@@ -24,15 +24,17 @@ import (
 
 type BashParams struct {
 	Description         string `json:"description" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
-	Command             string `json:"command" description:"The command to execute"`
-	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory to execute the command in (defaults to current directory)"`
-	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in the background. Use job_output to read the output later."`
-	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait before automatically moving the command to a background job (default: 60)"`
+	Command             string `json:"command" description:"The command to run in the persistent terminal session. Leave empty with input set to send keystrokes to a running program, or both empty to poll its output."`
+	Input               string `json:"input,omitempty" description:"Raw keystrokes to send to the terminal (text, answers to prompts, key sequences for the running program). Append \\n to submit a line. Use instead of command when something interactive is already running."`
+	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory the terminal session was opened in; the session itself tracks cd"`
+	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in a detached background shell. Use job_output to read the output later. Prefer this only for servers and watchers; everything else belongs in the terminal session."`
+	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait for the command before returning it as still running (default: 60)"`
 }
 
 type BashPermissionsParams struct {
 	Description         string `json:"description"`
 	Command             string `json:"command"`
+	Input               string `json:"input"`
 	WorkingDir          string `json:"working_dir"`
 	RunInBackground     bool   `json:"run_in_background"`
 	AutoBackgroundAfter int    `json:"auto_background_after"`
@@ -205,17 +207,18 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 		BashToolName,
 		string(bashDescription(attribution, modelID)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.Command == "" {
-				return fantasy.NewTextErrorResponse("missing command"), nil
+			if params.Command == "" && params.Input == "" {
+				return fantasy.NewTextErrorResponse("missing command (or input, to interact with the terminal session)"), nil
 			}
 
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
 
 			isSafeReadOnly := false
-			cmdLower := strings.ToLower(params.Command)
+			permCommand := cmp.Or(params.Command, params.Input)
+			cmdLower := strings.ToLower(permCommand)
 
-			if !containsCommandChaining(params.Command) {
+			if !containsCommandChaining(permCommand) {
 				for _, safe := range safeCommands {
 					if strings.HasPrefix(cmdLower, safe) {
 						if len(cmdLower) == len(safe) || cmdLower[len(safe)] == ' ' || cmdLower[len(safe)] == '-' {
@@ -239,7 +242,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 						ToolCallID:  call.ID,
 						ToolName:    BashToolName,
 						Action:      "execute",
-						Description: fmt.Sprintf("Execute command: %s", params.Command),
+						Description: fmt.Sprintf("Execute command: %s", permCommand),
 						Params:      BashPermissionsParams(params),
 					},
 				)
@@ -306,21 +309,38 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 			}
 
-			// Synchronous execution goes through the persistent terminal
-			// session; commands that outlive the wait budget are reported
-			// as still running in the session.
+			// Everything synchronous goes through the persistent terminal
+			// session: a command runs and reports its exit code, input
+			// drives whatever is running, and an empty call polls.
 			startTime := time.Now()
-			result, err := runner.Run(ctx, params.Command, cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter))
+			waitSeconds := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
+
+			var result PTYResult
+			var err error
+			switch {
+			case params.Input != "":
+				result, err = runner.Input(ctx, params.Input)
+			case params.Command != "":
+				result, err = runner.Run(ctx, params.Command, waitSeconds)
+			default:
+				result, err = runner.Poll(ctx)
+			}
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error running command in terminal session: %w", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("terminal session: %w", err)
 			}
 
 			stdout := TruncateOutput(result.Output)
-			if result.ExitCode != nil && *result.ExitCode != 0 {
-				if stdout != "" {
-					stdout += "\n"
-				}
-				stdout += fmt.Sprintf("Exit code %d", *result.ExitCode)
+
+			var header string
+			switch {
+			case result.Running:
+				header = "Still running in the terminal session (no exit code yet). Send input to interact with it, or call bash again with empty command and input to poll."
+			case result.ExitCode != nil && *result.ExitCode != 0:
+				header = fmt.Sprintf("Exit code %d", *result.ExitCode)
+			case params.Input != "":
+				header = "Input sent."
+			case result.Output == "" && params.Command == "":
+				header = "No new output."
 			}
 
 			metadata := BashResponseMetadata{
@@ -328,13 +348,20 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				EndTime:          time.Now().UnixMilli(),
 				Output:           stdout,
 				Description:      params.Description,
-				WorkingDirectory: execWorkingDir,
+				WorkingDirectory: cmp.Or(result.Cwd, execWorkingDir),
 			}
-			if stdout == "" {
-				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
+
+			var sb strings.Builder
+			if header != "" {
+				sb.WriteString(header + "\n")
 			}
-			stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(execWorkingDir))
-			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
+			if stdout != "" {
+				sb.WriteString(stdout)
+				sb.WriteString(fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(cmp.Or(result.Cwd, execWorkingDir))))
+			} else if header == "" {
+				sb.WriteString(BashNoOutput)
+			}
+			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(sb.String()), metadata), nil
 		},
 	)
 }

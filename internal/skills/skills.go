@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/crush/internal/stringext"
+
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"golang.org/x/text/unicode/norm"
@@ -28,8 +30,7 @@ const (
 )
 
 var (
-	namePattern    = regexp.MustCompile(`^[\p{L}\p{N}]+(-[\p{L}\p{N}]+)*$`)
-	promptReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
+	namePattern = regexp.MustCompile(`^[\p{L}\p{N}]+(-[\p{L}\p{N}]+)*$`)
 
 	latestStates   []*SkillState
 	latestStatesMu sync.RWMutex
@@ -314,9 +315,9 @@ func ToPromptXML(skills []*Skill) string {
 			continue
 		}
 		sb.WriteString("  <skill>\n")
-		fmt.Fprintf(&sb, "    <name>%s</name>\n", escape(s.Name))
-		fmt.Fprintf(&sb, "    <description>%s</description>\n", escape(s.Description))
-		fmt.Fprintf(&sb, "    <location>%s</location>\n", escape(s.SkillFilePath))
+		fmt.Fprintf(&sb, "    <name>%s</name>\n", stringext.EscapeXML(s.Name))
+		fmt.Fprintf(&sb, "    <description>%s</description>\n", stringext.EscapeXML(s.Description))
+		fmt.Fprintf(&sb, "    <location>%s</location>\n", stringext.EscapeXML(s.SkillFilePath))
 		if s.Builtin {
 			sb.WriteString("    <type>builtin</type>\n")
 		}
@@ -330,18 +331,14 @@ func ToPromptXML(skills []*Skill) string {
 func (s *Skill) FormatInvocation() string {
 	var sb strings.Builder
 	sb.WriteString("<loaded_skill>\n")
-	fmt.Fprintf(&sb, "  <name>%s</name>\n", escape(s.Name))
-	fmt.Fprintf(&sb, "  <description>%s</description>\n", escape(s.Description))
-	fmt.Fprintf(&sb, "  <location>%s</location>\n", escape(s.SkillFilePath))
+	fmt.Fprintf(&sb, "  <name>%s</name>\n", stringext.EscapeXML(s.Name))
+	fmt.Fprintf(&sb, "  <description>%s</description>\n", stringext.EscapeXML(s.Description))
+	fmt.Fprintf(&sb, "  <location>%s</location>\n", stringext.EscapeXML(s.SkillFilePath))
 	sb.WriteString("  <instructions>\n")
-	sb.WriteString(escape(s.Instructions))
+	sb.WriteString(stringext.EscapeXML(s.Instructions))
 	sb.WriteString("\n  </instructions>\n")
 	sb.WriteString("</loaded_skill>")
 	return sb.String()
-}
-
-func escape(s string) string {
-	return promptReplacer.Replace(s)
 }
 
 // DeduplicateStates removes duplicate skill states by name. When duplicates exist,

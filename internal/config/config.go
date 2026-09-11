@@ -431,6 +431,8 @@ type Options struct {
 	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
 	DisableUpdateCheck        bool         `json:"disable_update_check,omitempty" jsonschema:"description=Disable the startup check for Crush updates - useful when the binary is managed externally (nix\\, package manager),default=false"`
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	SubagentsPaths            []string     `json:"subagents_paths,omitempty" jsonschema:"description=Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"`
+	DisabledSubagents         []string     `json:"disabled_subagents,omitempty" jsonschema:"description=List of subagent names to disable and hide from the agent"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
@@ -921,6 +923,34 @@ func (c *Config) IsModelAvailable(provider, model string) bool {
 	return false
 }
 
+// IsKnownModelID reports whether modelID matches the ID of any model offered
+// by any provider in the config. Walks every provider since model IDs are
+// unique per provider but callers identifying a model by ID alone do not have
+// provider context.
+func (c *Config) IsKnownModelID(modelID string) bool {
+	if modelID == "" {
+		return false
+	}
+	for p := range c.Providers.Seq() {
+		for _, m := range p.Models {
+			if m.ID == modelID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// IsKnownModel reports whether the given model is offered by the given
+// provider. When provider is empty, it scans all providers (equivalent to
+// IsKnownModelID).
+func (c *Config) IsKnownModel(provider, modelID string) bool {
+	if provider == "" {
+		return c.IsKnownModelID(modelID)
+	}
+	return c.GetModel(provider, modelID) != nil
+}
+
 func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfig {
 	model, ok := c.Models[modelType]
 	if !ok {
@@ -971,6 +1001,16 @@ func (c *Config) SmallModel() *catwalk.Model {
 }
 
 const maxRecentModelsPerType = 5
+
+// AllToolNames returns every built-in tool name an agent's AllowedTools may
+// contain. MCP tools are not included: they bypass AllowedTools entirely and
+// are gated by AllowedMCP instead (see the agent coordinator's buildTools).
+// Exported so callers that accept user-authored tool allowlists — subagent
+// `tools:` / `disallowedTools:` frontmatter — can reject unknown names instead
+// of silently intersecting them away to nothing.
+func AllToolNames() []string {
+	return allToolNames()
+}
 
 func allToolNames() []string {
 	return []string{

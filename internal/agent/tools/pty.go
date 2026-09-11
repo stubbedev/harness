@@ -100,25 +100,100 @@ type ptyRunner struct {
 	session ptyTerminal
 
 	startedAt time.Time
+	lastUsed  time.Time
 	lastEcho  []string
 }
 
 var (
-	ptyRunnersMu sync.Mutex
-	ptyRunners   = map[string]*ptyRunner{}
+	ptyRunnersMu  sync.Mutex
+	ptyRunners    = map[string]*ptyRunner{}
+	ptyReaperOnce sync.Once
 )
+
+const (
+	// ptyMaxRunners bounds concurrent terminal sessions per process.
+	// Opening past the cap evicts the most-idle runner, mirroring the
+	// pty-mcp max-sessions policy.
+	ptyMaxRunners = 8
+	// ptyIdleTimeout is how long an idle terminal session is kept alive
+	// before its shell is reaped. Any Run/Input/Poll refreshes it.
+	ptyIdleTimeout = 30 * time.Minute
+	// ptyExitedGrace is how long a runner whose shell has exited stays
+	// in the map before removal.
+	ptyExitedGrace = 2 * time.Minute
+	// ptyReapInterval is how often the reaper sweeps.
+	ptyReapInterval = time.Minute
+)
+
+// touch refreshes the runner's idle clock (called from Run/Input/Poll
+// under r.mu).
+func (r *ptyRunner) touch() {
+	r.lastUsed = time.Now()
+}
+
+// ptyReap closes and removes idle or long-exited runners. The caller
+// must hold ptyRunnersMu; closing happens off the map lock.
+func ptyReap() {
+	for _, r := range ptyRunners {
+		r.mu.Lock()
+		idle := time.Since(r.lastUsed)
+		exited := r.session != nil && !r.session.Alive()
+		r.mu.Unlock()
+		if idle >= ptyIdleTimeout || (exited && idle >= ptyExitedGrace) {
+			delete(ptyRunners, r.cwd)
+			go r.Close()
+		}
+	}
+}
+
+// ptyReaperStart launches the background sweeper once per process.
+func ptyReaperStart() {
+	ptyReaperOnce.Do(func() {
+		go func() {
+			for range time.Tick(ptyReapInterval) {
+				ptyRunnersMu.Lock()
+				ptyReap()
+				ptyRunnersMu.Unlock()
+			}
+		}()
+	})
+}
 
 // ptyRunnerFor returns the runner for workingDir, creating (and
 // warm-starting) it on first use. The ask service collects sudo
-// passwords from the user; nil disables prompting.
+// passwords from the user; nil disables prompting. Runners are reused
+// until they idle out (ptyIdleTimeout) or are evicted at the cap, so
+// shell state survives across calls without leaking one PTY per
+// working directory forever.
 func ptyRunnerFor(cwd string, ask question.Service) *ptyRunner {
 	ptyRunnersMu.Lock()
 	defer ptyRunnersMu.Unlock()
+	ptyReap()
 	if r, ok := ptyRunners[cwd]; ok {
+		r.mu.Lock()
+		r.touch()
+		r.mu.Unlock()
 		return r
 	}
-	r := &ptyRunner{cwd: cwd, ask: ask}
+	// Enforce the cap: evict the most-idle runner to make room.
+	if len(ptyRunners) >= ptyMaxRunners {
+		var victim *ptyRunner
+		for _, r := range ptyRunners {
+			r.mu.Lock()
+			older := victim == nil || r.lastUsed.Before(victim.lastUsed)
+			r.mu.Unlock()
+			if older {
+				victim = r
+			}
+		}
+		if victim != nil {
+			delete(ptyRunners, victim.cwd)
+			go victim.Close()
+		}
+	}
+	r := &ptyRunner{cwd: cwd, ask: ask, lastUsed: time.Now()}
 	ptyRunners[cwd] = r
+	ptyReaperStart()
 	// Warm start in the background: interactive shells (nix,
 	// starship) can take hundreds of milliseconds to become ready.
 	go func() {
@@ -181,6 +256,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 // the terminal output so far is reported with Running set.
 func (r *ptyRunner) Run(ctx context.Context, command string, waitSeconds int) (PTYResult, error) {
 	r.mu.Lock()
+	r.touch()
 	defer r.mu.Unlock()
 
 	s, err := r.ensureSessionLocked(ctx)
@@ -287,6 +363,7 @@ func (r *ptyRunner) answerSudoPrompt(ctx context.Context, s ptyTerminal) error {
 // terminal after output settles.
 func (r *ptyRunner) Input(ctx context.Context, text string) (PTYResult, error) {
 	r.mu.Lock()
+	r.touch()
 	defer r.mu.Unlock()
 
 	s, err := r.ensureSessionLocked(ctx)
@@ -304,6 +381,7 @@ func (r *ptyRunner) Input(ctx context.Context, text string) (PTYResult, error) {
 // Poll reads the current terminal output without sending anything.
 func (r *ptyRunner) Poll(ctx context.Context) (PTYResult, error) {
 	r.mu.Lock()
+	r.touch()
 	defer r.mu.Unlock()
 
 	s, err := r.ensureSessionLocked(ctx)
@@ -361,4 +439,14 @@ func (r *ptyRunner) clean(raw string) string {
 		lines = lines[1:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// Close terminates the runner's terminal session.
+func (r *ptyRunner) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.session != nil {
+		r.session.Close()
+		r.session = nil
+	}
 }

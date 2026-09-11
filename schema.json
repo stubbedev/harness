@@ -619,6 +619,20 @@
             300,
             0
           ]
+        },
+        "subagents_paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"
+        },
+        "disabled_subagents": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "List of subagent names to disable and hide from the agent"
         }
       },
       "additionalProperties": false,

@@ -65,17 +65,29 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return renderJobTool(sty, opts, cappedWidth, "Start", meta.ShellID, description, content)
 	}
 
-	// Regular bash command.
+	// Regular bash command, raw input, or poll.
 	cmd := params.Command
+	label := ""
+	if cmd == "" && params.Input != "" {
+		cmd = params.Input
+		label = "input"
+	} else if cmd == "" {
+		cmd = "(poll session)"
+	}
 	if !opts.ExpandedContent {
 		cmd = strings.ReplaceAll(cmd, "\n", " ")
 	}
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	cmd = common.StripBashDisplayPrefix(cmd, b.workingDir)
-	if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
-		cmd = highlighted
+	if label == "" {
+		if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
+			cmd = highlighted
+		}
 	}
 	toolParams := []string{cmd}
+	if label != "" {
+		toolParams = append(toolParams, label)
+	}
 	if params.RunInBackground {
 		toolParams = append(toolParams, "background", "true")
 	}

@@ -1,50 +1,44 @@
-Execute shell commands; long-running commands automatically move to background and return a shell ID.
+You run commands in a real interactive terminal: the user's own shell in a persistent pseudo-terminal, shared by every bash call. Treat it exactly as if you were a person sitting at their terminal.
 
-<cross_platform>
-Uses mvdan/sh interpreter (Bash-compatible on all platforms including Windows).
-Use forward slashes for paths: "ls C:/foo/bar" not "ls C:\foo\bar".
-Common shell builtins and core utils available on Windows.
-</cross_platform>
+<cross_platform_note>
+On Windows the session falls back to the mvdan/sh interpreter; interactive programs are unavailable there. Use forward slashes for paths.
+</cross_platform_note>
+
+<the_session>
+- One terminal session lives for the whole conversation. Shell state persists across calls: working directory (cd), exported variables, activated venvs/direnv, and the sudo credential all stick.
+- It is a full terminal: anything you could run interactively as a human works here — editors (vim, nvim), TUIs (htop, lazygit, k9s), REPLs (python, psql, node), pagers, ssh, password prompts, watch commands. Do not hesitate to launch them; never claim they are impossible here.
+- Aliases are stripped at startup (unalias -a), so commands run with their standard meanings. Functions and environment from the user's rc files remain.
+</the_session>
+
+<calling_patterns>
+1. Run a command: set `command`. The response reports the exit code and the command's output (ANSI styling stripped, echoed commands removed).
+2. Interact with a running program: set `input` (leave command empty). It sends raw keystrokes to whatever is in the terminal: answer a prompt ("y\n"), type into an editor ("i" to enter insert mode, "\x1b" then ":wq\n" to save and quit in vim), drive menus. Append \n to submit a line.
+3. Check on something: leave both empty to poll for new output (watching a build, or seeing what a program printed after it exited on its own).
+4. Commands still running when the wait budget expires return "Still running" with the output so far — the program is NOT dead. Continue with `input`, poll, or send ctrl-c ("\x03") to stop it.
+</calling_patterns>
 
 <execution_steps>
-1. Directory Verification: If creating directories/files, use LS tool to verify parent exists
-2. Security Check: Banned commands ({{ .BannedCommands }}) return error - explain to user. Safe read-only commands execute without prompts
-3. Command Execution: Execute with proper quoting, capture output
-4. Auto-Background: Commands exceeding 1 minute (default, configurable via `auto_background_after`) automatically move to background and return shell ID
-5. Output Processing: Truncate if exceeds {{ .MaxOutputLength }} characters
-6. Return Result: Include errors, metadata with <cwd></cwd> tags
+1. Security Check: Banned commands ({{ .BannedCommands }}) return error - explain to user. Safe read-only commands execute without prompts
+2. Long commands: raise `auto_background_after` (seconds) instead of guessing; or use run_in_background
+3. Output Processing: Truncate if exceeds {{ .MaxOutputLength }} characters
 </execution_steps>
 
 <usage_notes>
-- Command required, working_dir optional (defaults to current directory)
-- IMPORTANT: Use Grep/Glob/Agent tools instead of 'find'/'grep'. Use View/LS tools instead of 'cat'/'head'/'tail'/'ls'
+- The sudo credential stays valid on the session's terminal after the first authentication — later sudo calls in the same session run without another password
+- If sudo asks for a password, the user is prompted through a masked dialog in the Crush UI; wait for the command to finish, never try to type the password yourself
+- Multiline commands and heredocs work (send them via command)
+- IMPORTANT: Use Grep/Glob/Agent tools instead of 'find'/'grep' for code search. Use View/LS tools instead of 'cat'/'head'/'tail'/'ls' for file reading
 - Chain with ';' or '&&', avoid newlines except in quoted strings
-- Each command runs in independent shell (no state persistence between calls)
-- Prefer absolute paths over 'cd' (use 'cd' only if user explicitly requests)
 {{- if .RgAvailable }}
 - Ripgrep (`rg`) is available; prefer it over `grep` for faster, more intuitive searching
 {{- end }}
 </usage_notes>
 
 <background_execution>
-- Set run_in_background=true to run commands in a separate background shell
-- Returns a shell ID for managing the background process
-- Use job_output tool to view current output from background shell
-- Use job_kill tool to terminate a background shell
-- IMPORTANT: NEVER use `&` at the end of commands to run in background - use run_in_background parameter instead
-- Commands that should run in background:
-  * Long-running servers (e.g., `npm start`, `python -m http.server`, `node server.js`)
-  * Watch/monitoring tasks (e.g., `npm run watch`, `tail -f logfile`)
-  * Continuous processes that don't exit on their own
-  * Any command expected to run indefinitely
-- Commands that should NOT run in background:
-  * Build commands (e.g., `npm run build`, `go build`)
-  * Test suites (e.g., `npm test`, `pytest`)
-  * Git operations
-  * File operations
-  * Short-lived scripts
+- Set run_in_background=true only for things that must run detached: long-running servers (npm start, python -m http.server), watchers (npm run watch, tail -f)
+- It runs in a separate background shell and returns a shell ID; use job_output/job_kill to manage it
+- Everything else — builds, tests, git — belongs in the terminal session, where you can interact with it if it pauses
 </background_execution>
-
 <git_message_quality>
 These rules apply whenever creating or updating commit messages, PR titles, or PR bodies:
 
@@ -170,4 +164,13 @@ Important:
 <examples>
 Good: pytest /foo/bar/tests
 Bad: cd /foo/bar && pytest tests
+</examples>
+
+<examples>
+Good: pytest /foo/bar/tests
+Bad: cd /foo/bar && pytest tests
+
+Interactive: htop - poll with empty params to watch; send "q" via input to quit
+Interactive: nvim file.go - input "i" to type, escape then ":wq" + newline to save and quit
+Password prompt (sudo apt install foo) - just run it; the user authenticates via a masked dialog and the command continues
 </examples>

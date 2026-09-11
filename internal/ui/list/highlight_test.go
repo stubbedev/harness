@@ -112,27 +112,23 @@ func TestHighlightContentRestoresCodespanBackticks(t *testing.T) {
 	require.Contains(t, result, `"this is `+"`code`"+`" ok`, "copy must restore the codespan backticks, got:\n%s", result)
 }
 
-// TestHighlightContentPreservesRealNonBreakingSpaces is the regression test
-// for the sentinel collision: a real no-break space in the message text
-// (pasted text, LLM output, non-English typography) is not codespan padding
-// and must survive a selection copy verbatim, never turn into a backtick.
-func TestHighlightContentPreservesRealNonBreakingSpaces(t *testing.T) {
+// TestCodespanPaddingCopiesAsBacktick documents this fork's tradeoff:
+// the padding is a plain no-break space (upstream tags it with a
+// variation selector, which some terminals render as visible tofu
+// around every codespan), so a no-break space anywhere in copied
+// content becomes a backtick. Regular spaces and text are
+// unaffected.
+func TestCodespanPaddingCopiesAsBacktick(t *testing.T) {
 	t.Parallel()
 
-	sty := styles.CharmtonePantera()
-	r, err := glamour.NewTermRenderer(glamour.WithStyles(sty.Markdown), glamour.WithWordWrap(80))
-	require.NoError(t, err)
-	rendered, err := r.Render("question\u00a0: is `code` ok")
-	require.NoError(t, err)
+	// The tradeoff in action: a real no-break space copies as a
+	// backtick because it is indistinguishable from padding.
+	result := HighlightContent("foo\u00a0bar", uv.Rect(0, 0, 40, 1), 0, 0, -1, -1)
+	require.Equal(t, "foo`bar\n", result)
 
-	result := HighlightContent(rendered, uv.Rect(0, 0, 80, lipgloss.Height(rendered)), 0, 0, -1, -1)
-	require.Contains(t, result, "question\u00a0: is `code` ok",
-		"copy must keep the real no-break space and restore only the codespan backticks, got:\n%q", result)
-
-	// Plain (unstyled) content with a real no-break space must also pass
-	// through untouched.
-	result = HighlightContent("foo\u00a0bar", uv.Rect(0, 0, 40, 1), 0, 0, -1, -1)
-	require.Equal(t, "foo\u00a0bar\n", result)
+	// Regular spaces and plain text are untouched.
+	result = HighlightContent("foo bar", uv.Rect(0, 0, 40, 1), 0, 0, -1, -1)
+	require.Equal(t, "foo bar\n", result)
 }
 
 // TestHighlightContentRestoresWrappedCodespanBackticks is the narrow-width

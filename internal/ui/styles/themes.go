@@ -2,6 +2,7 @@ package styles
 
 import (
 	"fmt"
+	"image/color"
 	"slices"
 	"strings"
 
@@ -104,6 +105,19 @@ func charmtoneOpts() quickStyleOpts {
 		ansiBrightMagenta: charmtone.Blush,
 		ansiBrightCyan:    charmtone.Sardine,
 		ansiBrightWhite:   charmtone.Salt,
+
+		// Subagent identity palette, in SubagentColorNames order:
+		// red, orange, yellow, green, cyan, blue, purple, pink.
+		subagentPalette: [8]color.Color{
+			charmtone.Cherry,
+			charmtone.Tang,
+			charmtone.Citron,
+			charmtone.Julep,
+			charmtone.Guppy,
+			charmtone.Sapphire,
+			charmtone.Mauve,
+			charmtone.Flamingo,
+		},
 	}
 }
 
@@ -179,9 +193,21 @@ func catppuccinMochaOpts() quickStyleOpts {
 		// ANSI 16-color palette mirroring the terminal's own Catppuccin
 		// Mocha palette, so bang-mode shell output looks the same inside
 		// Crush as outside it.
-		ansiBlack:   lipgloss.Color("#45475a"), // surface1
-		ansiRed:     lipgloss.Color("#f38ba8"), // red
-		ansiGreen:   lipgloss.Color("#a6e3a1"), // green
+		ansiBlack: lipgloss.Color("#45475a"), // surface1
+		ansiRed:   lipgloss.Color("#f38ba8"), // red
+		ansiGreen: lipgloss.Color("#a6e3a1"), // green
+
+		// Subagent identity palette, in SubagentColorNames order.
+		subagentPalette: [8]color.Color{
+			lipgloss.Color("#f38ba8"), // red
+			lipgloss.Color("#fab387"), // peach
+			lipgloss.Color("#f9e2af"), // yellow
+			lipgloss.Color("#a6e3a1"), // green
+			lipgloss.Color("#89dceb"), // sky
+			lipgloss.Color("#89b4fa"), // blue
+			lipgloss.Color("#cba6f7"), // mauve
+			lipgloss.Color("#f5c2e7"), // pink
+		},
 		ansiYellow:  lipgloss.Color("#f9e2af"), // yellow
 		ansiBlue:    lipgloss.Color("#89b4fa"), // blue
 		ansiMagenta: lipgloss.Color("#f5c2e7"), // pink
@@ -278,6 +304,18 @@ func gruvboxDarkOpts() quickStyleOpts {
 		ansiBrightMagenta: lipgloss.Color("#d3869b"),
 		ansiBrightCyan:    lipgloss.Color("#8ec07c"),
 		ansiBrightWhite:   lipgloss.Color("#ebdbb2"),
+
+		// Subagent identity palette, in SubagentColorNames order.
+		subagentPalette: [8]color.Color{
+			lipgloss.Color("#fb4934"), // bright red
+			lipgloss.Color("#fe8019"), // orange
+			lipgloss.Color("#fabd2f"), // bright yellow
+			lipgloss.Color("#b8bb26"), // bright green
+			lipgloss.Color("#8ec07c"), // bright aqua
+			lipgloss.Color("#83a598"), // bright blue
+			lipgloss.Color("#d3869b"), // bright purple
+			lipgloss.Color("#f2cdcd"), // rosewater
+		},
 	}
 }
 

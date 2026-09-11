@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -154,4 +155,70 @@ func TestPtySentinelParsing(t *testing.T) {
 	// The echoed sentinel command must not match (format specifiers).
 	require.False(t, ptySentinelRe.MatchString(ptySentinelCmd))
 	require.False(t, ptySentinelLoose.MatchString(ptySentinelCmd))
+}
+
+func TestPtyRunnerIdleReapAndCap(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh on this platform")
+	}
+	t.Setenv("SHELL", "/bin/sh")
+
+	ptyRunnersMu.Lock()
+	saved := ptyRunners
+	ptyRunners = map[string]*ptyRunner{}
+	ptyRunnersMu.Unlock()
+	t.Cleanup(func() {
+		ptyRunnersMu.Lock()
+		for _, r := range ptyRunners {
+			r.Close()
+		}
+		ptyRunners = saved
+		ptyRunnersMu.Unlock()
+	})
+
+	// Fill to the cap.
+	for i := range ptyMaxRunners {
+		dir := t.TempDir()
+		r := ptyRunnerFor(dir, nil)
+		if _, err := r.ensureSessionLocked(t.Context()); err != nil {
+			t.Fatalf("open %d: %v", i, err)
+		}
+	}
+	ptyRunnersMu.Lock()
+	require.Len(t, ptyRunners, ptyMaxRunners)
+	ptyRunnersMu.Unlock()
+
+	// One more evicts the most idle.
+	time.Sleep(10 * time.Millisecond)
+	r := ptyRunnerFor(t.TempDir(), nil)
+	_, err := r.ensureSessionLocked(t.Context())
+	require.NoError(t, err)
+	ptyRunnersMu.Lock()
+	require.Len(t, ptyRunners, ptyMaxRunners)
+	ptyRunnersMu.Unlock()
+
+	// An idle-beyond-timeout runner is reaped on the next sweep.
+	ptyRunnersMu.Lock()
+	var victim *ptyRunner
+	for _, cand := range ptyRunners {
+		if cand != r {
+			victim = cand
+			break
+		}
+	}
+	require.NotNil(t, victim)
+	victim.mu.Lock()
+	victim.lastUsed = time.Now().Add(-ptyIdleTimeout - time.Minute)
+	victim.mu.Unlock()
+	ptyRunnersMu.Unlock()
+
+	ptyRunnersMu.Lock()
+	ptyReap()
+	ptyRunnersMu.Unlock()
+
+	ptyRunnersMu.Lock()
+	defer ptyRunnersMu.Unlock()
+	require.Len(t, ptyRunners, ptyMaxRunners-1)
+	_, stillThere := ptyRunners[r.cwd]
+	require.True(t, stillThere, "the just-used runner must survive the reap")
 }

@@ -28,6 +28,7 @@ func TestCodespanPaddingIsOneCellWide(t *testing.T) {
 	require.Equal(t, CodespanPadding, cluster, "padding must be a single grapheme cluster")
 	require.Equal(t, 1, w)
 
-	require.NotEqual(t, "\u00a0", CodespanPadding,
-		"sentinel must stay distinguishable from a real no-break space")
+	// This fork uses a plain no-break space: some terminals render the
+	// variation selector upstream appends as visible tofu around every
+	// codespan, so the distinguishability tradeoff is accepted here.
 }

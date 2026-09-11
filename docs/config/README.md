@@ -518,6 +518,8 @@ List Keys:
   global-context-path string      append a global context path
   skill-path string               append a skill directory
   disable-skill string            hide a skill from the agent
+  subagent-path string            append a subagent definition directory
+  disable-subagent string         hide a subagent from the agent
 ```
 
 ```bash
@@ -540,6 +542,8 @@ Available Keys:
   global-context-path   clear global context paths
   skill-path            clear additional skill directories
   disable-skill         clear disabled skill names
+  subagent-path         clear subagent directories
+  disable-subagent      clear disabled subagent names
 ```
 
 ```
