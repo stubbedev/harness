@@ -11,7 +11,6 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/openaicompat"
-	"charm.land/x/vcr"
 	"github.com/charmbracelet/crush/internal/agent/prompt"
 	"github.com/charmbracelet/crush/internal/agent/tools"
 	"github.com/charmbracelet/crush/internal/config"
@@ -39,7 +38,7 @@ type fakeEnv struct {
 	lspClients  *csync.Map[string, *lsp.Client]
 }
 
-type builderFunc func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error)
+type builderFunc func(t *testing.T, r testRecorder) (fantasy.LanguageModel, error)
 
 type modelPair struct {
 	name       string
@@ -48,7 +47,7 @@ type modelPair struct {
 }
 
 func hyperBuilder(model string) builderFunc {
-	return func(t *testing.T, r *vcr.Recorder) (fantasy.LanguageModel, error) {
+	return func(t *testing.T, r testRecorder) (fantasy.LanguageModel, error) {
 		provider, err := openaicompat.New(
 			openaicompat.WithBaseURL("https://hyper.charm.land/v1"),
 			openaicompat.WithAPIKey(os.Getenv("CRUSH_HYPER_API_KEY")),
@@ -123,7 +122,7 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 	return agent
 }
 
-func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
+func coderAgent(r testRecorder, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
 	fixedTime := func() time.Time {
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
@@ -180,7 +179,15 @@ func coderAgent(r *vcr.Recorder, env fakeEnv, large, small fantasy.LanguageModel
 		tools.NewWriteTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
 	}
 
-	return testSessionAgent(env, large, small, systemPrompt, allTools...), nil
+	agent := testSessionAgent(env, large, small, systemPrompt, allTools...)
+	// A replayed cassette never benefits from a retry: a miss means the
+	// cassette is stale, and the default backoff turns that into 35s of
+	// waiting before the real error surfaces.
+	if sa, ok := agent.(*sessionAgent); ok {
+		noRetries := 0
+		sa.maxRetries = &noRetries
+	}
+	return agent, nil
 }
 
 // createSimpleGoProject creates a simple Go project structure in the given directory.

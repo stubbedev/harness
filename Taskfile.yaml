@@ -84,6 +84,12 @@ tasks:
     cmds:
       - go test -race -failfast ./... {{.CLI_ARGS}}
 
+  test:restamp:
+    desc: Rewrite VCR cassette request bodies from the current prompts and tool definitions (no API key needed)
+    aliases: [restamp]
+    cmds:
+      - go test ./internal/agent -run TestCoderAgent -count=1 -restamp
+
   test:record:
     desc: Run tests and record all VCR cassettes again
     aliases: [record]

@@ -105,6 +105,14 @@ internal/
   - Update specific package:
     `go test ./internal/tui/components/core -update` (in this case,
     we're updating "core")
+- **Restamp VCR Cassettes**: `task restamp` (after editing a system prompt
+  template or a tool description). The agent cassettes in
+  `internal/agent/testdata` store the full request body, so any change to
+  `internal/agent/templates/*.md.tpl` or `internal/agent/tools/*.md*` makes
+  `TestCoderAgent` fail on a request mismatch. Restamping replays the recorded
+  responses unchanged and rewrites only our side of each request, so it needs
+  no API key. Use `task record` instead when the change should alter what the
+  model actually does.
 - **Lint**: `task lint:fix`
 - **Format**: `task fmt` (`gofumpt -w .`)
 - **Modernize**: `task modernize` (runs `modernize` which makes code
