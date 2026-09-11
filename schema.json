@@ -496,6 +496,29 @@
           "description": "Disable automatic conversation summarization",
           "default": false
         },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum retries for failed model requests. Unset uses the Fantasy default of 3.",
+          "default": 3
+        },
+        "auto_summarize_ratio": {
+          "type": "number",
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "description": "Share of a context window of up to 200k tokens kept free before the session is summarized (default 0.2)",
+          "examples": [
+            0.3
+          ]
+        },
+        "auto_summarize_buffer": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tokens kept free in a context window above 200k tokens before the session is summarized (default 20000)",
+          "examples": [
+            40000
+          ]
+        },
         "data_directory": {
           "type": "string",
           "description": "Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.",
@@ -545,6 +568,11 @@
             "docs/LLMs.md"
           ]
         },
+        "init_prompt": {
+          "type": "boolean",
+          "description": "Show the project initialization prompt when a project has no context file. Set to false to never ask",
+          "default": true
+        },
         "auto_lsp": {
           "type": "boolean",
           "description": "Automatically setup LSPs based on root markers",
@@ -577,6 +605,11 @@
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
         },
+        "disable_update_check": {
+          "type": "boolean",
+          "description": "Disable the startup check for Crush updates - useful when the binary is managed externally (nix, package manager)",
+          "default": false
+        },
         "request_timeout": {
           "type": "integer",
           "description": "Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity, so slow but active streams are never killed. 0 disables it, negative values are invalid.",
@@ -603,6 +636,11 @@
           },
           "type": "array",
           "description": "List of tools that don't require permission prompts"
+        },
+        "yolo": {
+          "type": "boolean",
+          "description": "Skip all permission prompts (yolo mode). This build defaults to true, set false to restore prompts",
+          "default": true
         }
       },
       "additionalProperties": false,
@@ -807,6 +845,15 @@
           ],
           "description": "Diff mode for the TUI interface"
         },
+        "theme": {
+          "type": "string",
+          "description": "Color theme for the TUI. Overrides the provider-based default theme",
+          "examples": [
+            "charmtone",
+            "catppuccin-mocha",
+            "gruvbox-dark"
+          ]
+        },
         "completions": {
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
@@ -840,6 +887,25 @@
           ],
           "description": "Exit banner style after quitting Crush",
           "default": "default"
+        },
+        "git_status": {
+          "type": "boolean",
+          "description": "Show git branch and working-tree status in the compact header",
+          "default": true
+        },
+        "show_thinking": {
+          "type": "boolean",
+          "description": "Render model reasoning (thinking) blocks in the transcript. Reasoning is still requested, streamed and stored when disabled - only the rendering is suppressed",
+          "default": true
+        },
+        "textarea_min_height": {
+          "type": "integer",
+          "description": "Minimum height of the prompt textarea in rows. The textarea grows to fit content, so this only sets the collapsed floor. Values below 1 are clamped to 1.",
+          "default": 3,
+          "examples": [
+            1,
+            5
+          ]
         }
       },
       "additionalProperties": false,

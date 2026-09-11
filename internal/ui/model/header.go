@@ -15,21 +15,13 @@ import (
 )
 
 const (
-	headerDiag           = "╱"
-	minHeaderDiags       = 3
-	leftPadding          = 1
-	rightPadding         = 1
-	diagToDetailsSpacing = 1 // space between diagonal pattern and details section
+	leftPadding  = 1
+	rightPadding = 1
 )
 
 type header struct {
-	// cached logo and compact logo
-	logo        string
-	compactLogo string
-
-	com     *common.Common
-	width   int
-	compact bool
+	com   *common.Common
+	width int
 }
 
 // newHeader creates a new header model.
@@ -41,24 +33,9 @@ func newHeader(com *common.Common) *header {
 	return h
 }
 
-// refresh rebuilds cached logo strings using the current styles. Call
-// after the theme changes.
+// refresh invalidates cached header state. Call after the theme changes.
 func (h *header) refresh() {
-	t := h.com.Styles
-	isHyper := h.com.IsHyper()
-	charm := "Charm™"
-	if !isHyper {
-		charm = " " + charm
-	}
-	name := "CRUSH"
-	if isHyper {
-		name = "HYPERCRUSH"
-	}
-	h.compactLogo = t.Header.Charm.Render(charm) + " " +
-		styles.ApplyBoldForegroundGrad(t.Header.LogoGradCanvas, name, t.Header.LogoGradFromColor, t.Header.LogoGradToColor) + " "
-	// Force drawHeader to re-render the wide logo on the next frame.
 	h.width = 0
-	h.logo = ""
 }
 
 // drawHeader draws the header for the given session. lspErrorCount comes
@@ -74,16 +51,9 @@ func (h *header) drawHeader(
 	lspErrorCount int,
 	hyperCredits *int,
 ) {
-	t := h.com.Styles
-	if width != h.width || compact != h.compact {
-		h.logo = renderLogo(h.com.Styles, compact, h.com.IsHyper(), width)
-	}
-
 	h.width = width
-	h.compact = compact
 
 	if !compact || session == nil {
-		uv.NewStyledString(h.logo).Draw(scr, area)
 		return
 	}
 
@@ -91,90 +61,96 @@ func (h *header) drawHeader(
 		return
 	}
 
-	var b strings.Builder
-	b.WriteString(h.compactLogo)
-
-	availDetailWidth := width - leftPadding - rightPadding - lipgloss.Width(b.String()) - minHeaderDiags - diagToDetailsSpacing
-	details := renderHeaderDetails(
+	// The compact header is a single status line, like the status bars
+	// other coding agents render: working directory and git state flush
+	// left, context usage, model and the details hint flush right.
+	availWidth := width - leftPadding - rightPadding
+	left, right := renderHeaderDetails(
 		h.com,
 		session,
 		lspErrorCount,
 		detailsOpen,
-		availDetailWidth,
 		hyperCredits,
 	)
 
-	remainingWidth := width -
-		lipgloss.Width(b.String()) -
-		lipgloss.Width(details) -
-		leftPadding -
-		rightPadding -
-		diagToDetailsSpacing
-
-	if remainingWidth > 0 {
-		b.WriteString(t.Header.Diagonals.Render(
-			strings.Repeat(headerDiag, max(minHeaderDiags, remainingWidth)),
-		))
-		b.WriteString(" ")
+	gap := availWidth - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		// Not enough room: shrink the left side first so the usage and
+		// model stay visible, then truncate whatever still overflows.
+		maxLeft := max(0, availWidth-lipgloss.Width(right)-1)
+		left = ansi.Truncate(left, maxLeft, "…")
+		if lipgloss.Width(left)+lipgloss.Width(right) > availWidth {
+			right = ansi.Truncate(right, max(0, availWidth-lipgloss.Width(left)), "…")
+		}
+		gap = availWidth - lipgloss.Width(left) - lipgloss.Width(right)
 	}
 
-	b.WriteString(details)
+	line := left + strings.Repeat(" ", max(gap, 0)) + right
 
 	view := uv.NewStyledString(
-		t.Header.Wrapper.Padding(0, rightPadding, 0, leftPadding).Render(b.String()),
+		h.com.Styles.Header.Wrapper.Padding(0, rightPadding, 0, leftPadding).Render(line),
 	)
 	view.Draw(scr, area)
 }
 
-// renderHeaderDetails renders the details section of the header.
+// renderHeaderDetails renders the two halves of the compact status line:
+// the left (working directory and git state) and the right (LSP errors,
+// context usage with model, hypercredits, and the details hint).
 func renderHeaderDetails(
 	com *common.Common,
 	session *session.Session,
 	lspErrorCount int,
 	detailsOpen bool,
-	availWidth int,
 	hyperCredits *int,
-) string {
+) (left, right string) {
 	t := com.Styles
 
-	var parts []string
+	// Left: working directory and git state.
+	const dirTrimLimit = 4
+	cwd := fsext.DirTrim(fsext.PrettyPath(com.Workspace.WorkingDir()), dirTrimLimit)
 
+	var leftParts []string
+	leftParts = append(leftParts, t.Header.WorkingDir.Render(cwd))
+	if com.Config().Options.TUI.ShowGitStatus() {
+		// The git segment reads from a TTL cache fed by a background
+		// poll, so this never blocks on a subprocess.
+		if seg := gitHeaderParts(t, com.Workspace.WorkingDir()); seg != "" {
+			leftParts = append(leftParts, seg)
+		}
+	}
+
+	// Right: diagnostics, context usage with the model ID, hypercredits,
+	// and the session-details hint.
+	var rightParts []string
 	if lspErrorCount > 0 {
-		parts = append(parts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))
+		rightParts = append(rightParts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))
 	}
 
 	agentCfg := com.Config().Agents[config.AgentCoder]
 	model := com.Config().GetModelByType(agentCfg.Model)
 	if model != nil && model.ContextWindow > 0 {
 		percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
-		percentageText := fmt.Sprintf("%d%%", int(percentage))
+		// The model ID rides beside the context percentage so the
+		// header shows what is answering, not just how full it is.
+		percentageText := fmt.Sprintf("%d%% %s", int(percentage), model.ID)
 		if session.EstimatedUsage {
 			percentageText = "~" + percentageText
 		}
-		formattedPercentage := t.Header.Percentage.Render(percentageText)
-		parts = append(parts, formattedPercentage)
+		rightParts = append(rightParts, t.Header.Percentage.Render(percentageText))
 	}
 
 	if com.IsHyper() && hyperCredits != nil {
 		hc := t.Header.HypercreditIcon.Render(styles.HypercreditIcon) + " " + t.Header.Percentage.Render(common.FormatCredits(*hyperCredits))
-		parts = append(parts, hc)
+		rightParts = append(rightParts, hc)
 	}
 
 	const keystroke = "ctrl+d"
 	if detailsOpen {
-		parts = append(parts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" close"))
+		rightParts = append(rightParts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" close"))
 	} else {
-		parts = append(parts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" open "))
+		rightParts = append(rightParts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" open "))
 	}
 
 	dot := t.Header.Separator.Render(" • ")
-	metadata := strings.Join(parts, dot)
-	metadata = dot + metadata
-
-	const dirTrimLimit = 4
-	cwd := fsext.DirTrim(fsext.PrettyPath(com.Workspace.WorkingDir()), dirTrimLimit)
-	cwd = t.Header.WorkingDir.Render(cwd)
-
-	result := cwd + metadata
-	return ansi.Truncate(result, max(0, availWidth), "…")
+	return strings.Join(leftParts, dot), dot + strings.Join(rightParts, dot)
 }

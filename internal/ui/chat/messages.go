@@ -475,6 +475,12 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 	return []MessageItem{}
 }
 
+// HideThinking suppresses rendering of reasoning (thinking) blocks in
+// the transcript when true. Reasoning is still requested, streamed and
+// stored; only the rendering is suppressed. Set once at startup from
+// options.tui.show_thinking, before any message items are built.
+var HideThinking bool
+
 // ShouldRenderAssistantMessage determines if an assistant message should be rendered
 //
 // In some cases the assistant message only has tools so we do not want to render an
@@ -482,6 +488,9 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 func ShouldRenderAssistantMessage(msg *message.Message) bool {
 	content := strings.TrimSpace(msg.Content().Text)
 	thinking := strings.TrimSpace(msg.ReasoningContent().Thinking)
+	if HideThinking {
+		thinking = ""
+	}
 	isCancelled := msg.FinishReason() == message.FinishReasonCanceled
 	hasToolCalls := len(msg.ToolCalls()) > 0
 	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking() || msg.IsErrorLike() || isCancelled

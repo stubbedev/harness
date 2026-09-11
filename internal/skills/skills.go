@@ -16,6 +16,7 @@ import (
 
 	"github.com/charlievieth/fastwalk"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,7 +28,7 @@ const (
 )
 
 var (
-	namePattern    = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
+	namePattern    = regexp.MustCompile(`^[\p{L}\p{N}]+(-[\p{L}\p{N}]+)*$`)
 	promptReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
 
 	latestStates   []*SkillState
@@ -36,17 +37,17 @@ var (
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
-	Name                   string            `yaml:"name" json:"name"`
-	Description            string            `yaml:"description" json:"description"`
-	UserInvocable          bool              `yaml:"user-invocable" json:"user_invocable"`
-	DisableModelInvocation bool              `yaml:"disable-model-invocation" json:"disable_model_invocation"`
-	License                string            `yaml:"license,omitempty" json:"license,omitempty"`
-	Compatibility          string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
-	Metadata               map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
-	Instructions           string            `yaml:"-" json:"instructions"`
-	Path                   string            `yaml:"-" json:"path"`
-	SkillFilePath          string            `yaml:"-" json:"skill_file_path"`
-	Builtin                bool              `yaml:"-" json:"builtin"`
+	Name                   string         `yaml:"name" json:"name"`
+	Description            string         `yaml:"description" json:"description"`
+	UserInvocable          bool           `yaml:"user-invocable" json:"user_invocable"`
+	DisableModelInvocation bool           `yaml:"disable-model-invocation" json:"disable_model_invocation"`
+	License                string         `yaml:"license,omitempty" json:"license,omitempty"`
+	Compatibility          string         `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
+	Metadata               map[string]any `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	Instructions           string         `yaml:"-" json:"instructions"`
+	Path                   string         `yaml:"-" json:"path"`
+	SkillFilePath          string         `yaml:"-" json:"skill_file_path"`
+	Builtin                bool           `yaml:"-" json:"builtin"`
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.
@@ -124,10 +125,14 @@ func (s *Skill) Validate() error {
 		if len(s.Name) > MaxNameLength {
 			errs = append(errs, fmt.Errorf("name exceeds %d characters", MaxNameLength))
 		}
-		if !namePattern.MatchString(s.Name) {
+		// Compare in NFC form so that names written in one Unicode
+		// normalization match directories stored in another (e.g. macOS
+		// reports NFD filenames).
+		name := norm.NFC.String(s.Name)
+		if !namePattern.MatchString(name) {
 			errs = append(errs, errors.New("name must be alphanumeric with hyphens, no leading/trailing/consecutive hyphens"))
 		}
-		if s.Path != "" && !strings.EqualFold(filepath.Base(s.Path), s.Name) {
+		if s.Path != "" && !strings.EqualFold(norm.NFC.String(filepath.Base(s.Path)), name) {
 			errs = append(errs, fmt.Errorf("name %q must match directory %q", s.Name, filepath.Base(s.Path)))
 		}
 	}

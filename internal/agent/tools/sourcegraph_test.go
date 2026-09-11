@@ -1,9 +1,14 @@
 package tools
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,6 +86,44 @@ func TestFormatSourcegraphResultsRespectsCount(t *testing.T) {
 	require.NotContains(t, got, "owner/repo/second.go")
 }
 
+func TestFormatSourcegraphResultsTruncatesHugeFileContent(t *testing.T) {
+	t.Parallel()
+
+	huge := strings.Repeat("x", MaxOutputLength+1)
+	result := map[string]any{
+		"data": map[string]any{
+			"search": map[string]any{
+				"results": map[string]any{
+					"matchCount":  float64(1),
+					"resultCount": float64(1),
+					"results": []any{
+						map[string]any{
+							"__typename": "FileMatch",
+							"repository": map[string]any{"name": "owner/repo"},
+							"file": map[string]any{
+								"path":    "huge.go",
+								"content": "match\n" + huge,
+							},
+							"lineMatches": []any{
+								map[string]any{
+									"lineNumber": float64(1),
+									"preview":    "match",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got, err := formatSourcegraphResults(result, 1, 10)
+	require.NoError(t, err)
+	require.Contains(t, got, "lines truncated]")
+	require.LessOrEqual(t, len(got), MaxOutputLength+128)
+	require.NotContains(t, got, huge)
+}
+
 func TestFormatSourcegraphResultsErrorsAndNoResults(t *testing.T) {
 	t.Parallel()
 
@@ -108,4 +151,58 @@ func TestFormatSourcegraphResultsErrorsAndNoResults(t *testing.T) {
 	got, err = formatSourcegraphResults(noResult, 1, 10)
 	require.NoError(t, err)
 	require.True(t, strings.HasSuffix(got, "No results found. Try a different query.\n"))
+}
+
+type erroringRoundTripper struct {
+	err error
+}
+
+func (rt erroringRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, rt.err
+}
+
+func runSourcegraphTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params SourcegraphParams) (fantasy.ToolResponse, error) {
+	t.Helper()
+
+	input, err := json.Marshal(params)
+	require.NoError(t, err)
+
+	call := fantasy.ToolCall{
+		ID:    "test-call",
+		Name:  SourcegraphToolName,
+		Input: string(input),
+	}
+
+	return tool.Run(ctx, call)
+}
+
+func TestSourcegraphToolNetworkError(t *testing.T) {
+	t.Parallel()
+
+	client := &http.Client{
+		Transport: erroringRoundTripper{err: errors.New("dial tcp: i/o timeout")},
+	}
+	tool := NewSourcegraphTool(client)
+
+	resp, err := runSourcegraphTool(t, tool, context.Background(), SourcegraphParams{
+		Query: "context cancellation",
+	})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "Failed to fetch URL")
+}
+
+func TestSourcegraphToolContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tool := NewSourcegraphTool(nil)
+
+	resp, err := runSourcegraphTool(t, tool, ctx, SourcegraphParams{
+		Query: "context cancellation",
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, resp.IsError)
 }

@@ -53,7 +53,6 @@ import (
 	"github.com/charmbracelet/crush/internal/ui/completions"
 	"github.com/charmbracelet/crush/internal/ui/dialog"
 	fimage "github.com/charmbracelet/crush/internal/ui/image"
-	"github.com/charmbracelet/crush/internal/ui/logo"
 	"github.com/charmbracelet/crush/internal/ui/notification"
 	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/crush/internal/ui/util"
@@ -88,8 +87,10 @@ const TextareaMaxHeight = 15
 // account for the attachments row (top) and bottom margin.
 const editorHeightMargin = 2
 
-// TextareaMinHeight is the minimum height of the prompt textarea.
-const TextareaMinHeight = 3
+// TextareaMinHeight is the minimum height of the prompt textarea when
+// options.tui.textarea_min_height is unset; the live value comes from
+// TUIOptions.MinTextareaHeight.
+const TextareaMinHeight = config.DefaultTextareaMinHeight
 
 // uiFocusState represents the current focus state of the UI.
 type uiFocusState uint8
@@ -410,7 +411,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.CharLimit = -1
 	ta.SetVirtualCursor(false)
 	ta.DynamicHeight = true
-	ta.MinHeight = TextareaMinHeight
+	ta.MinHeight = com.Config().Options.TUI.MinTextareaHeight()
 	ta.MaxHeight = TextareaMaxHeight
 	// Keep "ctrl+a" for line-start (the textarea default); bind select-all
 	// to "ctrl+shift+a" instead (line-start is also available via "home").
@@ -487,8 +488,15 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	// Seed the active theme key from the large model provider so the
 	// first model selection can correctly skip a redundant theme swap.
+	// A configured theme (options.tui.theme) pins the theme for the
+	// whole session; the key carries a "config:" prefix so provider
+	// switches can never match it.
 	if cfg := com.Config(); cfg != nil {
-		ui.themeKey = styles.ThemeKeyForProvider(cfg.Models[config.SelectedModelTypeLarge].Provider)
+		if name := common.ThemeNameFromConfig(cfg); name != "" {
+			ui.themeKey = "config:" + strings.ToLower(name)
+		} else {
+			ui.themeKey = styles.ThemeKeyForProvider(cfg.Models[config.SelectedModelTypeLarge].Provider)
+		}
 	}
 
 	// Seed the yolo cache once at construction; afterwards it is kept
@@ -527,6 +535,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.setState(desiredState, desiredFocus)
 
 	opts := com.Config().Options
+
+	// Suppress thinking-block rendering in the transcript when
+	// configured. Set before any message items are built; reasoning is
+	// still requested, streamed and stored.
+	chat.HideThinking = !opts.TUI.ShouldShowThinking()
 
 	// disable indeterminate progress bar
 	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
@@ -1002,7 +1015,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 		if cmd := m.sendNotification(notification.Notification{
-			Title:   "Crush is waiting...",
+			Title:   "Agent is waiting...",
 			Message: fmt.Sprintf("Permission required to execute \"%s\"", msg.Payload.ToolName),
 		}); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1013,7 +1026,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openBatchFormDialog(msg.Payload)
 		m.chat.ScrollToBottom()
 		if cmd := m.sendNotification(notification.Notification{
-			Title:   "Crush is waiting...",
+			Title:   "Agent is waiting...",
 			Message: fmt.Sprintf("%d questions need your input", len(msg.Payload.Questions)),
 		}); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -3137,7 +3150,7 @@ func (m *UI) View() tea.View {
 	}
 	v.MouseMode = mouseMode(m.mouseEnabled, m.activeInline != nil)
 	v.ReportFocus = m.caps.ReportFocusEvents
-	v.WindowTitle = "crush " + home.Short(m.com.Workspace.WorkingDir())
+	v.WindowTitle = home.Short(m.com.Workspace.WorkingDir())
 
 	key, cacheable := m.currentFrameKey()
 	if cacheable {
@@ -3630,7 +3643,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	// The sidebar width
 	sidebarWidth := 32
 	// The header height
-	const landingHeaderHeight = 4
+	const landingHeaderHeight = 0
 
 	var helpKeyMap help.KeyMap = m
 	if m.status != nil && m.status.ShowingAll() {
@@ -4161,7 +4174,7 @@ func (m *UI) renderEditorView(width int) string {
 
 // cacheSidebarLogo renders and caches the sidebar logo at the specified width.
 func (m *UI) cacheSidebarLogo(width int) {
-	m.sidebarLogo = renderLogo(m.com.Styles, true, m.com.IsHyper(), width)
+	m.sidebarLogo = ""
 }
 
 // applyThemeForProvider swaps the active theme to the one associated with
@@ -4171,6 +4184,12 @@ func (m *UI) cacheSidebarLogo(width int) {
 // invalidating the markdown renderer cache and re-rendering the entire
 // transcript for no visible change.
 func (m *UI) applyThemeForProvider(providerID string) {
+	// A theme configured via options.tui.theme wins over the
+	// provider-based mapping; switching providers must not swap it.
+	if name := common.ThemeNameFromConfig(m.com.Config()); name != "" {
+		m.themeKey = "config:" + strings.ToLower(name)
+		return
+	}
 	key := styles.ThemeKeyForProvider(providerID)
 	if key == m.themeKey {
 		return
@@ -4721,7 +4740,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	case notify.TypeAgentFinished:
 		common.StopTurn()
 		cmds = append(cmds, m.sendNotification(notification.Notification{
-			Title:   "Crush is waiting...",
+			Title:   "Agent is waiting...",
 			Message: fmt.Sprintf("Agent's turn completed in \"%s\"", n.SessionTitle),
 		}))
 		if m.com.IsHyper() {
@@ -5217,17 +5236,4 @@ func (m *UI) disableDockerMCP() tea.Msg {
 	}
 
 	return util.NewInfoMsg("Docker MCP disabled successfully")
-}
-
-// renderLogo renders the Crush logo with the given styles and dimensions.
-func renderLogo(t *styles.Styles, compact, hyper bool, width int) string {
-	return logo.Render(t.Logo.GradCanvas, version.Version, compact, logo.Opts{
-		FieldColor:   t.Logo.FieldColor,
-		TitleColorA:  t.Logo.TitleColorA,
-		TitleColorB:  t.Logo.TitleColorB,
-		CharmColor:   t.Logo.CharmColor,
-		VersionColor: t.Logo.VersionColor,
-		Width:        width,
-		Hyper:        hyper,
-	})
 }

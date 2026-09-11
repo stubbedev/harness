@@ -45,6 +45,10 @@ type Question struct {
 	Text        string   `json:"question"`
 	Description string   `json:"description,omitempty"`
 	Choices     []Choice `json:"choices,omitempty"`
+	// Secret renders the answer masked (single line, no echo). Used for
+	// passwords: the answer goes to the asker only and must never be
+	// displayed in clear text.
+	Secret bool `json:"secret,omitempty"`
 }
 
 // Answer carries the user's response to a single Question.

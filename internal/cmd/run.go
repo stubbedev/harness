@@ -20,7 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/crush/internal/session"
 	"github.com/charmbracelet/crush/internal/ui/anim"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
@@ -114,6 +114,10 @@ crush run --continue "Follow up on your last response"
 				return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
 			}
 
+			if err := refuseUnresolvedLarge(largeModel, ws.Config); err != nil {
+				return err
+			}
+
 			clientWs := workspace.NewClientWorkspace(c, *ws)
 			if err := clientWs.InitCoderAgentNonInteractive(ctx); err != nil {
 				return fmt.Errorf("failed to initialize agent: %w", err)
@@ -144,6 +148,10 @@ crush run --continue "Follow up on your last response"
 
 		if !ws.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'crush' to set up a provider interactively")
+		}
+
+		if err := refuseUnresolvedLarge(largeModel, ws.Config()); err != nil {
+			return err
 		}
 
 		if verbose {
@@ -195,7 +203,15 @@ func runNonInteractive(
 		if err := overrideModels(ctx, c, ws, largeModel, smallModel); err != nil {
 			return fmt.Errorf("failed to override models: %w", err)
 		}
+		cfg, err := c.GetConfig(ctx, ws.ID)
+		if err != nil {
+			slog.Debug("failed to refresh config after model override", "error", err)
+		} else {
+			ws.Config = cfg
+		}
 	}
+
+	fmt.Fprintln(os.Stderr, resolvedLargeLine(ws.Config))
 
 	// The reasoning effort applies to the model that will actually run.
 	// On a continued session without an explicit model override, the
@@ -218,7 +234,7 @@ func runNonInteractive(
 	progress = ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
 
 	if !hideSpinner && stderrTTY {
-		t := styles.ThemeForProvider(ws.Config.Models[config.SelectedModelTypeLarge].Provider)
+		t := common.ThemeStylesForConfig(ws.Config, ws.Config.Models[config.SelectedModelTypeLarge].Provider)
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,
@@ -498,6 +514,28 @@ func waitForAgent(ctx context.Context, c *client.Client, wsID string) error {
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+// refuseUnresolvedLarge fails crush run when models.large was set and
+// did not resolve. -m / --model wins and skips this check. Interactive
+// TUI is not gated here.
+func refuseUnresolvedLarge(cliLarge string, cfg *config.Config) error {
+	if cliLarge != "" || cfg == nil || !cfg.LargeFallback {
+		return nil
+	}
+	requested := cfg.LargeConfigured
+	id := requested.Model
+	if requested.Provider != "" && requested.Model != "" {
+		id = requested.Provider + "/" + requested.Model
+	}
+	return fmt.Errorf("models.large %s does not resolve; crush run refusing to start (pass -m provider/model to override)", id)
+}
+
+// resolvedLargeLine is the default-verbosity model pin for headless runs.
+// Shared implementation lives on config.Config so app.RunNonInteractive can
+// use the same printer without importing cmd.
+func resolvedLargeLine(cfg *config.Config) string {
+	return cfg.ResolvedLargeLine()
 }
 
 // overrideModels resolves model strings and updates the workspace

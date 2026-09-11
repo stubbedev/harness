@@ -425,6 +425,31 @@ func TestConfig_setDefaults(t *testing.T) {
 	})
 }
 
+func TestConfig_setDefaults_autoSummarize(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name               string
+		ratio, wantRatio   float64
+		buffer, wantBuffer int64
+	}{
+		{"unset keeps zero", 0, 0, 0, 0},
+		{"in range is kept", 0.3, 0.3, 40_000, 40_000},
+		{"ratio of one is dropped", 1, 0, 0, 0},
+		{"ratio above one is dropped", 2.5, 0, 0, 0},
+		{"negative ratio is dropped", -0.5, 0, 0, 0},
+		{"negative buffer is dropped", 0, 0, -1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &Config{Options: &Options{AutoSummarizeRatio: tc.ratio, AutoSummarizeBuffer: tc.buffer}}
+			cfg.setDefaults(t.TempDir(), "")
+			require.InDelta(t, tc.wantRatio, cfg.Options.AutoSummarizeRatio, 1e-9)
+			require.Equal(t, tc.wantBuffer, cfg.Options.AutoSummarizeBuffer)
+		})
+	}
+}
+
 func TestConfig_configureProviders(t *testing.T) {
 	knownProviders := []catwalk.Provider{
 		{
@@ -1910,11 +1935,12 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 
 		resolved, resolveErr := resolveSelectedModels(cfg, knownProviders)
 		require.NoError(t, resolveErr)
-		cfg.Models[SelectedModelTypeLarge] = resolved.Large
-		cfg.Models[SelectedModelTypeSmall] = resolved.Small
+		applyResolvedModels(cfg, resolved)
 
 		// In-memory falls back to default.
 		require.True(t, resolved.LargeFallback)
+		require.Equal(t, "ghost", cfg.LargeConfigured.Provider)
+		require.Equal(t, "missing", cfg.LargeConfigured.Model)
 		require.Equal(t, "openai", cfg.Models[SelectedModelTypeLarge].Provider)
 		require.Equal(t, "large-model", cfg.Models[SelectedModelTypeLarge].Model)
 

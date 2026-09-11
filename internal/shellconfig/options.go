@@ -51,6 +51,9 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return optionUI(o, args, stderr)
 	}
 
+	// "option terminal <key> <value>" configures the persistent
+	// terminal session that backs the bash tool (options.terminal).
+
 	// "option reset <key>" wipes a list back to empty. Because the builder
 	// applies operations in execution order, this is just an assignment:
 	// values added after the reset are kept, earlier ones are dropped.
@@ -149,6 +152,9 @@ func handleOption(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		if err != nil {
 			return usage(stderr, fmt.Sprintf("option: %s expects a number of seconds, got %q", key, val))
 		}
+		if key == "max-retries" && n < 0 {
+			return usage(stderr, fmt.Sprintf("option: %s expects a non-negative integer, got %q", key, val))
+		}
 		o[spec.jsonKey] = n
 		slog.Info("Option set in shell config", "key", key, "value", n)
 		return nil
@@ -204,14 +210,17 @@ var optionSpecs = map[string]optionSpec{
 	"auto-summarize":       {jsonKey: "disable_auto_summarize", kind: optBool, inverted: true},
 	"provider-auto-update": {jsonKey: "disable_provider_auto_update", kind: optBool, inverted: true},
 	"default-providers":    {jsonKey: "disable_default_providers", kind: optBool, inverted: true},
+	"update-check":         {jsonKey: "disable_update_check", kind: optBool, inverted: true},
+	"init-prompt":          {jsonKey: "init_prompt", kind: optBool},
 
 	// String fields.
 	"notifications":  {jsonKey: "notifications", kind: optString},
 	"data-directory": {jsonKey: "data_directory", kind: optString},
 	"initialize-as":  {jsonKey: "initialize_as", kind: optString},
 
-	// Integer fields, in seconds.
+	// Integer fields.
 	"request-timeout": {jsonKey: "request_timeout", kind: optInt},
+	"max-retries":     {jsonKey: "max_retries", kind: optInt},
 
 	// List fields. Keys are singular because each call appends one value.
 	"context-path":        {jsonKey: "context_paths", kind: optList},
@@ -220,11 +229,12 @@ var optionSpecs = map[string]optionSpec{
 	"disable-skill":       {jsonKey: "disabled_skills", kind: optList},
 }
 
+
 // optionUI implements "option ui <key> <value>" for TUI-specific settings
 // that live under options.tui rather than as top-level options.
 func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	if len(args) != 4 {
-		return usage(stderr, "usage: option ui <compact|diff|transparent|mouse|scrollbar|completions-max-depth|completions-max-items|exit-banner> <value>")
+		return usage(stderr, "usage: option ui <compact|diff|theme|transparent|mouse|scrollbar|git-status|show-thinking|textarea-min-height|completions-max-depth|completions-max-items|exit-banner> <value>")
 	}
 
 	key := args[2]
@@ -232,21 +242,29 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 	ui := childMap(options, "tui")
 
 	switch key {
-	case "compact", "transparent", "mouse":
+	case "compact", "transparent", "mouse", "git-status", "show-thinking":
 		parsed, err := parseBool(value)
 		if err != nil {
 			return usage(stderr, fmt.Sprintf("option ui %s expects true/false, got %q", key, value))
 		}
-		jsonKey := key
-		if key == "compact" {
-			jsonKey = "compact_mode"
-		}
+		jsonKey := map[string]string{
+			"compact":       "compact_mode",
+			"transparent":   "transparent",
+			"mouse":         "mouse",
+			"git-status":    "git_status",
+			"show-thinking": "show_thinking",
+		}[key]
 		ui[jsonKey] = parsed
 	case "diff":
 		if value != "unified" && value != "split" {
 			return usage(stderr, fmt.Sprintf("option ui diff expects unified or split, got %q", value))
 		}
 		ui["diff_mode"] = value
+	case "theme":
+		if value == "" {
+			return usage(stderr, "option ui theme requires a theme name")
+		}
+		ui["theme"] = value
 	case "scrollbar":
 		if value != "default" && value != "always" && value != "never" {
 			return usage(stderr, fmt.Sprintf("option ui scrollbar expects default, always, or never, got %q", value))
@@ -267,6 +285,12 @@ func optionUI(options map[string]any, args []string, stderr io.Writer) error {
 			jsonKey = "max_items"
 		}
 		childMap(ui, "completions")[jsonKey] = parsed
+	case "textarea-min-height":
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 {
+			return usage(stderr, fmt.Sprintf("option ui textarea-min-height expects an integer of at least 1, got %q", value))
+		}
+		ui["textarea_min_height"] = parsed
 	default:
 		return usage(stderr, fmt.Sprintf("option ui: unknown key %q", key))
 	}

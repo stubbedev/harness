@@ -3,6 +3,7 @@ package dialog
 import (
 	"image"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
@@ -28,6 +29,10 @@ type FreeText struct {
 	keyEnter     key.Binding
 	keyNewline   key.Binding
 	keyClose     key.Binding
+
+	// secret holds the raw answer for Secret questions; it is never
+	// rendered, only masked length is shown.
+	secret string
 
 	lastResponse question.Answer
 	lastWidth    int
@@ -70,6 +75,9 @@ func (d *FreeText) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return true, nil
 	case key.Matches(msg, d.keyEnter):
 		val := strings.TrimSpace(d.editor.Value())
+		if d.Request.Secret {
+			val = d.secret
+		}
 		if val != "" {
 			d.answer(question.Answer{
 				QuestionID: d.Request.ID,
@@ -79,13 +87,38 @@ func (d *FreeText) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		}
 		return false, nil
 	case key.Matches(msg, d.keyNewline):
-		d.editor.InsertRune('\n')
+		if !d.Request.Secret {
+			d.editor.InsertRune('\n')
+		}
 		return false, nil
 	default:
+		if d.Request.Secret {
+			return false, d.handleSecretKey(msg)
+		}
 		var cmd tea.Cmd
 		d.editor, cmd = d.editor.Update(msg)
 		return false, cmd
 	}
+}
+
+// handleSecretKey accumulates a masked single-line answer: printable
+// runes append, backspace deletes. Everything else is ignored.
+func (d *FreeText) handleSecretKey(msg tea.KeyPressMsg) tea.Cmd {
+	switch msg.Code {
+	case tea.KeyBackspace:
+		if len(d.secret) > 0 {
+			_, size := utf8.DecodeLastRuneInString(d.secret)
+			d.secret = d.secret[:len(d.secret)-size]
+		}
+		return nil
+	case tea.KeyDelete, tea.KeyLeft, tea.KeyRight, tea.KeyUp, tea.KeyDown,
+		tea.KeyHome, tea.KeyEnd, tea.KeyPgUp, tea.KeyPgDown:
+		return nil
+	}
+	if msg.Text != "" {
+		d.secret += msg.Text
+	}
+	return nil
 }
 
 func (d *FreeText) answer(resp question.Answer) {
@@ -95,6 +128,12 @@ func (d *FreeText) answer(resp question.Answer) {
 // Response returns the current answer, including any unsaved
 // editor content so that tabbing away preserves typed text.
 func (d *FreeText) Response() question.Answer {
+	if d.Request.Secret {
+		if d.secret != "" {
+			return question.Answer{QuestionID: d.Request.ID, FillInText: d.secret}
+		}
+		return d.lastResponse
+	}
 	if val := strings.TrimSpace(d.editor.Value()); val != "" {
 		return question.Answer{QuestionID: d.Request.ID, FillInText: val}
 	}
@@ -136,7 +175,10 @@ func (d *FreeText) Height(width int) int {
 		h++ // blank
 	}
 	h += freeTextMinEditorHeight // textarea (minimum; grows to fill at draw time)
-	h++                          // trailing blank for bottom padding
+	if d.Request.Secret {
+		h = h - freeTextMinEditorHeight + 1 // single masked line
+	}
+	h++ // trailing blank for bottom padding
 	return h
 }
 
@@ -207,7 +249,13 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		d.editor.SetHeight(available)
 		d.editor.SetWidth(contentWidth - 2 - prefixWidth)
 		tc := d.editor.Cursor()
-		for j, ln := range strings.Split(d.editor.View(), "\n") {
+		editorLines := strings.Split(d.editor.View(), "\n")
+		if d.Request.Secret {
+			// Masked single line; the cursor sits at the end.
+			editorLines = []string{strings.Repeat("*", len([]rune(d.secret)))}
+			tc = &tea.Cursor{X: len(editorLines[0]), Y: 0, Shape: tea.CursorBar, Blink: true}
+		}
+		for j, ln := range editorLines {
 			text := bar + ln
 			cursorX := -1
 			if tc != nil && tc.Y == j {

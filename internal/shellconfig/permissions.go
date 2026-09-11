@@ -26,7 +26,7 @@ func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdo
 		return nil
 	}
 	if len(args) < 2 {
-		return usage(stderr, "usage: permissions allow|deny <tool> [<tool> ...]")
+		return usage(stderr, "usage: permissions allow|deny <tool> [<tool> ...] | yolo [true|false]")
 	}
 
 	switch args[1] {
@@ -34,9 +34,28 @@ func handlePermissions(ctx context.Context, args []string, stdin io.Reader, stdo
 		return permissionsAllow(b, args, stderr)
 	case "deny":
 		return permissionsDeny(b, args, stderr)
+	case "yolo":
+		return permissionsYolo(b, args, stderr)
 	default:
-		return usage(stderr, fmt.Sprintf("permissions: unknown subcommand %q (expected allow or deny)", args[1]))
+		return usage(stderr, fmt.Sprintf("permissions: unknown subcommand %q (expected allow, deny, or yolo)", args[1]))
 	}
+}
+
+// permissionsYolo sets permissions.yolo. Omitting the value enables it
+// (the fork default); "permissions yolo false" restores prompting.
+func permissionsYolo(b *ConfigBuilder, args []string, stderr io.Writer) error {
+	bv := true
+	if len(args) >= 3 {
+		parsed, err := parseBool(args[2])
+		if err != nil {
+			return usage(stderr, fmt.Sprintf("permissions: yolo expects true/false, got %q", args[2]))
+		}
+		bv = parsed
+	}
+	b.section("permissions")["yolo"] = bv
+
+	slog.Info("Permissions yolo set in shell config", "value", bv)
+	return nil
 }
 
 func permissionsAllow(b *ConfigBuilder, args []string, stderr io.Writer) error {

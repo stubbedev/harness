@@ -135,8 +135,11 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		slog.Warn("Clipboard initialization failed", "error", err)
 	}
 
-	// Check for updates in the background.
-	go app.checkForUpdates(ctx)
+	// Check for updates in the background, unless the binary is managed
+	// externally (nix, package manager) and the check was disabled.
+	if !app.config.Config().Options.DisableUpdateCheck {
+		go app.checkForUpdates(ctx)
+	}
 
 	// Arm initialization synchronously before launching it so WaitForInit
 	// blocks for the in-flight init instead of racing the goroutine and
@@ -292,6 +295,8 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}
 
+	fmt.Fprintln(os.Stderr, app.config.Config().ResolvedLargeLine())
+
 	var (
 		spinner   *format.Spinner
 		stderrTTY bool
@@ -302,7 +307,13 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
 
 	if !hideSpinner && stderrTTY {
+		// The configured theme (options.tui.theme) wins over the
+		// provider-based mapping. Resolved inline because importing
+		// ui/common here would cycle (common -> workspace -> app).
 		t := styles.ThemeForProvider(app.config.Config().Models[config.SelectedModelTypeLarge].Provider)
+		if cfg := app.config.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.Theme != "" {
+			t = styles.ThemeFromConfig(cfg.Options.TUI.Theme)
+		}
 
 		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
 			Size:        10,

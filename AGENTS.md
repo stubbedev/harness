@@ -229,6 +229,10 @@ func CharmtonePantera() Styles {
 }
 ```
 
-**Adding a new theme**: Add a function in `themes.go` that returns the
-result of `quickStyle` with a `quickStyleOpts` palette (plus any needed
-overrides), then wire it into `ThemeForProvider`.
+**Adding a new theme**: Add a palette function in `themes.go` that
+returns a `quickStyleOpts` (plus an overrides function when the theme
+needs colors outside the token model), then register both in the
+`builtinThemes` / `builtinThemeOverrides` maps. Users select the theme
+via `options.tui.theme` (`option ui theme <name>` in crushrc); a
+configured theme wins over the provider-based `ThemeForProvider`
+mapping.

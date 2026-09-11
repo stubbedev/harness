@@ -10,7 +10,6 @@ import (
 	mcp "github.com/charmbracelet/crush/internal/agent/tools/mcp"
 	"github.com/charmbracelet/crush/internal/config"
 	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/logo"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 )
@@ -68,22 +67,15 @@ func (m *UI) updateSidebarScrollState() {
 		return
 	}
 
-	const logoHeightBreakpoint = 30
-
 	t := m.com.Styles
 	width := m.layout.sidebar.Dx()
-	height := m.layout.sidebar.Dy()
 
 	contentWidth := max(width-2, 1)
 
 	title := t.Sidebar.SessionTitle.Width(contentWidth).MaxHeight(2).Render(m.session.Title)
 	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), contentWidth)
+	// No logo in the sidebar: the cached sidebar logo is always empty.
 	sidebarLogo := m.sidebarLogo
-	if height < logoHeightBreakpoint {
-		sidebarLogo = lipgloss.JoinVertical(lipgloss.Left, logo.SmallRender(m.com.Styles, contentWidth, logo.Opts{
-			Hyper: m.com.IsHyper(),
-		}), "")
-	}
 
 	var logoRect, contentRect image.Rectangle
 	layout.Vertical(

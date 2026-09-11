@@ -106,6 +106,9 @@ type Styles struct {
 		LogoGradCanvas    lipgloss.Style // Canvas for the compact "CRUSH" gradient
 		LogoGradFromColor color.Color    // "CRUSH" wordmark gradient start
 		LogoGradToColor   color.Color    // "CRUSH" wordmark gradient end
+		GitBranch         lipgloss.Style // Style for the git branch glyph and name
+		GitStatus         lipgloss.Style // Style for git working-tree counts
+		GitRemote         lipgloss.Style // Style for git ahead/behind markers
 	}
 
 	CompactDetails struct {

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/text/unicode/norm"
 )
 
 func TestParse(t *testing.T) {
@@ -19,7 +20,7 @@ func TestParse(t *testing.T) {
 		wantDesc    string
 		wantLicense string
 		wantCompat  string
-		wantMeta    map[string]string
+		wantMeta    map[string]any
 		wantTools   string
 		wantInstr   string
 		wantErr     bool
@@ -45,8 +46,32 @@ Use this skill when the user needs to work with PDF files.
 			wantDesc:    "Extracts text and tables from PDF files, fills PDF forms, and merges multiple PDFs.",
 			wantLicense: "Apache-2.0",
 			wantCompat:  "Requires python 3.8+, pdfplumber, pdfrw libraries",
-			wantMeta:    map[string]string{"author": "example-org", "version": "1.0"},
+			wantMeta:    map[string]any{"author": "example-org", "version": "1.0"},
 			wantInstr:   "# PDF Processing\n\n## When to use this skill\nUse this skill when the user needs to work with PDF files.",
+		},
+		{
+			name: "metadata with non-string values",
+			content: `---
+name: ppt-master
+description: AI-driven presentation workflow for generating editable PPTX decks.
+metadata:
+  version: "6.3.2"
+  license: "MIT"
+  sponsors:
+    - "SPONSORS.md"
+    - "SPONSORS_CN.md"
+---
+
+# PPT Master Skill
+`,
+			wantName: "ppt-master",
+			wantDesc: "AI-driven presentation workflow for generating editable PPTX decks.",
+			wantMeta: map[string]any{
+				"version":  "6.3.2",
+				"license":  "MIT",
+				"sponsors": []any{"SPONSORS.md", "SPONSORS_CN.md"},
+			},
+			wantInstr: "# PPT Master Skill",
 		},
 		{
 			name: "minimal skill",
@@ -174,6 +199,50 @@ func TestSkillValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid name - accented latin",
+			skill:   Skill{Name: "redacteur-français", Description: "Some description.", Path: "/skills/redacteur-français"},
+			wantErr: false,
+		},
+		{
+			name:    "valid name - nfd name against nfc directory",
+			skill:   Skill{Name: norm.NFD.String("rédacteur-français"), Description: "Some description.", Path: "/skills/rédacteur-français"},
+			wantErr: false,
+		},
+		{
+			name:    "valid name - cjk",
+			skill:   Skill{Name: "写作者-指南", Description: "Some description.", Path: "/skills/写作者-指南"},
+			wantErr: false,
+		},
+		{
+			name:    "valid name - letters and digits",
+			skill:   Skill{Name: "café-2", Description: "Some description.", Path: "/skills/café-2"},
+			wantErr: false,
+		},
+		{
+			name:    "invalid name - consecutive hyphens",
+			skill:   Skill{Name: "café--français", Description: "Some description."},
+			wantErr: true,
+			errMsg:  "alphanumeric with hyphens",
+		},
+		{
+			name:    "invalid name - trailing hyphen",
+			skill:   Skill{Name: "résumé-", Description: "Some description."},
+			wantErr: true,
+			errMsg:  "alphanumeric with hyphens",
+		},
+		{
+			name:    "invalid name - spaces",
+			skill:   Skill{Name: "café au lait", Description: "Some description."},
+			wantErr: true,
+			errMsg:  "alphanumeric with hyphens",
+		},
+		{
+			name:    "invalid name - punctuation",
+			skill:   Skill{Name: "résumé!", Description: "Some description."},
+			wantErr: true,
+			errMsg:  "alphanumeric with hyphens",
+		},
+		{
 			name:    "invalid name - starts with hyphen",
 			skill:   Skill{Name: "-my-skill", Description: "Some description."},
 			wantErr: true,
@@ -286,6 +355,22 @@ func TestDiscoverEmptyDir(t *testing.T) {
 	skills, states := DiscoverWithStates([]string{tmpDir})
 	require.Empty(t, states)
 	require.Empty(t, skills)
+}
+
+func TestDiscoverAccentedName(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	skillDir := filepath.Join(tmpDir, norm.NFD.String("redacteur-français"))
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: redacteur-français\ndescription: Rédige en français correctement accentué.\n---\n# Rédacteur\n"), 0o644))
+
+	skills, states := DiscoverWithStates([]string{tmpDir})
+	require.Len(t, states, 1)
+	require.Equal(t, StateNormal, states[0].State, "unexpected error: %v", states[0].Err)
+	require.Len(t, skills, 1)
+	require.Equal(t, "redacteur-français", skills[0].Name)
 }
 
 func TestDiscoverMissingPath(t *testing.T) {

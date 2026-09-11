@@ -146,10 +146,12 @@ crush --continue
 			return errors.New("Crush crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/charmbracelet/crush/issues/new?template=bug.yml") //nolint:staticcheck
 		}
 		var banner config.ExitBanner
+		theme := ""
 		if cfg := com.Config(); cfg != nil {
 			banner = cfg.Options.TUI.ExitBanner
+			theme = cfg.Options.TUI.Theme
 		}
-		printSessionResume(model, banner)
+		printSessionResume(model, banner, theme)
 		return nil
 	},
 }
@@ -171,9 +173,9 @@ var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`
 // printSessionResume prints the exit banner after the TUI exits, including the
 // session title and the hint to resume it with `crush -s <id>`. The banner
 // style decides how much of that is shown; see config.ExitBanner.
-func printSessionResume(model *ui.UI, banner config.ExitBanner) {
+func printSessionResume(model *ui.UI, banner config.ExitBanner, theme string) {
 	tw, _, _ := term.GetSize(os.Stdout.Fd())
-	body := exitbanner.Render(banner, model.CurrentSession(), tw)
+	body := exitbanner.Render(banner, model.CurrentSession(), tw, theme)
 	if body == "" {
 		return
 	}
@@ -285,7 +287,9 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	}
 
 	cfg := store.Config()
-	store.Overrides().SkipPermissionRequests = yolo
+	// Yolo defaults to true in this fork; the flag forces it on but never
+	// turns a config-enabled yolo off.
+	store.Overrides().SkipPermissionRequests = yolo || cfg.Permissions.YoloEnabled()
 	store.Overrides().EnabledChannels = channels
 
 	if err := os.MkdirAll(cfg.Options.DataDirectory, 0o700); err != nil {

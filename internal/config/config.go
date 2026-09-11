@@ -272,14 +272,16 @@ type LSPConfig struct {
 type TUIOptions struct {
 	CompactMode bool   `json:"compact_mode,omitempty" jsonschema:"description=Enable compact mode for the TUI interface,default=false"`
 	DiffMode    string `json:"diff_mode,omitempty" jsonschema:"description=Diff mode for the TUI interface,enum=unified,enum=split"`
-	// Here we can add themes later or any TUI related options
-	//
+	Theme       string `json:"theme,omitempty" jsonschema:"description=Color theme for the TUI. Overrides the provider-based default theme,example=charmtone,example=catppuccin-mocha,example=gruvbox-dark"`
 
-	Completions Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
-	Scrollbar   string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
-	Mouse       *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
-	ExitBanner  ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+	Completions       Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
+	Transparent       *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
+	Scrollbar         string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
+	Mouse             *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
+	ExitBanner        ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+	GitStatus         *bool       `json:"git_status,omitempty" jsonschema:"description=Show git branch and working-tree status in the compact header,default=true"`
+	ShowThinking      *bool       `json:"show_thinking,omitempty" jsonschema:"description=Render model reasoning (thinking) blocks in the transcript. Reasoning is still requested\\, streamed and stored when disabled - only the rendering is suppressed,default=true"`
+	TextareaMinHeight *int        `json:"textarea_min_height,omitempty" jsonschema:"description=Minimum height of the prompt textarea in rows. The textarea grows to fit content\\, so this only sets the collapsed floor. Values below 1 are clamped to 1.,default=3,example=1,example=5"`
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The
@@ -287,6 +289,33 @@ type TUIOptions struct {
 // without unwrapping either.
 func (t *TUIOptions) IsTransparent() bool {
 	return t != nil && t.Transparent != nil && *t.Transparent
+}
+
+// ShowGitStatus reports whether the compact header includes the git branch
+// and working-tree status segment. The nil receiver and the unset pointer
+// both mean enabled.
+func (t *TUIOptions) ShowGitStatus() bool {
+	return t == nil || t.GitStatus == nil || *t.GitStatus
+}
+
+// ShouldShowThinking reports whether reasoning (thinking) blocks render in
+// the transcript. The nil receiver and the unset pointer both mean enabled.
+func (t *TUIOptions) ShouldShowThinking() bool {
+	return t == nil || t.ShowThinking == nil || *t.ShowThinking
+}
+
+// DefaultTextareaMinHeight is the prompt textarea's minimum height in rows
+// when options.tui.textarea_min_height is unset.
+const DefaultTextareaMinHeight = 3
+
+// MinTextareaHeight returns the prompt textarea's minimum height in rows.
+// Unset values fall back to DefaultTextareaMinHeight; values below one are
+// clamped to one so the prompt never collapses to zero rows.
+func (t *TUIOptions) MinTextareaHeight() int {
+	if t == nil || t.TextareaMinHeight == nil {
+		return DefaultTextareaMinHeight
+	}
+	return max(1, *t.TextareaMinHeight)
 }
 
 // Completions defines options for the completions UI.
@@ -331,6 +360,17 @@ const (
 
 type Permissions struct {
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
+	// Yolo skips every permission prompt. This fork defaults it to true;
+	// set permissions.yolo false (or "permissions yolo false" in crushrc)
+	// to restore prompting. The --yolo flag forces it on regardless.
+	Yolo *bool `json:"yolo,omitempty" jsonschema:"description=Skip all permission prompts (yolo mode). This build defaults to true\\, set false to restore prompts,default=true"`
+}
+
+// YoloEnabled reports whether permission prompts are skipped. The nil
+// receiver and the unset pointer both mean enabled: this fork ships with
+// yolo mode on by default.
+func (p *Permissions) YoloEnabled() bool {
+	return p == nil || p.Yolo == nil || *p.Yolo
 }
 
 type TrailerStyle string
@@ -364,22 +404,33 @@ type Options struct {
 	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	MaxRetries           *int        `json:"max_retries,omitempty" jsonschema:"description=Maximum retries for failed model requests. Unset uses the Fantasy default of 3.,minimum=0,default=3"`
+	// AutoSummarizeRatio is the share of a context window of up to 200k
+	// tokens that is kept free before the session is summarized. Zero keeps
+	// the default of 0.2.
+	AutoSummarizeRatio float64 `json:"auto_summarize_ratio,omitempty" jsonschema:"description=Share of a context window of up to 200k tokens kept free before the session is summarized (default 0.2),minimum=0,exclusiveMaximum=1,example=0.3"`
+	// AutoSummarizeBuffer is the number of tokens kept free in a context
+	// window above 200k tokens before the session is summarized. Zero keeps
+	// the default of 20000.
+	AutoSummarizeBuffer int64 `json:"auto_summarize_buffer,omitempty" jsonschema:"description=Tokens kept free in a context window above 200k tokens before the session is summarized (default 20000),minimum=0,example=40000"`
 	// DataDirectory is where Crush keeps per-project state such as
 	// the SQLite database and workspace overrides. Relative paths are
 	// resolved against the working directory; absolute paths are used
 	// verbatim. After defaulting the stored value is always absolute.
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.crush,example=.crush"`
-	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
-	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
-	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
-	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
-	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
-	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
-	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
-	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
-	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
-	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	DataDirectory             string           `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.crush,example=.crush"`
+	DisabledTools             []string         `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
+	DisableProviderAutoUpdate bool             `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	DisableDefaultProviders   bool             `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
+	Attribution               *Attribution     `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
+	DisableMetrics            bool             `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	InitializeAs              string           `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	InitPrompt                *bool            `json:"init_prompt,omitempty" jsonschema:"description=Show the project initialization prompt when a project has no context file. Set to false to never ask,default=true"`
+	AutoLSP                   *bool            `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
+	Progress                  *bool            `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
+	Notifications             string           `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
+	DisabledSkills            []string         `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
+	DisableUpdateCheck        bool             `json:"disable_update_check,omitempty" jsonschema:"description=Disable the startup check for Crush updates - useful when the binary is managed externally (nix\\, package manager),default=false"`
+	RequestTimeout            *int             `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
@@ -760,6 +811,14 @@ type Config struct {
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
 	Agents map[string]Agent `json:"-"`
+
+	// LargeFallback is true when models.large was set but did not resolve
+	// against the catalog. Interactive TUI still uses the default; crush
+	// run refuses to start unless -m / --model overrides.
+	LargeFallback bool `json:"large_fallback,omitempty" jsonschema:"-"`
+
+	// LargeConfigured is the models.large value before fallback.
+	LargeConfigured SelectedModel `json:"large_configured,omitempty" jsonschema:"-"`
 }
 
 // cloneForWrite returns a copy of c that the store's typed field mutators
@@ -887,6 +946,20 @@ func (c *Config) LargeModel() *catwalk.Model {
 		return nil
 	}
 	return c.GetModel(model.Provider, model.Model)
+}
+
+// ResolvedLargeLine is the default-verbosity model pin for headless crush run.
+// Missing or zero-value large selection prints "crush run: model unresolved"
+// rather than "crush run: /".
+func (c *Config) ResolvedLargeLine() string {
+	if c == nil {
+		return "crush run: model unresolved"
+	}
+	m, ok := c.Models[SelectedModelTypeLarge]
+	if !ok || m.Provider == "" || m.Model == "" {
+		return "crush run: model unresolved"
+	}
+	return fmt.Sprintf("crush run: %s/%s", m.Provider, m.Model)
 }
 
 func (c *Config) SmallModel() *catwalk.Model {

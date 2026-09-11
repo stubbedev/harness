@@ -21,8 +21,9 @@ const FallbackWidth = 80
 
 // Render returns the exit banner for the given style, or an empty string when
 // there is nothing to print. A nil or untitled session means the resume hint is
-// omitted, which for the compact banner leaves nothing at all.
-func Render(banner config.ExitBanner, sess *session.Session, width int) string {
+// omitted, which for the compact banner leaves nothing at all. The theme name
+// selects the palette for the full banner's logo.
+func Render(banner config.ExitBanner, sess *session.Session, width int, theme string) string {
 	if width <= 0 {
 		width = FallbackWidth
 	}
@@ -43,7 +44,7 @@ func Render(banner config.ExitBanner, sess *session.Session, width int) string {
 		style := lipgloss.NewStyle().Padding(1, 3)
 		contentWidth := width - style.GetHorizontalFrameSize()
 
-		sections := []string{logoSection(contentWidth)}
+		sections := []string{logoSection(contentWidth, theme)}
 		if hasSession {
 			sections = append(sections, sessionResumeLines(sess, contentWidth))
 		}
@@ -52,8 +53,8 @@ func Render(banner config.ExitBanner, sess *session.Session, width int) string {
 }
 
 // logoSection returns the ASCII art logo followed by the parting message.
-func logoSection(contentWidth int) string {
-	t := styles.ThemeForProvider("")
+func logoSection(contentWidth int, theme string) string {
+	t := styles.ThemeFromConfig(theme)
 	crushLogo := logo.Render(t.Logo.GradCanvas, version.Version, true, logo.Opts{
 		FieldColor:   t.Logo.FieldColor,
 		TitleColorA:  t.Logo.TitleColorA,

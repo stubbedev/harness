@@ -693,10 +693,15 @@ func xdgIsolated(t *testing.T) {
 func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 	tests := []struct {
 		name   string
+		config string
 		mutate func(*proto.Workspace)
 	}{
 		{
+			// Yolo defaults to on in this build, so the flag alone cannot
+			// produce an effective mismatch; opt out in config first to
+			// make the differing flag observable again.
 			name:   "yolo",
+			config: "permissions yolo false\n",
 			mutate: func(p *proto.Workspace) { p.YOLO = true },
 		},
 		{
@@ -718,6 +723,9 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			xdgIsolated(t)
 			cwd := t.TempDir()
 			dataDir := t.TempDir()
+			if tc.config != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(cwd, "crushrc"), []byte(tc.config), 0o644))
+			}
 
 			buf := captureDebugLogs(t)
 			b := New(context.Background(), nil, func() {})

@@ -32,6 +32,9 @@ func ProjectNeedsInitialization(store *ConfigStore) (bool, error) {
 	}
 
 	cfg := store.Config()
+	if cfg.Options.InitPrompt != nil && !*cfg.Options.InitPrompt {
+		return false, nil
+	}
 	flagFilePath := filepath.Join(cfg.Options.DataDirectory, InitFlagFilename)
 
 	_, err := os.Stat(flagFilePath)

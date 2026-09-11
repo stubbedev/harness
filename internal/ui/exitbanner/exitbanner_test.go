@@ -75,7 +75,7 @@ func TestRender(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := Render(tt.banner, tt.sess, 100)
+			got := Render(tt.banner, tt.sess, 100, "")
 			if tt.empty {
 				require.Empty(t, got)
 				return
@@ -94,7 +94,7 @@ func TestRender(t *testing.T) {
 func TestRenderCompactIsExactlyTwoLines(t *testing.T) {
 	t.Parallel()
 
-	got := Render(config.ExitBannerCompact, testSession(), 100)
+	got := Render(config.ExitBannerCompact, testSession(), 100, "")
 	require.Len(t, strings.Split(got, "\n"), 2)
 }
 
@@ -104,7 +104,7 @@ func TestRenderTruncatesLongTitles(t *testing.T) {
 	sess := testSession()
 	sess.Title = strings.Repeat("long ", 60)
 
-	got := Render(config.ExitBannerCompact, sess, 40)
+	got := Render(config.ExitBannerCompact, sess, 40, "")
 	for _, line := range strings.Split(got, "\n") {
 		require.LessOrEqual(t, ansi.StringWidth(line), 40, "line wider than the terminal: %q", line)
 	}
@@ -117,7 +117,7 @@ func TestRenderFlattensNewlinesInTitles(t *testing.T) {
 	sess := testSession()
 	sess.Title = "first\nsecond"
 
-	got := Render(config.ExitBannerCompact, sess, 100)
+	got := Render(config.ExitBannerCompact, sess, 100, "")
 	require.Len(t, strings.Split(got, "\n"), 2)
 	require.Contains(t, got, "first second")
 }
@@ -127,7 +127,7 @@ func TestRenderFitsTheGivenWidth(t *testing.T) {
 
 	for _, width := range []int{40, 80, 200} {
 		for _, banner := range []config.ExitBanner{config.ExitBannerCompact, config.ExitBannerDefault} {
-			got := Render(banner, testSession(), width)
+			got := Render(banner, testSession(), width, "")
 			for _, line := range strings.Split(got, "\n") {
 				require.LessOrEqual(t, ansi.StringWidth(line), width,
 					"%s banner overflows width %d: %q", banner, width, line)
@@ -142,7 +142,7 @@ func TestRenderNonPositiveWidthUsesFallback(t *testing.T) {
 	sess := testSession()
 	sess.Title = strings.Repeat("long ", 60)
 
-	got := Render(config.ExitBannerCompact, sess, 0)
+	got := Render(config.ExitBannerCompact, sess, 0, "")
 	for _, line := range strings.Split(got, "\n") {
 		require.LessOrEqual(t, ansi.StringWidth(line), FallbackWidth)
 	}

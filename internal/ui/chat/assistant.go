@@ -394,6 +394,9 @@ func (a *AssistantMessageItem) compositionKey() uint64 {
 func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 	var messageParts []string
 	thinking := strings.TrimSpace(a.message.ReasoningContent().Thinking)
+	if HideThinking {
+		thinking = ""
+	}
 	content := strings.TrimSpace(a.message.Content().Text)
 
 	if thinking != "" {

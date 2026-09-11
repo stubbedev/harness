@@ -43,11 +43,11 @@ func (c *Common) Config() *config.Config {
 	return c.Workspace.Config()
 }
 
-// DefaultCommon returns the default common UI configurations. When the
-// workspace has a large model selected, the theme is chosen based on its
-// provider; otherwise the default theme is used.
+// DefaultCommon returns the default common UI configurations. A theme
+// configured via options.tui.theme wins; otherwise the theme is chosen
+// from the large model's provider, falling back to the default theme.
 func DefaultCommon(ws workspace.Workspace) *Common {
-	s := styles.ThemeForProvider(largeModelProviderID(ws))
+	s := ThemeStylesForWorkspace(ws)
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,
@@ -65,6 +65,37 @@ func largeModelProviderID(ws workspace.Workspace) string {
 		return ""
 	}
 	return cfg.Models[config.SelectedModelTypeLarge].Provider
+}
+
+// ThemeNameFromConfig extracts the configured theme name from config,
+// returning "" (which LoadTheme treats as the default) when config is
+// nil or no theme is set.
+func ThemeNameFromConfig(cfg *config.Config) string {
+	if cfg == nil || cfg.Options == nil || cfg.Options.TUI == nil {
+		return ""
+	}
+	return cfg.Options.TUI.Theme
+}
+
+// ThemeStylesForWorkspace resolves the theme for a workspace: the
+// configured theme (options.tui.theme) takes precedence over the
+// provider-based mapping.
+func ThemeStylesForWorkspace(ws workspace.Workspace) styles.Styles {
+	var cfg *config.Config
+	if ws != nil {
+		cfg = ws.Config()
+	}
+	return ThemeStylesForConfig(cfg, largeModelProviderID(ws))
+}
+
+// ThemeStylesForConfig resolves the theme for a config plus a fallback
+// provider ID: a theme configured via options.tui.theme wins, otherwise
+// the provider mapping decides.
+func ThemeStylesForConfig(cfg *config.Config, providerID string) styles.Styles {
+	if name := ThemeNameFromConfig(cfg); name != "" {
+		return styles.ThemeFromConfig(name)
+	}
+	return styles.ThemeForProvider(providerID)
 }
 
 // IsHyper reports whether the currently selected large model is provided

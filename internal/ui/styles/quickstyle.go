@@ -623,6 +623,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Header.LogoGradCanvas = lipgloss.NewStyle()
 	s.Header.LogoGradFromColor = o.secondary
 	s.Header.LogoGradToColor = o.primary
+	s.Header.GitBranch = base.Foreground(o.primary)
+	s.Header.GitStatus = base.Foreground(o.warning)
+	s.Header.GitRemote = base.Foreground(o.info)
 
 	s.CompactDetails.Title = base
 	s.CompactDetails.View = base.Padding(0, 1, 1, 1).Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)

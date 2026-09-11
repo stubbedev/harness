@@ -420,7 +420,9 @@ Flags:
 ### permissions
 
 Configure tool permissions. `allow` skips approval prompts; `deny` hides tools
-from the agent entirely.
+from the agent entirely. `yolo` skips every prompt — this build defaults it to
+on, so `permissions yolo false` restores prompting (same as
+`permissions.yolo = false` in JSON).
 
 ```text
 Usage:
@@ -429,6 +431,20 @@ Usage:
 Available Commands:
   allow     Allow tools without prompting
   deny      Hide tools from the agent
+  yolo      Skip all permission prompts (default true in this build)
+```
+
+#### `permissions yolo`
+
+Toggle yolo mode. Omitting the value enables it.
+
+```text
+Usage:
+  permissions yolo [true|false]
+```
+
+```bash
+permissions yolo false
 ```
 
 #### `permissions allow`
@@ -473,10 +489,12 @@ Boolean Keys:
   debug-lsp                      enable LSP debug logging
   auto-lsp                       automatically configure language servers
   progress                       show progress indicators
+  init-prompt                    ask to initialize projects with no context file
   metrics                        send anonymous usage metrics
   auto-summarize                 automatically summarize long conversations
   provider-auto-update           update the provider catalog automatically
   default-providers              include built-in providers
+  update-check                   check for Crush updates at startup
   attribution-generated-with     add the Generated with Crush line
 
 String Keys:
@@ -492,6 +510,8 @@ Integer Keys:
                                    streaming responses are only aborted after
                                    this much inactivity; 0 waits forever
                                    (default 60)
+  max-retries int                  retries for failed model requests; 0
+                                   disables them (default 3)
 
 List Keys:
   context-path string             append a project context path
@@ -522,10 +542,11 @@ Available Keys:
   disable-skill         clear disabled skill names
 ```
 
+```
+
 #### `option ui`
 
 Configure terminal UI presentation and completion-list limits.
-
 ```text
 Usage:
   option ui <key> <value>
@@ -533,6 +554,9 @@ Usage:
 Available Keys:
   compact bool                  use the compact chat layout
   diff unified|split            choose unified or side-by-side diffs
+  theme string                  color theme: charmtone (default),
+                                catppuccin-mocha, or gruvbox-dark; overrides
+                                the provider-based default
   transparent bool              use the terminal background
   mouse bool                    enable terminal mouse capture for clicks,
                                 selection, and scrolling in the TUI (default
@@ -540,6 +564,14 @@ Available Keys:
                                 or tmux handle text selection and copy/paste
   scrollbar string              control chat scrollbar visibility: default,
                                 always, or never
+  git-status bool               show git branch and working-tree status in
+                                the compact header (default true)
+  show-thinking bool            render model reasoning blocks in the
+                                transcript (default true); reasoning is
+                                still streamed and stored when disabled
+  textarea-min-height int       minimum rows of the prompt textarea; it
+                                grows to fit content, so this only sets
+                                the collapsed floor (default 3)
   exit-banner default|compact|none
                                 control the post-session banner: default shows
                                 the Crush logo, compact shows only the resume
@@ -551,9 +583,13 @@ Available Keys:
 ```bash
 option ui compact true
 option ui diff unified
+option ui theme catppuccin-mocha
 option ui transparent true
 option ui mouse false
 option ui scrollbar always
+option ui git-status true
+option ui show-thinking false
+option ui textarea-min-height 1
 option ui exit-banner compact
 option ui completions-max-depth 4
 option ui completions-max-items 200

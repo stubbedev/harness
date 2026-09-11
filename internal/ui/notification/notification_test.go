@@ -65,13 +65,13 @@ func TestOSCBackend_Send_OSC99(t *testing.T) {
 
 	backend := notification.NewOSCBackend(nil, true)
 	s := extractRawString(t, backend.Send(notification.Notification{
-		Title:   "Crush is waiting...",
+		Title:   "Agent is waiting...",
 		Message: "Agent's turn completed",
 	}))
 
 	require.Contains(t, s, "p=title")
 	require.Contains(t, s, "p=body")
-	require.Contains(t, s, "Crush is waiting...")
+	require.Contains(t, s, "Agent is waiting...")
 	require.Contains(t, s, "Agent's turn completed")
 	require.NotContains(t, s, "p=icon")
 	require.NotContains(t, s, "\x1b]777;")
@@ -83,7 +83,7 @@ func TestOSCBackend_Send_OSC99_TitleOnly(t *testing.T) {
 
 	backend := notification.NewOSCBackend(nil, true)
 	s := extractRawString(t, backend.Send(notification.Notification{
-		Title: "Crush is waiting...",
+		Title: "Agent is waiting...",
 	}))
 
 	require.Contains(t, s, "p=title")

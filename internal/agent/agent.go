@@ -59,6 +59,24 @@ const (
 	smallContextWindowRatio     = 0.2
 )
 
+// autoSummarizeThreshold returns how many tokens may remain in a context
+// window of cw tokens before the session is summarized. Windows above
+// largeContextWindowThreshold keep a flat buffer, smaller ones reserve a
+// share of the window. A configured buffer or ratio only replaces the
+// default of its own regime.
+func autoSummarizeThreshold(cw int64, ratio float64, buffer int64) int64 {
+	if cw > largeContextWindowThreshold {
+		if buffer > 0 {
+			return buffer
+		}
+		return largeContextWindowBuffer
+	}
+	if ratio > 0 {
+		return int64(float64(cw) * ratio)
+	}
+	return int64(float64(cw) * smallContextWindowRatio)
+}
+
 var userAgent = fmt.Sprintf("Charm-Crush/%s (https://charm.land/crush)", version.Version)
 
 //go:embed templates/title.md
@@ -167,6 +185,7 @@ type activeCancel struct {
 }
 
 type sessionAgent struct {
+	cfg                *config.ConfigStore
 	largeModel         *csync.Value[Model]
 	smallModel         *csync.Value[Model]
 	systemPromptPrefix *csync.Value[string]
@@ -177,6 +196,9 @@ type sessionAgent struct {
 	sessions             session.Service
 	messages             message.Service
 	disableAutoSummarize bool
+	autoSummarizeRatio   float64
+	autoSummarizeBuffer  int64
+	maxRetries           *int
 	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
@@ -223,12 +245,16 @@ type sessionAgent struct {
 }
 
 type SessionAgentOptions struct {
+	Config               *config.ConfigStore
 	LargeModel           Model
 	SmallModel           Model
 	SystemPromptPrefix   string
 	SystemPrompt         string
 	IsSubAgent           bool
 	DisableAutoSummarize bool
+	AutoSummarizeRatio   float64
+	AutoSummarizeBuffer  int64
+	MaxRetries           *int
 	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
@@ -241,6 +267,7 @@ func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
 	return &sessionAgent{
+		cfg:                  opts.Config,
 		largeModel:           csync.NewValue(opts.LargeModel),
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
@@ -249,6 +276,9 @@ func NewSessionAgent(
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
 		disableAutoSummarize: opts.DisableAutoSummarize,
+		autoSummarizeRatio:   opts.AutoSummarizeRatio,
+		autoSummarizeBuffer:  opts.AutoSummarizeBuffer,
+		maxRetries:           opts.MaxRetries,
 		tools:                csync.NewSliceFrom(opts.Tools),
 		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
@@ -259,6 +289,14 @@ func NewSessionAgent(
 		acceptedRuns:         csync.NewMap[string, int](),
 		cancelMark:           csync.NewMap[string, uint64](),
 	}
+}
+
+func (a *sessionAgent) retryOption() fantasy.AgentOption {
+	maxRetries := fantasy.DefaultRetryOptions().MaxRetries
+	if a.maxRetries != nil {
+		maxRetries = *a.maxRetries
+	}
+	return fantasy.WithMaxRetries(maxRetries)
 }
 
 // AcceptedRun owns exactly one accept reservation taken by
@@ -686,6 +724,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		largeModel.Model,
 		fantasy.WithSystemPrompt(systemPrompt),
 		fantasy.WithTools(agentTools...),
+		a.retryOption(),
 		fantasy.WithUserAgent(userAgent),
 	)
 
@@ -836,6 +875,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
+			prepared.Messages = mergeConsecutiveUserMessages(prepared.Messages)
 
 			lastSystemRoleInx := 0
 			systemMessageUpdated := false
@@ -1046,12 +1086,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
 				remaining := cw - tokens
-				var threshold int64
-				if cw > largeContextWindowThreshold {
-					threshold = largeContextWindowBuffer
-				} else {
-					threshold = int64(float64(cw) * smallContextWindowRatio)
-				}
+				threshold := autoSummarizeThreshold(cw, a.autoSummarizeRatio, a.autoSummarizeBuffer)
 				if (remaining <= threshold) && !a.disableAutoSummarize {
 					shouldSummarize = true
 					return true
@@ -1371,6 +1406,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	agent := fantasy.NewAgent(
 		largeModel.Model,
 		fantasy.WithSystemPrompt(string(summaryPrompt)),
+		a.retryOption(),
 		fantasy.WithUserAgent(userAgent),
 	)
 	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
@@ -1595,7 +1631,8 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			continue
 		}
 		// Assistant message without content or tool calls (cancelled before it returned anything).
-		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && m.Content().Text == "" && m.ReasoningContent().String() == "" {
+		// TrimSpace: whitespace-only Text is later stripped by ToAIMessage and llama.cpp 400s the session.
+		if m.Role == message.Assistant && len(m.ToolCalls()) == 0 && strings.TrimSpace(m.Content().Text) == "" && m.ReasoningContent().String() == "" {
 			continue
 		}
 		// Tool results are emitted right after their assistant message.
@@ -1631,6 +1668,8 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			MediaType: attachment.MimeType,
 		})
 	}
+
+	history = mergeConsecutiveUserMessages(history)
 
 	return history, files
 }
@@ -1683,6 +1722,43 @@ func toolResultsForCalls(m message.Message, toolResultsByCall map[string][]fanta
 		Role:    fantasy.MessageRoleTool,
 		Content: content,
 	}
+}
+
+// mergeConsecutiveUserMessages coalesces adjacent user messages by
+// concatenating their content. This prevents strict OpenAI-compatible
+// providers (e.g., LM Studio) from rejecting the request with
+// "consecutive role 'user'" errors after an ESC cancel leaves an empty
+// assistant message that is filtered out. File parts and text parts are
+// preserved in order.
+func mergeConsecutiveUserMessages(msgs []fantasy.Message) []fantasy.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	out := make([]fantasy.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Role == fantasy.MessageRoleUser && len(out) > 0 && out[len(out)-1].Role == fantasy.MessageRoleUser {
+			// Do not merge the synthetic system_reminder (always the first
+			// element when isSubAgent is false) with the first real user
+			// message. The reminder must stay as a separate message for
+			// cache control and existing test expectations.
+			prev := &out[len(out)-1]
+			if len(prev.Content) > 0 {
+				if tp, ok := fantasy.AsMessagePart[fantasy.TextPart](prev.Content[0]); ok {
+					if strings.Contains(tp.Text, "<system_reminder>") {
+						out = append(out, m)
+						continue
+					}
+				}
+			}
+			prev.Content = append(prev.Content, m.Content...)
+			if m.ProviderOptions != nil {
+				prev.ProviderOptions = m.ProviderOptions
+			}
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {
@@ -1751,6 +1827,8 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			m,
 			fantasy.WithSystemPrompt(string(p)+"\n /no_think"),
 			fantasy.WithMaxOutputTokens(tok),
+			// Title generation is best-effort and must not extend detached work.
+			fantasy.WithMaxRetries(0),
 			fantasy.WithUserAgent(userAgent),
 		)
 	}
@@ -1788,7 +1866,12 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
 		}
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
-		resp, err = agent.Stream(ctx, streamCall)
+		call := streamCall
+		if a.cfg != nil {
+			providerCfg, _ := a.cfg.Config().Providers.Get(attempt.model.ModelCfg.Provider)
+			call.ProviderOptions = getProviderOptions(attempt.model, providerCfg)
+		}
+		resp, err = agent.Stream(ctx, call)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {
 			model = attempt.model
 			slog.Debug("Generated title with " + attempt.name + " model")
@@ -1857,7 +1940,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		cost = 0
 	}
 
-	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens
+	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens + resp.TotalUsage.CacheReadTokens
 	completionTokens := resp.TotalUsage.OutputTokens
 
 	// Atomically update only title and usage fields to avoid overriding other
@@ -1984,7 +2067,7 @@ func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {
 	if usage.OutputTokens != 0 {
 		session.CompletionTokens = usage.OutputTokens
 	}
-	if promptTokens := usage.InputTokens + usage.CacheReadTokens; promptTokens != 0 {
+	if promptTokens := usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens; promptTokens != 0 {
 		session.PromptTokens = promptTokens
 	}
 }

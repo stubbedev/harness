@@ -416,7 +416,9 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
 	}
 
-	cfg.Overrides().SkipPermissionRequests = args.YOLO
+	// Yolo defaults to true in this fork; the client flag forces it on
+	// but never turns a config-enabled yolo off.
+	cfg.Overrides().SkipPermissionRequests = args.YOLO || cfg.Config().Permissions.YoloEnabled()
 	cfg.Overrides().EnabledChannels = args.Channels
 
 	if err := createDotCrushDir(cfg.Config().Options.DataDirectory); err != nil {
@@ -1097,8 +1099,13 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 	existingCfg := existing.Cfg.Config()
 	existingYOLO := existing.Cfg.Overrides().SkipPermissionRequests
+	// Fold the config default into the requested side too so the
+	// comparison is between effective yolo states, not raw flags; with
+	// this build's yolo-on default the flag alone must not look like a
+	// mismatch when the effective mode is identical.
+	requestedYOLO := args.YOLO || existingCfg.Permissions.YoloEnabled()
 	existingChannels := existing.Cfg.Overrides().EnabledChannels
-	if existingYOLO == args.YOLO &&
+	if existingYOLO == requestedYOLO &&
 		existingCfg.Options.Debug == args.Debug &&
 		existingCfg.Options.DataDirectory == args.DataDir &&
 		stringSlicesEqual(existing.Env, args.Env) &&
