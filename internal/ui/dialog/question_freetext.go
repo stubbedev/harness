@@ -220,7 +220,7 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		header := iconPrompt + d.Styles.Editor.QuestionUnselected.Render(
 			ansi.Wrap(d.Request.Text, contentWidth-iconWidth, ""),
 		)
-		for _, l := range strings.Split(header, "\n") {
+		for l := range strings.SplitSeq(header, "\n") {
 			lines = append(lines, ftLine{text: l, cursorX: -1})
 		}
 		lines = append(lines, ftLine{cursorX: -1}) // blank
@@ -235,7 +235,7 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 				desc = d.Request.Description
 			}
 			desc = strings.TrimSuffix(desc, "\n")
-			for _, l := range strings.Split(desc, "\n") {
+			for l := range strings.SplitSeq(desc, "\n") {
 				lines = append(lines, ftLine{text: l, cursorX: -1})
 			}
 			lines = append(lines, ftLine{cursorX: -1}) // blank

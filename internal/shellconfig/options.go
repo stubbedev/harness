@@ -229,7 +229,6 @@ var optionSpecs = map[string]optionSpec{
 	"disable-skill":       {jsonKey: "disabled_skills", kind: optList},
 }
 
-
 // optionUI implements "option ui <key> <value>" for TUI-specific settings
 // that live under options.tui rather than as top-level options.
 func optionUI(options map[string]any, args []string, stderr io.Writer) error {

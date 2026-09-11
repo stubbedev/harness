@@ -18,13 +18,14 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Go toolchain
-            go_1_26
+            go_1_27
 
             # Development tools
             gopls # Go language server
             golangci-lint # Linter
             gofumpt # Formatter (stricter than gofmt)
             go-task # Task runner
+            just # Just recipe runner
             delve # Go debugger
 
             # Additional tools

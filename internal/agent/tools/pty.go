@@ -327,7 +327,7 @@ func (r *ptyRunner) clean(raw string) string {
 	out = ansi.Strip(out)
 
 	var lines []string
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.Contains(trimmed, ptySentinelCmd) || ptySentinelRe.MatchString(trimmed) || ptySentinelLoose.MatchString(trimmed) {
 			continue

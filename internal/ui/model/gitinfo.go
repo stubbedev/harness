@@ -129,7 +129,7 @@ func parseGitSummary(info string) gitSummary {
 	if i := strings.IndexByte(info, '['); i >= 0 {
 		counts := strings.TrimSuffix(info[i+1:], "]")
 		info = strings.TrimSpace(info[:i])
-		for _, part := range strings.Fields(counts) {
+		for part := range strings.FieldsSeq(counts) {
 			switch {
 			case strings.HasPrefix(part, "⇡"), strings.HasPrefix(part, "⇣"), strings.HasPrefix(part, "⇕"):
 				s.remote = strings.TrimSpace(s.remote + " " + part)
@@ -151,11 +151,11 @@ func formatGitStatus(branch, status string) string {
 
 	var ahead, behind int
 	var conflicted, untracked, modified, staged, renamed, deleted int
-	for _, line := range strings.Split(status, "\n") {
+	for line := range strings.SplitSeq(status, "\n") {
 		if strings.HasPrefix(line, "##") {
 			if i := strings.IndexByte(line, '['); i >= 0 {
 				if j := strings.IndexByte(line[i:], ']'); j > 0 {
-					for _, part := range strings.Split(line[i+1:i+j], ",") {
+					for part := range strings.SplitSeq(line[i+1:i+j], ",") {
 						if v, ok := strings.CutPrefix(strings.TrimSpace(part), "ahead "); ok {
 							ahead, _ = strconv.Atoi(v)
 						} else if v, ok := strings.CutPrefix(strings.TrimSpace(part), "behind "); ok {
