@@ -454,6 +454,19 @@ func (m *Models) setProviderItems() error {
 		groups = append(groups, group)
 	}
 
+	// Show configured providers first, keeping the original order within
+	// each tier.
+	slices.SortStableFunc(groups, func(a, b ModelGroup) int {
+		switch {
+		case a.configured == b.configured:
+			return 0
+		case b.configured:
+			return 1
+		default:
+			return -1
+		}
+	})
+
 	if len(recentItems) > 0 {
 		recentGroup := NewModelGroup(t, "Recently used", false)
 
@@ -488,6 +501,8 @@ func (m *Models) setProviderItems() error {
 		}
 	}
 
+	showProviderForAmbiguousModels(groups)
+
 	// Set model groups in the list.
 	m.list.SetGroups(groups...)
 	m.list.SetSelectedItem(selectedItemID)
@@ -503,6 +518,36 @@ func (m *Models) setProviderItems() error {
 	}
 
 	return nil
+}
+
+// showProviderForAmbiguousModels shows the provider on models whose name is
+// offered by more than one provider. Several providers serve the same model
+// under an identical name, and while filtering the list the group headers
+// scroll out of view, leaving the entries indistinguishable.
+func showProviderForAmbiguousModels(groups []ModelGroup) {
+	providersByName := make(map[string]map[string]struct{})
+	for _, group := range groups {
+		for _, item := range group.Items {
+			if item.model.Name == "" {
+				continue
+			}
+			// Configured providers may not carry an ID, so fall back to the
+			// name to avoid collapsing them into a single key.
+			key := cmp.Or(string(item.prov.ID), item.prov.Name)
+			if providersByName[item.model.Name] == nil {
+				providersByName[item.model.Name] = make(map[string]struct{})
+			}
+			providersByName[item.model.Name][key] = struct{}{}
+		}
+	}
+
+	for _, group := range groups {
+		for _, item := range group.Items {
+			if len(providersByName[item.model.Name]) > 1 {
+				item.showProvider = true
+			}
+		}
+	}
 }
 
 func modelKey(providerID, modelID string) string {
