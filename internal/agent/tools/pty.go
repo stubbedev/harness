@@ -150,6 +150,11 @@ type PTYResult struct {
 	// Interrupted reports that the caller gave up on the command and it
 	// was stopped with ctrl-c.
 	Interrupted bool
+	// WhileBusy reports that this call looked at a session with a
+	// command still running in it: the output is the screen as it
+	// stands, and the command's own output goes to the call waiting on
+	// it rather than here.
+	WhileBusy bool
 }
 
 // ptyTerminal is the slice of term.Session the runner uses; it exists
@@ -162,6 +167,8 @@ type ptyTerminal interface {
 	Alive() bool
 	AltScreen() bool
 	Screen() string
+	BracketedPaste() bool
+	Paste(text string) error
 	Resize(rows, cols int) error
 	Size() (rows, cols int)
 	Close()
@@ -171,7 +178,15 @@ type ptyTerminal interface {
 // and serializes access: commands run one at a time, like a person
 // typing in a terminal.
 type ptyRunner struct {
-	mu sync.Mutex
+	// mu guards the runner's own state; it is held only for as long as
+	// that takes. cmdMu is the one long-held lock: it serialises whole
+	// commands, so a second command waits while the first is running -
+	// but keystrokes, polls and resizes do not, which is what lets a
+	// prompt be answered while the command that asked is still going.
+	// sendMu keeps two writers from interleaving bytes on the wire.
+	mu     sync.Mutex
+	cmdMu  sync.Mutex
+	sendMu sync.Mutex
 	// key is the registry key, cwd the directory the shell started in,
 	// and slot tells apart the sessions sharing that directory: slot 0
 	// is the primary one, higher slots are opened when it is busy
@@ -197,6 +212,9 @@ type ptyRunner struct {
 	// lastRunning records that the previous call left something running
 	// here, so input and keys know which session to go to.
 	lastRunning bool
+	// inFlight is set while a command is running here and its output
+	// belongs to the call waiting for it.
+	inFlight bool
 	// restarted records that the shell had exited and a fresh one was
 	// opened to serve the current call, so the caller can be told that
 	// the state it built up (cd, exports, venv) is gone.
@@ -240,38 +258,35 @@ var errAllSessionsBusy = errors.New(
 		"before running another command",
 )
 
-// occupied reports whether a full-screen program owns this session, so
-// a command sent to it would be keystrokes for that program instead.
-// A session mid-command counts as occupied too: its output belongs to
-// the call that is waiting for it.
+// occupied reports whether a command sent here would go somewhere other
+// than a waiting shell: a full-screen program has the terminal, or
+// another command is still running and owns the output.
 func (r *ptyRunner) occupied() bool {
-	if !r.mu.TryLock() {
-		return true
-	}
+	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.session != nil && r.session.Alive() && r.session.AltScreen()
+	if r.session == nil || !r.session.Alive() {
+		return false
+	}
+	return r.inFlight || r.session.AltScreen()
 }
 
 // hasAltScreen reports whether a full-screen program owns this session.
-// Locked out means a call is in flight; that session is somebody's, so
-// treat it as taken rather than guessing.
 func (r *ptyRunner) hasAltScreen() bool {
-	if !r.mu.TryLock() {
-		return true
-	}
+	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.session != nil && r.session.Alive() && r.session.AltScreen()
 }
 
-// leftSomethingRunning reports whether the last call here ended with a
-// program still going - a REPL, a command past its wait budget, an
-// answer typed at a prompt. Input and keys belong to that session.
+// leftSomethingRunning reports whether something here is waiting to be
+// typed at: a command still in flight, or a REPL or prompt the last
+// call left behind. Input and keys belong to that session.
 func (r *ptyRunner) leftSomethingRunning() bool {
-	if !r.mu.TryLock() {
-		return true
-	}
+	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.session != nil && r.session.Alive() && r.lastRunning
+	if r.session == nil || !r.session.Alive() {
+		return false
+	}
+	return r.inFlight || r.lastRunning
 }
 
 // freeAfterGrace waits briefly for a full-screen program to finish
@@ -427,6 +442,41 @@ func ptyRunnerSlot(cwd string, slot int, ask question.Service) *ptyRunner {
 	return r
 }
 
+// terminal returns the runner's session, opening it if needed. The
+// state lock is held only for that, never across the wait that follows.
+func (r *ptyRunner) terminal(ctx context.Context) (ptyTerminal, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.touch()
+	return r.ensureSessionLocked(ctx)
+}
+
+// setState runs f under the state lock.
+func (r *ptyRunner) setState(f func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	f()
+}
+
+// send writes to the terminal with the write lock held, so two callers
+// cannot interleave their bytes.
+func (r *ptyRunner) send(s ptyTerminal, b []byte) error {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+	if err := s.Send(b); err != nil {
+		return fmt.Errorf("terminal session: %w", err)
+	}
+	return nil
+}
+
+// commandInFlight reports whether a command is running here and owns
+// the output stream.
+func (r *ptyRunner) commandInFlight() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.inFlight
+}
+
 // ensureSessionLocked opens (or reopens after a shell exit) the
 // terminal session. Callers must hold r.mu.
 func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error) {
@@ -484,14 +534,12 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 // the masked TUI prompt along the way. When the wait budget expires
 // the terminal output so far is reported with Running set.
 func (r *ptyRunner) Run(ctx context.Context, command string, waitSeconds int) (res PTYResult, err error) {
-	r.mu.Lock()
-	r.touch()
-	defer r.mu.Unlock()
-	// Remember whether this session still has something in it, so a
-	// later keystroke goes to the right terminal.
-	defer func() { r.lastRunning = res.Running || res.AltScreen }()
+	// One command at a time in a session; everything else - keystrokes,
+	// polls, resizes - stays free while this one waits.
+	r.cmdMu.Lock()
+	defer r.cmdMu.Unlock()
 
-	s, err := r.ensureSessionLocked(ctx)
+	s, err := r.terminal(ctx)
 	if err != nil {
 		return PTYResult{}, err
 	}
@@ -504,10 +552,21 @@ func (r *ptyRunner) Run(ctx context.Context, command string, waitSeconds int) (r
 		return PTYResult{}, errAltScreenBusy
 	}
 
-	if err := s.Send([]byte(command + "\n")); err != nil {
-		return PTYResult{}, fmt.Errorf("terminal session: %w", err)
+	echo := strings.Split(command, "\n")
+	r.setState(func() {
+		r.lastEcho = echo
+		r.inFlight = true
+	})
+	defer r.setState(func() {
+		r.inFlight = false
+		// Remember whether this session still has something in it, so a
+		// later keystroke goes to the right terminal.
+		r.lastRunning = res.Running || res.AltScreen
+	})
+
+	if err := r.send(s, []byte(command+"\n")); err != nil {
+		return PTYResult{}, err
 	}
-	r.lastEcho = strings.Split(command, "\n")
 
 	deadline := time.Now().Add(time.Duration(waitSeconds) * time.Second)
 
@@ -516,7 +575,7 @@ func (r *ptyRunner) Run(ctx context.Context, command string, waitSeconds int) (r
 			// The caller gave up (the user interrupted the turn). Stop
 			// the command rather than leaving it running into the next
 			// call's output.
-			return r.interruptLocked(s), nil
+			return r.interrupt(s), nil
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -557,7 +616,7 @@ func (r *ptyRunner) Run(ctx context.Context, command string, waitSeconds int) (r
 		s.Drain()
 		return r.screenResult(s), nil
 	}
-	return PTYResult{Output: r.clean(string(s.Drain())), Running: s.Alive()}, nil
+	return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: s.Alive()}, nil
 }
 
 // echoedLine reports whether a line is the terminal echoing back what
@@ -598,16 +657,16 @@ var errAltScreenBusy = errors.New(
 		"or \"ctrl+c\"), or drive it with keys/input instead of a command",
 )
 
-// interruptLocked stops whatever is running with ctrl-c and reports the
-// terminal afterwards. Callers must hold r.mu. The context is already
-// done at this point, so waits here use a fresh short-lived one.
-func (r *ptyRunner) interruptLocked(s ptyTerminal) PTYResult {
+// interrupt stops whatever is running with ctrl-c and reports the
+// terminal afterwards. The caller's context is already done at this
+// point, so the waits here use a fresh short-lived one.
+func (r *ptyRunner) interrupt(s ptyTerminal) PTYResult {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 5*time.Second)
 	defer cancel()
 
-	_ = s.Send([]byte{0x03})
+	_ = r.send(s, []byte{0x03})
 	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 3*time.Second)
-	res := r.observe(ctx, s)
+	res := r.collect(ctx, s)
 	res.Interrupted = true
 	return res
 }
@@ -622,11 +681,13 @@ func (r *ptyRunner) screenResult(s ptyTerminal) PTYResult {
 		AltScreen: true,
 		Running:   s.Alive(),
 	}
-	if screen == r.lastScreen {
-		res.Unchanged = true
-		res.Output = ""
-	}
-	r.lastScreen = screen
+	r.setState(func() {
+		if screen == r.lastScreen {
+			res.Unchanged = true
+			res.Output = ""
+		}
+		r.lastScreen = screen
+	})
 	return res
 }
 
@@ -634,10 +695,14 @@ func (r *ptyRunner) screenResult(s ptyTerminal) PTYResult {
 // waits for it, and parses exit code and cwd out of the drained
 // output.
 func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult, error) {
-	if err := s.Send([]byte(r.sentinel.cmd + "\n")); err != nil {
-		return PTYResult{}, fmt.Errorf("terminal session: %w", err)
+	var mark sentinel
+	var echo []string
+	r.setState(func() { mark, echo = r.sentinel, r.lastEcho })
+
+	if err := r.send(s, []byte(mark.cmd+"\n")); err != nil {
+		return PTYResult{}, err
 	}
-	if s.WaitForAny(ctx, []*regexp.Regexp{r.sentinel.loose}, 10*time.Second) != 0 {
+	if s.WaitForAny(ctx, []*regexp.Regexp{mark.loose}, 10*time.Second) != 0 {
 		// Sentinel never printed: something is still holding the
 		// terminal after all. Report it as running - with no exit code
 		// and no claim that the command finished - so the caller keeps
@@ -646,17 +711,17 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 			s.Drain()
 			return r.screenResult(s), nil
 		}
-		return PTYResult{Output: r.clean(string(s.Drain())), Running: s.Alive()}, nil
+		return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: s.Alive()}, nil
 	}
 
 	drained := string(s.Drain())
 	cut := drained
 	var match []string
-	if loc := r.sentinel.parse.FindStringIndex(drained); loc != nil {
-		match = r.sentinel.parse.FindStringSubmatch(drained)
+	if loc := mark.parse.FindStringIndex(drained); loc != nil {
+		match = mark.parse.FindStringSubmatch(drained)
 		cut = drained[:loc[0]]
 	}
-	res := PTYResult{Output: r.clean(cut)}
+	res := PTYResult{Output: r.clean(cut, echo)}
 	if match != nil {
 		if code, err := strconv.Atoi(match[1]); err == nil {
 			res.ExitCode = &code
@@ -703,21 +768,44 @@ func (r *ptyRunner) answerSudoPrompt(ctx context.Context, s ptyTerminal) error {
 // prompts, keystrokes for TUIs, or multiline scripts. Returns the
 // terminal after output settles.
 func (r *ptyRunner) Input(ctx context.Context, text string) (res PTYResult, err error) {
-	r.mu.Lock()
-	r.touch()
-	defer r.mu.Unlock()
-	defer func() { r.lastRunning = res.Running || res.AltScreen }()
-
-	s, err := r.ensureSessionLocked(ctx)
+	s, err := r.terminal(ctx)
 	if err != nil {
 		return PTYResult{}, err
 	}
-	if err := s.Send([]byte(text)); err != nil {
-		return PTYResult{}, fmt.Errorf("terminal session: %w", err)
+	defer r.setState(func() { r.lastRunning = res.Running || res.AltScreen })
+
+	r.setState(func() { r.lastEcho = strings.Split(strings.TrimSuffix(text, "\n"), "\n") })
+	busy := r.commandInFlight()
+	if err := r.paste(s, text); err != nil {
+		return PTYResult{}, err
 	}
-	r.lastEcho = strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 5*time.Second)
-	return r.observe(ctx, s), nil
+	return r.collectBusy(ctx, s, busy), nil
+}
+
+// paste delivers text the way a terminal would. Several lines written
+// straight into a shell or a REPL are read as several typed lines: the
+// first one runs on its own, the rest arrive against auto-indent and
+// history expansion, and what comes out is not what was sent. When the
+// program has asked for bracketed paste, wrap the text in the paste
+// markers so it is taken as one block, and submit it with a separate
+// return - a paste that ends in a newline is a newline, not "run this".
+func (r *ptyRunner) paste(s ptyTerminal, text string) error {
+	body, submit := strings.CutSuffix(text, "\n")
+	if !strings.Contains(body, "\n") || !s.BracketedPaste() {
+		return r.send(s, []byte(text))
+	}
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+	if err := s.Paste(body); err != nil {
+		return fmt.Errorf("terminal session: %w", err)
+	}
+	if submit {
+		if err := s.Send([]byte("\r")); err != nil {
+			return fmt.Errorf("terminal session: %w", err)
+		}
+	}
+	return nil
 }
 
 // Keys sends named keys (escape, arrows, ctrl+c, f1-f12) to whatever is
@@ -729,53 +817,51 @@ func (r *ptyRunner) Keys(ctx context.Context, list string) (res PTYResult, err e
 		return PTYResult{}, err
 	}
 
-	r.mu.Lock()
-	r.touch()
-	defer r.mu.Unlock()
-	defer func() { r.lastRunning = res.Running || res.AltScreen }()
-
-	s, err := r.ensureSessionLocked(ctx)
+	s, err := r.terminal(ctx)
 	if err != nil {
 		return PTYResult{}, err
 	}
-	// One key per write, with a gap between them. Sent as a single burst,
-	// a leading escape is read as the meta prefix of whatever follows
-	// (ESC : is Alt-:, not "escape then colon"), and programs that poll
-	// their input can miss the tail of the burst.
-	for i, k := range keys {
-		if err := s.Send(k); err != nil {
-			return PTYResult{}, fmt.Errorf("terminal session: %w", err)
+	defer r.setState(func() { r.lastRunning = res.Running || res.AltScreen })
+
+	busy := r.commandInFlight()
+	// One key per write, with a gap between them, and the whole sequence
+	// under the write lock so nothing lands in the middle of it. Sent as
+	// a single burst, a leading escape is read as the meta prefix of
+	// whatever follows (ESC : is Alt-:, not "escape then colon"), and
+	// programs that poll their input can miss the tail of the burst.
+	if err := func() error {
+		r.sendMu.Lock()
+		defer r.sendMu.Unlock()
+		for i, k := range keys {
+			if err := s.Send(k); err != nil {
+				return fmt.Errorf("terminal session: %w", err)
+			}
+			if i < len(keys)-1 {
+				time.Sleep(ptyKeyGap)
+			}
 		}
-		if i < len(keys)-1 {
-			time.Sleep(ptyKeyGap)
-		}
+		return nil
+	}(); err != nil {
+		return PTYResult{}, err
 	}
-	r.lastEcho = nil
+	r.setState(func() { r.lastEcho = nil })
 	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 5*time.Second)
-	return r.observe(ctx, s), nil
+	return r.collectBusy(ctx, s, busy), nil
 }
 
 // Poll reads the current terminal state without sending anything.
 func (r *ptyRunner) Poll(ctx context.Context) (PTYResult, error) {
-	r.mu.Lock()
-	r.touch()
-	defer r.mu.Unlock()
-
-	s, err := r.ensureSessionLocked(ctx)
+	s, err := r.terminal(ctx)
 	if err != nil {
 		return PTYResult{}, err
 	}
-	return r.observe(ctx, s), nil
+	return r.collect(ctx, s), nil
 }
 
 // Resize changes the terminal size for the whole session. A program
 // already running redraws at the new size (SIGWINCH).
 func (r *ptyRunner) Resize(ctx context.Context, rows, cols int) (PTYResult, error) {
-	r.mu.Lock()
-	r.touch()
-	defer r.mu.Unlock()
-
-	s, err := r.ensureSessionLocked(ctx)
+	s, err := r.terminal(ctx)
 	if err != nil {
 		return PTYResult{}, err
 	}
@@ -785,8 +871,8 @@ func (r *ptyRunner) Resize(ctx context.Context, rows, cols int) (PTYResult, erro
 	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 5*time.Second)
 	// The redraw invalidates the dedup baseline: the same UI at a new
 	// size is new information.
-	r.lastScreen = ""
-	return r.observe(ctx, s), nil
+	r.setState(func() { r.lastScreen = "" })
+	return r.collect(ctx, s), nil
 }
 
 // tookRestart reports - once - that the session's shell had exited and
@@ -812,7 +898,25 @@ func (r *ptyRunner) Size() (rows, cols int) {
 
 // observe reports the terminal as it stands: a rendered screen while a
 // full-screen program owns it, the new output otherwise.
-func (r *ptyRunner) observe(ctx context.Context, s ptyTerminal) PTYResult {
+func (r *ptyRunner) collect(ctx context.Context, s ptyTerminal) PTYResult {
+	return r.collectBusy(ctx, s, r.commandInFlight())
+}
+
+// collectBusy is collect with the busy decision already made. A caller
+// that sent something to a running command decides at send time, not
+// after its settle wait: the command may well finish in between, and
+// draining then would take the tail of its output away from the call
+// that is about to report it.
+func (r *ptyRunner) collectBusy(ctx context.Context, s ptyTerminal, busy bool) PTYResult {
+	// The call waiting on that command owns the output stream, so show
+	// the screen instead - a read, not a consume.
+	if busy {
+		res := r.screenResult(s)
+		res.AltScreen = s.AltScreen()
+		res.WhileBusy = true
+		return res
+	}
+
 	// Quitting a full-screen program takes longer than the settle
 	// window: it goes quiet while it tears down, then restores the main
 	// screen. Give it that moment, or the call after ":q" still reports
@@ -824,8 +928,12 @@ func (r *ptyRunner) observe(ctx context.Context, s ptyTerminal) PTYResult {
 		s.Drain()
 		return r.screenResult(s)
 	}
-	r.lastScreen = ""
-	return PTYResult{Output: r.clean(string(s.Drain())), Running: s.Alive()}
+	var echo []string
+	r.setState(func() {
+		r.lastScreen = ""
+		echo = r.lastEcho
+	})
+	return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: s.Alive()}
 }
 
 // clean normalizes terminal output for the model: CRLF and lone CR to
@@ -834,7 +942,10 @@ func (r *ptyRunner) observe(ctx context.Context, s ptyTerminal) PTYResult {
 // breaks first: a prompt is printed right after the closing marker, so
 // without this, unterminated output (printf %s, ...) glues onto the
 // prompt and the next echoed command.
-func (r *ptyRunner) clean(raw string) string {
+func (r *ptyRunner) clean(raw string, echo []string) string {
+	var mark sentinel
+	r.setState(func() { mark = r.sentinel })
+
 	out := strings.ReplaceAll(raw, "\r\n", "\n")
 	out = strings.ReplaceAll(out, "\r", "\n")
 	out = strings.ReplaceAll(out, "\x1b[?2004h", "\n")
@@ -844,7 +955,7 @@ func (r *ptyRunner) clean(raw string) string {
 	var lines []string
 	for line := range strings.SplitSeq(out, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.Contains(trimmed, r.sentinel.cmd) || r.sentinel.parse.MatchString(trimmed) || r.sentinel.loose.MatchString(trimmed) {
+		if strings.Contains(trimmed, mark.cmd) || mark.parse.MatchString(trimmed) || mark.loose.MatchString(trimmed) {
 			continue
 		}
 		lines = append(lines, line)
@@ -858,7 +969,7 @@ func (r *ptyRunner) clean(raw string) string {
 	// prompt. So a match may stay on the current echo line rather than
 	// always advancing, and the scan stops at the first line that is
 	// neither - real output.
-	if len(r.lastEcho) > 0 {
+	if len(echo) > 0 {
 		echoIdx := 0
 		for i, line := range lines {
 			trimmed := strings.TrimSpace(line)
@@ -866,12 +977,12 @@ func (r *ptyRunner) clean(raw string) string {
 				continue
 			}
 			matched := false
-			for idx := echoIdx; idx < len(r.lastEcho) && idx <= echoIdx+1; idx++ {
-				echo := strings.TrimSpace(r.lastEcho[idx])
-				if echo == "" {
+			for idx := echoIdx; idx < len(echo) && idx <= echoIdx+1; idx++ {
+				line := strings.TrimSpace(echo[idx])
+				if line == "" {
 					continue
 				}
-				if echoedLine(trimmed, echo) {
+				if echoedLine(trimmed, line) {
 					lines[i] = ""
 					echoIdx = idx
 					matched = true

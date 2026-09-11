@@ -366,6 +366,8 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			switch {
 			case result.Interrupted:
 				header = "Interrupted: the command was stopped with ctrl+c because the call was cancelled."
+			case result.WhileBusy:
+				header = "A command is still running in this terminal session. Below is its screen as it stands; the command's own output goes to the call waiting on it. Keystrokes you send here reach that command."
 			case result.AltScreen && result.Unchanged:
 				header = "A full-screen program owns the terminal; its screen is unchanged since the last call. Drive it with keys/input, or send ctrl+c (keys) to stop it."
 			case result.AltScreen:

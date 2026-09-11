@@ -12,6 +12,7 @@
 package term
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -74,6 +75,12 @@ type Session struct {
 	emu        vt10x.Terminal
 	replies    *replyWriter
 	rows, cols int
+
+	// bracketedPaste is whatever is running asking for pasted text to be
+	// marked as a paste; modeCarry holds the tail of the last chunk so a
+	// mode sequence split across two reads is still seen.
+	bracketedPaste bool
+	modeCarry      []byte
 }
 
 // Shell returns the shell the terminal session should run: the shell
@@ -270,6 +277,7 @@ func (s *Session) append(b []byte) {
 	_, _ = s.emu.Write(b)
 
 	s.mu.Lock()
+	s.trackBracketedPasteLocked(b)
 	s.pending = append(s.pending, b...)
 	if len(s.pending) > maxPending {
 		// Keep the tail; the head is the oldest, least useful output.
@@ -283,6 +291,49 @@ func (s *Session) append(b []byte) {
 	case s.notify <- struct{}{}:
 	default:
 	}
+}
+
+// Bracketed paste: a program that turns it on wants pasted text
+// wrapped in the paste markers, so it can tell "the user pasted this"
+// from "the user typed this". Shells, editors and REPLs use that to
+// skip auto-indent, history expansion and immediate execution - which
+// is exactly what mangles multi-line text written straight into them.
+// vt10x does not track the mode, so watch the stream for it.
+var (
+	bracketedPasteOn  = []byte("\x1b[?2004h")
+	bracketedPasteOff = []byte("\x1b[?2004l")
+)
+
+// trackBracketedPasteLocked follows the mode across chunk boundaries by
+// keeping the tail of the previous chunk: the sequence is 8 bytes and a
+// read can split it anywhere. Callers must hold s.mu.
+func (s *Session) trackBracketedPasteLocked(b []byte) {
+	scan := b
+	if len(s.modeCarry) > 0 {
+		scan = append(append([]byte{}, s.modeCarry...), b...)
+	}
+	if on, off := bytes.LastIndex(scan, bracketedPasteOn), bytes.LastIndex(scan, bracketedPasteOff); on >= 0 || off >= 0 {
+		s.bracketedPaste = on > off
+	}
+	carry := min(len(scan), len(bracketedPasteOn)-1)
+	s.modeCarry = append(s.modeCarry[:0], scan[len(scan)-carry:]...)
+}
+
+// BracketedPaste reports whether whatever is running has asked for
+// pasted text to be marked as a paste.
+func (s *Session) BracketedPaste() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.bracketedPaste
+}
+
+// Paste writes text the way a terminal delivers a paste: wrapped in the
+// paste markers when the program asked for them, plain otherwise.
+func (s *Session) Paste(text string) error {
+	if !s.BracketedPaste() {
+		return s.Send([]byte(text))
+	}
+	return s.Send(append(append(append([]byte{}, "\x1b[200~"...), text...), "\x1b[201~"...))
 }
 
 func (s *Session) finish(err error) {

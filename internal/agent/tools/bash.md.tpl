@@ -13,9 +13,10 @@ On Windows the session falls back to the mvdan/sh interpreter; interactive progr
 
 <calling_patterns>
 1. Run a command: set `command`. The response reports the exit code and the command's output (ANSI styling stripped, echoed commands removed).
-2. Type into a running program: set `input` (leave command empty). Raw keystrokes go to whatever is in the terminal: answer a prompt ("y\n"), type into an editor ("i" then the text), drive menus. Append \n to submit a line.
+2. Type into a running program: set `input` (leave command empty). Raw keystrokes go to whatever is in the terminal: answer a prompt ("y\n"), type into an editor ("i" then the text), drive menus. Append \n to submit a line. Several lines at once are delivered as a paste when the program supports it, so a block of code or config arrives intact instead of fighting auto-indent.
 3. Press keys: set `keys` — a comma-separated list of key names sent in order ("ctrl+c", "escape, :, w, q, enter", "down, down, enter"). Prefer this over escape codes in `input` for anything that is not literal text: enter, tab, backtab, escape, space, backspace, delete, up, down, left, right, home, end, pageup, pagedown, insert, f1-f12, and any ctrl+letter. Single characters in the list are typed literally.
 4. Check on something: leave everything empty to poll (watching a build, re-reading a TUI's screen, seeing what a program printed after it exited on its own).
+   Keystrokes and polls work while a command is still running — that is how you answer a command that stopped to ask something. Such a call returns the screen as it stands and says so; the command's own output still goes to the call waiting on it.
 5. Resize: set `resize` to "COLSxROWS" when a full-screen program needs more room. The size sticks for the session.
 6. Commands still running when the wait budget expires return "Still running" with the output so far — the program is NOT dead. Continue with `input`/`keys`, poll, or send ctrl+c to stop it.
 </calling_patterns>
