@@ -163,29 +163,11 @@ tasks:
     generates:
       - ./internal/agent/hyper/provider.json
 
-  release:
-    desc: Create and push a new tag following semver
-    vars:
-      NEXT:
-        sh: svu next --always || go run github.com/caarlos0/svu/v3@latest next --always
-    prompt: "This will release {{.NEXT}}. Continue?"
-    preconditions:
-      - sh: '[ $(git symbolic-ref --short HEAD) = "main" ]'
-        msg: Not on main branch
-      - sh: "[ $(git status --porcelain=2 | wc -l) = 0 ]"
-        msg: "Git is dirty"
-      - sh: 'gh run list --workflow ci.yml --commit $(git rev-parse HEAD) --status success --json conclusion -q ".[0].conclusion" | grep -q success'
-        msg: "CI for this commit failed or not present"
-    cmds:
-      - task: fetch-tags
-      - git commit --allow-empty -m "{{.NEXT}}"
-      - git tag --annotate --sign -m "{{.NEXT}}" {{.NEXT}} {{.CLI_ARGS}}
-      - echo "Pushing {{.NEXT}}..."
-      - git push origin main --follow-tags
+  # Releases are cut with just: `just release-patch` / `release-minor` /
+  # `release-major`. See the justfile.
 
   fetch-tags:
     cmds:
-      - git tag -d nightly || true
       - git fetch --tags
 
   deps:

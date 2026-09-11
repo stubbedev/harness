@@ -57,9 +57,9 @@ update-golden:
 dev:
     HARNESS_PROFILE=true go run .
 
-# Recompute package.nix's vendorHash from go.mod/go.sum. CI does this on every
-# dependency change (see .github/workflows/flake.yml); run it locally when you
-# want `nix build` to work before pushing.
+# CI does this on every dependency change (see .github/workflows/flake.yml);
+# run it locally when you want `nix build` to work before pushing.
+# Recompute package.nix's vendorHash from go.mod/go.sum.
 nix-vendor-hash:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -74,3 +74,57 @@ nix-vendor-hash:
 # Build the Nix package and print the store path.
 nix-build:
     nix build .#default --no-link --print-out-paths
+
+# Show the next major/minor/patch versions.
+release-preview:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.0.0)"
+    IFS=. read -r maj min pat <<<"${v#v}"
+    echo "current: $v"
+    echo "patch:   v$maj.$min.$((pat + 1))"
+    echo "minor:   v$maj.$((min + 1)).0"
+    echo "major:   v$((maj + 1)).0.0"
+
+release-patch: (release "patch")
+release-minor: (release "minor")
+release-major: (release "major")
+
+# The version lives in the git tag: the binary reads it from the build info and
+# publish.yml stamps it into the ldflags, so there is no version file to bump.
+# Syncs the flake vendorHash, runs the gates, tags, and pushes -- the tag push
+# is what triggers .github/workflows/publish.yml.
+# Tag a release and push it.
+release level:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        echo "working tree is dirty — commit or stash first" >&2
+        exit 1
+    fi
+    git fetch --tags --quiet
+    v="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.0.0)"
+    IFS=. read -r maj min pat <<<"${v#v}"
+    case "{{ level }}" in
+        patch) new="v$maj.$min.$((pat + 1))" ;;
+        minor) new="v$maj.$((min + 1)).0" ;;
+        major) new="v$((maj + 1)).0.0" ;;
+        *) echo "unknown level: {{ level }}" >&2; exit 1 ;;
+    esac
+    if git rev-parse -q --verify "refs/tags/$new" >/dev/null; then
+        echo "tag $new already exists" >&2
+        exit 1
+    fi
+    echo "releasing $v -> $new"
+    just nix-vendor-hash
+    just check
+    # nix-vendor-hash rewrites package.nix when dependencies moved; that has to
+    # land before the tag so the tagged tree builds under Nix.
+    if ! git diff --quiet package.nix; then
+        git add package.nix
+        git commit -m "chore(nix): update vendorHash for $new"
+    fi
+    git tag --annotate -m "$new" "$new"
+    git push origin HEAD
+    git push origin "$new"
+    echo "released $new"
