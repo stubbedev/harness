@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"charm.land/x/vcr"
@@ -43,19 +44,20 @@ func newTestRecorder(t *testing.T) testRecorder {
 	}
 	inner := vcr.NewRecorder(t)
 	os.MkdirAll("/tmp/vcrlog", 0o755)
-	n := 0
-	return &loggingRecorder{inner: inner, t: t, n: &n}
+	return &loggingRecorder{inner: inner, t: t, n: new(atomic.Int64)}
 }
 
 type loggingRecorder struct {
 	inner testRecorder
 	t     *testing.T
-	n     *int
+	// n numbers the dumped request files. Title generation runs
+	// concurrently with the main turn, so two goroutines round-trip at
+	// once.
+	n *atomic.Int64
 }
 
 func (l *loggingRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
-	i := *l.n
-	*l.n++
+	i := l.n.Add(1) - 1
 	var body []byte
 	if req.Body != nil && req.Body != http.NoBody {
 		body, _ = io.ReadAll(req.Body)

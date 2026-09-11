@@ -398,10 +398,10 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 
 			var sb strings.Builder
 			if session.slot > 0 {
-				sb.WriteString(fmt.Sprintf(
+				fmt.Fprintf(&sb,
 					"Ran in terminal session #%d: session #1 is busy with an interactive program. "+
 						"This is a separate shell - it does not have the other one's cd, exported "+
-						"variables or activated environments.\n", session.slot+1))
+						"variables or activated environments.\n", session.slot+1)
 			}
 			if session.tookRestart() {
 				sb.WriteString("The terminal session's shell had exited, so a new one was started: " +
@@ -413,7 +413,7 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			}
 			if stdout != "" {
 				sb.WriteString(stdout)
-				sb.WriteString(fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(cmp.Or(result.Cwd, execWorkingDir))))
+				fmt.Fprintf(&sb, "\n\n<cwd>%s</cwd>", normalizeWorkingDir(cmp.Or(result.Cwd, execWorkingDir)))
 			} else if header == "" {
 				sb.WriteString(BashNoOutput)
 			}

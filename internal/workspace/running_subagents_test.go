@@ -594,7 +594,7 @@ func TestAppWorkspace_AllSubagents_MonorepoRootIsProjectScope(t *testing.T) {
 	// reports the resolved path — file paths must match that view.
 	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
-	out, err := exec.Command("git", "init", repoRoot).CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), "git", "init", repoRoot).CombinedOutput()
 	require.NoError(t, err, "git init: %s", out)
 
 	workDir := filepath.Join(repoRoot, "apps", "web")

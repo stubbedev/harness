@@ -32,6 +32,20 @@ jobs:
           go mod tidy
           git diff --exit-code
 
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        if: matrix.os == 'ubuntu-latest'
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+          args: --path-mode=abs --config=.golangci.yml --timeout=8m
+
+      - name: Log messages start with a capital
+        if: matrix.os == 'ubuntu-latest'
+        run: ./scripts/check_log_capitalization.sh
+
       - name: Build
         run: go build ./...
 

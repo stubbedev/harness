@@ -25,8 +25,10 @@ func newTestRunner(t *testing.T) *ptyRunner {
 			r.session.Close()
 		}
 	})
-	// Open synchronously so tests observe the session directly.
-	_, err := r.ensureSessionLocked(t.Context())
+	// Open synchronously so tests observe the session directly. Go through
+	// terminal() rather than ensureSessionLocked: the latter needs r.mu,
+	// which the warm-start goroutine in ptyRunnerSlot also takes.
+	_, err := r.terminal(t.Context())
 	require.NoError(t, err)
 	return r
 }
@@ -192,7 +194,7 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 	for i := range ptyMaxRunners {
 		dir := t.TempDir()
 		r := ptyRunnerFor(dir, nil)
-		if _, err := r.ensureSessionLocked(t.Context()); err != nil {
+		if _, err := r.terminal(t.Context()); err != nil {
 			t.Fatalf("open %d: %v", i, err)
 		}
 	}
@@ -203,7 +205,7 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 	// One more evicts the most idle.
 	time.Sleep(10 * time.Millisecond)
 	r := ptyRunnerFor(t.TempDir(), nil)
-	_, err := r.ensureSessionLocked(t.Context())
+	_, err := r.terminal(t.Context())
 	require.NoError(t, err)
 	ptyRunnersMu.Lock()
 	require.Len(t, ptyRunners, ptyMaxRunners)

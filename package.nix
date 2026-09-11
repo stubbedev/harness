@@ -15,6 +15,10 @@ buildGo127Module {
 
   vendorHash = "sha256-x7g2zIUDCahguz8GVE6uE5biwpH9MjtfJBEeamMrlmQ=";
 
+  # Only the root command. Without this every main package in the tree is
+  # installed, which puts internal/ui/logo/example on PATH as `example`.
+  subPackages = ["."];
+
   # The SQLite driver used here is pure Go, so nothing needs cgo.
   env.CGO_ENABLED = 0;
 

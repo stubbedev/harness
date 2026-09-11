@@ -80,7 +80,7 @@ func keyBytes(name string) ([]byte, error) {
 // sequence can spell out the keystrokes it types.
 func parseKeys(list string) ([][]byte, error) {
 	var out [][]byte
-	for _, part := range strings.Split(list, ",") {
+	for part := range strings.SplitSeq(list, ",") {
 		name := strings.TrimSpace(part)
 		if name == "" {
 			continue

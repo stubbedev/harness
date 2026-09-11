@@ -78,6 +78,7 @@ func TestRuntime_List_ReturnsCopy(t *testing.T) {
 	// Mutate the returned slice.
 	first[0] = RunningEntry{ChildSessionID: "mutated"}
 	first = append(first, RunningEntry{ChildSessionID: "extra"})
+	require.Len(t, first, 2, "the local copy is what grew")
 
 	// Internal state must be unaffected.
 	second := rt.List("parent-1")

@@ -53,7 +53,7 @@
             git # Version control
             gh # GitHub CLI
             sqlc # SQL code generator
-            nodePackages.prettier # Formats the stats page assets
+            prettier # Formats the stats page assets
           ];
 
           shellHook = ''

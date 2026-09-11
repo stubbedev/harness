@@ -16,18 +16,16 @@ ldflags := if version == "" { "" } else { "-ldflags=-X github.com/stubbedev/harn
 default:
     @just --list
 
-# What CI runs: build + race tests.
-check: build test
+# What CI runs: vet + lint + build + race tests.
+check: vet lint build test
 
-# Not part of `check`: the copylocks analyzer flags csync.Map.JSONSchemaAlias,
-# whose value receiver is required by the jsonschema reflector. golangci-lint
-# runs the same analyzer and honors the //nolint there, so use `just lint`.
 vet:
     go vet ./...
 
 # Run the test suite with the race detector, stopping at the first failure.
+# The race detector is cgo-only, so it overrides this file's CGO_ENABLED=0.
 test *args:
-    go test -race -failfast ./... {{ args }}
+    CGO_ENABLED=1 go test -race -failfast ./... {{ args }}
 
 # Same without the race detector, for a faster loop.
 test-fast *args:

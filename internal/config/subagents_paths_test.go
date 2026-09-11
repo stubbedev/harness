@@ -256,7 +256,7 @@ func gitInitTempDir(t *testing.T) string {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
 
-	cmd := exec.Command("git", "init", "-q")
+	cmd := exec.CommandContext(t.Context(), "git", "init", "-q")
 	cmd.Dir = root
 	if err := cmd.Run(); err != nil {
 		t.Skip("git init failed")

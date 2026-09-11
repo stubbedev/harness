@@ -142,8 +142,10 @@ func parentShell() string {
 // working directory. The environment is the current process environment
 // plus TERM; env entries of the form KEY=VALUE are appended last so they
 // win.
+// The shell is deliberately not bound to a caller context: the session
+// outlives the request that opened it and is torn down by Close.
 func Start(cwd string, env ...string) (*Session, error) {
-	cmd := exec.Command(Shell())
+	cmd := exec.CommandContext(context.Background(), Shell())
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Env = append(cmd.Env, "TERM="+termValue())

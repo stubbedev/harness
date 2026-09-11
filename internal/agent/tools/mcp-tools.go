@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -98,9 +99,7 @@ func (m *Tool) Info() fantasy.ToolInfo {
 		defs := map[string]any{}
 		for _, key := range []string{"$defs", "definitions"} {
 			if d, ok := input[key].(map[string]any); ok {
-				for name, def := range d {
-					defs[name] = def
-				}
+				maps.Copy(defs, d)
 			}
 		}
 		if len(defs) > 0 {
@@ -166,8 +165,8 @@ func resolveRef(node map[string]any, defs map[string]any, depth int) (map[string
 	}
 	var name string
 	for _, prefix := range []string{"#/$defs/", "#/definitions/"} {
-		if strings.HasPrefix(ref, prefix) {
-			name = strings.TrimPrefix(ref, prefix)
+		if after, found := strings.CutPrefix(ref, prefix); found {
+			name = after
 			break
 		}
 	}

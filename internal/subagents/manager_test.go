@@ -46,6 +46,7 @@ func TestManager_AllSubagents_ReturnsClone(t *testing.T) {
 	// Mutate returned slice; subsequent read must see original content.
 	got[0] = &Subagent{Name: "mutated"}
 	got = append(got, &Subagent{Name: "appended"})
+	require.Len(t, got, 2, "the local copy is what grew")
 
 	after := mgr.AllSubagents()
 	require.Len(t, after, 1, "mutating returned slice must not change manager state")
@@ -61,6 +62,7 @@ func TestManager_ActiveSubagents_ReturnsClone(t *testing.T) {
 	got := mgr.ActiveSubagents()
 	got[0] = &Subagent{Name: "mutated"}
 	got = append(got, &Subagent{Name: "extra"})
+	require.Len(t, got, 2, "the local copy is what grew")
 
 	after := mgr.ActiveSubagents()
 	require.Len(t, after, 1)

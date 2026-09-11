@@ -83,6 +83,10 @@ func gitStatusInfo(dir string) string {
 		return cached
 	}
 	gitRefreshing = true
+	// Read the stale value while still holding the lock: the refresh
+	// goroutine below writes gitCache, so reading it after the unlock
+	// races with that write.
+	cached := gitCache
 	gitMu.Unlock()
 	go func() {
 		info := collectGitInfo(dir)
@@ -92,7 +96,7 @@ func gitStatusInfo(dir string) string {
 		gitRefreshing = false
 		gitMu.Unlock()
 	}()
-	return gitCache
+	return cached
 }
 
 // collectGitInfo shells out to git twice - branch, then porcelain status
