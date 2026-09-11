@@ -6,10 +6,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/home"
+	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/skills"
 )
 
 // Manager owns per-workspace subagent discovery state: the latest discovery

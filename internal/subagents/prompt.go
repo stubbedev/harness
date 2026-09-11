@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/stubbedev/harness/internal/stringext"
 )
 
 // ToPromptXML generates XML for injection into the coder system prompt so the

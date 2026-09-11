@@ -12,12 +12,12 @@ import (
 	"charm.land/fantasy"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/charmbracelet/crush/internal/agent/prompt"
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/subagents"
+	"github.com/stubbedev/harness/internal/agent/prompt"
+	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/subagents"
 )
 
 //go:embed templates/agent_tool.md

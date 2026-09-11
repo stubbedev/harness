@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/hooks"
-	"github.com/charmbracelet/crush/internal/permission"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/hooks"
+	"github.com/stubbedev/harness/internal/permission"
 )
 
 // fakeTool records the context it was invoked with so tests can assert on

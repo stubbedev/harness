@@ -13,11 +13,11 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 // ListWorkspaces retrieves all workspaces from the server.

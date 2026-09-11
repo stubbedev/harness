@@ -5,14 +5,14 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/charmbracelet/crush/internal/agent"
-	mcptools "github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/stubbedev/harness/internal/agent"
+	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/commands"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/oauth"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/skills"
 )
 
 // publishConfigChanged publishes a ConfigChanged event on the workspace's

@@ -13,12 +13,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/subagents"
+	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/subagents"
 )
 
 // -- minimal session.Service stub for token-enrichment tests --
@@ -252,7 +252,7 @@ func TestAppWorkspace_AllSubagents_ScopeDetection(t *testing.T) {
 
 	workDir := t.TempDir()
 
-	projectFile := filepath.Join(workDir, ".crush", "subagents", "proj-agent.md")
+	projectFile := filepath.Join(workDir, ".harness", "subagents", "proj-agent.md")
 	require.NoError(t, os.MkdirAll(filepath.Dir(projectFile), 0o755))
 	require.NoError(t, os.WriteFile(
 		projectFile,
@@ -393,11 +393,11 @@ func TestAppWorkspace_AllSubagents_NameCollisionKeepsBothRows(t *testing.T) {
 // TestAppWorkspace_AllSubagents_Deletable verifies that Deletable reflects the
 // same trust rule DeleteUserSubagent enforces (InGlobalDir), not the display
 // scope: a file in the global user dir is deletable, a project file is not.
-// Not parallel: pins the global subagents dir via CRUSH_SUBAGENTS_DIR.
+// Not parallel: pins the global subagents dir via HARNESS_SUBAGENTS_DIR.
 func TestAppWorkspace_AllSubagents_Deletable(t *testing.T) {
 	workDir := t.TempDir()
 	userDir := t.TempDir()
-	t.Setenv("CRUSH_SUBAGENTS_DIR", userDir)
+	t.Setenv("HARNESS_SUBAGENTS_DIR", userDir)
 
 	userFile := filepath.Join(userDir, "user-agent.md")
 	require.NoError(t, os.WriteFile(
@@ -405,7 +405,7 @@ func TestAppWorkspace_AllSubagents_Deletable(t *testing.T) {
 		[]byte("---\nname: user-agent\ndescription: User agent.\n---\n\nBody.\n"),
 		0o644,
 	))
-	projectFile := filepath.Join(workDir, ".crush", "subagents", "proj-agent.md")
+	projectFile := filepath.Join(workDir, ".harness", "subagents", "proj-agent.md")
 	require.NoError(t, os.MkdirAll(filepath.Dir(projectFile), 0o755))
 	require.NoError(t, os.WriteFile(
 		projectFile,
@@ -479,7 +479,7 @@ func TestAppWorkspace_DeleteUserSubagent_NonUserScope(t *testing.T) {
 
 	workDir := t.TempDir()
 
-	projectFile := filepath.Join(workDir, ".crush", "subagents", "proj-agent.md")
+	projectFile := filepath.Join(workDir, ".harness", "subagents", "proj-agent.md")
 	require.NoError(t, os.MkdirAll(filepath.Dir(projectFile), 0o755))
 	require.NoError(t, os.WriteFile(
 		projectFile,
@@ -508,11 +508,11 @@ func TestAppWorkspace_DeleteUserSubagent_NonUserScope(t *testing.T) {
 // subagent whose file lives in a global (user-scope) subagents directory
 // removes the file from disk and the agent no longer appears in AllSubagents
 // after the internal Manager is reloaded. Not parallel: pins the global
-// subagents dir via CRUSH_SUBAGENTS_DIR.
+// subagents dir via HARNESS_SUBAGENTS_DIR.
 func TestAppWorkspace_DeleteUserSubagent_Success(t *testing.T) {
 	workDir := t.TempDir()
 	userDir := t.TempDir()
-	t.Setenv("CRUSH_SUBAGENTS_DIR", userDir)
+	t.Setenv("HARNESS_SUBAGENTS_DIR", userDir)
 
 	userFile := filepath.Join(userDir, "user-agent.md")
 	require.NoError(t, os.WriteFile(
@@ -643,12 +643,12 @@ func TestAddOrRemove(t *testing.T) {
 // reload after a delete validates model ids (passes cfg.IsKnownModel, not
 // nil). A subagent referencing an unknown model must NOT become active after
 // the reload — with a nil validator it would be wrongly accepted. Not
-// parallel: pins the global subagents dir via CRUSH_SUBAGENTS_DIR so the
+// parallel: pins the global subagents dir via HARNESS_SUBAGENTS_DIR so the
 // delete passes the user-scope check.
 func TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel(t *testing.T) {
 	workDir := t.TempDir()
 	userDir := t.TempDir()
-	t.Setenv("CRUSH_SUBAGENTS_DIR", userDir)
+	t.Setenv("HARNESS_SUBAGENTS_DIR", userDir)
 
 	// One valid user subagent to delete, and one with an unknown model id.
 	keepFile := filepath.Join(userDir, "keep-agent.md")

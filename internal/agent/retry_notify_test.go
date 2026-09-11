@@ -9,11 +9,11 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/agent/notify"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 // flakyStreamModel fails its first stream with a retryable in-band

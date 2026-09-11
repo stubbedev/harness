@@ -15,7 +15,7 @@ import (
 	"github.com/charlievieth/fastwalk"
 	"gopkg.in/yaml.v3"
 
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/stubbedev/harness/internal/config"
 )
 
 const (
@@ -55,7 +55,7 @@ var reservedNames = map[string]bool{
 // name. Nothing breaks — the two live in separate namespaces — but both are
 // presented to the model in the same turn, so an instruction like "use fetch"
 // stops being unambiguous. This warns and never rejects: the tool list grows
-// over time, and a definition file must not stop loading because Crush shipped
+// over time, and a definition file must not stop loading because Harness shipped
 // a new tool that happens to share its name.
 func warnIfShadowsToolName(name, path string) {
 	if slices.Contains(config.AllToolNames(), name) {

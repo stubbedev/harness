@@ -2,8 +2,8 @@ package model
 
 import (
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // parentBreadcrumbLine renders a one-line breadcrumb indicating the parent

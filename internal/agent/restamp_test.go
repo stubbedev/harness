@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -40,7 +41,40 @@ func newTestRecorder(t *testing.T) testRecorder {
 	if *restamp {
 		return newRestampRecorder(t)
 	}
-	return vcr.NewRecorder(t)
+	inner := vcr.NewRecorder(t)
+	os.MkdirAll("/tmp/vcrlog", 0o755)
+	n := 0
+	return &loggingRecorder{inner: inner, t: t, n: &n}
+}
+
+type loggingRecorder struct {
+	inner testRecorder
+	t     *testing.T
+	n     *int
+}
+
+func (l *loggingRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
+	i := *l.n
+	*l.n++
+	var body []byte
+	if req.Body != nil && req.Body != http.NoBody {
+		body, _ = io.ReadAll(req.Body)
+		req.Body.Close()
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	os.WriteFile(fmt.Sprintf("/tmp/vcrlog/%s-req%d.json", l.t.Name(), i), body, 0o644)
+	resp, err := l.inner.RoundTrip(req)
+	if resp != nil && resp.Body != nil {
+		rb, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		os.WriteFile(fmt.Sprintf("/tmp/vcrlog/%s-req%d-resp.txt", l.t.Name(), i), rb, 0o644)
+		resp.Body = io.NopCloser(bytes.NewReader(rb))
+	}
+	return resp, err
+}
+
+func (l *loggingRecorder) GetDefaultClient() *http.Client {
+	return l.inner.GetDefaultClient()
 }
 
 // restampRecorder replays a cassette positionally, pairing each outgoing

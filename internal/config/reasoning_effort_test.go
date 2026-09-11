@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/csync"
 )
 
 func TestConfig_ValidateReasoningEffort(t *testing.T) {

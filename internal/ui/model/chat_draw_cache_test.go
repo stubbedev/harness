@@ -4,10 +4,10 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/ui/chat"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/ui/chat"
 )
 
 // drawTestArea is a fixed area used by the cache tests; it must be at least

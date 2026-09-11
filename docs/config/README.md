@@ -5,675 +5,414 @@
 
 > [!TIP]
 >
-> Crush can configure itself via a builtin config skill. That is to say,
-> can generally just tell Crush want you want to configure using natural
+> Harness can configure itself via a builtin config skill. That is to say, you
+> can generally just tell Harness what you want to configure using natural
 > language.
->
-> If you're migrating from the old JSON format, you can also ask Crush to
-> convert the config for you.
 
-Crush is configured with Bash via a set of Crush-specific builtin commands. By
-default, global config lives at `~/.config/crush/crushrc` on Unix-like systems
-and `%USERPROFILE%\.config\crush\crushrc` on Windows. It works like a `.bashrc`:
-it runs when Crush starts and configures the agent.
+Harness is configured with YAML. One format, one schema, one file to learn:
 
-```bash
-# Add Ollama.
-provider add ollama --type ollama --base-url "http://localhost:11434/v1"
+```yaml
+# ~/.config/harness/config.yaml
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
 
-# Register a model on Ollama.
-model add ollama/llama3.3 --name "Llama 3.3" --context-window 128000
+models:
+  large:
+    provider: anthropic
+    model: claude-sonnet-4-20250514
 
-# Auto-approve some tools.
-permissions allow view edit
+permissions:
+  allowed_tools: [view, ls, grep]
 
-# Add an MCP server
-mcp add github \
-  --type http \
-  --url "https://api.githubcopilot.com/mcp/" \
-  --header Authorization "Bearer $GITHUB_TOKEN"
+options:
+  tui:
+    theme: gruvbox-dark
 ```
 
-Since it’s Bash, so you can use logic, `source` other files, and so on. It’s
-really handy.
+Secrets never have to live in the file: values are expanded through the
+embedded shell at load time, so `${ANTHROPIC_API_KEY}` and
+`$(op read op://private/anthropic/key)` both work. See
+[Environment interpolation](#environment-interpolation).
 
-```bash
-# Change config based on the machine you're on.
-if [[ $HOSTNAME == "babysquid" ]]; then
-    option skill-path "$HOME/squid-skills"
-fi
+## Where config lives
 
-# Load some extra config
-source "$XDG_CONFIG_HOME/squid-config.sh"
+Harness merges everything it finds, with later entries winning:
 
-# Get API keys from your password manager.
-provider add my-secret-provider \
-  --type openai-compat \
-  --base-url "https://api.example.com/v1" \
-  --api-key "$(op read my-secret-key)"
+| Order | Path                                     | Who writes it       |
+| ----- | ---------------------------------------- | ------------------- |
+| 1     | `/etc/harness/config.yaml` (Unix only)   | your administrator  |
+| 2     | `$XDG_CONFIG_HOME/harness/config.yaml`   | you                 |
+| 3     | `$XDG_DATA_HOME/harness/state.yaml`      | Harness             |
+| 4     | `<project>/harness.yaml`                 | you                 |
+| 5     | `<project>/.harness.yaml`                | you                 |
+| 6     | `<data-directory>/state.yaml`            | Harness             |
+
+On Windows the user config is `%XDG_CONFIG_HOME%\harness\config.yaml` (falling
+back to `%USERPROFILE%\.config\harness\config.yaml`) and the state file lives
+under `%LOCALAPPDATA%\harness`. `.yml` works everywhere `.yaml` does, and
+loses to `.yaml` when both are present.
+
+Project files are discovered from the current directory upward, stopping at the
+git working tree root, so a stray `harness.yaml` above your project is never
+adopted. Deeper directories win over shallower ones.
+
+Two locations are **machine-owned**: `state.yaml` in the global data directory
+and in the project's data directory (`.harness/` by default). Harness writes
+API keys you paste into the TUI, OAuth tokens, the selected and recently-used
+models, and UI preferences there. Those writes round-trip through JSON, so
+comments in a `state.yaml` will not survive. The files you author are never
+rewritten — comments and layout in them are safe.
+
+`harness dirs` prints the locations in use.
+
+### Editor support
+
+The config is described by a JSON Schema, which every YAML language server
+consumes:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/stubbedev/harness/main/schema.json
 ```
 
-## Why Bash?
-
-Two reasons:
-
-1. Crush ships with a first-class Bash interpreter, so we get the logic for
-   free.
-2. Ultimately, Crush needs to be able to configure itself, and command-based
-   config allows both users and the agent to use the same tools.
-
-## What about JSON?
-
-JSON is still supported but is deprecated and, while it's supported, it won't
-be receiving new features. For more see [Legacy JSON](#legacy-json).
-
-## Config versioning
-
-Not breaking the config API is really important to us! That said, you can
-target specific Crush versions with `$CRUSH_VERSION`:
+`harness schema` prints the schema from the running binary, which is handy for
+a version-pinned local copy:
 
 ```bash
-if [[ $CRUSH_VERSION == "0.85.*" ]]; then
-    option debug true
-fi
+harness schema > ~/.config/harness/schema.json
 ```
 
 ## Security
 
-Just like `crush.json`, `crushrc` is a trusted file. Guard it carefully and
-don't download random configs without reading them first.
+The config is trusted input. Any `$(...)` in it runs at load time with your
+privileges, before the UI appears, and hook commands run whenever their event
+fires. Guard the file, and don't launch Harness in a directory whose
+`harness.yaml` you haven't read.
 
-## Where config lives
+## Providers
 
-Crush looks for config in the following places, with lower numbers taking
-precedence:
+`providers` is a map keyed by provider ID. Known providers need only what you
+want to override, which is usually the key:
 
-| Priority | Unix-like                        | Windows                           |
-| -------- | -------------------------------- | --------------------------------- |
-| 1        | `./.crushrc`                     | `.\.crushrc`                      |
-| 2        | `./crushrc`                      | `.\crushrc`                       |
-| 3        | `$XDG_CONFIG_HOME/crush/crushrc` | `%XDG_CONFIG_HOME%\crush\crushrc` |
-
-Legacy JSON uses `.crush.json` / `crush.json` in the same directories as the
-above. Everything found is merged, with project settings overriding global ones
-and `crushrc` overriding JSON in the same directory. If a folder has both, they
-merge and Crush logs a warning.
-
-Data directories (`~/.local/share/crush` on Unix-like systems and
-`%LOCALAPPDATA%\crush` on Windows) contain machine-owned JSON state. Crush does
-not discover or execute a `crushrc` from those locations.
-
-> [!NOTE]
-> Crush also stores state data in `$XDG_DATA_HOME/crush`
-> (`%LOCALAPPDATA%\crush` on Windows). This is application state, and should
-> not be edited by hand.
-
-## Command Reference
-
-The sections below read like CLI help. Entity commands use `add` to create or
-update something and `remove` (or `rm`) to delete it. Booleans accept
-`true/false/1/0/yes/no`, in any case.
-
-```text
-Available Commands:
-  provider      Manage model providers
-  model         Manage models and model selection
-  mcp           Manage MCP servers
-  lsp           Manage language servers
-  hook          Manage hooks
-  permissions   Configure tool permissions
-  option        Configure general Crush behavior
+```yaml
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    extra_headers:
+      OpenAI-Organization: ${OPENAI_ORG_ID}
 ```
 
-### provider
+A header whose value resolves to the empty string — an unset variable, a
+`$(...)` that prints nothing, a literal `""` — is dropped from the outgoing
+request, which makes env-gated headers like the one above safe to leave in
+place.
 
-Manage model providers.
+Unknown providers need a type and a base URL:
 
-```text
-Usage:
-  provider [command]
+```yaml
+providers:
+  deepseek:
+    type: openai-compat
+    base_url: https://api.deepseek.com/v1
+    api_key: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}
 
-Available Commands:
-  add       Add or update a provider
-  remove    Remove a provider and its custom models
-  rm        Alias for remove
+  ollama:
+    type: ollama
+    base_url: http://localhost:11434/v1
+    discover_models: true
 ```
 
-#### `provider add`
+| Field                  | Meaning                                                        |
+| ---------------------- | -------------------------------------------------------------- |
+| `name`                 | Display name                                                   |
+| `type`                 | `anthropic`, `openai`, `openai-compat`, `azure`, `bedrock`, `vertexai`, or a local type (`ollama`, `lmstudio`, `llamacpp`) |
+| `base_url`             | API base URL                                                   |
+| `api_key`              | API key; expanded at load time                                 |
+| `disable`              | Keep the entry but stop using it                               |
+| `flat_rate`            | Bill as flat rate rather than per token                        |
+| `discover_models`      | Ask the endpoint what models it serves and merge them in       |
+| `system_prompt_prefix` | Text prepended to the system prompt for this provider          |
+| `extra_headers`        | Extra HTTP headers (map)                                       |
+| `extra_body`           | Object merged into request bodies (**not** expanded)           |
+| `provider_options`     | Provider-specific object merged into requests                  |
+| `aws_auth_refresh`     | Command that refreshes AWS credentials                         |
+| `models`               | Custom models offered by this provider                         |
 
-Add a provider, or update an existing provider with the same ID.
+### Custom models
 
-```text
-Usage:
-  provider add <id> [flags]
-
-Flags:
-      --name string                 display name
-      --type string                 provider type (openai, openai-compat, anthropic, ollama, …)
-      --api-key string              API key
-      --base-url string             API base URL
-      --disable bool                disable without removing
-      --flat-rate bool              use flat-rate billing
-      --discover-models bool        auto-discover and merge provider models
-      --system-prompt-prefix string text prepended to the system prompt
-      --extra-header key value      add an HTTP header (repeatable)
-      --extra-body JSON             merge a JSON object into request bodies
-      --provider-options JSON       merge a provider-specific JSON object
+```yaml
+providers:
+  work:
+    type: openai-compat
+    base_url: https://api.example.com/v1
+    api_key: $(op read op://work/harness/key)
+    models:
+      - id: internal-large
+        name: Internal Large
+        context_window: 128000
+        default_max_tokens: 8192
+        can_reason: true
+        reasoning_levels: [low, medium, high]
+        supports_attachments: false
+        cost_per_1m_in: 3.0
+        cost_per_1m_out: 15.0
 ```
 
-```bash
-provider add deepseek \
-  --type openai-compat \
-  --base-url "https://api.deepseek.com/v1" \
-  --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
+## Models
+
+`models` picks which model fills each slot. `large` is the coding model;
+`small` handles summarization and other cheap work.
+
+```yaml
+models:
+  large:
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    max_tokens: 16384
+    think: true
+    reasoning_effort: medium
+  small:
+    provider: anthropic
+    model: claude-haiku-4-20250514
 ```
 
-Headers whose value resolves to the empty string (an unset `$VAR`, a
-`$(...)` that prints nothing, or a literal `""`) are dropped from the
-outgoing request. This makes env-gated headers safe:
+Besides `provider` and `model`: `max_tokens`, `think`, `reasoning_effort`
+(models with reasoning levels only), `temperature`, `top_p`, `top_k`,
+`frequency_penalty`, `presence_penalty`, and `provider_options`.
 
-```bash
-provider add openai \
-  --extra-header OpenAI-Organization "$OPENAI_ORG_ID"
+`harness models` lists available IDs in `provider/model` form. Model choices
+made in the TUI are written to the state file, so the config only needs this
+block when you want to pin a model for a project or a machine.
+
+## MCP servers
+
+```yaml
+mcp:
+  github:
+    type: http
+    url: https://api.githubcopilot.com/mcp/
+    headers:
+      Authorization: Bearer ${GH_PAT}
+
+  filesystem:
+    type: stdio
+    command: node
+    args: [/path/to/mcp-server.js]
+    env:
+      ROOT: ${HOME}/src
+    timeout: 30
+    disabled_tools: [write_file]
 ```
 
-If `OPENAI_ORG_ID` is unset, the header is simply not sent.
+| Field                                                       | Meaning                                     |
+| ----------------------------------------------------------- | ------------------------------------------- |
+| `type`                                                      | `stdio`, `http`, or `sse`                   |
+| `command`, `args`, `env`                                    | For `stdio` servers                         |
+| `url`, `headers`                                            | For `http` and `sse` servers                |
+| `timeout`                                                   | Seconds before the server is considered dead |
+| `disabled`                                                  | Keep the entry, stop starting it            |
+| `enabled_tools`, `disabled_tools`                           | Allow/deny individual tools                 |
+| `sessionless`                                               | Treat the server as stateless               |
+| `oauth`, `oauth_client_id`, `oauth_client_secret`, `oauth_callback_port` | OAuth flow for remote servers   |
 
-#### `provider remove`
+## Language servers
 
-Remove a provider and all custom models registered on it.
+```yaml
+lsp:
+  go:
+    command: gopls
+    filetypes: [go, mod]
+    env:
+      GOPATH: ${HOME}/go
+    options:
+      gofumpt: true
+      staticcheck: true
 
-```text
-Usage:
-  provider remove <id>
-  provider rm <id>
+  typescript:
+    command: typescript-language-server
+    args: [--stdio]
 ```
 
-### model
+Fields: `command`, `args`, `env`, `filetypes`, `root_markers`, `init_options`
+(sent in the LSP `initialize` request), `options` (server settings), `timeout`,
+and `disabled`. Harness fills in defaults for servers it recognizes, so a bare
+`command` is usually enough.
 
-Manage custom models and the large/small model slots. Model references use the
-same `<provider>/<id>` form printed by `crush models`.
+## Permissions and tools
 
-```text
-Usage:
-  model [command]
+```yaml
+permissions:
+  yolo: false
+  allowed_tools: [view, ls, grep, edit]
 
-Available Commands:
-  add       Register a custom model on an existing provider
-  remove    Remove a custom model
-  rm        Alias for remove
-  large     Set or print the large model
-  small     Set or print the small model
+options:
+  disabled_tools: [bash]
+
+tools:
+  ls:
+    max_depth: 5
+    max_items: 500
+  grep:
+    timeout: 45s
+  glob:
+    timeout: 2m
 ```
 
-#### `model add`
+- `permissions.yolo` unset means prompts are skipped; set it to `false` to get
+  them back.
+- `permissions.allowed_tools` lists tools that skip the prompt.
+- `options.disabled_tools` hides tools from the agent entirely — stronger than
+  prompting, since the agent never sees them.
+- Tool timeouts take a duration string (`45s`, `2m`, `1h30m`).
 
-Register a custom model on an existing provider.
+## Hooks
 
-```text
-Usage:
-  model add <provider>/<id> [flags]
-
-Flags:
-      --name string                 display name
-      --context-window int          context window in tokens
-      --default-max-tokens int      default maximum output tokens
-      --can-reason bool             model supports reasoning
-      --supports-images bool        model accepts image input
-      --price-input float           input price per 1M tokens
-      --price-output float          output price per 1M tokens
-      --price-cache-create float    cache-creation price per 1M tokens
-      --price-cache-hit float       cache-hit price per 1M tokens
-      --reasoning-effort string     low, medium, or high
+```yaml
+hooks:
+  PreToolUse:
+    - name: no-haskell
+      matcher: ^bash$
+      command: .harness/hooks/no-haskell.sh
+      timeout: 10
 ```
 
-#### `model remove`
-
-Remove a custom model from its provider.
-
-```text
-Usage:
-  model remove <provider>/<id>
-  model rm <provider>/<id>
-```
-
-#### `model large`, `model small`
-
-Set the large or small model slot. With no model argument, print the current
-selection.
-
-```text
-Usage:
-  model large [<provider>/<id>] [flags]
-  model small [<provider>/<id>] [flags]
-
-Flags:
-      --think                       enable thinking mode
-      --reasoning-effort string     low, medium, or high
-      --max-tokens int              maximum output tokens
-      --temperature float           sampling temperature
-      --top-p float                 top-p sampling (0–1)
-      --top-k int                   top-k sampling
-      --frequency-penalty float     frequency penalty
-      --presence-penalty float      presence penalty
-      --provider-options JSON       merge a provider-specific JSON object
-```
-
-```bash
-model large openai/gpt-4o --think
-echo "coding with: $(model large)"   # prints: openai/gpt-4o
-```
-
-### mcp
-
-Manage Model Context Protocol servers.
-
-```text
-Usage:
-  mcp [command]
-
-Available Commands:
-  add       Add or update an MCP server
-  remove    Remove an MCP server
-  rm        Alias for remove
-```
-
-#### `mcp add`
-
-Add an MCP server, or update an existing server with the same name.
-
-```text
-Usage:
-  mcp add <name> [flags]
-
-Flags:
-      --type string              stdio, sse, or http (default "stdio")
-      --command string           executable for stdio servers
-      --args string              command argument (repeatable)
-      --env key value            environment variable (repeatable)
-      --url string               URL for HTTP/SSE servers
-      --header key value         HTTP header (repeatable)
-      --timeout int              startup timeout in seconds
-      --disabled bool            disable without removing
-      --disabled-tools string       deny a server tool (repeatable)
-      --enabled-tools string        allow only these server tools (repeatable)
-      --oauth bool                  enable OAuth 2.1 flow (HTTP only)
-      --oauth-client-id string      pre-registered OAuth client ID
-      --oauth-client-secret string  pre-registered OAuth client secret
-      --oauth-callback-port int     fixed localhost port for the OAuth callback
-```
-
-```bash
-mcp add github --type http \
-  --url "https://api.githubcopilot.com/mcp/" \
-  --header Authorization "Bearer $GH_PAT"
-```
-
-As with providers, a header whose value resolves to the empty string is
-dropped from the outgoing request.
-
-#### `mcp remove`
-
-Remove an MCP server.
-
-```text
-Usage:
-  mcp remove <name>
-  mcp rm <name>
-```
-
-### lsp
-
-Manage language servers.
-
-```text
-Usage:
-  lsp [command]
-
-Available Commands:
-  add       Add or update a language server
-  remove    Remove a language server
-  rm        Alias for remove
-```
-
-#### `lsp add`
-
-Add a language server, or update an existing server with the same name.
-
-```text
-Usage:
-  lsp add <name> --command <command> [flags]
-
-Flags:
-      --args string              command argument (repeatable)
-      --env key value            environment variable (repeatable)
-      --filetypes string         file type to attach to (repeatable)
-      --root-markers string      root marker file (repeatable)
-      --timeout int              startup timeout in seconds
-      --disabled bool            disable without removing
-      --init-options JSON        initialization options
-      --options JSON             server settings
-```
-
-```bash
-lsp add go --command gopls --env GOPATH "$HOME/go"
-```
-
-#### `lsp remove`
-
-Remove a language server.
-
-```text
-Usage:
-  lsp remove <name>
-  lsp rm <name>
-```
-
-### hook
-
-Manage hooks. See the [hooks docs](../hooks/) for what they can do and how
-they run.
-
-```text
-Usage:
-  hook [command]
-
-Available Commands:
-  add       Add a hook to an event
-  remove    Remove a named hook, or clear an event
-  rm        Alias for remove
-```
-
-#### `hook add`
-
-Add a shell command that runs when the given hook event fires.
-
-```text
-Usage:
-  hook add <event> --command <command> [flags]
-
-Flags:
-      --command string           shell command to run (required)
-      --name string              name used for later removal
-      --matcher string           regex tested against the tool name
-      --timeout int              timeout in seconds (default 30)
-```
-
-```bash
-hook add PreToolUse --matcher "^bash$" \
-  --command "./hooks/no-haskell.sh" --name no-haskell
-```
-
-#### `hook remove`
-
-Remove hooks from an event. Without `--name`, remove every hook for the event.
-
-```text
-Usage:
-  hook remove <event> [--name <name>]
-  hook rm <event> [--name <name>]
-
-Flags:
-      --name string              remove hooks with this name
-```
-
-### permissions
-
-Configure tool permissions. `allow` skips approval prompts; `deny` hides tools
-from the agent entirely. `yolo` skips every prompt — this build defaults it to
-on, so `permissions yolo false` restores prompting (same as
-`permissions.yolo = false` in JSON).
-
-```text
-Usage:
-  permissions [command]
-
-Available Commands:
-  allow     Allow tools without prompting
-  deny      Hide tools from the agent
-  yolo      Skip all permission prompts (default true in this build)
-```
-
-#### `permissions yolo`
-
-Toggle yolo mode. Omitting the value enables it.
-
-```text
-Usage:
-  permissions yolo [true|false]
-```
-
-```bash
-permissions yolo false
-```
-
-#### `permissions allow`
-
-Allow one or more tools to run without prompting.
-
-```text
-Usage:
-  permissions allow <tool> [<tool> ...]
-```
-
-#### `permissions deny`
-
-Hide one or more tools from the agent so they cannot be called.
-
-```text
-Usage:
-  permissions deny <tool> [<tool> ...]
-```
-
-```bash
-permissions allow view ls grep edit
-permissions deny bash
-```
-
-### option
-
-Configure general Crush behavior, paths, attribution, and the terminal UI.
-Boolean values are optional and default to `true`.
-
-```text
-Usage:
-  option <key> [value]
-  option [command]
-
-Available Commands:
-  reset     Clear every value from a list option
-  ui        Configure terminal UI behavior
-
-Boolean Keys:
-  debug                          enable debug logging
-  debug-lsp                      enable LSP debug logging
-  auto-lsp                       automatically configure language servers
-  progress                       show progress indicators
-  init-prompt                    ask to initialize projects with no context file
-  metrics                        send anonymous usage metrics
-  auto-summarize                 automatically summarize long conversations
-  provider-auto-update           update the provider catalog automatically
-  default-providers              include built-in providers
-  update-check                   check for Crush updates at startup
-  attribution-generated-with     add the Generated with Crush line
-
-String Keys:
-  data-directory string            directory for project data and state
-  initialize-as string             context filename created by crush init
-  notifications string             notification style: auto, native, osc, bell,
-                                   or disabled
-  attribution-trailer-style string attribution trailer: none, co-authored-by,
-                                   or assisted-by
-
-Integer Keys:
-  request-timeout int              seconds before an LLM request is aborted;
-                                   streaming responses are only aborted after
-                                   this much inactivity; 0 waits forever
-                                   (default 60)
-  max-retries int                  retries for failed model requests; 0
-                                   disables them (default 3)
-
-List Keys:
-  context-path string             append a project context path
-  global-context-path string      append a global context path
-  skill-path string               append a skill directory
-  disable-skill string            hide a skill from the agent
-  subagent-path string            append a subagent definition directory
-  disable-subagent string         hide a subagent from the agent
-```
-
-```bash
-option progress false
-option skill-path ./skills
-option attribution-trailer-style assisted-by
-```
-
-#### `option reset`
-
-Clear every value previously added to a list option. Values added after the
-reset are kept.
-
-```text
-Usage:
-  option reset <key>
-
-Available Keys:
-  context-path          clear project context paths
-  global-context-path   clear global context paths
-  skill-path            clear additional skill directories
-  disable-skill         clear disabled skill names
-  subagent-path         clear subagent directories
-  disable-subagent      clear disabled subagent names
-```
-
-```
-
-#### `option ui`
-
-Configure terminal UI presentation and completion-list limits.
-```text
-Usage:
-  option ui <key> <value>
-
-Available Keys:
-  compact bool                  use the compact chat layout
-  diff unified|split            choose unified or side-by-side diffs
-  theme string                  color theme: charmtone (default),
-                                catppuccin-mocha, or gruvbox-dark; overrides
-                                the provider-based default
-  transparent bool              use the terminal background
-  mouse bool                    enable terminal mouse capture for clicks,
-                                selection, and scrolling in the TUI (default
-                                true); disable to let the terminal emulator
-                                or tmux handle text selection and copy/paste
-  scrollbar string              control chat scrollbar visibility: default,
-                                always, or never
-  git-status bool               show git branch and working-tree status in
-                                the compact header (default true)
-  show-thinking bool            render model reasoning blocks in the
-                                transcript (default true); reasoning is
-                                still streamed and stored when disabled
-  textarea-min-height int       minimum rows of the prompt textarea; it
-                                grows to fit content, so this only sets
-                                the collapsed floor (default 3)
-  exit-banner default|compact|none
-                                control the post-session banner: default shows
-                                the Crush logo, compact shows only the resume
-                                hint, none hides it entirely
-  completions-max-depth int     maximum directory depth shown by completions
-  completions-max-items int     maximum items returned to completions
-```
-
-```bash
-option ui compact true
-option ui diff unified
-option ui theme catppuccin-mocha
-option ui transparent true
-option ui mouse false
-option ui scrollbar always
-option ui git-status true
-option ui show-thinking false
-option ui textarea-min-height 1
-option ui exit-banner compact
-option ui completions-max-depth 4
-option ui completions-max-items 200
+`matcher` is a regex against the tool name; omit it to match every tool.
+`timeout` is in seconds and defaults to 30. Project hooks take precedence over
+global ones, matching hooks are deduplicated by `command`, run in parallel, and
+are aggregated in config order. See [Hooks](../hooks/README.md) for the
+stdin/stdout contract.
+
+## Options
+
+Everything else about Harness's behavior:
+
+```yaml
+options:
+  debug: false # verbose logging
+  debug_lsp: false # log LSP traffic too
+  auto_lsp: true # start language servers automatically
+  progress: true # progress output in non-interactive runs
+  init_prompt: true # offer to initialize a project with no context file
+  initialize_as: AGENTS.md # filename written by that initialization
+  data_directory: .harness # per-project state and logs
+  notifications: auto # auto | native | osc | bell | disabled
+  request_timeout: 60 # seconds of inactivity per model request; 0 disables it
+  max_retries: 3 # retries for a failing request
+
+  disable_auto_summarize: false # summarize a session when context fills up
+  auto_summarize_ratio: 0.2 # share of a <=200k window kept free (default 0.2)
+  auto_summarize_buffer: 20000 # tokens kept free in a >200k window
+
+  disable_metrics: false
+  disable_update_check: false
+  disable_provider_auto_update: false # stop refreshing the provider catalog
+  disable_default_providers: false # only use providers defined here
+
+  context_paths: [.cursorrules] # extra per-project context files
+  global_context_paths: [~/.config/harness/AGENTS.md]
+  skills_paths: [./skills]
+  disabled_skills: [harness-config]
+  subagents_paths: [./agents]
+  disabled_subagents: [reviewer]
+
+  attribution:
+    trailer_style: assisted-by # none | co-authored-by | assisted-by
+    generated_with: true # add the "Generated with" trailer
 ```
 
 > [!IMPORTANT]
-> These skill paths load by default — you do NOT need `skill-path`
-> for them: `.agents/skills`, `.crush/skills`, `.claude/skills`,
-> `.cursor/skills`.
+> These skill paths load by default — you do NOT need `skills_paths` for them:
+> `.agents/skills`, `.harness/skills`, `.claude/skills`, `.cursor/skills`.
 
-> [!NOTE]
-> The command palette's "Disable Background Color" and "Disable Mouse" 
-> toggles always write to the global config. If a project config
-> also sets `transparent` or `mouse`, project settings win on the next
-> launch (see [Where config lives](#where-config-lives)), so the toggle can
-> look like it silently reverted.
+### TUI
+
+```yaml
+options:
+  tui:
+    theme: charmtone # charmtone | catppuccin-mocha | gruvbox-dark
+    compact_mode: false # hide the sidebar
+    diff_mode: unified # unified | split
+    transparent: false # use the terminal background
+    mouse: true # false lets the terminal or tmux own selection and copy
+    scrollbar: default # default | always | never
+    exit_banner: default # default | compact | none
+    git_status: true # branch and working-tree status in the header
+    show_thinking: true # render reasoning blocks in the transcript
+    textarea_min_height: 3 # collapsed height of the prompt; it grows to fit
+    completions:
+      max_depth: 5
+      max_items: 500
+```
+
+The theme picker (`alt+t`) and the command palette's "Disable Background Color"
+and "Disable Mouse" toggles write to the **global state file**. If a project
+config also sets `theme`, `transparent`, or `mouse`, the project wins on the
+next launch (see [Where config lives](#where-config-lives)), so a toggle can
+look like it silently reverted.
+
+## Environment interpolation
+
+Selected string fields are expanded through the embedded shell — the same
+interpreter the `bash` tool uses — at load time:
+
+| Surface                                                         | Expansion                          |
+| --------------------------------------------------------------- | ---------------------------------- |
+| Provider `api_key`, `base_url`, `api_endpoint`, `extra_headers` | yes                                |
+| Provider `extra_body`                                           | **no** (passed through verbatim)   |
+| MCP `command`, `args`, `env`, `headers`, `url`                  | yes                                |
+| MCP `oauth_client_id`, `oauth_client_secret`                    | yes                                |
+| LSP `command`, `args`, `env`                                    | yes                                |
+| Top-level `env`                                                 | yes                                |
+| Hook `command`                                                  | runs via `sh -c`, not the resolver |
+
+Supported constructs: `$VAR`, `${VAR}`, `${VAR:-default}`, `${VAR:+alt}`,
+`${VAR:?message}`, and `$(command)`. An unset variable expands to empty, so use
+`${VAR:?message}` for anything required and the load fails loudly instead of
+authenticating with an empty key. A failing `$(command)` is always a hard
+error.
+
+The top-level `env` block is applied before providers are configured, so it can
+feed credential chains that read the environment directly:
+
+```yaml
+env:
+  AWS_PROFILE: work
+  ANTHROPIC_API_KEY: $(op read op://private/anthropic/key)
+```
+
+### YAML quoting
+
+`${VAR}` and `$(cmd)` need no quotes. Quote when a value starts with `*`, `&`,
+`%`, `@`, or a backtick, when it contains `: ` or ` #`, and when you want a
+string that YAML would otherwise read as a number, a boolean, or null —
+`yes`, `no`, `on`, `off`, and `null` included:
+
+```yaml
+providers:
+  example:
+    extra_headers:
+      X-Flag: "no" # without quotes this is the boolean false
+```
 
 ## Composing configs
 
-Because it's Bash, a shared base config is just a `source`:
+YAML has no `include`, and that is deliberate: the layering does the composing.
+Put what you want everywhere in `~/.config/harness/config.yaml` and let each
+project's `harness.yaml` override it. Within a project, `.harness.yaml` wins
+over `harness.yaml`, which is a convenient place for personal settings you
+keep out of version control.
 
-```bash
-# Unix-like: ~/.config/crush/crushrc
-# Windows:   %USERPROFILE%\.config\crush\crushrc
-source ~/team/crush-base.sh    # sets up providers, a few skills
+Merging is per key and deep: a map in a later file merges into the earlier
+one, and a list is appended to the earlier one rather than replacing it. So a
+project that sets `context_paths` adds to whatever the user config listed. To
+drop something a lower layer defined, override it in place — disable a
+provider rather than trying to unset it:
 
-# …but on this machine, drop a skill path the base added and add my own.
-option reset skill-path
-option skill-path ~/my/skills
+```yaml
+providers:
+  openai:
+    disable: true
 ```
 
-`remove`, `rm`, and `option reset` all act on whatever was set earlier in the
-script or pulled in via `source`. Later lines win, just like a shell.
-
-## Legacy JSON
-
-`crush.json` is the original format and is now deprecated. We plan to support
-it for the forseeable future, but new configuration options will only be added
-to Bash-based config.
-
-```jsonc
-{
-  "$schema": "https://charm.land/crush.json",
-  "providers": {
-    "anthropic": { "api_key": "$ANTHROPIC_API_KEY" },
-  },
-  "models": {
-    "large": { "provider": "anthropic", "model": "claude-sonnet-4-20250514" },
-  },
-  "permissions": { "allowed_tools": ["view", "ls", "grep"] },
-}
-```
-
-For a full reference, See the [JSON schema](../../schema.json).
-
-In JSON, only selected string fields (API keys, URLs, MCP/LSP commands and args,
-headers) are shell-expanded at load time. In `crushrc` there's no such list —
-it's all just Bash.
-
-Both formats are trusted code: they run with your shell privileges before the UI
-appears. Don't launch Crush in a directory whose config you haven't read.
-
----
-
-## Whatcha think?
-
-We'd love to hear your thoughts on this project. Need help? We gotchu. You can
-find us on:
-
-- [Twitter](https://twitter.com/charmcli)
-- [Slack](https://charm.land/slack)
-- [Discord](https://charm.land/discord)
-- [The Fediverse](https://mastodon.social/@charmcli)
-- [Bluesky](https://bsky.app/profile/charm.land)
-
----
-
-Part of [Charm](https://charm.land).
-
-<a href="https://charm.land/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-softy.jpg" /></a>
-
-<!--prettier-ignore-->
-Charm热爱开源 • Charm loves open source

@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // newTestUserItem builds a UserMessageItem carrying text.
@@ -39,7 +39,7 @@ func renderedLines(t *testing.T, text string, width int) []string {
 }
 
 // TestUserMessagePreservesSingleLineBreaks is the regression test for
-// charmbracelet/crush#3502: a user submitting
+// stubbedev/harness#3502: a user submitting
 //
 //	a
 //	b

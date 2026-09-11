@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"path/filepath"
@@ -15,17 +16,20 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/question"
-	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/question"
+	"github.com/stubbedev/harness/internal/shell"
+	"github.com/stubbedev/harness/internal/term"
 )
 
 type BashParams struct {
 	Description         string `json:"description" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
 	Command             string `json:"command" description:"The command to run in the persistent terminal session. Leave empty with input set to send keystrokes to a running program, or both empty to poll its output."`
 	Input               string `json:"input,omitempty" description:"Raw keystrokes to send to the terminal (text, answers to prompts, key sequences for the running program). Append \\n to submit a line. Use instead of command when something interactive is already running."`
+	Keys                string `json:"keys,omitempty" description:"Named keys to send instead of raw text, comma separated in order (e.g. \"ctrl+c\" or \"escape, :, w, q, enter\"). Supported: enter, tab, backtab, escape, space, backspace, delete, up, down, left, right, home, end, pageup, pagedown, insert, f1-f12, any ctrl+<letter>, and single characters typed literally."`
+	Resize              string `json:"resize,omitempty" description:"Resize the terminal as COLSxROWS (e.g. \"240x60\") and return the redrawn screen. Use when a full-screen program needs more room; the size sticks for the whole session."`
 	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory the terminal session was opened in; the session itself tracks cd"`
 	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in a detached background shell. Use job_output to read the output later. Prefer this only for servers and watchers; everything else belongs in the terminal session."`
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait for the command before returning it as still running (default: 60)"`
@@ -35,6 +39,8 @@ type BashPermissionsParams struct {
 	Description         string `json:"description"`
 	Command             string `json:"command"`
 	Input               string `json:"input"`
+	Keys                string `json:"keys"`
+	Resize              string `json:"resize"`
 	WorkingDir          string `json:"working_dir"`
 	RunInBackground     bool   `json:"run_in_background"`
 	AutoBackgroundAfter int    `json:"auto_background_after"`
@@ -73,6 +79,8 @@ type bashDescriptionData struct {
 	ModelID         string
 	RgAvailable     bool
 	GhAvailable     bool
+	DefaultRows     int
+	DefaultCols     int
 }
 
 var bannedCommands = []string{
@@ -150,6 +158,7 @@ var bannedCommands = []string{
 
 func bashDescription(attribution *config.Attribution, modelID string) string {
 	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+	descRows, descCols := term.DefaultSize()
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
 		BannedCommands:  bannedCommandsStr,
@@ -158,6 +167,8 @@ func bashDescription(attribution *config.Attribution, modelID string) string {
 		ModelID:         modelID,
 		RgAvailable:     getRg() != "",
 		GhAvailable:     ghAvailable,
+		DefaultRows:     descRows,
+		DefaultCols:     descCols,
 	}); err != nil {
 		// this should never happen.
 		panic("failed to execute bash description template: " + err.Error())
@@ -198,24 +209,24 @@ func blockFuncs() []shell.BlockFunc {
 }
 
 func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string, questions question.Service) fantasy.AgentTool {
-	// The synchronous execution path runs in the persistent terminal
-	// session (see pty.go): one interactive PTY per process, shell state
-	// and the sudo credential preserved across calls. The runner warms
-	// up in the background while the agent starts.
-	runner := ptyRunnerFor(workingDir, questions)
+	// The synchronous execution path runs in persistent terminal
+	// sessions (see pty.go): a real PTY whose shell state and sudo
+	// credential survive across calls, with a second session opened on
+	// demand when the first is busy driving an editor or TUI. The
+	// primary one warms up in the background while the agent starts.
+	_ = ptyRunnerFor(workingDir, questions)
 	return fantasy.NewAgentTool(
 		BashToolName,
 		string(bashDescription(attribution, modelID)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.Command == "" && params.Input == "" {
-				return fantasy.NewTextErrorResponse("missing command (or input, to interact with the terminal session)"), nil
-			}
-
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
 
-			isSafeReadOnly := false
-			permCommand := cmp.Or(params.Command, params.Input)
+			// Polling the terminal and resizing it change nothing, so
+			// they never ask for permission; everything that reaches the
+			// shell - a command, keystrokes, named keys - does.
+			permCommand := cmp.Or(params.Command, params.Input, params.Keys)
+			isSafeReadOnly := permCommand == ""
 			cmdLower := strings.ToLower(permCommand)
 
 			if !containsCommandChaining(permCommand) {
@@ -315,28 +326,60 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			startTime := time.Now()
 			waitSeconds := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
 
+			// Which terminal session serves this call: keystrokes go to
+			// the one with a program in it, commands to one that is free
+			// - a second shell is opened when an editor or TUI is still
+			// holding the first.
 			var result PTYResult
 			var err error
+			session := ptyInteractiveRunner(execWorkingDir, questions)
 			switch {
+			case params.Resize != "":
+				var rows, cols int
+				if rows, cols, err = parseTerminalSize(params.Resize); err == nil {
+					result, err = session.Resize(ctx, rows, cols)
+				}
+			case params.Keys != "":
+				result, err = session.Keys(ctx, params.Keys)
 			case params.Input != "":
-				result, err = runner.Input(ctx, params.Input)
+				result, err = session.Input(ctx, params.Input)
 			case params.Command != "":
-				result, err = runner.Run(ctx, params.Command, waitSeconds)
+				if session, err = ptyCommandRunner(ctx, execWorkingDir, questions); err == nil {
+					result, err = session.Run(ctx, params.Command, waitSeconds)
+				}
 			default:
-				result, err = runner.Poll(ctx)
+				result, err = session.Poll(ctx)
 			}
-			if err != nil {
+			switch {
+			case errors.Is(err, errAltScreenBusy), errors.Is(err, errAllSessionsBusy):
+				// The model's mistake, not a tool failure: tell it what
+				// is in the way and how to get past it.
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			case err != nil:
 				return fantasy.ToolResponse{}, fmt.Errorf("terminal session: %w", err)
 			}
 
 			stdout := TruncateOutput(result.Output)
+			ranCommand := params.Command != "" && params.Input == "" && params.Keys == "" && params.Resize == ""
 
 			var header string
 			switch {
-			case result.Running:
-				header = "Still running in the terminal session (no exit code yet). Send input to interact with it, or call bash again with empty command and input to poll."
+			case result.Interrupted:
+				header = "Interrupted: the command was stopped with ctrl+c because the call was cancelled."
+			case result.AltScreen && result.Unchanged:
+				header = "A full-screen program owns the terminal; its screen is unchanged since the last call. Drive it with keys/input, or send ctrl+c (keys) to stop it."
+			case result.AltScreen:
+				rows, cols := session.Size()
+				header = fmt.Sprintf("A full-screen program owns the terminal. Below is its rendered %dx%d screen, not a stream of output; there is no exit code until it quits. Drive it with keys/input, poll to see it again, or send ctrl+c (keys) to stop it.", cols, rows)
+			case result.Running && ranCommand:
+				header = "Still running in the terminal session (no exit code yet). Send input or keys to interact with it, or call bash again with everything empty to poll."
 			case result.ExitCode != nil && *result.ExitCode != 0:
 				header = fmt.Sprintf("Exit code %d", *result.ExitCode)
+			case params.Resize != "":
+				rows, cols := session.Size()
+				header = fmt.Sprintf("Terminal resized to %dx%d.", cols, rows)
+			case params.Keys != "":
+				header = "Keys sent."
 			case params.Input != "":
 				header = "Input sent."
 			case result.Output == "" && params.Command == "":
@@ -352,6 +395,17 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			}
 
 			var sb strings.Builder
+			if session.slot > 0 {
+				sb.WriteString(fmt.Sprintf(
+					"Ran in terminal session #%d: session #1 is busy with an interactive program. "+
+						"This is a separate shell - it does not have the other one's cd, exported "+
+						"variables or activated environments.\n", session.slot+1))
+			}
+			if session.tookRestart() {
+				sb.WriteString("The terminal session's shell had exited, so a new one was started: " +
+					"working directory, exported variables, activated environments and the sudo " +
+					"credential from before are gone.\n")
+			}
 			if header != "" {
 				sb.WriteString(header + "\n")
 			}
@@ -409,9 +463,13 @@ func TruncateOutput(content string) string {
 		return content
 	}
 
-	halfLength := MaxOutputLength / 2
-	start := ansi.Truncate(content, halfLength, "")
-	end := ansi.TruncateLeft(content, ansi.StringWidth(content)-halfLength, "")
+	// Keep a short head and a long tail. What went wrong is almost
+	// always at the end - the failing test, the compiler error, the
+	// stack trace - while the head is usually preamble, so splitting the
+	// budget evenly spends half of it on lines nobody needs.
+	headLength := MaxOutputLength / 8
+	start := ansi.Truncate(content, headLength, "")
+	end := ansi.TruncateLeft(content, ansi.StringWidth(content)-(MaxOutputLength-headLength), "")
 
 	truncatedLinesCount := max(strings.Count(content, "\n")-strings.Count(start, "\n")-strings.Count(end, "\n"), 0)
 	return fmt.Sprintf("%s\n\n... [%d lines truncated] ...\n\n%s", start, truncatedLinesCount, end)

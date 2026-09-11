@@ -5,11 +5,11 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy/providers/openaicompat"
-	"github.com/charmbracelet/crush/internal/agent/prompt"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/agent/prompt"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/subagents"
 	"golang.org/x/sync/errgroup"
 )
 

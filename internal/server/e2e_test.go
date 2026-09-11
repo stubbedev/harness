@@ -14,15 +14,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/backend"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/backend"
+	"github.com/stubbedev/harness/internal/db"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 // e2eHarness wires a Server, its Backend (with a custom shutdownFn we

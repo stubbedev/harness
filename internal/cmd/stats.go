@@ -17,12 +17,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/event"
-	"github.com/charmbracelet/crush/internal/projects"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/db"
+	"github.com/stubbedev/harness/internal/event"
+	"github.com/stubbedev/harness/internal/projects"
 )
 
 //go:embed stats/index.html
@@ -51,7 +51,7 @@ var statsCmd = &cobra.Command{
 }
 
 func init() {
-	statsCmd.Flags().String("crawl-dir", "", "Crawl a directory recursively for all crush projects and aggregate stats")
+	statsCmd.Flags().String("crawl-dir", "", "Crawl a directory recursively for all harness projects and aggregate stats")
 	statsCmd.Flags().Bool("all", false, "Aggregate stats from all known projects (from projects.json)")
 }
 
@@ -222,7 +222,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	if outputDataDir == "" {
-		outputDataDir = ".crush"
+		outputDataDir = ".harness"
 	}
 
 	htmlPath := filepath.Join(outputDataDir, "stats/index.html")
@@ -240,7 +240,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// crawlForStats crawls a directory recursively looking for .crush/crush.db files.
+// crawlForStats crawls a directory recursively looking for .harness/harness.db files.
 func crawlForStats(ctx context.Context, rootDir string) ([]ProjectStats, error) {
 	var dbPaths []struct {
 		dbPath     string
@@ -257,10 +257,10 @@ func crawlForStats(ctx context.Context, rootDir string) ([]ProjectStats, error) 
 			return filepath.SkipDir
 		}
 
-		// Look for .crush/crush.db pattern
-		if !d.IsDir() && d.Name() == "crush.db" {
+		// Look for .harness/harness.db pattern
+		if !d.IsDir() && d.Name() == "harness.db" {
 			dir := filepath.Dir(path)
-			if filepath.Base(dir) == ".crush" {
+			if filepath.Base(dir) == ".harness" {
 				projectDir := filepath.Dir(dir)
 				dbPaths = append(dbPaths, struct {
 					dbPath     string
@@ -323,7 +323,7 @@ func gatherStatsFromProjects(ctx context.Context) ([]ProjectStats, error) {
 	}
 
 	for _, p := range projectList.Projects {
-		dbPath := filepath.Join(p.DataDir, "crush.db")
+		dbPath := filepath.Join(p.DataDir, "harness.db")
 		if _, err := os.Stat(dbPath); err == nil {
 			dbPaths = append(dbPaths, struct {
 				dbPath     string

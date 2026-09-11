@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
+	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 // hookApprovalKey is the unexported context key used to mark a tool call as

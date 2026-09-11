@@ -6,9 +6,9 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/session"
 )
 
 func TestUsageIsZero(t *testing.T) {

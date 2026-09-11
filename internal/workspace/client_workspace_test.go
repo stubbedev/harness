@@ -13,15 +13,15 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/client"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/client"
+	"github.com/stubbedev/harness/internal/commands"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/skills"
 )
 
 // TestProtoToMessageToolResult ensures that ToolResult metadata,
@@ -833,7 +833,7 @@ func TestClientWorkspace_ShutdownFallsBackForLegacyServer(t *testing.T) {
 
 // TestClientWorkspace_AgentReadyErr_WorkspaceGone checks the status the
 // UI is given while recovery runs. A 404 from a live server used to print
-// "lost connection to the crush server: ... status code 404", which is
+// "lost connection to the harness server: ... status code 404", which is
 // both wrong and unactionable.
 func TestClientWorkspace_AgentReadyErr_WorkspaceGone(t *testing.T) {
 	t.Parallel()

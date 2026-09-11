@@ -105,5 +105,5 @@ func TestGitHeaderParts_EmptyOutsideRepo(t *testing.T) {
 	// gitStatusInfo with a nonexistent directory starts a refresh but
 	// returns the (empty) cache, so the header drops the segment instead
 	// of rendering garbage.
-	require.Empty(t, gitHeaderParts(nil, "/nonexistent-dir-for-crush-test"))
+	require.Empty(t, gitHeaderParts(nil, "/nonexistent-dir-for-harness-test"))
 }

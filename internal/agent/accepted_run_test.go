@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/message"
 )
 
 // newCancelTestAgent builds a DB-backed sessionAgent with no model. The

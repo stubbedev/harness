@@ -10,13 +10,13 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/stringext"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/stringext"
+	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // PermissionsID is the identifier for the permissions dialog.

@@ -3,9 +3,9 @@ package model
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // activeSubagentsWorkspace stubs ActiveSubagents for rebuildSubagentCaches.

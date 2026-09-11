@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/ui/chat"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/ui/chat"
 )
 
 // spinTestItem is a chat item with a controllable spinner.

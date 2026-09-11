@@ -13,12 +13,12 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	hyperp "github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/lock"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	"github.com/charmbracelet/crush/internal/oauth/hyper"
+	hyperp "github.com/stubbedev/harness/internal/agent/hyper"
+	"github.com/stubbedev/harness/internal/env"
+	"github.com/stubbedev/harness/internal/lock"
+	"github.com/stubbedev/harness/internal/oauth"
+	"github.com/stubbedev/harness/internal/oauth/copilot"
+	"github.com/stubbedev/harness/internal/oauth/hyper"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"golang.org/x/sync/singleflight"
@@ -91,8 +91,8 @@ type ConfigStore struct {
 	config             *Config
 	workingDir         string
 	resolver           VariableResolver
-	globalDataPath     string   // ~/.local/share/crush/crush.json
-	workspacePath      string   // .crush/crush.json
+	globalDataPath     string   // $XDG_DATA_HOME/harness/state.yaml
+	workspacePath      string   // .harness/state.yaml
 	loadedPaths        []string // config files that were successfully loaded
 	knownProviders     []catwalk.Provider
 	overrides          RuntimeOverrides
@@ -294,8 +294,10 @@ func (s *ConfigStore) lockConfig(scope Scope) (func(), error) {
 
 // atomicWrite handles the lock-read-transform-write-unlock cycle for
 // config file mutations. The fn callback receives the current file
-// contents (raw bytes, or {} if the file is missing) and must return the
-// new contents. fn must be pure — no I/O, no network calls.
+// contents as JSON (or {} if the file is missing or empty) and must
+// return the new contents, also as JSON; this function converts to and
+// from the YAML stored on disk. fn must be pure — no I/O, no network
+// calls.
 func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, error)) error {
 	unlock, err := s.lockConfig(scope)
 	if err != nil {
@@ -308,13 +310,12 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 		return err
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := readConfigJSON(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			data = []byte("{}")
-		} else {
-			return fmt.Errorf("read config file: %w", err)
-		}
+		return err
+	}
+	if len(data) == 0 {
+		data = []byte("{}")
 	}
 
 	newData, err := fn(data)
@@ -322,7 +323,31 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 		return err
 	}
 
-	return atomicWriteFile(path, newData, 0o600)
+	out, err := encodeConfig(newData)
+	if err != nil {
+		return fmt.Errorf("encode config file %s: %w", path, err)
+	}
+
+	return atomicWriteFile(path, out, 0o600)
+}
+
+// readConfigJSON reads a config file from disk and returns it as JSON,
+// the representation every read and write path in this package operates
+// on. A missing or empty file yields nil bytes and no error, so callers
+// can treat "absent" and "carries nothing" alike.
+func readConfigJSON(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read config file %s: %w", path, err)
+	}
+	jsonBytes, err := decodeConfig(data)
+	if err != nil {
+		return nil, fmt.Errorf("invalid YAML in config file %s: %w", path, err)
+	}
+	return jsonBytes, nil
 }
 
 // configPath returns the file path for the given scope.
@@ -345,11 +370,11 @@ func (s *ConfigStore) HasConfigField(scope Scope, key string) bool {
 	if err != nil {
 		return false
 	}
-	data, err := os.ReadFile(path)
+	data, err := readConfigJSON(path)
 	if err != nil {
 		return false
 	}
-	return gjson.Get(string(data), key).Exists()
+	return gjson.GetBytes(data, key).Exists()
 }
 
 // StringSliceConfigField reads a string array straight from the config file for
@@ -364,11 +389,11 @@ func (s *ConfigStore) StringSliceConfigField(scope Scope, key string) []string {
 	if err != nil {
 		return nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := readConfigJSON(path)
 	if err != nil {
 		return nil
 	}
-	result := gjson.Get(string(data), key)
+	result := gjson.GetBytes(data, key)
 	if !result.Exists() {
 		return nil
 	}
@@ -497,7 +522,7 @@ func (s *ConfigStore) OverridePreferredModel(modelType SelectedModelType, model 
 
 // pinPreferredModelLocked records a model choice made in this instance so
 // that a later config reload cannot replace it with a choice made
-// somewhere else. Several Crush instances share one global config file, so
+// somewhere else. Several Harness instances share one global config file, so
 // a reload triggered by an unrelated write (a token refresh, say) would
 // otherwise import whichever model a sibling instance last selected and
 // switch models out from under the user mid-session.
@@ -668,7 +693,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 //
 // Providers like Hyper rotate refresh tokens: each exchange consumes the
 // caller's refresh token, issues a new pair, and revokes the old one. If
-// two crush instances (or two goroutines) refresh concurrently with the
+// two harness instances (or two goroutines) refresh concurrently with the
 // same stored refresh token, the second exchange reuses an already-revoked
 // token, trips the provider's reuse detection, and revokes the entire
 // token family — leaving both with dead tokens even though each refresh
@@ -949,12 +974,12 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 		return nil, err
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := readConfigJSON(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
 	}
 
 	oauthKey := fmt.Sprintf("providers.%s.oauth", providerID)
@@ -1210,8 +1235,6 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 
 // reloadFromDiskLocked performs the actual reload. Caller must hold writeMu.
 func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
-	// Migrate deprecated disable_notifications before reloading config.
-	migrateDisableNotifications()
 
 	configPaths := lookupConfigs(s.workingDir)
 	cfg, loadedPaths, err := loadFromConfigPaths(ctx, configPaths)
@@ -1227,13 +1250,10 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	cfg.setDefaults(s.workingDir, dataDir)
 
 	// Merge workspace config if present
-	workspacePath := filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName))
-	if wsData, err := os.ReadFile(workspacePath); err == nil && len(wsData) > 0 {
-		if !json.Valid(wsData) {
-			return fmt.Errorf("invalid JSON in config file %s", workspacePath)
-		}
-		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
-		if mergeErr == nil {
+	workspacePath := filepath.Join(cfg.Options.DataDirectory, stateConfigFile)
+	if wsJSON, err := readConfigJSON(workspacePath); err == nil {
+		merged, mergeErr := mergeWorkspaceConfig(cfg, wsJSON)
+		if mergeErr == nil && merged != nil {
 			dataDir := cfg.Options.DataDirectory
 			*cfg = *merged
 			cfg.setDefaults(s.workingDir, dataDir)

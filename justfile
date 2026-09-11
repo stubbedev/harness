@@ -1,4 +1,4 @@
-# Crush dev tasks.
+# Harness dev tasks.
 # `just check` mirrors the CI gates; `just restamp` rewrites recorded
 # request bodies after prompt/tool edits (no API key needed).
 
@@ -44,7 +44,7 @@ restamp:
     go test ./internal/agent -run TestCoderAgent -count=1 -restamp
 
 # Re-record all VCR cassettes against the live provider (needs
-# CRUSH_HYPER_API_KEY).
+# HARNESS_HYPER_API_KEY).
 record:
     rm -r internal/agent/testdata
     go test -v -count=1 -timeout=1h ./internal/agent
@@ -55,4 +55,22 @@ update-golden:
 
 # Run the TUI with profiling enabled.
 dev:
-    CRUSH_PROFILE=true go run .
+    HARNESS_PROFILE=true go run .
+
+# Recompute package.nix's vendorHash from go.mod/go.sum. CI does this on every
+# dependency change (see .github/workflows/flake.yml); run it locally when you
+# want `nix build` to work before pushing.
+nix-vendor-hash:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    FAKE="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    CUR="$(grep -oP 'vendorHash = "\K[^"]+' package.nix)"
+    sed -i "s#vendorHash = \"${CUR}\"#vendorHash = \"${FAKE}\"#" package.nix
+    GOT="$(nix build .#default --no-link 2>&1 | grep -oP 'got:\s+\K(sha256-\S+)' | head -1 || true)"
+    [ -z "$GOT" ] && GOT="$CUR"
+    sed -i "s#vendorHash = \"${FAKE}\"#vendorHash = \"${GOT}\"#" package.nix
+    echo "vendorHash = ${GOT}"
+
+# Build the Nix package and print the store path.
+nix-build:
+    nix build .#default --no-link --print-out-paths

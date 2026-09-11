@@ -10,16 +10,17 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/oauth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/env"
+	"github.com/stubbedev/harness/internal/oauth"
 )
 
 func TestMain(m *testing.M) {
@@ -50,15 +51,15 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	// the developer's real config.
 	globalDir := t.TempDir()
 	dataDir := t.TempDir()
-	t.Setenv("CRUSH_GLOBAL_CONFIG", globalDir)
-	t.Setenv("CRUSH_GLOBAL_DATA", dataDir)
+	t.Setenv("HARNESS_GLOBAL_CONFIG", globalDir)
+	t.Setenv("HARNESS_GLOBAL_DATA", dataDir)
 
-	t.Run("does not pick up crush.json above non-git project", func(t *testing.T) {
+	t.Run("does not pick up harness.yaml above non-git project", func(t *testing.T) {
 		parent := t.TempDir()
 
-		// crush.json above the project must not be adopted.
+		// harness.yaml above the project must not be adopted.
 		require.NoError(t, os.WriteFile(
-			filepath.Join(parent, "crush.json"),
+			filepath.Join(parent, "harness.yaml"),
 			[]byte(`{}`),
 			0o644,
 		))
@@ -68,11 +69,11 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 
 		got := lookupConfigs(project)
 		for _, p := range got {
-			require.NotEqual(t, filepath.Join(parent, "crush.json"), p)
+			require.NotEqual(t, filepath.Join(parent, "harness.yaml"), p)
 		}
 	})
 
-	t.Run("does not climb out of git worktree to find crush.json", func(t *testing.T) {
+	t.Run("does not climb out of git worktree to find harness.yaml", func(t *testing.T) {
 		if _, err := exec.LookPath("git"); err != nil {
 			t.Skip("git not available")
 		}
@@ -80,7 +81,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		parent := t.TempDir()
 
 		require.NoError(t, os.WriteFile(
-			filepath.Join(parent, "crush.json"),
+			filepath.Join(parent, "harness.yaml"),
 			[]byte(`{}`),
 			0o644,
 		))
@@ -92,20 +93,20 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.NoError(t, gitInit.Run())
 
 		got := lookupConfigs(worktree)
-		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, "crush.json"))
+		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, "harness.yaml"))
 		require.NoError(t, err)
 		for _, p := range got {
 			pEval, err := filepath.EvalSymlinks(p)
 			if err != nil {
 				continue
 			}
-			require.NotEqual(t, strayEval, pEval, "must not adopt parent crush.json")
+			require.NotEqual(t, strayEval, pEval, "must not adopt parent harness.yaml")
 		}
 	})
 
-	t.Run("picks up crush.json inside the project", func(t *testing.T) {
+	t.Run("picks up harness.yaml inside the project", func(t *testing.T) {
 		project := t.TempDir()
-		local := filepath.Join(project, "crush.json")
+		local := filepath.Join(project, "harness.yaml")
 		require.NoError(t, os.WriteFile(local, []byte(`{}`), 0o644))
 
 		got := lookupConfigs(project)
@@ -123,7 +124,7 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, foundLocal, "expected project crush.json to be in lookup result: %v", got)
+		require.True(t, foundLocal, "expected project harness.yaml to be in lookup result: %v", got)
 	})
 
 	t.Run("global config is always included regardless of boundary", func(t *testing.T) {
@@ -136,24 +137,37 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.Contains(t, got, GlobalConfigData())
 	})
 
-	t.Run("global shell config (crushrc) is included", func(t *testing.T) {
+	t.Run("both project spellings are discovered", func(t *testing.T) {
 		project := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(project, "harness.yaml"), []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".harness.yaml"), []byte(""), 0o644))
 
 		got := lookupConfigs(project)
-		// A global crushrc is discovered only beside the user config. The data
-		// directory is machine-owned state and must never execute a crushrc.
-		require.Contains(t, got, shellConfigSibling(GlobalConfig()))
-		require.NotContains(t, got, shellConfigSibling(GlobalConfigData()))
+		require.Contains(t, got, filepath.Join(project, "harness.yaml"))
+		require.Contains(t, got, filepath.Join(project, ".harness.yaml"))
 	})
 
-	t.Run("project crushrc and .crushrc are discovered", func(t *testing.T) {
+	t.Run("the .yml spelling is discovered", func(t *testing.T) {
 		project := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(project, "crushrc"), []byte(""), 0o644))
-		require.NoError(t, os.WriteFile(filepath.Join(project, ".crushrc"), []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, "harness.yml"), []byte(""), 0o644))
 
 		got := lookupConfigs(project)
-		require.Contains(t, got, filepath.Join(project, "crushrc"))
-		require.Contains(t, got, filepath.Join(project, ".crushrc"))
+		require.Contains(t, got, filepath.Join(project, "harness.yml"))
+	})
+
+	t.Run("the hidden spelling wins over the visible one", func(t *testing.T) {
+		project := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(project, "harness.yaml"), []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(project, ".harness.yaml"), []byte(""), 0o644))
+
+		got := lookupConfigs(project)
+		// Later paths are merged last and therefore win, so .harness.yaml
+		// must come after harness.yaml.
+		visible := slices.Index(got, filepath.Join(project, "harness.yaml"))
+		hidden := slices.Index(got, filepath.Join(project, ".harness.yaml"))
+		require.NotEqual(t, -1, visible)
+		require.NotEqual(t, -1, hidden)
+		require.Greater(t, hidden, visible)
 	})
 
 	t.Run("system config is loaded first", func(t *testing.T) {
@@ -165,46 +179,78 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 		require.NotEmpty(t, got)
 		// The system-wide config must be first so it has the lowest
 		// priority when configs are merged.
-		require.Equal(t, "/etc/crush/crush.json", got[0])
+		require.Equal(t, "/etc/harness/config.yaml", got[0])
 	})
 }
 
-func TestLoadFromConfigPaths_InvalidJSON(t *testing.T) {
+func TestLoadFromConfigPaths_InvalidYAML(t *testing.T) {
 	t.Parallel()
 
 	t.Run("identifies the offending file", func(t *testing.T) {
 		t.Parallel()
 		tmpDir := t.TempDir()
-		good := filepath.Join(tmpDir, "good.json")
-		bad := filepath.Join(tmpDir, "bad.json")
-		require.NoError(t, os.WriteFile(good, []byte(`{"providers":{}}`), 0o644))
-		require.NoError(t, os.WriteFile(bad, []byte(`{not valid json}`), 0o644))
+		good := filepath.Join(tmpDir, "good.yaml")
+		bad := filepath.Join(tmpDir, "bad.yaml")
+		require.NoError(t, os.WriteFile(good, []byte("providers: {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(bad, []byte("options:\n  debug: true\n   bad: indent\n"), 0o644))
 
 		_, _, err := loadFromConfigPaths(context.Background(), []string{good, bad})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid JSON in config file")
-		require.Contains(t, err.Error(), "bad.json")
+		require.Contains(t, err.Error(), "invalid YAML in config file")
+		require.Contains(t, err.Error(), "bad.yaml")
 	})
 
-	t.Run("skips missing and empty files", func(t *testing.T) {
+	t.Run("skips missing, empty, and comment-only files", func(t *testing.T) {
 		t.Parallel()
 		tmpDir := t.TempDir()
-		empty := filepath.Join(tmpDir, "empty.json")
+		empty := filepath.Join(tmpDir, "empty.yaml")
+		comments := filepath.Join(tmpDir, "comments.yaml")
 		require.NoError(t, os.WriteFile(empty, []byte(""), 0o644))
+		require.NoError(t, os.WriteFile(comments, []byte("# nothing to see here\n"), 0o644))
 
-		cfg, _, err := loadFromConfigPaths(context.Background(), []string{
-			filepath.Join(tmpDir, "nonexistent.json"),
+		cfg, loaded, err := loadFromConfigPaths(context.Background(), []string{
+			filepath.Join(tmpDir, "nonexistent.yaml"),
 			empty,
+			comments,
 		})
 		require.NoError(t, err)
 		require.NotNil(t, cfg)
+		require.Empty(t, loaded)
+	})
+
+	t.Run("reads JSON written as YAML", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		flow := filepath.Join(tmpDir, "flow.yaml")
+		require.NoError(t, os.WriteFile(flow, []byte(`{"options": {"debug": true}}`), 0o644))
+
+		cfg, _, err := loadFromConfigPaths(context.Background(), []string{flow})
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Options)
+		require.True(t, cfg.Options.Debug)
+	})
+
+	t.Run("keeps env references unexpanded at parse time", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "env.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(
+			"providers:\n  openai:\n    api_key: ${OPENAI_API_KEY}\n",
+		), 0o644))
+
+		cfg, _, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.NoError(t, err)
+		provider, ok := cfg.Providers.Get("openai")
+		require.True(t, ok)
+		// Resolution happens later, against the environment; the parsed
+		// config still holds the template the user wrote.
+		require.Equal(t, "${OPENAI_API_KEY}", provider.APIKey)
 	})
 }
 
-// TestLoadFromConfigPaths_ConflictWarningNamesKeys verifies that when a JSON
-// config and a crushrc coexist in the same directory, the merge warning names
-// the overlapping top-level keys so incremental migrations can spot stale
-// duplicates.
+// TestLoadFromConfigPaths_ConflictWarningNamesKeys verifies that when two
+// config files coexist in the same directory, the merge warning names the
+// overlapping top-level keys so a shadowed setting is easy to spot.
 func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
 	capture := func(t *testing.T) *strings.Builder {
 		t.Helper()
@@ -218,29 +264,46 @@ func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
 	t.Run("names overlapping keys", func(t *testing.T) {
 		buf := capture(t)
 		tmpDir := t.TempDir()
-		jsonPath := filepath.Join(tmpDir, "crush.json")
-		rcPath := filepath.Join(tmpDir, "crushrc")
-		require.NoError(t, os.WriteFile(jsonPath, []byte(`{"options":{"debug":true},"providers":{}}`), 0o644))
-		require.NoError(t, os.WriteFile(rcPath, []byte("option debug true\n"), 0o644))
+		visible := filepath.Join(tmpDir, "harness.yaml")
+		hidden := filepath.Join(tmpDir, ".harness.yaml")
+		require.NoError(t, os.WriteFile(visible, []byte("options:\n  debug: true\nproviders: {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(hidden, []byte("options:\n  debug: false\n"), 0o644))
 
-		_, _, err := loadFromConfigPaths(context.Background(), []string{jsonPath, rcPath})
+		_, _, err := loadFromConfigPaths(context.Background(), []string{visible, hidden})
 		require.NoError(t, err)
-		require.Contains(t, buf.String(), "crushrc taking precedence")
+		require.Contains(t, buf.String(), "later file taking precedence")
 		require.Contains(t, buf.String(), `"conflicting_keys":"options"`)
+		require.Contains(t, buf.String(), `"file":".harness.yaml"`)
 	})
 
 	t.Run("no warning when nothing overlaps", func(t *testing.T) {
 		buf := capture(t)
 		tmpDir := t.TempDir()
-		jsonPath := filepath.Join(tmpDir, "crush.json")
-		rcPath := filepath.Join(tmpDir, "crushrc")
-		require.NoError(t, os.WriteFile(jsonPath, []byte(`{"providers":{}}`), 0o644))
-		require.NoError(t, os.WriteFile(rcPath, []byte("option debug true\n"), 0o644))
+		visible := filepath.Join(tmpDir, "harness.yaml")
+		hidden := filepath.Join(tmpDir, ".harness.yaml")
+		require.NoError(t, os.WriteFile(visible, []byte("providers: {}\n"), 0o644))
+		require.NoError(t, os.WriteFile(hidden, []byte("options:\n  debug: true\n"), 0o644))
 
-		_, _, err := loadFromConfigPaths(context.Background(), []string{jsonPath, rcPath})
+		_, _, err := loadFromConfigPaths(context.Background(), []string{visible, hidden})
 		require.NoError(t, err)
-		require.NotContains(t, buf.String(), "crushrc taking precedence",
+		require.NotContains(t, buf.String(), "later file taking precedence",
 			"disjoint coexistence should not warn")
+	})
+
+	t.Run("no warning across different directories", func(t *testing.T) {
+		buf := capture(t)
+		parent := t.TempDir()
+		child := filepath.Join(parent, "child")
+		require.NoError(t, os.Mkdir(child, 0o755))
+		outer := filepath.Join(parent, "harness.yaml")
+		inner := filepath.Join(child, "harness.yaml")
+		require.NoError(t, os.WriteFile(outer, []byte("options:\n  debug: true\n"), 0o644))
+		require.NoError(t, os.WriteFile(inner, []byte("options:\n  debug: false\n"), 0o644))
+
+		_, _, err := loadFromConfigPaths(context.Background(), []string{outer, inner})
+		require.NoError(t, err)
+		require.NotContains(t, buf.String(), "later file taking precedence",
+			"layered directories are the normal case, not a conflict")
 	})
 }
 
@@ -263,7 +326,7 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.NotNil(t, cfg.Models)
 		require.NotNil(t, cfg.LSP)
 		require.NotNil(t, cfg.MCP)
-		require.Equal(t, filepath.Join(workingDir, ".crush"), cfg.Options.DataDirectory)
+		require.Equal(t, filepath.Join(workingDir, ".harness"), cfg.Options.DataDirectory)
 		require.Equal(t, "AGENTS.md", cfg.Options.InitializeAs)
 		// DiffMode is deliberately left empty: the permissions dialog treats
 		// the zero value as "pick split or unified based on terminal width".
@@ -361,10 +424,10 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.Equal(t, filepath.Join(workingDir, "state"), cfg.Options.DataDirectory)
 	})
 
-	t.Run("does not adopt .crush from a parent project", func(t *testing.T) {
+	t.Run("does not adopt .harness from a parent project", func(t *testing.T) {
 		parent := t.TempDir()
 
-		// .crush in the parent: it should not be reused by the child
+		// .harness in the parent: it should not be reused by the child
 		// because there is no git context joining them.
 		require.NoError(t, os.Mkdir(filepath.Join(parent, defaultDataDirectory), 0o755))
 
@@ -381,14 +444,14 @@ func TestConfig_setDefaults(t *testing.T) {
 		)
 	})
 
-	t.Run("does not climb out of git worktree to find .crush", func(t *testing.T) {
+	t.Run("does not climb out of git worktree to find .harness", func(t *testing.T) {
 		if _, err := exec.LookPath("git"); err != nil {
 			t.Skip("git not available")
 		}
 
 		parent := t.TempDir()
 
-		// Stray .crush above the worktree root.
+		// Stray .harness above the worktree root.
 		require.NoError(t, os.Mkdir(filepath.Join(parent, defaultDataDirectory), 0o755))
 
 		worktree := filepath.Join(parent, "worktree")
@@ -417,7 +480,7 @@ func TestConfig_setDefaults(t *testing.T) {
 
 		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, defaultDataDirectory))
 		require.NoError(t, err)
-		require.NotEqual(t, strayEval, gotEval, "must not adopt parent .crush")
+		require.NotEqual(t, strayEval, gotEval, "must not adopt parent .harness")
 
 		subEval, err := filepath.EvalSymlinks(sub)
 		require.NoError(t, err)
@@ -857,7 +920,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "glob", "ls", "question", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "harness_info", "harness_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "glob", "ls", "question", "sourcegraph", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -883,7 +946,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "bash", "crush_info", "crush_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "bash", "harness_info", "harness_logs", "job_output", "job_kill", "download", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "agentic_fetch", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -1882,7 +1945,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 
 func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 	t.Run("sets option from environment variable", func(t *testing.T) {
-		t.Setenv("CRUSH_DISABLE_DEFAULT_PROVIDERS", "true")
+		t.Setenv("HARNESS_DISABLE_DEFAULT_PROVIDERS", "true")
 
 		cfg := &Config{}
 		cfg.setDefaults("/tmp", "")
@@ -1905,7 +1968,7 @@ func TestConfig_setDefaultsDisableDefaultProvidersEnvVar(t *testing.T) {
 func TestConfig_configureSelectedModels(t *testing.T) {
 	t.Run("reload mode should not persist fallback defaults", func(t *testing.T) {
 		dir := t.TempDir()
-		globalPath := filepath.Join(dir, "crush.json")
+		globalPath := filepath.Join(dir, "harness.yaml")
 		require.NoError(t, os.WriteFile(globalPath, []byte(`{"models":{"large":{"provider":"ghost","model":"missing"}}}`), 0o600))
 
 		knownProviders := []catwalk.Provider{
@@ -2109,7 +2172,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 	})
 	t.Run("resolve and persist fallback under writeMu does not deadlock", func(t *testing.T) {
 		dir := t.TempDir()
-		globalPath := filepath.Join(dir, "crush.json")
+		globalPath := filepath.Join(dir, "harness.yaml")
 		require.NoError(t, os.WriteFile(globalPath, []byte(`{}`), 0o600))
 
 		knownProviders := []catwalk.Provider{

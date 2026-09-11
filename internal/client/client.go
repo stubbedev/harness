@@ -13,16 +13,16 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/server"
 	"github.com/google/uuid"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/server"
 )
 
 // DummyHost is used to satisfy the http.Client's requirement for a URL.
-const DummyHost = "api.crush.localhost"
+const DummyHost = "api.harness.localhost"
 
-// Client represents an RPC client connected to a Crush server.
+// Client represents an RPC client connected to a Harness server.
 type Client struct {
 	h        *http.Client
 	path     string

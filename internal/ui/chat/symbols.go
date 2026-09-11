@@ -3,9 +3,9 @@ package chat
 import (
 	"encoding/json"
 
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // SymbolsToolMessageItem is a message item that represents a symbols tool call.

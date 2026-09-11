@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 func newTestModelGroup(t *testing.T, providerID, providerName string, modelNames ...string) ModelGroup {

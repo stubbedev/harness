@@ -3,14 +3,14 @@ package model
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/chat"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
-	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/ui/chat"
+	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/dialog"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // prismWorkspace is a minimal [workspace.Workspace] stub providing the

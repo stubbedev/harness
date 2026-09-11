@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/db"
+	"github.com/stubbedev/harness/internal/history"
+	"github.com/stubbedev/harness/internal/session"
 )
 
 // newTestAppWithHistory wires a real session.Service and history.Service

@@ -6,9 +6,9 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy/providers/openaicompat"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/discover"
 )
 
 // Title generation reuses getProviderOptions (per PR #3717 review), so

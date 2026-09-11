@@ -9,10 +9,10 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/proto"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/oauth"
+	"github.com/stubbedev/harness/internal/proto"
 )
 
 // captureClient returns a Client that talks to the given test server,

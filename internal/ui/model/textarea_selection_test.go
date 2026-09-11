@@ -4,10 +4,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/ui/attachments"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/ui/attachments"
+	"github.com/stubbedev/harness/internal/ui/dialog"
 )
 
 func newSelectionTestUI() *UI {

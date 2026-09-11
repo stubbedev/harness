@@ -6,26 +6,38 @@ On Windows the session falls back to the mvdan/sh interpreter; interactive progr
 
 <the_session>
 - One terminal session lives for the whole conversation. Shell state persists across calls: working directory (cd), exported variables, activated venvs/direnv, and the sudo credential all stick.
+- While an interactive program is holding that session, a command opens a second one instead of being typed into the program — like a second terminal tab. The response says when that happened; the second shell is separate, so it does not have the first one's cd, exports or activated environments. Keystrokes (`input`, `keys`) and polls always go to the session with the program in it.
 - It is a full terminal: anything you could run interactively as a human works here — editors (vim, nvim), TUIs (htop, lazygit, k9s), REPLs (python, psql, node), pagers, ssh, password prompts, watch commands. Do not hesitate to launch them; never claim they are impossible here.
 - Aliases are stripped at startup (unalias -a), so commands run with their standard meanings. Functions and environment from the user's rc files remain.
 </the_session>
 
 <calling_patterns>
 1. Run a command: set `command`. The response reports the exit code and the command's output (ANSI styling stripped, echoed commands removed).
-2. Interact with a running program: set `input` (leave command empty). It sends raw keystrokes to whatever is in the terminal: answer a prompt ("y\n"), type into an editor ("i" to enter insert mode, "\x1b" then ":wq\n" to save and quit in vim), drive menus. Append \n to submit a line.
-3. Check on something: leave both empty to poll for new output (watching a build, or seeing what a program printed after it exited on its own).
-4. Commands still running when the wait budget expires return "Still running" with the output so far — the program is NOT dead. Continue with `input`, poll, or send ctrl-c ("\x03") to stop it.
+2. Type into a running program: set `input` (leave command empty). Raw keystrokes go to whatever is in the terminal: answer a prompt ("y\n"), type into an editor ("i" then the text), drive menus. Append \n to submit a line.
+3. Press keys: set `keys` — a comma-separated list of key names sent in order ("ctrl+c", "escape, :, w, q, enter", "down, down, enter"). Prefer this over escape codes in `input` for anything that is not literal text: enter, tab, backtab, escape, space, backspace, delete, up, down, left, right, home, end, pageup, pagedown, insert, f1-f12, and any ctrl+letter. Single characters in the list are typed literally.
+4. Check on something: leave everything empty to poll (watching a build, re-reading a TUI's screen, seeing what a program printed after it exited on its own).
+5. Resize: set `resize` to "COLSxROWS" when a full-screen program needs more room. The size sticks for the session.
+6. Commands still running when the wait budget expires return "Still running" with the output so far — the program is NOT dead. Continue with `input`/`keys`, poll, or send ctrl+c to stop it.
 </calling_patterns>
 
+<full_screen_programs>
+Editors, pagers and TUIs (nvim, less, htop, lazygit, k9s, git log without --no-pager) take over the terminal. The response then says so and shows a **rendered screen** — the {{ .DefaultCols }}x{{ .DefaultRows }} grid as a person would see it, not a stream of output:
+
+- There is no exit code until the program quits. That is expected, not a failure, and the program is still there between calls.
+- Drive it with `keys`/`input`, then read the screen the response returns; poll to see it again. An unchanged screen is reported as unchanged instead of being resent.
+- Quit when you are done with it: "q" for pagers and most TUIs, "escape, :, q, !, enter" for vim/nvim, ctrl+c as the fallback.
+- A screen is one screenful: a full-screen program redraws instead of scrolling, so anything it has scrolled past is gone. Scroll inside it (pageup/pagedown, ctrl+d) or `resize` bigger. Ordinary command output is not limited this way — that comes from the session's stream and keeps every line, however far it scrolled.
+</full_screen_programs>
+
 <execution_steps>
-1. Security Check: Banned commands ({{ .BannedCommands }}) return error - explain to user. Safe read-only commands execute without prompts
+1. Security Check: these commands are refused in detached background shells ({{ .BannedCommands }}) - run them in the terminal session instead, where they work. Safe read-only commands execute without a permission prompt
 2. Long commands: raise `auto_background_after` (seconds) instead of guessing; or use run_in_background
-3. Output Processing: Truncate if exceeds {{ .MaxOutputLength }} characters
+3. Output Processing: Truncate if exceeds {{ .MaxOutputLength }} characters, keeping a short head and a long tail (where build and test failures print)
 </execution_steps>
 
 <usage_notes>
 - The sudo credential stays valid on the session's terminal after the first authentication — later sudo calls in the same session run without another password
-- If sudo asks for a password, the user is prompted through a masked dialog in the Crush UI; wait for the command to finish, never try to type the password yourself
+- If sudo asks for a password, the user is prompted through a masked dialog in the Harness UI; wait for the command to finish, never try to type the password yourself
 - Multiline commands and heredocs work (send them via command)
 - IMPORTANT: Use Grep/Glob/Agent tools instead of 'find'/'grep' for code search. Use View/LS tools instead of 'cat'/'head'/'tail'/'ls' for file reading
 - Chain with ';' or '&&', avoid newlines except in quoted strings
@@ -88,14 +100,14 @@ When user asks to create git commit:
 Commit message here.
 
 {{ if .Attribution.GeneratedWith }}
-💘 Generated with Crush
+💘 Generated with Harness
 {{ end}}
 {{if eq .Attribution.TrailerStyle "assisted-by" }}
 
-Assisted-by: Crush:{{ .ModelID }}
+Assisted-by: Harness:{{ .ModelID }}
 {{ else if eq .Attribution.TrailerStyle "co-authored-by" }}
 
-Co-Authored-By: Crush <crush@charm.land>
+Co-Authored-By: Harness <noreply@github.com>
 {{ end }}
 EOF
 )"
@@ -149,7 +161,7 @@ When user asks you to create or update a PR:
 <summary>
 
 {{ if .Attribution.GeneratedWith -}}
-💘 Generated with Crush
+💘 Generated with Harness
 {{- end }}
 
 EOF
@@ -170,7 +182,9 @@ Bad: cd /foo/bar && pytest tests
 Good: pytest /foo/bar/tests
 Bad: cd /foo/bar && pytest tests
 
-Interactive: htop - poll with empty params to watch; send "q" via input to quit
-Interactive: nvim file.go - input "i" to type, escape then ":wq" + newline to save and quit
+Interactive: htop - poll with empty params to watch its screen; keys "q" to quit
+Interactive: nvim file.go - input "i" then the text, keys "escape, :, w, q, enter" to save and quit
+Interactive: less/git log - keys "pagedown" to page, keys "q" to quit before running anything else
+Interrupt: keys "ctrl+c" (never send \x03 as input)
 Password prompt (sudo apt install foo) - just run it; the user authenticates via a masked dialog and the command continues
 </examples>

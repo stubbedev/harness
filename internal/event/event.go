@@ -1,46 +1,47 @@
+// Package event is the seam where usage events used to be reported to a
+// remote analytics service. This fork sends nothing: every reporting entry
+// point below is inert, and no network client is constructed or configured.
+//
+// The API is kept so the call sites throughout the app — which mark session,
+// prompt, and tool activity — stay in place and continue to document what the
+// app considers notable. If reporting is ever wanted again, it belongs behind
+// send, Error, and Alias, and behind an explicit opt-in.
+//
+// GetID survives because it is not telemetry: it identifies the machine to
+// providers that rate-limit per device (see the x-harness-id request header).
 package event
 
 import (
-	"fmt"
-	"log/slog"
 	"os"
-	"path/filepath"
-	"reflect"
-	"runtime"
-	"time"
-
-	"github.com/charmbracelet/crush/internal/version"
-	"github.com/posthog/posthog-go"
 )
 
 const (
-	endpoint = "https://data.charm.land"
-	key      = "phc_4zt4VgDWLqbYnJYEwLRxFoaTL2noNrQij0C6E8k3I0V"
-
 	nonInteractiveAttrName       = "NonInteractive"
 	nonInteractiveNestedAttrName = "NonInteractiveNested"
 	continueSessionByIDAttrName  = "ContinueSessionByID"
 	continueLastSessionAttrName  = "ContinueLastSession"
 )
 
-var (
-	client posthog.Client
+// baseProps records how the app was invoked. Nothing transmits it; the
+// setters below are kept so callers do not have to special-case a build
+// without reporting.
+var baseProps = properties{
+	nonInteractiveAttrName:       false,
+	nonInteractiveNestedAttrName: false,
+}
 
-	baseProps = posthog.NewProperties().
-			Set("GOOS", runtime.GOOS).
-			Set("GOARCH", runtime.GOARCH).
-			Set("TERM", os.Getenv("TERM")).
-			Set("SHELL", filepath.Base(os.Getenv("SHELL"))).
-			Set("Version", version.Version).
-			Set("GoVersion", runtime.Version()).
-			Set(nonInteractiveAttrName, false).
-			Set(nonInteractiveNestedAttrName, false)
-)
+// properties is the shape event data took when it was reported.
+type properties map[string]any
+
+func (p properties) Set(key string, value any) properties {
+	p[key] = value
+	return p
+}
 
 func SetNonInteractive(nonInteractive bool) {
 	baseProps = baseProps.
 		Set(nonInteractiveAttrName, nonInteractive).
-		Set(nonInteractiveNestedAttrName, nonInteractive && os.Getenv("CRUSH") == "1")
+		Set(nonInteractiveNestedAttrName, nonInteractive && os.Getenv("HARNESS") == "1")
 }
 
 func SetContinueBySessionID(continueBySessionID bool) {
@@ -51,103 +52,28 @@ func SetContinueLastSession(continueLastSession bool) {
 	baseProps = baseProps.Set(continueLastSessionAttrName, continueLastSession)
 }
 
+// Init resolves the machine identifier. It opens no connections.
 func Init() {
-	c, err := posthog.NewWithConfig(key, posthog.Config{
-		Endpoint:        endpoint,
-		Logger:          logger{},
-		ShutdownTimeout: 500 * time.Millisecond,
-	})
-	if err != nil {
-		slog.Error("Failed to initialize PostHog client", "error", err)
-	}
-	client = c
 	distinctId = getDistinctId()
 }
 
-func GetID() string { return distinctId }
-
-func Alias(userID string) {
-	if client == nil || distinctId == fallbackId || distinctId == "" || userID == "" {
-		return
+// GetID returns the machine identifier, resolving it on first use so callers
+// that never call Init still get a stable value.
+func GetID() string {
+	if distinctId == "" {
+		distinctId = getDistinctId()
 	}
-	if err := client.Enqueue(posthog.Alias{
-		DistinctId: distinctId,
-		Alias:      userID,
-	}); err != nil {
-		slog.Error("Failed to enqueue PostHog alias event", "error", err)
-		return
-	}
-	slog.Info("Aliased in PostHog", "machine_id", distinctId, "user_id", userID)
+	return distinctId
 }
 
-// send logs an event to PostHog with the given event name and properties.
-func send(event string, props ...any) {
-	if client == nil {
-		return
-	}
-	err := client.Enqueue(posthog.Capture{
-		DistinctId: distinctId,
-		Event:      event,
-		Properties: pairsToProps(props...).Merge(baseProps),
-	})
-	if err != nil {
-		slog.Error("Failed to enqueue PostHog event", "event", event, "props", props, "error", err)
-		return
-	}
-}
+// Alias is inert: there is no analytics identity to link an account to.
+func Alias(string) {}
 
-// Error logs an error event to PostHog with the error type and message.
-func Error(errToLog any, props ...any) {
-	if client == nil || distinctId == "" || errToLog == nil {
-		return
-	}
+// send is inert. Callers in all.go describe app activity for future use.
+func send(string, ...any) {}
 
-	exception := posthog.NewDefaultException(
-		time.Now(),
-		distinctId,
-		reflect.TypeOf(errToLog).String(),
-		fmt.Sprintf("%v", errToLog),
-	)
-	if exception.Properties == nil {
-		exception.Properties = posthog.NewProperties()
-	}
-	exception.Properties = exception.Properties.Merge(pairsToProps(props...))
+// Error is inert. Errors are surfaced through the logs instead.
+func Error(any, ...any) {}
 
-	if posthogErr := client.Enqueue(exception); posthogErr != nil {
-		slog.Error("Failed to enqueue PostHog error", "err", errToLog, "props", props, "posthogErr", posthogErr)
-		return
-	}
-}
-
-func Flush() {
-	if client == nil {
-		return
-	}
-	if err := client.Close(); err != nil {
-		slog.Error("Failed to flush PostHog events", "error", err)
-	}
-}
-
-func pairsToProps(props ...any) posthog.Properties {
-	p := posthog.NewProperties()
-
-	if !isEven(len(props)) {
-		slog.Error("Event properties must be provided as key-value pairs", "props", props)
-		return p
-	}
-
-	for i := 0; i < len(props); i += 2 {
-		key, ok := props[i].(string)
-		if !ok {
-			slog.Error("Event property key must be a string", "key", props[i], "index", i)
-			continue
-		}
-		value := props[i+1]
-		p = p.Set(key, value)
-	}
-	return p
-}
-
-func isEven(n int) bool {
-	return n%2 == 0
-}
+// Flush is inert: nothing is buffered.
+func Flush() {}

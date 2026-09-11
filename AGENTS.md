@@ -1,15 +1,15 @@
-# Crush Development Guide
+# Harness Development Guide
 
 ## Project Overview
 
-Crush is a terminal-based AI coding assistant built in Go by
-[Charm](https://charm.land). It connects to LLMs and gives them tools to read,
-write, and execute code. It supports multiple providers (Anthropic, OpenAI,
-Gemini, Bedrock, Copilot, Hyper, MiniMax, Vercel, and more), integrates with
-LSPs for code intelligence, and supports extensibility via MCP servers and
-agent skills.
+Harness is a terminal-based AI coding assistant written in Go, forked from
+[Crush](https://github.com/charmbracelet/crush) and maintained independently.
+It connects to LLMs and gives them tools to read, write, and execute code. It
+supports multiple providers (Anthropic, OpenAI, Gemini, Bedrock, Copilot,
+MiniMax, Vercel, and more), integrates with LSPs for code intelligence, and
+supports extensibility via MCP servers and agent skills.
 
-The module path is `github.com/charmbracelet/crush`.
+The module path is `github.com/stubbedev/harness`.
 
 ## Architecture
 
@@ -20,9 +20,9 @@ internal/
   cmd/                             CLI commands (root, run, login, models, stats, sessions)
   config/
     config.go                      Config struct, context file paths, agent definitions
-    load.go                        crushrc and crush.json loading and validation
+    load.go                        YAML config discovery, loading and validation
+    yaml.go                        YAML <-> JSON conversion at the file boundary
     provider.go                    Provider configuration and model resolution
-  shellconfig/                      Bash-powered config format (crushrc builtins)
   agent/
     agent.go                       SessionAgent: runs LLM conversations per session
     coordinator.go                 Coordinator: manages named agents ("coder", "task")
@@ -34,7 +34,7 @@ internal/
   hooks/                           Hook engine: runs user shell commands on hook events
     hooks.go                       Decision types, aggregation logic, event constants
     runner.go                      Parallel hook execution, timeout, dedup
-    input.go                       Stdin payload builder, env vars, stdout parsing (Crush + Claude Code compat)
+    input.go                       Stdin payload builder, env vars, stdout parsing (Harness + Claude Code compat)
   session/session.go               Session CRUD backed by SQLite
   message/                         Message model and content types
   db/                              SQLite via sqlc, with migrations
@@ -59,7 +59,7 @@ internal/
 - **`charm.land/bubbletea/v2`**: TUI framework powering the interactive UI.
 - **`charm.land/lipgloss/v2`**: Terminal styling.
 - **`charm.land/glamour/v2`**: Markdown rendering in the terminal.
-- **`charm.land/catwalk`**: Snapshot/golden-file testing for TUI components.
+- **`charm.land/catwalk`**: Upstream catalog of models and providers.
 - **`sqlc`**: Generates Go code from SQL queries in `internal/db/sql/`.
 
 ### Key Patterns
@@ -69,23 +69,22 @@ internal/
   `.md` description file in `internal/agent/tools/`.
 - **System prompts are Go templates**: `internal/agent/templates/*.md.tpl`
   with runtime data injected.
-- **Context files**: Crush reads AGENTS.md, CRUSH.md, CLAUDE.md, GEMINI.md
+- **Context files**: Harness reads AGENTS.md, HARNESS.md, CLAUDE.md, GEMINI.md
   (and `.local` variants) from the working directory for project-specific
   instructions.
-- **Bash config format**: Crush's primary config format is `crushrc` — a
-  Bash script using builtins (`provider`, `model`, `mcp`, `lsp`,
-  `permissions`, `hook`, `options`) to define config. `crush.json` is still
-  supported but is deprecated in favor of `crushrc` and may be removed in a
-  future release. Shell config files are discovered alongside JSON configs
-  and deep-merged through the same pipeline. Builtins are registered via
-  `shell.RegisterBuiltin` and gated by a `ConfigBuilder` on the context —
-  they are no-ops during normal bash tool execution. See
-  `internal/shellconfig/`.
+- **YAML config**: the only config format. Hand-written files are
+  `$XDG_CONFIG_HOME/harness/config.yaml` and a project `harness.yaml` /
+  `.harness.yaml`; Harness writes machine-owned state to `state.yaml` in the
+  global and workspace data directories. Files are converted to JSON at the
+  file boundary (`internal/config/yaml.go`) and everything downstream —
+  merging via go-jsons, struct tags, gjson/sjson reads and writes, the
+  generated schema — stays JSON. Selected string fields are shell-expanded at
+  load time by the resolver in `internal/config/resolve.go`.
 - **Persistence**: SQLite + sqlc. All queries live in `internal/db/sql/`,
   generated code in `internal/db/`. Migrations in `internal/db/migrations/`.
 - **Pub/sub**: `internal/pubsub` for decoupled communication between agent,
   UI, and services.
-- **Hooks**: User-defined shell commands in `crushrc` (or `crush.json`)
+- **Hooks**: User-defined shell commands in the config (`hooks:` block)
   that fire before tool execution. The engine (`internal/hooks/`) is
   independent of fantasy and agent — it takes inputs, runs commands,
   returns decisions. The `hookedTool` decorator in
@@ -241,6 +240,6 @@ func CharmtonePantera() Styles {
 returns a `quickStyleOpts` (plus an overrides function when the theme
 needs colors outside the token model), then register both in the
 `builtinThemes` / `builtinThemeOverrides` maps. Users select the theme
-via `options.tui.theme` (`option ui theme <name>` in crushrc); a
+via `options.tui.theme`, or the theme picker (alt+t) which writes it; a
 configured theme wins over the provider-based `ThemeForProvider`
 mapping.

@@ -3,7 +3,7 @@ package tools
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 )
 
 func TestInfoInlinesDefsRefs(t *testing.T) {

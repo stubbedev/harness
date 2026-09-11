@@ -3,7 +3,7 @@ package subagents
 import (
 	"charm.land/catwalk/pkg/catwalk"
 
-	"github.com/charmbracelet/crush/internal/config"
+	"github.com/stubbedev/harness/internal/config"
 )
 
 // Effort level constants — these are the catwalk ReasoningLevels values and

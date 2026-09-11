@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
 )
 
 func TestRefuseUnresolvedLarge_FailsWhenConfiguredMissesCatalog(t *testing.T) {
@@ -63,18 +63,18 @@ func TestResolvedLargeLine_DefaultVerbosity(t *testing.T) {
 		},
 	}
 
-	require.Equal(t, "crush run: openai/gpt-4o", resolvedLargeLine(cfg))
+	require.Equal(t, "harness run: openai/gpt-4o", resolvedLargeLine(cfg))
 }
 
 func TestResolvedLargeLine_ZeroValue(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, "crush run: model unresolved", resolvedLargeLine(nil))
-	require.Equal(t, "crush run: model unresolved", resolvedLargeLine(&config.Config{}))
-	require.Equal(t, "crush run: model unresolved", resolvedLargeLine(&config.Config{
+	require.Equal(t, "harness run: model unresolved", resolvedLargeLine(nil))
+	require.Equal(t, "harness run: model unresolved", resolvedLargeLine(&config.Config{}))
+	require.Equal(t, "harness run: model unresolved", resolvedLargeLine(&config.Config{
 		Models: map[config.SelectedModelType]config.SelectedModel{},
 	}))
-	require.Equal(t, "crush run: model unresolved", resolvedLargeLine(&config.Config{
+	require.Equal(t, "harness run: model unresolved", resolvedLargeLine(&config.Config{
 		Models: map[config.SelectedModelType]config.SelectedModel{
 			config.SelectedModelTypeLarge: {},
 		},

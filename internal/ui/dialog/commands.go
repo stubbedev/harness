@@ -9,12 +9,12 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/list"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/stubbedev/harness/internal/commands"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/list"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // CommandsID is the identifier for the commands dialog.
@@ -454,11 +454,17 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "subagents", "Subagents", "ctrl+x", ActionOpenDialog{SubagentsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", "alt+t", ActionOpenDialog{ThemesID}),
 	}
 
 	// Only show compact command if there's an active session
 	if c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+	}
+
+	// Only show the export command when there is a conversation to export
+	if c.hasSession {
+		commands = append(commands, NewCommandItem(c.com.Styles, "export_conversation", "Export Conversation", "ctrl+shift+e", ActionExportConversation{SessionID: c.sessionID}).WithAliases("export", "transcript"))
 	}
 
 	// Only show the save summary command if the session already has one

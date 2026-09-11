@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	mcp "github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/ui/common"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
+	mcp "github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/ui/common"
 )
 
 // modelInfo renders the current model information including reasoning

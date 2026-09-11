@@ -8,10 +8,10 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 type mockBashPermissionService struct {

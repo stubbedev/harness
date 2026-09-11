@@ -13,14 +13,14 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/agent"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/backend"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/agent"
+	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/backend"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 // scriptedCoordinator is an agent.Coordinator stub that mimics the

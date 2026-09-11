@@ -6,10 +6,10 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/tree"
-	"github.com/charmbracelet/crush/internal/agent"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/stubbedev/harness/internal/agent"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // -----------------------------------------------------------------------------

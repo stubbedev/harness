@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 // RunningEntry holds the live state of a single running sub-agent.

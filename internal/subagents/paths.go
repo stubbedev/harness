@@ -1,8 +1,8 @@
 package subagents
 
 import (
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/fsext"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/fsext"
 )
 
 // InGlobalDir reports whether path lies inside one of the global (user-scope)

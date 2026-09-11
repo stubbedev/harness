@@ -6,8 +6,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
-	uistyles "github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
+	uistyles "github.com/stubbedev/harness/internal/ui/styles"
 )
 
 func TestParentBreadcrumbLine_EmptyTitle(t *testing.T) {

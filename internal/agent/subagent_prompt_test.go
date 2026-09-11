@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/subagents"
 )
 
 // newTestSkill constructs a minimal *skills.Skill for use in unit tests.

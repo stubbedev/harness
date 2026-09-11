@@ -21,17 +21,17 @@ func TestGlobalSubagentsDirs(t *testing.T) {
 		require.NotEmpty(t, dirs)
 	})
 
-	t.Run("contains path ending with crush/subagents or .config/crush/subagents", func(t *testing.T) {
+	t.Run("contains path ending with harness/subagents or .config/harness/subagents", func(t *testing.T) {
 		t.Parallel()
 		found := false
 		for _, d := range dirs {
-			if strings.HasSuffix(d, filepath.Join("crush", "subagents")) ||
-				strings.HasSuffix(d, filepath.Join(".config", "crush", "subagents")) {
+			if strings.HasSuffix(d, filepath.Join("harness", "subagents")) ||
+				strings.HasSuffix(d, filepath.Join(".config", "harness", "subagents")) {
 				found = true
 				break
 			}
 		}
-		require.True(t, found, "expected a path ending with crush/subagents or .config/crush/subagents; got %v", dirs)
+		require.True(t, found, "expected a path ending with harness/subagents or .config/harness/subagents; got %v", dirs)
 	})
 
 	t.Run("contains path ending with .agents/subagents", func(t *testing.T) {
@@ -73,9 +73,9 @@ func TestProjectSubagentsDir(t *testing.T) {
 		require.Contains(t, dirs, filepath.Join(workingDir, ".agents", "subagents"))
 	})
 
-	t.Run("contains .crush/subagents under workingDir", func(t *testing.T) {
+	t.Run("contains .harness/subagents under workingDir", func(t *testing.T) {
 		t.Parallel()
-		require.Contains(t, dirs, filepath.Join(workingDir, ".crush", "subagents"))
+		require.Contains(t, dirs, filepath.Join(workingDir, ".harness", "subagents"))
 	})
 
 	t.Run("does not contain .claude paths", func(t *testing.T) {
@@ -122,16 +122,16 @@ func TestSetDefaults_SubagentsPathsPopulated(t *testing.T) {
 		require.True(t, found, "expected at least one path ending in .agents/subagents; got %v", cfg.Options.SubagentsPaths)
 	})
 
-	t.Run("contains a path ending in .crush/subagents", func(t *testing.T) {
+	t.Run("contains a path ending in .harness/subagents", func(t *testing.T) {
 		t.Parallel()
 		found := false
 		for _, p := range cfg.Options.SubagentsPaths {
-			if strings.HasSuffix(p, filepath.Join(".crush", "subagents")) {
+			if strings.HasSuffix(p, filepath.Join(".harness", "subagents")) {
 				found = true
 				break
 			}
 		}
-		require.True(t, found, "expected at least one path ending in .crush/subagents; got %v", cfg.Options.SubagentsPaths)
+		require.True(t, found, "expected at least one path ending in .harness/subagents; got %v", cfg.Options.SubagentsPaths)
 	})
 
 	t.Run("no cross-contamination with skills paths", func(t *testing.T) {
@@ -216,30 +216,30 @@ func TestOptions_SubagentsPaths_JSONRoundtrip(t *testing.T) {
 	require.Equal(t, original.DisabledSubagents, restored.DisabledSubagents)
 }
 
-// TestGlobalSubagentsDirs_EnvOverride verifies that CRUSH_SUBAGENTS_DIR, when
+// TestGlobalSubagentsDirs_EnvOverride verifies that HARNESS_SUBAGENTS_DIR, when
 // set to a non-empty value, causes GlobalSubagentsDirs to return exactly that
-// single path, mirroring the CRUSH_SKILLS_DIR override on GlobalSkillsDirs.
+// single path, mirroring the HARNESS_SKILLS_DIR override on GlobalSkillsDirs.
 // When unset or empty, the existing default list is returned.
 func TestGlobalSubagentsDirs_EnvOverride(t *testing.T) {
 	override := t.TempDir()
-	t.Setenv("CRUSH_SUBAGENTS_DIR", override)
+	t.Setenv("HARNESS_SUBAGENTS_DIR", override)
 
 	dirs := GlobalSubagentsDirs()
 	require.Equal(t, []string{override}, dirs,
-		"CRUSH_SUBAGENTS_DIR must fully replace the default subagents dirs")
+		"HARNESS_SUBAGENTS_DIR must fully replace the default subagents dirs")
 
-	t.Setenv("CRUSH_SUBAGENTS_DIR", "")
+	t.Setenv("HARNESS_SUBAGENTS_DIR", "")
 
 	dirs = GlobalSubagentsDirs()
 	found := false
 	for _, d := range dirs {
-		if strings.HasSuffix(d, filepath.Join("crush", "subagents")) {
+		if strings.HasSuffix(d, filepath.Join("harness", "subagents")) {
 			found = true
 			break
 		}
 	}
 	require.True(t, found,
-		"expected the default list (a path ending in crush/subagents) when CRUSH_SUBAGENTS_DIR is empty; got %v", dirs)
+		"expected the default list (a path ending in harness/subagents) when HARNESS_SUBAGENTS_DIR is empty; got %v", dirs)
 }
 
 // gitInitTempDir resolves a fresh temp dir's symlinks (macOS reports
@@ -282,9 +282,9 @@ func TestProjectSubagentsDir_MonorepoGitRoot(t *testing.T) {
 
 	expected := []string{
 		filepath.Join(root, ".agents", "subagents"),
-		filepath.Join(root, ".crush", "subagents"),
+		filepath.Join(root, ".harness", "subagents"),
 		filepath.Join(sub, ".agents", "subagents"),
-		filepath.Join(sub, ".crush", "subagents"),
+		filepath.Join(sub, ".harness", "subagents"),
 	}
 	require.Equal(t, expected, dirs)
 }
@@ -301,7 +301,7 @@ func TestProjectSubagentsDir_AtGitRoot(t *testing.T) {
 
 	expected := []string{
 		filepath.Join(root, ".agents", "subagents"),
-		filepath.Join(root, ".crush", "subagents"),
+		filepath.Join(root, ".harness", "subagents"),
 	}
 	require.Equal(t, expected, dirs)
 }
@@ -319,7 +319,7 @@ func TestProjectSubagentsDir_OutsideGitRepo(t *testing.T) {
 
 	expected := []string{
 		filepath.Join(root, ".agents", "subagents"),
-		filepath.Join(root, ".crush", "subagents"),
+		filepath.Join(root, ".harness", "subagents"),
 	}
 	require.Equal(t, expected, dirs)
 }

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/home"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/home"
 )
 
 func TestLookupClosest(t *testing.T) {

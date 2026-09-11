@@ -86,6 +86,11 @@ type KeyMap struct {
 	ToggleYolo    key.Binding
 	ParentSession key.Binding
 	Subagents     key.Binding
+	// ExportConversation writes the current session transcript to a
+	// markdown file.
+	ExportConversation key.Binding
+	// Themes opens the color theme picker.
+	Themes key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -129,6 +134,17 @@ func DefaultKeyMap() KeyMap {
 		Subagents: key.NewBinding(
 			key.WithKeys("ctrl+x"),
 			key.WithHelp("ctrl+x", "subagents"),
+		),
+		ExportConversation: key.NewBinding(
+			key.WithKeys("ctrl+shift+e"),
+			key.WithHelp("ctrl+shift+e", "export conversation"),
+		),
+		// The ctrl+ space is crowded (ctrl+t already toggles tasks) and the
+		// textarea claims most of what is left, so the theme picker sits on
+		// alt+t.
+		Themes: key.NewBinding(
+			key.WithKeys("alt+t"),
+			key.WithHelp("alt+t", "themes"),
 		),
 	}
 

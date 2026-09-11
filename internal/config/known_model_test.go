@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/csync"
 )
 
 func newConfigWithProviders(t *testing.T, providers map[string][]string) *Config {

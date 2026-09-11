@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/env"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/env"
 )
 
 // fakeExpander returns a canned value/error for the last passed value and

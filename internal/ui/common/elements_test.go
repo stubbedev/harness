@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 func TestFormatTokensAndCostPrefixesEstimatedUsage(t *testing.T) {

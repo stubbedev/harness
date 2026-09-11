@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/history"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 type mockPermissionService struct {

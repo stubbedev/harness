@@ -9,15 +9,15 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/util"
+	"github.com/stubbedev/harness/internal/commands"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/oauth"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/util"
 )
 
 // ActionClose is a message to close the current dialog.
@@ -68,10 +68,29 @@ type (
 	ActionSaveSummary struct {
 		SessionID string
 	}
+	// ActionExportConversation is a message to export the whole session
+	// transcript to a markdown file in the data directory.
+	ActionExportConversation struct {
+		SessionID string
+	}
 	// ActionSelectReasoningEffort is a message indicating a reasoning effort
 	// has been selected.
 	ActionSelectReasoningEffort struct {
 		Effort string
+	}
+	// ActionPreviewTheme is a message indicating the theme picker moved to
+	// a new entry. The named theme is applied to the whole UI right away so
+	// the user can see it, but not persisted: the picker restores the
+	// previous theme if it closes without a selection. Cmd carries any
+	// pending input command so previewing never swallows it.
+	ActionPreviewTheme struct {
+		Name string
+		Cmd  tea.Cmd
+	}
+	// ActionSelectTheme is a message indicating a theme has been confirmed
+	// in the theme picker and should be persisted.
+	ActionSelectTheme struct {
+		Name string
 	}
 	ActionPermissionResponse struct {
 		Permission permission.PermissionRequest

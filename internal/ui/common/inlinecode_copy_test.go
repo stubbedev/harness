@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"charm.land/glamour/v2"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // TestRenderedInlineCodeHasNoVisibleBackticks guards the display side of the

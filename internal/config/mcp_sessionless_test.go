@@ -3,8 +3,8 @@ package config
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/env"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/env"
 )
 
 func TestMCPConfig_IsSessionless(t *testing.T) {

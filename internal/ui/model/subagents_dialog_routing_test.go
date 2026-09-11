@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/ui/dialog"
 )
 
 // recordingDialog stands in for a real dialog, recording every message routed

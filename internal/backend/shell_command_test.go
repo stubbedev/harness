@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/db"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/session"
 )
 
 func TestRunShellCommand_SkipsPersistenceForMissingSession(t *testing.T) {

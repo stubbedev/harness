@@ -3,9 +3,9 @@ package model
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/ui/dialog"
 )
 
 // newTestUIForPermissions builds a UI with a chat, dialog overlay, and

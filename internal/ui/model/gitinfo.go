@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/ui/styles"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 const (
@@ -69,7 +69,7 @@ func gitHeaderParts(t *styles.Styles, dir string) string {
 // gitStatusInfo returns the cached status for dir, refreshing it
 // asynchronously when the TTL has expired. The first frames of a session
 // may render without git state; it appears once the background poll
-// lands. The cache is keyed by nothing but time: Crush draws a single
+// lands. The cache is keyed by nothing but time: Harness draws a single
 // working directory at a time, and a workspace switch falls back to the
 // stale string for at most one TTL.
 func gitStatusInfo(dir string) string {

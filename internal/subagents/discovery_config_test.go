@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/skills"
 )
 
 // TestDiscoveryConfigFromStore_FieldPassthrough verifies that
@@ -60,11 +60,11 @@ func TestDiscoveryConfigFromStore_ResolverExpandsEnvVar(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(hostHome, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(hostHome, ".local", "share"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(hostHome, ".cache"))
-	t.Setenv("CRUSH_SKILLS_DIR", t.TempDir())
-	t.Setenv("CRUSH_SUBAGENTS_DIR", t.TempDir())
+	t.Setenv("HARNESS_SKILLS_DIR", t.TempDir())
+	t.Setenv("HARNESS_SUBAGENTS_DIR", t.TempDir())
 
 	varDir := t.TempDir()
-	t.Setenv("CRUSH_TEST_SUBAGENT_VAR", varDir)
+	t.Setenv("HARNESS_TEST_SUBAGENT_VAR", varDir)
 
 	workingDir := t.TempDir()
 	store, err := config.Init(workingDir, "", false)
@@ -73,7 +73,7 @@ func TestDiscoveryConfigFromStore_ResolverExpandsEnvVar(t *testing.T) {
 	got := DiscoveryConfigFromStore(store, nil)
 	require.NotNil(t, got.Resolver)
 
-	resolved, err := got.Resolver("$CRUSH_TEST_SUBAGENT_VAR")
+	resolved, err := got.Resolver("$HARNESS_TEST_SUBAGENT_VAR")
 	require.NoError(t, err)
 	require.Equal(t, varDir, resolved)
 }

@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/ui/attachments"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/ui/attachments"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // finishedAssistantMessage builds an assistant message with text content and a

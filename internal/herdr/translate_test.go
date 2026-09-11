@@ -3,12 +3,12 @@ package herdr
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/assert"
+	"github.com/stubbedev/harness/internal/agent/notify"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 // Domain type translation.

@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/stubbedev/harness/internal/agent/notify"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 // Translate converts a pub/sub event (domain or proto) into a herdr

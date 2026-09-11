@@ -118,3 +118,55 @@ func TestSession_LongOutputTailPreserved(t *testing.T) {
 	require.Contains(t, out, "1999")
 	require.True(t, strings.Contains(strings.ReplaceAll(out, "\r", ""), "1\n2\n"))
 }
+
+func TestSessionScreenAndAltScreen(t *testing.T) {
+	s := startTestSession(t)
+
+	require.False(t, s.AltScreen())
+
+	require.NoError(t, s.Send([]byte("printf 'on the screen'\n")))
+	require.True(t, s.WaitForPattern(t.Context(), regexp.MustCompile("on the screen"), 5*time.Second))
+	require.Contains(t, s.Screen(), "on the screen")
+
+	// A program taking the alternate screen is visible as such, and the
+	// rendered screen follows it rather than the raw byte stream.
+	// The echoed command line arrives before the command runs, so wait
+	// on the emulator's state rather than on text that is also part of
+	// what was typed.
+	require.NoError(t, s.Send([]byte("printf '\\033[?1049h'; printf 'full screen app'\n")))
+	require.Eventually(t, s.AltScreen, 5*time.Second, 50*time.Millisecond)
+	require.Contains(t, s.Screen(), "full screen app")
+
+	require.NoError(t, s.Send([]byte("printf '\\033[?1049l'\n")))
+	require.Eventually(t, func() bool { return !s.AltScreen() }, 5*time.Second, 50*time.Millisecond)
+}
+
+func TestSessionResize(t *testing.T) {
+	s := startTestSession(t)
+
+	require.NoError(t, s.Resize(24, 80))
+	rows, cols := s.Size()
+	require.Equal(t, 24, rows)
+	require.Equal(t, 80, cols)
+
+	require.NoError(t, s.Send([]byte("printf '%s %s' \"$(tput lines)\" \"$(tput cols)\"\n")))
+	require.True(t, s.WaitForPattern(t.Context(), regexp.MustCompile(`24 80`), 5*time.Second))
+
+	// Out-of-range dimensions are clamped, never applied verbatim.
+	require.NoError(t, s.Resize(1, 5))
+	rows, cols = s.Size()
+	require.Equal(t, minRows, rows)
+	require.Equal(t, minCols, cols)
+}
+
+func TestDefaultSizeEnvOverride(t *testing.T) {
+	t.Setenv("HARNESS_PTY_ROWS", "42")
+	t.Setenv("HARNESS_PTY_COLS", "123")
+	rows, cols := DefaultSize()
+	require.Equal(t, 42, rows)
+	require.Equal(t, 123, cols)
+
+	t.Setenv("HARNESS_PTY_ROWS", "not a number")
+	rows, _ = DefaultSize()
+	require.Equal(t, DefaultRows, rows)
+}

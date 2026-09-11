@@ -43,7 +43,7 @@ tasks:
   build:
     desc: Run build
     vars:
-      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
+      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/stubbedev/harness/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
       - "go build -v {{if .RACE}}-race{{end}} {{.LDFLAGS}} ."
     sources:
@@ -53,13 +53,13 @@ tasks:
       - internal/agent/**/*.md.tpl
       - internal/agent/hyper/provider.json
     generates:
-      - crush{{exeExt}}
+      - harness{{exeExt}}
 
   run:
     desc: Run build
     cmds:
       - task: build
-      - "./crush{{exeExt}} {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
+      - "./harness{{exeExt}} {{.CLI_ARGS}} {{if .RACE}}2>race.log{{end}}"
 
   run:catwalk:
     desc: Run build with local Catwalk
@@ -67,17 +67,17 @@ tasks:
       CATWALK_URL: http://localhost:8080
     cmds:
       - task: build
-      - ./crush{{exeExt}} {{.CLI_ARGS}}
+      - ./harness{{exeExt}} {{.CLI_ARGS}}
 
   run:onboarding:
     desc: Run build with custom config to test onboarding
     env:
-      CRUSH_GLOBAL_DATA: tmp/onboarding/data
-      CRUSH_GLOBAL_CONFIG: tmp/onboarding/config
+      HARNESS_GLOBAL_DATA: tmp/onboarding/data
+      HARNESS_GLOBAL_CONFIG: tmp/onboarding/config
     cmds:
       - task: build
       - rm -rf tmp/onboarding
-      - ./crush{{exeExt}} {{.CLI_ARGS}}
+      - ./harness{{exeExt}} {{.CLI_ARGS}}
 
   test:
     desc: Run tests
@@ -115,14 +115,14 @@ tasks:
   dev:
     desc: Run with profiling enabled
     env:
-      CRUSH_PROFILE: true
+      HARNESS_PROFILE: true
     cmds:
       - go run .
 
   install:
     desc: Install the application
     vars:
-      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/charmbracelet/crush/internal/version.Version={{.VERSION}}"{{end}}'
+      LDFLAGS: '{{if .VERSION}}-ldflags="-X github.com/stubbedev/harness/internal/version.Version={{.VERSION}}"{{end}}'
     cmds:
       - task: fetch-tags
       - go install {{.LDFLAGS}} -v .
@@ -174,10 +174,8 @@ tasks:
         msg: Not on main branch
       - sh: "[ $(git status --porcelain=2 | wc -l) = 0 ]"
         msg: "Git is dirty"
-      - sh: 'gh run list --workflow build.yml --commit $(git rev-parse HEAD) --status success --json conclusion -q ".[0].conclusion" | grep -q success'
-        msg: "Test build for this commit failed or not present"
-      - sh: 'gh run list --workflow snapshot.yml --commit $(git rev-parse HEAD) --status success --json conclusion -q ".[0].conclusion" | grep -q success'
-        msg: "Snapshot build for this commit failed or not present"
+      - sh: 'gh run list --workflow ci.yml --commit $(git rev-parse HEAD) --status success --json conclusion -q ".[0].conclusion" | grep -q success'
+        msg: "CI for this commit failed or not present"
     cmds:
       - task: fetch-tags
       - git commit --allow-empty -m "{{.NEXT}}"

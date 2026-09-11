@@ -4,12 +4,12 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/question"
-	"github.com/charmbracelet/crush/internal/ui/attachments"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/question"
+	"github.com/stubbedev/harness/internal/ui/attachments"
+	"github.com/stubbedev/harness/internal/ui/dialog"
 )
 
 type attachmentClickWorkspace struct {

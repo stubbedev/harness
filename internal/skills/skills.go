@@ -14,10 +14,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/crush/internal/stringext"
+	"github.com/stubbedev/harness/internal/stringext"
 
 	"github.com/charlievieth/fastwalk"
-	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/stubbedev/harness/internal/pubsub"
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
 )

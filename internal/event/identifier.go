@@ -13,7 +13,9 @@ import (
 var distinctId string
 
 const (
-	hashKey    = "charm"
+	// hashKey salts the machine ID so the value the app sees cannot be
+	// traced back to the raw machine identifier.
+	hashKey    = "harness"
 	fallbackId = "unknown"
 )
 

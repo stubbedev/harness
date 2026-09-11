@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/charmbracelet/crush/internal/ui/common"
-	uistyles "github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/stubbedev/harness/internal/ui/common"
+	uistyles "github.com/stubbedev/harness/internal/ui/styles"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 func TestSubagentsInfo_Empty(t *testing.T) {

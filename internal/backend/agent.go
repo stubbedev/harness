@@ -5,12 +5,12 @@ import (
 	"errors"
 	"os"
 
-	"github.com/charmbracelet/crush/internal/agent"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/shell"
+	"github.com/stubbedev/harness/internal/agent"
+	"github.com/stubbedev/harness/internal/agent/notify"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/shell"
 )
 
 // SendMessage validates and accepts a prompt for the workspace's agent,
@@ -68,7 +68,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // On a non-cancel error it surfaces the failure to observers via a
 // notify.TypeAgentError notification (lossy, best-effort). That alone is
 // not a reliable terminal signal: the agent-event fan-in uses lossy
-// subscribers, so a `crush run` caller blocking on its RunID could hang
+// subscribers, so a `harness run` caller blocking on its RunID could hang
 // if the event is dropped. To guarantee termination, when msg.RunID is
 // non-empty and the coordinator did not already publish the run's
 // authoritative terminal RunComplete (e.g. the error was returned before

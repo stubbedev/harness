@@ -7,9 +7,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	"github.com/charmbracelet/crush/internal/ui/common"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/oauth/copilot"
+	"github.com/stubbedev/harness/internal/ui/common"
 )
 
 func NewOAuthCopilot(

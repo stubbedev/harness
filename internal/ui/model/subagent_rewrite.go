@@ -3,8 +3,8 @@ package model
 import (
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/ui/completions"
-	"github.com/charmbracelet/crush/internal/workspace"
+	"github.com/stubbedev/harness/internal/ui/completions"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // buildSubagentCaches projects the workspace's active subagents into the two

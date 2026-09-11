@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/hooks"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/hooks"
 )
 
 // TestReloadFromDisk_CompilesHookMatchers is a regression test for a bug
@@ -29,7 +29,7 @@ func TestReloadFromDisk_CompilesHookMatchers(t *testing.T) {
 
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
-	configPath := filepath.Join(workDir, "crush.json")
+	configPath := filepath.Join(workDir, "harness.yaml")
 	cfgJSON := `{
         "hooks": {
             "PreToolUse": [
@@ -82,7 +82,7 @@ func TestSetConfigField_AutoReload_PreservesHookMatcherFiltering(t *testing.T) {
 
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
-	configPath := filepath.Join(workDir, "crush.json")
+	configPath := filepath.Join(workDir, "harness.yaml")
 	cfgJSON := `{
         "hooks": {
             "PreToolUse": [

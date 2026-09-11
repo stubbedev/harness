@@ -3,8 +3,8 @@ package dialog
 import (
 	"testing"
 
-	uistyles "github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
+	uistyles "github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // TestRunningSubagentItem_RenderContainsName verifies that the rendered output

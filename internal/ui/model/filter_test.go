@@ -5,8 +5,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/ui/common"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/ui/common"
 )
 
 func newTestFilter(t *testing.T) (*Filter, *time.Time) {

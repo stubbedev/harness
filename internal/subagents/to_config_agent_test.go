@@ -3,8 +3,8 @@ package subagents
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
 )
 
 func TestToConfigAgent(t *testing.T) {

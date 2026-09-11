@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/session"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/session"
 )
 
 // summaryExportPath returns the file path where the given session's

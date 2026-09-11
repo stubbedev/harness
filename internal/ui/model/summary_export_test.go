@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/session"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/session"
 )
 
 func TestSummaryExportPath(t *testing.T) {
@@ -15,8 +15,8 @@ func TestSummaryExportPath(t *testing.T) {
 
 	require.Equal(
 		t,
-		filepath.Join(".crush", "summaries", "sess-123.md"),
-		summaryExportPath(".crush", "sess-123"),
+		filepath.Join(".harness", "summaries", "sess-123.md"),
+		summaryExportPath(".harness", "sess-123"),
 	)
 }
 

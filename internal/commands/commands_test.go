@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/skills"
 )
 
 func TestLoadFromSource_NonExistentDir(t *testing.T) {

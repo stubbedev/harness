@@ -3,8 +3,8 @@ package dialog
 import (
 	"testing"
 
-	uistyles "github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/stretchr/testify/require"
+	uistyles "github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // TestLibrarySubagentItem_RenderContainsName verifies that the rendered output
@@ -97,15 +97,15 @@ func TestLibrarySubagentItem_ErrorIDIsFilePath(t *testing.T) {
 
 	broken := NewLibrarySubagentItem(&st, LibrarySubagentItemData{
 		Name:     "reviewer",
-		FilePath: "/project/.crush/subagents/reviewer.md",
+		FilePath: "/project/.harness/subagents/reviewer.md",
 		Error:    "unknown model",
 	})
 	valid := NewLibrarySubagentItem(&st, LibrarySubagentItemData{
 		Name:     "reviewer",
-		FilePath: "/home/me/.config/crush/subagents/reviewer.md",
+		FilePath: "/home/me/.config/harness/subagents/reviewer.md",
 	})
 
-	require.Equal(t, "/project/.crush/subagents/reviewer.md", broken.ID())
+	require.Equal(t, "/project/.harness/subagents/reviewer.md", broken.ID())
 	require.Equal(t, "reviewer", valid.ID(), "valid rows keep the name as their identity")
 	require.NotEqual(t, valid.ID(), broken.ID())
 }

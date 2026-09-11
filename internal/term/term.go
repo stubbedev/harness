@@ -19,23 +19,36 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/hinshun/vt10x"
 )
 
 const (
 	// DefaultRows and DefaultCols are the terminal size the session is
 	// opened with. Generous width keeps build output from wrapping into
-	// unreadable columns.
-	DefaultRows = 50
-	DefaultCols = 200
+	// unreadable columns, and the extra rows give full-screen programs
+	// (editors, pagers, TUIs) enough room that their panes are legible
+	// in a rendered screen. Override per machine with HARNESS_PTY_ROWS
+	// and HARNESS_PTY_COLS.
+	DefaultRows = 80
+	DefaultCols = 280
+
+	// minRows/minCols/maxRows/maxCols bound the size an override or a
+	// Resize call can ask for; a degenerate grid breaks the emulator and
+	// an enormous one turns every screen read into a wall of blanks.
+	minRows, minCols = 4, 20
+	maxRows, maxCols = 400, 1000
 
 	// maxPending caps the undrained output buffer so a runaway process
-	// cannot grow memory without bound.
-	maxPending = 4 << 20 // 4 MiB
+	// cannot grow memory without bound. This buffer is the session's
+	// scrollback for ordinary output: everything a command printed is
+	// here, not just the lines the current size can show.
+	maxPending = 16 << 20 // 16 MiB
 )
 
 // Session is a persistent PTY running an interactive shell.
@@ -51,10 +64,20 @@ type Session struct {
 	lastData time.Time // last time output arrived
 	exited   bool
 	err      error
+
+	// emu is a headless terminal emulator fed the same bytes as pending.
+	// The raw stream is the right view of a normal command (it keeps
+	// everything, including output that scrolled past the screen), but
+	// it is unreadable for a full-screen program: cursor addressing and
+	// redraws only mean something once they have been applied to a grid.
+	// Screen renders that grid; AltScreen says which view to use.
+	emu        vt10x.Terminal
+	replies    *replyWriter
+	rows, cols int
 }
 
 // Shell returns the shell the terminal session should run: the shell
-// Crush itself was launched from when it can be identified (the parent
+// Harness itself was launched from when it can be identified (the parent
 // process being one), then the user's login shell ($SHELL), then
 // /bin/sh. Non-POSIX shells are not driven directly because the
 // completion sentinel uses POSIX parameter expansion; they fall back
@@ -85,7 +108,7 @@ func isPosixShell(path string) bool {
 	return posixShells[base]
 }
 
-// parentShell reports the shell hosting the Crush process by looking
+// parentShell reports the shell hosting the Harness process by looking
 // at the parent process name; empty when the parent is not a shell
 // (terminal emulator, systemd, an editor task runner, ...).
 func parentShell() string {
@@ -118,32 +141,112 @@ func Start(cwd string, env ...string) (*Session, error) {
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Env = append(cmd.Env, "TERM="+termValue())
 
+	rows, cols := DefaultSize()
+	cmd.Env = append(cmd.Env,
+		"LINES="+strconv.Itoa(rows),
+		"COLUMNS="+strconv.Itoa(cols),
+	)
+
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start terminal session: %w", err)
 	}
-	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: DefaultRows, Cols: DefaultCols})
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 
-	return newSession(ptmx, cmd.Process), nil
+	return newSession(ptmx, cmd.Process, rows, cols), nil
 }
 
+// termValue is the TERM the session advertises. It is not the user's
+// TERM: programs tailor their escape sequences to it, and the emulator
+// behind this session is xterm-class, so inheriting a kitty, foot or
+// wezterm TERM invites sequences it cannot parse and a screen that
+// renders wrong. Override with HARNESS_PTY_TERM when a program needs
+// something else.
 func termValue() string {
-	if t := os.Getenv("TERM"); t != "" {
+	if t := strings.TrimSpace(os.Getenv("HARNESS_PTY_TERM")); t != "" {
 		return t
 	}
 	return "xterm-256color"
 }
 
-func newSession(ptmx *os.File, proc *os.Process) *Session {
+// DefaultSize is the size new sessions open with: the defaults, unless
+// HARNESS_PTY_ROWS/HARNESS_PTY_COLS override them.
+func DefaultSize() (rows, cols int) {
+	return clampDim(envInt("HARNESS_PTY_ROWS", DefaultRows), minRows, maxRows),
+		clampDim(envInt("HARNESS_PTY_COLS", DefaultCols), minCols, maxCols)
+}
+
+func envInt(name string, fallback int) int {
+	v, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
+	if err != nil {
+		return fallback
+	}
+	return v
+}
+
+func clampDim(v, lo, hi int) int {
+	return min(max(v, lo), hi)
+}
+
+func newSession(ptmx *os.File, proc *os.Process, rows, cols int) *Session {
+	replies := newReplyWriter()
+	emu := vt10x.New(vt10x.WithSize(cols, rows), vt10x.WithWriter(replies))
 	s := &Session{
 		ptmx:     ptmx,
 		proc:     proc,
 		notify:   make(chan struct{}, 1),
 		closed:   make(chan struct{}),
 		lastData: time.Now(),
+		emu:      emu,
+		replies:  replies,
+		rows:     rows,
+		cols:     cols,
 	}
+	replies.session = s
 	go s.readLoop()
 	return s
+}
+
+// replyWriter carries the emulator's answers back to the program that
+// asked. Programs query the terminal (device attributes, cursor
+// position) and then wait for an answer on their input; this emulator
+// is the only terminal the session has, so nothing else is going to
+// answer, and a program left waiting stalls until its own timeout.
+//
+// Answers go to a goroutine rather than straight down the PTY: a write
+// blocks when the program is not reading its input, and blocking here
+// would stall the parser and, behind it, the reading of output. A
+// dropped answer is a program falling back to its default; a stalled
+// session is the whole tool wedged.
+type replyWriter struct {
+	session *Session
+	replies chan []byte
+}
+
+func newReplyWriter() *replyWriter {
+	w := &replyWriter{replies: make(chan []byte, 64)}
+	go func() {
+		for b := range w.replies {
+			if w.session != nil {
+				_ = w.session.Send(b)
+			}
+		}
+	}()
+	return w
+}
+
+func (w *replyWriter) Write(p []byte) (int, error) {
+	reply := make([]byte, len(p))
+	copy(reply, p)
+	select {
+	case w.replies <- reply:
+	default:
+	}
+	return len(p), nil
+}
+
+func (w *replyWriter) close() {
+	close(w.replies)
 }
 
 // readLoop pumps PTY output into the pending buffer until EOF or error.
@@ -162,6 +265,10 @@ func (s *Session) readLoop() {
 }
 
 func (s *Session) append(b []byte) {
+	// The emulator keeps its own lock; feed it outside s.mu so a slow
+	// parse cannot stall a reader waiting on pending.
+	_, _ = s.emu.Write(b)
+
 	s.mu.Lock()
 	s.pending = append(s.pending, b...)
 	if len(s.pending) > maxPending {
@@ -331,6 +438,92 @@ func (s *Session) Drain() []byte {
 	return out
 }
 
+// AltScreen reports whether a full-screen program (an editor, a pager,
+// a TUI) currently owns the terminal. While it does, the raw byte
+// stream is a redraw log rather than output: read Screen instead.
+func (s *Session) AltScreen() bool {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	return s.emu.Mode()&vt10x.ModeAltScreen != 0
+}
+
+// Screen renders what a human would see right now: the emulator's grid
+// as plain text, trailing blanks and trailing empty lines trimmed.
+//
+// The grid is everything a full-screen program leaves behind - it
+// redraws rather than scrolling, so there is no history above its top
+// line to recover. Ordinary command output does not come from here at
+// all: the raw stream keeps every line, including the ones that
+// scrolled past, so output is never limited to one screenful.
+func (s *Session) Screen() string {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+
+	cols, rows := s.emu.Size()
+	lines := make([]string, 0, rows)
+	var sb strings.Builder
+	for y := range rows {
+		sb.Reset()
+		sb.Grow(cols)
+		for x := range cols {
+			sb.WriteRune(s.emu.Cell(x, y).Char)
+		}
+		lines = append(lines, sb.String())
+	}
+	return trimScreen(lines)
+}
+
+// trimScreen drops trailing whitespace and trailing blank lines: an
+// idle screen is a few lines of content, not a page of blanks.
+func trimScreen(lines []string) string {
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// Cursor is the cursor's 0-indexed position on the rendered screen.
+func (s *Session) Cursor() (row, col int) {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	c := s.emu.Cursor()
+	return c.Y, c.X
+}
+
+// Size is the session's current terminal size.
+func (s *Session) Size() (rows, cols int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rows, s.cols
+}
+
+// Resize changes the terminal size, signalling SIGWINCH to whatever is
+// running so it redraws at the new size. Dimensions are clamped to the
+// supported range.
+func (s *Session) Resize(rows, cols int) error {
+	rows = clampDim(rows, minRows, maxRows)
+	cols = clampDim(cols, minCols, maxCols)
+
+	s.mu.Lock()
+	exited := s.exited
+	if !exited {
+		s.rows, s.cols = rows, cols
+	}
+	s.mu.Unlock()
+	if exited {
+		return errors.New("terminal session has exited")
+	}
+
+	if err := pty.Setsize(s.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}); err != nil {
+		return fmt.Errorf("resize terminal session: %w", err)
+	}
+	s.emu.Resize(cols, rows)
+	return nil
+}
+
 // Alive reports whether the session process is still running.
 func (s *Session) Alive() bool {
 	s.mu.Lock()
@@ -354,6 +547,8 @@ func (s *Session) Close() {
 		_ = s.proc.Kill()
 	}
 	_ = s.ptmx.Close()
+	// Ends the reply-forwarding goroutine.
+	s.replies.close()
 	select {
 	case <-s.closed:
 	case <-time.After(5 * time.Second):

@@ -12,11 +12,11 @@ import (
 	"text/template" // nosemgrep: go.lang.security.audit.xss.import-text-template.import-text-template
 	"time"
 
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/filepathext"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/shell"
-	"github.com/charmbracelet/crush/internal/skills"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/filepathext"
+	"github.com/stubbedev/harness/internal/home"
+	"github.com/stubbedev/harness/internal/shell"
+	"github.com/stubbedev/harness/internal/skills"
 )
 
 // Prompt represents a template-based prompt generator.

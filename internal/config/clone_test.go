@@ -3,8 +3,8 @@ package config
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/csync"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/csync"
 )
 
 // TestCloneForWrite_Isolation verifies that mutating a clone never reaches

@@ -7,32 +7,32 @@ import (
 	"os/signal"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/clipboard"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/copilot"
-	"github.com/charmbracelet/crush/internal/oauth/hyper"
-	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+	"github.com/stubbedev/harness/internal/clipboard"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/oauth"
+	"github.com/stubbedev/harness/internal/oauth/copilot"
+	"github.com/stubbedev/harness/internal/oauth/hyper"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 var loginCmd = &cobra.Command{
 	Aliases: []string{"auth"},
 	Use:     "login [platform]",
-	Short:   "Login Crush to a platform",
-	Long: `Login Crush to a specified platform.
+	Short:   "Login Harness to a platform",
+	Long: `Login Harness to a specified platform.
 The platform should be provided as an argument.
 Available platforms are: hyper, copilot.`,
 	Example: `
 # Authenticate with Charm Hyper
-crush login
+harness login
 
 # Authenticate with GitHub Copilot
-crush login copilot
+harness login copilot
 
 # Force re-authentication even if already logged in
-crush login -f copilot
+harness login -f copilot
   `,
 	ValidArgs: []cobra.Completion{
 		"hyper",

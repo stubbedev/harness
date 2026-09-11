@@ -7,9 +7,9 @@ import (
 	"os"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/ui/logo"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/term"
+	"github.com/stubbedev/harness/internal/ui/logo"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 func main() {

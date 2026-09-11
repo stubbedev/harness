@@ -10,12 +10,12 @@ const docTemplate = `{
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
         "contact": {
-            "name": "Charm",
-            "url": "https://charm.sh"
+            "name": "Harness",
+            "url": "https://github.com/stubbedev/harness"
         },
         "license": {
-            "name": "MIT",
-            "url": "https://github.com/charmbracelet/crush/blob/main/LICENSE"
+            "name": "FSL-1.1-MIT",
+            "url": "https://github.com/stubbedev/harness/blob/main/LICENSE.md"
         },
         "version": "{{.Version}}"
     },
@@ -1579,6 +1579,105 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaces/{id}/mcp/auth": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Authenticate an MCP server",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "MCP name request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPNameRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPAuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/mcp/auth-url": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Get MCP OAuth authorization URL",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "MCP server name",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.MCPAuthResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/mcp/docker/disable": {
             "post": {
                 "tags": [
@@ -1688,6 +1787,49 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/mcp/pending-auth": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mcp"
+                ],
+                "summary": "Get MCP servers pending OAuth",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.MCPPendingAuthServer"
+                            }
                         }
                     },
                     "404": {
@@ -2029,7 +2171,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_charmbracelet_crush_internal_proto.Message"
+                                "$ref": "#/definitions/github_com_stubbedev_harness_internal_proto.Message"
                             }
                         }
                     },
@@ -2824,7 +2966,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_charmbracelet_crush_internal_proto.Message"
+                                "$ref": "#/definitions/github_com_stubbedev_harness_internal_proto.Message"
                             }
                         }
                     },
@@ -2874,7 +3016,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_charmbracelet_crush_internal_proto.Message"
+                                "$ref": "#/definitions/github_com_stubbedev_harness_internal_proto.Message"
                             }
                         }
                     },
@@ -3092,6 +3234,49 @@ const docTemplate = `{
                 }
             }
         },
+        "config.Duration": {
+            "type": "integer",
+            "format": "int64",
+            "enum": [
+                -9223372036854775808,
+                9223372036854775807,
+                1,
+                1000,
+                1000000,
+                1000000000,
+                60000000000,
+                3600000000000,
+                300000000000,
+                60000000000,
+                10000000000,
+                5000000000,
+                45000000000,
+                10000000000,
+                2000000000
+            ],
+            "x-enum-varnames": [
+                "resolveTimeout",
+                "DefaultRequestTimeout",
+                "dockerMCPAvailabilityTTL",
+                "configLockDeadline",
+                "refreshLockDeadline",
+                "credentialWriteLockDeadline",
+                "renameRetryBudget"
+            ]
+        },
+        "config.ExitBanner": {
+            "type": "string",
+            "enum": [
+                "default",
+                "compact",
+                "none"
+            ],
+            "x-enum-varnames": [
+                "ExitBannerDefault",
+                "ExitBannerCompact",
+                "ExitBannerNone"
+            ]
+        },
         "config.HookConfig": {
             "type": "object",
             "properties": {
@@ -3210,7 +3395,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "oauth_callback_port": {
-                    "description": "OAuthCallbackPort pins the localhost port used for the OAuth\nredirect listener. Set this when the OAuth provider requires an\nexact-match callback URL (e.g. GitHub OAuth Apps). When omitted,\nCrush picks the first free port from its default range.",
+                    "description": "OAuthCallbackPort pins the localhost port used for the OAuth\nredirect listener. Set this when the OAuth provider requires an\nexact-match callback URL (e.g. GitHub OAuth Apps). When omitted,\nHarness picks the first free port from its default range.",
                     "type": "integer"
                 },
                 "oauth_client_id": {
@@ -3228,6 +3413,10 @@ const docTemplate = `{
                             "$ref": "#/definitions/oauth.Token"
                         }
                     ]
+                },
+                "sessionless": {
+                    "description": "Sessionless marks a server that does not maintain an MCP session (it\nnever issues a Mcp-Session-Id). When true, Harness omits the\ntools/prompts/resources list-changed handlers: the go-sdk opens a\nSEP-2575 \"subscriptions/listen\" stream whenever any of those handlers\nis set, and sessionless streamable-HTTP servers (e.g. GitHub MCP)\nanswer that POST with 404 (\"session not found\"), which the SDK treats\nas fatal. The cost is no live list-changed notifications from this\nserver.\n\nWhen nil, Harness auto-detects a set of known sessionless servers (see\nIsSessionless); set it explicitly to override that detection.",
+                    "type": "boolean"
                 },
                 "timeout": {
                     "type": "integer"
@@ -3267,6 +3456,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "yolo": {
+                    "description": "Yolo skips every permission prompt. This fork defaults it to true;\nset permissions.yolo false in the config file\nto restore prompting. The --yolo flag forces it on regardless.",
+                    "type": "boolean"
                 }
             }
         },
@@ -3338,7 +3531,25 @@ const docTemplate = `{
                 "diff_mode": {
                     "type": "string"
                 },
+                "exit_banner": {
+                    "$ref": "#/definitions/config.ExitBanner"
+                },
+                "git_status": {
+                    "type": "boolean"
+                },
+                "mouse": {
+                    "type": "boolean"
+                },
                 "scrollbar": {
+                    "type": "string"
+                },
+                "show_thinking": {
+                    "type": "boolean"
+                },
+                "textarea_min_height": {
+                    "type": "integer"
+                },
+                "theme": {
                     "type": "string"
                 },
                 "transparent": {
@@ -3350,7 +3561,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "timeout": {
-                    "$ref": "#/definitions/time.Duration"
+                    "$ref": "#/definitions/config.Duration"
                 }
             }
         },
@@ -3358,7 +3569,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "timeout": {
-                    "$ref": "#/definitions/time.Duration"
+                    "$ref": "#/definitions/config.Duration"
                 }
             }
         },
@@ -3403,7 +3614,7 @@ const docTemplate = `{
         "csync.Map-string-config_ProviderConfig": {
             "type": "object"
         },
-        "github_com_charmbracelet_crush_internal_config.Config": {
+        "github_com_stubbedev_harness_internal_config.Config": {
             "type": "object",
             "properties": {
                 "$schema": {
@@ -3425,6 +3636,18 @@ const docTemplate = `{
                         }
                     }
                 },
+                "large_configured": {
+                    "description": "LargeConfigured is the models.large value before fallback.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/config.SelectedModel"
+                        }
+                    ]
+                },
+                "large_fallback": {
+                    "description": "LargeFallback is true when models.large was set but did not resolve\nagainst the catalog. Interactive TUI still uses the default; harness\nrun refuses to start unless -m / --model overrides.",
+                    "type": "boolean"
+                },
                 "lsp": {
                     "$ref": "#/definitions/config.LSPs"
                 },
@@ -3439,7 +3662,7 @@ const docTemplate = `{
                     }
                 },
                 "options": {
-                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Options"
+                    "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Options"
                 },
                 "permissions": {
                     "$ref": "#/definitions/config.Permissions"
@@ -3467,7 +3690,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_charmbracelet_crush_internal_config.Options": {
+        "github_com_stubbedev_harness_internal_config.Options": {
             "type": "object",
             "properties": {
                 "attribution": {
@@ -3476,6 +3699,14 @@ const docTemplate = `{
                 "auto_lsp": {
                     "type": "boolean"
                 },
+                "auto_summarize_buffer": {
+                    "description": "AutoSummarizeBuffer is the number of tokens kept free in a context\nwindow above 200k tokens before the session is summarized. Zero keeps\nthe default of 20000.",
+                    "type": "integer"
+                },
+                "auto_summarize_ratio": {
+                    "description": "AutoSummarizeRatio is the share of a context window of up to 200k\ntokens that is kept free before the session is summarized. Zero keeps\nthe default of 0.2.",
+                    "type": "number"
+                },
                 "context_paths": {
                     "type": "array",
                     "items": {
@@ -3483,7 +3714,7 @@ const docTemplate = `{
                     }
                 },
                 "data_directory": {
-                    "description": "DataDirectory is where Crush keeps per-project state such as\nthe SQLite database and workspace overrides. Relative paths are\nresolved against the working directory; absolute paths are used\nverbatim. After defaulting the stored value is always absolute.",
+                    "description": "DataDirectory is where Harness keeps per-project state such as\nthe SQLite database and workspace overrides. Relative paths are\nresolved against the working directory; absolute paths are used\nverbatim. After defaulting the stored value is always absolute.",
                     "type": "string"
                 },
                 "debug": {
@@ -3504,7 +3735,16 @@ const docTemplate = `{
                 "disable_provider_auto_update": {
                     "type": "boolean"
                 },
+                "disable_update_check": {
+                    "type": "boolean"
+                },
                 "disabled_skills": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "disabled_subagents": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -3522,8 +3762,14 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "init_prompt": {
+                    "type": "boolean"
+                },
                 "initialize_as": {
                     "type": "string"
+                },
+                "max_retries": {
+                    "type": "integer"
                 },
                 "notifications": {
                     "type": "string"
@@ -3531,7 +3777,16 @@ const docTemplate = `{
                 "progress": {
                     "type": "boolean"
                 },
+                "request_timeout": {
+                    "type": "integer"
+                },
                 "skills_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "subagents_paths": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -3542,7 +3797,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_charmbracelet_crush_internal_config.Scope": {
+        "github_com_stubbedev_harness_internal_config.Scope": {
             "type": "integer",
             "enum": [
                 0,
@@ -3553,7 +3808,7 @@ const docTemplate = `{
                 "ScopeWorkspace"
             ]
         },
-        "github_com_charmbracelet_crush_internal_proto.Message": {
+        "github_com_stubbedev_harness_internal_proto.Message": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -3562,12 +3817,27 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "is_summary_message": {
+                    "type": "boolean"
+                },
                 "model": {
                     "type": "string"
                 },
                 "parts": {
                     "type": "array",
                     "items": {}
+                },
+                "prism_dollar_savings": {
+                    "type": "number"
+                },
+                "prism_hypercredit_savings": {
+                    "type": "number"
+                },
+                "prism_model_id": {
+                    "type": "string"
+                },
+                "prism_model_name": {
+                    "type": "string"
                 },
                 "provider": {
                     "type": "string"
@@ -3764,7 +4034,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Scope"
                 }
             }
         },
@@ -3778,7 +4048,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/config.SelectedModelType"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Scope"
                 }
             }
         },
@@ -3798,7 +4068,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Scope"
                 }
             }
         },
@@ -3809,7 +4079,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Scope"
                 }
             }
         },
@@ -3820,7 +4090,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Scope"
                 }
             }
         },
@@ -3831,7 +4101,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "scope": {
-                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Scope"
+                    "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Scope"
                 },
                 "value": {}
             }
@@ -3924,6 +4194,15 @@ const docTemplate = `{
                 }
             }
         },
+        "proto.MCPAuthResponse": {
+            "type": "object",
+            "properties": {
+                "auth_url": {
+                    "description": "AuthURL is the OAuth authorization URL the user must visit, when\nthe flow is still in progress.",
+                    "type": "string"
+                }
+            }
+        },
         "proto.MCPClientInfo": {
             "type": "object",
             "properties": {
@@ -3977,6 +4256,17 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.MCPPendingAuthServer": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "url": {
                     "type": "string"
                 }
             }
@@ -4416,7 +4706,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "config": {
-                    "$ref": "#/definitions/github_com_charmbracelet_crush_internal_config.Config"
+                    "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Config"
                 },
                 "data_dir": {
                     "type": "string"
@@ -4450,30 +4740,6 @@ const docTemplate = `{
                     "type": "boolean"
                 }
             }
-        },
-        "time.Duration": {
-            "type": "integer",
-            "format": "int64",
-            "enum": [
-                -9223372036854775808,
-                9223372036854775807,
-                1,
-                1000,
-                1000000,
-                1000000000,
-                60000000000,
-                3600000000000
-            ],
-            "x-enum-varnames": [
-                "minDuration",
-                "maxDuration",
-                "Nanosecond",
-                "Microsecond",
-                "Millisecond",
-                "Second",
-                "Minute",
-                "Hour"
-            ]
         }
     }
 }`
@@ -4484,8 +4750,8 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "",
 	BasePath:         "/v1",
 	Schemes:          []string{},
-	Title:            "Crush API",
-	Description:      "Crush is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.",
+	Title:            "Harness API",
+	Description:      "Harness is a terminal-based AI coding assistant. This API is served over a Unix socket (or Windows named pipe) and provides programmatic access to workspaces, sessions, agents, LSP, MCP, and more.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

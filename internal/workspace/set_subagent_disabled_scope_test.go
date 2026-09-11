@@ -1,15 +1,15 @@
 package workspace
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/subagents"
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/subagents"
 )
 
 // isolateConfigHome points config.Init's filesystem reads at a temp HOME so the
@@ -21,15 +21,15 @@ func isolateConfigHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(hostHome, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(hostHome, ".local", "share"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(hostHome, ".cache"))
-	t.Setenv("CRUSH_SKILLS_DIR", t.TempDir())
-	t.Setenv("CRUSH_SUBAGENTS_DIR", t.TempDir())
+	t.Setenv("HARNESS_SKILLS_DIR", t.TempDir())
+	t.Setenv("HARNESS_SUBAGENTS_DIR", t.TempDir())
 }
 
 // workspaceDisabledSubagents reads options.disabled_subagents straight out of
-// the workspace config file, bypassing the merged in-memory view.
+// the workspace state file, bypassing the merged in-memory view.
 func workspaceDisabledSubagents(t *testing.T, store *config.ConfigStore) []string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(store.Config().Options.DataDirectory, "crush.json"))
+	data, err := os.ReadFile(filepath.Join(store.Config().Options.DataDirectory, "state.yaml"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -41,7 +41,7 @@ func workspaceDisabledSubagents(t *testing.T, store *config.ConfigStore) []strin
 			DisabledSubagents []string `json:"disabled_subagents"`
 		} `json:"options"`
 	}
-	require.NoError(t, json.Unmarshal(data, &parsed))
+	require.NoError(t, yaml.Unmarshal(data, &parsed))
 	return parsed.Options.DisabledSubagents
 }
 

@@ -8,8 +8,8 @@ import (
 
 	"charm.land/fantasy"
 	"charm.land/x/vcr"
-	"github.com/charmbracelet/crush/internal/message"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/message"
 )
 
 // fakeLanguageModel is a [fantasy.LanguageModel] stub that records the

@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/permission"
 )
 
 // whitelistDockerTools contains Docker MCP tools that don't require permission.

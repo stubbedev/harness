@@ -1,4 +1,4 @@
-// Package exitbanner renders what Crush prints after the TUI exits.
+// Package exitbanner renders what Harness prints after the TUI exits.
 package exitbanner
 
 import (
@@ -6,13 +6,13 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/ui/logo"
-	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/version"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/ui/logo"
+	"github.com/stubbedev/harness/internal/ui/styles"
+	"github.com/stubbedev/harness/internal/version"
 )
 
 // FallbackWidth is used when stdout is not a terminal, so the banner still
@@ -55,7 +55,7 @@ func Render(banner config.ExitBanner, sess *session.Session, width int, theme st
 // logoSection returns the ASCII art logo followed by the parting message.
 func logoSection(contentWidth int, theme string) string {
 	t := styles.ThemeFromConfig(theme)
-	crushLogo := logo.Render(t.Logo.GradCanvas, version.Version, true, logo.Opts{
+	harnessLogo := logo.Render(t.Logo.GradCanvas, version.Version, true, logo.Opts{
 		FieldColor:   t.Logo.FieldColor,
 		TitleColorA:  t.Logo.TitleColorA,
 		TitleColorB:  t.Logo.TitleColorB,
@@ -65,11 +65,11 @@ func logoSection(contentWidth int, theme string) string {
 	})
 	// Wrap the greeting and the message together: wrapping only the message
 	// leaves the greeting's own width unaccounted for and overflows the frame.
-	return crushLogo + "\n" +
-		lipgloss.NewStyle().Width(contentWidth).Render("Thanks for using Crush! "+randomExitMessage())
+	return harnessLogo + "\n" +
+		lipgloss.NewStyle().Width(contentWidth).Render("Thanks for using Harness! "+randomExitMessage())
 }
 
-// sessionResumeLines returns the "Session  <title>\nContinue crush -s <hash>"
+// sessionResumeLines returns the "Session  <title>\nContinue harness -s <hash>"
 // pair used by the exit banner.
 func sessionResumeLines(sess *session.Session, contentWidth int) string {
 	title := strings.ReplaceAll(sess.Title, "\n", " ")
@@ -83,7 +83,7 @@ func sessionResumeLines(sess *session.Session, contentWidth int) string {
 	hash := session.HashID(sess.ID)[:7]
 	label := lipgloss.NewStyle().Foreground(charmtone.Charple)
 	sessionLine := label.Render("Session  ") + title
-	continueLine := label.Render("Continue ") + "crush -s " + hash
+	continueLine := label.Render("Continue ") + "harness -s " + hash
 	return sessionLine + "\n" + continueLine
 }
 

@@ -1,31 +1,31 @@
 package config
 
 import (
-	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/require"
 )
 
-// readConfigJSON reads and unmarshals the JSON config file at path.
-func readConfigJSON(t *testing.T, path string) map[string]any {
+// readStateFile reads and unmarshals the YAML state file at path.
+func readStateFile(t *testing.T, path string) map[string]any {
 	t.Helper()
 	baseDir := filepath.Dir(path)
 	fileName := filepath.Base(path)
 	b, err := fs.ReadFile(os.DirFS(baseDir), fileName)
 	require.NoError(t, err)
 	var out map[string]any
-	require.NoError(t, json.Unmarshal(b, &out))
+	require.NoError(t, yaml.Unmarshal(b, &out))
 	return out
 }
 
 // readRecentModels reads the recent_models section from the config file.
 func readRecentModels(t *testing.T, path string) map[string]any {
 	t.Helper()
-	out := readConfigJSON(t, path)
+	out := readStateFile(t, path)
 	rm, ok := out["recent_models"].(map[string]any)
 	require.True(t, ok)
 	return rm
@@ -35,7 +35,7 @@ func readRecentModels(t *testing.T, path string) map[string]any {
 func testStoreWithPath(cfg *Config, dir string) *ConfigStore {
 	return &ConfigStore{
 		config:         cfg,
-		globalDataPath: filepath.Join(dir, "config.json"),
+		globalDataPath: filepath.Join(dir, stateConfigFile),
 	}
 }
 

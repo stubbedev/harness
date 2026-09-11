@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
 )
 
 // TestParseContent_EffortField verifies that the effort field round-trips

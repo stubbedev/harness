@@ -9,13 +9,13 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/backend"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/skills"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/backend"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/skills"
 )
 
 // TestBackend_WorkspaceSkillsIsolation verifies that skill discovery
@@ -33,7 +33,7 @@ func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(hostHome, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(hostHome, ".local", "share"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(hostHome, ".cache"))
-	t.Setenv("CRUSH_SKILLS_DIR", t.TempDir())
+	t.Setenv("HARNESS_SKILLS_DIR", t.TempDir())
 
 	// Each workspace gets its own working directory containing a
 	// distinct project-local skill so the discovery output differs.
@@ -52,7 +52,7 @@ func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 	wsA, _, err := b.CreateWorkspace(proto.Workspace{
 		ClientID: cidA,
 		Path:     wdA,
-		DataDir:  filepath.Join(wdA, ".crush"),
+		DataDir:  filepath.Join(wdA, ".harness"),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = b.DeleteWorkspace(wsA.ID, cidA) })
@@ -60,7 +60,7 @@ func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 	wsB, _, err := b.CreateWorkspace(proto.Workspace{
 		ClientID: cidB,
 		Path:     wdB,
-		DataDir:  filepath.Join(wdB, ".crush"),
+		DataDir:  filepath.Join(wdB, ".harness"),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = b.DeleteWorkspace(wsB.ID, cidB) })

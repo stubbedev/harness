@@ -9,11 +9,11 @@ import (
 
 // TestInGlobalDir verifies global-dir membership: files inside a global
 // subagents directory pass, anything else (project/custom paths, empty)
-// fails. Not parallel: pins the global dir via CRUSH_SUBAGENTS_DIR.
+// fails. Not parallel: pins the global dir via HARNESS_SUBAGENTS_DIR.
 func TestInGlobalDir(t *testing.T) {
 	globalDir := t.TempDir()
 	otherDir := t.TempDir()
-	t.Setenv("CRUSH_SUBAGENTS_DIR", globalDir)
+	t.Setenv("HARNESS_SUBAGENTS_DIR", globalDir)
 
 	require.True(t, InGlobalDir(filepath.Join(globalDir, "agent.md")))
 	require.True(t, InGlobalDir(filepath.Join(globalDir, "nested", "agent.md")))

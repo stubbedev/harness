@@ -4,13 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
 )
 
 // newTestStore returns a config store for prompt-rendering tests. It builds
 // the store directly instead of calling config.Init, which reads the host's
-// HOME/XDG locations: a developer with a populated ~/.config/crush would
+// HOME/XDG locations: a developer with a populated ~/.config/harness would
 // otherwise have their own context files and skill paths rendered into the
 // prompt under test.
 func newTestStore(t *testing.T) *config.ConfigStore {

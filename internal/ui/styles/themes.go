@@ -32,7 +32,7 @@ func ThemeKeyForProvider(providerID string) string {
 func ThemeForProvider(providerID string) Styles {
 	switch ThemeKeyForProvider(providerID) {
 	case "hyper":
-		return HypercrushObsidiana()
+		return HyperharnessObsidiana()
 	default:
 		return CharmtonePantera()
 	}
@@ -44,8 +44,8 @@ func CharmtonePantera() Styles {
 	return charmtoneOverrides(quickStyle(charmtoneOpts()))
 }
 
-// HypercrushObsidiana returns the Hypercrush dark theme.
-func HypercrushObsidiana() Styles {
+// HyperharnessObsidiana returns the Hyperharness dark theme.
+func HyperharnessObsidiana() Styles {
 	return CharmtonePantera()
 }
 
@@ -192,7 +192,7 @@ func catppuccinMochaOpts() quickStyleOpts {
 
 		// ANSI 16-color palette mirroring the terminal's own Catppuccin
 		// Mocha palette, so bang-mode shell output looks the same inside
-		// Crush as outside it.
+		// Harness as outside it.
 		ansiBlack: lipgloss.Color("#45475a"), // surface1
 		ansiRed:   lipgloss.Color("#f38ba8"), // red
 		ansiGreen: lipgloss.Color("#a6e3a1"), // green
@@ -388,4 +388,18 @@ func ThemeFromConfig(name string) Styles {
 		return CharmtonePantera()
 	}
 	return s
+}
+
+// ThemeSwatch returns a handful of representative colors for the named
+// theme, in a stable order (primary, secondary, accent, keyword). It is
+// meant for previews — the theme picker paints these next to each entry —
+// and returns nil for unknown names. Lookups are case-insensitive, like
+// [LoadTheme].
+func ThemeSwatch(name string) []color.Color {
+	optsFn, ok := builtinThemes[strings.ToLower(name)]
+	if !ok {
+		return nil
+	}
+	opts := optsFn()
+	return []color.Color{opts.primary, opts.secondary, opts.accent, opts.keyword}
 }

@@ -10,11 +10,11 @@ import (
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/openaicompat"
-	"github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/subagents"
 )
 
 func TestBuildAgentDispatchInfo_NoSubagents(t *testing.T) {
@@ -351,12 +351,12 @@ func (s *stubRequestPermissions) Request(_ context.Context, opts permission.Crea
 // — requires an explicit user confirmation on every dispatch, and a denial
 // blocks the dispatch with a tool-error response.
 //
-// Not parallel: subtests pin the global subagents dir via CRUSH_SUBAGENTS_DIR
+// Not parallel: subtests pin the global subagents dir via HARNESS_SUBAGENTS_DIR
 // so scope detection is hermetic.
 func TestConfirmBypassPermissions(t *testing.T) {
 	globalDir := t.TempDir()
 	projectDir := t.TempDir()
-	t.Setenv("CRUSH_SUBAGENTS_DIR", globalDir)
+	t.Setenv("HARNESS_SUBAGENTS_DIR", globalDir)
 
 	t.Run("no bypass mode never prompts", func(t *testing.T) {
 		perms := &stubRequestPermissions{grant: false}
@@ -388,7 +388,7 @@ func TestConfirmBypassPermissions(t *testing.T) {
 		sa := &subagents.Subagent{
 			Name:           "repo-agent",
 			PermissionMode: subagents.PermissionModeBypassPermissions,
-			FilePath:       filepath.Join(projectDir, ".crush", "subagents", "repo-agent.md"),
+			FilePath:       filepath.Join(projectDir, ".harness", "subagents", "repo-agent.md"),
 		}
 
 		resp, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
@@ -405,7 +405,7 @@ func TestConfirmBypassPermissions(t *testing.T) {
 		sa := &subagents.Subagent{
 			Name:           "repo-agent",
 			PermissionMode: subagents.PermissionModeBypassPermissions,
-			FilePath:       filepath.Join(projectDir, ".crush", "subagents", "repo-agent.md"),
+			FilePath:       filepath.Join(projectDir, ".harness", "subagents", "repo-agent.md"),
 		}
 
 		_, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")

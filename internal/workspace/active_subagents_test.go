@@ -3,9 +3,9 @@ package workspace
 import (
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/subagents"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/subagents"
 )
 
 func TestAppWorkspace_ActiveSubagents_NilManagerReturnsNil(t *testing.T) {

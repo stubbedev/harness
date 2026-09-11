@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/config"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
 )
 
 // TestProjectNeedsInitialization_InitPromptOption verifies that setting
-// "option init-prompt false" in the crushrc suppresses the project
+// "init_prompt: false" in the project config suppresses the project
 // initialization prompt even when the project would otherwise need it
 // (no context file, no init flag, non-empty directory).
 func TestProjectNeedsInitialization_InitPromptOption(t *testing.T) {
@@ -18,8 +18,8 @@ func TestProjectNeedsInitialization_InitPromptOption(t *testing.T) {
 	t.Setenv("HOME", isolated)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(isolated, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(isolated, ".local", "share"))
-	t.Setenv("CRUSH_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "crush"))
-	t.Setenv("CRUSH_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "crush"))
+	t.Setenv("HARNESS_GLOBAL_CONFIG", filepath.Join(isolated, ".config", "harness"))
+	t.Setenv("HARNESS_GLOBAL_DATA", filepath.Join(isolated, ".local", "share", "harness"))
 
 	workDir := t.TempDir()
 	dataDir := t.TempDir()
@@ -38,8 +38,8 @@ func TestProjectNeedsInitialization_InitPromptOption(t *testing.T) {
 
 	t.Run("init-prompt false disables it", func(t *testing.T) {
 		require.NoError(t, os.WriteFile(
-			filepath.Join(workDir, "crushrc"),
-			[]byte("option init-prompt false\n"),
+			filepath.Join(workDir, "harness.yaml"),
+			[]byte("options:\n  init_prompt: false\n"),
 			0o644,
 		))
 

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 func TestManager_AllSubagents(t *testing.T) {

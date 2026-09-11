@@ -5,17 +5,19 @@ import (
 	"fmt"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/discover"
 	"github.com/invopop/jsonschema"
 	"github.com/spf13/cobra"
+	"github.com/stubbedev/harness/internal/agent/hyper"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/discover"
 )
 
 var schemaCmd = &cobra.Command{
-	Use:    "schema",
-	Short:  "Generate JSON schema for configuration",
-	Long:   "Generate JSON schema for the crush configuration file",
+	Use:   "schema",
+	Short: "Generate JSON schema for configuration",
+	Long: "Generate the JSON Schema describing harness.yaml. YAML editors and\n" +
+		"language servers consume JSON Schema directly, so this is what\n" +
+		"drives completion and validation for the config file.",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reflector := new(jsonschema.Reflector)

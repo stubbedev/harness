@@ -5,11 +5,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/workspace"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 func TestCurrentModelSupportsImages(t *testing.T) {
@@ -119,7 +119,7 @@ func (w *testWorkspace) Config() *config.Config {
 }
 
 func (w *testWorkspace) WorkingDir() string {
-	return "/tmp/crush-test"
+	return "/tmp/harness-test"
 }
 
 func (w *testWorkspace) AgentIsReady() bool {

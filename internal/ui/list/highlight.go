@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/stringext"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/stubbedev/harness/internal/stringext"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // DefaultHighlighter is the default highlighter function that applies inverse style.

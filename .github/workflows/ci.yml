@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Tidy check
+        run: |
+          go mod tidy
+          git diff --exit-code
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test -race -failfast ./...
+
+      # The config is the app's primary interface, and the schema is generated
+      # from the same structs the loader uses. A stale schema.json silently
+      # breaks editor completion for every user, so treat drift as a failure.
+      - name: Schema is current
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go run . schema > /tmp/schema.json
+          diff -u schema.json /tmp/schema.json

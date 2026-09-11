@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,8 +110,8 @@ func TestPtyRunner_MultilineCommand(t *testing.T) {
 
 	res, err := r.Run(t.Context(), "for i in 1 2 3\ndo echo $i\ndone", 10)
 	require.NoError(t, err)
-	// Multiline commands run without a sentinel: no exit code, but
-	// the output is still captured and cleaned.
+	// Multiline commands work like any other: the prompt marker comes
+	// back when the whole thing has run.
 	require.Contains(t, res.Output, "1")
 	require.Contains(t, res.Output, "3")
 }
@@ -146,15 +147,26 @@ func TestPtySudoPromptPattern(t *testing.T) {
 func TestPtySentinelParsing(t *testing.T) {
 	t.Parallel()
 
-	require.True(t, ptySentinelLoose.MatchString("__exit:0@"))
-	require.True(t, ptySentinelRe.MatchString("__exit:12@/tmp/x__"))
-	m := ptySentinelRe.FindStringSubmatch("__exit:-1@/home__")
+	s := newSentinel()
+	tag := strings.TrimSuffix(strings.TrimPrefix(s.cmd, "printf '__exit_"), `:%d@%s__' "$?" "$PWD"`)
+	require.Len(t, tag, 16)
+
+	require.True(t, s.loose.MatchString("__exit_"+tag+":0@"))
+	require.True(t, s.parse.MatchString("__exit_"+tag+":12@/tmp/x__"))
+	m := s.parse.FindStringSubmatch("__exit_" + tag + ":-1@/home__")
 	require.Equal(t, "-1", m[1])
 	require.Equal(t, "/home", m[2])
 
 	// The echoed sentinel command must not match (format specifiers).
-	require.False(t, ptySentinelRe.MatchString(ptySentinelCmd))
-	require.False(t, ptySentinelLoose.MatchString(ptySentinelCmd))
+	require.False(t, s.parse.MatchString(s.cmd))
+	require.False(t, s.loose.MatchString(s.cmd))
+
+	// A marker printed by something else - another session, a log line -
+	// is not this session's answer.
+	other := newSentinel()
+	require.False(t, s.parse.MatchString("__exit_deadbeefdeadbeef:0@/tmp__"))
+	require.False(t, s.parse.MatchString(other.cmd))
+	require.NotEqual(t, s.cmd, other.cmd)
 }
 
 func TestPtyRunnerIdleReapAndCap(t *testing.T) {

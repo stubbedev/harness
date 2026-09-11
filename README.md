@@ -1,169 +1,67 @@
-# Crush
+# Harness
 
 <p align="center">
-    <a href="https://stuff.charm.sh/crush/charm-crush.png"><img width="450" alt="Charm Crush Logo" src="https://github.com/user-attachments/assets/cf8ca3ce-8b02-43f0-9d0f-5a331488da4b" /></a><br />
-    <a href="https://github.com/charmbracelet/crush/releases"><img src="https://img.shields.io/github/release/charmbracelet/crush" alt="Latest Release"></a>
-    <a href="https://github.com/charmbracelet/crush/actions"><img src="https://github.com/charmbracelet/crush/actions/workflows/build.yml/badge.svg" alt="Build Status"></a>
+    <a href="https://github.com/stubbedev/harness/releases"><img src="https://img.shields.io/github/release/stubbedev/harness" alt="Latest Release"></a>
+    <a href="https://github.com/stubbedev/harness/actions"><img src="https://github.com/stubbedev/harness/actions/workflows/ci.yml/badge.svg" alt="Build Status"></a>
 </p>
 
-<p align="center">Your new coding bestie, now available in your favourite terminal.<br />Your tools, your code, and your workflows, wired into your LLM of choice.</p>
-<p align="center">终端里的编程新搭档，<br />无缝接入你的工具、代码与工作流，全面兼容主流 LLM 模型。</p>
-
-<p align="center"><img width="800" alt="Crush Demo" src="https://github.com/user-attachments/assets/58280caf-851b-470a-b6f7-d5c4ea8a1968" /></p>
+Harness is a terminal-based AI coding assistant, forked from
+[Crush](https://github.com/charmbracelet/crush) and maintained independently.
 
 ## Features
 
 - **Multi-Model:** choose from a wide range of LLMs or add your own via OpenAI- or Anthropic-compatible APIs
 - **Flexible:** switch LLMs mid-session while preserving context
 - **Session-Based:** maintain multiple work sessions and contexts per project
-- **LSP-Enhanced:** Crush uses LSPs for additional context, just like you do
+- **LSP-Enhanced:** Harness uses LSPs for additional context, just like you do
 - **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
 - **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), Android, FreeBSD, OpenBSD, and NetBSD
-- **Industrial Grade:** built on the Charm ecosystem, powering 25k+ applications, from leading open source projects to business-critical infrastructure
 
 ## Installation
 
-Use a package manager:
+### Nix (recommended)
+
+The flake in this repository builds Harness, its shell completions, and its man
+page:
 
 ```bash
-# Homebrew
-brew install charmbracelet/tap/crush
+# Run it without installing.
+nix run github:stubbedev/harness
 
-# NPM
-npm install -g @charmland/crush
-
-# Arch Linux (btw)
-yay -S crush-bin
-
-# Nix
-nix run github:numtide/nix-ai-tools#crush
-
-# FreeBSD
-pkg install crush
+# Or add it to a profile.
+nix profile install github:stubbedev/harness
 ```
 
-Windows users:
-
-```bash
-# Winget
-winget install charmbracelet.crush
-
-# Scoop
-scoop bucket add charm https://github.com/charmbracelet/scoop-bucket.git
-scoop install crush
-```
-
-<details>
-<summary><strong>Nix (NUR)</strong></summary>
-
-Crush is available via the official Charm [NUR](https://github.com/nix-community/NUR) in `nur.repos.charmbracelet.crush`, which is the most up-to-date way to get Crush in Nix.
-
-You can also try out Crush via the NUR with `nix-shell`:
-
-```bash
-# Add the NUR channel.
-nix-channel --add https://github.com/nix-community/NUR/archive/main.tar.gz nur
-nix-channel --update
-
-# Get Crush in a Nix shell.
-nix-shell -p '(import <nur> { pkgs = import <nixpkgs> {}; }).repos.charmbracelet.crush'
-```
-
-### NixOS & Home Manager Module Usage via NUR
-
-Crush provides NixOS and Home Manager modules via NUR.
-You can use these modules directly in your flake by importing them from NUR. Since it auto detects whether its a home manager or nixos context you can use the import the exact same way :)
+In a flake-based NixOS or Home Manager configuration:
 
 ```nix
 {
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nur.url = "github:nix-community/NUR";
-  };
+  inputs.harness.url = "github:stubbedev/harness";
 
-  outputs = { self, nixpkgs, nur, ... }: {
-    nixosConfigurations.your-hostname = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = [
-        nur.modules.nixos.default
-        nur.repos.charmbracelet.modules.crush
-        {
-          programs.crush = {
-            enable = true;
-            settings = {
-              providers = {
-                openai = {
-                  id = "openai";
-                  name = "OpenAI";
-                  base_url = "https://api.openai.com/v1";
-                  type = "openai";
-                  api_key = "sk-fake123456789abcdef...";
-                  models = [
-                    {
-                      id = "gpt-4";
-                      name = "GPT-4";
-                    }
-                  ];
-                };
-              };
-              lsp = {
-                go = { command = "gopls"; enabled = true; };
-                nix = { command = "nil"; enabled = true; };
-              };
-              options = {
-                context_paths = [ "/etc/nixos/configuration.nix" ];
-                tui = { compact_mode = true; };
-                debug = false;
-              };
-            };
-          };
-        }
-      ];
-    };
-  };
+  # …then, in your module:
+  # environment.systemPackages = [ inputs.harness.packages.${pkgs.system}.default ];
+  # home.packages = [ inputs.harness.packages.${pkgs.system}.default ];
 }
 ```
 
-</details>
+CI builds every commit and pushes the closure to a binary cache, so you can
+substitute it instead of compiling:
 
-<details>
-<summary><strong>Debian/Ubuntu</strong></summary>
+```nix
+nix.settings = {
+  substituters = [ "https://nix.stubbe.dev/c/default/default" ];
+};
+```
+
+Harness inherits Crush's FSL-1.1-MIT license, which nixpkgs classifies as
+unfree. The flake allows it for its own nixpkgs instance, so nothing is
+required on your side; pulling the package into a configuration that builds it
+against your own nixpkgs may need `allowUnfree`.
+
+### Go
 
 ```bash
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg
-echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list
-sudo apt update && sudo apt install crush
-```
-
-</details>
-
-<details>
-<summary><strong>Fedora/RHEL</strong></summary>
-
-```bash
-echo '[charm]
-name=Charm
-baseurl=https://repo.charm.sh/yum/
-enabled=1
-gpgcheck=1
-gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
-sudo yum install crush
-```
-
-</details>
-
-Or, download it:
-
-- [Packages][releases] are available in Debian and RPM formats
-- [Binaries][releases] are available for Linux, macOS, Windows, FreeBSD, OpenBSD, and NetBSD
-
-[releases]: https://github.com/charmbracelet/crush/releases
-
-Or just install it with Go:
-
-```
-go install github.com/charmbracelet/crush@latest
+go install github.com/stubbedev/harness@latest
 ```
 
 On illumos (OpenIndiana, OmniOS), the command above works as-is. Only native
@@ -171,29 +69,20 @@ OS notifications are unavailable there; terminal-based notifications (OSC) and
 the terminal bell still work. On Oracle Solaris, add `-tags sqlite3_dotlk` so
 the local database uses dot-file locking:
 
-```
-go install -tags sqlite3_dotlk github.com/charmbracelet/crush@latest
+```bash
+go install -tags sqlite3_dotlk github.com/stubbedev/harness@latest
 ```
 
-> [!WARNING]
-> Productivity may increase when using Crush and you may find yourself nerd
-> sniped when first using the application. If the symptoms persist, join the
-> [Slack][slack] or [Discord][discord] and nerd snipe the rest of us.
+Tagged releases also carry prebuilt binaries for Linux, macOS, Windows, and the
+BSDs: see [Releases](https://github.com/stubbedev/harness/releases).
 
 ## Getting Started
 
-The quickest way to get started is to choose a [Hyper][hyper] model from model
-picker. Follow the steps to authenticate and you'll be good to go.
-
-[Hyper], from Charm, is the official Crush provider. It’s subscription-based,
-with a free tier, and optimized for Crush. It’s privacy focused, with zero data
-retention (ZDR) is and designed to comply with GDPR. [More on Hyper][hyper].
-
-<p><a href="https://hyper.charm.land"><img width="340" height="200" alt="Charm Hyper" src="https://github.com/user-attachments/assets/50875289-7992-454d-9f14-9f790413fb5e" /></a></p>
-
+Press <kbd>ctrl+l</kbd> to open the model picker, choose a provider, and paste
+your API key. Harness stores it in its state file and you're off.
 ## API Keys
 
-You can also use Crush with many other providers such as Anthopic, OpenAI,
+You can also use Harness with many other providers such as Anthopic, OpenAI,
 Gemini, OpenRouter and so on. Press <kbd>ctrl+l</kbd> to open the model picker,
 choose the provider of your choice, and paste your API key.
 
@@ -201,7 +90,6 @@ That said, you can also set environment variables for preferred providers:
 
 | Environment Variable        | Provider                                           |
 | --------------------------- | -------------------------------------------------- |
-| `HYPER_API_KEY`             | [Charm Hyper][hyper]                               |
 | `ANTHROPIC_API_KEY`         | Anthropic                                          |
 | `OPENAI_API_KEY`            | OpenAI                                             |
 | `VERCEL_API_KEY`            | Vercel AI Gateway                                  |
@@ -230,116 +118,121 @@ That said, you can also set environment variables for preferred providers:
 | `AZURE_OPENAI_API_VERSION`  | Azure OpenAI models                                |
 | `MOONSHOT_API_KEY`          | Moonshot                                           |
 
-[hyper]: https://hyper.charm.land
-
-Also note that Crush can support nearly any provider, including
+Also note that Harness can support nearly any provider, including
 [Local Models](#local-models). For more info see
 [Custom Providers](#custom-providers) below.
 
 ### By the Way
 
-Is there a provider you’d like to see in Crush? Is there an existing model that needs an update?
+The default model listing comes from [Catwalk][catwalk], an open source catalog
+of models and providers that Harness fetches at startup (see
+[Provider Auto-Updates](#provider-auto-updates) to pin or disable that). A
+provider missing from the catalog can always be added by hand — see
+[Custom Providers](#custom-providers).
 
-Crush’s default model listing is managed in [Catwalk](https://github.com/charmbracelet/catwalk), a community-supported, open source repository of Crush-compatible models, and you’re welcome to contribute.
-
-<a href="https://github.com/charmbracelet/catwalk"><img width="174" height="174" alt="Catwalk Badge" src="https://github.com/user-attachments/assets/95b49515-fe82-4409-b10d-5beb0873787d" /></a>
+[catwalk]: https://github.com/charmbracelet/catwalk
 
 ## Configuration
 
 > [!TIP]
-> Crush ships with a builtin skill for configuring itself. Most of the time
+> Harness ships with a builtin skill for configuring itself. Most of the time
 > you can just tell what you want it to configure and it will get the job done.
 
-Crush runs great with no configuration. That said, if you do need or want to
-customize Crush, you can, with a `crushrc`.
-
-A `crushrc` is just Bash with some Crush-specific builtins. It’s a lot like
-a `.bashrc`, just for your Crush. Because Crush has a native, built-in Bash
-interpreter, Bash-based config works identically across all platforms, including
-Windows.
+Harness runs great with no configuration. That said, if you do need or want to
+customize Harness, you can, with YAML.
 
 For example:
 
-```bash
-# Add Ollama.
-provider add ollama --type ollama --base-url "http://localhost:11434/v1"
+```yaml
+providers:
+  # Add Ollama, and register a model on it.
+  ollama:
+    type: ollama
+    base_url: http://localhost:11434/v1
+    models:
+      - id: llama3.3
+        name: Llama 3.3
+        context_window: 128000
 
-# Register a model on Ollama.
-model add ollama/llama3.3 --name "Llama 3.3" --context-window 128000
+permissions:
+  # Auto-approve some tools.
+  allowed_tools: [view, edit]
 
-# Auto-approve some tools.
-permissions allow view edit
-
-# Include some other file on a specific machine.
-if [[ $HOSTNAME == "babysquid" ]]; then
-    source ~/my-stuff/babysquid.sh
-fi
-
-# Add an MCP server, with a GitHub API token stored in 1Password.
-mcp add github \
-  --type http \
-  --url "https://api.github.com/mcp/" \
-  --header Authorization "Bearer $(op read 'op://my-secret-key')"
+mcp:
+  # Add an MCP server, with a GitHub API token stored in 1Password.
+  github:
+    type: http
+    url: https://api.github.com/mcp/
+    headers:
+      Authorization: Bearer $(op read 'op://my-secret-key')
 ```
+
+Values are expanded through Harness's built-in shell at load time, so
+`${GITHUB_TOKEN}`, `${VAR:?required}` and `$(...)` all work — and work
+identically on every platform, Windows included.
 
 Configuration can be added either local to the project itself, or globally,
 with the following priority:
 
-| Priority | Unix-like                 | Windows                               |
-| -------- | ------------------------- | ------------------------------------- |
-| 1        | `./.crushrc`              | `.\.crushrc`                          |
-| 2        | `./crushrc`               | `.\crushrc`                           |
-| 3        | `~/.config/crush/crushrc` | `%USERPROFILE%\.config\crush\crushrc` |
+| Priority | Unix-like                       | Windows                                      |
+| -------- | ------------------------------- | -------------------------------------------- |
+| 1        | `./.harness.yaml`               | `.\.harness.yaml`                            |
+| 2        | `./harness.yaml`                | `.\harness.yaml`                             |
+| 3        | `~/.config/harness/config.yaml` | `%USERPROFILE%\.config\harness\config.yaml`  |
+| 4        | `/etc/harness/config.yaml`      | —                                            |
 
-(Crush respects the [XDG Base Directory Specification][xdg], so your paths
-may differ depending on your `XDG_CONFIG_HOME` value. Data directories such as
-`~/.local/share/crush` and `%LOCALAPPDATA%\crush` contain JSON state only; Crush
-does not execute a `crushrc` from them.)
+(Harness respects the [XDG Base Directory Specification][xdg], so your paths
+may differ depending on your `XDG_CONFIG_HOME` value. `.yml` works wherever
+`.yaml` does. Data directories such as `~/.local/share/harness` and
+`%LOCALAPPDATA%\harness` hold a machine-owned `state.yaml` — API keys, tokens,
+model selection, UI preferences — which Harness writes and you generally
+should not hand-edit.)
 
 [xdg]: https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
 
-What about the old JSON format? It’s still supported, but it should be
-considered deprecated. See: [the config docs](./docs/config/) for details.
+Every setting is described by a JSON Schema, which YAML language servers read
+directly — point your editor at it for completion and validation:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/stubbedev/harness/main/schema.json
+```
+
+See [the config docs](./docs/config/) for the full reference.
 
 > [!TIP]
 > You can override the user and data config locations by setting:
 >
-> - `CRUSH_GLOBAL_CONFIG`
-> - `CRUSH_GLOBAL_DATA`
+> - `HARNESS_GLOBAL_CONFIG`
+> - `HARNESS_GLOBAL_DATA`
 
-As an additional note, Crush also stores ephemeral data, such as application
+As an additional note, Harness also stores ephemeral data, such as application
 state, in one additional location. This is state and should not be edited by
 hand, nor should it be considered configuration.
 
 ```bash
 # Unix
-$HOME/.local/share/crush/crush.json
+$HOME/.local/share/harness/state.yaml
 
 # Windows
-%LOCALAPPDATA%\crush\crush.json
+%LOCALAPPDATA%\harness\state.yaml
 ```
 
 #### A note on security
 
-Both `crushrc` and `crush.json` are trusted code; `crushrc` runs in a full
-shell, and any `$(...)` in `crush.json` runs at load time. Don't launch Crush
-in a directory whose config you haven't reviewed, and don't randomly `source`
-files from the internet into your config.
+Your config is trusted code: any `$(...)` in it runs at load time with your
+privileges, and hook commands run whenever their event fires. Don't launch
+Harness in a directory whose config you haven't reviewed.
 
 ### Environment Variables
 
 The top-level `env` field sets environment variables at startup, before
 providers are configured. This is useful for variables that affect provider
 authentication (e.g. the AWS SDK credential chain) without wrapping the
-`crush` command in a shell script or exporting them in your shell profile:
+`harness` command in a shell script or exporting them in your shell profile:
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "env": {
-    "AWS_PROFILE": "my-sso-profile"
-  }
-}
+```yaml
+env:
+  AWS_PROFILE: my-sso-profile
 ```
 
 Values support the same `$VAR` and `$(command)` expansion as other config
@@ -348,56 +241,70 @@ a value.
 
 ### LSPs
 
-Crush can use LSPs for additional context to help inform its decisions, just
+Harness can use LSPs for additional context to help inform its decisions, just
 like you would. LSPs can be added manually like so:
 
-```bash
-# crushrc
-
-lsp add go --command "gopls" --env "GOTOOLCHAIN go1.24.5"
-lsp add typescript --command "typescript-language-server" --args --stdio
-lsp add nix --command "nil"
+```yaml
+lsp:
+  go:
+    command: gopls
+    env:
+      GOTOOLCHAIN: go1.24.5
+  typescript:
+    command: typescript-language-server
+    args: [--stdio]
+  nix:
+    command: nil
 ```
 
 ### MCPs
 
-Crush also supports Model Context Protocol (MCP) servers through three transport
+Harness also supports Model Context Protocol (MCP) servers through three transport
 types: `stdio` for command-line servers, `http` for HTTP endpoints, and `sse`
 for Server-Sent Events.
 
-```bash
-# crushrc
+```yaml
+mcp:
+  # A local MCP server that runs a Node.js script.
+  filesystem:
+    type: stdio
+    command: node
+    args: [/path/to/mcp-server.js]
+    timeout: 10
+    disabled_tools: [some-tool-name]
+    env:
+      NODE_ENV: production
 
-# Add a local MCP server that runs a Node.js script.
-mcp add filesystem --command node --args /path/to/mcp-server.js \
-  --timeout 10 --disabled-tools some-tool-name --env NODE_ENV production
+  # A GitHub MCP server that uses an API token.
+  github:
+    type: http
+    url: https://api.github.com/mcp/
+    timeout: 10
+    headers:
+      Authorization: Bearer ${GH_PAT}
+    disabled_tools: [create_issue, create_pull_request]
 
-# Add a GitHub MCP server that uses an API token.
-mcp add github --type http --url https://api.github.com/mcp/ \
-  --timeout 10 --header Authorization "Bearer $GH_PAT" \
-  --disabled-tools create_issue --disabled-tools create_pull_request
-
-# Add a streaming MCP server that uses SSE.
-mcp add streaming-service --type sse --url "https://example.com/mcp/sse" \
-  --timeout 10 --header API-Key "$API_KEY"
+  # A streaming MCP server that uses SSE.
+  streaming-service:
+    type: sse
+    url: https://example.com/mcp/sse
+    timeout: 10
+    headers:
+      API-Key: ${API_KEY}
 ```
 
 #### MCP OAuth
 
-HTTP and SSE MCP servers that require OAuth can use Crush's built-in
+HTTP and SSE MCP servers that require OAuth can use Harness's built-in
 authorization-code flow instead of a static `Authorization` header. Set
 `"oauth": true` to enable it:
 
-```json
-{
-  "mcp": {
-    "linear": {
-      "type": "http",
-      "url": "https://mcp.linear.app/mcp",
-      "oauth": true
-    }
-  }
-}
+```yaml
+mcp:
+  linear:
+    type: http
+    url: https://mcp.linear.app/mcp
+    oauth: true
 ```
 
 ##### Pre-registered clients
@@ -406,49 +313,45 @@ Some servers (GitHub, Slack) don't support dynamic client registration.
 For those, register an OAuth app with the provider and supply the
 credentials directly. All values support shell expansion:
 
-```json
-{
-  "mcp": {
-    "github": {
-      "type": "http",
-      "url": "https://api.github.com/mcp/",
-      "oauth": true,
-      "oauth_client_id": "Iv1.abc123def456",
-      "oauth_client_secret": "$GITHUB_MCP_SECRET",
-      "oauth_callback_port": 40704
-    }
-  }
-}
+```yaml
+mcp:
+  github:
+    type: http
+    url: https://api.github.com/mcp/
+    oauth: true
+    oauth_client_id: Iv1.abc123def456
+    oauth_client_secret: ${GITHUB_MCP_SECRET}
+    oauth_callback_port: 40704
 ```
 
-When `oauth_client_id` is set, Crush skips dynamic client registration
-and authenticates as the specified client. When omitted, Crush attempts
+When `oauth_client_id` is set, Harness skips dynamic client registration
+and authenticates as the specified client. When omitted, Harness attempts
 dynamic registration automatically (works with Linear, Notion, and other
 servers that support RFC 7591).
 
 #### Sessionless servers
 
 Some HTTP MCP servers are sessionless — they never issue a
-`Mcp-Session-Id` and reject the `subscriptions/listen` stream Crush opens
+`Mcp-Session-Id` and reject the `subscriptions/listen` stream Harness opens
 for list-changed notifications, which would otherwise break the
-connection. Crush auto-detects known sessionless servers (GitHub MCP,
+connection. Harness auto-detects known sessionless servers (GitHub MCP,
 `api.githubcopilot.com/mcp`), so those need no extra configuration.
 
 For other sessionless servers, mark them explicitly with
-`"sessionless": true` (or `--sessionless true` in `crushrc`); set it to
+`sessionless: true`; set it to
 `false` to force the default behavior for an auto-detected URL. The
 tradeoff is that a sessionless server won't push live
 tool/prompt/resource list-changed notifications.
 
 ### Hooks
 
-Crush has preliminary support for hooks. For details, see
+Harness has preliminary support for hooks. For details, see
 [the hook guide](./docs/hooks/).
 
 ### Sharing a workspace across clients
 
-When Crush is run against a shared backend (for example two TUIs talking to
-the same `crush serve`), clients are grouped into **workspaces** keyed by
+When Harness is run against a shared backend (for example two TUIs talking to
+the same `harness serve`), clients are grouped into **workspaces** keyed by
 their resolved `--cwd`. Two clients with the same `--cwd` join the same
 underlying workspace, so they share the session list, message history,
 permission queue, LSP, and MCP state.
@@ -481,120 +384,126 @@ does not get reaped before it can attach.
 
 ### Global context files
 
-Crush automatically includes two files for cross-project instructions. Think of
+Harness automatically includes two files for cross-project instructions. Think of
 these are personal additions to the system prompt.
 
-- `~/.config/crush/CRUSH.md`: Crush-specific rules that would confuse other
-  agentic coding tools. If you only use Crush, this is the only one you need to
+- `~/.config/harness/HARNESS.md`: Harness-specific rules that would confuse other
+  agentic coding tools. If you only use Harness, this is the only one you need to
   edit.
 - `~/.config/AGENTS.md`: generic instructions that other coding tools might
-  read. Avoid referring to Crush-specific features or workflows here. You
+  read. Avoid referring to Harness-specific features or workflows here. You
   probably only care about this if you use multiple agentic coding tools and
   want to share instructions between them.
 
-You can customize these paths with `option global-context-path`. Repeat the
-command to add multiple paths:
+You can customize these paths with `options.global_context_paths`:
 
-```bash
-# Load a single markdown file.
-option global-context-path "~/path/to/custom/context/file.md"
-
-# Recursively load all Markdown files in the folder.
-option global-context-path "/full/path/to/folder/of/files/"
+```yaml
+options:
+  global_context_paths:
+    # Load a single markdown file.
+    - ~/path/to/custom/context/file.md
+    # Recursively load all Markdown files in the folder.
+    - /full/path/to/folder/of/files/
 ```
 
 ### Ignoring Files
 
-Crush respects `.gitignore` files by default, but you can also create a
-`.crushignore` file to specify additional files and directories that Crush
+Harness respects `.gitignore` files by default, but you can also create a
+`.harnessignore` file to specify additional files and directories that Harness
 should ignore. This is useful for excluding files that you want in version
-control but don't want Crush to consider when providing context.
+control but don't want Harness to consider when providing context.
 
-The `.crushignore` file uses the same syntax as `.gitignore` and can be placed
+The `.harnessignore` file uses the same syntax as `.gitignore` and can be placed
 in the root of your project or in subdirectories.
 
 ### Allowing Tools
 
-By default, Crush will ask you for permission before running tool calls. If
+By default, Harness will ask you for permission before running tool calls. If
 you'd like, you can allow tools to be executed without prompting you for
 permissions. Use this with care.
 
-```bash
-permissions allow view ls grep edit mcp_context7_get-library-doc
+```yaml
+permissions:
+  allowed_tools: [view, ls, grep, edit, mcp_context7_get-library-doc]
 ```
 
 ### Disabling Built-In Tools
 
 You can also deny tools, hiding then from the agent entirely:
 
-```bash
-permissions deny bash sourcegraph
+```yaml
+options:
+  disabled_tools: [bash, sourcegraph]
 ```
 
 To disable tools from MCP servers, see the [MCP config section](#mcps).
 
 ### You only live once
 
-You can also skip all permission prompts completely by running Crush with the
+You can also skip all permission prompts completely by running Harness with the
 `--yolo` flag. Be very, very careful with this feature.
 
 ### Disabling Skills
 
-You can prevent Crush from using certain skills entirely. Disabled skills are
+You can prevent Harness from using certain skills entirely. Disabled skills are
 hidden from the agent, including builtin skills and skills discovered from
 disk.
 
-```bash
-option disable-skill crush-config
+```yaml
+options:
+  disabled_skills: [harness-config]
 ```
 
 ### Agent Skills
 
-Crush supports the [Agent Skills](https://agentskills.io) open standard for
+Harness supports the [Agent Skills](https://agentskills.io) open standard for
 extending agent capabilities with reusable skill packages. Skills are folders
-containing a `SKILL.md` file with instructions that Crush can discover and
+containing a `SKILL.md` file with instructions that Harness can discover and
 activate on demand.
 
 The global paths we looks for skills are:
 
-- `$CRUSH_SKILLS_DIR`
+- `$HARNESS_SKILLS_DIR`
 - `$XDG_CONFIG_HOME/agents/skills` or `~/.config/agents/skills/`
-- `$XDG_CONFIG_HOME/crush/skills` or `~/.config/crush/skills/`
+- `$XDG_CONFIG_HOME/harness/skills` or `~/.config/harness/skills/`
 - `~/.agents/skills/`
 - `~/.claude/skills/`
 - On Windows, we _also_ look at
   - `%LOCALAPPDATA%\agents\skills\` or `%USERPROFILE%\AppData\Local\agents\skills\`
-  - `%LOCALAPPDATA%\crush\skills\` or `%USERPROFILE%\AppData\Local\crush\skills\`
+  - `%LOCALAPPDATA%\harness\skills\` or `%USERPROFILE%\AppData\Local\harness\skills\`
 - Additional paths configured via `options.skills_paths`
 
 On top of that, we _also_ load skills in your project from the following
 relative paths:
 
 - `.agents/skills`
-- `.crush/skills`
+- `.harness/skills`
 - `.claude/skills`
 - `.cursor/skills`
 
 Or load directories of skills specifically in your config:
 
-```bash
-option skill-path "$HOME/squid-skills" "./other-skills"
+```yaml
+options:
+  skills_paths:
+    - ${HOME}/squid-skills
+    - ./other-skills
 ```
 
 You can get started with example skills from [anthropics/skills](https://github.com/anthropics/skills):
 
 ```bash
 # Unix
-mkdir -p ~/.config/crush/skills
-cd ~/.config/crush/skills
+mkdir -p ~/.config/harness/skills
+cd ~/.config/harness/skills
 git clone https://github.com/anthropics/skills.git _temp
 mv _temp/skills/* . && rm -rf _temp
 ```
 
 ```powershell
 # Windows (PowerShell)
-mkdir -Force "$env:LOCALAPPDATA\crush\skills"
-cd "$env:LOCALAPPDATA\crush\skills"
+mkdir -Force "$env:LOCALAPPDATA\harness\skills"
+cd "$env:LOCALAPPDATA\harness\skills"
 git clone https://github.com/anthropics/skills.git _temp
 mv _temp/skills/* . ; rm -r -force _temp
 ```
@@ -635,13 +544,14 @@ Skills with `disable-model-invocation` won't appear in the model's available ski
 
 ### Desktop notifications
 
-Crush sends desktop notifications when a tool call requires permission and when
+Harness sends desktop notifications when a tool call requires permission and when
 the agent finishes its turn. They're only sent when the terminal window isn't
 focused _and_ your terminal supports reporting the focus state.
 
-```bash
-# Choose auto, native, osc, bell, or disabled.
-option notifications disabled
+```yaml
+options:
+  # Choose auto, native, osc, bell, or disabled.
+  notifications: disabled
 ```
 
 `auto` uses native notifications locally and OSC notifications over SSH when
@@ -649,42 +559,44 @@ supported.
 
 ### Initialization
 
-When you initialize a project, Crush analyzes your codebase and creates
+When you initialize a project, Harness analyzes your codebase and creates
 a context file that helps it work more effectively in future sessions. By
 default, this file is named `AGENTS.md`, but you can customize the name and
 location with the `initialize-as` option:
 
-```bash
-# crushrc
-option initialize-as AGENTS.md
+```yaml
+options:
+  initialize_as: AGENTS.md
 ```
 
 This is useful if you prefer a different naming convention or want to place the
-file in a specific directory (e.g., `CRUSH.md` or `docs/LLMs.md`). Crush will
+file in a specific directory (e.g., `HARNESS.md` or `docs/LLMs.md`). Harness will
 fill the file with project-specific context like build commands, code patterns,
 and conventions it discovered during initialization.
 
 ### Attribution Settings
 
-By default, Crush adds attribution information to Git commits and pull requests
+By default, Harness adds attribution information to Git commits and pull requests
 it creates. You can customize this behavior with `option` commands:
 
-```bash
-option attribution-trailer-style co-authored-by
-option attribution-generated-with true
+```yaml
+options:
+  attribution:
+    trailer_style: co-authored-by
+    generated_with: true
 ```
 
 - `trailer_style`: Controls the attribution trailer added to commit messages
   (default: `assisted-by`)
-  - `assisted-by`: Adds `Assisted-by: Crush:[ModelID]` as specified in [the convention](https://docs.kernel.org/process/coding-assistants.html#attribution)
-  - `co-authored-by`: Adds `Co-Authored-By: Crush <crush@charm.land>`
+  - `assisted-by`: Adds `Assisted-by: Harness:[ModelID]` as specified in [the convention](https://docs.kernel.org/process/coding-assistants.html#attribution)
+  - `co-authored-by`: Adds `Co-Authored-By: Harness <noreply@github.com>`
   - `none`: No attribution trailer
-- `generated_with`: When true (default), adds `💘 Generated with Crush` line to
+- `generated_with`: When true (default), adds `💘 Generated with Harness` line to
   commit messages and PR descriptions
 
 ### Custom Providers
 
-Crush supports custom provider configurations for both OpenAI-compatible and
+Harness supports custom provider configurations for both OpenAI-compatible and
 Anthropic-compatible APIs.
 
 > [!NOTE]
@@ -699,81 +611,79 @@ Anthropic-compatible APIs.
 Here’s an example configuration for Deepseek, which uses an OpenAI-compatible
 API. Don't forget to set `DEEPSEEK_API_KEY` in your environment.
 
-```bash
-provider add deepseek --type openai-compat \
-  --base-url "https://api.deepseek.com/v1" \
-  --api-key "$DEEPSEEK_API_KEY"
-
-model add deepseek/deepseek-chat \
-  --name "Deepseek V3" \
-  --context-window 64000 \
-  --default-max-tokens 5000 \
-  --price-input 0.27 \
-  --price-output 1.1 \
-  --price-cache-create 1.1 \
-  --price-cache-hit 0.07
+```yaml
+providers:
+  deepseek:
+    type: openai-compat
+    base_url: https://api.deepseek.com/v1
+    api_key: ${DEEPSEEK_API_KEY}
+    models:
+      - id: deepseek-chat
+        name: Deepseek V3
+        context_window: 64000
+        default_max_tokens: 5000
+        cost_per_1m_in: 0.27
+        cost_per_1m_out: 1.1
+        cost_per_1m_in_cached: 1.1
+        cost_per_1m_out_cached: 0.07
 ```
 
 #### Anthropic-Compatible APIs
 
 Custom Anthropic-compatible providers follow this format:
 
-```bash
-provider add custom-anthropic \
-  --type anthropic \
-  --base-url "https://api.anthropic.com/v1" \
-  --api-key "$ANTHROPIC_API_KEY" \
-  --extra-header anthropic-version 2023-06-01
-
-model add custom-anthropic/claude-sonnet-4-20250514 \
-  --name "Claude Sonnet 4" \
-  --context-window 200000 \
-  --default-max-tokens 50000 \
-  --can-reason true \
-  --supports-images true \
-  --price-input 3 \
-  --price-output 15 \
-  --price-cache-create 3.75 \
-  --price-cache-hit 0.3
+```yaml
+providers:
+  custom-anthropic:
+    type: anthropic
+    base_url: https://api.anthropic.com/v1
+    api_key: ${ANTHROPIC_API_KEY}
+    extra_headers:
+      anthropic-version: "2023-06-01"
+    models:
+      - id: claude-sonnet-4-20250514
+        name: Claude Sonnet 4
+        context_window: 200000
+        default_max_tokens: 50000
+        can_reason: true
+        supports_attachments: true
+        cost_per_1m_in: 3
+        cost_per_1m_out: 15
+        cost_per_1m_in_cached: 3.75
+        cost_per_1m_out_cached: 0.3
 ```
 
 ### Amazon Bedrock
 
-Crush currently supports running Anthropic models through Bedrock, with caching disabled.
+Harness currently supports running Anthropic models through Bedrock, with caching disabled.
 
-A Bedrock provider appears once Crush can find AWS credentials. You can
+A Bedrock provider appears once Harness can find AWS credentials. You can
 authenticate in one of two ways:
 
 **API key.** Set `AWS_BEARER_TOKEN_BEDROCK` to a Bedrock API key. This is the
 simplest option and never expires mid-session.
 
 **AWS credential chain (SSO, profiles, access keys).** Configure AWS the usual
-way with `aws configure` or `aws configure sso`. Crush picks up whatever the
+way with `aws configure` or `aws configure sso`. Harness picks up whatever the
 AWS SDK credential chain resolves, including `AWS_PROFILE`, `AWS_ACCESS_KEY_ID`
 / `AWS_SECRET_ACCESS_KEY`, or an SSO session. To select a specific profile,
-set `AWS_PROFILE` in your shell (`AWS_PROFILE=myprofile crush`) or in the
+set `AWS_PROFILE` in your shell (`AWS_PROFILE=myprofile harness`) or in the
 top-level [`env`](#environment-variables) config.
 
 If you authenticate via AWS SSO, your session expires periodically. Set
 `aws_auth_refresh` to a command that refreshes it. When Bedrock returns a
-credential error, Crush runs the command, then retries the request in place
+credential error, Harness runs the command, then retries the request in place
 (no duplicate messages, no manual restart):
 
-```json
-{
-  "$schema": "https://charm.land/crush.json",
-  "env": {
-    "AWS_PROFILE": "my-sso-profile"
-  },
-  "providers": {
-    "bedrock": {
-      "aws_auth_refresh": "aws sso login --profile my-sso-profile"
-    },
-    "bedrock-europe": {
-      "aws_auth_refresh": "aws sso login --profile my-eu-sso-profile"
-    }
-  }
-}
+```yaml
+env:
+  AWS_PROFILE: my-sso-profile
+
+providers:
+  bedrock:
+    aws_auth_refresh: aws sso login --profile my-sso-profile
+  bedrock-europe:
+    aws_auth_refresh: aws sso login --profile my-eu-sso-profile
 ```
 
 - `aws_auth_refresh` — shell command run when AWS credentials expire (e.g. `aws sso login`)
@@ -788,44 +698,48 @@ $ gcloud auth application-default login
 
 To add specific models to the configuration, configure as such:
 
-```bash
-# crushrc — authentication still comes from gcloud and the VERTEXAI_* env vars.
-provider add vertexai --type google-vertex
-
-model add vertexai/claude-sonnet-4@20250514 \
-  --name "VertexAI Sonnet 4" \
-  --context-window 200000 \
-  --default-max-tokens 50000 \
-  --can-reason true \
-  --supports-images true \
-  --price-input 3 \
-  --price-output 15 \
-  --price-cache-create 3.75 \
-  --price-cache-hit 0.3
+```yaml
+# Authentication still comes from gcloud and the VERTEXAI_* env vars.
+providers:
+  vertexai:
+    type: google-vertex
+    models:
+      - id: claude-sonnet-4@20250514
+        name: VertexAI Sonnet 4
+        context_window: 200000
+        default_max_tokens: 50000
+        can_reason: true
+        supports_attachments: true
+        cost_per_1m_in: 3
+        cost_per_1m_out: 15
+        cost_per_1m_in_cached: 3.75
+        cost_per_1m_out_cached: 0.3
 ```
 
 ### Local Models
 
-Crush can auto-discovers models from local providers. Add a custom provider
+Harness can auto-discovers models from local providers. Add a custom provider
 with `type` set to `llamacpp`, `omlx`, `lmstudio`, `litellm`, or `ollama`
-and leave out the models list. Crush will populate the model list
+and leave out the models list. Harness will populate the model list
 automatically.
 
-```bash
+```yaml
 # Piece of cake.
-provider add ollama \
-  --name Ollama \
-  --type ollama \
-  --base-url "http://localhost:11434/v1/"
+providers:
+  ollama:
+    name: Ollama
+    type: ollama
+    base_url: http://localhost:11434/v1/
 ```
 
 For llama.cpp (`llama-server`), point at the server's base URL:
 
-```bash
-provider add llamacpp \
-  --name "llama.cpp" \
-  --type llamacpp \
-  --base-url "http://localhost:2222"
+```yaml
+providers:
+  llamacpp:
+    name: llama.cpp
+    type: llamacpp
+    base_url: http://localhost:2222
 ```
 
 #### Manual Model Configuration
@@ -836,18 +750,18 @@ by auto-discovery. Auto discovery will run if the model list is empty for any
 `openai-compat` provider or if you pass `"discover_models": true` it will merge
 the found models with your hand configured ones.
 
-```bash
-# crushrc
-provider add ollama \
-  --name Ollama \
-  --type ollama \
-  --base-url "http://localhost:11434/v1/" \
-  --discover-models true
-
-model add ollama/qwen3:30b \
-  --name "Qwen 3 30B" \
-  --context-window 256000 \
-  --default-max-tokens 20000
+```yaml
+providers:
+  ollama:
+    name: Ollama
+    type: ollama
+    base_url: http://localhost:11434/v1/
+    discover_models: true
+    models:
+      - id: qwen3:30b
+        name: Qwen 3 30B
+        context_window: 256000
+        default_max_tokens: 20000
 ```
 
 The `--discover-models true` flag merges discovered models with the one above;
@@ -855,37 +769,37 @@ your explicit model fields win on conflicts.
 
 ## Logging
 
-Sometimes you need to look at logs. Luckily, Crush logs all sorts of
-stuff. Logs are stored in `./.crush/logs/crush.log` relative to the project.
+Sometimes you need to look at logs. Luckily, Harness logs all sorts of
+stuff. Logs are stored in `./.harness/logs/harness.log` relative to the project.
 
 The CLI also contains some helper commands to make perusing recent logs easier:
 
 ```bash
 # Print the last 1000 lines
-crush logs
+harness logs
 
 # Print the last 500 lines
-crush logs --tail 500
+harness logs --tail 500
 
 # Follow logs in real time
-crush logs --follow
+harness logs --follow
 ```
 
-Want more logging? Run `crush` with the `--debug` flag, or enable it in your
-`crushrc`:
+Want more logging? Run `harness` with the `--debug` flag, or enable it in your
+config:
 
-```bash
-# crushrc
-option debug true
-option debug-lsp true
+```yaml
+options:
+  debug: true
+  debug_lsp: true
 ```
 
 ## Provider Auto-Updates
 
-By default, Crush automatically checks for the latest and greatest list of
+By default, Harness automatically checks for the latest and greatest list of
 providers and models from [Catwalk](https://github.com/charmbracelet/catwalk),
-the open source Crush provider database. This means that when new providers and
-models are available, or when model metadata changes, Crush automatically
+the open source Harness provider database. This means that when new providers and
+models are available, or when model metadata changes, Harness automatically
 updates your local configuration.
 
 ### Custom provider catalog
@@ -900,59 +814,53 @@ For those with restricted internet access, or those who prefer to work in
 air-gapped environments, this might not be want you want, and this feature can
 be disabled.
 
-To disable automatic provider updates in your `crushrc`:
+To disable automatic provider updates in your config:
 
-```bash
-option provider-auto-update false
+```yaml
+options:
+  disable_provider_auto_update: true
 ```
 
-Or set the `CRUSH_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
+Or set the `HARNESS_DISABLE_PROVIDER_AUTO_UPDATE` environment variable:
 
 ```bash
-export CRUSH_DISABLE_PROVIDER_AUTO_UPDATE=1
+export HARNESS_DISABLE_PROVIDER_AUTO_UPDATE=1
 ```
 
 ### Manually updating providers
 
-Manually updating providers is possible with the `crush update-providers`
+Manually updating providers is possible with the `harness update-providers`
 command:
 
 ```bash
 # Update providers remotely from Catwalk.
-crush update-providers
+harness update-providers
 
 # Update providers from a custom Catwalk base URL.
-crush update-providers https://example.com/
+harness update-providers https://example.com/
 
 # Update providers from a local file.
-crush update-providers /path/to/local-providers.json
+harness update-providers /path/to/local-providers.json
 
-# Reset providers to the embedded version, embedded at crush at build time.
-crush update-providers embedded
+# Reset providers to the embedded version, embedded at harness at build time.
+harness update-providers embedded
 
 # For more info:
-crush update-providers --help
+harness update-providers --help
 ```
 
 ## Metrics
 
-Crush records pseudonymous usage metrics (tied to a device-specific hash),
-which maintainers rely on to inform development and support priorities. The
-metrics include solely usage metadata; prompts and responses are NEVER
-collected.
+None. Harness sends no usage data anywhere: the analytics client upstream
+shipped with was removed, not merely defaulted off. The event hooks in
+[`internal/event`](https://github.com/stubbedev/harness/tree/main/internal/event)
+are inert no-ops kept only so the call sites still describe what the app
+considers notable.
 
-Details on exactly what’s collected are in the source code ([here](https://github.com/charmbracelet/crush/tree/main/internal/event)
-and [here](https://github.com/charmbracelet/crush/blob/main/internal/llm/agent/event.go)).
-
-You can opt out of metrics collection at any time by setting the environment
-variable by setting the following in your environment:
-
-```bash
-export CRUSH_DISABLE_METRICS=1
-```
-
-Crush also respects the [`DO_NOT_TRACK`](https://donottrack.sh/) convention
-which can be enabled via `export DO_NOT_TRACK=1`.
+The only outbound requests Harness makes are the ones you can see: the model
+provider you configured, the model catalog (see
+[Provider Auto-Updates](#provider-auto-updates), which you can disable), and
+whatever your MCP servers and tools do.
 
 ## Q&A
 
@@ -969,30 +877,12 @@ Installing an extra tool might be needed on Unix-like environments.
 
 ## Contributing
 
-See the [contributing guide](https://github.com/charmbracelet/crush?tab=contributing-ov-file#contributing).
-
-## Whatcha think?
-
-We’d love to hear your thoughts on this project. Need help? We gotchu. You can find us on:
-
-- [Twitter](https://twitter.com/charmcli)
-- [Slack][slack]
-- [Discord][discord]
-- [The Fediverse](https://mastodon.social/@charmcli)
-- [Bluesky](https://bsky.app/profile/charm.land)
-
-[slack]: https://charm.land/slack
-[discord]: https://charm.land/discord
+Issues and pull requests are welcome at
+[stubbedev/harness](https://github.com/stubbedev/harness).
 
 ## License
 
-[FSL-1.1-MIT](https://github.com/charmbracelet/crush/raw/main/LICENSE.md)
+[FSL-1.1-MIT](https://github.com/stubbedev/harness/raw/main/LICENSE.md)
 
----
-
-Part of [Charm](https://charm.land).
-
-<a href="https://charm.land/"><img alt="The Charm logo" width="400" src="https://stuff.charm.sh/charm-banner-softy.jpg" /></a>
-
-<!--prettier-ignore-->
-Charm热爱开源 • Charm loves open source
+Harness is a fork of [Crush](https://github.com/charmbracelet/crush) by
+Charmbracelet, Inc., and carries its license.

@@ -27,43 +27,43 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/agent/notify"
-	agenttools "github.com/charmbracelet/crush/internal/agent/tools"
-	"github.com/charmbracelet/crush/internal/agent/tools/mcp"
-	"github.com/charmbracelet/crush/internal/app"
-	"github.com/charmbracelet/crush/internal/clipboard"
-	"github.com/charmbracelet/crush/internal/commands"
-	"github.com/charmbracelet/crush/internal/config"
-	"github.com/charmbracelet/crush/internal/event"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/history"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/message"
-	"github.com/charmbracelet/crush/internal/permission"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"github.com/charmbracelet/crush/internal/question"
-	"github.com/charmbracelet/crush/internal/session"
-	"github.com/charmbracelet/crush/internal/skills"
-	"github.com/charmbracelet/crush/internal/stringext"
-	"github.com/charmbracelet/crush/internal/subagents"
-	"github.com/charmbracelet/crush/internal/ui/attachments"
-	"github.com/charmbracelet/crush/internal/ui/chat"
-	"github.com/charmbracelet/crush/internal/ui/common"
-	"github.com/charmbracelet/crush/internal/ui/completions"
-	"github.com/charmbracelet/crush/internal/ui/dialog"
-	fimage "github.com/charmbracelet/crush/internal/ui/image"
-	"github.com/charmbracelet/crush/internal/ui/notification"
-	"github.com/charmbracelet/crush/internal/ui/styles"
-	"github.com/charmbracelet/crush/internal/ui/util"
-	"github.com/charmbracelet/crush/internal/version"
-	"github.com/charmbracelet/crush/internal/workspace"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 	xstrings "github.com/charmbracelet/x/exp/strings"
+	"github.com/stubbedev/harness/internal/agent/hyper"
+	"github.com/stubbedev/harness/internal/agent/notify"
+	agenttools "github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/clipboard"
+	"github.com/stubbedev/harness/internal/commands"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/event"
+	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/history"
+	"github.com/stubbedev/harness/internal/home"
+	"github.com/stubbedev/harness/internal/lsp"
+	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/permission"
+	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/question"
+	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/stringext"
+	"github.com/stubbedev/harness/internal/subagents"
+	"github.com/stubbedev/harness/internal/ui/attachments"
+	"github.com/stubbedev/harness/internal/ui/chat"
+	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/completions"
+	"github.com/stubbedev/harness/internal/ui/dialog"
+	fimage "github.com/stubbedev/harness/internal/ui/image"
+	"github.com/stubbedev/harness/internal/ui/notification"
+	"github.com/stubbedev/harness/internal/ui/styles"
+	"github.com/stubbedev/harness/internal/ui/util"
+	"github.com/stubbedev/harness/internal/version"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // Compact mode breakpoints.
@@ -227,13 +227,17 @@ type UI struct {
 
 	// mouseEnabled controls whether Bubble Tea mouse reporting is active.
 	// When false, the terminal emulator (or tmux) handles text selection,
-	// copy/paste, right-click, and scrolling instead of Crush.
+	// copy/paste, right-click, and scrolling instead of Harness.
 	mouseEnabled bool
 
 	// themeKey identifies the currently applied theme so applyTheme can
 	// skip the expensive style rebuild when switching to a provider that
 	// resolves to the same theme.
 	themeKey string
+
+	// themePreview is live only while the theme picker is open; see
+	// [themePreview] and [UI.previewTheme].
+	themePreview themePreview
 
 	focus uiFocusState
 	state uiState
@@ -476,8 +480,8 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		key.WithKeys("ctrl+shift+a"),
 		key.WithHelp("ctrl+shift+a", "select all"),
 	)
-	// Copying is handled by crush's keymap (Editor.CopySelection) so it can
-	// use crush's clipboard backend and user feedback; disable the
+	// Copying is handled by harness's keymap (Editor.CopySelection) so it can
+	// use harness's clipboard backend and user feedback; disable the
 	// textarea's built-in copy binding.
 	ta.KeyMap.CopySelection = key.NewBinding()
 	ta.Focus()
@@ -1534,9 +1538,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
 	case app.UpdateAvailableMsg:
-		text := fmt.Sprintf("Crush update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
+		text := fmt.Sprintf("Harness update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
-			text = fmt.Sprintf("This is a development version of Crush. The latest version is v%s.", msg.LatestVersion)
+			text = fmt.Sprintf("This is a development version of Harness. The latest version is v%s.", msg.LatestVersion)
 		}
 		ttl := 10 * time.Second
 		m.status.SetInfoMsg(util.InfoMsg{
@@ -1700,7 +1704,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	info := util.InfoMsg{
 		Type: util.InfoTypeWarn,
-		Msg:  "Lost connection to the Crush server — reconnecting…",
+		Msg:  "Lost connection to the Harness server — reconnecting…",
 		TTL:  30 * time.Second,
 	}
 	switch msg.State {
@@ -1708,13 +1712,13 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 		slog.Warn("Server connection degraded", "error", msg.Err, "stuck", msg.Stuck)
 		if msg.Stuck {
 			info.Type = util.InfoTypeError
-			info.Msg = "Can't restore the connection to the Crush server. Restart Crush to recover."
+			info.Msg = "Can't restore the connection to the Harness server. Restart Harness to recover."
 			info.TTL = time.Minute
 		}
 	case workspace.ConnectionRecovered:
 		info = util.InfoMsg{
 			Type: util.InfoTypeSuccess,
-			Msg:  "Reconnected to the Crush server.",
+			Msg:  "Reconnected to the Harness server.",
 			TTL:  DefaultStatusTTL,
 		}
 	}
@@ -2061,6 +2065,11 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
+		// Closing the theme picker without confirming drops the preview.
+		if front := m.dialog.DialogLast(); front != nil && front.ID() == dialog.ThemesID {
+			m.revertThemePreview()
+		}
+
 		if m.dialog.ContainsDialog(dialog.FilePickerID) {
 			defer fimage.ResetCache()
 		}
@@ -2143,6 +2152,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, m.saveSummaryToFile(msg.SessionID))
+		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionExportConversation:
+		cmds = append(cmds, m.exportConversationToFile(msg.SessionID))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
@@ -2286,6 +2298,31 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
 		}))
 		m.dialog.CloseDialog(dialog.ReasoningID)
+	case dialog.ActionPreviewTheme:
+		m.previewTheme(msg.Name)
+		if msg.Cmd != nil {
+			cmds = append(cmds, msg.Cmd)
+		}
+	case dialog.ActionSelectTheme:
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.theme", msg.Name); err != nil {
+			// The preview is still on screen but nothing was saved, so
+			// put the previous theme back rather than leaving the UI in a
+			// state the config doesn't describe.
+			m.revertThemePreview()
+			cmds = append(cmds, util.ReportError(err))
+			m.dialog.CloseDialog(dialog.ThemesID)
+			break
+		}
+		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
+			if cfg.Options.TUI == nil {
+				cfg.Options.TUI = &config.TUIOptions{}
+			}
+			cfg.Options.TUI.Theme = msg.Name
+		}
+		m.previewTheme(msg.Name)
+		m.commitThemePreview()
+		cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Theme set to: "+msg.Name)))
+		m.dialog.CloseDialog(dialog.ThemesID)
 	case dialog.ActionPermissionResponse:
 		m.dialog.CloseDialog(dialog.PermissionsID)
 		switch msg.Action {
@@ -2646,6 +2683,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 			return true
+		case key.Matches(msg, m.keyMap.Themes):
+			if cmd := m.openThemesDialog(); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return true
 		case key.Matches(msg, m.keyMap.Chat.Details) && m.isCompact:
 			m.detailsOpen = !m.detailsOpen
 			m.updateLayoutAndSize()
@@ -2703,6 +2745,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 			return true
+		case key.Matches(msg, m.keyMap.ExportConversation):
+			if m.hasSession() {
+				cmds = append(cmds, m.exportConversationToFile(m.session.ID))
+				return true
+			}
 		}
 		return false
 	}
@@ -3279,7 +3326,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	// Debugging rendering (visually see when the tui rerenders)
-	if os.Getenv("CRUSH_UI_DEBUG") == "true" {
+	if os.Getenv("HARNESS_UI_DEBUG") == "true" {
 		debugView := lipgloss.NewStyle().Background(lipgloss.ANSIColor(rand.Intn(256))).Width(4).Height(2)
 		debug := uv.NewStyledString(debugView.String())
 		debug.Draw(scr, image.Rectangle{
@@ -3540,10 +3587,11 @@ func (m *UI) FullHelp() [][]key.Binding {
 			k.Models,
 			k.Subagents,
 			k.Sessions,
+			k.Themes,
 			k.ToggleYolo,
 		)
 		if hasSession {
-			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.EndFollow)
+			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.EndFollow, k.ExportConversation)
 		}
 
 		binds = append(binds, mainBinds)
@@ -3623,6 +3671,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Models,
 					k.Subagents,
 					k.Sessions,
+					k.Themes,
 					k.ToggleYolo,
 				},
 			)
@@ -4064,7 +4113,7 @@ func (m *UI) openEditor(value string) tea.Cmd {
 		return util.ReportError(err)
 	}
 	cmd, err := editor.Command(
-		"crush",
+		"harness",
 		tmpPath,
 		editor.AtPosition(
 			m.textarea.Line()+1,
@@ -4413,6 +4462,36 @@ func (m *UI) applyThemeForProvider(providerID string) {
 	m.applyTheme(styles.ThemeForProvider(providerID))
 }
 
+// previewTheme applies a theme by name without persisting it, so the theme
+// picker can show what an entry actually looks like across the whole UI.
+// The first preview snapshots the current styles so [revertThemePreview]
+// can put them back.
+func (m *UI) previewTheme(name string) {
+	m.themePreview.begin(*m.com.Styles, m.themeKey)
+	if !m.themePreview.set(name) {
+		return
+	}
+	m.themeKey = "config:" + strings.ToLower(name)
+	m.applyTheme(styles.ThemeFromConfig(name))
+}
+
+// revertThemePreview restores the theme that was active before the theme
+// picker started previewing. It is a no-op when nothing was previewed.
+func (m *UI) revertThemePreview() {
+	restore, restoreKey, ok := m.themePreview.take()
+	if !ok {
+		return
+	}
+	m.themeKey = restoreKey
+	m.applyTheme(restore)
+}
+
+// commitThemePreview keeps the previewed theme, dropping the snapshot so a
+// later close doesn't revert it.
+func (m *UI) commitThemePreview() {
+	m.themePreview.clear()
+}
+
 // applyTheme replaces the active styles with the given theme, drops the
 // shared markdown renderer cache, and refreshes every component that
 // caches style data.
@@ -4711,6 +4790,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ThemesID:
+		if cmd := m.openThemesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.NotificationsID:
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4802,6 +4885,17 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 	}
 
 	m.dialog.OpenDialog(reasoningDialog)
+	return nil
+}
+
+// openThemesDialog opens the color theme picker.
+func (m *UI) openThemesDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ThemesID) {
+		m.dialog.BringToFront(dialog.ThemesID)
+		return nil
+	}
+
+	m.dialog.OpenDialog(dialog.NewThemes(m.com))
 	return nil
 }
 
@@ -5170,6 +5264,29 @@ func (m *UI) saveSummaryToFile(sessionID string) tea.Cmd {
 		return util.CmdHandler(util.InfoMsg{
 			Type: util.InfoTypeSuccess,
 			Msg:  "Summary saved to " + path,
+		})()
+	}
+}
+
+// exportConversationToFile writes the full transcript of the given session
+// to a markdown file inside the data directory.
+func (m *UI) exportConversationToFile(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		sess, err := m.com.Workspace.GetSession(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), sessionID)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		path, err := saveConversationExport(m.com.Config().Options.DataDirectory, sess, msgs)
+		if err != nil {
+			return util.ReportError(err)()
+		}
+		return util.CmdHandler(util.InfoMsg{
+			Type: util.InfoTypeSuccess,
+			Msg:  "Conversation exported to " + path,
 		})()
 	}
 }

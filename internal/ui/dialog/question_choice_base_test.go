@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/crush/internal/question"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/question"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 func newTestSingleChoice(t *testing.T) *SingleChoice {

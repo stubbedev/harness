@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"github.com/charmbracelet/crush/internal/diff"
-	"github.com/charmbracelet/crush/internal/filepathext"
-	"github.com/charmbracelet/crush/internal/filetracker"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/history"
+	"github.com/stubbedev/harness/internal/diff"
+	"github.com/stubbedev/harness/internal/filepathext"
+	"github.com/stubbedev/harness/internal/filetracker"
+	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/history"
 
-	"github.com/charmbracelet/crush/internal/lsp"
-	"github.com/charmbracelet/crush/internal/permission"
+	"github.com/stubbedev/harness/internal/lsp"
+	"github.com/stubbedev/harness/internal/permission"
 )
 
 //go:embed write.md

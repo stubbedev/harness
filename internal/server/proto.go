@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/charmbracelet/crush/internal/backend"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/session"
 	"github.com/google/uuid"
+	"github.com/stubbedev/harness/internal/backend"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/session"
 )
 
 type controllerV1 struct {

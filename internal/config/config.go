@@ -13,15 +13,15 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/oauth"
-	"github.com/charmbracelet/crush/internal/oauth/copilot"
 	"github.com/invopop/jsonschema"
+	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/oauth"
+	"github.com/stubbedev/harness/internal/oauth/copilot"
 )
 
 const (
-	appName              = "crush"
-	defaultDataDirectory = ".crush"
+	appName              = "harness"
+	defaultDataDirectory = ".harness"
 	defaultInitializeAs  = "AGENTS.md"
 )
 
@@ -33,12 +33,12 @@ var defaultContextPaths = []string{
 	"CLAUDE.local.md",
 	"GEMINI.md",
 	"gemini.md",
-	"crush.md",
-	"crush.local.md",
-	"Crush.md",
-	"Crush.local.md",
-	"CRUSH.md",
-	"CRUSH.local.md",
+	"harness.md",
+	"harness.local.md",
+	"Harness.md",
+	"Harness.local.md",
+	"HARNESS.md",
+	"HARNESS.local.md",
 	"AGENTS.md",
 	"agents.md",
 	"Agents.md",
@@ -138,7 +138,7 @@ type ProviderConfig struct {
 	FlatRate bool `json:"flat_rate,omitempty" jsonschema:"description=Flat-rate mode for this provider"`
 
 	// AutoDiscoverModels controls model discovery via /v1/models endpoint.
-	// When Models is empty and this is nil or true, Crush auto-discovers
+	// When Models is empty and this is nil or true, Harness auto-discovers
 	// models. When true and Models is non-empty, discovered models are
 	// merged in (user-specified models take precedence). When false,
 	// only explicitly listed models are used.
@@ -202,7 +202,7 @@ type MCPConfig struct {
 	Timeout       int               `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for MCP server connections,default=10,example=30,example=60,example=120"`
 
 	// Sessionless marks a server that does not maintain an MCP session (it
-	// never issues a Mcp-Session-Id). When true, Crush omits the
+	// never issues a Mcp-Session-Id). When true, Harness omits the
 	// tools/prompts/resources list-changed handlers: the go-sdk opens a
 	// SEP-2575 "subscriptions/listen" stream whenever any of those handlers
 	// is set, and sessionless streamable-HTTP servers (e.g. GitHub MCP)
@@ -210,9 +210,9 @@ type MCPConfig struct {
 	// as fatal. The cost is no live list-changed notifications from this
 	// server.
 	//
-	// When nil, Crush auto-detects a set of known sessionless servers (see
+	// When nil, Harness auto-detects a set of known sessionless servers (see
 	// IsSessionless); set it explicitly to override that detection.
-	Sessionless *bool `json:"sessionless,omitempty" jsonschema:"description=Mark a sessionless MCP server (no Mcp-Session-Id) so Crush skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP),default=false"`
+	Sessionless *bool `json:"sessionless,omitempty" jsonschema:"description=Mark a sessionless MCP server (no Mcp-Session-Id) so Harness skips the subscriptions/listen stream it would otherwise reject. Leave unset to auto-detect known sessionless servers (e.g. GitHub MCP),default=false"`
 
 	// Headers are HTTP headers for HTTP/SSE MCP servers. Values run
 	// through shell expansion at MCP startup, so $VAR and $(cmd)
@@ -243,7 +243,7 @@ type MCPConfig struct {
 	// OAuthCallbackPort pins the localhost port used for the OAuth
 	// redirect listener. Set this when the OAuth provider requires an
 	// exact-match callback URL (e.g. GitHub OAuth Apps). When omitted,
-	// Crush picks the first free port from its default range.
+	// Harness picks the first free port from its default range.
 	OAuthCallbackPort int `json:"oauth_callback_port,omitempty" jsonschema:"description=Fixed localhost port for the OAuth callback, required by providers that enforce exact-match redirect URIs"`
 
 	// OAuthToken is the persisted OAuth token for this server. It is
@@ -278,7 +278,7 @@ type TUIOptions struct {
 	Transparent       *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar         string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
 	Mouse             *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
-	ExitBanner        ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Crush,enum=default,enum=compact,enum=none,default=default"`
+	ExitBanner        ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Harness,enum=default,enum=compact,enum=none,default=default"`
 	GitStatus         *bool       `json:"git_status,omitempty" jsonschema:"description=Show git branch and working-tree status in the compact header,default=true"`
 	ShowThinking      *bool       `json:"show_thinking,omitempty" jsonschema:"description=Render model reasoning (thinking) blocks in the transcript. Reasoning is still requested\\, streamed and stored when disabled - only the rendering is suppressed,default=true"`
 	TextareaMinHeight *int        `json:"textarea_min_height,omitempty" jsonschema:"description=Minimum height of the prompt textarea in rows. The textarea grows to fit content\\, so this only sets the collapsed floor. Values below 1 are clamped to 1.,default=3,example=1,example=5"`
@@ -343,7 +343,7 @@ const (
 	ScrollbarNever   = "never"   // Never show scrollbar
 )
 
-// ExitBanner selects what Crush prints after the TUI exits.
+// ExitBanner selects what Harness prints after the TUI exits.
 type ExitBanner string
 
 const (
@@ -352,7 +352,7 @@ const (
 	ExitBannerDefault ExitBanner = "default"
 	// ExitBannerCompact renders only the session and resume lines, with no
 	// logo and no padding. With no active session it renders nothing at all,
-	// so Crush exits silently.
+	// so Harness exits silently.
 	ExitBannerCompact ExitBanner = "compact"
 	// ExitBannerNone renders nothing.
 	ExitBannerNone ExitBanner = "none"
@@ -361,7 +361,7 @@ const (
 type Permissions struct {
 	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
 	// Yolo skips every permission prompt. This fork defaults it to true;
-	// set permissions.yolo false (or "permissions yolo false" in crushrc)
+	// set permissions.yolo false in the config file
 	// to restore prompting. The --yolo flag forces it on regardless.
 	Yolo *bool `json:"yolo,omitempty" jsonschema:"description=Skip all permission prompts (yolo mode). This build defaults to true\\, set false to restore prompts,default=true"`
 }
@@ -384,7 +384,7 @@ const (
 type Attribution struct {
 	TrailerStyle  TrailerStyle `json:"trailer_style,omitempty" jsonschema:"description=Style of attribution trailer to add to commits,enum=none,enum=co-authored-by,enum=assisted-by,default=assisted-by"`
 	CoAuthoredBy  *bool        `json:"co_authored_by,omitempty" jsonschema:"description=Deprecated: use trailer_style instead"`
-	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Crush line to commit messages and issues and PRs,default=true"`
+	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Harness line to commit messages and issues and PRs,default=true"`
 }
 
 // JSONSchemaExtend marks the co_authored_by field as deprecated in the schema.
@@ -397,9 +397,9 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
-	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=CRUSH.md"`
-	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/crush/CRUSH.md,default=~/.config/AGENTS.md"`
-	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/crush/skills,example=./skills"`
+	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=HARNESS.md"`
+	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/harness/HARNESS.md,default=~/.config/AGENTS.md"`
+	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/harness/skills,example=./skills"`
 	TUI                  *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
 	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
@@ -413,23 +413,23 @@ type Options struct {
 	// window above 200k tokens before the session is summarized. Zero keeps
 	// the default of 20000.
 	AutoSummarizeBuffer int64 `json:"auto_summarize_buffer,omitempty" jsonschema:"description=Tokens kept free in a context window above 200k tokens before the session is summarized (default 20000),minimum=0,example=40000"`
-	// DataDirectory is where Crush keeps per-project state such as
+	// DataDirectory is where Harness keeps per-project state such as
 	// the SQLite database and workspace overrides. Relative paths are
 	// resolved against the working directory; absolute paths are used
 	// verbatim. After defaulting the stored value is always absolute.
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.crush,example=.crush"`
+	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.harness,example=.harness"`
 	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=sourcegraph"`
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
 	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
 	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
 	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=CRUSH.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=HARNESS.md,example=CLAUDE.md,example=docs/LLMs.md"`
 	InitPrompt                *bool        `json:"init_prompt,omitempty" jsonschema:"description=Show the project initialization prompt when a project has no context file. Set to false to never ask,default=true"`
 	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
 	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
 	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
-	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=crush-config"`
-	DisableUpdateCheck        bool         `json:"disable_update_check,omitempty" jsonschema:"description=Disable the startup check for Crush updates - useful when the binary is managed externally (nix\\, package manager),default=false"`
+	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=harness-config"`
+	DisableUpdateCheck        bool         `json:"disable_update_check,omitempty" jsonschema:"description=Disable the startup check for Harness updates - useful when the binary is managed externally (nix\\, package manager),default=false"`
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
 	SubagentsPaths            []string     `json:"subagents_paths,omitempty" jsonschema:"description=Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"`
 	DisabledSubagents         []string     `json:"disabled_subagents,omitempty" jsonschema:"description=List of subagent names to disable and hide from the agent"`
@@ -734,21 +734,21 @@ func (t ToolLs) Limits() (depth, items int) {
 }
 
 type ToolGrep struct {
-	Timeout *time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the grep tool call,default=5s,example=10s"`
+	Timeout *Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the grep tool call,default=5s,example=10s"`
 }
 
 // GetTimeout returns the user-defined timeout or the default.
 func (t ToolGrep) GetTimeout() time.Duration {
-	return ptrValOr(t.Timeout, 5*time.Second)
+	return ptrValOr(t.Timeout, Duration(5*time.Second)).Duration()
 }
 
 type ToolGlob struct {
-	Timeout *time.Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the glob tool call,default=30s,example=10s"`
+	Timeout *Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the glob tool call,default=30s,example=10s"`
 }
 
 // GetTimeout returns the user-defined timeout or the default.
 func (t ToolGlob) GetTimeout() time.Duration {
-	return ptrValOr(t.Timeout, 30*time.Second)
+	return ptrValOr(t.Timeout, Duration(30*time.Second)).Duration()
 }
 
 // HookConfig defines a user-configured shell command that fires on a hook
@@ -784,7 +784,7 @@ func (h *HookConfig) TimeoutDuration() time.Duration {
 	return time.Duration(h.Timeout) * time.Second
 }
 
-// Config holds the configuration for crush.
+// Config holds the configuration for harness.
 type Config struct {
 	Schema string `json:"$schema,omitempty"`
 
@@ -815,7 +815,7 @@ type Config struct {
 	Agents map[string]Agent `json:"-"`
 
 	// LargeFallback is true when models.large was set but did not resolve
-	// against the catalog. Interactive TUI still uses the default; crush
+	// against the catalog. Interactive TUI still uses the default; harness
 	// run refuses to start unless -m / --model overrides.
 	LargeFallback bool `json:"large_fallback,omitempty" jsonschema:"-"`
 
@@ -978,18 +978,18 @@ func (c *Config) LargeModel() *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-// ResolvedLargeLine is the default-verbosity model pin for headless crush run.
-// Missing or zero-value large selection prints "crush run: model unresolved"
-// rather than "crush run: /".
+// ResolvedLargeLine is the default-verbosity model pin for headless harness run.
+// Missing or zero-value large selection prints "harness run: model unresolved"
+// rather than "harness run: /".
 func (c *Config) ResolvedLargeLine() string {
 	if c == nil {
-		return "crush run: model unresolved"
+		return "harness run: model unresolved"
 	}
 	m, ok := c.Models[SelectedModelTypeLarge]
 	if !ok || m.Provider == "" || m.Model == "" {
-		return "crush run: model unresolved"
+		return "harness run: model unresolved"
 	}
-	return fmt.Sprintf("crush run: %s/%s", m.Provider, m.Model)
+	return fmt.Sprintf("harness run: %s/%s", m.Provider, m.Model)
 }
 
 func (c *Config) SmallModel() *catwalk.Model {
@@ -1016,8 +1016,8 @@ func allToolNames() []string {
 	return []string{
 		"agent",
 		"bash",
-		"crush_info",
-		"crush_logs",
+		"harness_info",
+		"harness_logs",
 		"job_output",
 		"job_kill",
 		"download",

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/crush/internal/db"
-	"github.com/charmbracelet/crush/internal/pubsub"
 	"github.com/google/uuid"
+	"github.com/stubbedev/harness/internal/db"
+	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 // defaultUpdateDebounce is the default debounce window for [Service.Update].

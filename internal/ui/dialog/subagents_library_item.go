@@ -1,10 +1,10 @@
 package dialog
 
 import (
-	"github.com/charmbracelet/crush/internal/ui/list"
-	"github.com/charmbracelet/crush/internal/ui/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
+	"github.com/stubbedev/harness/internal/ui/list"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // LibrarySubagentItemData holds the data for a library subagent list item.

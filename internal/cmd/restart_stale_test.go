@@ -8,11 +8,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/charmbracelet/crush/internal/client"
-	"github.com/charmbracelet/crush/internal/proto"
-	"github.com/charmbracelet/crush/internal/version"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/client"
+	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/version"
 )
 
 // controlServerOpts describes the server restartIfStale will find.

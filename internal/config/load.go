@@ -20,18 +20,16 @@ import (
 	"time"
 
 	"charm.land/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/agent/hyper"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/discover"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/filepathext"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/shellconfig"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
+	"github.com/stubbedev/harness/internal/agent/hyper"
+	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/discover"
+	"github.com/stubbedev/harness/internal/env"
+	"github.com/stubbedev/harness/internal/filepathext"
+	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/home"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.land"
@@ -39,9 +37,6 @@ const defaultCatwalkURL = "https://catwalk.charm.land"
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
-	// Migrate deprecated disable_notifications before loading config.
-	migrateDisableNotifications()
-
 	configPaths := lookupConfigs(workingDir)
 
 	cfg, loadedPaths, err := loadFromConfigPaths(context.Background(), configPaths)
@@ -55,7 +50,7 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		config:         cfg,
 		workingDir:     workingDir,
 		globalDataPath: GlobalConfigData(),
-		workspacePath:  filepath.Join(cfg.Options.DataDirectory, fmt.Sprintf("%s.json", appName)),
+		workspacePath:  filepath.Join(cfg.Options.DataDirectory, stateConfigFile),
 		loadedPaths:    loadedPaths,
 	}
 
@@ -64,12 +59,13 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 
 	// Load workspace config last so it has highest priority.
-	if wsData, err := os.ReadFile(store.workspacePath); err == nil && len(wsData) > 0 {
-		if !json.Valid(wsData) {
-			return nil, fmt.Errorf("invalid JSON in config file %s", store.workspacePath)
+	if wsData, err := os.ReadFile(store.workspacePath); err == nil {
+		wsJSON, decErr := decodeConfig(wsData)
+		if decErr != nil {
+			return nil, fmt.Errorf("invalid YAML in config file %s: %w", store.workspacePath, decErr)
 		}
-		merged, mergeErr := loadFromBytes(append([][]byte{mustMarshalConfig(cfg)}, wsData))
-		if mergeErr == nil {
+		merged, mergeErr := mergeWorkspaceConfig(cfg, wsJSON)
+		if mergeErr == nil && merged != nil {
 			// Preserve defaults that setDefaults already applied.
 			dataDir := cfg.Options.DataDirectory
 			*cfg = *merged
@@ -162,13 +158,23 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	}
 	store.SetupAgents()
 
-	// Capture initial staleness snapshot
 	// Capture initial staleness snapshot. Track every discovered config path,
 	// not just the ones that loaded, so a config file created after startup
-	// (e.g. a crushrc added mid-session) is detected as a change.
+	// (e.g. a project harness.yaml added mid-session) is detected as a change.
 	store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
 
 	return store, nil
+}
+
+// mergeWorkspaceConfig merges the workspace config (already converted to
+// JSON) over cfg and returns the result. A workspace file that carries no
+// settings yields a nil config and no error, so the caller keeps what it
+// already has.
+func mergeWorkspaceConfig(cfg *Config, workspaceJSON []byte) (*Config, error) {
+	if len(workspaceJSON) == 0 {
+		return nil, nil
+	}
+	return loadFromBytes([][]byte{mustMarshalConfig(cfg), workspaceJSON})
 }
 
 // mustMarshalConfig marshals the config to JSON bytes, returning empty JSON on
@@ -181,15 +187,15 @@ func mustMarshalConfig(cfg *Config) []byte {
 	return data
 }
 
-func PushPopCrushEnv() func() {
+func PushPopHarnessEnv() func() {
 	var found []string
 	for _, ev := range os.Environ() {
-		if strings.HasPrefix(ev, "CRUSH_") {
+		if strings.HasPrefix(ev, "HARNESS_") {
 			pair := strings.SplitN(ev, "=", 2)
 			if len(pair) != 2 {
 				continue
 			}
-			found = append(found, strings.TrimPrefix(pair[0], "CRUSH_"))
+			found = append(found, strings.TrimPrefix(pair[0], "HARNESS_"))
 		}
 	}
 	backups := make(map[string]string)
@@ -198,7 +204,7 @@ func PushPopCrushEnv() func() {
 	}
 
 	for _, ev := range found {
-		os.Setenv(ev, os.Getenv("CRUSH_"+ev))
+		os.Setenv(ev, os.Getenv("HARNESS_"+ev))
 	}
 
 	restore := func() {
@@ -211,7 +217,7 @@ func PushPopCrushEnv() func() {
 
 func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
 	knownProviderNames := make(map[string]bool)
-	restore := PushPopCrushEnv()
+	restore := PushPopHarnessEnv()
 	defer restore()
 
 	// When disable_default_providers is enabled, skip all default/embedded
@@ -529,7 +535,7 @@ func (c *Config) applyEnv(resolver VariableResolver) {
 // NormalizeOptions allocates Options and Options.TUI and fills in the option
 // defaults the UI relies on, so readers can dereference them without guarding.
 // Configs loaded from disk get this via setDefaults; configs arriving over the
-// wire from a Crush server need the same treatment before the UI reads them.
+// wire from a Harness server need the same treatment before the UI reads them.
 //
 // DiffMode is deliberately left alone: the permissions dialog reads its zero
 // value as "choose split or unified from the terminal width".
@@ -551,10 +557,10 @@ func (c *Config) NormalizeOptions() {
 func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.NormalizeOptions()
 	if len(c.Options.GlobalContextPaths) == 0 {
-		crushConfigDir := filepath.Dir(GlobalConfig())
+		harnessConfigDir := filepath.Dir(GlobalConfig())
 		c.Options.GlobalContextPaths = []string{
-			filepath.Join(crushConfigDir, "CRUSH.md"),
-			filepath.Join(filepath.Dir(crushConfigDir), "AGENTS.md"),
+			filepath.Join(harnessConfigDir, "HARNESS.md"),
+			filepath.Join(filepath.Dir(harnessConfigDir), "AGENTS.md"),
 		}
 	}
 	slices.Sort(c.Options.GlobalContextPaths)
@@ -583,7 +589,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		c.MCP = make(map[string]MCPConfig)
 	}
 	// Drop orphaned OAuth token entries left behind when a user removes
-	// an MCP from crush.json. See MCPConfig.isOrphanedToken.
+	// an MCP from the config file. See MCPConfig.isOrphanedToken.
 	for name, m := range c.MCP {
 		if m.isOrphanedToken() {
 			delete(c.MCP, name)
@@ -630,11 +636,11 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 
-	if str, ok := os.LookupEnv("CRUSH_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
+	if str, ok := os.LookupEnv("HARNESS_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}
 
-	if str, ok := os.LookupEnv("CRUSH_DISABLE_DEFAULT_PROVIDERS"); ok {
+	if str, ok := os.LookupEnv("HARNESS_DISABLE_DEFAULT_PROVIDERS"); ok {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
 	}
 
@@ -960,30 +966,27 @@ func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (reso
 // lookupConfigs searches config files starting at cwd and walking up
 // through the current project. The upward walk stops at the git
 // working tree root when one can be detected, otherwise at cwd itself,
-// so an unrelated crush.json placed above the project is never picked
+// so an unrelated harness.yaml placed above the project is never picked
 // up. Global user-level config locations are always included
 // regardless of the boundary.
 func lookupConfigs(cwd string) []string {
-	// Prepend global user config and machine-owned data JSON. Only the user
-	// config directory contributes a crushrc; the data directory is writable
-	// machine state and must never be executed as Bash. Missing files are
-	// skipped when loaded.
+	// Prepend the system config, the hand-written user config, and the
+	// machine-owned state file. Missing files are skipped when loaded.
 	configPaths := []string{
 		systemConfigPath,
 		GlobalConfig(),
-		shellConfigSibling(GlobalConfig()),
 		GlobalConfigData(),
 	}
 
 	// Ordered high-to-low priority within a directory. LookupBounded returns
 	// matches in this order, and the later reverse + merge make the earliest
-	// listed name win on conflict. So: .crushrc beats crushrc, both beat the
-	// JSON configs, and .crush.json beats crush.json.
+	// listed name win on conflict: the hidden .harness.yaml beats the visible
+	// harness.yaml, and .yaml beats .yml for either spelling.
 	configNames := []string{
-		"." + appName + "rc",
-		appName + "rc",
-		"." + appName + ".json",
-		appName + ".json",
+		"." + appName + yamlExt,
+		"." + appName + ymlExt,
+		appName + yamlExt,
+		appName + ymlExt,
 	}
 
 	foundConfigs, err := fsext.LookupBounded(cwd, projectBoundary(cwd), configNames...)
@@ -998,15 +1001,16 @@ func lookupConfigs(cwd string) []string {
 	return append(configPaths, foundConfigs...)
 }
 
-func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []string, error) {
+func loadFromConfigPaths(_ context.Context, configPaths []string) (*Config, []string, error) {
 	var configs [][]byte
 	var loaded []string
 
-	// Track directories that have both crush.json and crushrc to warn
-	// about potential confusion, along with the top-level keys each
-	// defines so we can report conflicts.
-	jsonDirKeys := make(map[string]map[string]bool)
-	shDirKeys := make(map[string]map[string]bool)
+	// Track the directories that hold more than one config file, along with
+	// the top-level keys each defines, so overlapping settings can be
+	// reported. Two spellings in one directory (harness.yaml next to
+	// .harness.yaml) is legal but rarely intended.
+	dirKeys := make(map[string]map[string]bool)
+	dirFiles := make(map[string][]string)
 
 	for _, path := range configPaths {
 		if path == "" {
@@ -1019,53 +1023,19 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 			}
 			return nil, nil, fmt.Errorf("failed to open config file %s: %w", path, err)
 		}
-		if len(data) == 0 {
+
+		jsonBytes, err := decodeConfig(data)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid YAML in config file %s: %w", path, err)
+		}
+		if len(jsonBytes) == 0 {
 			continue
 		}
 
 		dir := filepath.Dir(path)
-		if isShellConfig(path) {
-			jsonBytes, err := shellconfig.LoadShellConfig(ctx, path, data)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to load shell config %s: %w", path, err)
-			}
-			if len(jsonBytes) > 0 {
-				if !json.Valid(jsonBytes) {
-					return nil, nil, fmt.Errorf("shell config %s produced invalid JSON", path)
-				}
-				addTopLevelKeys(shDirKeys, dir, jsonBytes)
-				configs = append(configs, jsonBytes)
-				loaded = append(loaded, path)
-			}
-		} else {
-			if !json.Valid(data) {
-				return nil, nil, fmt.Errorf("invalid JSON in config file %s", path)
-			}
-			addTopLevelKeys(jsonDirKeys, dir, data)
-			configs = append(configs, data)
-			loaded = append(loaded, path)
-		}
-	}
-
-	// Warn if both a JSON config and a crushrc exist in the same directory
-	// and define overlapping top-level keys. Disjoint coexistence is
-	// intentional and not worth warning about.
-	for dir, jKeys := range jsonDirKeys {
-		sKeys, ok := shDirKeys[dir]
-		if !ok {
-			continue
-		}
-		var conflicts []string
-		for k := range jKeys {
-			if sKeys[k] {
-				conflicts = append(conflicts, k)
-			}
-		}
-		if len(conflicts) > 0 {
-			slices.Sort(conflicts)
-			slog.Warn("Found both a JSON config and a crushrc in the same directory; merging with crushrc taking precedence",
-				"dir", dir, "conflicting_keys", strings.Join(conflicts, ", "))
-		}
+		reportConflicts(dirKeys, dirFiles, dir, path, jsonBytes)
+		configs = append(configs, jsonBytes)
+		loaded = append(loaded, path)
 	}
 
 	cfg, err := loadFromBytes(configs)
@@ -1075,18 +1045,36 @@ func loadFromConfigPaths(ctx context.Context, configPaths []string) (*Config, []
 	return cfg, loaded, nil
 }
 
-// addTopLevelKeys records the top-level JSON keys present in data into the
-// set for dir.
-func addTopLevelKeys(m map[string]map[string]bool, dir string, data []byte) {
-	keys := m[dir]
+// reportConflicts records the top-level keys path contributes and warns
+// when an earlier config from the same directory already defined one of
+// them. Later paths win the merge, so the warning names what is being
+// overridden rather than failing the load.
+func reportConflicts(dirKeys map[string]map[string]bool, dirFiles map[string][]string, dir, path string, data []byte) {
+	keys := dirKeys[dir]
 	if keys == nil {
 		keys = make(map[string]bool)
-		m[dir] = keys
+		dirKeys[dir] = keys
 	}
+
+	var conflicts []string
 	gjson.ParseBytes(data).ForEach(func(key, _ gjson.Result) bool {
-		keys[key.String()] = true
+		name := key.String()
+		if keys[name] {
+			conflicts = append(conflicts, name)
+		}
+		keys[name] = true
 		return true
 	})
+
+	if len(conflicts) > 0 {
+		slices.Sort(conflicts)
+		slog.Warn("Found more than one config file in the same directory; merging with the later file taking precedence",
+			"dir", dir,
+			"file", filepath.Base(path),
+			"other_files", strings.Join(dirFiles[dir], ", "),
+			"conflicting_keys", strings.Join(conflicts, ", "))
+	}
+	dirFiles[dir] = append(dirFiles[dir], filepath.Base(path))
 }
 
 func loadFromBytes(configs [][]byte) (*Config, error) {
@@ -1145,116 +1133,21 @@ func hasAWSCredentials(env env.Env) bool {
 	return false
 }
 
-// migrateDisableNotifications migrates the deprecated disable_notifications
-// and notification_style fields to the unified notifications field. It checks
-// both the user config (~/.config) and data config (~/.local) files. If
-// disable_notifications is true, it sets notifications to "disabled" in the
-// data file. If notification_style is set, it moves the value to notifications.
-// Regardless of value, it removes the deprecated fields from any file that
-// contains them.
-func migrateDisableNotifications() {
-	globalConfig := GlobalConfig()
-	dataConfig := GlobalConfigData()
-
-	var wasDisabled bool
-	var styleValue string
-	filesToClean := []string{}
-
-	for _, path := range []string{globalConfig, dataConfig} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		needsClean := false
-		if gjson.Get(string(data), "options.disable_notifications").Exists() {
-			needsClean = true
-			if gjson.Get(string(data), "options.disable_notifications").Bool() {
-				wasDisabled = true
-			}
-		}
-		if v := gjson.Get(string(data), "options.notification_style"); v.Exists() {
-			needsClean = true
-			if styleValue == "" {
-				styleValue = v.String()
-			}
-		}
-		if needsClean {
-			filesToClean = append(filesToClean, path)
-		}
-	}
-
-	if len(filesToClean) == 0 {
-		return
-	}
-
-	// Determine the value to persist: notification_style takes precedence,
-	// then disable_notifications: true maps to "disabled".
-	migratedValue := styleValue
-	if migratedValue == "" && wasDisabled {
-		migratedValue = "disabled"
-	}
-
-	if migratedValue != "" {
-		data, err := os.ReadFile(dataConfig)
-		if err == nil {
-			if !gjson.Get(string(data), "options.notifications").Exists() {
-				updated, err := sjson.Set(string(data), "options.notifications", migratedValue)
-				if err == nil {
-					if err := atomicWriteFile(dataConfig, []byte(updated), 0o600); err != nil {
-						slog.Warn("Failed to migrate to notifications field", "error", err)
-					} else {
-						slog.Info("Migrated notification settings to notifications field", "value", migratedValue)
-					}
-				}
-			}
-		}
-	}
-
-	// Remove deprecated fields from all files that contain them.
-	for _, path := range filesToClean {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		updated := string(data)
-		updated, _ = sjson.Delete(updated, "options.disable_notifications")
-		updated, _ = sjson.Delete(updated, "options.notification_style")
-		if updated == string(data) {
-			continue
-		}
-		if err := atomicWriteFile(path, []byte(updated), 0o600); err != nil {
-			slog.Warn("Failed to write migrated config", "path", path, "error", err)
-		}
-	}
-}
-
-// GlobalConfig returns the global configuration file path for the application.
+// GlobalConfig returns the hand-written user configuration file path:
+// $XDG_CONFIG_HOME/harness/config.yaml. Harness reads this file and never
+// writes to it, so comments and layout in it are safe.
 func GlobalConfig() string {
-	if crushGlobal := os.Getenv("CRUSH_GLOBAL_CONFIG"); crushGlobal != "" {
-		return filepath.Join(crushGlobal, fmt.Sprintf("%s.json", appName))
+	if harnessGlobal := os.Getenv("HARNESS_GLOBAL_CONFIG"); harnessGlobal != "" {
+		return filepath.Join(harnessGlobal, userConfigFile)
 	}
-	return filepath.Join(home.Config(), appName, fmt.Sprintf("%s.json", appName))
-}
-
-// shellConfigSibling returns the crushrc path that sits alongside a given
-// crush.json path (same directory). Used so global config locations pick up a
-// shell config, not just JSON.
-func shellConfigSibling(jsonPath string) string {
-	return filepath.Join(filepath.Dir(jsonPath), appName+"rc")
-}
-
-// isShellConfig reports whether a config path is a shell config (crushrc or
-// the hidden .crushrc), as opposed to a JSON config.
-func isShellConfig(path string) bool {
-	base := filepath.Base(path)
-	return base == appName+"rc" || base == "."+appName+"rc"
+	return filepath.Join(home.Config(), appName, userConfigFile)
 }
 
 // GlobalCacheDir returns the path to the global cache directory for the
 // application.
 func GlobalCacheDir() string {
-	if crushCache := os.Getenv("CRUSH_CACHE_DIR"); crushCache != "" {
-		return crushCache
+	if harnessCache := os.Getenv("HARNESS_CACHE_DIR"); harnessCache != "" {
+		return harnessCache
 	}
 	if xdgCacheHome := os.Getenv("XDG_CACHE_HOME"); xdgCacheHome != "" {
 		return filepath.Join(xdgCacheHome, appName)
@@ -1277,25 +1170,25 @@ func ProjectConfigs(cwd string) []string {
 // GlobalConfigData returns the path to the main data directory for the application.
 // this config is used when the app overrides configurations instead of updating the global config.
 func GlobalConfigData() string {
-	if crushData := os.Getenv("CRUSH_GLOBAL_DATA"); crushData != "" {
-		return filepath.Join(crushData, fmt.Sprintf("%s.json", appName))
+	if harnessData := os.Getenv("HARNESS_GLOBAL_DATA"); harnessData != "" {
+		return filepath.Join(harnessData, stateConfigFile)
 	}
 	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
-		return filepath.Join(xdgDataHome, appName, fmt.Sprintf("%s.json", appName))
+		return filepath.Join(xdgDataHome, appName, stateConfigFile)
 	}
 
 	// return the path to the main data directory
-	// for windows, it should be in `%LOCALAPPDATA%/crush/`
-	// for linux and macOS, it should be in `$HOME/.local/share/crush/`
+	// for windows, it should be in `%LOCALAPPDATA%/harness/`
+	// for linux and macOS, it should be in `$HOME/.local/share/harness/`
 	if runtime.GOOS == "windows" {
 		localAppData := cmp.Or(
 			os.Getenv("LOCALAPPDATA"),
 			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
 		)
-		return filepath.Join(localAppData, appName, fmt.Sprintf("%s.json", appName))
+		return filepath.Join(localAppData, appName, stateConfigFile)
 	}
 
-	return filepath.Join(home.Dir(), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
+	return filepath.Join(home.Dir(), ".local", "share", appName, stateConfigFile)
 }
 
 // GlobalWorkspaceDir returns the path to the global server workspace
@@ -1366,7 +1259,7 @@ func computeWorktreeRoot(dir string) string {
 // projectBoundary returns the directory at which an upward configuration
 // search rooted at dir should stop. It is the git working tree root when
 // one can be detected, otherwise dir itself. Returning dir as a
-// fallback keeps Crush from silently adopting state files placed above
+// fallback keeps Harness from silently adopting state files placed above
 // the current project.
 func projectBoundary(dir string) string {
 	if root := worktreeRoot(dir); root != "" {
@@ -1383,8 +1276,8 @@ func projectBoundary(dir string) string {
 // Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.
 func GlobalSkillsDirs() []string {
-	if crushSkills := os.Getenv("CRUSH_SKILLS_DIR"); crushSkills != "" {
-		return []string{crushSkills}
+	if harnessSkills := os.Getenv("HARNESS_SKILLS_DIR"); harnessSkills != "" {
+		return []string{harnessSkills}
 	}
 
 	paths := []string{
@@ -1395,7 +1288,7 @@ func GlobalSkillsDirs() []string {
 		filepath.Join(home.Dir(), ".claude", "skills"),
 	}
 
-	// On Windows, also load from app data on top of `$HOME/.config/crush`.
+	// On Windows, also load from app data on top of `$HOME/.config/harness`.
 	// This is here mostly for backwards compatibility.
 	if runtime.GOOS == "windows" {
 		appData := cmp.Or(
@@ -1417,12 +1310,12 @@ func GlobalSkillsDirs() []string {
 // git-root lookups to prevent drift when a new convention is added.
 var projectSkillSubdirs = []string{
 	".agents/skills",
-	".crush/skills",
+	".harness/skills",
 	".claude/skills",
 	".cursor/skills",
 }
 
-// ProjectSkillsDir returns the default project directories for which Crush
+// ProjectSkillsDir returns the default project directories for which Harness
 // will look for skills. In addition to the working directory, it also
 // checks the git working tree root so that monorepo-level skills are
 // discovered when the user is inside a subdirectory.
@@ -1446,11 +1339,11 @@ func ProjectSkillsDir(workingDir string) []string {
 }
 
 // GlobalSubagentsDirs returns the default global directories for subagent
-// definitions. The CRUSH_SUBAGENTS_DIR environment variable, when set to a
+// definitions. The HARNESS_SUBAGENTS_DIR environment variable, when set to a
 // non-empty value, overrides the default list entirely.
 func GlobalSubagentsDirs() []string {
-	if crushSubagents := os.Getenv("CRUSH_SUBAGENTS_DIR"); crushSubagents != "" {
-		return []string{crushSubagents}
+	if harnessSubagents := os.Getenv("HARNESS_SUBAGENTS_DIR"); harnessSubagents != "" {
+		return []string{harnessSubagents}
 	}
 
 	paths := []string{
@@ -1477,11 +1370,11 @@ func GlobalSubagentsDirs() []string {
 // git-root lookups to prevent drift when a new convention is added.
 var projectSubagentSubdirs = []string{
 	".agents/subagents",
-	".crush/subagents",
+	".harness/subagents",
 }
 
 // ProjectSubagentsDir returns the default project directories in which
-// Crush looks for subagent definitions. In addition to the working
+// Harness looks for subagent definitions. In addition to the working
 // directory, it also checks the git working tree root so that
 // monorepo-level subagents are discovered when the user is inside a
 // subdirectory.
