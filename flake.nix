@@ -46,15 +46,14 @@
             gopls # Go language server
             golangci-lint # Linter
             gofumpt # Formatter (stricter than gofmt)
-            go-task # Task runner
-            just # Just recipe runner
+            just # Task runner
             delve # Go debugger
 
             # Additional tools
             git # Version control
             gh # GitHub CLI
-            svu # Semantic version utility
             sqlc # SQL code generator
+            nodePackages.prettier # Formats the stats page assets
           ];
 
           shellHook = ''

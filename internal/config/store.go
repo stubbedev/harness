@@ -1235,7 +1235,6 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 
 // reloadFromDiskLocked performs the actual reload. Caller must hold writeMu.
 func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
-
 	configPaths := lookupConfigs(s.workingDir)
 	cfg, loadedPaths, err := loadFromConfigPaths(ctx, configPaths)
 	if err != nil {

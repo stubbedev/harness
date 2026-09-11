@@ -205,7 +205,7 @@ func runNonInteractive(
 		}
 		cfg, err := c.GetConfig(ctx, ws.ID)
 		if err != nil {
-			slog.Debug("failed to refresh config after model override", "error", err)
+			slog.Debug("Failed to refresh config after model override", "error", err)
 		} else {
 			ws.Config = cfg
 		}

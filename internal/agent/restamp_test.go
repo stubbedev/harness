@@ -26,7 +26,7 @@ import (
 //
 //	go test ./internal/agent -run TestCoderAgent -restamp
 //
-// It needs no API key. Re-record with `task record` instead whenever the change
+// It needs no API key. Re-record with `just record` instead whenever the change
 // should alter what the model does.
 var restamp = flag.Bool("restamp", false, "rewrite VCR cassette request bodies from the current prompts and tool definitions")
 
@@ -96,7 +96,7 @@ func newRestampRecorder(t *testing.T) *restampRecorder {
 	t.Cleanup(func() {
 		for i, used := range r.used {
 			if !used {
-				t.Errorf("restamp: interaction %d (%s) was never requested; the cassette drifted beyond request bodies, re-record it with `task record`",
+				t.Errorf("restamp: interaction %d (%s) was never requested; the cassette drifted beyond request bodies, re-record it with `just record`",
 					i, r.cas.Interactions[i].Request.URL)
 				return
 			}
@@ -135,7 +135,7 @@ func (r *restampRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
 		in.Request.ContentLength = int64(len(body))
 		return in.GetHTTPResponse()
 	}
-	return nil, fmt.Errorf("restamp: no unused interaction for %s %s (%s); re-record with `task record`", req.Method, req.URL, want)
+	return nil, fmt.Errorf("restamp: no unused interaction for %s %s (%s); re-record with `just record`", req.Method, req.URL, want)
 }
 
 // fingerprint identifies a chat completion request by the parts restamping

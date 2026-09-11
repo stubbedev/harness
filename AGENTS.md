@@ -97,26 +97,26 @@ internal/
 ## Build/Test/Lint Commands
 
 - **Build**: `go build .` or `go run .`
-- **Test**: `task test` or `go test ./...` (run single test:
+- **Test**: `just test` or `go test ./...` (run single test:
   `go test ./internal/llm/prompt -run TestGetContextFromPaths`)
 - **Update Golden Files**: `go test ./... -update` (regenerates `.golden`
   files when test output changes)
   - Update specific package:
     `go test ./internal/tui/components/core -update` (in this case,
     we're updating "core")
-- **Restamp VCR Cassettes**: `task restamp` (after editing a system prompt
+- **Restamp VCR Cassettes**: `just restamp` (after editing a system prompt
   template or a tool description). The agent cassettes in
   `internal/agent/testdata` store the full request body, so any change to
   `internal/agent/templates/*.md.tpl` or `internal/agent/tools/*.md*` makes
   `TestCoderAgent` fail on a request mismatch. Restamping replays the recorded
   responses unchanged and rewrites only our side of each request, so it needs
-  no API key. Use `task record` instead when the change should alter what the
+  no API key. Use `just record` instead when the change should alter what the
   model actually does.
-- **Lint**: `task lint:fix`
-- **Format**: `task fmt` (`gofumpt -w .`)
-- **Modernize**: `task modernize` (runs `modernize` which makes code
+- **Lint**: `just lint-fix`
+- **Format**: `just fmt` (`gofumpt -w .`)
+- **Modernize**: `just modernize` (runs `modernize` which makes code
   simplifications)
-- **Dev**: `task dev` (runs with profiling enabled)
+- **Dev**: `just dev` (runs with profiling enabled)
 
 ## Code Style Guidelines
 
@@ -146,7 +146,7 @@ internal/
   permissions.
 - **Log messages**: Log messages must start with a capital letter (e.g.,
   "Failed to save session" not "failed to save session").
-  - This is enforced by `task lint:log` which runs as part of `task lint`.
+  - This is enforced by `just lint-log` which runs as part of `just lint`.
 - **Comments**: End comments in periods unless comments are at the end of the
   line.
 
@@ -180,7 +180,7 @@ func TestYourFunction(t *testing.T) {
   - First, try `gofumpt -w .`.
   - If `gofumpt` is not available, use `goimports`.
   - If `goimports` is not available, use `gofmt`.
-  - You can also use `task fmt` to run `gofumpt -w .` on the entire project,
+  - You can also use `just fmt` to run `gofumpt -w .` on the entire project,
     as long as `gofumpt` is on the `PATH`.
 
 ## Comments
