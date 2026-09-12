@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/stubbedev/harness/internal/ui/completions"
@@ -27,26 +28,55 @@ func (m *UI) rebuildSubagentCaches() {
 	m.activeSubagentItems, m.activeSubagentNames = buildSubagentCaches(m.com.Workspace.ActiveSubagents())
 }
 
-// rewriteSubagentPrompt detects the pattern `@name rest` at the start of
-// content — with any whitespace (space, tab, or newline) after the name — and
-// rewrites it to a delegation instruction when name is a known active
-// subagent. Returns content unchanged if the pattern doesn't match.
+// leadingSubagentMentions consumes the run of `@name` tokens at the start of
+// content — each followed by whitespace (space, tab, or newline) — for as long
+// as every name is a known active subagent. It returns the names in the order
+// written and the remaining text. Scanning stops at the first token that is
+// not an `@mention` of an active subagent, so `@known @unknown do X` yields
+// one name and leaves "@unknown do X" as the prompt.
+func leadingSubagentMentions(content string, activeNames map[string]bool) (names []string, rest string) {
+	rest = content
+	for strings.HasPrefix(rest, "@") {
+		after := rest[1:]
+		idx := strings.IndexAny(after, " \t\n\r")
+		if idx < 0 {
+			break
+		}
+		name := after[:idx]
+		if !activeNames[name] {
+			break
+		}
+		names = append(names, name)
+		rest = strings.TrimLeft(after[idx+1:], " \t\n\r")
+	}
+	return names, rest
+}
+
+// rewriteSubagentPrompt detects one or more `@name` mentions at the start of
+// content and rewrites them to a delegation instruction. A single mention
+// delegates to that subagent; several fan out, dispatching all of them in one
+// message so they run concurrently. Returns content unchanged when no leading
+// mention names an active subagent, or when nothing follows the mentions.
 func rewriteSubagentPrompt(content string, activeNames map[string]bool) string {
-	if !strings.HasPrefix(content, "@") {
+	names, prompt := leadingSubagentMentions(content, activeNames)
+	prompt = strings.TrimSpace(prompt)
+	if len(names) == 0 || prompt == "" {
 		return content
 	}
-	rest := content[1:]
-	idx := strings.IndexAny(rest, " \t\n\r")
-	if idx < 0 {
-		return content
+	if len(names) == 1 {
+		return `Use the agent tool with subagent_type="` + names[0] + `" to handle this request: ` + prompt
 	}
-	name := rest[:idx]
-	prompt := strings.TrimSpace(rest[idx+1:])
-	if prompt == "" {
-		return content
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = `"` + n + `"`
 	}
-	if !activeNames[name] {
-		return content
-	}
-	return `Use the agent tool with subagent_type="` + name + `" to handle this request: ` + prompt
+	// One message with every call in it, stated explicitly: the user named
+	// several agents because they want them working at the same time, and the
+	// dispatcher tool only runs them concurrently when the calls share a
+	// message.
+	return "Handle this request by dispatching to every one of these subagents: " +
+		strings.Join(quoted, ", ") +
+		". Issue all " + strconv.Itoa(len(names)) + " agent tool calls in a single message so they run concurrently, " +
+		"giving each a self-contained prompt for its part of the work, then combine their results. " +
+		"The request: " + prompt
 }

@@ -174,6 +174,26 @@ const (
 	ModelAliasSmall = string(config.SelectedModelTypeSmall)
 )
 
+// ModelLabel returns the model this subagent dispatches on, as the dispatching
+// model should see it: the raw `model:` frontmatter value, or ModelAliasLarge
+// when the field is absent (which is what buildAgent falls back to). Exposed so
+// the prompt XML and the agent tool's subagent_type enum describe the same
+// thing and cannot drift.
+func (s Subagent) ModelLabel() string {
+	if s.Model == "" {
+		return ModelAliasLarge
+	}
+	return s.Model
+}
+
+// IsCheap reports whether dispatching this subagent is cheap enough that the
+// coordinator should prefer fanning several of them out over doing the work
+// itself. Only the `small` alias qualifies: a pinned model id may be anything,
+// so it is never assumed cheap.
+func (s Subagent) IsCheap() bool {
+	return s.Model == ModelAliasSmall
+}
+
 // ToConfigAgent converts the Subagent into a config.Agent by applying the
 // subagent's tool restrictions and model preference on top of the provided
 // base agent configuration.

@@ -316,6 +316,7 @@ options:
   disabled_skills: [harness-config]
   subagents_paths: [./agents]
   disabled_subagents: [reviewer]
+  max_concurrent_subagents: 24 # sub-agents running at once; extras wait for a slot
 
   attribution:
     trailer_style: assisted-by # none | co-authored-by | assisted-by

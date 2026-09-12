@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -501,4 +502,75 @@ func TestAgentTool_TaskBuildFailureIsRetryable(t *testing.T) {
 	require.NotContains(t, resp.Content, "build task agent",
 		"the task build must be retried after a failure, not replay the cached error")
 	require.Contains(t, resp.Content, "Failed to generate response")
+}
+
+// dispatchTypeParam extracts the subagent_type parameter's enum and
+// description from a dispatcher ToolInfo.
+func dispatchTypeParam(t *testing.T, info fantasy.ToolInfo) (enum []string, desc string) {
+	t.Helper()
+	paramMap, ok := info.Parameters["subagent_type"].(map[string]any)
+	require.True(t, ok, "subagent_type parameter should be a map[string]any")
+	enum, ok = paramMap["enum"].([]string)
+	require.True(t, ok, "enum should be a []string")
+	desc, ok = paramMap["description"].(string)
+	require.True(t, ok, "description should be a string")
+	return enum, desc
+}
+
+// TestBuildAgentDispatchInfo_FastType pins the cheap built-in type: it must be
+// dispatchable with no subagents configured at all, since it is the zero-config
+// fan-out target.
+func TestBuildAgentDispatchInfo_FastType(t *testing.T) {
+	t.Parallel()
+
+	enum, desc := dispatchTypeParam(t, buildAgentDispatchInfo(nil))
+
+	require.Contains(t, enum, config.AgentTask)
+	require.Contains(t, enum, config.AgentFast)
+	require.Contains(t, desc, "small model")
+	require.Contains(t, desc, "large model")
+}
+
+// TestBuildAgentDispatchInfo_SurfacesModel verifies each subagent line carries
+// the model it runs on, so the dispatching model can weigh cost, and that only
+// the `small` alias is advertised as cheap.
+func TestBuildAgentDispatchInfo_SurfacesModel(t *testing.T) {
+	t.Parallel()
+
+	_, desc := dispatchTypeParam(t, buildAgentDispatchInfo([]*subagents.Subagent{
+		{Name: "scout", Description: "Narrow lookups", Model: subagents.ModelAliasSmall, Effort: "low"},
+		{Name: "architect", Description: "Designs changes"},
+		{Name: "pinned", Description: "Specific model", Model: "gpt-5"},
+	}))
+
+	require.Contains(t, desc, "scout (model: small, effort: low): Narrow lookups")
+	require.Contains(t, desc, "[cheap: prefer fanning several out in parallel]")
+
+	// An absent model: reports the large default, and effort is omitted when
+	// unset rather than rendered empty.
+	require.Contains(t, desc, "architect (model: large): Designs changes")
+	require.NotContains(t, desc, "effort: )")
+
+	// A pinned model id is reported but never assumed cheap.
+	require.Contains(t, desc, "pinned (model: gpt-5): Specific model")
+	require.Equal(t, 1, strings.Count(desc, "[cheap:"))
+}
+
+// TestBuildAgentDispatchInfo_BuiltinNameCollision verifies a subagent named
+// after a built-in type is dropped from the enum instead of being offered as a
+// choice that dispatch would resolve to the built-in.
+func TestBuildAgentDispatchInfo_BuiltinNameCollision(t *testing.T) {
+	t.Parallel()
+
+	enum, desc := dispatchTypeParam(t, buildAgentDispatchInfo([]*subagents.Subagent{
+		{Name: config.AgentFast, Description: "shadowed by the built-in"},
+		{Name: config.AgentTask, Description: "also shadowed"},
+		{Name: "real", Description: "reachable"},
+	}))
+
+	require.Equal(t, []string{config.AgentTask, config.AgentFast, "real"}, enum,
+		"colliding names must not be added a second time")
+	require.NotContains(t, desc, "shadowed by the built-in")
+	require.NotContains(t, desc, "also shadowed")
+	require.Contains(t, desc, "real (model: large): reachable")
 }

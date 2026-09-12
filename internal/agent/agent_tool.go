@@ -109,19 +109,48 @@ func (c *coordinator) confirmBypassPermissions(ctx context.Context, sa *subagent
 	return fantasy.ToolResponse{}, true
 }
 
+// describeSubagentForEnum renders one line of the subagent_type enum's
+// description. The model and effort are included alongside the description
+// because they answer a different question than it does: the description says
+// whether a subagent fits the task, the model says whether dispatching it is
+// cheap enough to fan several out. Mirrors subagents.ToPromptXML, which feeds
+// the same two facts to the coder system prompt.
+func describeSubagentForEnum(sa *subagents.Subagent) string {
+	attrs := "model: " + sa.ModelLabel()
+	if sa.Effort != "" {
+		attrs += ", effort: " + sa.Effort
+	}
+	line := fmt.Sprintf("%s (%s): %s", sa.Name, attrs, sa.Description)
+	if sa.IsCheap() {
+		line += " [cheap: prefer fanning several out in parallel]"
+	}
+	return line
+}
+
 // buildAgentDispatchInfo builds the ToolInfo for the agent dispatcher tool with
 // a dynamic subagent_type enum derived from the currently active subagents.
 func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolInfo {
-	enumValues := []string{"task"}
+	enumValues := []string{config.AgentTask, config.AgentFast}
+	// A subagent whose name collides with a built-in type is unreachable —
+	// dispatch resolves built-ins first — so it is left out of the enum
+	// entirely rather than listed as a choice that silently runs something
+	// else.
+	reachable := make([]*subagents.Subagent, 0, len(activeSubagents))
 	for _, sa := range activeSubagents {
+		if sa.Name == config.AgentTask || sa.Name == config.AgentFast {
+			continue
+		}
+		reachable = append(reachable, sa)
 		enumValues = append(enumValues, sa.Name)
 	}
 
-	typeDesc := `The type of agent to use. Use "task" for general search and research tasks.`
-	if len(activeSubagents) > 0 {
-		lines := make([]string, 0, len(activeSubagents))
-		for _, sa := range activeSubagents {
-			lines = append(lines, fmt.Sprintf("- %s: %s", sa.Name, sa.Description))
+	typeDesc := `The type of agent to use.
+- "task": general read-only search and research, on the large model. Use when the question is open-ended and needs judgment.
+- "fast": the same read-only tools on the small model. Use for one narrow lookup, and dispatch many in the same message — it is cheap enough that splitting a survey across several of them beats doing it yourself.`
+	if len(reachable) > 0 {
+		lines := make([]string, 0, len(reachable))
+		for _, sa := range reachable {
+			lines = append(lines, "- "+describeSubagentForEnum(sa))
 		}
 		typeDesc += "\n\nAvailable specialized agents:\n" + strings.Join(lines, "\n")
 	}
@@ -145,6 +174,44 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 	}
 }
 
+// lazyAgent memoizes one built-in sub-agent (task, fast) so the first dispatch
+// pays for the build and later ones reuse it. The mutex serializes the
+// concurrent dispatches this tool allows (Parallel: true) onto one build, but
+// unlike sync.Once a failed build does not stick: the next dispatch retries.
+type lazyAgent struct {
+	coord  *coordinator
+	prompt *prompt.Prompt
+	cfg    config.Agent
+	model  subagentModel
+
+	mu    sync.Mutex
+	agent SessionAgent
+	built bool
+}
+
+// get returns the memoized agent, building it on first call.
+func (l *lazyAgent) get(ctx context.Context) (SessionAgent, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.built {
+		return l.agent, nil
+	}
+	var wg errgroup.Group
+	agent, err := l.coord.buildAgent(ctx, l.prompt, l.cfg, true, l.model, &wg)
+	if err == nil {
+		err = wg.Wait()
+	}
+	if err != nil {
+		// Leave built unset so a transient build failure (a cancelled dispatch
+		// context, a provider hiccup) is retried by the next dispatch instead
+		// of sticking for the tool's whole lifetime.
+		return nil, err
+	}
+	l.agent = agent
+	l.built = true
+	return l.agent, nil
+}
+
 // agentTool builds the dispatcher tool. The context parameter is retained for
 // call-site symmetry with the other buildTools helpers; the task agent is now
 // built from the dispatch context instead, so nothing here consumes it.
@@ -157,51 +224,38 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 	if !ok {
 		return nil, errors.New("coder agent not configured")
 	}
+	fastCfg, ok := c.cfg.Config().Agents[config.AgentFast]
+	if !ok {
+		return nil, errors.New("fast agent not configured")
+	}
 	taskPr, err := taskPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
 	if err != nil {
 		return nil, err
 	}
-	// The task agent is built on first dispatch, not here. Two reasons it does
-	// not go on c.readyWg: UpdateModels rebuilds this tool at the start of
-	// every turn — after that turn's readyWg.Wait — so a readyWg-spawned build
-	// could still be pending when a task dispatch runs (starting the agent
-	// promptless/toolless), and a build failure would stick in readyWg, failing
-	// every later turn.
+	fastPr, err := fastPrompt(prompt.WithWorkingDir(c.cfg.WorkingDir()))
+	if err != nil {
+		return nil, err
+	}
+	// The built-in agents are built on first dispatch, not here. Two reasons
+	// they do not go on c.readyWg: UpdateModels rebuilds this tool at the
+	// start of every turn — after that turn's readyWg.Wait — so a
+	// readyWg-spawned build could still be pending when a dispatch runs
+	// (starting the agent promptless/toolless), and a build failure would
+	// stick in readyWg, failing every later turn.
 	//
-	// It is not built eagerly here either. buildAgent spawns a full skills
+	// They are not built eagerly here either. buildAgent spawns a full skills
 	// discovery walk plus an MCP-init wait, and nothing joins those goroutines
-	// unless a task is actually dispatched — so eagerly building meant every
+	// unless a dispatch actually happens — so eagerly building meant every
 	// turn started a generation of work that the great majority of turns threw
 	// away, with no backpressure across a burst of turns. Building on demand
 	// makes an unused tool free and matches the subagent dispatch path below,
-	// which also builds at dispatch time. The mutex serializes the concurrent
-	// dispatches this tool allows (Parallel: true) onto one build, but unlike
-	// sync.Once a failed build does not stick: the next dispatch retries.
-	var (
-		taskMu    sync.Mutex
-		taskAgent SessionAgent
-		taskBuilt bool
-	)
-	buildTaskAgent := func(ctx context.Context) (SessionAgent, error) {
-		taskMu.Lock()
-		defer taskMu.Unlock()
-		if taskBuilt {
-			return taskAgent, nil
-		}
-		var wg errgroup.Group
-		agent, err := c.buildAgent(ctx, taskPr, taskCfg, true, subagentModel{}, &wg)
-		if err == nil {
-			err = wg.Wait()
-		}
-		if err != nil {
-			// Leave taskBuilt unset so a transient build failure (a cancelled
-			// dispatch context, a provider hiccup) is retried by the next
-			// dispatch instead of sticking for the tool's whole lifetime.
-			return nil, err
-		}
-		taskAgent = agent
-		taskBuilt = true
-		return taskAgent, nil
+	// which also builds at dispatch time.
+	builtins := map[string]*lazyAgent{
+		config.AgentTask: {coord: c, prompt: taskPr, cfg: taskCfg},
+		// The fast agent is the task agent on the small model: the `small`
+		// alias routes buildAgent to the globally selected small model, the
+		// same one the coordinator already builds for summarization.
+		config.AgentFast: {coord: c, prompt: fastPr, cfg: fastCfg, model: subagentModel{Model: subagents.ModelAliasSmall}},
 	}
 
 	// The subagent_type enum is a point-in-time snapshot baked into the tool
@@ -226,22 +280,35 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
 			}
 
+			// Every dispatch below runs a whole child session, so the
+			// concurrency slot is taken here — before any build work — and
+			// held for the run. Over the limit this blocks rather than
+			// failing, so a wide fan-out completes in waves.
+			release, slotErr := c.acquireDispatchSlot(ctx)
+			if slotErr != nil {
+				return fantasy.ToolResponse{}, slotErr
+			}
+			defer release()
+
 			subagentType := params.SubagentType
-			if subagentType == "" || subagentType == config.AgentTask {
-				taskAgent, err := buildTaskAgent(ctx)
+			if subagentType == "" {
+				subagentType = config.AgentTask
+			}
+			if builtin, ok := builtins[subagentType]; ok {
+				builtAgent, err := builtin.get(ctx)
 				if err != nil {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("build task agent: %v", err)), nil
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("build %s agent: %v", subagentType, err)), nil
 				}
 				return c.runSubAgent(ctx, subAgentParams{
-					Agent:          taskAgent,
+					Agent:          builtAgent,
 					SessionID:      sessionID,
 					AgentMessageID: agentMessageID,
 					ToolCallID:     call.ID,
 					Prompt:         params.Prompt,
 					SessionTitle:   "New Agent Session",
-					AgentName:      config.AgentTask,
-					AgentColor:     subagents.AutoColor(config.AgentTask),
-					AgentModel:     taskAgent.Model().ModelCfg.Model,
+					AgentName:      subagentType,
+					AgentColor:     subagents.AutoColor(subagentType),
+					AgentModel:     builtAgent.Model().ModelCfg.Model,
 				})
 			}
 

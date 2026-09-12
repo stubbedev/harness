@@ -32,7 +32,7 @@ type BashParams struct {
 	Resize              string `json:"resize,omitempty" description:"Resize the terminal as COLSxROWS (e.g. \"240x60\") and return the redrawn screen. Use when a full-screen program needs more room; the size sticks for the whole session."`
 	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory the terminal session was opened in; the session itself tracks cd"`
 	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in a detached background shell. Use job_output to read the output later. Prefer this only for servers and watchers; everything else belongs in the terminal session."`
-	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait for the command before returning it as still running (default: 60)"`
+	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait once the command goes idle before returning it as still running (default: 60). Output, CPU or memory activity keeps the wait going, so this only ends a call that has genuinely stalled; hard ceiling 15 minutes"`
 }
 
 type BashPermissionsParams struct {
@@ -360,7 +360,6 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 			}
 
 			stdout := TruncateOutput(result.Output)
-			ranCommand := params.Command != "" && params.Input == "" && params.Keys == "" && params.Resize == ""
 
 			var header string
 			switch {
@@ -368,13 +367,15 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 				header = "Interrupted: the command was stopped with ctrl+c because the call was cancelled."
 			case result.WhileBusy:
 				header = "A command is still running in this terminal session. Below is its screen as it stands; the command's own output goes to the call waiting on it. Keystrokes you send here reach that command."
+			case result.Waiting:
+				header = "The command has stopped and is waiting for input (no exit code yet). Send input or keys to answer it - below is what it printed before stopping - or ctrl+c (keys) to give up on it."
 			case result.AltScreen && result.Unchanged:
 				header = "A full-screen program owns the terminal; its screen is unchanged since the last call. Drive it with keys/input, or send ctrl+c (keys) to stop it."
 			case result.AltScreen:
 				rows, cols := session.Size()
 				header = fmt.Sprintf("A full-screen program owns the terminal. Below is its rendered %dx%d screen, not a stream of output; there is no exit code until it quits. Drive it with keys/input, poll to see it again, or send ctrl+c (keys) to stop it.", cols, rows)
-			case result.Running && ranCommand:
-				header = "Still running in the terminal session (no exit code yet). Send input or keys to interact with it, or call bash again with everything empty to poll."
+			case result.Running:
+				header = "Still running in the terminal session (no exit code yet) but making no measurable progress - no output, no CPU, no memory change. Send input or keys to interact with it, poll (empty call) to wait for it to finish, or ctrl+c (keys) to stop it."
 			case result.ExitCode != nil && *result.ExitCode != 0:
 				header = fmt.Sprintf("Exit code %d", *result.ExitCode)
 			case params.Resize != "":

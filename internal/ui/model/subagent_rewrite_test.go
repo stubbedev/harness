@@ -191,3 +191,95 @@ func TestRewriteSubagentPrompt(t *testing.T) {
 		})
 	}
 }
+
+// TestLeadingSubagentMentions covers the scanner that consumes the run of
+// leading @mentions, including where it must stop.
+func TestLeadingSubagentMentions(t *testing.T) {
+	t.Parallel()
+
+	active := map[string]bool{"alpha": true, "beta": true, "gamma": true}
+
+	tests := []struct {
+		name      string
+		content   string
+		wantNames []string
+		wantRest  string
+	}{
+		{
+			name:      "no_mention",
+			content:   "plain text",
+			wantNames: nil,
+			wantRest:  "plain text",
+		},
+		{
+			name:      "single",
+			content:   "@alpha do it",
+			wantNames: []string{"alpha"},
+			wantRest:  "do it",
+		},
+		{
+			name:      "three_in_a_row",
+			content:   "@alpha @beta @gamma do it",
+			wantNames: []string{"alpha", "beta", "gamma"},
+			wantRest:  "do it",
+		},
+		{
+			name:      "stops_at_unknown_name",
+			content:   "@alpha @nope do it",
+			wantNames: []string{"alpha"},
+			wantRest:  "@nope do it",
+		},
+		{
+			name:      "stops_at_prose",
+			content:   "@alpha review and @beta test",
+			wantNames: []string{"alpha"},
+			wantRest:  "review and @beta test",
+		},
+		{
+			name:      "mixed_whitespace_separators",
+			content:   "@alpha\t@beta\ndo it",
+			wantNames: []string{"alpha", "beta"},
+			wantRest:  "do it",
+		},
+		{
+			name:      "trailing_mention_without_separator_is_not_consumed",
+			content:   "@alpha @beta",
+			wantNames: []string{"alpha"},
+			wantRest:  "@beta",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			names, rest := leadingSubagentMentions(tt.content, active)
+			require.Equal(t, tt.wantNames, names)
+			require.Equal(t, tt.wantRest, rest)
+		})
+	}
+}
+
+// TestRewriteSubagentPromptFanOut verifies that naming several subagents up
+// front produces one instruction that dispatches all of them in a single
+// message, which is what makes them run concurrently.
+func TestRewriteSubagentPromptFanOut(t *testing.T) {
+	t.Parallel()
+
+	active := map[string]bool{"alpha": true, "beta": true, "gamma": true}
+
+	got := rewriteSubagentPrompt("@alpha @beta @gamma audit the diff", active)
+
+	require.Contains(t, got, `"alpha", "beta", "gamma"`, "every named subagent must appear, in order")
+	require.Contains(t, got, "single message", "the instruction must ask for one message so the calls run concurrently")
+	require.Contains(t, got, "all 3 agent tool calls")
+	require.Contains(t, got, "audit the diff")
+
+	// A single mention keeps the original, narrower wording — no fan-out
+	// language for work that is not being split.
+	single := rewriteSubagentPrompt("@alpha audit the diff", active)
+	require.Equal(t, `Use the agent tool with subagent_type="alpha" to handle this request: audit the diff`, single)
+
+	// Mentions with nothing after them are left alone rather than dispatched
+	// with an empty prompt.
+	require.Equal(t, "@alpha @beta  ", rewriteSubagentPrompt("@alpha @beta  ", active))
+}

@@ -646,6 +646,16 @@
           },
           "type": "array",
           "description": "List of subagent names to disable and hide from the agent"
+        },
+        "max_concurrent_subagents": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum sub-agents running at once. Dispatches beyond the limit wait for a free slot rather than failing. Values below 1 are clamped to 1.",
+          "default": 24,
+          "examples": [
+            8,
+            48
+          ]
         }
       },
       "additionalProperties": false,

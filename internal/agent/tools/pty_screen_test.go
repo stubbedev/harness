@@ -102,7 +102,9 @@ func TestPtyRunner_Resize(t *testing.T) {
 	require.Equal(t, 30, rows)
 	require.Equal(t, 100, cols)
 
-	res, err := r.Run(t.Context(), "printf '%s %s' \"$(tput lines)\" \"$(tput cols)\"", 10)
+	// stty size reads the window size straight from the terminal; tput
+	// would consult terminfo and any inherited LINES/COLUMNS instead.
+	res, err := r.Run(t.Context(), "stty size", 10)
 	require.NoError(t, err)
 	require.Equal(t, "30 100", strings.TrimSpace(res.Output))
 }

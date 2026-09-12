@@ -76,6 +76,14 @@ type Session struct {
 	replies    *replyWriter
 	rows, cols int
 
+	// waitSampleCPU/waitSampleRSS/waitSampleValid are the baseline the
+	// SampleJob deltas are measured against: the foreground job's
+	// accumulated CPU and resident set at the last sample, and whether
+	// that sample exists yet.
+	waitSampleCPU   uint64
+	waitSampleRSS   int64
+	waitSampleValid bool
+
 	// bracketedPaste is whatever is running asking for pasted text to be
 	// marked as a paste; modeCarry holds the tail of the last chunk so a
 	// mode sequence split across two reads is still seen.
@@ -141,20 +149,18 @@ func parentShell() string {
 // Start spawns the user's shell in a new pseudo-terminal with the given
 // working directory. The environment is the current process environment
 // plus TERM; env entries of the form KEY=VALUE are appended last so they
-// win.
+// win. LINES and COLUMNS are dropped: a size exported here survives every
+// later resize as a lie told to any program that consults the environment
+// instead of the terminal, so the window size stays authoritative.
 // The shell is deliberately not bound to a caller context: the session
 // outlives the request that opened it and is torn down by Close.
 func Start(cwd string, env ...string) (*Session, error) {
 	cmd := exec.CommandContext(context.Background(), Shell())
 	cmd.Dir = cwd
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(withoutSizeEnv(os.Environ()), withoutSizeEnv(env)...)
 	cmd.Env = append(cmd.Env, "TERM="+termValue())
 
 	rows, cols := DefaultSize()
-	cmd.Env = append(cmd.Env,
-		"LINES="+strconv.Itoa(rows),
-		"COLUMNS="+strconv.Itoa(cols),
-	)
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -163,6 +169,20 @@ func Start(cwd string, env ...string) (*Session, error) {
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 
 	return newSession(ptmx, cmd.Process, rows, cols), nil
+}
+
+// withoutSizeEnv drops LINES and COLUMNS entries so nothing in the
+// session inherits a terminal size that a resize has already falsified.
+func withoutSizeEnv(entries []string) []string {
+	filtered := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name, _, _ := strings.Cut(entry, "=")
+		if name == "LINES" || name == "COLUMNS" {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }
 
 // termValue is the TERM the session advertises. It is not the user's
@@ -366,35 +386,25 @@ func (s *Session) Send(b []byte) error {
 }
 
 // WaitForAny blocks until one of the patterns appears in output that
-// arrived after this call, the session exits, the timeout elapses, or
-// ctx is done. It returns the index of the pattern that matched
-// earliest in the output, or -1 if no pattern matched.
+// no earlier match has consumed, the session exits, the timeout
+// elapses, or ctx is done. It returns the index of the pattern that
+// matched earliest in the unconsumed output, or -1 if no pattern
+// matched. Scanning starts where the last match ended (or where the
+// last Drain/RescanFromStart left it), so bytes that arrive while no
+// one is waiting are seen by the next call rather than skipped.
 func (s *Session) WaitForAny(ctx context.Context, patterns []*regexp.Regexp, timeout time.Duration) int {
-	s.mu.Lock()
-	s.scanFrom = len(s.pending)
-	s.mu.Unlock()
-
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 
 	for {
 		s.mu.Lock()
-		rest := s.pending[min(s.scanFrom, len(s.pending)):]
-		matched := -1
-		var matchStart int
-		for i, re := range patterns {
-			if loc := re.FindIndex(rest); loc != nil && (matched < 0 || loc[0] < matchStart) {
-				matched = i
-				matchStart = loc[0]
-			}
-		}
-		if matched >= 0 {
-			s.scanFrom += matchStart
-			s.mu.Unlock()
-			return matched
-		}
+		matched := s.scanLocked(patterns)
 		exited := s.exited
 		s.mu.Unlock()
+
+		if matched >= 0 {
+			return matched
+		}
 
 		if exited {
 			return -1
@@ -411,6 +421,39 @@ func (s *Session) WaitForAny(ctx context.Context, patterns []*regexp.Regexp, tim
 		}
 	}
 }
+
+// scanLocked returns the index of the pattern that matches earliest in
+// the output not yet consumed, advancing the scan position past the
+// whole match so it cannot be reported twice.
+// Callers must hold s.mu.
+func (s *Session) scanLocked(patterns []*regexp.Regexp) int {
+	rest := s.pending[min(s.scanFrom, len(s.pending)):]
+	matched := -1
+	var matchLoc []int
+	for i, re := range patterns {
+		if loc := re.FindIndex(rest); loc != nil && (matched < 0 || loc[0] < matchLoc[0]) {
+			matched = i
+			matchLoc = loc
+		}
+	}
+	if matched >= 0 {
+		s.scanFrom += matchLoc[1]
+		return matched
+	}
+	// Nothing matched: skip what was scanned, but keep a tail overlap
+	// so a pattern split across two reads is still seen. Without this,
+	// a long streaming command would be rescanned from its start on
+	// every wait.
+	if skip := len(s.pending) - ptyScanOverlap; skip > s.scanFrom {
+		s.scanFrom = skip
+	}
+	return matched
+}
+
+// ptyScanOverlap is how much unconsumed output scanning keeps around
+// after a fruitless pass: comfortably more than the longest prompt or
+// sudo pattern, so one split across chunk boundaries still matches.
+const ptyScanOverlap = 128
 
 // WaitForPattern blocks until the pattern appears in output that arrived
 // after this call, the session exits, the timeout elapses, or ctx is
@@ -479,6 +522,137 @@ func (s *Session) WaitForQuiet(ctx context.Context, quiet, timeout time.Duration
 			// Re-check: output may have arrived meanwhile.
 		}
 	}
+}
+
+// WaitForAnyOrQuiet blocks until one of the patterns appears in output
+// that no earlier match has consumed, output has stayed silent for the
+// quiet window, the session exits, the timeout elapses, or ctx is done.
+// It returns the index of the pattern that matched earliest (-1 when
+// none matched) and whether the quiet window elapsed instead. Everything
+// is driven by the arrival of output: no timers tick while bytes keep
+// coming, and bytes that arrive between waits are not skipped.
+func (s *Session) WaitForAnyOrQuiet(ctx context.Context, patterns []*regexp.Regexp, quiet, timeout time.Duration) (int, bool) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	for {
+		s.mu.Lock()
+		matched := s.scanLocked(patterns)
+		exited := s.exited
+		idleFor := time.Since(s.lastData)
+		s.mu.Unlock()
+
+		if matched >= 0 {
+			return matched, false
+		}
+		if exited {
+			return -1, false
+		}
+		if idleFor >= quiet {
+			return -1, true
+		}
+
+		select {
+		case <-ctx.Done():
+			return -1, false
+		case <-deadline.C:
+			return -1, false
+		case <-s.closed:
+			return -1, false
+		case <-s.notify:
+		case <-time.After(quiet - idleFor):
+			// Re-check: a pattern may have matched in what arrived.
+		}
+	}
+}
+
+// WaitForOutput blocks until output arrives after this call, the session
+// exits, the timeout elapses, or ctx is done. It reports whether new
+// output arrived.
+func (s *Session) WaitForOutput(ctx context.Context, timeout time.Duration) bool {
+	s.mu.Lock()
+	mark := len(s.pending)
+	s.mu.Unlock()
+
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	for {
+		s.mu.Lock()
+		grew := len(s.pending) > mark
+		exited := s.exited
+		s.mu.Unlock()
+		if grew || exited {
+			return grew
+		}
+
+		select {
+		case <-ctx.Done():
+			return false
+		case <-deadline.C:
+			return false
+		case <-s.closed:
+			return false
+		case <-s.notify:
+		}
+	}
+}
+
+// IdleFor reports how long it has been since output last arrived. A
+// send counts as activity.
+func (s *Session) IdleFor() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Since(s.lastData)
+}
+
+// RescanFromStart rewinds pattern scanning to the start of the
+// undrained output, so the next WaitFor* call sees bytes that arrived
+// before it began. Waiting only ever looks forward; this is for a
+// caller that knows something may already have happened while nobody
+// was watching.
+func (s *Session) RescanFromStart() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scanFrom = 0
+}
+
+// ResetWaitSample clears the CPU baseline used by WaitingForInput, so
+// the next sample is compared against the moment the new wait began
+// rather than an older one.
+func (s *Session) ResetWaitSample() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.waitSampleValid = false
+}
+
+// JobActivity is what the terminal's foreground job is doing, measured
+// from the OS rather than inferred from time passing. Callers sample it
+// when output goes quiet to tell "stopped and waiting for input" from
+// "working silently", and when a wait budget expires to tell "making
+// progress" from "genuinely idle".
+type JobActivity struct {
+	// Observed: a foreground job other than the shell exists and could
+	// be inspected.
+	Observed bool
+	// Asleep: every member process is sleeping - none running, stuck on
+	// disk, or stopped.
+	Asleep bool
+	// InputWait: at least one member is blocked in a wait that input can
+	// satisfy - a terminal read, or the generic interruptible wait points
+	// (select/poll/wait_woken) a reader or multiplexer sits in. Kernels
+	// differ in how much they expose; timers and child-reaping waits do
+	// not count.
+	InputWait bool
+	// WchanReadable: kernel wait points were observable at all; without
+	// them, a fully asleep job cannot be told apart from a tty read.
+	WchanReadable bool
+	// CPUDelta: CPU ticks the job consumed since the previous sample.
+	CPUDelta uint64
+	// RSSKB / RSSDeltaKB: the job's current resident set in KB, and how
+	// much it grew since the previous sample (negative when shrunken).
+	RSSKB      int64
+	RSSDeltaKB int64
 }
 
 // Drain returns and clears the accumulated output.

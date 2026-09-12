@@ -16,9 +16,10 @@ On Windows the session falls back to the mvdan/sh interpreter; interactive progr
 2. Type into a running program: set `input` (leave command empty). Raw keystrokes go to whatever is in the terminal: answer a prompt ("y\n"), type into an editor ("i" then the text), drive menus. Append \n to submit a line. Several lines at once are delivered as a paste when the program supports it, so a block of code or config arrives intact instead of fighting auto-indent.
 3. Press keys: set `keys` — a comma-separated list of key names sent in order ("ctrl+c", "escape, :, w, q, enter", "down, down, enter"). Prefer this over escape codes in `input` for anything that is not literal text: enter, tab, backtab, escape, space, backspace, delete, up, down, left, right, home, end, pageup, pagedown, insert, f1-f12, and any ctrl+letter. Single characters in the list are typed literally.
 4. Check on something: leave everything empty to poll (watching a build, re-reading a TUI's screen, seeing what a program printed after it exited on its own).
-   Keystrokes and polls work while a command is still running — that is how you answer a command that stopped to ask something. Such a call returns the screen as it stands and says so; the command's own output still goes to the call waiting on it.
+   While a command from an earlier call is still running, the poll WAITS for it - its completion with exit code, its next question, or its timeout - instead of returning a snapshot you would have to keep re-taking. One poll is one event; do not re-poll on a timer.
+   Keystrokes still work while a command is running - that is how you answer a command that stopped to ask something. Such a call returns the screen as it stands and says so; the command's own output still goes to the call waiting on it.
 5. Resize: set `resize` to "COLSxROWS" when a full-screen program needs more room. The size sticks for the session.
-6. Commands still running when the wait budget expires return "Still running" with the output so far — the program is NOT dead. Continue with `input`/`keys`, poll, or send ctrl+c to stop it.
+6. The call returns when the command reaches a state you can act on, tracked from the process itself rather than by a timer: finished (exit code and full output), stopped and waiting for input (the response says so - answer with input/keys), a full-screen program taking over, or genuinely idle with no output, CPU or memory activity. A command that keeps producing output or burning CPU is tracked until it finishes; you do not need to poll progress.
 </calling_patterns>
 
 <full_screen_programs>
@@ -32,7 +33,7 @@ Editors, pagers and TUIs (nvim, less, htop, lazygit, k9s, git log without --no-p
 
 <execution_steps>
 1. Security Check: these commands are refused in detached background shells ({{ .BannedCommands }}) - run them in the terminal session instead, where they work. Safe read-only commands execute without a permission prompt
-2. Long commands: raise `auto_background_after` (seconds) instead of guessing; or use run_in_background
+2. Long commands: normally you do not need to do anything - output or CPU activity keeps the call waiting for completion. `auto_background_after` (default 60s) only bounds how long a fully idle command is held; raise it for commands that go quiet for long stretches, or use run_in_background
 3. Output Processing: Truncate if exceeds {{ .MaxOutputLength }} characters, keeping a short head and a long tail (where build and test failures print)
 </execution_steps>
 

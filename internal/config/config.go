@@ -59,6 +59,10 @@ const (
 const (
 	AgentCoder string = "coder"
 	AgentTask  string = "task"
+	// AgentFast is the task agent's cheap twin: same read-only tool set, run
+	// on the small model. It exists so fanning work out in parallel has a
+	// zero-config target that does not cost a large-model call per branch.
+	AgentFast string = "fast"
 )
 
 type SelectedModel struct {
@@ -433,6 +437,9 @@ type Options struct {
 	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
 	SubagentsPaths            []string     `json:"subagents_paths,omitempty" jsonschema:"description=Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"`
 	DisabledSubagents         []string     `json:"disabled_subagents,omitempty" jsonschema:"description=List of subagent names to disable and hide from the agent"`
+	// MaxConcurrentSubagents bounds how many dispatched sub-agents run at
+	// once. Dispatches beyond the limit wait for a slot instead of failing.
+	MaxConcurrentSubagents *int `json:"max_concurrent_subagents,omitempty" jsonschema:"description=Maximum sub-agents running at once. Dispatches beyond the limit wait for a free slot rather than failing. Values below 1 are clamped to 1.,minimum=1,default=24,example=8,example=48"`
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not
@@ -1093,6 +1100,17 @@ func (c *Config) SetupAgents() {
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: resolveReadOnlyTools(allowedTools),
 			// NO MCPs or LSPs by default
+			AllowedMCP: map[string][]string{},
+		},
+
+		AgentFast: {
+			ID:           AgentFast,
+			Name:         "Fast",
+			Description:  "A cheap read-only agent for one narrow lookup, run on the small model. Dispatch many in parallel.",
+			Model:        SelectedModelTypeSmall,
+			ContextPaths: c.Options.ContextPaths,
+			AllowedTools: resolveReadOnlyTools(allowedTools),
+			// NO MCPs or LSPs by default, same as the task agent.
 			AllowedMCP: map[string][]string{},
 		},
 	}

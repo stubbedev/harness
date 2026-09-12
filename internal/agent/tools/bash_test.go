@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -43,6 +44,7 @@ func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) 
 }
 
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
+	requireTerminalSession(t)
 	workingDir := t.TempDir()
 	tool := newBashToolForTest(workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
@@ -61,6 +63,7 @@ func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 }
 
 func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
+	requireTerminalSession(t)
 	workingDir := t.TempDir()
 	tool := newBashToolForTest(workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
@@ -138,6 +141,7 @@ func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.Agent
 }
 
 func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {
+	requireTerminalSession(t)
 	workingDir := t.TempDir()
 	tool, perms := newBashToolWithRecordingPerms(workingDir, true)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
@@ -163,6 +167,7 @@ func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {
 }
 
 func TestBashTool_ChainedCommandsDenied(t *testing.T) {
+	requireTerminalSession(t)
 	workingDir := t.TempDir()
 	tool, perms := newBashToolWithRecordingPerms(workingDir, false)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
@@ -174,6 +179,16 @@ func TestBashTool_ChainedCommandsDenied(t *testing.T) {
 
 	require.Equal(t, 1, perms.requestCount)
 	require.Contains(t, resp.Content, "User denied permission")
+}
+
+// requireTerminalSession skips tests that execute commands through the
+// persistent terminal session, which needs a PTY and cannot start on
+// Windows.
+func requireTerminalSession(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("terminal sessions are unsupported on Windows")
+	}
 }
 
 func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {

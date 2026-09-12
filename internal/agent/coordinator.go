@@ -184,6 +184,14 @@ type coordinator struct {
 	// registry to reach them.
 	subagentCancels *csync.Map[string, context.CancelFunc]
 
+	// dispatchSem bounds how many sub-agents run at once across the whole
+	// workspace. The agent tool is Parallel and the prompt now actively asks
+	// for fan-out, so without a cap one turn can open an unbounded number of
+	// concurrent provider streams. Dispatches over the limit block until a
+	// slot frees rather than failing, so a wide fan-out still completes — it
+	// just runs in waves.
+	dispatchSem chan struct{}
+
 	// subagentPromptXML is the <available_subagents> XML currently baked into
 	// the coder system prompt. refreshCoderSystemPrompt compares against it
 	// each turn so Library reloads reach the prompt without a rebuild when
@@ -253,6 +261,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:        opts.Interactive,
 		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
+		dispatchSem:        make(chan struct{}, maxConcurrentSubagents(opts.Config)),
 	}
 
 	c.subagentsMgr = opts.SubagentsMgr
@@ -1712,6 +1721,50 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 		return err
 	}
 	return nil
+}
+
+// DefaultMaxConcurrentSubagents bounds simultaneous sub-agent runs when the
+// user has not configured options.max_concurrent_subagents.
+//
+// The limit exists to stop a runaway dispatch from opening unbounded provider
+// streams, not to ration ordinary fan-out — so it is set well above the width
+// a real task reaches. A fan-out is usually one branch per changed file or per
+// call site, and most of those branches run on the small model, where the cost
+// of a wide wave is low and the wall-clock saving is the whole point. A limit
+// that forced a 20-file survey into three waves would defeat that, so the
+// default is high enough for a survey of that size to run in one.
+const DefaultMaxConcurrentSubagents = 24
+
+// maxConcurrentSubagents resolves the configured sub-agent concurrency limit,
+// falling back to DefaultMaxConcurrentSubagents. Values below 1 are clamped to
+// 1: zero would deadlock every dispatch, and disabling delegation is what
+// options.disabled_tools is for.
+func maxConcurrentSubagents(store *config.ConfigStore) int {
+	if store == nil {
+		return DefaultMaxConcurrentSubagents
+	}
+	opts := store.Config().Options
+	if opts == nil || opts.MaxConcurrentSubagents == nil {
+		return DefaultMaxConcurrentSubagents
+	}
+	return max(*opts.MaxConcurrentSubagents, 1)
+}
+
+// acquireDispatchSlot blocks until a sub-agent concurrency slot is free or ctx
+// is done, returning a release func on success. A nil semaphore means no cap
+// (the coordinator was built without one, as in tests), in which case the
+// release func is a no-op.
+func (c *coordinator) acquireDispatchSlot(ctx context.Context) (release func(), err error) {
+	if c.dispatchSem == nil {
+		return func() {}, nil
+	}
+	select {
+	case c.dispatchSem <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-c.dispatchSem }) }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // subagentModel carries the model-selection fields from subagent frontmatter.

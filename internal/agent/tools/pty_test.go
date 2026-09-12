@@ -2,6 +2,7 @@ package tools
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -89,6 +90,57 @@ func TestPtyRunner_StillRunning(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// A command that stops to ask something is detected from the process
+// state, not waited out to the budget: the call returns as waiting for
+// input within a couple of seconds even with a minute of budget left.
+func TestPtyRunner_RunReturnsWhenInputNeeded(t *testing.T) {
+	r := newTestRunner(t)
+
+	start := time.Now()
+	res, err := r.Run(t.Context(), "read answer; echo \"got:$answer\"", 60)
+	require.NoError(t, err)
+	require.Less(t, time.Since(start), 20*time.Second, "the call should return on the quiet window, not the budget")
+	require.True(t, res.Running)
+	require.True(t, res.Waiting)
+	require.Nil(t, res.ExitCode)
+
+	done, err := r.Input(t.Context(), "hello\n")
+	require.NoError(t, err)
+	require.Contains(t, done.Output, "got:hello")
+}
+
+// A command left running by a timed-out call becomes an orphan: polling
+// waits for it to finish and reports its exit code and output, rather
+// than returning an instant snapshot the caller has to keep re-taking.
+func TestPtyRunner_PollWaitsForOrphanedCommand(t *testing.T) {
+	r := newTestRunner(t)
+
+	res, err := r.Run(t.Context(), "sleep 3; echo late", 1)
+	require.NoError(t, err)
+	require.True(t, res.Running)
+
+	poll, err := r.Poll(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, poll.ExitCode, "the poll waited for the orphan to finish")
+	require.Equal(t, 0, *poll.ExitCode)
+	require.Contains(t, poll.Output, "late")
+	require.False(t, poll.Running)
+}
+
+// A command that keeps producing output past its wait budget is making
+// progress: the wait is leased forward and the call returns its real
+// completion, not a still-running snapshot the agent would poll for.
+func TestPtyRunner_StreamingCommandLeasesPastBudget(t *testing.T) {
+	r := newTestRunner(t)
+
+	res, err := r.Run(t.Context(), "for i in 1 2 3 4 5 6; do echo tick $i; sleep 0.4; done", 2)
+	require.NoError(t, err)
+	require.NotNil(t, res.ExitCode, "the lease should have carried the call to completion")
+	require.Equal(t, 0, *res.ExitCode)
+	require.False(t, res.Running)
+	require.Contains(t, res.Output, "tick 6")
+}
+
 func TestPtyRunner_InputAnswersPrompt(t *testing.T) {
 	r := newTestRunner(t)
 
@@ -136,6 +188,132 @@ func TestPtyRunner_EchoStripped(t *testing.T) {
 	// The echoed command line is stripped; only the output remains.
 	require.Equal(t, "distinctivestring", res.Output)
 	require.Equal(t, 1, len(regexp.MustCompile("distinctivestring").FindAllString(res.Output, -1)))
+}
+
+func TestEchoDebris(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		line string
+		echo string
+		want bool
+	}{
+		{"exact", "echo hi", "echo hi", true},
+		{"prompt prefix", "sh-5.3$ echo hi", "echo hi", true},
+		// zle echoes the line, then the syntax-highlighting redisplay
+		// reprints it on the same line.
+		{"redraw, whole copy", "echo helloecho hello", "echo hello", true},
+		{"redraw, partial copy", "echo helloecho", "echo hello", true},
+		{"redraw, skipped runs", `which zsh; echo "SHELL=$SHELL"; ps -o comm= -p $PPIDwhich; echo "SHELL=$SHELL"; ps -o -p $PPID`, `which zsh; echo "SHELL=$SHELL"; ps -o comm= -p $PPID`, true},
+		// Real output that merely echoes fragments of the command is kept.
+		{"output shorter than command", "echo", "echo hello", false},
+		{"output ending with sent text", "got:hello", "hello", false},
+		{"output starting mid-command", "hello", "echo hello", false},
+		{"repeated junk", "nananananananana", "banana", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, echoDebris(tc.line, tc.echo))
+		})
+	}
+}
+
+// zshPromptSp is what zsh prints before every prompt when the
+// partial-line marker (PROMPT_SP) is on: a highlighted %, a space fill
+// to the last column, then carriage returns that erase it again. Stripped
+// of escapes it frames real output with "%" plus whitespace, at the
+// start (the prompt before the command, undrained) and the end (the
+// prompt after it).
+func zshPromptSp(fill int) string {
+	return "\x1b[1m\x1b[7m%\x1b[27m\x1b[1m\x1b[0m" + strings.Repeat(" ", fill) +
+		"\r \r\r\x1b[0m\x1b[27m\x1b[24m\x1b[J\x1b]133;A\a\x1b[K\x1b[?1h\x1b=\x1b[?2004h"
+}
+
+// TestPtyCleanZshStream runs clean() over raw zsh byte streams captured
+// from a real session: zle echoes a character, backspaces over it and
+// redisplays the command with per-character color codes and
+// cursor-forward skips, and prompts wrap output in PROMPT_SP markers.
+// The cleaned output must be the command's output alone.
+func TestPtyCleanZshStream(t *testing.T) {
+	t.Parallel()
+
+	r := &ptyRunner{sentinel: newSentinel()}
+
+	cases := []struct {
+		name string
+		raw  string
+		echo []string
+		want string
+	}{
+		{
+			name: "echo",
+			raw: zshPromptSp(215) +
+				"e\becho hello\x1b[10D\x1b[36me\x1b[36mc\x1b[36mh\x1b[36mo\x1b[39m\x1b[6C" +
+				"\x1b[?1l\x1b>\x1b[?2004l\r\r\nhello\r\n" + zshPromptSp(215) +
+				r.sentinel.cmd + "\r\n",
+			echo: []string{"echo hello"},
+			want: "hello",
+		},
+		{
+			name: "partial line",
+			raw: "p\bprintf %s partial-output\x1b[24D\x1b[36mp\x1b[36mr\x1b[36mi\x1b[36mn\x1b[36mt\x1b[36mf\x1b[39m \x1b[33m%\x1b[33ms\x1b[39m\x1b[15C" +
+				"\x1b[?1l\x1b>\x1b[?2004l\r\r\npartial-output" + zshPromptSp(215) +
+				r.sentinel.cmd + "\r\n",
+			echo: []string{"printf %s partial-output"},
+			want: "partial-output",
+		},
+		{
+			name: "long command",
+			raw: "l\bls /home/x/internal/shell/\x1b[26D\x1b[36ml\x1b[36ms\x1b[39m \x1b[4m/\x1b[4mh\x1b[4mo\x1b[4mm\x1b[4me\x1b[24m\x1b[?1l\x1b>\x1b[?2004l\r\r\n" +
+				"background.go    shell.go\r\nstream.go         run.go\r\n" + zshPromptSp(215) +
+				r.sentinel.cmd + "\r\n",
+			echo: []string{"ls /home/x/internal/shell/"},
+			want: "background.go    shell.go\nstream.go         run.go",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, r.clean(tc.raw, tc.echo))
+		})
+	}
+}
+
+// TestPtyRunner_ZshUserShell runs commands through a real zsh with the
+// user's rc files loaded: zle line editing, zsh-syntax-highlighting
+// redisplay and the PROMPT_SP partial-line marker all echo far more than
+// the command. The cleaned output must still be the command's output
+// alone - no doubled command, no "%" framing, no filler whitespace.
+func TestPtyRunner_ZshUserShell(t *testing.T) {
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("zsh not installed")
+	}
+	t.Setenv("SHELL", "zsh")
+	r := &ptyRunner{cwd: t.TempDir()}
+	t.Cleanup(r.Close)
+	_, err := r.terminal(t.Context())
+	require.NoError(t, err)
+
+	res, err := r.Run(t.Context(), "echo hello-zsh", 15)
+	require.NoError(t, err)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	require.Equal(t, "hello-zsh", res.Output)
+
+	res, err = r.Run(t.Context(), "printf %s partial-zsh", 15)
+	require.NoError(t, err)
+	require.Equal(t, "partial-zsh", res.Output)
+}
+
+func TestResolveBackspaces(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "echo hello", resolveBackspaces("e\becho hello"))
+	require.Equal(t, "", resolveBackspaces("x\b"))
+	require.Equal(t, "ün", resolveBackspaces("üü\bn"))
+	require.Equal(t, "no backspaces", resolveBackspaces("no backspaces"))
 }
 
 func TestPtySudoPromptPattern(t *testing.T) {
