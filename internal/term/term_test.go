@@ -175,7 +175,13 @@ func TestSessionScreenAndAltScreen(t *testing.T) {
 	// what was typed.
 	require.NoError(t, s.Send([]byte("printf '\\033[?1049h'; printf 'full screen app'\n")))
 	require.Eventually(t, s.AltScreen, testTimeout(5*time.Second), 50*time.Millisecond)
-	require.Contains(t, s.Screen(), "full screen app")
+	// The mode flips the moment the escape is parsed, but the text after
+	// it can still sit in a later pty read: the alt screen starts blank
+	// (1049h clears it), so a one-shot snapshot can render "". Poll the
+	// rendered screen until the bytes have landed.
+	require.Eventually(t, func() bool {
+		return strings.Contains(s.Screen(), "full screen app")
+	}, testTimeout(5*time.Second), 50*time.Millisecond)
 
 	require.NoError(t, s.Send([]byte("printf '\\033[?1049l'\n")))
 	require.Eventually(t, func() bool { return !s.AltScreen() }, testTimeout(5*time.Second), 50*time.Millisecond)
