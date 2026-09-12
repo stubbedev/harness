@@ -5246,7 +5246,8 @@ func (m *UI) newSession() tea.Cmd {
 
 // saveSummaryToFile writes the session's latest summary message to a
 // markdown file inside the data directory so it can be reused later,
-// e.g. as the initial context of a new session.
+// e.g. as the initial context of a new session, and copies it to the
+// clipboard.
 func (m *UI) saveSummaryToFile(sessionID string) tea.Cmd {
 	return func() tea.Msg {
 		sess, err := m.com.Workspace.GetSession(context.Background(), sessionID)
@@ -5257,19 +5258,39 @@ func (m *UI) saveSummaryToFile(sessionID string) tea.Cmd {
 		if err != nil {
 			return util.ReportError(err)()
 		}
-		path, err := saveSummaryExport(m.com.Config().Options.DataDirectory, sess, msgs)
+		path, content, err := saveSummaryExport(m.com.Config().Options.DataDirectory, sess, msgs)
 		if err != nil {
 			return util.ReportError(err)()
 		}
-		return util.CmdHandler(util.InfoMsg{
-			Type: util.InfoTypeSuccess,
-			Msg:  "Summary saved to " + path,
-		})()
+		return reportExportCopied("Summary saved to", path, content)
 	}
 }
 
+// reportExportCopied copies an export's text to the clipboard and reports
+// where the file landed. The file is the export and the clipboard copy comes
+// on top of it, so a clipboard that accepts the write and then does not hold
+// the text still leaves the path on screen.
+func reportExportCopied(label, path, content string) tea.Msg {
+	return tea.Sequence(
+		tea.SetClipboard(content),
+		func() tea.Msg {
+			msg := label + " " + path
+			if err := clipboard.WriteText(content); errors.Is(err, clipboard.ErrWriteFailed) {
+				msg += " (clipboard copy failed)"
+			} else {
+				msg += " and copied to clipboard"
+			}
+			return util.CmdHandler(util.InfoMsg{
+				Type: util.InfoTypeSuccess,
+				Msg:  msg,
+			})()
+		},
+	)()
+}
+
 // exportConversationToFile writes the full transcript of the given session
-// to a markdown file inside the data directory.
+// to a markdown file inside the data directory and copies the same markdown
+// to the clipboard.
 func (m *UI) exportConversationToFile(sessionID string) tea.Cmd {
 	return func() tea.Msg {
 		sess, err := m.com.Workspace.GetSession(context.Background(), sessionID)
@@ -5280,14 +5301,11 @@ func (m *UI) exportConversationToFile(sessionID string) tea.Cmd {
 		if err != nil {
 			return util.ReportError(err)()
 		}
-		path, err := saveConversationExport(m.com.Config().Options.DataDirectory, sess, msgs)
+		path, content, err := saveConversationExport(m.com.Config().Options.DataDirectory, sess, msgs)
 		if err != nil {
 			return util.ReportError(err)()
 		}
-		return util.CmdHandler(util.InfoMsg{
-			Type: util.InfoTypeSuccess,
-			Msg:  "Conversation exported to " + path,
-		})()
+		return reportExportCopied("Conversation exported to", path, content)
 	}
 }
 

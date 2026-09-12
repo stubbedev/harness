@@ -87,7 +87,7 @@ type KeyMap struct {
 	ParentSession key.Binding
 	Subagents     key.Binding
 	// ExportConversation writes the current session transcript to a
-	// markdown file.
+	// markdown file and copies it to the clipboard.
 	ExportConversation key.Binding
 	// Themes opens the color theme picker.
 	Themes key.Binding

@@ -166,20 +166,21 @@ func TestSaveConversationExport(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 
-		path, err := saveConversationExport(dir, sess, msgs)
+		path, content, err := saveConversationExport(dir, sess, msgs)
 		require.NoError(t, err)
 		require.Equal(t, conversationExportPath(dir, "sess-123"), path)
 
 		b, err := os.ReadFile(path)
 		require.NoError(t, err)
 		require.Contains(t, string(b), "why is the parser slow?")
+		require.Equal(t, string(b), content)
 	})
 
 	t.Run("overwrites the previous export", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 
-		path, err := saveConversationExport(dir, sess, msgs)
+		path, _, err := saveConversationExport(dir, sess, msgs)
 		require.NoError(t, err)
 
 		grown := append(msgs, message.Message{
@@ -188,7 +189,7 @@ func TestSaveConversationExport(t *testing.T) {
 			Role:      message.Assistant,
 			Parts:     []message.ContentPart{message.TextContent{Text: "found it"}},
 		})
-		path2, err := saveConversationExport(dir, sess, grown)
+		path2, _, err := saveConversationExport(dir, sess, grown)
 		require.NoError(t, err)
 		require.Equal(t, path, path2)
 
@@ -200,7 +201,7 @@ func TestSaveConversationExport(t *testing.T) {
 	t.Run("errors when there is nothing to export", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := saveConversationExport(t.TempDir(), sess, nil)
+		_, _, err := saveConversationExport(t.TempDir(), sess, nil)
 		require.Error(t, err)
 	})
 }

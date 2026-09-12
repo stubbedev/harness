@@ -18,10 +18,11 @@ func summaryExportPath(dataDirectory, sessionID string) string {
 }
 
 // saveSummaryExport writes the session's latest summary message to a
-// markdown file inside dataDirectory and returns the written path.
-func saveSummaryExport(dataDirectory string, sess session.Session, msgs []message.Message) (string, error) {
+// markdown file inside dataDirectory and returns the written path along with
+// the summary text so callers can reuse it without reading the file back.
+func saveSummaryExport(dataDirectory string, sess session.Session, msgs []message.Message) (string, string, error) {
 	if sess.SummaryMessageID == "" {
-		return "", fmt.Errorf("no summary available yet, run \"Summarize Session\" first")
+		return "", "", fmt.Errorf("no summary available yet, run \"Summarize Session\" first")
 	}
 	var summary *message.Message
 	for i := range msgs {
@@ -31,18 +32,18 @@ func saveSummaryExport(dataDirectory string, sess session.Session, msgs []messag
 		}
 	}
 	if summary == nil {
-		return "", fmt.Errorf("summary message not found for this session")
+		return "", "", fmt.Errorf("summary message not found for this session")
 	}
 	content := strings.TrimSpace(summary.Content().Text)
 	if content == "" {
-		return "", fmt.Errorf("summary message is empty")
+		return "", "", fmt.Errorf("summary message is empty")
 	}
 	path := summaryExportPath(dataDirectory, sess.ID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("failed to create summaries directory: %w", err)
+		return "", "", fmt.Errorf("failed to create summaries directory: %w", err)
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("failed to write summary: %w", err)
+		return "", "", fmt.Errorf("failed to write summary: %w", err)
 	}
-	return path, nil
+	return path, content, nil
 }

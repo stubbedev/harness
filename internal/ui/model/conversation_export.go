@@ -21,20 +21,21 @@ func conversationExportPath(dataDirectory, sessionID string) string {
 }
 
 // saveConversationExport renders the session transcript as markdown and
-// writes it inside dataDirectory, returning the written path.
-func saveConversationExport(dataDirectory string, sess session.Session, msgs []message.Message) (string, error) {
+// writes it inside dataDirectory, returning the written path along with the
+// rendered markdown so callers can reuse it without reading the file back.
+func saveConversationExport(dataDirectory string, sess session.Session, msgs []message.Message) (string, string, error) {
 	content, err := renderConversationMarkdown(sess, msgs, time.Now())
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	path := conversationExportPath(dataDirectory, sess.ID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("failed to create exports directory: %w", err)
+		return "", "", fmt.Errorf("failed to create exports directory: %w", err)
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("failed to write conversation: %w", err)
+		return "", "", fmt.Errorf("failed to write conversation: %w", err)
 	}
-	return path, nil
+	return path, content, nil
 }
 
 // renderConversationMarkdown renders the whole session as a markdown
