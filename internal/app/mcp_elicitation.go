@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,8 +21,10 @@ import (
 // (the server asking the human a question mid-tool-call) into the TUI
 // question form. Form elicitations become a question batch derived from
 // the server's requested schema; anything the terminal cannot present
-// (URL elicitations, schemas beyond five fields) is declined so the
-// server can fall back rather than hang.
+// faithfully (URL elicitations, schemas beyond the form's width, enums
+// outside the choice window, structured field types) is declined so the
+// server can fall back rather than receive a reshaped answer. A
+// dismissed form answers "cancel" and an explicit refusal "decline".
 func wireMCPElicitation(questions question.Service) {
 	harnessmcp.SetElicitationHandler(elicitationHandler(questions))
 }
@@ -47,15 +51,45 @@ func elicitationHandler(questions question.Service) harnessmcp.ElicitationHandle
 		answers, askErr := questions.Ask(ctx, *req)
 		if askErr != nil {
 			if errors.Is(askErr, question.ErrCancelled) {
-				return &mcpsdk.ElicitResult{Action: "decline"}, nil
+				// The form was dismissed without an explicit
+				// choice: the protocol's "cancel", distinct from
+				// the explicit refusal "decline" carries.
+				return &mcpsdk.ElicitResult{Action: "cancel"}, nil
 			}
 			return nil, askErr
+		}
+		if isBareConfirmation(params) {
+			return bareConfirmationResult(answers), nil
 		}
 		content, contentErr := elicitationContent(answers, params.RequestedSchema)
 		if contentErr != nil {
 			return nil, contentErr
 		}
 		return &mcpsdk.ElicitResult{Action: "accept", Content: content}, nil
+	}
+}
+
+// isBareConfirmation reports whether the server asked for a plain
+// confirmation: a message and no fields to fill.
+func isBareConfirmation(params *mcpsdk.ElicitParams) bool {
+	return len(parseElicitationSchema(params.RequestedSchema).Properties) == 0
+}
+
+// bareConfirmationResult maps a bare confirmation's answer onto the
+// protocol's three actions: an explicit yes accepts with empty content,
+// an explicit no declines, and anything else is a dismissal.
+func bareConfirmationResult(answers []question.Answer) *mcpsdk.ElicitResult {
+	var yes *bool
+	if len(answers) > 0 {
+		yes = answers[0].Yes
+	}
+	switch {
+	case yes != nil && *yes:
+		return &mcpsdk.ElicitResult{Action: "accept", Content: map[string]any{}}
+	case yes != nil:
+		return &mcpsdk.ElicitResult{Action: "decline"}
+	default:
+		return &mcpsdk.ElicitResult{Action: "cancel"}
 	}
 }
 
@@ -72,9 +106,23 @@ type elicitationProperty struct {
 	Enum        json.RawMessage `json:"enum"`
 }
 
+// elicitationConfirmID is the synthesized question ID for a schema with
+// no fields: the server asked for a bare confirmation.
+const elicitationConfirmID = "confirm"
+
 // elicitationQuestion converts an ElicitParams into a question.Request.
+// It returns an error for any schema the form cannot present faithfully;
+// the handler turns that into a decline so the server can fall back
+// rather than receive a reshaped answer.
 func elicitationQuestion(server string, params *mcpsdk.ElicitParams) (*question.Request, error) {
 	schema := parseElicitationSchema(params.RequestedSchema)
+
+	// A schema wider than the form is declined outright: truncating it
+	// would send accept with a content map that cannot satisfy a
+	// required field the form silently dropped.
+	if len(schema.Properties) > question.MaxQuestions {
+		return nil, fmt.Errorf("schema has %d fields; the form presents at most %d", len(schema.Properties), question.MaxQuestions)
+	}
 
 	message := strings.TrimSpace(params.Message)
 	if message == "" {
@@ -84,18 +132,36 @@ func elicitationQuestion(server string, params *mcpsdk.ElicitParams) (*question.
 		message = message[:question.MaxDescriptionLength]
 	}
 
-	var questions []question.Question
-	for name, prop := range schema.Properties {
-		if len(questions) == question.MaxQuestions {
-			break
+	// Deterministic order: required fields first, then the rest, each
+	// group alphabetical — iterating the map would make which fields
+	// appear where random per call.
+	names := slices.Sorted(maps.Keys(schema.Properties))
+	slices.SortFunc(names, func(a, b string) int {
+		if ra, rb := slices.Contains(schema.Required, a), slices.Contains(schema.Required, b); ra != rb {
+			if ra {
+				return -1
+			}
+			return 1
 		}
-		q := elicitationPropertyQuestion(name, prop, schema.Required)
+		return strings.Compare(a, b)
+	})
+
+	var questions []question.Question
+	for _, name := range names {
+		if name == "" {
+			return nil, fmt.Errorf("schema has a field with an empty name")
+		}
+		q, err := elicitationPropertyQuestion(name, schema.Properties[name], schema.Required)
+		if err != nil {
+			return nil, err
+		}
 		questions = append(questions, q)
 	}
+
 	// No properties: the server is asking for a bare confirmation.
 	if len(questions) == 0 {
 		questions = append(questions, question.Question{
-			ID:          "confirm",
+			ID:          elicitationConfirmID,
 			Type:        question.TypeYesNo,
 			Text:        message,
 			Description: fmt.Sprintf("The MCP server %q asks you to confirm.", server),
@@ -106,26 +172,29 @@ func elicitationQuestion(server string, params *mcpsdk.ElicitParams) (*question.
 	// The elicitation message travels as the description on single-field
 	// forms (where the TUI shows it next to the input) and as the
 	// confirmation header on multi-field forms.
+	req := &question.Request{ID: newElicitationID(), Questions: questions}
 	if len(questions) == 1 {
 		// A one-field form has no confirmation header to carry the
 		// message, so it becomes the description — otherwise the user is
 		// asked for a value with only the generated "Required field ..."
 		// line to go on and never sees what the server actually asked.
-		questions[0].Description = message
+		req.Questions[0].Description = message
 	} else {
-		confirmTitle := fmt.Sprintf("%s needs input", server)
-		confirmDesc := message
-		return &question.Request{
-			ID:                 newElicitationID(),
-			Questions:          questions,
-			ConfirmTitle:       confirmTitle,
-			ConfirmDescription: confirmDesc,
-		}, nil
+		req.ConfirmTitle = fmt.Sprintf("%s needs input", server)
+		req.ConfirmDescription = message
 	}
-	return &question.Request{ID: newElicitationID(), Questions: questions}, nil
+	// The request must clear Ask's validation, or Ask would fail with
+	// an error instead of the decline this path promises.
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+	return req, nil
 }
 
-func elicitationPropertyQuestion(name string, prop elicitationProperty, required []string) question.Question {
+// elicitationPropertyQuestion maps one schema property onto a form
+// question, or an error when the property cannot be presented
+// faithfully.
+func elicitationPropertyQuestion(name string, prop elicitationProperty, required []string) (question.Question, error) {
 	isRequired := slices.Contains(required, name)
 	prefix := "Optional"
 	if isRequired {
@@ -152,21 +221,40 @@ func elicitationPropertyQuestion(name string, prop elicitationProperty, required
 	}
 
 	// An enum becomes a choice list regardless of the declared type.
-	if vals := parseEnum(prop.Enum); len(vals) >= 2 && len(vals) <= question.MaxChoices {
+	// Outside the presentable window the property is declined, not
+	// reshaped into free text: whatever the user typed would be sent as
+	// if it were one of the valid choices.
+	if len(prop.Enum) > 0 {
+		vals, ok := parseEnum(prop.Enum)
+		if !ok {
+			return question.Question{}, fmt.Errorf("field %q: enum values must be scalars (strings, numbers or booleans)", name)
+		}
+		if len(vals) < 2 || len(vals) > question.MaxChoices {
+			return question.Question{}, fmt.Errorf("field %q: enum has %d values; the form presents 2 to %d", name, len(vals), question.MaxChoices)
+		}
 		q.Type = question.TypeSingleChoice
+		seen := make(map[string]bool, len(vals))
 		for _, v := range vals {
+			if v == "" || seen[v] || len(v) > question.MaxChoiceLabelLength {
+				return question.Question{}, fmt.Errorf("field %q: enum values must be unique, non-empty and at most %d characters", name, question.MaxChoiceLabelLength)
+			}
+			seen[v] = true
 			q.Choices = append(q.Choices, question.Choice{ID: v, Label: v})
 		}
-		return q
+		return q, nil
 	}
 
 	switch strings.ToLower(prop.Type) {
+	case "", "string", "number", "integer":
+		q.Type = question.TypeFreeText
 	case "boolean":
 		q.Type = question.TypeYesNo
 	default:
-		q.Type = question.TypeFreeText
+		// Structured (array, object) and unknown types have no form
+		// widget, and a free-text answer would not satisfy the schema.
+		return question.Question{}, fmt.Errorf("field %q: type %q has no form representation", name, prop.Type)
 	}
-	return q
+	return q, nil
 }
 
 func parseElicitationSchema(raw any) elicitationSchema {
@@ -182,15 +270,32 @@ func parseElicitationSchema(raw any) elicitationSchema {
 	return schema
 }
 
-func parseEnum(raw json.RawMessage) []string {
+// parseEnum decodes an enum into choice values. Scalar members are
+// stringified so numeric and boolean enums stay choices rather than
+// degrading to free text; ok is false when the list is empty or holds
+// non-scalars.
+func parseEnum(raw json.RawMessage) ([]string, bool) {
 	if len(raw) == 0 {
-		return nil
+		return nil, false
 	}
-	var vals []string
+	var vals []any
 	if err := json.Unmarshal(raw, &vals); err != nil {
-		return nil
+		return nil, false
 	}
-	return vals
+	out := make([]string, 0, len(vals))
+	for _, v := range vals {
+		switch v := v.(type) {
+		case string:
+			out = append(out, v)
+		case float64:
+			out = append(out, strconv.FormatFloat(v, 'f', -1, 64))
+		case bool:
+			out = append(out, strconv.FormatBool(v))
+		default:
+			return nil, false
+		}
+	}
+	return out, len(out) > 0
 }
 
 // elicitationContent converts answered questions back into the
@@ -226,8 +331,8 @@ func elicitationContent(answers []question.Answer, rawSchema any) (map[string]an
 	return content, nil
 }
 
-// coerceElicitationValue parses a textual answer into the numeric type
-// the schema asked for. ok is false when the value should stay a string.
+// coerceElicitationValue parses a textual answer into the declared
+// schema type. ok is false when the value should stay a string.
 func coerceElicitationValue(v, propType string) (any, bool) {
 	switch propType {
 	case "number":
@@ -237,6 +342,10 @@ func coerceElicitationValue(v, propType string) (any, bool) {
 	case "integer":
 		if f, err := parseJSONNumber(v); err == nil && f == float64(int64(f)) {
 			return int64(f), true
+		}
+	case "boolean":
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b, true
 		}
 	}
 	return nil, false

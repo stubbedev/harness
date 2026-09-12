@@ -164,7 +164,7 @@ const (
 	MaxDescriptionLength       = 600
 	MaxChoiceLabelLength       = 200
 	MaxChoiceDescriptionLength = 200
-	MaxChoices                 = 5
+	MaxChoices                 = 10
 	MaxQuestions               = 5
 )
 

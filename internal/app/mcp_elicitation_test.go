@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -102,21 +103,97 @@ func TestElicitationQuestion(t *testing.T) {
 		}, req.Questions[0].Choices)
 	})
 
-	t.Run("a one-value enum stays a free-text field", func(t *testing.T) {
+	// The choice list scrolls, so six options stay a choice list; free
+	// text would send whatever the user typed as if it were valid.
+	t.Run("an enum past the old five-option window stays a choice list", func(t *testing.T) {
+		t.Parallel()
+
+		vals := make([]any, 6)
+		for i := range vals {
+			vals[i] = string(rune('a' + i))
+		}
+		req, err := elicitationQuestion("forge", &mcpsdk.ElicitParams{
+			RequestedSchema: schemaOf(map[string]any{
+				"pick": map[string]any{"type": "string", "enum": vals},
+			}),
+		})
+		require.NoError(t, err)
+		require.Len(t, req.Questions, 1)
+		assert.Equal(t, question.TypeSingleChoice, req.Questions[0].Type)
+		require.Len(t, req.Questions[0].Choices, 6)
+	})
+
+	t.Run("numeric enum values become choices", func(t *testing.T) {
 		t.Parallel()
 
 		req, err := elicitationQuestion("forge", &mcpsdk.ElicitParams{
 			RequestedSchema: schemaOf(map[string]any{
-				"only": map[string]any{"type": "string", "enum": []any{"one"}},
+				"priority": map[string]any{"type": "integer", "enum": []any{1, 2, 3}},
 			}),
 		})
 		require.NoError(t, err)
-		assert.Equal(t, question.TypeFreeText, req.Questions[0].Type)
+		require.Len(t, req.Questions, 1)
+		assert.Equal(t, []question.Choice{
+			{ID: "1", Label: "1"},
+			{ID: "2", Label: "2"},
+			{ID: "3", Label: "3"},
+		}, req.Questions[0].Choices)
 	})
 
-	// The dialog cannot present an unbounded form, so a wide schema is
-	// truncated rather than refused.
-	t.Run("more fields than the dialog holds are capped", func(t *testing.T) {
+	// Free text for an enum the form will not present would send any
+	// typed string as if it were a valid choice; these are declined
+	// instead so the server can fall back.
+	t.Run("enums the form cannot present are declined", func(t *testing.T) {
+		t.Parallel()
+
+		tooFew := []any{"one"}
+		empty := []any{}
+		nonScalar := []any{"one", map[string]any{"nested": true}}
+		tooMany := make([]any, question.MaxChoices+1)
+		for i := range tooMany {
+			tooMany[i] = string(rune('a' + i))
+		}
+
+		tests := []struct {
+			name string
+			enum []any
+		}{
+			{"a single value", tooFew},
+			{"an empty list", empty},
+			{"a non-scalar member", nonScalar},
+			{"more values than the form holds", tooMany},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				req, err := elicitationQuestion("forge", &mcpsdk.ElicitParams{
+					RequestedSchema: schemaOf(map[string]any{
+						"pick": map[string]any{"type": "string", "enum": tt.enum},
+					}),
+				})
+				require.Error(t, err)
+				assert.Nil(t, req)
+			})
+		}
+	})
+
+	t.Run("a structured field is declined rather than asked as free text", func(t *testing.T) {
+		t.Parallel()
+
+		req, err := elicitationQuestion("forge", &mcpsdk.ElicitParams{
+			RequestedSchema: schemaOf(map[string]any{
+				"tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			}),
+		})
+		require.Error(t, err)
+		assert.Nil(t, req)
+	})
+
+	// A schema the form cannot hold is declined outright: accept with a
+	// truncated content map cannot satisfy a required field that was
+	// dropped, and which fields survived was map-iteration random.
+	t.Run("more fields than the dialog holds are declined", func(t *testing.T) {
 		t.Parallel()
 
 		props := map[string]any{}
@@ -124,8 +201,27 @@ func TestElicitationQuestion(t *testing.T) {
 			props["field_"+string(rune('a'+i))] = map[string]any{"type": "string"}
 		}
 		req, err := elicitationQuestion("forge", &mcpsdk.ElicitParams{RequestedSchema: schemaOf(props)})
+		require.Error(t, err)
+		assert.Nil(t, req)
+	})
+
+	t.Run("fields are ordered required first, then alphabetically", func(t *testing.T) {
+		t.Parallel()
+
+		req, err := elicitationQuestion("forge", &mcpsdk.ElicitParams{
+			RequestedSchema: schemaOf(map[string]any{
+				"zebra": map[string]any{"type": "string"},
+				"apple": map[string]any{"type": "string"},
+				"mango": map[string]any{"type": "string"},
+				"kiwi":  map[string]any{"type": "string"},
+			}, "zebra", "mango"),
+		})
 		require.NoError(t, err)
-		assert.Len(t, req.Questions, question.MaxQuestions)
+		got := make([]string, len(req.Questions))
+		for i, q := range req.Questions {
+			got[i] = q.ID
+		}
+		assert.Equal(t, []string{"mango", "zebra", "apple", "kiwi"}, got)
 	})
 
 	t.Run("over-long text is trimmed to what the dialog can show", func(t *testing.T) {
@@ -189,6 +285,12 @@ func TestElicitationContent(t *testing.T) {
 			answers: []question.Answer{{QuestionID: "draft", Yes: &yes}, {QuestionID: "sign", Yes: &no}},
 			schema:  schemaOf(map[string]any{"draft": map[string]any{"type": "boolean"}, "sign": map[string]any{"type": "boolean"}}),
 			want:    map[string]any{"draft": true, "sign": false},
+		},
+		{
+			name:    "a chosen boolean enum value is coerced",
+			answers: []question.Answer{{QuestionID: "fast", SelectedIDs: []string{"true"}}},
+			schema:  schemaOf(map[string]any{"fast": map[string]any{"type": "boolean"}}),
+			want:    map[string]any{"fast": true},
 		},
 		{
 			name:    "a chosen enum value is coerced to the declared type",
@@ -273,16 +375,16 @@ func TestElicitationHandler(t *testing.T) {
 		assert.Len(t, questions.asked.Questions, 1)
 	})
 
-	// Esc on the form cancels the pending question. The server gets a
-	// decline, which is an answer it can act on, rather than an error or
-	// a call that never returns.
-	t.Run("a cancelled form declines", func(t *testing.T) {
+	// Esc on the form dismisses it without an explicit choice, which is
+	// exactly the protocol's "cancel"; a server offering a fallback for a
+	// dismissal can tell it apart from an explicit refusal.
+	t.Run("a cancelled form answers cancel", func(t *testing.T) {
 		t.Parallel()
 
 		res, err := elicitationHandler(&fakeQuestions{err: question.ErrCancelled})(
 			t.Context(), "forge", &mcpsdk.ElicitParams{Message: "Which branch?", RequestedSchema: schema})
 		require.NoError(t, err)
-		assert.Equal(t, "decline", res.Action)
+		assert.Equal(t, "cancel", res.Action)
 		assert.Nil(t, res.Content)
 	})
 
@@ -321,5 +423,49 @@ func TestElicitationHandler(t *testing.T) {
 				assert.Nil(t, questions.asked)
 			})
 		}
+	})
+
+	// A schema with no fields is a bare confirmation. An explicit no is
+	// the protocol's "decline"; an explicit yes accepts with empty
+	// content rather than shipping a field the schema never declared.
+	t.Run("a bare confirmation maps no and yes onto decline and accept", func(t *testing.T) {
+		t.Parallel()
+
+		no := false
+		t.Run("yes accepts with empty content", func(t *testing.T) {
+			t.Parallel()
+
+			res, err := elicitationHandler(&fakeQuestions{answers: []question.Answer{{QuestionID: "confirm", Yes: &yes}}})(
+				t.Context(), "forge", &mcpsdk.ElicitParams{Message: "Proceed with the deploy?"})
+			require.NoError(t, err)
+			assert.Equal(t, "accept", res.Action)
+			assert.Empty(t, res.Content)
+		})
+		t.Run("no declines", func(t *testing.T) {
+			t.Parallel()
+
+			res, err := elicitationHandler(&fakeQuestions{answers: []question.Answer{{QuestionID: "confirm", Yes: &no}}})(
+				t.Context(), "forge", &mcpsdk.ElicitParams{Message: "Proceed with the deploy?"})
+			require.NoError(t, err)
+			assert.Equal(t, "decline", res.Action)
+			assert.Nil(t, res.Content)
+		})
+	})
+
+	t.Run("a schema the form cannot present is declined, not asked", func(t *testing.T) {
+		t.Parallel()
+
+		props := map[string]any{}
+		for i := range question.MaxQuestions + 1 {
+			props[fmt.Sprintf("field_%d", i)] = map[string]any{"type": "string"}
+		}
+		questions := &fakeQuestions{answers: []question.Answer{{QuestionID: "field_0", FillInText: "x"}}}
+		res, err := elicitationHandler(questions)(t.Context(), "forge", &mcpsdk.ElicitParams{
+			Message:         "Fill these in",
+			RequestedSchema: schemaOf(props),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "decline", res.Action)
+		assert.Nil(t, questions.asked)
 	})
 }
