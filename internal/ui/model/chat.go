@@ -37,11 +37,6 @@ type scrollbarHideMsg struct {
 	seq int // sequence number to ignore stale messages
 }
 
-// sidebarScrollbarHideMsg is sent to hide the sidebar scrollbar after timeout.
-type sidebarScrollbarHideMsg struct {
-	seq int
-}
-
 // scrollbarHideCmd returns a command that sends a scrollbarHideMsg after the timeout.
 func scrollbarHideCmd(seq int) tea.Cmd {
 	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {
@@ -73,14 +68,6 @@ func chatWarmCmd(seq int, delay time.Duration) tea.Cmd {
 	}
 	return tea.Tick(delay, func(_ time.Time) tea.Msg {
 		return chatWarmMsg{seq: seq}
-	})
-}
-
-// sidebarScrollbarHideCmd returns a command that sends a sidebarScrollbarHideMsg
-// after the timeout.
-func sidebarScrollbarHideCmd(seq int) tea.Cmd {
-	return tea.Tick(scrollbarHideDuration, func(_ time.Time) tea.Msg {
-		return sidebarScrollbarHideMsg{seq: seq}
 	})
 }
 
@@ -131,6 +118,12 @@ type Chat struct {
 	// follow is a flag to indicate whether the view should auto-scroll to
 	// bottom on new messages.
 	follow bool
+
+	// manualSelection is set while the user has moved the selection to an
+	// item other than the newest one. Streamed updates must not steal such
+	// a selection; it is released again once the newest item is selected,
+	// at which point the selection resumes following new items.
+	manualSelection bool
 
 	// drawCache memoizes the decoded form of the last list.Render output so
 	// repeat frames with byte-identical content skip the per-cell ANSI
@@ -415,64 +408,152 @@ func (m *Chat) InvalidateRenderCaches() {
 }
 
 // SetMessages sets the chat messages to the provided list of message items.
+// Consecutive tool calls are folded into collapsed groups.
 func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
 	m.idInxMap = make(map[string]int)
 	m.scrollbarVisible = false // Reset scrollbar visibility on new session load
 
-	items := make([]list.Item, len(msgs))
-	for i, msg := range msgs {
-		m.idInxMap[msg.ID()] = i
-		// Register nested tool IDs for tools that contain nested tools.
-		if container, ok := msg.(chat.NestedToolContainer); ok {
-			for _, nested := range container.NestedTools() {
-				m.idInxMap[nested.ID()] = i
-			}
-		}
-		items[i] = msg
-	}
+	items := m.foldToolGroups(msgs)
 	m.list.SetItems(items...)
+	m.rebuildIndices()
+	m.manualSelection = false
 	m.ScrollToBottom()
 	return nil
 }
 
-// AppendMessages appends a new message item to the chat list.
+// AppendMessages appends items in order, folding each tool call into
+// the trailing open group so a run of calls between two text messages
+// collapses into one row. Assistant info footers do not close a group:
+// the turn they belong to may keep emitting tool calls. Items must be
+// processed sequentially — absorbing a batch's tools before appending
+// its text would merge them into the previous run and render the text
+// after its own tool calls.
 func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
-	items := make([]list.Item, len(msgs))
-	indexOffset := m.list.Len()
-	for i, msg := range msgs {
-		m.idInxMap[msg.ID()] = indexOffset + i
-		// Register nested tool IDs for tools that contain nested tools.
-		if container, ok := msg.(chat.NestedToolContainer); ok {
-			for _, nested := range container.NestedTools() {
-				m.idInxMap[nested.ID()] = indexOffset + i
-			}
+	for _, msg := range msgs {
+		if tool, ok := msg.(chat.ToolMessageItem); ok {
+			m.absorbTool(tool)
+			continue
 		}
-		items[i] = msg
+		m.list.AppendItems(msg)
 	}
-	m.list.AppendItems(items...)
+	m.rebuildIndices()
 }
 
-// UpdateNestedToolIDs updates the ID map for nested tools within a container.
-// Call this after modifying nested tools to ensure animations work correctly.
-func (m *Chat) UpdateNestedToolIDs(containerID string) {
-	idx, ok := m.idInxMap[containerID]
-	if !ok {
-		return
+// absorbTool folds a tool call into the trailing open group, skipping
+// back over assistant info footers, or starts a new group when the run
+// was closed by a user or assistant text item.
+func (m *Chat) absorbTool(tool chat.ToolMessageItem) {
+	for idx := m.list.Len() - 1; idx >= 0; idx-- {
+		item := m.list.ItemAt(idx)
+		if _, ok := item.(*chat.AssistantInfoItem); ok {
+			continue
+		}
+		if group, ok := item.(*chat.ToolGroupMessageItem); ok {
+			group.AddTool(tool)
+			return
+		}
+		break
 	}
+	m.list.AppendItems(chat.NewToolGroupMessageItem(m.com.Styles, tool))
+}
 
+// foldToolGroups folds runs of tool calls into group items. Info footers
+// do not close a run and render after the group they trailed; anything
+// the user reads closes it.
+func (m *Chat) foldToolGroups(msgs []chat.MessageItem) []list.Item {
+	out := make([]list.Item, 0, len(msgs))
+	var group *chat.ToolGroupMessageItem
+	var pending []list.Item
+	closeRun := func() {
+		if group != nil {
+			out = append(out, group)
+			group = nil
+		}
+		out = append(out, pending...)
+		pending = nil
+	}
+	for _, msg := range msgs {
+		if tool, ok := msg.(chat.ToolMessageItem); ok {
+			if group == nil {
+				group = chat.NewToolGroupMessageItem(m.com.Styles, tool)
+			} else {
+				group.AddTool(tool)
+			}
+			continue
+		}
+		if _, ok := msg.(*chat.AssistantInfoItem); ok && group != nil {
+			// Hold the footer back until the run closes so it renders
+			// after the group.
+			pending = append(pending, msg)
+			continue
+		}
+		closeRun()
+		out = append(out, msg)
+	}
+	closeRun()
+	return out
+}
+
+// rebuildIndices rebuilds the ID-to-index map, registering tool group
+// child IDs against their group's index.
+func (m *Chat) rebuildIndices() {
+	m.idInxMap = make(map[string]int, len(m.idInxMap))
+	for i := range m.list.Len() {
+		item, ok := m.list.ItemAt(i).(chat.MessageItem)
+		if !ok {
+			continue
+		}
+		m.idInxMap[item.ID()] = i
+		if group, ok := item.(chat.ToolGroupContainer); ok {
+			for _, child := range group.ToolChildren() {
+				m.idInxMap[child.ID()] = i
+			}
+		}
+	}
+}
+
+// ToolItem resolves a tool call item by ID, looking through tool groups.
+func (m *Chat) ToolItem(id string) chat.ToolMessageItem {
+	idx, ok := m.idInxMap[id]
+	if !ok {
+		return nil
+	}
 	item, ok := m.list.ItemAt(idx).(chat.MessageItem)
 	if !ok {
+		return nil
+	}
+	if tool, ok := item.(chat.ToolMessageItem); ok {
+		return tool
+	}
+	if group, ok := item.(chat.ToolGroupContainer); ok {
+		return group.ChildTool(id)
+	}
+	return nil
+}
+
+// UpdateToolItem resolves a tool call by ID, applies fn, and drops the
+// containing item from the list cache so the mutation is rendered: a
+// child's own version bump is invisible to the list, which only keys on
+// the group's version.
+func (m *Chat) UpdateToolItem(id string, fn func(chat.ToolMessageItem)) {
+	tool := m.ToolItem(id)
+	if tool == nil {
 		return
 	}
+	fn(tool)
+	m.InvalidateToolItem(id)
+}
 
-	container, ok := item.(chat.NestedToolContainer)
-	if !ok {
-		return
-	}
-
-	// Register all nested tool IDs to point to the container's index.
-	for _, nested := range container.NestedTools() {
-		m.idInxMap[nested.ID()] = idx
+// InvalidateToolItem drops the list cache entry holding the given tool
+// call and bumps its version so both the list cache and the frame cache
+// re-render it: a child's own version bump is invisible to both.
+func (m *Chat) InvalidateToolItem(id string) {
+	if idx, ok := m.idInxMap[id]; ok {
+		item := m.list.ItemAt(idx)
+		if v, ok := item.(interface{ Bump() }); ok {
+			v.Bump()
+		}
+		m.list.Invalidate(item)
 	}
 }
 
@@ -746,9 +827,36 @@ func (m *Chat) isSelectable(index int) bool {
 	return ok
 }
 
+// HasManualSelection reports whether the user has moved the selection to
+// an item other than the newest, so new items must leave it alone.
+func (m *Chat) HasManualSelection() bool {
+	return m.manualSelection
+}
+
+// refreshManualSelection records whether the selection currently sits on
+// an item other than the newest selectable one. Every selection change
+// runs through it, so selecting the newest item again releases the manual
+// hold and the selection follows new items once more.
+func (m *Chat) refreshManualSelection() {
+	sel := m.list.Selected()
+	m.manualSelection = sel >= 0 && sel != m.lastSelectableIndex()
+}
+
+// lastSelectableIndex returns the index of the newest selectable item,
+// or -1 when the list has no selectable item.
+func (m *Chat) lastSelectableIndex() int {
+	for i := m.list.Len() - 1; i >= 0; i-- {
+		if m.isSelectable(i) {
+			return i
+		}
+	}
+	return -1
+}
+
 // SetSelected sets the selected message index in the chat list.
 func (m *Chat) SetSelected(index int) {
 	m.list.SetSelected(index)
+	defer m.refreshManualSelection()
 	if index < 0 || index >= m.list.Len() {
 		return
 	}
@@ -774,6 +882,7 @@ func (m *Chat) SetSelected(index int) {
 
 // SelectPrev selects the previous message in the chat list.
 func (m *Chat) SelectPrev() {
+	defer m.refreshManualSelection()
 	for {
 		if !m.list.SelectPrev() {
 			return
@@ -786,6 +895,7 @@ func (m *Chat) SelectPrev() {
 
 // SelectNext selects the next message in the chat list.
 func (m *Chat) SelectNext() {
+	defer m.refreshManualSelection()
 	for {
 		if !m.list.SelectNext() {
 			return
@@ -798,6 +908,7 @@ func (m *Chat) SelectNext() {
 
 // SelectFirst selects the first message in the chat list.
 func (m *Chat) SelectFirst() {
+	defer m.refreshManualSelection()
 	if !m.list.SelectFirst() {
 		return
 	}
@@ -816,6 +927,7 @@ func (m *Chat) SelectFirst() {
 
 // SelectLast selects the last message in the chat list.
 func (m *Chat) SelectLast() {
+	defer m.refreshManualSelection()
 	if !m.list.SelectLast() {
 		return
 	}
@@ -834,6 +946,7 @@ func (m *Chat) SelectLast() {
 
 // SelectFirstInView selects the first message currently in view.
 func (m *Chat) SelectFirstInView() {
+	defer m.refreshManualSelection()
 	startIdx, endIdx := m.list.VisibleItemIndices()
 	for i := startIdx; i <= endIdx; i++ {
 		if m.isSelectable(i) {
@@ -845,6 +958,7 @@ func (m *Chat) SelectFirstInView() {
 
 // SelectLastInView selects the last message currently in view.
 func (m *Chat) SelectLastInView() {
+	defer m.refreshManualSelection()
 	startIdx, endIdx := m.list.VisibleItemIndices()
 	for i := endIdx; i >= startIdx; i-- {
 		if m.isSelectable(i) {
@@ -880,6 +994,7 @@ func (m *Chat) SelectNearestInView(scrolledUp bool) {
 func (m *Chat) ClearMessages() {
 	m.idInxMap = make(map[string]int)
 	m.scrollbarVisible = false
+	m.manualSelection = false
 	m.list.SetItems()
 	m.ClearMouse()
 }
@@ -894,15 +1009,22 @@ func (m *Chat) RemoveMessage(id string) {
 	// Remove from list
 	m.list.RemoveItem(idx)
 
-	// Remove from index map
-	delete(m.idInxMap, id)
-
-	// Rebuild index map for all items after the removed one
-	for i := idx; i < m.list.Len(); i++ {
-		if item, ok := m.list.ItemAt(i).(chat.MessageItem); ok {
-			m.idInxMap[item.ID()] = i
+	// The removed item may have been the only thing separating two tool
+	// runs: every assistant message gets an (empty) text item at created
+	// time, and a tool-only message drops it again once its calls arrive.
+	// Merge the runs the empty separator split so consecutive calls end
+	// up in one group after all.
+	if idx > 0 && idx < m.list.Len() {
+		prev, okPrev := m.list.ItemAt(idx - 1).(*chat.ToolGroupMessageItem)
+		next, okNext := m.list.ItemAt(idx).(*chat.ToolGroupMessageItem)
+		if okPrev && okNext && prev != next {
+			for _, tool := range next.ToolChildren() {
+				prev.AddTool(tool)
+			}
+			m.list.RemoveItem(idx)
 		}
 	}
+	m.rebuildIndices()
 }
 
 // MessageItem returns the message item with the given ID, or nil if not found.
@@ -920,7 +1042,13 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
-	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {
+	selected := m.list.SelectedItem()
+	// With the sub-cursor on a child line, toggle that one call
+	// between its one-liner and full view.
+	if g, ok := selected.(*chat.ToolGroupMessageItem); ok && g.ToggleSelectedChild() {
+		return
+	}
+	if expandable, ok := selected.(chat.Expandable); ok {
 		wasFollowing := m.follow
 		if !expandable.ToggleExpanded() {
 			m.ScrollToIndex(m.list.Selected())
@@ -929,6 +1057,48 @@ func (m *Chat) ToggleExpandedSelectedItem() {
 			m.ScrollToBottom()
 		}
 	}
+}
+
+// EnterSelectedItem implements the enter key: go in one level. On a
+// tool group, enter on the group row opens the one-liner level and
+// drops the sub-cursor on the first call, and enter on a call line
+// opens that call's full view; anything else expands like space.
+func (m *Chat) EnterSelectedItem() {
+	if g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem); ok {
+		g.DigIn()
+		return
+	}
+	m.ToggleExpandedSelectedItem()
+}
+
+// AscendSelectedItem implements the escape key: go out one level. A
+// tool group consumes the escape while it has a level to leave
+// (a fully rendered call, the sub-cursor, or the open group); anything
+// else falls through to the caller's escape handling.
+func (m *Chat) AscendSelectedItem() bool {
+	if g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem); ok {
+		return g.Ascend()
+	}
+	return false
+}
+
+// SubCursorDown handles down-navigation into an expanded group's
+// children. It reports whether the sub-cursor consumed the key, in
+// which case list selection must not move.
+func (m *Chat) SubCursorDown() bool {
+	if g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem); ok {
+		return g.SelectChildNext()
+	}
+	return false
+}
+
+// SubCursorUp handles up-navigation out of a group's children. It
+// reports whether the sub-cursor consumed the key.
+func (m *Chat) SubCursorUp() bool {
+	if g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem); ok {
+		return g.SelectChildPrev()
+	}
+	return false
 }
 
 // IsSelectedShellItem returns true if the currently selected item is a
@@ -992,6 +1162,7 @@ func (m *Chat) HandleMouseDown(x, y int) (bool, tea.Cmd) {
 
 	// Select the item that was clicked
 	m.list.SetSelected(itemIdx)
+	m.refreshManualSelection()
 
 	var cmd tea.Cmd
 

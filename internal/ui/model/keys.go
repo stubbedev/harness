@@ -38,34 +38,34 @@ type KeyMap struct {
 	}
 
 	Chat struct {
-		NewSession     key.Binding
-		AddAttachment  key.Binding
-		Cancel         key.Binding
-		Tab            key.Binding
-		Details        key.Binding
-		TogglePills    key.Binding
-		PillLeft       key.Binding
-		PillRight      key.Binding
-		Down           key.Binding
-		Up             key.Binding
-		UpDown         key.Binding
-		DownOneItem    key.Binding
-		UpOneItem      key.Binding
-		UpDownOneItem  key.Binding
-		PageDown       key.Binding
-		PageUp         key.Binding
-		HalfPageDown   key.Binding
-		HalfPageUp     key.Binding
-		Home           key.Binding
-		End            key.Binding
-		EndFollow      key.Binding
-		Copy           key.Binding
-		ClearHighlight key.Binding
-		Expand         key.Binding
-		ScrollLeft     key.Binding
-		ScrollRight    key.Binding
-		FocusSidebar   key.Binding
-		FocusChat      key.Binding
+		NewSession      key.Binding
+		AddAttachment   key.Binding
+		Cancel          key.Binding
+		Tab             key.Binding
+		Details         key.Binding
+		TogglePills     key.Binding
+		PillLeft        key.Binding
+		PillRight       key.Binding
+		Down            key.Binding
+		Up              key.Binding
+		UpDown          key.Binding
+		DownOneItem     key.Binding
+		UpOneItem       key.Binding
+		UpDownOneItem   key.Binding
+		PageDown        key.Binding
+		PageUp          key.Binding
+		HalfPageDown    key.Binding
+		HalfPageUp      key.Binding
+		Home            key.Binding
+		End             key.Binding
+		EndFollow       key.Binding
+		Copy            key.Binding
+		ClearHighlight  key.Binding
+		Expand          key.Binding
+		DigIn           key.Binding
+		ScrollLeft      key.Binding
+		ScrollRight     key.Binding
+		BackgroundTasks key.Binding
 	}
 
 	// Global key maps
@@ -77,7 +77,6 @@ type KeyMap struct {
 	Sessions      key.Binding
 	Tab           key.Binding
 	ParentSession key.Binding
-	Subagents     key.Binding
 	// ExportConversation writes the current session transcript to a
 	// markdown file and copies it to the clipboard.
 	ExportConversation key.Binding
@@ -118,10 +117,6 @@ func DefaultKeyMap() KeyMap {
 		ParentSession: key.NewBinding(
 			key.WithKeys("ctrl+up"),
 			key.WithHelp("ctrl+up", "go to parent session"),
-		),
-		Subagents: key.NewBinding(
-			key.WithKeys("ctrl+x"),
-			key.WithHelp("ctrl+x", "subagents"),
 		),
 		ExportConversation: key.NewBinding(
 			key.WithKeys("ctrl+shift+e"),
@@ -296,7 +291,11 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Chat.Expand = key.NewBinding(
 		key.WithKeys("space"),
-		key.WithHelp("space", "expand/collapse"),
+		key.WithHelp("space", "toggle"),
+	)
+	km.Chat.DigIn = key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("↵", "go in"),
 	)
 	km.Chat.ScrollLeft = key.NewBinding(
 		key.WithKeys("shift+left", "H"),
@@ -306,13 +305,9 @@ func DefaultKeyMap() KeyMap {
 		key.WithKeys("shift+right", "L"),
 		key.WithHelp("shift+→/L", "scroll right"),
 	)
-	km.Chat.FocusSidebar = key.NewBinding(
-		key.WithKeys("l", "right"),
-		key.WithHelp("l/→", "focus sidebar"),
-	)
-	km.Chat.FocusChat = key.NewBinding(
-		key.WithKeys("h", "left"),
-		key.WithHelp("h/←", "focus chat"),
+	km.Chat.BackgroundTasks = key.NewBinding(
+		key.WithKeys("ctrl+b"),
+		key.WithHelp("ctrl+b", "background tasks"),
 	)
 
 	return km

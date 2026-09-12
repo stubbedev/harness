@@ -27,10 +27,6 @@ type CommandType uint
 func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
 
 const (
-	sidebarCompactModeBreakpoint = 120
-)
-
-const (
 	SystemCommands CommandType = iota
 	UserCommands
 	MCPPrompts
@@ -419,7 +415,6 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
-		NewCommandItem(c.com.Styles, "subagents", "Subagents", "ctrl+x", ActionOpenDialog{SubagentsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
 		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", "alt+t", ActionOpenDialog{ThemesID}),
 	}
@@ -467,10 +462,6 @@ func (c *Commands) defaultCommands() []*CommandItem {
 				}))
 			}
 		}
-	}
-	// Only show toggle compact mode command if window width is larger than compact breakpoint (120)
-	if c.windowWidth >= sidebarCompactModeBreakpoint && c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_sidebar", "Toggle Sidebar", "", ActionToggleCompactMode{}))
 	}
 	if c.hasSession {
 		cfgPrime := c.com.Config()

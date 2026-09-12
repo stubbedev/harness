@@ -27,7 +27,7 @@ The UI uses a **hybrid rendering** approach:
    `uv.ScreenBuffer`, and components draw into sub-regions using
    `uv.NewStyledString(str).Draw(scr, rect)`. Layout is rectangle-based via
    a `uiLayout` struct with fields like `layout.header`, `layout.main`,
-   `layout.editor`, `layout.sidebar`, `layout.pills`, `layout.status`.
+   `layout.editor`, `layout.tasks`, `layout.pills`, `layout.status`.
 2. **String-based**: Sub-components like `list.List` and `completions` render
    to strings, which are painted onto the screen buffer.
 3. **`View()`** creates the screen buffer, calls `Draw()`, then
@@ -66,7 +66,8 @@ imperative methods that the main model calls directly:
 - **`Attachments`** and **`Completions`** have non-standard `Update`
   signatures (e.g., returning `bool` for "consumed") that act as guards, not
   as full Bubble Tea models.
-- **Sidebar** is not its own model: it's a `drawSidebar()` method on `UI`.
+- **Background tasks strip** (subagents) is not its own model: it renders
+  from `m.agentTasks` in `model/tasks.go`.
 
 When writing new components, follow this pattern:
 
@@ -136,7 +137,7 @@ tool names to specific types:
 | `chat/file.go`        | View, Write, Edit, MultiEdit                   |
 | `chat/search.go`      | Glob, Grep, LS, Web Search                     |
 | `chat/fetch.go`       | Fetch, WebFetch, WebSearch                     |
-| `chat/agent.go`       | Agent, Research                            |
+| `chat/toolgroup.go`   | Collapsed groups of consecutive tool calls     |
 | `chat/diagnostics.go` | Diagnostics                                    |
 | `chat/references.go`  | References                                     |
 | `chat/lsp_restart.go` | LSPRestart                                     |
@@ -145,6 +146,14 @@ tool names to specific types:
 | `chat/generic.go`     | Fallback for unrecognized tools                |
 | `chat/assistant.go`   | Assistant messages (thinking, content, errors) |
 | `chat/user.go`        | User messages (input + attachments)            |
+
+Consecutive tool calls are folded into one `ToolGroupMessageItem`
+(`chat/toolgroup.go`): a collapsed "Ran (N tool calls)" row that expands
+first to one-liners and then to the calls' full renderers. Children are
+never list items of their own — `Chat.ToolItem` resolves through groups.
+Subagent dispatches (`agent`, `research`) never render in the transcript;
+they live in the background tasks strip (`model/tasks.go`) between the
+chat and the pills.
 
 ### Styling
 
@@ -197,7 +206,7 @@ through all components that need access to app state or styles.
 
 ## File Organization
 
-- `model/` — Main UI model and major sub-models (chat, sidebar, header,
+- `model/` — Main UI model and major sub-models (chat, background tasks, header,
   status, pills, session, onboarding, keys, etc.)
 - `chat/` — Chat message item types and tool renderers
 - `dialog/` — Dialog implementations (models, sessions, commands,

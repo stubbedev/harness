@@ -101,9 +101,12 @@ func TestMouseMode(t *testing.T) {
 func newTestUIWithConfig(t *testing.T, cfg *config.Config) *UI {
 	t.Helper()
 
+	ws := &testWorkspace{cfg: cfg}
+	styles := common.ThemeStylesForWorkspace(ws)
 	return &UI{
 		com: &common.Common{
-			Workspace: &testWorkspace{cfg: cfg},
+			Workspace: ws,
+			Styles:    &styles,
 		},
 	}
 }

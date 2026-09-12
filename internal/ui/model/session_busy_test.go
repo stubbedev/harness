@@ -53,6 +53,12 @@ type countingWorkspace struct {
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
 
+// ParseAgentToolSessionID reports "not a child session"; the background
+// tasks strip probes it for running-subagent events.
+func (w *countingWorkspace) ParseAgentToolSessionID(string) (string, string, bool) {
+	return "", "", false
+}
+
 func (w *countingWorkspace) AgentReadyErr() error {
 	w.readyCalls++
 	if w.ready {

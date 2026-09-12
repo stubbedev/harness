@@ -49,6 +49,7 @@ type ToolMessageItem interface {
 	ToolCall() message.ToolCall
 	SetToolCall(tc message.ToolCall)
 	SetResult(res *message.ToolResult)
+	Result() *message.ToolResult
 	MessageID() string
 	SetMessageID(id string)
 	SetStatus(status ToolStatus)
@@ -273,10 +274,6 @@ func NewToolMessageItem(
 		item = NewFetchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.DiagnosticsToolName:
 		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
-	case agent.AgentToolName:
-		item = NewAgentToolMessageItem(sty, toolCall, result, canceled)
-	case tools.ResearchToolName:
-		item = NewResearchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WebSearchToolName:
 		item = NewWebSearchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.TodosToolName:
@@ -308,6 +305,13 @@ func NewToolMessageItem(
 	return item
 }
 
+// IsSubagentTool reports whether a tool call dispatches a subagent
+// (agent or research). Subagent calls do not render in the transcript;
+// they live in the background tasks strip.
+func IsSubagentTool(name string) bool {
+	return name == agent.AgentToolName || name == tools.ResearchToolName
+}
+
 // SetCompact implements the Compactable interface.
 func (t *baseToolMessageItem) SetCompact(compact bool) {
 	if t.isCompact == compact {
@@ -316,6 +320,11 @@ func (t *baseToolMessageItem) SetCompact(compact bool) {
 	t.isCompact = compact
 	t.clearCache()
 	t.Bump()
+}
+
+// IsCompact reports whether the item renders in compact (one-line) mode.
+func (t *baseToolMessageItem) IsCompact() bool {
+	return t.isCompact
 }
 
 // ID returns the unique identifier for this tool message item.
@@ -454,6 +463,16 @@ func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
 	t.result = res
 	t.clearCache()
 	t.Bump()
+}
+
+// Result returns the tool result recorded for this call, if any.
+func (t *baseToolMessageItem) Result() *message.ToolResult {
+	return t.result
+}
+
+// Expanded reports whether the item renders its full content.
+func (t *baseToolMessageItem) Expanded() bool {
+	return t.expandedContent
 }
 
 // MessageID returns the ID of the message containing this tool call.

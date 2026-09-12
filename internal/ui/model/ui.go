@@ -65,12 +65,6 @@ import (
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
-// Compact mode breakpoints.
-const (
-	compactModeWidthBreakpoint  = 120
-	compactModeHeightBreakpoint = 30
-)
-
 // If pasted text has more than 10 newlines, treat it as a file attachment.
 const pasteLinesThreshold = 10
 
@@ -100,7 +94,7 @@ const (
 	uiFocusNone uiFocusState = iota
 	uiFocusEditor
 	uiFocusMain
-	uiFocusSidebar
+	uiFocusTasks
 )
 
 type uiState uint8
@@ -351,21 +345,6 @@ type UI struct {
 	activeSubagentItems []completions.SubagentCompletionValue
 	activeSubagentNames map[string]bool
 
-	// sidebarLogo keeps a cached version of the sidebar sidebarLogo.
-	sidebarLogo string
-
-	// Sidebar scroll state for virtual scrolling.
-	sidebarOffset           int  // current scroll offset in lines
-	sidebarScrollable       bool // true when sidebar content exceeds available height
-	sidebarScrollbarVisible bool
-	sidebarScrollbarSeq     int    // sequence number for auto-hide timer
-	sidebarMaxOffsetVal     int    // max scroll offset, computed in updateSidebarScrollState
-	sidebarContent          string // cached rendered sidebar content
-	sidebarTotalLines       int    // total lines in sidebarContent
-	sidebarContentHeight    int    // available height for sidebar content
-	sidebarContentWidth     int    // available width for sidebar content
-	sidebarDrawLogo         string // logo to render (may differ from sidebarLogo for short heights)
-
 	// Notification state
 	notifyBackend       notification.Backend
 	notifyWindowFocused bool
@@ -373,20 +352,27 @@ type UI struct {
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
 
-	// forceCompactMode tracks whether compact mode is forced by user toggle
-	forceCompactMode bool
-
-	// isCompact tracks whether we're currently in compact layout mode (either
-	// by user toggle or auto-switch based on window size)
-	isCompact bool
-
-	// detailsOpen tracks whether the details panel is open (in compact mode)
+	// detailsOpen tracks whether the session details overlay is open
 	detailsOpen bool
 
 	// pills state
 	pillsExpanded      bool
 	pillsAutoExpanded  bool
 	focusedPillSection pillSection
+
+	// Background tasks (subagents) render in a strip under the chat, not
+	// in the transcript. agentTasks is insertion-ordered; taskRows maps
+	// rendered strip rows back to tasks for click handling.
+	agentTasks     []*agentTask
+	expandedTaskID string
+	taskRows       []taskRow
+	taskSpinner    spinner.Model
+	tasksView      string
+	// taskCursor / taskSubCursor drive keyboard navigation of the
+	// strip: taskCursor indexes the visible entries, taskSubCursor the
+	// cursor task's nested calls (-1 = on the task row itself).
+	taskCursor    int
+	taskSubCursor int
 	// promptQueue / promptQueueItems mirror the session's queued prompts.
 	// They are event-driven with a TTL backstop, fetched off-thread by
 	// dispatchPromptQueueRefresh (see workspace_cache.go); promptQueue is
@@ -492,6 +478,10 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		spinner.WithSpinner(spinner.MiniDot),
 		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
 	)
+	taskSpinner := spinner.New(
+		spinner.WithSpinner(spinner.MiniDot),
+		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
+	)
 
 	// Attachments component
 	attachments := attachments.New(
@@ -522,6 +512,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		completions:         comp,
 		attachments:         attachments,
 		todoSpinner:         todoSpinner,
+		taskSpinner:         taskSpinner,
 		frames:              newFrameCache(frameCacheTTL, frameCacheMaxEntries),
 		lspStates:           make(map[string]workspace.LSPClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
@@ -563,7 +554,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ui.status = status
 
 	// Initialize compact mode from config
-	ui.forceCompactMode = com.Config().Options.TUI.CompactMode
 
 	desiredState := uiLanding
 	desiredFocus := uiFocusEditor
@@ -734,10 +724,6 @@ func (m *UI) shouldSendNotification() bool {
 
 // setState changes the UI state and focus.
 func (m *UI) setState(state uiState, focus uiFocusState) {
-	if state == uiLanding {
-		// Always turn off compact mode when going to landing
-		m.isCompact = false
-	}
 	m.state = state
 	m.focus = focus
 	// Changing the state may change layout, so update it.
@@ -847,15 +833,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case loadSessionMsg:
-		if m.forceCompactMode {
-			m.isCompact = true
-		}
 		// A session switch leaves any retry notice behind: it
 		// belonged to the previous session's backoff.
 		m.clearRetryNotice()
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
-		m.sidebarOffset = 0
 		m.sessionFiles = msg.files
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
@@ -881,6 +863,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// showing a stale "Active subagents" panel until one happens to
 		// arrive (or never, if nothing is dispatched under the new session).
 		m.runningSubagents = nil
+		m.resetAgentTasks()
 		cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
@@ -1084,7 +1067,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.runningSubagents = nil
 			m.knownChildSessionIDs = nil
 		case msg.Payload.ParentSessionID == m.session.ID:
-			// Only the current session's children populate the panel; ignore
+			// Only the current session's children populate the strip; ignore
 			// events for other parents to avoid spurious DB refreshes.
 			cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
 			if m.knownChildSessionIDs == nil {
@@ -1092,10 +1075,27 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			for _, e := range msg.Payload.Entries {
 				m.knownChildSessionIDs[e.ChildSessionID] = true
+				m.applyRunningSubagentInfo(childSessionInfo{
+					ChildSessionID: e.ChildSessionID,
+					Name:           e.Name,
+					Color:          e.Color,
+					Model:          e.Model,
+					Status:         e.Status,
+				})
 			}
 			if f := msg.Payload.Finished; f != nil {
 				m.knownChildSessionIDs[f.ChildSessionID] = true
+				m.applyRunningSubagentInfo(childSessionInfo{
+					ChildSessionID: f.ChildSessionID,
+					Name:           f.Name,
+					Color:          f.Color,
+					Status:         f.Status,
+				})
 			}
+		}
+		m.updateLayoutAndSize()
+		if m.tasksSpinning() {
+			cmds = append(cmds, m.taskSpinner.Tick)
 		}
 		if f := msg.Payload.Finished; f != nil && m.session != nil && f.ParentSessionID == m.session.ID {
 			cmds = append(cmds, util.ReportInfo(fmt.Sprintf("Subagent %s %s", f.Name, f.Status)))
@@ -1112,6 +1112,17 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// list with a stale one.
 		if msg.forSession == m.currentSessionID() {
 			m.runningSubagents = msg.list
+			for _, info := range msg.list {
+				m.applyRunningSubagentInfo(childSessionInfo{
+					ChildSessionID:   info.ChildSessionID,
+					Name:             info.Name,
+					Color:            info.Color,
+					Model:            info.Model,
+					Status:           info.Status,
+					PromptTokens:     info.PromptTokens,
+					CompletionTokens: info.CompletionTokens,
+				})
+			}
 			// Seed the child-session set from the fetch as well. On a session
 			// switch loadSessionMsg clears knownChildSessionIDs, and the only
 			// other place it is filled is the RuntimeEvent case — so a subagent
@@ -1126,27 +1137,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.knownChildSessionIDs[info.ChildSessionID] = true
 			}
 		}
-	case dialog.RunningSubagentsFetchedMsg:
-		// The subagents dialog resolves its running list off the Update path;
-		// dialogs only see message types routed here, so hand it back.
-		if cmd := m.handleSubagentsDialogMsg(msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.SubagentsInitialDataMsg:
-		if cmd := m.handleSubagentsDialogMsg(msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.SubagentMutationFailedMsg:
-		if cmd := m.handleSubagentsDialogMsg(msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 	case pubsub.Event[subagents.Event]:
 		// Library discovery changed (e.g. a delete) — rebuild the @-mention
 		// caches so removed subagents stop being offered without a restart.
 		m.rebuildSubagentCaches()
-		if cmd := m.handleSubagentsDialogMsg(msg); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 	case pubsub.Event[mcp.Event]:
 		switch msg.Payload.Type {
 		case mcp.EventStateChanged:
@@ -1252,16 +1246,21 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch m.state {
 		case uiChat:
+			// Clicks in the background tasks strip toggle its entries
+			// before the chat sees them.
+			if image.Pt(msg.X, msg.Y).In(m.layout.tasks) {
+				if m.handleTaskClick(msg.X, msg.Y-m.layout.tasks.Min.Y) {
+					return m, tea.Batch(cmds...)
+				}
+			}
 			x, y := msg.X, msg.Y
 			// Adjust for chat area position
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
-			if !image.Pt(msg.X, msg.Y).In(m.layout.sidebar) {
-				if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
-					m.lastClickTime = time.Now()
-					if cmd != nil {
-						cmds = append(cmds, cmd)
-					}
+			if handled, cmd := m.chat.HandleMouseDown(x, y); handled {
+				m.lastClickTime = time.Now()
+				if cmd != nil {
+					cmds = append(cmds, cmd)
 				}
 			}
 		}
@@ -1376,17 +1375,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// others send DeltaY=1.
 		switch m.state {
 		case uiChat:
-			// When sidebar is focused, route wheel events to sidebar scrolling.
-			if m.focus == uiFocusSidebar {
-				lines := int(msg.DeltaY)
-				if lines != 0 {
-					m.sidebarOffset = max(0, min(m.sidebarOffset+lines, m.sidebarMaxOffsetVal))
-					m.sidebarScrollbarSeq++
-					m.sidebarScrollbarVisible = true
-					cmds = append(cmds, sidebarScrollbarHideCmd(m.sidebarScrollbarSeq))
-				}
-				break
-			}
 			if msg.DeltaX != 0 {
 				m.chat.ScrollSelectedShellHorizontal(int(msg.DeltaX))
 			}
@@ -1420,10 +1408,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateLayoutAndSize()
 			}
 		}
-	case sidebarScrollbarHideMsg:
-		if msg.seq == m.sidebarScrollbarSeq && m.focus != uiFocusSidebar {
-			m.sidebarScrollbarVisible = false
-		}
 	case spinner.TickMsg:
 		if m.dialog.HasDialogs() {
 			// route to dialog
@@ -1436,6 +1420,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.todoSpinner, cmd = m.todoSpinner.Update(msg)
 			if cmd != nil {
 				m.renderPills()
+				cmds = append(cmds, cmd)
+			}
+		}
+		if m.state == uiChat && m.tasksSpinning() {
+			var cmd tea.Cmd
+			m.taskSpinner, cmd = m.taskSpinner.Update(msg)
+			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}
@@ -1657,8 +1648,9 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		}
 	}
 
-	// Load nested tool calls for agent/research tools.
-	m.loadNestedToolCalls(items)
+	// Rebuild the background task list (subagents) from the same
+	// messages; they do not render in the transcript.
+	m.loadAgentTasks(msgPtrs, toolResultMap)
 
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually
@@ -1710,64 +1702,6 @@ func (m *UI) handleConnectionEvent(msg workspace.ConnectionEvent) []tea.Cmd {
 	return cmds
 }
 
-// loadNestedToolCalls recursively loads nested tool calls for agent/research tools.
-func (m *UI) loadNestedToolCalls(items []chat.MessageItem) {
-	for _, item := range items {
-		nestedContainer, ok := item.(chat.NestedToolContainer)
-		if !ok {
-			continue
-		}
-		toolItem, ok := item.(chat.ToolMessageItem)
-		if !ok {
-			continue
-		}
-
-		tc := toolItem.ToolCall()
-		messageID := toolItem.MessageID()
-
-		// Get the agent tool session ID.
-		agentSessionID := m.com.Workspace.CreateAgentToolSessionID(messageID, tc.ID)
-
-		// Fetch nested messages.
-		nestedMsgs, err := m.com.Workspace.ListMessages(context.Background(), agentSessionID)
-		if err != nil || len(nestedMsgs) == 0 {
-			continue
-		}
-
-		// Build tool result map for nested messages.
-		nestedMsgPtrs := make([]*message.Message, len(nestedMsgs))
-		for i := range nestedMsgs {
-			nestedMsgPtrs[i] = &nestedMsgs[i]
-		}
-		nestedToolResultMap := chat.BuildToolResultMap(nestedMsgPtrs)
-
-		// Extract nested tool items.
-		var nestedTools []chat.ToolMessageItem
-		for _, nestedMsg := range nestedMsgPtrs {
-			nestedItems := chat.ExtractMessageItems(m.com.Styles, nestedMsg, nestedToolResultMap, m.com.Workspace.WorkingDir())
-			for _, nestedItem := range nestedItems {
-				if nestedToolItem, ok := nestedItem.(chat.ToolMessageItem); ok {
-					// Mark nested tools as simple (compact) rendering.
-					if simplifiable, ok := nestedToolItem.(chat.Compactable); ok {
-						simplifiable.SetCompact(true)
-					}
-					nestedTools = append(nestedTools, nestedToolItem)
-				}
-			}
-		}
-
-		// Recursively load nested tool calls for any agent tools within.
-		nestedMessageItems := make([]chat.MessageItem, len(nestedTools))
-		for i, nt := range nestedTools {
-			nestedMessageItems[i] = nt
-		}
-		m.loadNestedToolCalls(nestedMessageItems)
-
-		// Set nested tools on the parent.
-		nestedContainer.SetNestedTools(nestedTools)
-	}
-}
-
 // appendSessionMessage appends a new message to the current session in the chat
 // if the message is a tool result it will update the corresponding tool call message
 func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
@@ -1812,16 +1746,16 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		}
 	case message.Tool:
 		for _, tr := range msg.ToolResults() {
-			toolItem := m.chat.MessageItem(tr.ToolCallID)
-			if toolItem == nil {
-				// we should have an item!
+			// A subagent's final answer closes its strip entry.
+			if m.resolveAgentTaskResult(tr) {
+				m.updateLayoutAndSize()
 				continue
 			}
-			if toolMsgItem, ok := toolItem.(chat.ToolMessageItem); ok {
-				toolMsgItem.SetResult(&tr)
-				if m.chat.Follow() {
-					m.chat.ScrollToBottom()
-				}
+			m.chat.UpdateToolItem(tr.ToolCallID, func(toolItem chat.ToolMessageItem) {
+				toolItem.SetResult(&tr)
+			})
+			if m.chat.Follow() {
+				m.chat.ScrollToBottom()
 			}
 		}
 	}
@@ -1832,10 +1766,9 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 	switch {
 	case m.state != uiChat:
 		return nil
-	case m.focus != uiFocusSidebar && image.Pt(msg.X, msg.Y).In(m.layout.sidebar) && m.sidebarScrollable:
-		m.focus = uiFocusSidebar
-		m.textarea.Blur()
-		m.chat.Blur()
+	case m.focus != uiFocusTasks && len(m.agentTasks) > 0 && image.Pt(msg.X, msg.Y).In(m.layout.tasks):
+		m.focusTasks()
+		m.handleTaskClick(msg.X, msg.Y-m.layout.tasks.Min.Y)
 		return nil
 	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
 		m.focus = uiFocusEditor
@@ -1844,11 +1777,9 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		} else {
 			cmd = m.textarea.Focus()
 		}
-		m.sidebarScrollbarVisible = false
 		m.chat.Blur()
 	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
 		m.focus = uiFocusMain
-		m.sidebarScrollbarVisible = false
 		m.textarea.Blur()
 		m.chat.Focus()
 	}
@@ -1894,137 +1825,59 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	var items []chat.MessageItem
 	for _, tc := range msg.ToolCalls() {
-		existingToolItem := m.chat.MessageItem(tc.ID)
-		if toolItem, ok := existingToolItem.(chat.ToolMessageItem); ok {
+		// Subagent dispatches live in the background tasks strip.
+		if chat.IsSubagentTool(tc.Name) {
+			if cmd := m.upsertAgentTask(&msg, tc); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			continue
+		}
+		if toolItem := m.chat.ToolItem(tc.ID); toolItem != nil {
 			existingToolCall := toolItem.ToolCall()
 			// only update if finished state changed or input changed
 			// to avoid clearing the cache
 			if (tc.Finished && !existingToolCall.Finished) || tc.Input != existingToolCall.Input {
-				toolItem.SetToolCall(tc)
+				m.chat.UpdateToolItem(tc.ID, func(item chat.ToolMessageItem) {
+					item.SetToolCall(tc)
+				})
 			}
+			continue
 		}
-		if existingToolItem == nil {
-			items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false, m.com.Workspace.WorkingDir()))
-		}
+		items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false, m.com.Workspace.WorkingDir()))
 	}
 
 	m.chat.AppendMessages(items...)
 	if m.chat.Follow() {
 		m.chat.ScrollToBottom()
-		m.chat.SelectLast()
+		if !m.chat.HasManualSelection() {
+			m.chat.SelectLast()
+		}
 	}
 
 	return tea.Sequence(cmds...)
 }
 
-// handleChildSessionMessage handles messages from child sessions (agent tools).
+// handleChildSessionMessage handles messages from child sessions
+// (agent tools): their tool activity feeds the background tasks strip,
+// not the transcript.
 func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.Cmd {
-	var cmds []tea.Cmd
-
 	// Only process messages with tool calls or results.
 	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
 		return nil
 	}
 
 	// Check if this is an agent tool session and parse it.
-	childSessionID := event.Payload.SessionID
-	_, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(childSessionID)
-	if !ok {
-		return nil
-	}
-	// Nested tool activity means the agent is running; the animation clock
-	// may have been frozen by a non-busy session reload.
-	m.chat.SetAnimationsAllowed(true)
-
-	// Find the parent agent tool item.
-	var agentItem chat.NestedToolContainer
-	for i := 0; i < m.chat.Len(); i++ {
-		item := m.chat.MessageItem(toolCallID)
-		if item == nil {
-			continue
-		}
-		if agent, ok := item.(chat.NestedToolContainer); ok {
-			if toolMessageItem, ok := item.(chat.ToolMessageItem); ok {
-				if toolMessageItem.ToolCall().ID == toolCallID {
-					// Verify this agent belongs to the correct parent message.
-					// We can't directly check parentMessageID on the item, so we trust the session parsing.
-					agentItem = agent
-					break
-				}
-			}
-		}
-	}
-
-	if agentItem == nil {
+	if _, _, ok := m.com.Workspace.ParseAgentToolSessionID(event.Payload.SessionID); !ok {
 		return nil
 	}
 
-	// Get existing nested tools.
-	nestedTools := agentItem.NestedTools()
+	m.updateAgentTaskFromChildSession(event.Payload)
+	m.updateLayoutAndSize()
 
-	// Update or create nested tool calls.
-	for _, tc := range event.Payload.ToolCalls() {
-		found := false
-		for _, existingTool := range nestedTools {
-			if existingTool.ToolCall().ID == tc.ID {
-				existingTool.SetToolCall(tc)
-				found = true
-				break
-			}
-		}
-		if !found {
-			// Create a new nested tool item.
-			nestedItem := chat.NewToolMessageItem(m.com.Styles, event.Payload.ID, tc, nil, false, m.com.Workspace.WorkingDir())
-			if simplifiable, ok := nestedItem.(chat.Compactable); ok {
-				simplifiable.SetCompact(true)
-			}
-			nestedTools = append(nestedTools, nestedItem)
-		}
-	}
-
-	// Update nested tool results.
-	for _, tr := range event.Payload.ToolResults() {
-		for _, nestedTool := range nestedTools {
-			if nestedTool.ToolCall().ID == tr.ToolCallID {
-				nestedTool.SetResult(&tr)
-				break
-			}
-		}
-	}
-
-	// Update the agent item with the new nested tools.
-	agentItem.SetNestedTools(nestedTools)
-
-	// Update the chat so it updates the index map for animations to work as expected
-	m.chat.UpdateNestedToolIDs(toolCallID)
-
-	if m.chat.Follow() {
-		m.chat.ScrollToBottom()
-		m.chat.SelectLast()
-	}
-
-	return tea.Sequence(cmds...)
-}
-
-// handleSubagentsDialogMsg delivers msg to the subagents dialog by ID rather
-// than to whichever dialog happens to be front. Its data arrives
-// asynchronously — the initial fetch, a running-list refresh, a failed
-// mutation's rollback — and anything can open on top while that work is in
-// flight (a permission prompt during exactly the agent run the user opened
-// this dialog to watch). Routing to the front dialog would drop those
-// messages, leaving the dialog empty or showing state the workspace rejected,
-// with nothing to re-request them.
-//
-// The subagents dialog answers these messages with an ActionCmd or nil, never
-// a close or navigation action, so none of handleDialogMsg's front-dialog
-// bookkeeping applies here.
-func (m *UI) handleSubagentsDialogMsg(msg tea.Msg) tea.Cmd {
-	d := m.dialog.Dialog(dialog.SubagentsID)
-	if d == nil {
-		return nil
-	}
-	if action, ok := d.HandleMsg(msg).(dialog.ActionCmd); ok {
-		return action.Cmd
+	// Subagent activity means the agent is running; keep the strip
+	// spinner alive.
+	if m.tasksSpinning() {
+		return m.taskSpinner.Tick
 	}
 	return nil
 }
@@ -2074,11 +1927,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionSelectSession:
 		m.dialog.CloseDialog(dialog.SessionsID)
 		cmds = append(cmds, m.loadSession(msg.Session.ID))
-
-	// Subagents dialog messages.
-	case dialog.ActionLoadSubagentSession:
-		m.dialog.CloseDialog(dialog.SubagentsID)
-		cmds = append(cmds, m.loadSession(msg.SessionID))
 
 	// Open dialog message.
 	case dialog.ActionOpenDialog:
@@ -2172,9 +2020,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			editorValue = "!" + editorValue
 		}
 		cmds = append(cmds, m.openEditor(editorValue))
-		m.dialog.CloseDialog(dialog.CommandsID)
-	case dialog.ActionToggleCompactMode:
-		cmds = append(cmds, m.toggleCompactMode())
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionTogglePills:
 		if cmd := m.togglePillsExpanded(); cmd != nil {
@@ -2650,6 +2495,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 	handleGlobalKeys := func(msg tea.KeyPressMsg) bool {
 		switch {
+		case key.Matches(msg, m.keyMap.Chat.BackgroundTasks):
+			if m.focus == uiFocusTasks {
+				m.focusEditorFromTasks()
+			} else if m.state == uiChat && len(m.agentTasks) > 0 {
+				m.focusTasks()
+			}
+			return true
 		case key.Matches(msg, m.keyMap.Help):
 			m.status.ToggleHelp()
 			m.updateLayoutAndSize()
@@ -2674,7 +2526,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, cmd)
 			}
 			return true
-		case key.Matches(msg, m.keyMap.Chat.Details) && m.isCompact:
+		case key.Matches(msg, m.keyMap.Chat.Details):
 			m.detailsOpen = !m.detailsOpen
 			m.updateLayoutAndSize()
 			return true
@@ -2718,11 +2570,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				cmds = append(cmds, m.loadSession(m.session.ParentSessionID))
 				return true
 			}
-		case key.Matches(msg, m.keyMap.Subagents):
-			if cmd := m.openSubagentsDialog(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			return true
 		case key.Matches(msg, m.keyMap.ExportConversation):
 			if m.hasSession() {
 				cmds = append(cmds, m.exportConversationToFile(m.session.ID))
@@ -2781,14 +2628,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	// Handle cancel key when agent is busy.
-	if key.Matches(msg, m.keyMap.Chat.Cancel) {
-		if m.isAgentBusy() {
-			if cmd := m.cancelAgent(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			return tea.Batch(cmds...)
+	// Escape cancels a busy run only while the editor is focused. From
+	// the chat or the background tasks strip it goes out a level instead
+	// (collapsing an expanded group, call, or task) and never cancels.
+	if key.Matches(msg, m.keyMap.Chat.Cancel) && m.focus == uiFocusEditor && m.isAgentBusy() {
+		if cmd := m.cancelAgent(); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
+		return tea.Batch(cmds...)
 	}
 
 	switch m.state {
@@ -3052,13 +2899,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case uiFocusMain:
 			switch {
 			case key.Matches(msg, m.keyMap.Tab):
-				m.focus = uiFocusEditor
-				m.sidebarScrollbarVisible = false
-				cmds = append(cmds, m.textarea.Focus())
-				m.chat.Blur()
-			case key.Matches(msg, m.keyMap.Chat.FocusSidebar):
-				if m.state == uiChat && !m.isCompact && m.hasSession() && m.sidebarScrollable {
-					m.focus = uiFocusSidebar
+				// Tab cycles chat -> background tasks (when present) -> editor.
+				if m.state == uiChat && len(m.agentTasks) > 0 {
+					m.chat.Blur()
+					m.focusTasks()
+				} else {
+					m.focus = uiFocusEditor
+					cmds = append(cmds, m.textarea.Focus())
 					m.chat.Blur()
 				}
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
@@ -3075,7 +2922,17 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
+			case key.Matches(msg, m.keyMap.Chat.DigIn):
+				m.chat.EnterSelectedItem()
+			case key.Matches(msg, m.keyMap.Chat.ClearHighlight):
+				// Escape goes out one level: a fully rendered call, then
+				// the sub-cursor, then the open group. At the top level it
+				// keeps its existing meaning.
+				m.chat.AscendSelectedItem()
 			case key.Matches(msg, m.keyMap.Chat.Up):
+				if m.chat.SubCursorUp() {
+					break
+				}
 				m.markScrollOnly()
 				m.chat.ScrollBy(-1)
 				if !m.chat.SelectedItemInView() {
@@ -3083,6 +2940,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.chat.ScrollToSelected()
 				}
 			case key.Matches(msg, m.keyMap.Chat.Down):
+				if m.chat.SubCursorDown() {
+					break
+				}
 				m.markScrollOnly()
 				m.chat.ScrollBy(1)
 				if !m.chat.SelectedItemInView() {
@@ -3090,9 +2950,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.chat.ScrollToSelected()
 				}
 			case key.Matches(msg, m.keyMap.Chat.UpOneItem):
+				if m.chat.SubCursorUp() {
+					break
+				}
 				m.chat.SelectPrev()
 				m.chat.ScrollToSelected()
 			case key.Matches(msg, m.keyMap.Chat.DownOneItem):
+				if m.chat.SubCursorDown() {
+					break
+				}
 				m.chat.SelectNext()
 				m.chat.ScrollToSelected()
 			case key.Matches(msg, m.keyMap.Chat.HalfPageUp):
@@ -3123,38 +2989,17 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					handleGlobalKeys(msg)
 				}
 			}
-		case uiFocusSidebar:
-			if m.state != uiChat || m.isCompact || !m.hasSession() {
+		case uiFocusTasks:
+			// The background tasks strip: up/down move the cursor through
+			// tasks and their calls, enter/space expands, esc or tab leaves.
+			if m.state != uiChat || len(m.agentTasks) == 0 {
+				m.focusEditorFromTasks()
 				break
 			}
-			switch {
-			case key.Matches(msg, m.keyMap.Chat.Up):
-				m.sidebarOffset = max(0, m.sidebarOffset-4)
-				m.sidebarScrollbarSeq++
-			case key.Matches(msg, m.keyMap.Chat.Down):
-				maxOffset := m.sidebarMaxOffsetVal
-				if m.sidebarOffset < maxOffset {
-					m.sidebarOffset = min(m.sidebarOffset+4, maxOffset)
-					m.sidebarScrollbarSeq++
-				}
-			case key.Matches(msg, m.keyMap.Chat.Home):
-				m.sidebarOffset = 0
-				m.sidebarScrollbarSeq++
-			case key.Matches(msg, m.keyMap.Chat.End):
-				m.sidebarOffset = m.sidebarMaxOffsetVal
-				m.sidebarScrollbarSeq++
-			case key.Matches(msg, m.keyMap.Chat.FocusChat):
-				m.focus = uiFocusMain
-				m.sidebarScrollbarVisible = false
-				m.chat.Focus()
-			case key.Matches(msg, m.keyMap.Tab):
-				m.focus = uiFocusEditor
-				m.sidebarScrollbarVisible = false
-				cmds = append(cmds, m.textarea.Focus())
-				m.chat.Blur()
-			default:
-				handleGlobalKeys(msg)
+			if m.handleTaskKey(msg) {
+				break
 			}
+			handleGlobalKeys(msg)
 		default:
 			handleGlobalKeys(msg)
 		}
@@ -3167,15 +3012,18 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 // drawHeader draws the header section of the UI.
 func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
+	if m.header == nil {
+		return
+	}
 	m.header.drawHeader(
 		scr,
 		area,
 		m.session,
-		m.isCompact,
 		m.detailsOpen,
 		area.Dx(),
 		m.lspErrorCount(),
 		m.hyperCredits,
+		parentBreadcrumbLine(m.com.Styles, m.subagentColor, m.parentTitle, area.Dx()),
 	)
 }
 
@@ -3193,10 +3041,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		// renderPills, but only when the layout actually differs;
 		// this catches the steady-state case.
 		m.renderPills()
-	}
-
-	if m.state == uiChat && m.hasSession() && !m.isCompact {
-		m.updateSidebarScrollState()
 	}
 
 	// Clear the screen first
@@ -3231,13 +3075,12 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 	case uiChat:
-		if m.isCompact {
-			m.drawHeader(scr, layout.header)
-		} else {
-			m.drawSidebar(scr, layout.sidebar)
-		}
+		m.drawHeader(scr, layout.header)
 
 		m.chat.Draw(scr, layout.main)
+		if layout.tasks.Dy() > 0 && m.tasksView != "" {
+			uv.NewStyledString(m.tasksView).Draw(scr, layout.tasks)
+		}
 		if layout.pills.Dy() > 0 && m.pillsView != "" {
 			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
 		}
@@ -3253,17 +3096,13 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
 			}
 		} else {
-			editorWidth := scr.Bounds().Dx()
-			if !m.isCompact {
-				editorWidth -= layout.sidebar.Dx()
-			}
-			editor := uv.NewStyledString(m.renderEditorView(editorWidth))
+			editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
 			editor.Draw(scr, layout.editor)
 			m.inlineCursor = nil
 		}
 
-		// Draw details overlay in compact mode when open
-		if m.isCompact && m.detailsOpen {
+		// Draw the session details overlay when open
+		if m.detailsOpen {
 			m.drawSessionDetails(scr, layout.sessionDetails)
 		}
 	}
@@ -3317,7 +3156,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			// Don't show cursor if editor is not visible
 			return nil
 		}
-		if m.detailsOpen && m.isCompact {
+		if m.detailsOpen {
 			// Don't show cursor if details overlay is open
 			return nil
 		}
@@ -3452,7 +3291,6 @@ func (m *UI) ShortHelp() []key.Binding {
 			tab,
 			commands,
 			k.Models,
-			k.Subagents,
 		)
 
 		switch m.focus {
@@ -3460,12 +3298,6 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds = append(
 				binds,
 				k.Editor.Newline,
-			)
-		case uiFocusSidebar:
-			binds = append(
-				binds,
-				k.Chat.UpDown,
-				k.Chat.FocusChat,
 			)
 		case uiFocusMain:
 			binds = append(
@@ -3479,6 +3311,13 @@ func (m *UI) ShortHelp() []key.Binding {
 			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
 				binds = append(binds, k.Chat.PillLeft)
 			}
+		case uiFocusTasks:
+			binds = append(
+				binds,
+				k.Chat.UpDown,
+				k.Chat.Expand,
+				k.Chat.ClearHighlight,
+			)
 		}
 	default:
 		// TODO: other states
@@ -3488,7 +3327,6 @@ func (m *UI) ShortHelp() []key.Binding {
 			binds,
 			commands,
 			k.Models,
-			k.Subagents,
 			k.Editor.Newline,
 		)
 	}
@@ -3547,7 +3385,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 			tab,
 			commands,
 			k.Models,
-			k.Subagents,
 			k.Sessions,
 			k.Themes,
 		)
@@ -3582,20 +3419,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 					},
 				)
 			}
-		case uiFocusSidebar:
-			binds = append(
-				binds,
-				[]key.Binding{
-					k.Chat.UpDown,
-				},
-				[]key.Binding{
-					k.Chat.FocusChat,
-				},
-				[]key.Binding{
-					k.Chat.Home,
-					k.Chat.End,
-				},
-			)
 		case uiFocusMain:
 			binds = append(
 				binds,
@@ -3611,7 +3434,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.Home,
 					k.Chat.End,
 					k.Chat.EndFollow,
-					k.Chat.FocusSidebar,
 				},
 				[]key.Binding{
 					k.Chat.Copy,
@@ -3621,6 +3443,18 @@ func (m *UI) FullHelp() [][]key.Binding {
 			if m.pillsExpanded && hasIncompleteTodos(m.session.Todos) && m.promptQueue > 0 {
 				binds = append(binds, []key.Binding{k.Chat.PillLeft})
 			}
+		case uiFocusTasks:
+			binds = append(
+				binds,
+				[]key.Binding{
+					k.Chat.UpDown,
+					k.Chat.Expand,
+				},
+				[]key.Binding{
+					k.Chat.ClearHighlight,
+					k.Chat.BackgroundTasks,
+				},
+			)
 		}
 	default:
 		if m.session == nil {
@@ -3630,7 +3464,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 				[]key.Binding{
 					commands,
 					k.Models,
-					k.Subagents,
 					k.Sessions,
 					k.Themes,
 				},
@@ -3685,33 +3518,8 @@ func (m *UI) currentModelSupportsImages() bool {
 	return model != nil && model.SupportsImages
 }
 
-// toggleCompactMode toggles compact mode between uiChat and uiChatCompact states.
-func (m *UI) toggleCompactMode() tea.Cmd {
-	m.forceCompactMode = !m.forceCompactMode
-
-	err := m.com.Workspace.SetCompactMode(config.ScopeGlobal, m.forceCompactMode)
-	if err != nil {
-		return util.ReportError(err)
-	}
-
-	m.updateLayoutAndSize()
-
-	return nil
-}
-
 // updateLayoutAndSize updates the layout and sizes of UI components.
 func (m *UI) updateLayoutAndSize() {
-	// Determine if we should be in compact mode
-	if m.state == uiChat {
-		if m.forceCompactMode {
-			m.isCompact = true
-		} else if m.width < compactModeWidthBreakpoint || m.height < compactModeHeightBreakpoint {
-			m.isCompact = true
-		} else {
-			m.isCompact = false
-		}
-	}
-
 	// First pass sizes components from the current textarea height.
 	m.layout = m.generateLayout(m.width, m.height)
 	prevHeight := m.textarea.Height()
@@ -3820,14 +3628,6 @@ func (m *UI) updateSize() {
 	m.textarea.MaxHeight = TextareaMaxHeight
 	m.textarea.SetWidth(m.layout.editor.Dx())
 	m.renderPills()
-
-	// Handle different app states
-	switch m.state {
-	case uiChat:
-		if !m.isCompact {
-			m.cacheSidebarLogo(m.layout.sidebar.Dx())
-		}
-	}
 }
 
 // generateLayout calculates the layout rectangles for all UI components based
@@ -3855,8 +3655,6 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			editorHeight = m.activeInline.Height(editorWidth)
 		}
 	}
-	// The sidebar width
-	sidebarWidth := 32
 	// The header height
 	const landingHeaderHeight = 0
 
@@ -3937,96 +3735,65 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		uiLayout.editor = editorRect
 
 	case uiChat:
-		if m.isCompact {
-			// Layout
-			//
-			// compact-header
-			// ------
-			// main
-			// ------
-			// editor
-			// ------
-			// help
-			const compactHeaderHeight = 1
-			var headerRect, mainRect image.Rectangle
+		// Layout
+		//
+		// header
+		// ------
+		// main
+		// ------
+		// editor
+		// ------
+		// help
+		const headerHeight = 1
+		var headerRect, mainRect image.Rectangle
+		layout.Vertical(
+			layout.Len(headerHeight),
+			layout.Fill(1),
+		).Split(appRect).Assign(&headerRect, &mainRect)
+		detailsHeight := min(sessionDetailsMaxHeight, area.Dy()-1) // One row for the header
+		var sessionDetailsArea image.Rectangle
+		layout.Vertical(
+			layout.Len(detailsHeight),
+			layout.Fill(1),
+		).Split(appRect).Assign(&sessionDetailsArea, new(image.Rectangle))
+		uiLayout.sessionDetails = sessionDetailsArea
+		uiLayout.sessionDetails.Min.Y += headerHeight // adjust for header
+		// Add one line gap between header and main content
+		mainRect.Min.Y += 1
+		var editorRect image.Rectangle
+		layout.Vertical(
+			layout.Len(mainRect.Dy()-editorHeight),
+			layout.Fill(1),
+		).Split(mainRect).Assign(&mainRect, &editorRect)
+		mainRect.Max.X -= 1 // Add padding right
+		uiLayout.header = headerRect
+		tasksHeight := m.tasksAreaHeight()
+		if tasksHeight > 0 {
+			tasksHeight = min(tasksHeight, mainRect.Dy())
+			var chatRect, tasksRect image.Rectangle
 			layout.Vertical(
-				layout.Len(compactHeaderHeight),
+				layout.Len(mainRect.Dy()-tasksHeight),
 				layout.Fill(1),
-			).Split(appRect).Assign(&headerRect, &mainRect)
-			detailsHeight := min(sessionDetailsMaxHeight, area.Dy()-1) // One row for the header
-			var sessionDetailsArea image.Rectangle
-			layout.Vertical(
-				layout.Len(detailsHeight),
-				layout.Fill(1),
-			).Split(appRect).Assign(&sessionDetailsArea, new(image.Rectangle))
-			uiLayout.sessionDetails = sessionDetailsArea
-			uiLayout.sessionDetails.Min.Y += compactHeaderHeight // adjust for header
-			// Add one line gap between header and main content
-			mainRect.Min.Y += 1
-			var editorRect image.Rectangle
-			layout.Vertical(
-				layout.Len(mainRect.Dy()-editorHeight),
-				layout.Fill(1),
-			).Split(mainRect).Assign(&mainRect, &editorRect)
-			mainRect.Max.X -= 1 // Add padding right
-			uiLayout.header = headerRect
-			pillsHeight := m.pillsAreaHeight()
-			if pillsHeight > 0 {
-				pillsHeight = min(pillsHeight, mainRect.Dy())
-				var chatRect, pillsRect image.Rectangle
-				layout.Vertical(
-					layout.Len(mainRect.Dy()-pillsHeight),
-					layout.Fill(1),
-				).Split(mainRect).Assign(&chatRect, &pillsRect)
-				uiLayout.main = chatRect
-				uiLayout.pills = pillsRect
-			} else {
-				uiLayout.main = mainRect
-			}
-			// Add bottom margin to main
-			uiLayout.main.Max.Y -= 1
-			uiLayout.editor = editorRect
-		} else {
-			// Layout
-			//
-			// ------|---
-			// main  |
-			// ------| side
-			// editor|
-			// ----------
-			// help
-
-			var mainRect, sideRect image.Rectangle
-			layout.Horizontal(
-				layout.Len(appRect.Dx()-sidebarWidth),
-				layout.Fill(1),
-			).Split(appRect).Assign(&mainRect, &sideRect)
-			// Add padding left
-			sideRect.Min.X += 1
-			var editorRect image.Rectangle
-			layout.Vertical(
-				layout.Len(mainRect.Dy()-editorHeight),
-				layout.Fill(1),
-			).Split(mainRect).Assign(&mainRect, &editorRect)
-			mainRect.Max.X -= 1 // Add padding right
-			uiLayout.sidebar = sideRect
-			pillsHeight := m.pillsAreaHeight()
-			if pillsHeight > 0 {
-				pillsHeight = min(pillsHeight, mainRect.Dy())
-				var chatRect, pillsRect image.Rectangle
-				layout.Vertical(
-					layout.Len(mainRect.Dy()-pillsHeight),
-					layout.Fill(1),
-				).Split(mainRect).Assign(&chatRect, &pillsRect)
-				uiLayout.main = chatRect
-				uiLayout.pills = pillsRect
-			} else {
-				uiLayout.main = mainRect
-			}
-			// Add bottom margin to main
-			uiLayout.main.Max.Y -= 1
-			uiLayout.editor = editorRect
+			).Split(mainRect).Assign(&chatRect, &tasksRect)
+			uiLayout.tasks = tasksRect
+			mainRect = chatRect
 		}
+		pillsHeight := m.pillsAreaHeight()
+		if pillsHeight > 0 {
+			pillsHeight = min(pillsHeight, mainRect.Dy())
+			var chatRect, pillsRect image.Rectangle
+			layout.Vertical(
+				layout.Len(mainRect.Dy()-pillsHeight),
+				layout.Fill(1),
+			).Split(mainRect).Assign(&chatRect, &pillsRect)
+			uiLayout.main = chatRect
+			uiLayout.pills = pillsRect
+		} else {
+			uiLayout.main = mainRect
+		}
+		// Add bottom margin to main
+		uiLayout.main.Max.Y -= 1
+		uiLayout.editor = editorRect
 	}
 
 	return uiLayout
@@ -4037,13 +3804,10 @@ type uiLayout struct {
 	// area is the overall available area.
 	area uv.Rectangle
 
-	// header is the header shown in special cases
-	// e.x when the sidebar is collapsed
-	// or when in the landing page
-	// or in init/config
+	// header is the compact status header shown above the chat.
 	header uv.Rectangle
 
-	// main is the area for the main pane. (e.x chat, configure, landing)
+	// main is the area for the main pane. (e.g. chat, landing)
 	main uv.Rectangle
 
 	// pills is the area for the pills panel.
@@ -4052,8 +3816,8 @@ type uiLayout struct {
 	// editor is the area for the editor pane.
 	editor uv.Rectangle
 
-	// sidebar is the area for the sidebar.
-	sidebar uv.Rectangle
+	// tasks is the area for the background tasks strip (subagents).
+	tasks uv.Rectangle
 
 	// status is the area for the status view.
 	status uv.Rectangle
@@ -4375,11 +4139,6 @@ func (m *UI) renderEditorView(width int) string {
 	}, "\n")
 }
 
-// cacheSidebarLogo renders and caches the sidebar logo at the specified width.
-func (m *UI) cacheSidebarLogo(width int) {
-	m.sidebarLogo = ""
-}
-
 // applyThemeForProvider swaps the active theme to the one associated with
 // the given provider, but only when that theme differs from the one
 // already applied. Most providers share a single theme, so re-selecting a
@@ -4445,9 +4204,6 @@ func (m *UI) applyTheme(s styles.Styles) {
 func (m *UI) refreshStyles() {
 	t := m.com.Styles
 	m.header.refresh()
-	if m.layout.sidebar.Dx() > 0 {
-		m.cacheSidebarLogo(m.layout.sidebar.Dx())
-	}
 	m.textarea.SetStyles(t.Editor.Textarea)
 	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
 	m.attachments.Renderer().SetStyles(
@@ -4503,9 +4259,6 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
 		if err != nil {
 			return util.ReportError(err)
-		}
-		if m.forceCompactMode {
-			m.isCompact = true
 		}
 		if newSession.ID != "" {
 			m.session = &newSession
@@ -4568,9 +4321,6 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
 		if err != nil {
 			return util.ReportError(err)
-		}
-		if m.forceCompactMode {
-			m.isCompact = true
 		}
 		if newSession.ID != "" {
 			m.session = &newSession
@@ -4711,10 +4461,6 @@ func (m *UI) openDialog(id string) tea.Cmd {
 	switch id {
 	case dialog.SessionsID:
 		if cmd := m.openSessionsDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.SubagentsID:
-		if cmd := m.openSubagentsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ModelsID:
@@ -4874,25 +4620,6 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 	return nil
 }
 
-// openSubagentsDialog opens the subagents dialog and returns the command that
-// populates its tabs off the Update path. If the dialog is already open, it
-// brings it to the front. Subagent surfaces are local-mode only: in
-// client/server mode the ClientWorkspace stubs return empty, so the dialog
-// opens with no running or library entries.
-func (m *UI) openSubagentsDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.SubagentsID) {
-		m.dialog.BringToFront(dialog.SubagentsID)
-		return nil
-	}
-	sessionID := ""
-	if m.session != nil {
-		sessionID = m.session.ID
-	}
-	d := dialog.NewSubagents(m.com, sessionID)
-	m.dialog.OpenDialog(d)
-	return d.InitialFetchCmd()
-}
-
 // openFilesDialog opens the file picker dialog.
 func (m *UI) openFilesDialog() tea.Cmd {
 	if !m.currentModelSupportsImages() {
@@ -4953,11 +4680,7 @@ func (m *UI) handleQuestionNotification(_ question.Notification) {
 // of truth for the inline editor width used by both layout sizing
 // and Height() queries.
 func (m *UI) editorContentWidth() int {
-	width := m.width - 2 // appRect horizontal margins
-	if m.state == uiChat && !m.isCompact {
-		width -= 30 // sidebar column
-	}
-	return width
+	return m.width - 2 // appRect horizontal margins
 }
 
 // shouldCollapseQuestion reports whether a question form should render
@@ -5107,7 +4830,6 @@ func (m *UI) newSession() tea.Cmd {
 	}
 
 	m.session = nil
-	m.sidebarOffset = 0
 	m.sessionFiles = nil
 	m.sessionFileReads = nil
 	m.knownChildSessionIDs = nil
@@ -5116,6 +4838,7 @@ func (m *UI) newSession() tea.Cmd {
 	// rendering the previous session's parent breadcrumb and "Active subagents"
 	// panel on an empty screen until an unrelated event happened to clear them.
 	m.runningSubagents = nil
+	m.resetAgentTasks()
 	m.parentTitle = ""
 	m.subagentColor = ""
 	m.setState(uiLanding, uiFocusEditor)

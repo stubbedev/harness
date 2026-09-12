@@ -41,19 +41,21 @@ func (h *header) refresh() {
 // drawHeader draws the header for the given session. lspErrorCount comes
 // from the UI's memoized LSP state: drawing runs on every frame and must not
 // probe the workspace (a synchronous HTTP round-trip in client/server mode).
+// breadcrumb is the parent-session breadcrumb shown when a child (subagent)
+// session is being viewed, empty otherwise.
 func (h *header) drawHeader(
 	scr uv.Screen,
 	area uv.Rectangle,
 	session *session.Session,
-	compact bool,
 	detailsOpen bool,
 	width int,
 	lspErrorCount int,
 	hyperCredits *int,
+	breadcrumb string,
 ) {
 	h.width = width
 
-	if !compact || session == nil {
+	if session == nil {
 		return
 	}
 
@@ -71,6 +73,7 @@ func (h *header) drawHeader(
 		lspErrorCount,
 		detailsOpen,
 		hyperCredits,
+		breadcrumb,
 	)
 
 	gap := availWidth - lipgloss.Width(left) - lipgloss.Width(right)
@@ -94,14 +97,16 @@ func (h *header) drawHeader(
 }
 
 // renderHeaderDetails renders the two halves of the compact status line:
-// the left (working directory and git state) and the right (LSP errors,
-// context usage with model, hypercredits, and the details hint).
+// the left (breadcrumb when viewing a child session, working directory and
+// git state) and the right (LSP errors, context usage with model,
+// hypercredits, and the details hint).
 func renderHeaderDetails(
 	com *common.Common,
 	session *session.Session,
 	lspErrorCount int,
 	detailsOpen bool,
 	hyperCredits *int,
+	breadcrumb string,
 ) (left, right string) {
 	t := com.Styles
 
@@ -110,8 +115,15 @@ func renderHeaderDetails(
 	cwd := fsext.DirTrim(fsext.PrettyPath(com.Workspace.WorkingDir()), dirTrimLimit)
 
 	var leftParts []string
+	if breadcrumb != "" {
+		leftParts = append(leftParts, breadcrumb)
+	}
 	leftParts = append(leftParts, t.Header.WorkingDir.Render(cwd))
-	if com.Config().Options.TUI.ShowGitStatus() {
+	var tuiOpts *config.TUIOptions
+	if cfg := com.Config(); cfg != nil && cfg.Options != nil {
+		tuiOpts = cfg.Options.TUI
+	}
+	if tuiOpts.ShowGitStatus() {
 		// The git segment reads a cache the git watcher refreshes in
 		// the background, so this never blocks on a subprocess.
 		if seg := gitHeaderParts(t, com.Workspace.WorkingDir()); seg != "" {

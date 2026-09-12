@@ -457,6 +457,11 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			items = append(items, NewAssistantMessageItem(sty, msg))
 		}
 		for _, tc := range msg.ToolCalls() {
+			// Subagent dispatches render in the background tasks strip,
+			// not the transcript.
+			if IsSubagentTool(tc.Name) {
+				continue
+			}
 			var result *message.ToolResult
 			if tr, ok := toolResults[tc.ID]; ok {
 				result = &tr
