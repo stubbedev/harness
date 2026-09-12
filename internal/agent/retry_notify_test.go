@@ -154,7 +154,6 @@ func retryNotifyAgent(env fakeEnv, model fantasy.LanguageModel, broker *pubsub.B
 		SystemPrompt:         "fake system prompt",
 		IsSubAgent:           true,
 		DisableAutoSummarize: true,
-		IsYolo:               true,
 		Sessions:             env.sessions,
 		Messages:             env.messages,
 		MaxRetries:           &maxRetries,

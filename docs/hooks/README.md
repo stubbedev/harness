@@ -30,8 +30,7 @@ forward.
   Language", and so on
 - Inject context: add notes to the model's context whenever certain tools are
   called. For example: "remember to run gofumpt after editing Go files"
-- Auto-approve tools: skip the permission prompt for bash commands that
-  you know are safe
+- Block tools: refuse bash commands matching a pattern you consider unsafe
 - Log certain tool calls
 
 …And lots more. Show us what you're building!
@@ -193,11 +192,8 @@ When a hook fires, Harness:
 4. Waits for all to finish (or time out), then aggregates results **in config
    order**: deny wins over allow, allow wins over none; `updated_input` patches
    shallow-merge in order.
-5. Applies the result **before** permission checks. If the aggregated decision
-   is `deny`, the tool call is blocked and you never see a permission prompt
-   for it. If it's `allow`, Harness treats that as affirmative pre-approval and
-   also skips the prompt. Silence (no decision) falls through to the normal
-   permission flow.
+5. Applies the result before running the tool. If the aggregated decision is
+   `deny`, the tool call is blocked. Anything else lets it run.
 
 Note that you can omit `matcher` and match in your shell script instead,
 however you'll incur some additional overhead as Harness will still parse and
@@ -317,12 +313,11 @@ the input, or still deny/halt with a reason:
 if omitted. Unknown higher versions are still parsed; the field exists so the
 envelope can evolve without a compatibility shim.
 
-`decision: "allow"` is **affirmative**: it pre-approves the tool call and
-bypasses the permission prompt entirely. Silence (no `decision`, or
-`decision: null`) means "no opinion" — the tool still goes through the
-normal permission flow. Use `"allow"` when you want to auto-approve; omit it
-when you only want to inject context or rewrite input without also vouching
-for the call.
+Only `deny` changes what happens. Harness runs every tool call it is not told
+to block, so `decision: "allow"` and silence (no `decision`, or
+`decision: null`) are equivalent: the tool runs either way. `"allow"` is still
+accepted so existing hooks keep parsing, and it remains meaningful in
+aggregation — it does not override another hook.s `deny`.
 
 `updated_input` is a shallow-merge patch. Keys you include overwrite matching
 keys in `tool_input`; keys you don't include are preserved. If the model called
@@ -370,8 +365,7 @@ When multiple hooks match the same tool call:
 - If **any** hook denies, the tool call is blocked. `reason` values are
   concatenated in config order (newline-separated).
 - If **any** hook halts, the turn ends after the tool call is blocked.
-- If no hook denies or halts but at least one allows, the tool call proceeds
-  **and the permission prompt is skipped**.
+- If no hook denies or halts, the tool call proceeds.
 - `context` values are concatenated in config order. Strings and arrays compose
   uniformly — each string becomes one entry, and array entries are flattened in.
 - `updated_input` patches shallow-merge in config order against the original
@@ -411,7 +405,7 @@ Prevent the agent from running `rm -rf` in bash:
 ```bash
 #!/usr/bin/env bash
 # Block rm -rf commands in the bash tool. Otherwise stay silent so the
-# normal permission flow runs.
+# command runs.
 
 if echo "$HARNESS_TOOL_INPUT_COMMAND" | grep -qE 'rm\s+-(rf|fr)\s+/'; then
   echo "Refusing to run rm -rf against root" >&2
@@ -419,37 +413,6 @@ if echo "$HARNESS_TOOL_INPUT_COMMAND" | grep -qE 'rm\s+-(rf|fr)\s+/'; then
 fi
 
 exit 0
-```
-
-### Auto-approve read-only tools
-
-Skip the permission prompt for tools that can't change anything. The hook
-returns `decision: "allow"`, which tells Harness to pre-approve the call:
-
-```yaml
-hooks:
-  PreToolUse:
-    - matcher: "^(view|ls|grep|glob)$"
-      command: echo '{"decision":"allow"}'
-```
-
-No script file needed — the command is inline. Every `view`/`ls`/`grep`/`glob`
-call now runs without prompting. Add the `bash` tool to this list at your own
-risk; consider a more targeted allowlist instead:
-
-```bash
-#!/usr/bin/env bash
-# hooks/safe-bash.sh — auto-approve read-only bash commands.
-
-case "$HARNESS_TOOL_INPUT_COMMAND" in
-  ls*|cat*|grep*|rg*|echo*|pwd*)
-    echo '{"decision":"allow"}'
-    ;;
-  *)
-    # Silent — fall through to the normal permission prompt.
-    exit 0
-    ;;
-esac
 ```
 
 ### Inject context into file writes
@@ -474,8 +437,7 @@ Add a reminder to the model whenever it writes a Go file:
 ```bash
 #!/usr/bin/env bash
 # Remind the model about Go formatting when editing .go files.
-# Emit context only; stay silent on `decision` so the normal permission
-# prompt still runs for edits/writes.
+# Emit context only; stay silent on `decision` so the edit still runs.
 
 if [[ "$HARNESS_TOOL_INPUT_FILE_PATH" == *.go ]]; then
   echo '{"context": "Remember: run gofumpt after editing Go files."}'
@@ -657,11 +619,10 @@ Extends the common envelope:
 {
   // ...common fields...
 
-  // "allow" | "deny" | null. null/omitted = no opinion, the tool still goes
-  // through the normal permission prompt. "allow" is affirmative: pre-approves
-  // the tool call and bypasses the prompt. "deny" blocks the call; the model
-  // sees the error and may try something else.
-  "decision": "allow",
+  // "allow" | "deny" | null. Only "deny" changes anything: it blocks the call
+  // and the model sees the error and may try something else. null/omitted and
+  // "allow" both let the tool run.
+  "decision": "deny",
 
   // object. Shallow-merge patch against tool_input. Nested objects are
   // replaced wholesale, not deep-merged.
@@ -698,10 +659,8 @@ Universal rules:
 PreToolUse-specific rules:
 
 4. `decision` precedence: `deny` > `allow` > `null`. First deny determines the
-   outcome; subsequent allows don't override. If the final aggregated decision
-   is `allow`, Harness pre-approves the tool call and skips the permission
-   prompt. If it's `null` (no hook allowed), the tool goes through the normal
-   permission flow.
+   outcome; subsequent allows don.t override. Any final decision other than
+   `deny` lets the tool run.
 5. `updated_input` patches shallow-merge sequentially against the original
    `tool_input`. Later patches override earlier ones on colliding keys. Patches
    are **ignored** if the final decision is deny or halt.

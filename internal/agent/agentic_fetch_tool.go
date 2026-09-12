@@ -13,7 +13,6 @@ import (
 
 	"github.com/stubbedev/harness/internal/agent/prompt"
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/subagents"
 )
 
@@ -71,33 +70,6 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 			validationResult, err := validateAgenticFetchParams(ctx, params)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
-			}
-
-			// Determine description based on mode.
-			var description string
-			if params.URL != "" {
-				description = fmt.Sprintf("Fetch and analyze content from URL: %s", params.URL)
-			} else {
-				description = "Search the web and analyze results"
-			}
-
-			p, err := c.permissions.Request(
-				ctx,
-				permission.CreatePermissionRequest{
-					SessionID:   validationResult.SessionID,
-					Path:        c.cfg.WorkingDir(),
-					ToolCallID:  call.ID,
-					ToolName:    tools.AgenticFetchToolName,
-					Action:      "fetch",
-					Description: description,
-					Params:      tools.AgenticFetchPermissionsParams(params),
-				},
-			)
-			if err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-			if !p {
-				return tools.NewPermissionDeniedResponse(), nil
 			}
 
 			tmpDir, err := os.MkdirTemp(c.cfg.Config().Options.DataDirectory, "harness-fetch-*")
@@ -171,7 +143,7 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				tools.NewGlobTool(tmpDir, c.cfg.Config().Tools.Glob),
 				tools.NewGrepTool(tmpDir, c.cfg.Config().Tools.Grep),
 				tools.NewSourcegraphTool(client),
-				tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, nil, tmpDir),
+				tools.NewViewTool(c.lspManager, c.filetracker, nil, tmpDir),
 			}
 
 			// Sub-agent tools run without hook interception. The top-level
@@ -189,7 +161,6 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				AutoSummarizeRatio:   c.cfg.Config().Options.AutoSummarizeRatio,
 				AutoSummarizeBuffer:  c.cfg.Config().Options.AutoSummarizeBuffer,
 				MaxRetries:           c.cfg.Config().Options.MaxRetries,
-				IsYolo:               c.permissions.SkipRequests(),
 				Sessions:             c.sessions,
 				Messages:             c.messages,
 				Tools:                fetchTools,
@@ -205,9 +176,6 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				AgentName:      tools.AgenticFetchToolName,
 				AgentColor:     subagents.AutoColor(tools.AgenticFetchToolName),
 				AgentModel:     agent.Model().ModelCfg.Model,
-				SessionSetup: func(sessionID string) {
-					c.permissions.AutoApproveSession(sessionID)
-				},
 			})
 		},
 	), nil

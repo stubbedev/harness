@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/subagents"
 )
 
@@ -214,42 +212,6 @@ func TestDispatcherTool_Run_UnknownSubagent_ReturnsErrorResponse(t *testing.T) {
 	require.True(t, resp.IsError)
 }
 
-// recordingPermissions stubs permission.Service to capture
-// AutoApproveSession calls for subagent dispatch tests. All other methods
-// are no-ops or return zero values.
-type recordingPermissions struct {
-	permission.Service
-	autoApproved []string
-}
-
-func (r *recordingPermissions) AutoApproveSession(sessionID string) {
-	r.autoApproved = append(r.autoApproved, sessionID)
-}
-
-func TestSubagentSessionSetup(t *testing.T) {
-	t.Parallel()
-
-	t.Run("nil_when_no_bypass", func(t *testing.T) {
-		t.Parallel()
-		c := &coordinator{}
-		require.Nil(t, c.subagentSessionSetup(&subagents.Subagent{Name: "a"}))
-		require.Nil(t, c.subagentSessionSetup(&subagents.Subagent{Name: "a", PermissionMode: subagents.PermissionModeDefault}))
-	})
-
-	t.Run("bypass_calls_auto_approve", func(t *testing.T) {
-		t.Parallel()
-		rec := &recordingPermissions{}
-		c := &coordinator{permissions: rec}
-		sa := &subagents.Subagent{Name: "a", PermissionMode: subagents.PermissionModeBypassPermissions}
-
-		setup := c.subagentSessionSetup(sa)
-		require.NotNil(t, setup)
-
-		setup("session-123")
-		require.Equal(t, []string{"session-123"}, rec.autoApproved)
-	})
-}
-
 // TestAgentTool_SubagentBuildFailure_SurfacedAsToolError verifies that when a
 // named subagent fails to build (because its model: names a model no provider
 // offers), the dispatcher returns a ToolResponse with IsError==true and a nil
@@ -291,10 +253,9 @@ func TestAgentTool_SubagentBuildFailure_SurfacedAsToolError(t *testing.T) {
 	}
 
 	c, err := NewCoordinator(t.Context(), CoordinatorOptions{
-		Config:      cfg,
-		Sessions:    env.sessions,
-		Messages:    env.messages,
-		Permissions: permission.NewPermissionService(env.workingDir, true, nil),
+		Config:   cfg,
+		Sessions: env.sessions,
+		Messages: env.messages,
 	})
 	require.NoError(t, err)
 
@@ -332,89 +293,7 @@ func TestAgentTool_SubagentBuildFailure_SurfacedAsToolError(t *testing.T) {
 	require.Contains(t, resp.Content, "broken")
 }
 
-// stubRequestPermissions stubs permission.Service to record Request calls and
-// return a configured answer. All other methods are inherited (nil) and must
-// not be called by the code under test.
-type stubRequestPermissions struct {
-	permission.Service
-	requests []permission.CreatePermissionRequest
-	grant    bool
-}
-
-func (s *stubRequestPermissions) Request(_ context.Context, opts permission.CreatePermissionRequest) (bool, error) {
-	s.requests = append(s.requests, opts)
-	return s.grant, nil
-}
-
 // TestConfirmBypassPermissions verifies the per-dispatch confirmation gate for
-// permissionMode: bypassPermissions. User-scope (global-dir) definitions pass
-// without a prompt; anything else — which can arrive with a cloned repository
-// — requires an explicit user confirmation on every dispatch, and a denial
-// blocks the dispatch with a tool-error response.
-//
-// Not parallel: subtests pin the global subagents dir via HARNESS_SUBAGENTS_DIR
-// so scope detection is hermetic.
-func TestConfirmBypassPermissions(t *testing.T) {
-	globalDir := t.TempDir()
-	projectDir := t.TempDir()
-	t.Setenv("HARNESS_SUBAGENTS_DIR", globalDir)
-
-	t.Run("no bypass mode never prompts", func(t *testing.T) {
-		perms := &stubRequestPermissions{grant: false}
-		c := &coordinator{permissions: perms}
-		sa := &subagents.Subagent{Name: "plain", FilePath: filepath.Join(projectDir, "plain.md")}
-
-		_, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
-		require.True(t, ok)
-		require.Empty(t, perms.requests)
-	})
-
-	t.Run("user-scoped bypass never prompts", func(t *testing.T) {
-		perms := &stubRequestPermissions{grant: false}
-		c := &coordinator{permissions: perms}
-		sa := &subagents.Subagent{
-			Name:           "trusted",
-			PermissionMode: subagents.PermissionModeBypassPermissions,
-			FilePath:       filepath.Join(globalDir, "trusted.md"),
-		}
-
-		_, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
-		require.True(t, ok)
-		require.Empty(t, perms.requests)
-	})
-
-	t.Run("project-scoped bypass denied blocks dispatch", func(t *testing.T) {
-		perms := &stubRequestPermissions{grant: false}
-		c := &coordinator{permissions: perms}
-		sa := &subagents.Subagent{
-			Name:           "repo-agent",
-			PermissionMode: subagents.PermissionModeBypassPermissions,
-			FilePath:       filepath.Join(projectDir, ".harness", "subagents", "repo-agent.md"),
-		}
-
-		resp, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
-		require.False(t, ok)
-		require.True(t, resp.IsError)
-		require.Contains(t, resp.Content, "repo-agent")
-		require.Len(t, perms.requests, 1)
-		require.Equal(t, "bypass_permissions:repo-agent", perms.requests[0].Action)
-	})
-
-	t.Run("project-scoped bypass granted proceeds", func(t *testing.T) {
-		perms := &stubRequestPermissions{grant: true}
-		c := &coordinator{permissions: perms}
-		sa := &subagents.Subagent{
-			Name:           "repo-agent",
-			PermissionMode: subagents.PermissionModeBypassPermissions,
-			FilePath:       filepath.Join(projectDir, ".harness", "subagents", "repo-agent.md"),
-		}
-
-		_, ok := c.confirmBypassPermissions(t.Context(), sa, "sess", "call")
-		require.True(t, ok)
-		require.Len(t, perms.requests, 1)
-	})
-}
-
 // TestAgentTool_TaskDispatch_BuildsOnLocalGroup verifies the task path of the
 // dispatcher end-to-end with a real (offline) coordinator: the dispatch waits
 // for the task agent's local build group before running, the run failure

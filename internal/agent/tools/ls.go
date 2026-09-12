@@ -14,19 +14,12 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/fsext"
-	"github.com/stubbedev/harness/internal/permission"
 )
 
 type LSParams struct {
 	Path   string   `json:"path,omitempty" description:"The path to the directory to list (defaults to current working directory)"`
 	Ignore []string `json:"ignore,omitempty" description:"List of glob patterns to ignore"`
 	Depth  int      `json:"depth,omitempty" description:"The maximum depth to traverse"`
-}
-
-type LSPermissionsParams struct {
-	Path   string   `json:"path"`
-	Ignore []string `json:"ignore"`
-	Depth  int      `json:"depth"`
 }
 
 type NodeType string
@@ -71,7 +64,7 @@ func lsDescription() string {
 	})
 }
 
-func NewLsTool(permissions permission.Service, workingDir string, lsConfig config.ToolLs) fantasy.AgentTool {
+func NewLsTool(workingDir string, lsConfig config.ToolLs) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		LSToolName,
 		lsDescription(),
@@ -82,45 +75,6 @@ func NewLsTool(permissions permission.Service, workingDir string, lsConfig confi
 			}
 
 			searchPath = filepathext.SmartJoin(workingDir, searchPath)
-
-			// Check if directory is outside working directory and request permission if needed
-			absWorkingDir, err := filepath.Abs(workingDir)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("error resolving working directory: %v", err)), nil
-			}
-
-			absSearchPath, err := filepath.Abs(searchPath)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("error resolving search path: %v", err)), nil
-			}
-
-			relPath, err := filepath.Rel(absWorkingDir, absSearchPath)
-			if err != nil || strings.HasPrefix(relPath, "..") {
-				// Directory is outside working directory, request permission
-				sessionID := GetSessionFromContext(ctx)
-				if sessionID == "" {
-					return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing directories outside working directory")
-				}
-
-				granted, err := permissions.Request(
-					ctx,
-					permission.CreatePermissionRequest{
-						SessionID:   sessionID,
-						Path:        absSearchPath,
-						ToolCallID:  call.ID,
-						ToolName:    LSToolName,
-						Action:      "list",
-						Description: fmt.Sprintf("List directory outside working directory: %s", absSearchPath),
-						Params:      LSPermissionsParams(params),
-					},
-				)
-				if err != nil {
-					return fantasy.ToolResponse{}, err
-				}
-				if !granted {
-					return NewPermissionDeniedResponse(), nil
-				}
-			}
 
 			output, metadata, err := ListDirectoryTree(searchPath, params, lsConfig)
 			if err != nil {

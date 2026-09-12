@@ -15,19 +15,12 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/filepathext"
-	"github.com/stubbedev/harness/internal/permission"
 )
 
 type DownloadParams struct {
 	URL      string `json:"url" description:"The URL to download from"`
 	FilePath string `json:"file_path" description:"The local file path where the downloaded content should be saved"`
 	Timeout  int    `json:"timeout,omitempty" description:"Optional timeout in seconds (max 600)"`
-}
-
-type DownloadPermissionsParams struct {
-	URL      string `json:"url"`
-	FilePath string `json:"file_path"`
-	Timeout  int    `json:"timeout,omitempty"`
 }
 
 const DownloadToolName = "download"
@@ -50,7 +43,7 @@ func downloadDescription() string {
 	})
 }
 
-func NewDownloadTool(permissions permission.Service, workingDir string, client *http.Client) fantasy.AgentTool {
+func NewDownloadTool(workingDir string, client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.MaxIdleConns = 100
@@ -85,24 +78,6 @@ func NewDownloadTool(permissions permission.Service, workingDir string, client *
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for downloading files")
-			}
-
-			p, err := permissions.Request(
-				ctx,
-				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        filePath,
-					ToolName:    DownloadToolName,
-					Action:      "download",
-					Description: fmt.Sprintf("Download file from URL: %s to %s", params.URL, filePath),
-					Params:      DownloadPermissionsParams(params),
-				},
-			)
-			if err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-			if !p {
-				return NewPermissionDeniedResponse(), nil
 			}
 
 			// Handle timeout with context

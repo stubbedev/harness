@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -11,8 +10,6 @@ import (
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/filepathext"
-	"github.com/stubbedev/harness/internal/permission"
 )
 
 type ReadMCPResourceParams struct {
@@ -20,17 +17,12 @@ type ReadMCPResourceParams struct {
 	URI     string `json:"uri" description:"The resource URI to read"`
 }
 
-type ReadMCPResourcePermissionsParams struct {
-	MCPName string `json:"mcp_name"`
-	URI     string `json:"uri"`
-}
-
 const ReadMCPResourceToolName = "read_mcp_resource"
 
 //go:embed read_mcp_resource.md
 var readMCPResourceDescription string
 
-func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Service) fantasy.AgentTool {
+func NewReadMCPResourceTool(cfg *config.ConfigStore) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
 		ReadMCPResourceToolName,
 		readMCPResourceDescription,
@@ -47,26 +39,6 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore, permissions permission.Serv
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
 				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for reading MCP resources")
-			}
-
-			relPath := filepathext.SmartJoin(cfg.WorkingDir(), cmp.Or(params.URI, "mcp-resource"))
-			p, err := permissions.Request(
-				ctx,
-				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        relPath,
-					ToolCallID:  call.ID,
-					ToolName:    ReadMCPResourceToolName,
-					Action:      "read",
-					Description: fmt.Sprintf("Read MCP resource from %s", params.MCPName),
-					Params:      ReadMCPResourcePermissionsParams(params),
-				},
-			)
-			if err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-			if !p {
-				return NewPermissionDeniedResponse(), nil
 			}
 
 			contents, err := mcp.ReadResource(ctx, cfg, params.MCPName, params.URI)

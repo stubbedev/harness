@@ -22,9 +22,6 @@ models:
     provider: anthropic
     model: claude-sonnet-4-20250514
 
-permissions:
-  allowed_tools: [view, ls, grep]
-
 options:
   tui:
     theme: gruvbox-dark
@@ -240,13 +237,9 @@ Fields: `command`, `args`, `env`, `filetypes`, `root_markers`, `init_options`
 and `disabled`. Harness fills in defaults for servers it recognizes, so a bare
 `command` is usually enough.
 
-## Permissions and tools
+## Tools
 
 ```yaml
-permissions:
-  yolo: false
-  allowed_tools: [view, ls, grep, edit]
-
 options:
   disabled_tools: [bash]
 
@@ -260,11 +253,8 @@ tools:
     timeout: 2m
 ```
 
-- `permissions.yolo` unset means prompts are skipped; set it to `false` to get
-  them back.
-- `permissions.allowed_tools` lists tools that skip the prompt.
-- `options.disabled_tools` hides tools from the agent entirely — stronger than
-  prompting, since the agent never sees them.
+- `options.disabled_tools` hides tools from the agent entirely: the agent
+  never sees them.
 - Tool timeouts take a duration string (`45s`, `2m`, `1h30m`).
 
 ## Hooks

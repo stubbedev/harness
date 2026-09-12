@@ -362,21 +362,6 @@ const (
 	ExitBannerNone ExitBanner = "none"
 )
 
-type Permissions struct {
-	AllowedTools []string `json:"allowed_tools,omitempty" jsonschema:"description=List of tools that don't require permission prompts,example=bash,example=view"`
-	// Yolo skips every permission prompt. This fork defaults it to true;
-	// set permissions.yolo false in the config file
-	// to restore prompting. The --yolo flag forces it on regardless.
-	Yolo *bool `json:"yolo,omitempty" jsonschema:"description=Skip all permission prompts (yolo mode). This build defaults to true\\, set false to restore prompts,default=true"`
-}
-
-// YoloEnabled reports whether permission prompts are skipped. The nil
-// receiver and the unset pointer both mean enabled: this fork ships with
-// yolo mode on by default.
-func (p *Permissions) YoloEnabled() bool {
-	return p == nil || p.Yolo == nil || *p.Yolo
-}
-
 type TrailerStyle string
 
 const (
@@ -810,8 +795,6 @@ type Config struct {
 
 	Options *Options `json:"options,omitempty" jsonschema:"description=General application options"`
 
-	Permissions *Permissions `json:"permissions,omitempty" jsonschema:"description=Permission settings for tool usage"`
-
 	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
@@ -1022,6 +1005,7 @@ func AllToolNames() []string {
 func allToolNames() []string {
 	return []string{
 		"agent",
+		"batch",
 		"bash",
 		"harness_info",
 		"harness_logs",
@@ -1062,7 +1046,7 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 }
 
 func resolveReadOnlyTools(tools []string) []string {
-	readOnlyTools := []string{"glob", "grep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "sourcegraph", "view"}
+	readOnlyTools := []string{"batch", "glob", "grep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "sourcegraph", "view"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, readOnlyTools, true)
 }

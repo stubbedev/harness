@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"charm.land/fantasy"
-	"charm.land/x/vcr"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/message"
 )
@@ -253,7 +252,7 @@ func TestRequestTimeoutRunFinishMessage(t *testing.T) {
 
 	env := testEnv(t)
 	model := &timeoutOnlyModel{}
-	agent, err := coderAgent(vcr.NewRecorder(t), env, model, model)
+	agent, err := coderAgent(nil, env, model, model)
 	require.NoError(t, err)
 
 	session, err := env.sessions.Create(t.Context(), "timeout session")

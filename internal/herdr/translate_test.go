@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
@@ -49,22 +48,6 @@ func TestTranslateDomainRunComplete(t *testing.T) {
 	assert.Equal(t, RunComplete{SessionID: "s1"}, Translate(ev))
 }
 
-func TestTranslateDomainPermissionRequest(t *testing.T) {
-	t.Parallel()
-	ev := pubsub.Event[permission.PermissionRequest]{
-		Payload: permission.PermissionRequest{ToolName: "bash"},
-	}
-	assert.Equal(t, PermissionRequested{}, Translate(ev))
-}
-
-func TestTranslateDomainPermissionNotification(t *testing.T) {
-	t.Parallel()
-	ev := pubsub.Event[permission.PermissionNotification]{
-		Payload: permission.PermissionNotification{Granted: true},
-	}
-	assert.Equal(t, PermissionResolved{}, Translate(ev))
-}
-
 // Proto type translation.
 
 func TestTranslateProtoAssistantMessage(t *testing.T) {
@@ -89,22 +72,6 @@ func TestTranslateProtoRunComplete(t *testing.T) {
 		Payload: proto.RunComplete{SessionID: "s1"},
 	}
 	assert.Equal(t, RunComplete{SessionID: "s1"}, Translate(ev))
-}
-
-func TestTranslateProtoPermissionRequest(t *testing.T) {
-	t.Parallel()
-	ev := pubsub.Event[proto.PermissionRequest]{
-		Payload: proto.PermissionRequest{ToolName: "bash"},
-	}
-	assert.Equal(t, PermissionRequested{}, Translate(ev))
-}
-
-func TestTranslateProtoPermissionNotification(t *testing.T) {
-	t.Parallel()
-	ev := pubsub.Event[proto.PermissionNotification]{
-		Payload: proto.PermissionNotification{Granted: true},
-	}
-	assert.Equal(t, PermissionResolved{}, Translate(ev))
 }
 
 func TestTranslateProtoSummarizing(t *testing.T) {

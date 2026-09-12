@@ -47,41 +47,6 @@ func TestBasicLifecycle(t *testing.T) {
 	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
 }
 
-func TestPermissionBlockAndUnblock(t *testing.T) {
-	t.Parallel()
-	c := newTestClient()
-
-	// Start working.
-	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
-
-	// Permission request blocks.
-	c.HandleEvent(PermissionRequested{})
-	assert.Equal(t, []string{stateWorking, stateBlocked}, reportedStates(c))
-
-	// Permission granted returns to working (run still active).
-	c.HandleEvent(PermissionResolved{})
-	assert.Equal(t, []string{stateWorking, stateBlocked, stateWorking}, reportedStates(c))
-
-	// Run complete returns to idle.
-	c.HandleEvent(RunComplete{SessionID: "sess-1"})
-	assert.Equal(t, []string{stateWorking, stateBlocked, stateWorking, stateIdle}, reportedStates(c))
-}
-
-func TestPermissionBeforeAssistantMessage(t *testing.T) {
-	t.Parallel()
-	c := newTestClient()
-
-	// Permission request arrives before any assistant message.
-	// This can happen when tool calls fire before text output.
-	c.HandleEvent(PermissionRequested{})
-	assert.Equal(t, []string{stateBlocked}, reportedStates(c))
-
-	// Permission resolved should return to working, not idle,
-	// because the permission request implied a run was active.
-	c.HandleEvent(PermissionResolved{})
-	assert.Equal(t, []string{stateBlocked, stateWorking}, reportedStates(c))
-}
-
 func TestSessionIDPropagation(t *testing.T) {
 	t.Parallel()
 	c := newTestClient()
@@ -125,8 +90,6 @@ func TestNilClientSafe(t *testing.T) {
 	c.SetSessionID("s1")
 	c.HandleEvent(AssistantMessage{SessionID: "s1"})
 	c.HandleEvent(RunComplete{SessionID: "s1"})
-	c.HandleEvent(PermissionRequested{})
-	c.HandleEvent(PermissionResolved{})
 	c.HandleEvent(Summarizing{})
 }
 

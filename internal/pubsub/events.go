@@ -16,20 +16,18 @@ const (
 type PayloadType = string
 
 const (
-	PayloadTypeLSPEvent               PayloadType = "lsp_event"
-	PayloadTypeMCPEvent               PayloadType = "mcp_event"
-	PayloadTypePermissionRequest      PayloadType = "permission_request"
-	PayloadTypePermissionNotification PayloadType = "permission_notification"
-	PayloadTypeMessage                PayloadType = "message"
-	PayloadTypeSession                PayloadType = "session"
-	PayloadTypeFile                   PayloadType = "file"
-	PayloadTypeAgentEvent             PayloadType = "agent_event"
-	PayloadTypeConfigChanged          PayloadType = "config_changed"
-	PayloadTypeSkillsEvent            PayloadType = "skills_event"
-	PayloadTypeRunComplete            PayloadType = "run_complete"
-	PayloadTypeUpdateAvailable        PayloadType = "update_available"
-	PayloadTypeQuestionRequest        PayloadType = "question_batch_request"
-	PayloadTypeQuestionNotification   PayloadType = "question_batch_notification"
+	PayloadTypeLSPEvent             PayloadType = "lsp_event"
+	PayloadTypeMCPEvent             PayloadType = "mcp_event"
+	PayloadTypeMessage              PayloadType = "message"
+	PayloadTypeSession              PayloadType = "session"
+	PayloadTypeFile                 PayloadType = "file"
+	PayloadTypeAgentEvent           PayloadType = "agent_event"
+	PayloadTypeConfigChanged        PayloadType = "config_changed"
+	PayloadTypeSkillsEvent          PayloadType = "skills_event"
+	PayloadTypeRunComplete          PayloadType = "run_complete"
+	PayloadTypeUpdateAvailable      PayloadType = "update_available"
+	PayloadTypeQuestionRequest      PayloadType = "question_batch_request"
+	PayloadTypeQuestionNotification PayloadType = "question_batch_notification"
 )
 
 // Payload wraps a discriminated JSON payload with a type tag.

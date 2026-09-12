@@ -14,11 +14,9 @@ import (
 	"github.com/stubbedev/harness/internal/diff"
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/filetracker"
-	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/history"
 
 	"github.com/stubbedev/harness/internal/lsp"
-	"github.com/stubbedev/harness/internal/permission"
 )
 
 //go:embed write.md
@@ -27,12 +25,6 @@ var writeDescription string
 type WriteParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to write"`
 	Content  string `json:"content" description:"The content to write to the file"`
-}
-
-type WritePermissionsParams struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content,omitempty"`
-	NewContent string `json:"new_content,omitempty"`
 }
 
 type WriteResponseMetadata struct {
@@ -45,7 +37,6 @@ const WriteToolName = "write"
 
 func NewWriteTool(
 	lspManager *lsp.Manager,
-	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
 	workingDir string,
@@ -104,35 +95,6 @@ func NewWriteTool(
 				params.Content,
 				strings.TrimPrefix(filePath, workingDir),
 			)
-
-			p, err := permissions.Request(
-				ctx,
-				permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        fsext.PathOrPrefix(filePath, workingDir),
-					ToolCallID:  call.ID,
-					ToolName:    WriteToolName,
-					Action:      "write",
-					Description: fmt.Sprintf("Create file %s", filePath),
-					Params: WritePermissionsParams{
-						FilePath:   filePath,
-						OldContent: oldContent,
-						NewContent: params.Content,
-					},
-				},
-			)
-			if err != nil {
-				return fantasy.ToolResponse{}, err
-			}
-			if !p {
-				resp := NewPermissionDeniedResponse()
-				resp = fantasy.WithResponseMetadata(resp, WriteResponseMetadata{
-					Diff:      diff,
-					Additions: additions,
-					Removals:  removals,
-				})
-				return resp, nil
-			}
 
 			err = os.WriteFile(filePath, []byte(params.Content), 0o644)
 			if err != nil {

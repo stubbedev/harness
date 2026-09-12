@@ -27,7 +27,6 @@ func TestHarnessInfo_MinimalConfig(t *testing.T) {
 	require.NotContains(t, output, "[providers]")
 	require.NotContains(t, output, "[lsp]")
 	require.NotContains(t, output, "[mcp]")
-	require.NotContains(t, output, "[permissions]")
 	require.NotContains(t, output, "[tools]")
 }
 
@@ -148,33 +147,6 @@ func TestHarnessInfo_MCPStates(t *testing.T) {
 	filesystemIdx := strings.Index(output, "filesystem")
 	githubIdx := strings.Index(output, "github")
 	require.Less(t, filesystemIdx, githubIdx, "filesystem should appear before github")
-}
-
-func TestHarnessInfo_YoloMode(t *testing.T) {
-	t.Parallel()
-
-	cfg := config.NewTestStore(&config.Config{
-		Providers:   csync.NewMap[string, config.ProviderConfig](),
-		Permissions: &config.Permissions{},
-	})
-	cfg.Overrides().SkipPermissionRequests = true
-
-	output := buildHarnessInfo(cfg, nil, nil, nil, nil)
-	require.Contains(t, output, "[permissions]")
-	require.Contains(t, output, "mode = yolo")
-}
-
-func TestHarnessInfo_AllowedTools(t *testing.T) {
-	t.Parallel()
-
-	cfg := config.NewTestStore(&config.Config{
-		Providers:   csync.NewMap[string, config.ProviderConfig](),
-		Permissions: &config.Permissions{AllowedTools: []string{"edit:write", "bash"}},
-	})
-
-	output := buildHarnessInfo(cfg, nil, nil, nil, nil)
-	require.Contains(t, output, "[permissions]")
-	require.Contains(t, output, "allowed_tools = bash, edit:write")
 }
 
 func TestHarnessInfo_DisabledTools(t *testing.T) {
@@ -303,11 +275,7 @@ func TestHarnessInfo_DeterministicOrdering(t *testing.T) {
 	cfg := config.NewTestStore(&config.Config{
 		Providers: providers,
 		Options:   &config.Options{DisabledTools: []string{"z-tool", "a-tool"}},
-		Permissions: &config.Permissions{
-			AllowedTools: []string{"z-perm", "a-perm"},
-		},
 	})
-	cfg.Overrides().SkipPermissionRequests = true
 
 	// Test MCP ordering via writeMCP directly.
 	var mcpBuf strings.Builder
@@ -326,21 +294,18 @@ func TestHarnessInfo_DeterministicOrdering(t *testing.T) {
 	require.Less(t, middleIdx, zebraIdx)
 
 	require.Contains(t, output, "disabled = a-tool, z-tool")
-	require.Contains(t, output, "allowed_tools = a-perm, z-perm")
 }
 
 func TestHarnessInfo_EmptySectionsOmitted(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers:   csync.NewMap[string, config.ProviderConfig](),
-		Permissions: &config.Permissions{},
-		Options:     &config.Options{},
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Options:   &config.Options{},
 	})
 
 	output := buildHarnessInfo(cfg, nil, nil, nil, nil)
 	require.NotContains(t, output, "[tools]")
-	require.NotContains(t, output, "[permissions]")
 	require.NotContains(t, output, "[lsp]")
 	require.NotContains(t, output, "[mcp]")
 	require.NotContains(t, output, "[skills]")

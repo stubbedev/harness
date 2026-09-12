@@ -12,7 +12,6 @@ import (
 	"github.com/stubbedev/harness/internal/backend"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
@@ -54,29 +53,6 @@ func wrapEvent(ev any) *pubsub.Payload {
 				State:     proto.MCPState(e.Payload.State),
 				Error:     e.Payload.Error,
 				ToolCount: e.Payload.Counts.Tools,
-			},
-		})
-	case pubsub.Event[permission.PermissionRequest]:
-		return envelope(pubsub.PayloadTypePermissionRequest, pubsub.Event[proto.PermissionRequest]{
-			Type: e.Type,
-			Payload: proto.PermissionRequest{
-				ID:          e.Payload.ID,
-				SessionID:   e.Payload.SessionID,
-				ToolCallID:  e.Payload.ToolCallID,
-				ToolName:    e.Payload.ToolName,
-				Description: e.Payload.Description,
-				Action:      e.Payload.Action,
-				Path:        e.Payload.Path,
-				Params:      e.Payload.Params,
-			},
-		})
-	case pubsub.Event[permission.PermissionNotification]:
-		return envelope(pubsub.PayloadTypePermissionNotification, pubsub.Event[proto.PermissionNotification]{
-			Type: e.Type,
-			Payload: proto.PermissionNotification{
-				ToolCallID: e.Payload.ToolCallID,
-				Granted:    e.Payload.Granted,
-				Denied:     e.Payload.Denied,
 			},
 		})
 	case pubsub.Event[question.Request]:

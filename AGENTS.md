@@ -42,7 +42,6 @@ internal/
     migrations/                    Schema migrations
   lsp/                             LSP client manager, auto-discovery, on-demand startup
   ui/                              Bubble Tea v2 TUI (see internal/ui/AGENTS.md)
-  permission/                      Tool permission checking and allow-lists
   skills/                          Skill file discovery and loading
   shell/                           Bash command execution with background job support
   event/                           Telemetry (PostHog)
@@ -89,8 +88,7 @@ internal/
   independent of fantasy and agent — it takes inputs, runs commands,
   returns decisions. The `hookedTool` decorator in
   `internal/agent/hooked_tool.go` wraps tools at the coordinator level.
-  Hooks run before permission checks. See `HOOKS.md` for the user-facing
-  protocol.
+  See `HOOKS.md` for the user-facing protocol.
 - **CGO disabled**: builds with `CGO_ENABLED=0` and
   `GOEXPERIMENT=greenteagc`.
 
@@ -104,16 +102,15 @@ internal/
   - Update specific package:
     `go test ./internal/tui/components/core -update` (in this case,
     we're updating "core")
-- **Restamp VCR Cassettes**: `just restamp` (after editing a system prompt
-  template or a tool description). The agent cassettes in
-  `internal/agent/testdata` store the full request body, so any change to
-  `internal/agent/templates/*.md.tpl` or `internal/agent/tools/*.md*` makes
-  `TestCoderAgent` fail on a request mismatch. Restamping replays the recorded
-  responses unchanged and rewrites only our side of each request, so it needs
-  no API key. Use `just record` instead when the change should alter what the
-  model actually does.
+- **No API key is needed for any test**. `TestCoderAgent` drives a scripted
+  model (`internal/agent/scripted_model_test.go`) rather than a recorded
+  provider, so editing a prompt template or a tool description cannot
+  invalidate it. To add a case, script the turns the model should take and
+  assert on what the agent loop did with them.
 - **Lint**: `just lint-fix`
-- **Format**: `just fmt` (`gofumpt -w .`)
+- **Format**: `just fmt` (`golangci-lint fmt`). This applies the same gofumpt
+  `just lint` gates on, so formatting and linting can never disagree. Do not
+  reach for a standalone `gofumpt` binary - see **Formatting** below.
 - **Modernize**: `just modernize` (runs `modernize` which makes code
   simplifications)
 - **Dev**: `just dev` (runs with profiling enabled)
@@ -122,8 +119,8 @@ internal/
 
 - **Imports**: Use `goimports` formatting, group stdlib, external, internal
   packages.
-- **Formatting**: Use gofumpt (stricter than gofmt), enabled in
-  golangci-lint.
+- **Formatting**: gofumpt (stricter than gofmt), applied and enforced
+  through golangci-lint. Run it with `just fmt`.
 - **Naming**: Standard Go conventions — PascalCase for exported, camelCase
   for unexported.
 - **Types**: Prefer explicit types, use type aliases for clarity (e.g.,
@@ -176,12 +173,14 @@ func TestYourFunction(t *testing.T) {
 
 ## Formatting
 
-- ALWAYS format any Go code you write.
-  - First, try `gofumpt -w .`.
-  - If `gofumpt` is not available, use `goimports`.
-  - If `goimports` is not available, use `gofmt`.
-  - You can also use `just fmt` to run `gofumpt -w .` on the entire project,
-    as long as `gofumpt` is on the `PATH`.
+- ALWAYS format any Go code you write, with `just fmt`.
+  - A standalone `gofumpt` binary is version-coupled to the Go it was built
+    with, and neither direction is safe here. Built before this module's Go,
+    it fails with "method must have no type parameters" on
+    `internal/app/app.go` and formats nothing. Built after, it reformats
+    `internal/cmd/session.go` into a shape `just lint` rejects.
+  - `just fmt` goes through golangci-lint, which carries the gofumpt the
+    lint gate uses, so it is correct in both directions.
 
 ## Comments
 

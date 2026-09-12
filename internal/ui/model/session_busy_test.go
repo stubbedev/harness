@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stubbedev/harness/internal/agent/notify"
@@ -32,7 +31,6 @@ type countingWorkspace struct {
 
 	ready           bool
 	agentBusy       bool
-	yolo            bool
 	queued          []string
 	model           workspace.AgentModel
 	lspStates       map[string]workspace.LSPClientInfo
@@ -71,13 +69,6 @@ func (w *countingWorkspace) AgentQueuedPrompts(string) int {
 func (w *countingWorkspace) AgentQueuedPromptsList(string) []string {
 	w.queueListCalls++
 	return w.queued
-}
-
-func (w *countingWorkspace) PermissionSkipRequests() bool { w.permCalls++; return w.yolo }
-
-func (w *countingWorkspace) PermissionSetSkipRequests(skip bool) {
-	w.permSetCalls++
-	w.yolo = skip
 }
 
 func (w *countingWorkspace) AgentClearQueue(string) { w.clearQueueCalls++; w.queued = nil }
@@ -168,7 +159,6 @@ func pinTTLs(t *testing.T) {
 // invalidation (not startup staleness) can trigger refresh dispatches.
 func warmCaches(m *UI, busy bool) {
 	m.agentBusyCache.set(busy)
-	m.yoloCache.set(false)
 	m.agentReady = true
 	m.promptQueueCheckedAt = time.Now()
 	m.lspCheckedAt = time.Now()
@@ -229,7 +219,6 @@ func TestReadsNeverProbeWorkspace(t *testing.T) {
 
 	for range 10 {
 		m.isAgentBusy()
-		m.yoloModeCached()
 	}
 	require.Zero(t, ws.syncProbes(), "cache reads must never probe the workspace")
 }
@@ -477,60 +466,7 @@ func TestStaleParentTitleFetchDiscarded(t *testing.T) {
 	require.Equal(t, "green", m.subagentColor)
 }
 
-// TestToggleYoloWritesThroughCache: both yolo toggle paths share
-// toggleYoloMode, which must write the known new value through the cache —
-// no invalidation, no re-probe.
-func TestToggleYoloWritesThroughCache(t *testing.T) {
-	pinTTLs(t)
-
-	ws := &countingWorkspace{ready: true, yolo: false}
-	m := newBusyUI(ws)
-
-	got := m.toggleYoloMode()
-	require.True(t, got)
-	require.Equal(t, 1, ws.permSetCalls)
-	readsAfterToggle := ws.permCalls
-	require.Equal(t, 1, readsAfterToggle, "toggle reads the authoritative value exactly once")
-
-	require.True(t, m.yoloModeCached(), "the new value must be served from the cache")
-	require.True(t, m.yoloCache.fresh(busyCacheTTL), "write-through must stamp the cache fresh")
-	m.yoloModeCached()
-	require.Equal(t, readsAfterToggle, ws.permCalls, "reads after the toggle must not re-probe")
-
-	got = m.toggleYoloMode()
-	require.False(t, got)
-	require.False(t, m.yoloModeCached())
-}
-
 // TestLocalYoloToggleSupersedesInFlightProbe pins the generation bump in
-// toggleYoloMode: a busy/yolo probe dispatched before the toggle carries the
-// old generation. Without advancing busyFetchGen its stale result would land
-// with a still-matching generation and clobber the just-toggled value.
-func TestLocalYoloToggleSupersedesInFlightProbe(t *testing.T) {
-	pinTTLs(t)
-
-	ws := &countingWorkspace{ready: true, yolo: false}
-	m := newBusyUI(ws)
-	warmCaches(m, false)
-
-	// A busy/yolo probe carrying the pre-toggle generation is in flight.
-	m.busyFetchInFlight = true
-	staleGen := m.busyFetchGen
-
-	require.True(t, m.toggleYoloMode())
-	require.NotEqual(t, staleGen, m.busyFetchGen,
-		"toggle must advance the busy generation to supersede in-flight probes")
-	require.True(t, m.yoloModeCached(), "toggle must write the new value through the cache")
-
-	// The stale probe (old generation, old yolo=false) lands.
-	m.busyFetchInFlight = true
-	cmds := m.applyBusyState(busyStateMsg{gen: staleGen, yolo: false})
-	require.True(t, m.yoloModeCached(),
-		"stale probe must not overwrite the freshly toggled value")
-	require.NotEmpty(t, cmds, "stale probe must re-dispatch an authoritative refresh")
-	require.True(t, m.busyFetchInFlight, "re-dispatched refresh must be in flight")
-}
-
 // TestSendMessageSetsOptimisticBusy pins the esc-after-enter behavior:
 // submitting a prompt optimistically marks the agent busy so an immediate
 // esc routes to cancelAgent instead of reading a stale idle value and doing
@@ -900,37 +836,6 @@ func TestLSPEventRefreshIsOffThreadAndDeduped(t *testing.T) {
 }
 
 // TestRemoteYoloToggleUpdatesEditorPrompt pins the second fix: when an
-// asynchronous busy-state refresh reports a yolo mode different from the
-// cached one (a remote toggle), applyBusyState must update the textarea
-// prompt function too, not just the cache — otherwise the prompt icon/style
-// keeps rendering the old mode.
-func TestRemoteYoloToggleUpdatesEditorPrompt(t *testing.T) {
-	pinTTLs(t)
-
-	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
-	m.textarea.Focus()
-	m.textarea.SetWidth(40)
-	m.yoloCache.set(false)
-	m.setEditorPrompt(false)
-	normalPrompt := ansi.Strip(m.textarea.View())
-
-	// A remote toggle flips yolo on; delivered via an off-thread refresh.
-	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, yolo: true})
-	require.True(t, m.yoloModeCached(), "the refresh must write the new yolo value through the cache")
-	yoloPrompt := ansi.Strip(m.textarea.View())
-	require.NotEqual(t, normalPrompt, yoloPrompt,
-		"a remote yolo toggle must change the rendered editor prompt")
-	require.Contains(t, yoloPrompt, "Y",
-		"the yolo prompt icon must render after a remote toggle")
-
-	// Flipping back off must restore the normal prompt.
-	m.applyBusyState(busyStateMsg{gen: m.busyFetchGen, yolo: false})
-	require.False(t, m.yoloModeCached())
-	require.Equal(t, normalPrompt, ansi.Strip(m.textarea.View()),
-		"toggling yolo off must restore the normal editor prompt")
-}
-
 // TestAgentRetryingNotificationIsStatusOnly pins the retry visibility
 // contract: a TypeAgentRetrying notification must pin a status-bar
 // notice without disturbing the busy/queue caches. The turn is still

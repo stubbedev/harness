@@ -13,7 +13,6 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/oauth"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -52,7 +51,6 @@ type (
 	ActionToggleThinking          struct{}
 	ActionTogglePills             struct{}
 	ActionExternalEditor          struct{}
-	ActionToggleYoloMode          struct{}
 	ActionToggleNotifications     struct{}
 	ActionSelectNotificationStyle struct {
 		Style string
@@ -91,10 +89,6 @@ type (
 	// in the theme picker and should be persisted.
 	ActionSelectTheme struct {
 		Name string
-	}
-	ActionPermissionResponse struct {
-		Permission permission.PermissionRequest
-		Action     PermissionAction
 	}
 	// ActionRunCustomCommand is a message to run a custom command.
 	ActionRunCustomCommand struct {

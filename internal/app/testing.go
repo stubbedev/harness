@@ -6,30 +6,24 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stubbedev/harness/internal/agent/notify"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
 )
 
 // NewForTest constructs a minimal [App] suitable for in-process tests
-// that need a working event broker and permission service without
+// that need a working event broker and question service without
 // booting a real config, database, LSP, MCP, or agent coordinator.
 //
 // The returned App has:
 //
 //   - A live `events` broker that [App.SendEvent] publishes to and
 //     [App.Events] subscribes from.
-//   - A real [permission.Service] whose request and notification
-//     brokers are fanned into the events broker, so subscribers to
-//     [App.Events] observe the same permission events the production
-//     wiring would deliver to SSE clients.
 //   - An [App.agentNotifications] broker.
 //
 // The caller owns lifetime: cancel ctx (or call [App.Shutdown]) to
 // tear down the fan-in goroutines and the events broker.
 func NewForTest(ctx context.Context) *App {
 	app := &App{
-		Permissions:        permission.NewPermissionService("", false, nil),
 		Questions:          question.NewService(),
 		globalCtx:          ctx,
 		events:             pubsub.NewBroker[tea.Msg](),
@@ -41,10 +35,6 @@ func NewForTest(ctx context.Context) *App {
 
 	eventsCtx, cancel := context.WithCancel(ctx)
 	app.eventsCtx = eventsCtx
-	app.subscribeMustDeliver(eventsCtx, "permissions",
-		app.Permissions.Subscribe)
-	app.subscribeMustDeliver(eventsCtx, "permissions-notifications",
-		app.Permissions.SubscribeNotifications)
 	app.subscribeMustDeliver(eventsCtx, "question-batches",
 		app.Questions.Subscribe)
 	app.subscribeMustDeliver(eventsCtx, "question-notifications",

@@ -25,7 +25,6 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/oauth"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
@@ -334,71 +333,6 @@ func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.Selecte
 		return config.SelectedModel{}
 	}
 	return *model
-}
-
-// -- Permissions --
-
-func (w *ClientWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
-	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
-		Permission: proto.PermissionRequest{
-			ID:          perm.ID,
-			SessionID:   perm.SessionID,
-			ToolCallID:  perm.ToolCallID,
-			ToolName:    perm.ToolName,
-			Description: perm.Description,
-			Action:      perm.Action,
-			Path:        perm.Path,
-			Params:      perm.Params,
-		},
-		Action: proto.PermissionAllow,
-	})
-	return resolved
-}
-
-func (w *ClientWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
-	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
-		Permission: proto.PermissionRequest{
-			ID:          perm.ID,
-			SessionID:   perm.SessionID,
-			ToolCallID:  perm.ToolCallID,
-			ToolName:    perm.ToolName,
-			Description: perm.Description,
-			Action:      perm.Action,
-			Path:        perm.Path,
-			Params:      perm.Params,
-		},
-		Action: proto.PermissionAllowForSession,
-	})
-	return resolved
-}
-
-func (w *ClientWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
-	resolved, _ := w.client.GrantPermission(context.Background(), w.workspaceID(), proto.PermissionGrant{
-		Permission: proto.PermissionRequest{
-			ID:          perm.ID,
-			SessionID:   perm.SessionID,
-			ToolCallID:  perm.ToolCallID,
-			ToolName:    perm.ToolName,
-			Description: perm.Description,
-			Action:      perm.Action,
-			Path:        perm.Path,
-			Params:      perm.Params,
-		},
-		Action: proto.PermissionDeny,
-	})
-	return resolved
-}
-
-func (w *ClientWorkspace) PermissionSkipRequests() bool {
-	skip, err := w.client.GetPermissionsSkipRequests(context.Background(), w.workspaceID())
-	if err != nil {
-		return false
-	}
-	return skip
-}
-
-func (w *ClientWorkspace) PermissionSetSkipRequests(skip bool) {
-	_ = w.client.SetPermissionsSkipRequests(context.Background(), w.workspaceID(), skip)
 }
 
 // -- Questions --
@@ -989,7 +923,6 @@ func (w *ClientWorkspace) recreateArgs() proto.Workspace {
 		Path:     ws.Path,
 		DataDir:  ws.DataDir,
 		Debug:    ws.Debug,
-		YOLO:     ws.YOLO,
 		Channels: ws.Channels,
 		Env:      ws.Env,
 		Version:  version.Version,
@@ -1132,29 +1065,6 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 					Prompts:   e.Payload.PromptCount,
 					Resources: e.Payload.ResourceCount,
 				},
-			},
-		}
-	case pubsub.Event[proto.PermissionRequest]:
-		return pubsub.Event[permission.PermissionRequest]{
-			Type: e.Type,
-			Payload: permission.PermissionRequest{
-				ID:          e.Payload.ID,
-				SessionID:   e.Payload.SessionID,
-				ToolCallID:  e.Payload.ToolCallID,
-				ToolName:    e.Payload.ToolName,
-				Description: e.Payload.Description,
-				Action:      e.Payload.Action,
-				Path:        e.Payload.Path,
-				Params:      e.Payload.Params,
-			},
-		}
-	case pubsub.Event[proto.PermissionNotification]:
-		return pubsub.Event[permission.PermissionNotification]{
-			Type: e.Type,
-			Payload: permission.PermissionNotification{
-				ToolCallID: e.Payload.ToolCallID,
-				Granted:    e.Payload.Granted,
-				Denied:     e.Payload.Denied,
 			},
 		}
 	case pubsub.Event[proto.QuestionRequest]:

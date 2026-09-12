@@ -13,7 +13,6 @@ import (
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
-	"github.com/stubbedev/harness/internal/permission"
 )
 
 type ReplaceSymbolParams struct {
@@ -36,16 +35,8 @@ type ReplaceSymbolResponseMetadata struct {
 	Action     string `json:"action"`
 }
 
-// ReplaceSymbolPermissionsParams carries diff data for the permission dialog.
-type ReplaceSymbolPermissionsParams struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content"`
-	NewContent string `json:"new_content"`
-}
-
 func NewReplaceSymbolTool(
 	lspManager *lsp.Manager,
-	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
 ) fantasy.AgentTool {
@@ -104,7 +95,7 @@ func NewReplaceSymbolTool(
 				return fantasy.NewTextErrorResponse("symbol range exceeds file length"), nil
 			}
 
-			// Compute new content before permission so the dialog can show a diff.
+			// Compute the new content.
 			var newLines []string
 			switch action {
 			case "replace":
@@ -131,26 +122,6 @@ func NewReplaceSymbolTool(
 			newContent := strings.Join(newLines, "\n")
 
 			sessionID := GetSessionFromContext(ctx)
-			if sessionID != "" && permissions != nil {
-				granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					Path:        params.FilePath,
-					ToolName:    ReplaceSymbolToolName,
-					Description: fmt.Sprintf("%s symbol '%s' in %s", action, params.Symbol, params.FilePath),
-					Params: ReplaceSymbolPermissionsParams{
-						FilePath:   params.FilePath,
-						OldContent: string(content),
-						NewContent: newContent,
-					},
-				})
-				if err != nil {
-					return fantasy.ToolResponse{}, fmt.Errorf("permission request failed: %w", err)
-				}
-				if !granted {
-					return NewPermissionDeniedResponse(), nil
-				}
-			}
-
 			if files != nil && sessionID != "" {
 				if _, err := files.CreateVersion(ctx, sessionID, params.FilePath, string(content)); err != nil {
 					slog.Warn("Failed to create file version before replace", "path", params.FilePath, "error", err)

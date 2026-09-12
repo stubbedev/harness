@@ -30,8 +30,8 @@ buildGo127Module {
     "-X github.com/stubbedev/harness/internal/version.BuildID=${rev}"
   ];
 
-  # The test suite talks to recorded providers and spawns language servers;
-  # neither belongs in a sandboxed build.
+  # The test suite spawns language servers and PTYs; neither belongs in a
+  # sandboxed build.
   doCheck = false;
 
   nativeBuildInputs = [installShellFiles];

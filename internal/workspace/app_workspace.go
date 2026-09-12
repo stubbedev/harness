@@ -22,7 +22,6 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/oauth"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
@@ -246,28 +245,6 @@ func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
 
 func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
 	return w.app.GetDefaultSmallModel(providerID)
-}
-
-// -- Permissions --
-
-func (w *AppWorkspace) PermissionGrant(perm permission.PermissionRequest) bool {
-	return w.app.Permissions.Grant(perm)
-}
-
-func (w *AppWorkspace) PermissionGrantPersistent(perm permission.PermissionRequest) bool {
-	return w.app.Permissions.GrantPersistent(perm)
-}
-
-func (w *AppWorkspace) PermissionDeny(perm permission.PermissionRequest) bool {
-	return w.app.Permissions.Deny(perm)
-}
-
-func (w *AppWorkspace) PermissionSkipRequests() bool {
-	return w.app.Permissions.SkipRequests()
-}
-
-func (w *AppWorkspace) PermissionSetSkipRequests(skip bool) {
-	w.app.Permissions.SetSkipRequests(skip)
 }
 
 // -- Questions --

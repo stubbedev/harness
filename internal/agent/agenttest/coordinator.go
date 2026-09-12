@@ -13,7 +13,6 @@ import (
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/session"
 )
 
@@ -65,9 +64,8 @@ func NewCoordinator(
 	cfg.Config().Agents[config.AgentCoder] = coderCfg
 
 	return agent.NewCoordinator(ctx, agent.CoordinatorOptions{
-		Config:      cfg,
-		Sessions:    sessions,
-		Messages:    messages,
-		Permissions: permission.NewPermissionService(workingDir, true, nil),
+		Config:   cfg,
+		Sessions: sessions,
+		Messages: messages,
 	})
 }

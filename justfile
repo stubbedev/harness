@@ -1,6 +1,6 @@
 # Harness dev tasks.
-# `just check` mirrors the CI gates; `just restamp` rewrites recorded
-# request bodies after prompt/tool edits (no API key needed).
+# `just check` mirrors the CI gates. No task here needs an API key: the
+# agent tests drive a scripted model rather than a recorded provider.
 
 # The build is pure Go — the SQLite driver needs no cgo — and greenteagc is
 # what release builds use, so local builds match.
@@ -47,8 +47,14 @@ install:
     git fetch --tags
     go install "{{ ldflags }}" -v .
 
+# Format the tree with the same gofumpt `just lint` gates on, so the two
+# can never disagree. A standalone `gofumpt` binary is version-coupled to
+# the Go it was built with: one built before this module's Go cannot parse
+# the generic methods in internal/app, and one built after formats
+# internal/cmd/session.go differently than the linter accepts. Going
+# through golangci-lint sidesteps both.
 fmt:
-    gofumpt -w .
+    GOEXPERIMENT= golangci-lint fmt --config=".golangci.yml"
 
 # Format the stats page assets.
 fmt-html:
@@ -120,19 +126,6 @@ deps:
     GOPROXY=direct GONOSUMDB='charm.land/*' go get charm.land/fantasy@latest
     GOPROXY=direct GONOSUMDB='charm.land/*' go get charm.land/catwalk@latest
     go mod tidy
-
-# Run after editing a prompt template or tool description; needs no API key.
-# Re-record with `just record` when the model's side of the conversation
-# must change.
-# Rewrite VCR cassette request bodies from the current prompts and tools.
-restamp:
-    go test ./internal/agent -run TestCoderAgent -count=1 -restamp
-
-# Needs a key for whichever provider the cassettes target.
-# Re-record all VCR cassettes against the live provider.
-record:
-    rm -r internal/agent/testdata
-    go test -v -count=1 -timeout=1h ./internal/agent
 
 # Update golden snapshot files after intentional TUI output changes.
 update-golden:

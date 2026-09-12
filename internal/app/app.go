@@ -33,7 +33,6 @@ import (
 	"github.com/stubbedev/harness/internal/log"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
@@ -57,7 +56,6 @@ type App struct {
 	Sessions    session.Service
 	Messages    message.Service
 	History     history.Service
-	Permissions permission.Service
 	Questions   question.Service
 	FileTracker filetracker.Service
 
@@ -104,17 +102,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
 	cfg := store.Config()
-	skipPermissionsRequests := store.Overrides().SkipPermissionRequests
-	var allowedTools []string
-	if cfg.Permissions != nil && cfg.Permissions.AllowedTools != nil {
-		allowedTools = cfg.Permissions.AllowedTools
-	}
-
 	app := &App{
 		Sessions:    sessions,
 		Messages:    messages,
 		History:     files,
-		Permissions: permission.NewPermissionService(store.WorkingDir(), skipPermissionsRequests, allowedTools),
 		Questions:   question.NewService(),
 		FileTracker: filetracker.NewService(q),
 		LSPManager:  lsp.NewManager(store),
@@ -159,15 +150,13 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// blocks for the in-flight init instead of racing the goroutine and
 	// returning before any MCP tools register.
 	mcp.ArmInit()
-	go mcp.Initialize(ctx, app.Permissions, store)
+	go mcp.Initialize(ctx, store)
 
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
 	herdr.BridgeLocal(ctx, app.herdrClient, herdr.BridgeSources{
-		PermRequests:      app.Permissions,
-		PermNotifications: app.Permissions,
-		RunCompletions:    app.runCompletions,
-		Messages:          app.Messages,
+		RunCompletions: app.runCompletions,
+		Messages:       app.Messages,
 	})
 
 	// Release the shared database connection on shutdown. The pool
@@ -388,10 +377,6 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 			return err
 		}
 	}
-
-	// Automatically approve all permission requests for this non-interactive
-	// session.
-	app.Permissions.AutoApproveSession(sess.ID)
 
 	// Report session identity to herdr.
 	app.ReportCurrentSession(sess.ID)
@@ -654,8 +639,6 @@ func (app *App) setupEvents() {
 	app.eventsCtx = ctx
 	app.subscribe(ctx, "sessions", app.Sessions.Subscribe)
 	app.subscribe(ctx, "messages", app.Messages.Subscribe)
-	app.subscribeMustDeliver(ctx, "permissions", app.Permissions.Subscribe)
-	app.subscribeMustDeliver(ctx, "permissions-notifications", app.Permissions.SubscribeNotifications)
 	app.subscribeMustDeliver(ctx, "question-batches", app.Questions.Subscribe)
 	app.subscribeMustDeliver(ctx, "question-notifications", app.Questions.SubscribeNotifications)
 	app.subscribe(ctx, "history", app.History.Subscribe)
@@ -753,7 +736,6 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Config:       app.config,
 		Sessions:     app.Sessions,
 		Messages:     app.Messages,
-		Permissions:  app.Permissions,
 		Questions:    app.Questions,
 		History:      app.History,
 		FileTracker:  app.FileTracker,

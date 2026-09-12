@@ -463,23 +463,18 @@ func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 
 	originalEnv := []string{"FOO=bar"}
 	argsA := protoWS(cwd, dataDir, uuid.New().String())
-	argsA.YOLO = true
 	argsA.Env = originalEnv
-	wsA, protoA, err := b.CreateWorkspace(argsA)
+	_, protoA, err := b.CreateWorkspace(argsA)
 	require.NoError(t, err)
-	require.True(t, protoA.YOLO)
 	require.Equal(t, originalEnv, protoA.Env)
 
 	argsB := protoWS(cwd, dataDir, uuid.New().String())
-	argsB.YOLO = false
 	argsB.Debug = true
 	argsB.Env = []string{"BAZ=qux"}
 	_, protoB, err := b.CreateWorkspace(argsB)
 	require.NoError(t, err)
 	require.Equal(t, protoA.ID, protoB.ID)
-	require.True(t, protoB.YOLO, "first wins: YOLO must remain true")
 	require.Equal(t, originalEnv, protoB.Env, "proto must carry the originating client's Env")
-	require.Equal(t, wsA.Cfg.Overrides().SkipPermissionRequests, true)
 }
 
 // TestPathDedupe_Symlink confirms two paths that resolve to the same
@@ -697,14 +692,6 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 		mutate func(*proto.Workspace)
 	}{
 		{
-			// Yolo defaults to on in this build, so the flag alone cannot
-			// produce an effective mismatch; opt out in config first to
-			// make the differing flag observable again.
-			name:   "yolo",
-			config: "permissions:\n  yolo: false\n",
-			mutate: func(p *proto.Workspace) { p.YOLO = true },
-		},
-		{
 			name:   "debug",
 			mutate: func(p *proto.Workspace) { p.Debug = true },
 		},
@@ -737,7 +724,6 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 			wsA, _, err := b.CreateWorkspace(argsA)
 			require.NoError(t, err)
 			originalDebug := wsA.Cfg.Config().Options.Debug
-			originalYOLO := wsA.Cfg.Overrides().SkipPermissionRequests
 
 			argsB := protoWS(cwd, dataDir, uuid.New().String())
 			argsB.Env = []string{"FOO=bar"} // identical by default
@@ -750,8 +736,7 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 				"Workspace flag mismatch on duplicate create",
 				"expected debug log for mismatching %s", tc.name,
 			)
-			// Existing workspace's YOLO and Debug must not change.
-			require.Equal(t, originalYOLO, wsA.Cfg.Overrides().SkipPermissionRequests, "YOLO must be immutable on first-wins")
+			// The existing workspace.s Debug must not change.
 			require.Equal(t, originalDebug, wsA.Cfg.Config().Options.Debug, "Debug must be immutable on first-wins")
 		})
 	}

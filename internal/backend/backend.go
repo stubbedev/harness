@@ -417,9 +417,6 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
 	}
 
-	// Yolo defaults to true in this fork; the client flag forces it on
-	// but never turns a config-enabled yolo off.
-	cfg.Overrides().SkipPermissionRequests = args.YOLO || cfg.Config().Permissions.YoloEnabled()
 	cfg.Overrides().EnabledChannels = args.Channels
 
 	if err := createDotHarnessDir(cfg.Config().Options.DataDirectory); err != nil {
@@ -1078,7 +1075,6 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 	out := proto.Workspace{
 		ID:       ws.ID,
 		Path:     ws.Path,
-		YOLO:     ws.Cfg.Overrides().SkipPermissionRequests,
 		Channels: ws.Cfg.Overrides().EnabledChannels,
 		DataDir:  cfg.Options.DataDirectory,
 		Debug:    cfg.Options.Debug,
@@ -1103,15 +1099,8 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 // while the first set one will still log the mismatch.
 func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 	existingCfg := existing.Cfg.Config()
-	existingYOLO := existing.Cfg.Overrides().SkipPermissionRequests
-	// Fold the config default into the requested side too so the
-	// comparison is between effective yolo states, not raw flags; with
-	// this build's yolo-on default the flag alone must not look like a
-	// mismatch when the effective mode is identical.
-	requestedYOLO := args.YOLO || existingCfg.Permissions.YoloEnabled()
 	existingChannels := existing.Cfg.Overrides().EnabledChannels
-	if existingYOLO == requestedYOLO &&
-		existingCfg.Options.Debug == args.Debug &&
+	if existingCfg.Options.Debug == args.Debug &&
 		existingCfg.Options.DataDirectory == args.DataDir &&
 		stringSlicesEqual(existing.Env, args.Env) &&
 		stringSlicesEqual(existingChannels, args.Channels) {
@@ -1121,8 +1110,6 @@ func logFirstWinsMismatch(existing *Workspace, args proto.Workspace) {
 		"Workspace flag mismatch on duplicate create; first wins",
 		"workspace_id", existing.ID,
 		"path", existing.Path,
-		"existing_yolo", existingYOLO,
-		"requested_yolo", args.YOLO,
 		"existing_debug", existingCfg.Options.Debug,
 		"requested_debug", args.Debug,
 		"existing_data_dir", existingCfg.Options.DataDirectory,

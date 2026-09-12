@@ -18,7 +18,6 @@ import (
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/fsext"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/shell"
 	"github.com/stubbedev/harness/internal/term"
@@ -33,17 +32,6 @@ type BashParams struct {
 	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory the terminal session was opened in; the session itself tracks cd"`
 	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in a detached background shell. Use job_output to read the output later. Prefer this only for servers and watchers; everything else belongs in the terminal session."`
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait once the command goes idle before returning it as still running (default: 60). Output, CPU or memory activity keeps the wait going, so this only ends a call that has genuinely stalled; hard ceiling 15 minutes"`
-}
-
-type BashPermissionsParams struct {
-	Description         string `json:"description"`
-	Command             string `json:"command"`
-	Input               string `json:"input"`
-	Keys                string `json:"keys"`
-	Resize              string `json:"resize"`
-	WorkingDir          string `json:"working_dir"`
-	RunInBackground     bool   `json:"run_in_background"`
-	AutoBackgroundAfter int    `json:"auto_background_after"`
 }
 
 type BashResponseMetadata struct {
@@ -214,7 +202,7 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(permissions permission.Service, workingDir string, attribution *config.Attribution, modelID string, questions question.Service) fantasy.AgentTool {
+func NewBashTool(workingDir string, attribution *config.Attribution, modelID string, questions question.Service) fantasy.AgentTool {
 	// The synchronous execution path runs in persistent terminal
 	// sessions (see pty.go): a real PTY whose shell state and sudo
 	// credential survive across calls, with a second session opened on
@@ -227,49 +215,6 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
-
-			// Polling the terminal and resizing it change nothing, so
-			// they never ask for permission; everything that reaches the
-			// shell - a command, keystrokes, named keys - does.
-			permCommand := cmp.Or(params.Command, params.Input, params.Keys)
-			isSafeReadOnly := permCommand == ""
-			cmdLower := strings.ToLower(permCommand)
-
-			if !containsCommandChaining(permCommand) {
-				for _, safe := range safeCommands {
-					if strings.HasPrefix(cmdLower, safe) {
-						if len(cmdLower) == len(safe) || cmdLower[len(safe)] == ' ' || cmdLower[len(safe)] == '-' {
-							isSafeReadOnly = true
-							break
-						}
-					}
-				}
-			}
-
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for executing shell command")
-			}
-			if !isSafeReadOnly {
-				p, err := permissions.Request(
-					ctx,
-					permission.CreatePermissionRequest{
-						SessionID:   sessionID,
-						Path:        execWorkingDir,
-						ToolCallID:  call.ID,
-						ToolName:    BashToolName,
-						Action:      "execute",
-						Description: fmt.Sprintf("Execute command: %s", permCommand),
-						Params:      BashPermissionsParams(params),
-					},
-				)
-				if err != nil {
-					return fantasy.ToolResponse{}, err
-				}
-				if !p {
-					return NewPermissionDeniedResponse(), nil
-				}
-			}
 
 			// If explicitly requested as background, start immediately with detached context
 			if params.RunInBackground {

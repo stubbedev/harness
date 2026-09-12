@@ -19,7 +19,6 @@ import (
 	"github.com/stubbedev/harness/internal/history"
 
 	"github.com/stubbedev/harness/internal/lsp"
-	"github.com/stubbedev/harness/internal/permission"
 )
 
 type EditParams struct {
@@ -27,12 +26,6 @@ type EditParams struct {
 	OldString  string `json:"old_string" description:"The text to replace"`
 	NewString  string `json:"new_string" description:"The text to replace it with"`
 	ReplaceAll bool   `json:"replace_all,omitempty" description:"Replace all occurrences of old_string (default false)"`
-}
-
-type EditPermissionsParams struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content,omitempty"`
-	NewContent string `json:"new_content,omitempty"`
 }
 
 type EditResponseMetadata struct {
@@ -49,7 +42,6 @@ var editDescription string
 
 type editContext struct {
 	ctx         context.Context
-	permissions permission.Service
 	files       history.Service
 	filetracker filetracker.Service
 	workingDir  string
@@ -57,7 +49,6 @@ type editContext struct {
 
 func NewEditTool(
 	lspManager *lsp.Manager,
-	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
 	workingDir string,
@@ -75,7 +66,7 @@ func NewEditTool(
 			var response fantasy.ToolResponse
 			var err error
 
-			editCtx := editContext{ctx, permissions, files, filetracker, workingDir}
+			editCtx := editContext{ctx, files, filetracker, workingDir}
 
 			if params.OldString == "" {
 				response, err = createNewFile(editCtx, params.FilePath, params.NewString, call)
@@ -130,35 +121,6 @@ func createNewFile(edit editContext, filePath, content string, call fantasy.Tool
 		content,
 		strings.TrimPrefix(filePath, edit.workingDir),
 	)
-	p, err := edit.permissions.Request(
-		edit.ctx,
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Create file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: "",
-				NewContent: content,
-			},
-		},
-	)
-	if err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	if !p {
-		resp := NewPermissionDeniedResponse()
-		resp = fantasy.WithResponseMetadata(resp, EditResponseMetadata{
-			OldContent: "",
-			NewContent: content,
-			Additions:  additions,
-			Removals:   removals,
-		})
-		return resp, nil
-	}
 
 	err = os.WriteFile(filePath, []byte(content), 0o644)
 	if err != nil {
@@ -331,36 +293,6 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		strings.TrimPrefix(filePath, edit.workingDir),
 	)
 
-	p, err := edit.permissions.Request(
-		edit.ctx,
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Delete content from file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: oldContent,
-				NewContent: newContent,
-			},
-		},
-	)
-	if err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	if !p {
-		resp := NewPermissionDeniedResponse()
-		resp = fantasy.WithResponseMetadata(resp, EditResponseMetadata{
-			OldContent: oldContent,
-			NewContent: newContent,
-			Additions:  additions,
-			Removals:   removals,
-		})
-		return resp, nil
-	}
-
 	writeContent := newContent
 	if isCrlf {
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
@@ -403,36 +335,6 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		result,
 		strings.TrimPrefix(filePath, edit.workingDir),
 	)
-
-	p, err := edit.permissions.Request(
-		edit.ctx,
-		permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			Path:        fsext.PathOrPrefix(filePath, edit.workingDir),
-			ToolCallID:  call.ID,
-			ToolName:    EditToolName,
-			Action:      "write",
-			Description: fmt.Sprintf("Replace content in file %s", filePath),
-			Params: EditPermissionsParams{
-				FilePath:   filePath,
-				OldContent: oldContent,
-				NewContent: result,
-			},
-		},
-	)
-	if err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	if !p {
-		resp := NewPermissionDeniedResponse()
-		resp = fantasy.WithResponseMetadata(resp, EditResponseMetadata{
-			OldContent: oldContent,
-			NewContent: result,
-			Additions:  additions,
-			Removals:   removals,
-		})
-		return resp, nil
-	}
 
 	writeContent := result
 	if isCrlf {

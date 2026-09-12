@@ -19,7 +19,6 @@ import (
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/lsp"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/skills"
 )
 
@@ -47,12 +46,6 @@ type ViewParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to read"`
 	Offset   int    `json:"offset,omitempty" description:"The line number to start reading from (0-based)"`
 	Limit    int    `json:"limit,omitempty" description:"The number of lines to read (defaults to 200)"`
-}
-
-type ViewPermissionsParams struct {
-	FilePath string `json:"file_path"`
-	Offset   int    `json:"offset"`
-	Limit    int    `json:"limit"`
 }
 
 type ViewResourceType string
@@ -88,7 +81,6 @@ func (e contentTooLargeError) Error() string {
 
 func NewViewTool(
 	lspManager *lsp.Manager,
-	permissions permission.Service,
 	filetracker filetracker.Service,
 	skillTracker *skills.Tracker,
 	workingDir string,
@@ -111,46 +103,16 @@ func NewViewTool(
 			// Handle relative paths
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
-			// Check if file is outside working directory and request permission if needed
-			absWorkingDir, err := filepath.Abs(workingDir)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error resolving working directory: %w", err)
-			}
-
 			absFilePath, err := filepath.Abs(filePath)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error resolving file path: %w", err)
 			}
 
-			relPath, err := filepath.Rel(absWorkingDir, absFilePath)
-			isOutsideWorkDir := err != nil || strings.HasPrefix(relPath, "..")
 			isSkillFile := isInSkillsPath(absFilePath, skillsPaths)
 
 			sessionID := GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for accessing files outside working directory")
-			}
-
-			// Request permission for files outside working directory, unless it's a skill file.
-			if isOutsideWorkDir && !isSkillFile {
-				granted, permReqErr := permissions.Request(
-					ctx,
-					permission.CreatePermissionRequest{
-						SessionID:   sessionID,
-						Path:        absFilePath,
-						ToolCallID:  call.ID,
-						ToolName:    ViewToolName,
-						Action:      "read",
-						Description: fmt.Sprintf("Read file outside working directory: %s", absFilePath),
-						Params:      ViewPermissionsParams(params),
-					},
-				)
-				if permReqErr != nil {
-					return fantasy.ToolResponse{}, permReqErr
-				}
-				if !granted {
-					return NewPermissionDeniedResponse(), nil
-				}
+				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for reading files")
 			}
 
 			// Check if file exists

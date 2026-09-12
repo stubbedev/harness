@@ -49,7 +49,6 @@ func buildHarnessInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkill
 	writeMCP(&b, mcp.GetStates(), cfg)
 	writeSkills(&b, allSkills, activeSkills, skillTracker, cfg)
 	writeHooks(&b, cfg)
-	writePermissions(&b, cfg)
 	writeDisabledTools(&b, cfg)
 	writeOptions(&b, cfg)
 	writeAttribution(&b, cfg)
@@ -343,29 +342,6 @@ func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*
 	fmt.Fprintf(b, "loaded_this_session = %d/%d\n", tracker.LoadedCount(), len(activeSkills))
 	for _, e := range entries {
 		fmt.Fprintf(b, "%s = %s, %s\n", e.name, e.origin, e.state)
-	}
-	b.WriteString("\n")
-}
-
-func writePermissions(b *strings.Builder, cfg *config.ConfigStore) {
-	c := cfg.Config()
-	overrides := cfg.Overrides()
-
-	if c.Permissions == nil {
-		if !overrides.SkipPermissionRequests {
-			return
-		}
-	} else if !overrides.SkipPermissionRequests && len(c.Permissions.AllowedTools) == 0 {
-		return
-	}
-	b.WriteString("[permissions]\n")
-	if overrides.SkipPermissionRequests {
-		b.WriteString("mode = yolo\n")
-	}
-	if c.Permissions != nil && len(c.Permissions.AllowedTools) > 0 {
-		sorted := slices.Clone(c.Permissions.AllowedTools)
-		slices.Sort(sorted)
-		fmt.Fprintf(b, "allowed_tools = %s\n", strings.Join(sorted, ", "))
 	}
 	b.WriteString("\n")
 }

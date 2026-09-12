@@ -18,7 +18,6 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/oauth"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
@@ -158,21 +157,6 @@ type Workspace interface {
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
 	GetDefaultSmallModel(providerID string) config.SelectedModel
-
-	// Permissions
-	//
-	// PermissionGrant, PermissionGrantPersistent, and PermissionDeny
-	// return true if the call resolved the pending request and false if
-	// it had already been resolved by another subscriber (or is no
-	// longer pending). A false return is not an error; the modal can
-	// still close locally because the resolution will arrive via the
-	// PermissionNotification event stream regardless of which client
-	// won the race.
-	PermissionGrant(perm permission.PermissionRequest) bool
-	PermissionGrantPersistent(perm permission.PermissionRequest) bool
-	PermissionDeny(perm permission.PermissionRequest) bool
-	PermissionSkipRequests() bool
-	PermissionSetSkipRequests(skip bool)
 
 	// Questions
 	//

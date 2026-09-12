@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/hooks"
-	"github.com/stubbedev/harness/internal/permission"
 )
 
 // fakeTool records the context it was invoked with so tests can assert on
@@ -44,59 +43,6 @@ func newRunner(t *testing.T, cmd string) *hooks.Runner {
 	}
 	require.NoError(t, cfg.ValidateHooks())
 	return hooks.NewRunner(cfg.Hooks[hooks.EventPreToolUse], t.TempDir(), t.TempDir())
-}
-
-func TestHookedTool_AllowStampsHookApproval(t *testing.T) {
-	t.Parallel()
-
-	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
-	runner := newRunner(t, `echo '{"decision":"allow"}'`)
-	tool := newHookedTool(inner, runner)
-
-	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-1", Name: "view"})
-	require.NoError(t, err)
-	require.True(t, inner.called, "inner tool should have run")
-
-	// The inner tool's permission service can now treat call-1 as pre-approved.
-	svc := permission.NewPermissionService(t.TempDir(), false, nil)
-	granted, err := svc.Request(inner.gotCtx, permission.CreatePermissionRequest{
-		SessionID:  "s1",
-		ToolCallID: "call-1",
-		ToolName:   "view",
-		Action:     "read",
-		Path:       t.TempDir(),
-	})
-	require.NoError(t, err)
-	require.True(t, granted, "hook allow should bypass the permission prompt")
-}
-
-func TestHookedTool_SilentDoesNotStampApproval(t *testing.T) {
-	t.Parallel()
-
-	inner := &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}
-	runner := newRunner(t, `exit 0`) // no stdout, no decision
-	tool := newHookedTool(inner, runner)
-
-	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-2", Name: "view"})
-	require.NoError(t, err)
-	require.True(t, inner.called)
-
-	// With no hook opinion, a fresh permission request has nothing stamped
-	// and must fall through to the normal flow. We verify by checking that
-	// the context does not look pre-approved for this call ID: sending a
-	// request that no subscriber resolves will block until cancelled.
-	svc := permission.NewPermissionService(t.TempDir(), false, nil)
-	ctx, cancel := context.WithCancel(inner.gotCtx)
-	cancel()
-	granted, err := svc.Request(ctx, permission.CreatePermissionRequest{
-		SessionID:  "s1",
-		ToolCallID: "call-2",
-		ToolName:   "view",
-		Action:     "read",
-		Path:       t.TempDir(),
-	})
-	require.Error(t, err, "no approval stamped => request should reach the prompt path")
-	require.False(t, granted)
 }
 
 func TestHookedTool_DenySkipsInnerTool(t *testing.T) {

@@ -199,7 +199,6 @@ type sessionAgent struct {
 	autoSummarizeRatio   float64
 	autoSummarizeBuffer  int64
 	maxRetries           *int
-	isYolo               bool
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
 
@@ -255,7 +254,6 @@ type SessionAgentOptions struct {
 	AutoSummarizeRatio   float64
 	AutoSummarizeBuffer  int64
 	MaxRetries           *int
-	IsYolo               bool
 	Sessions             session.Service
 	Messages             message.Service
 	Tools                []fantasy.AgentTool
@@ -280,7 +278,6 @@ func NewSessionAgent(
 		autoSummarizeBuffer:  opts.AutoSummarizeBuffer,
 		maxRetries:           opts.MaxRetries,
 		tools:                csync.NewSliceFrom(opts.Tools),
-		isYolo:               opts.IsYolo,
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),

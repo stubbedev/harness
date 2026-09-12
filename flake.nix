@@ -21,6 +21,18 @@
           inherit system;
           config.allowUnfree = true;
         };
+        # A Go tool can only parse the language version of the Go it was
+        # built with. nixpkgs already builds golangci-lint and gopls with
+        # go_1_27, so they read this module's generic methods.
+        #
+        # A standalone gofumpt is deliberately absent from the shell below.
+        # nixpkgs still builds it with go_1_26, where it cannot parse
+        # internal/app/app.go at all; and the release it packages (v0.12.0)
+        # lays out internal/cmd/session.go differently than the v0.11.0
+        # golangci-lint vendors and gates on. Two formatters in one shell is
+        # the disagreement, not the cure: formatting goes through `just fmt`,
+        # which runs the gate's own copy.
+
         rev = self.shortRev or self.dirtyShortRev or "unknown";
         # Nix has no version to read from the source tree, so builds from a
         # checkout are stamped with the commit date and hash. Tagged releases
@@ -42,10 +54,10 @@
             # Go toolchain
             go_1_27
 
-            # Development tools
+            # Development tools. gopls and golangci-lint are built with
+            # go_1_27 by nixpkgs, so they parse what the compiler accepts.
             gopls # Go language server
-            golangci-lint # Linter
-            gofumpt # Formatter (stricter than gofmt)
+            golangci-lint # Linter, and the formatter behind `just fmt`
             just # Task runner
             delve # Go debugger
 

@@ -52,18 +52,6 @@ type RunComplete struct {
 
 func (RunComplete) herdrEvent() {}
 
-// PermissionRequested indicates the agent is waiting for user approval.
-// Transitions to blocked.
-type PermissionRequested struct{}
-
-func (PermissionRequested) herdrEvent() {}
-
-// PermissionResolved indicates a permission decision was made.
-// Transitions back to working if a run is active, idle otherwise.
-type PermissionResolved struct{}
-
-func (PermissionResolved) herdrEvent() {}
-
 // Summarizing indicates the agent is compacting context. Transitions
 // to working if not already active.
 type Summarizing struct{}
@@ -196,10 +184,6 @@ func (c *Client) HandleEvent(ev Event) {
 		c.onAssistantMessage(e.SessionID)
 	case RunComplete:
 		c.onRunComplete(e.SessionID)
-	case PermissionRequested:
-		c.onPermissionRequest()
-	case PermissionResolved:
-		c.onPermissionResolved()
 	case Summarizing:
 		c.onSummarizing()
 	}
@@ -236,28 +220,6 @@ func (c *Client) onRunComplete(sessionID string) {
 		c.sessionID = sessionID
 	}
 	c.reportLocked(stateIdle)
-}
-
-func (c *Client) onPermissionRequest() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	// A permission request implies a run is active, even if no
-	// assistant message has arrived yet (e.g. tool calls that fire
-	// before any text output).
-	if !c.runActive {
-		c.runActive = true
-	}
-	c.reportLocked(stateBlocked)
-}
-
-func (c *Client) onPermissionResolved() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.runActive {
-		c.reportLocked(stateWorking)
-	} else {
-		c.reportLocked(stateIdle)
-	}
 }
 
 func (c *Client) onSummarizing() {

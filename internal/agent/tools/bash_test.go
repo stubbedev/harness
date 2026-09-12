@@ -11,37 +11,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/permission"
-	"github.com/stubbedev/harness/internal/pubsub"
 )
-
-type mockBashPermissionService struct {
-	*pubsub.Broker[permission.PermissionRequest]
-}
-
-func (m *mockBashPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
-	return true, nil
-}
-
-func (m *mockBashPermissionService) Grant(req permission.PermissionRequest) bool { return true }
-
-func (m *mockBashPermissionService) Deny(req permission.PermissionRequest) bool { return true }
-
-func (m *mockBashPermissionService) GrantPersistent(req permission.PermissionRequest) bool {
-	return true
-}
-
-func (m *mockBashPermissionService) AutoApproveSession(sessionID string) {}
-
-func (m *mockBashPermissionService) SetSkipRequests(skip bool) {}
-
-func (m *mockBashPermissionService) SkipRequests() bool {
-	return false
-}
-
-func (m *mockBashPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
-	return make(<-chan pubsub.Event[permission.PermissionNotification])
-}
 
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	requireTerminalSession(t)
@@ -94,91 +64,9 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.Contains(t, resp.Content, "after")
 }
 
-type recordingPermissionService struct {
-	*pubsub.Broker[permission.PermissionRequest]
-	requestCount int
-	allow        bool
-}
-
-func (m *recordingPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
-	m.requestCount++
-	return m.allow, nil
-}
-
-func (m *recordingPermissionService) Grant(req permission.PermissionRequest) bool { return true }
-
-func (m *recordingPermissionService) Deny(req permission.PermissionRequest) bool { return true }
-
-func (m *recordingPermissionService) GrantPersistent(req permission.PermissionRequest) bool {
-	return true
-}
-
-func (m *recordingPermissionService) AutoApproveSession(sessionID string) {}
-
-func (m *recordingPermissionService) SetSkipRequests(skip bool) {}
-
-func (m *recordingPermissionService) SkipRequests() bool {
-	return false
-}
-
-func (m *recordingPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
-	return make(<-chan pubsub.Event[permission.PermissionNotification])
-}
-
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
-	permissions := &mockBashPermissionService{Broker: pubsub.NewBroker[permission.PermissionRequest]()}
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(permissions, workingDir, attribution, "test-model", nil)
-}
-
-func newBashToolWithRecordingPerms(workingDir string, allow bool) (fantasy.AgentTool, *recordingPermissionService) {
-	perms := &recordingPermissionService{
-		Broker: pubsub.NewBroker[permission.PermissionRequest](),
-		allow:  allow,
-	}
-	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(perms, workingDir, attribution, "test-model", nil), perms
-}
-
-func TestBashTool_ChainedCommandsRequirePermission(t *testing.T) {
-	requireTerminalSession(t)
-	workingDir := t.TempDir()
-	tool, perms := newBashToolWithRecordingPerms(workingDir, true)
-	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
-
-	// ls && echo should trigger permission check.
-	resp := runBashTool(t, tool, ctx, BashParams{
-		Description: "chained ls",
-		Command:     "ls && echo done",
-	})
-
-	require.False(t, resp.IsError)
-	require.Equal(t, 1, perms.requestCount, "chained command should trigger permission request")
-
-	// Plain ls should NOT trigger permission check.
-	perms.requestCount = 0
-	resp = runBashTool(t, tool, ctx, BashParams{
-		Description: "plain ls",
-		Command:     "ls -la",
-	})
-
-	require.False(t, resp.IsError)
-	require.Equal(t, 0, perms.requestCount, "plain ls should not trigger permission request")
-}
-
-func TestBashTool_ChainedCommandsDenied(t *testing.T) {
-	requireTerminalSession(t)
-	workingDir := t.TempDir()
-	tool, perms := newBashToolWithRecordingPerms(workingDir, false)
-	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
-
-	resp := runBashTool(t, tool, ctx, BashParams{
-		Description: "chained ls denied",
-		Command:     "ls && rm -rf /",
-	})
-
-	require.Equal(t, 1, perms.requestCount)
-	require.Contains(t, resp.Content, "User denied permission")
+	return NewBashTool(workingDir, attribution, "test-model", nil)
 }
 
 // requireTerminalSession skips tests that execute commands through the

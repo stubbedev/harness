@@ -31,9 +31,6 @@ type BashParams struct {
 	Timeout int    `json:"timeout"`
 }
 
-// BashPermissionsParams represents the permission parameters for the bash tool.
-type BashPermissionsParams = tools.BashPermissionsParams
-
 // BashResponseMetadata represents the metadata for a bash tool response.
 type BashResponseMetadata struct {
 	StartTime        int64  `json:"start_time"`
@@ -56,9 +53,6 @@ type DownloadParams struct {
 	Timeout  int    `json:"timeout,omitempty"`
 }
 
-// DownloadPermissionsParams represents the permission parameters for the download tool.
-type DownloadPermissionsParams = tools.DownloadPermissionsParams
-
 const EditToolName = "edit"
 
 // EditParams represents the parameters for the edit tool.
@@ -68,9 +62,6 @@ type EditParams struct {
 	NewString  string `json:"new_string"`
 	ReplaceAll bool   `json:"replace_all,omitempty"`
 }
-
-// EditPermissionsParams represents the permission parameters for the edit tool.
-type EditPermissionsParams = tools.EditPermissionsParams
 
 // EditResponseMetadata represents the metadata for an edit tool response.
 type EditResponseMetadata struct {
@@ -89,15 +80,8 @@ type FetchParams struct {
 	Timeout int    `json:"timeout,omitempty"`
 }
 
-// FetchPermissionsParams represents the permission parameters for the fetch tool.
-type FetchPermissionsParams = tools.FetchPermissionsParams
-
 // AgenticFetchToolName is the name of the agentic_fetch tool.
 const AgenticFetchToolName = tools.AgenticFetchToolName
-
-// AgenticFetchPermissionsParams represents the permission parameters for the
-// agentic_fetch tool.
-type AgenticFetchPermissionsParams = tools.AgenticFetchPermissionsParams
 
 const GlobToolName = "glob"
 
@@ -137,9 +121,6 @@ type LSParams struct {
 	Ignore []string `json:"ignore"`
 }
 
-// LSPermissionsParams represents the permission parameters for the ls tool.
-type LSPermissionsParams = tools.LSPermissionsParams
-
 // TreeNode represents a node in a directory tree.
 type TreeNode struct {
 	Name     string      `json:"name"`
@@ -168,9 +149,6 @@ type MultiEditParams struct {
 	FilePath string               `json:"file_path"`
 	Edits    []MultiEditOperation `json:"edits"`
 }
-
-// MultiEditPermissionsParams represents the permission parameters for the multi-edit tool.
-type MultiEditPermissionsParams = tools.MultiEditPermissionsParams
 
 // MultiEditResponseMetadata represents the metadata for a multi-edit tool response.
 type MultiEditResponseMetadata struct {
@@ -206,9 +184,6 @@ type ViewParams struct {
 	Limit    int    `json:"limit"`
 }
 
-// ViewPermissionsParams represents the permission parameters for the view tool.
-type ViewPermissionsParams = tools.ViewPermissionsParams
-
 // ViewResponseMetadata represents the metadata for a view tool response.
 type ViewResponseMetadata struct {
 	FilePath string `json:"file_path"`
@@ -222,9 +197,6 @@ type WriteParams struct {
 	FilePath string `json:"file_path"`
 	Content  string `json:"content"`
 }
-
-// WritePermissionsParams represents the permission parameters for the write tool.
-type WritePermissionsParams = tools.WritePermissionsParams
 
 // WriteResponseMetadata represents the metadata for a write tool response.
 type WriteResponseMetadata struct {

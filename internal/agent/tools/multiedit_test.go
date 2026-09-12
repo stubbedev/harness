@@ -11,37 +11,8 @@ import (
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/history"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
-
-type mockPermissionService struct {
-	*pubsub.Broker[permission.PermissionRequest]
-}
-
-func (m *mockPermissionService) Request(ctx context.Context, req permission.CreatePermissionRequest) (bool, error) {
-	return true, nil
-}
-
-func (m *mockPermissionService) Grant(req permission.PermissionRequest) bool { return true }
-
-func (m *mockPermissionService) Deny(req permission.PermissionRequest) bool { return true }
-
-func (m *mockPermissionService) GrantPersistent(req permission.PermissionRequest) bool {
-	return true
-}
-
-func (m *mockPermissionService) AutoApproveSession(sessionID string) {}
-
-func (m *mockPermissionService) SetSkipRequests(skip bool) {}
-
-func (m *mockPermissionService) SkipRequests() bool {
-	return false
-}
-
-func (m *mockPermissionService) SubscribeNotifications(ctx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
-	return make(<-chan pubsub.Event[permission.PermissionNotification])
-}
 
 type mockHistoryService struct {
 	*pubsub.Broker[history.File]
@@ -254,7 +225,6 @@ func TestProcessMultiEditExistingFilePartialFailure(t *testing.T) {
 
 	edit := editContext{
 		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
-		permissions: &mockPermissionService{},
 		files:       &mockHistoryService{},
 		filetracker: &mockEditFileTracker{lastRead: time.Now().Add(time.Second)},
 		workingDir:  dir,
@@ -293,7 +263,6 @@ func TestProcessMultiEditWithCreationPartialFailure(t *testing.T) {
 
 	edit := editContext{
 		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
-		permissions: &mockPermissionService{},
 		files:       &mockHistoryService{},
 		filetracker: &mockEditFileTracker{},
 		workingDir:  dir,

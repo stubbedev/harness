@@ -20,7 +20,6 @@ import (
 	"github.com/stubbedev/harness/internal/backend"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
@@ -222,18 +221,6 @@ func (h *e2eHarness) subscribeSSE(t *testing.T, ctx context.Context, workspaceID
 // assertions without worrying about envelope noise.
 func decodeSSEEnvelope(p pubsub.Payload) (any, bool) {
 	switch p.Type {
-	case pubsub.PayloadTypePermissionRequest:
-		var e pubsub.Event[proto.PermissionRequest]
-		if err := json.Unmarshal(p.Payload, &e); err != nil {
-			return nil, false
-		}
-		return e, true
-	case pubsub.PayloadTypePermissionNotification:
-		var e pubsub.Event[proto.PermissionNotification]
-		if err := json.Unmarshal(p.Payload, &e); err != nil {
-			return nil, false
-		}
-		return e, true
 	case pubsub.PayloadTypeQuestionNotification:
 		var e pubsub.Event[proto.QuestionNotification]
 		if err := json.Unmarshal(p.Payload, &e); err != nil {
@@ -260,28 +247,6 @@ func decodeSSEEnvelope(p pubsub.Payload) (any, bool) {
 		return e, true
 	}
 	return nil, false
-}
-
-// grantPermission posts a permission grant via the HTTP surface and
-// returns the server's "resolved" verdict. Mirrors the client-side
-// GrantPermission flow without importing internal/client (which
-// would create an import cycle from this in-package test).
-func (h *e2eHarness) grantPermission(t *testing.T, ctx context.Context, workspaceID string, req proto.PermissionGrant) bool {
-	t.Helper()
-	body, err := json.Marshal(req)
-	require.NoError(t, err)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		h.httpSrv.URL+"/v1/workspaces/"+workspaceID+"/permissions/grant",
-		bytes.NewReader(body))
-	require.NoError(t, err)
-	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := h.httpSrv.Client().Do(httpReq)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var out proto.PermissionGrantResponse
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
-	return out.Resolved
 }
 
 // waitForAttached spins until the workspace's clients map reports at
@@ -422,95 +387,6 @@ func TestE2E_TwoClientsReceiveSameMessage(t *testing.T) {
 	})
 	require.True(t, okB, "client B must receive the same MessageEvent")
 	require.Equal(t, sessionID, gotB.Payload.SessionID)
-}
-
-// TestE2E_PermissionFlowCrossClient covers PLAN item 6 scenario 2:
-// a tool-driven permission request is granted by client A; client B
-// observes a PermissionNotification; a redundant grant from B
-// returns the "already resolved" indicator (resolved=false from the
-// bool plumbing landed in item 3).
-func TestE2E_PermissionFlowCrossClient(t *testing.T) {
-	t.Parallel()
-	h := newE2EHarness(t)
-	ctx, cancel := context.WithCancel(t.Context())
-	t.Cleanup(cancel)
-
-	cidA := uuid.New().String()
-	cidB := uuid.New().String()
-
-	evcA, cancelA := h.subscribeSSE(t, ctx, h.workspace.ID, cidA)
-	t.Cleanup(cancelA)
-	evcB, cancelB := h.subscribeSSE(t, ctx, h.workspace.ID, cidB)
-	t.Cleanup(cancelB)
-
-	h.waitForAttached(t, 2)
-
-	// Drive the permission request from a goroutine simulating the
-	// tool path. Request blocks until resolved; capture the outcome.
-	const sessionID = "s-perm"
-	const toolCallID = "tc-1"
-	type result struct {
-		granted bool
-		err     error
-	}
-	done := make(chan result, 1)
-	go func() {
-		granted, err := h.app.Permissions.Request(ctx, permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			ToolCallID:  toolCallID,
-			ToolName:    "view",
-			Description: "read a file",
-			Action:      "read",
-			Path:        h.workspace.Path,
-		})
-		done <- result{granted: granted, err: err}
-	}()
-
-	// Wait for the PermissionRequest to arrive on client A's SSE
-	// stream. We need its ID to drive the grant.
-	// 10s instead of the 3s used elsewhere because this context
-	// bounds three sequential waits, not one.
-	pickCtx, pickCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer pickCancel()
-	reqEv, ok := drainUntil(pickCtx, evcA, func(e pubsub.Event[proto.PermissionRequest]) bool {
-		return e.Payload.ToolCallID == toolCallID
-	})
-	require.True(t, ok, "client A must receive the PermissionRequest")
-
-	// Client A grants — first grant must report resolved=true.
-	resolvedA := h.grantPermission(t, ctx, h.workspace.ID, proto.PermissionGrant{
-		Permission: reqEv.Payload,
-		Action:     proto.PermissionAllow,
-	})
-	require.True(t, resolvedA, "client A's grant must resolve the pending request")
-
-	// The blocked Request call must now return granted=true.
-	select {
-	case r := <-done:
-		require.NoError(t, r.err)
-		require.True(t, r.granted)
-	case <-pickCtx.Done():
-		t.Fatal("permission Request did not return after grant")
-	}
-
-	// Client B must receive a PermissionNotification with
-	// Granted=true for the same ToolCallID. The initial neither-
-	// granted-nor-denied notification published at the start of
-	// Request also lands on B's stream — match on the granted one.
-	notif, ok := drainUntil(pickCtx, evcB, func(e pubsub.Event[proto.PermissionNotification]) bool {
-		return e.Payload.ToolCallID == toolCallID && e.Payload.Granted
-	})
-	require.True(t, ok, "client B must receive a granting PermissionNotification")
-	require.True(t, notif.Payload.Granted)
-	require.False(t, notif.Payload.Denied)
-
-	// A follow-up grant from client B must report resolved=false
-	// (the request was already resolved by A).
-	resolvedB := h.grantPermission(t, ctx, h.workspace.ID, proto.PermissionGrant{
-		Permission: reqEv.Payload,
-		Action:     proto.PermissionAllow,
-	})
-	require.False(t, resolvedB, "client B's follow-up grant must report already resolved")
 }
 
 // TestE2E_KillingClientASSEDoesNotBreakClientB covers PLAN item 6

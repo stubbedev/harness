@@ -46,7 +46,6 @@ import (
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
@@ -406,11 +405,10 @@ type UI struct {
 	// in-flight fetch captures it at dispatch and its result is discarded
 	// if the generation has moved on (see workspace_cache.go).
 	promptQueueGen uint64
-	// agentBusyCache / yoloCache memoize the workspace busy and permission
+	// agentBusyCache memoizes the workspace busy
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
 	agentBusyCache    ttlCache
-	yoloCache         ttlCache
 	busyFetchInFlight bool
 	// agentReady / agentModel memoize the coordinator readiness and
 	// selected model (AgentIsReady/AgentModel are synchronous HTTP GETs in
@@ -558,12 +556,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		}
 	}
 
-	// Seed the yolo cache once at construction; afterwards it is kept
-	// fresh by write-through toggles and off-thread refreshes so Update
-	// and View never probe the workspace synchronously.
-	yolo := com.Workspace.PermissionSkipRequests()
-	ui.yoloCache.set(yolo)
-
 	// Seed the memoized agent ready/model state the same way so the first
 	// frame renders the model info; the busy probe keeps it fresh
 	// afterwards.
@@ -571,7 +563,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		ui.agentReady = true
 		ui.agentModel = com.Workspace.AgentModel()
 	}
-	ui.setEditorPrompt(yolo)
+	ui.setEditorPrompt()
 	ui.randomizePlaceholders()
 	ui.textarea.Placeholder = ui.readyPlaceholder
 	ui.status = status
@@ -1166,18 +1158,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case mcp.EventResourcesListChanged:
 			return m, handleMCPResourcesEvent(m.com.Workspace, msg.Payload.Name)
 		}
-	case pubsub.Event[permission.PermissionRequest]:
-		if cmd := m.openPermissionsDialog(msg.Payload); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		if cmd := m.sendNotification(notification.Notification{
-			Title:   "Agent is waiting...",
-			Message: fmt.Sprintf("Permission required to execute \"%s\"", msg.Payload.ToolName),
-		}); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case pubsub.Event[permission.PermissionNotification]:
-		m.handlePermissionNotification(msg.Payload)
 	case pubsub.Event[question.Request]:
 		m.openBatchFormDialog(msg.Payload)
 		m.chat.ScrollToBottom()
@@ -1591,9 +1571,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textarea.Placeholder = m.workingPlaceholder
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
-		}
-		if !m.bangMode && m.yoloModeCached() {
-			m.textarea.Placeholder = "Yolo mode!"
 		}
 	}
 	if m.textarea.Placeholder != prevPlaceholder {
@@ -2108,9 +2085,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 	// Command dialog messages.
-	case dialog.ActionToggleYoloMode:
-		m.toggleYoloMode()
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSelectNotificationStyle:
 		cfg := m.com.Config()
 		if cfg != nil && cfg.Options != nil {
@@ -2323,17 +2297,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.commitThemePreview()
 		cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Theme set to: "+msg.Name)))
 		m.dialog.CloseDialog(dialog.ThemesID)
-	case dialog.ActionPermissionResponse:
-		m.dialog.CloseDialog(dialog.PermissionsID)
-		switch msg.Action {
-		case dialog.PermissionAllow:
-			m.com.Workspace.PermissionGrant(msg.Permission)
-		case dialog.PermissionAllowForSession:
-			m.com.Workspace.PermissionGrantPersistent(msg.Permission)
-		case dialog.PermissionDeny:
-			m.com.Workspace.PermissionDeny(msg.Permission)
-		}
-
 	case dialog.ActionFilePickerSelected:
 		cmds = append(cmds, tea.Sequence(
 			msg.Cmd(),
@@ -2727,14 +2690,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			cmds = append(cmds, tea.Suspend)
 			return true
-		case key.Matches(msg, m.keyMap.ToggleYolo):
-			yolo := m.toggleYoloMode()
-			status := "disabled"
-			if yolo {
-				status = "enabled"
-			}
-			cmds = append(cmds, util.ReportInfo("Yolo mode "+status))
-			return true
 		case key.Matches(msg, m.keyMap.ParentSession):
 			if m.session != nil && m.session.ParentSessionID != "" {
 				cmds = append(cmds, m.loadSession(m.session.ParentSessionID))
@@ -2894,7 +2849,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				if m.bangMode && value != "" {
 					m.bangMode = false
-					m.setEditorPrompt(m.yoloModeCached())
+					m.setEditorPrompt()
 					m.randomizePlaceholders()
 					m.historyReset()
 					return tea.Batch(m.runShellCommand(value))
@@ -2990,7 +2945,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if m.bangMode && m.bangWasEmpty && msg.Code == tea.KeyBackspace {
 					m.bangMode = false
 					m.bangWasEmpty = false
-					m.setEditorPrompt(m.yoloModeCached())
+					m.setEditorPrompt()
 					break
 				}
 
@@ -3039,7 +2994,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.textarea.SetValue(stripped)
 					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
 					_ = line // cursor line doesn't change; prefix removed
-					m.setEditorPrompt(m.yoloModeCached())
+					m.setEditorPrompt()
 				} else if m.bangMode && newVal == "" && curValue != "" {
 					// Just cleared last character; mark empty, stay in bang mode.
 					m.bangWasEmpty = true
@@ -3588,7 +3543,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 			k.Subagents,
 			k.Sessions,
 			k.Themes,
-			k.ToggleYolo,
 		)
 		if hasSession {
 			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.EndFollow, k.ExportConversation)
@@ -3672,7 +3626,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Subagents,
 					k.Sessions,
 					k.Themes,
-					k.ToggleYolo,
 				},
 			)
 			editorBinds := []key.Binding{
@@ -4145,14 +4098,10 @@ func (m *UI) openEditor(value string) tea.Cmd {
 }
 
 // setEditorPrompt configures the textarea prompt function based on whether
-// yolo mode or bang mode is enabled.
-func (m *UI) setEditorPrompt(yolo bool) {
+// bang mode is enabled.
+func (m *UI) setEditorPrompt() {
 	if m.bangMode {
 		m.textarea.SetPromptFunc(4, m.bangPromptFunc)
-		return
-	}
-	if yolo {
-		m.textarea.SetPromptFunc(4, m.yoloPromptFunc)
 		return
 	}
 	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
@@ -4172,23 +4121,6 @@ func (m *UI) normalPromptFunc(info textarea.PromptInfo) string {
 		return t.Editor.PromptNormalFocused.Render()
 	}
 	return t.Editor.PromptNormalBlurred.Render()
-}
-
-// yoloPromptFunc returns the yolo mode editor prompt style with warning icon
-// and colored dots.
-func (m *UI) yoloPromptFunc(info textarea.PromptInfo) string {
-	t := m.com.Styles
-	if info.LineNumber == 0 {
-		if info.Focused {
-			return t.Editor.PromptYoloIconFocused.Render()
-		} else {
-			return t.Editor.PromptYoloIconBlurred.Render()
-		}
-	}
-	if info.Focused {
-		return t.Editor.PromptYoloDotsFocused.Render()
-	}
-	return t.Editor.PromptYoloDotsBlurred.Render()
 }
 
 // bangPromptFunc returns the bang mode editor prompt style with Turtle-colored
@@ -4973,22 +4905,6 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	return cmd
 }
 
-// openPermissionsDialog opens the permissions dialog for a permission request.
-func (m *UI) openPermissionsDialog(perm permission.PermissionRequest) tea.Cmd {
-	// Close any existing permissions dialog first.
-	m.dialog.CloseDialog(dialog.PermissionsID)
-
-	// Get diff mode from config.
-	var opts []dialog.PermissionsOption
-	if diffMode := m.com.Config().Options.TUI.DiffMode; diffMode != "" {
-		opts = append(opts, dialog.WithDiffMode(diffMode == "split"))
-	}
-
-	permDialog := dialog.NewPermissions(m.com, perm, opts...)
-	m.dialog.OpenDialogWithGrace(permDialog)
-	return nil
-}
-
 // openBatchFormDialog activates a tabbed multi-question form in
 // the editor area. Single questions render without tabs or confirm.
 func (m *UI) openBatchFormDialog(batch question.Request) {
@@ -5042,31 +4958,6 @@ func (m *UI) editorContentWidth() int {
 // unfocused and would consume more than half the terminal height.
 func (m *UI) shouldCollapseQuestion(qf *dialog.QuestionForm) bool {
 	return m.focus != uiFocusEditor && m.height > 0 && qf.Height(m.editorContentWidth()) > m.height*2/5
-}
-
-// handlePermissionNotification updates tool items when permission state changes.
-func (m *UI) handlePermissionNotification(notification permission.PermissionNotification) {
-	if toolItem := m.chat.MessageItem(notification.ToolCallID); toolItem != nil {
-		if permItem, ok := toolItem.(chat.ToolMessageItem); ok {
-			if notification.Granted {
-				permItem.SetStatus(chat.ToolStatusRunning)
-			} else {
-				permItem.SetStatus(chat.ToolStatusAwaitingPermission)
-			}
-		}
-	}
-
-	// If this notification reflects a final resolution (granted or denied),
-	// dismiss any open permissions dialog whose tool call ID matches. This
-	// covers the case where another client resolved the request remotely.
-	if !notification.Granted && !notification.Denied {
-		return
-	}
-	if d := m.dialog.Dialog(dialog.PermissionsID); d != nil {
-		if perm, ok := d.(*dialog.Permissions); ok && perm.ToolCallID() == notification.ToolCallID {
-			m.dialog.CloseDialog(dialog.PermissionsID)
-		}
-	}
 }
 
 // handleAgentNotification translates domain agent events into desktop
@@ -5327,7 +5218,7 @@ func (m *UI) checkBangModeAfterPaste() {
 	m.textarea.SetValue(stripped)
 	col := m.textarea.Column()
 	m.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))
-	m.setEditorPrompt(m.yoloModeCached())
+	m.setEditorPrompt()
 }
 
 // handlePasteMsg handles a paste message.

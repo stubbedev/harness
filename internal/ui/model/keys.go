@@ -83,7 +83,6 @@ type KeyMap struct {
 	Suspend       key.Binding
 	Sessions      key.Binding
 	Tab           key.Binding
-	ToggleYolo    key.Binding
 	ParentSession key.Binding
 	Subagents     key.Binding
 	// ExportConversation writes the current session transcript to a
@@ -122,10 +121,6 @@ func DefaultKeyMap() KeyMap {
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
-		),
-		ToggleYolo: key.NewBinding(
-			key.WithKeys("ctrl+y"),
-			key.WithHelp("ctrl+y", "toggle yolo"),
 		),
 		ParentSession: key.NewBinding(
 			key.WithKeys("ctrl+up"),

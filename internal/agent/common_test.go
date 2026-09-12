@@ -10,7 +10,6 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"charm.land/fantasy/providers/openaicompat"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/prompt"
 	"github.com/stubbedev/harness/internal/agent/tools"
@@ -21,7 +20,6 @@ import (
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/session"
 
 	_ "github.com/joho/godotenv/autoload"
@@ -32,32 +30,9 @@ type fakeEnv struct {
 	workingDir  string
 	sessions    session.Service
 	messages    message.Service
-	permissions permission.Service
 	history     history.Service
 	filetracker *filetracker.Service
 	lspClients  *csync.Map[string, *lsp.Client]
-}
-
-type builderFunc func(t *testing.T, r testRecorder) (fantasy.LanguageModel, error)
-
-type modelPair struct {
-	name       string
-	largeModel builderFunc
-	smallModel builderFunc
-}
-
-func hyperBuilder(model string) builderFunc {
-	return func(t *testing.T, r testRecorder) (fantasy.LanguageModel, error) {
-		provider, err := openaicompat.New(
-			openaicompat.WithBaseURL("https://hyper.charm.land/v1"),
-			openaicompat.WithAPIKey(os.Getenv("HARNESS_HYPER_API_KEY")),
-			openaicompat.WithHTTPClient(&http.Client{Transport: r}),
-		)
-		if err != nil {
-			return nil, err
-		}
-		return provider.LanguageModel(t.Context(), model)
-	}
 }
 
 func testEnv(t *testing.T) fakeEnv {
@@ -74,7 +49,6 @@ func testEnv(t *testing.T) fakeEnv {
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 
-	permissions := permission.NewPermissionService(workingDir, true, []string{})
 	history := history.NewService(q, conn)
 	filetrackerService := filetracker.NewService(q)
 	lspClients := csync.NewMap[string, *lsp.Client]()
@@ -88,7 +62,6 @@ func testEnv(t *testing.T) fakeEnv {
 		workingDir,
 		sessions,
 		messages,
-		permissions,
 		history,
 		&filetrackerService,
 		lspClients,
@@ -114,7 +87,6 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 		LargeModel:   largeModel,
 		SmallModel:   smallModel,
 		SystemPrompt: systemPrompt,
-		IsYolo:       true,
 		Sessions:     env.sessions,
 		Messages:     env.messages,
 		Tools:        tools,
@@ -122,7 +94,9 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 	return agent
 }
 
-func coderAgent(r testRecorder, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
+// coderAgent builds the coder agent the TestCoderAgent subtests drive. A
+// nil client is fine for everything but the network-facing tools.
+func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageModel) (SessionAgent, error) {
 	fixedTime := func() time.Time {
 		t, _ := time.Parse("1/2/2006", "1/1/2025")
 		return t
@@ -140,14 +114,16 @@ func coderAgent(r testRecorder, env fakeEnv, large, small fantasy.LanguageModel)
 		return nil, err
 	}
 
-	// NOTE(@andreynering): Set a fixed config to ensure cassettes match
-	// independently of user config on `$HOME/.config/harness/harness.yaml`.
+	// Pin the config so a developer.s own
+	// `$HOME/.config/harness/harness.yaml` cannot change what these tests
+	// assert.
 	cfg.Config().Options.Attribution = &config.Attribution{
 		TrailerStyle:  "co-authored-by",
 		GeneratedWith: true,
 	}
 
-	// Clear some fields to avoid issues with VCR cassette matching.
+	// Clear the fields that would otherwise pull in machine-specific state
+	// (skills on disk, context files, language servers).
 	cfg.Config().Options.SkillsPaths = nil
 	cfg.Config().Options.DisabledSkills = []string{"harness-config"}
 	cfg.Config().Options.ContextPaths = nil
@@ -166,23 +142,23 @@ func coderAgent(r testRecorder, env fakeEnv, large, small fantasy.LanguageModel)
 	}
 
 	allTools := []fantasy.AgentTool{
-		tools.NewBashTool(env.permissions, env.workingDir, cfg.Config().Options.Attribution, modelName, nil),
-		tools.NewDownloadTool(env.permissions, env.workingDir, r.GetDefaultClient()),
-		tools.NewEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
-		tools.NewMultiEditTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
-		tools.NewFetchTool(env.permissions, env.workingDir, r.GetDefaultClient()),
+		tools.NewBashTool(env.workingDir, cfg.Config().Options.Attribution, modelName, nil),
+		tools.NewDownloadTool(env.workingDir, client),
+		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
+		tools.NewMultiEditTool(nil, env.history, *env.filetracker, env.workingDir),
+		tools.NewFetchTool(env.workingDir, client),
 		tools.NewGlobTool(env.workingDir, cfg.Config().Tools.Glob),
 		tools.NewGrepTool(env.workingDir, cfg.Config().Tools.Grep),
-		tools.NewLsTool(env.permissions, env.workingDir, cfg.Config().Tools.Ls),
-		tools.NewSourcegraphTool(r.GetDefaultClient()),
-		tools.NewViewTool(nil, env.permissions, *env.filetracker, nil, env.workingDir),
-		tools.NewWriteTool(nil, env.permissions, env.history, *env.filetracker, env.workingDir),
+		tools.NewLsTool(env.workingDir, cfg.Config().Tools.Ls),
+		tools.NewSourcegraphTool(client),
+		tools.NewViewTool(nil, *env.filetracker, nil, env.workingDir),
+		tools.NewWriteTool(nil, env.history, *env.filetracker, env.workingDir),
 	}
 
 	agent := testSessionAgent(env, large, small, systemPrompt, allTools...)
-	// A replayed cassette never benefits from a retry: a miss means the
-	// cassette is stale, and the default backoff turns that into 35s of
-	// waiting before the real error surfaces.
+	// A scripted model never benefits from a retry: it cannot fail
+	// transiently, and the default backoff would turn a genuine scripting
+	// mistake into 35s of waiting before the real error surfaces.
 	if sa, ok := agent.(*sessionAgent); ok {
 		noRetries := 0
 		sa.maxRetries = &noRetries

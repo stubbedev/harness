@@ -6,7 +6,6 @@ import (
 
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
@@ -25,10 +24,6 @@ func Translate(ev any) Event {
 		)
 	case pubsub.Event[notify.RunComplete]:
 		return RunComplete{SessionID: e.Payload.SessionID}
-	case pubsub.Event[permission.PermissionRequest]:
-		return PermissionRequested{}
-	case pubsub.Event[permission.PermissionNotification]:
-		return PermissionResolved{}
 
 	// Proto types (client/server mode).
 	case pubsub.Event[proto.Message]:
@@ -39,10 +34,6 @@ func Translate(ev any) Event {
 		)
 	case pubsub.Event[proto.RunComplete]:
 		return RunComplete{SessionID: e.Payload.SessionID}
-	case pubsub.Event[proto.PermissionRequest]:
-		return PermissionRequested{}
-	case pubsub.Event[proto.PermissionNotification]:
-		return PermissionResolved{}
 	case pubsub.Event[proto.AgentEvent]:
 		if e.Payload.Type == proto.AgentEventTypeSummarize && !e.Payload.Done {
 			return Summarizing{}
@@ -66,20 +57,12 @@ func translateMessage(isAssistant bool, sessionID string, isSummary bool) Event 
 	return AssistantMessage{SessionID: sessionID}
 }
 
-// permNotificationSubscriber is the subset of the permission service
-// needed by BridgeLocal to subscribe to permission notifications.
-type permNotificationSubscriber interface {
-	SubscribeNotifications(context.Context) <-chan pubsub.Event[permission.PermissionNotification]
-}
-
 // BridgeSources groups the pub/sub sources that BridgeLocal subscribes
 // to. Adding a new event type means adding a field here rather than
 // growing the function signature.
 type BridgeSources struct {
-	PermRequests      pubsub.Subscriber[permission.PermissionRequest]
-	PermNotifications permNotificationSubscriber
-	RunCompletions    pubsub.Subscriber[notify.RunComplete]
-	Messages          pubsub.Subscriber[message.Message]
+	RunCompletions pubsub.Subscriber[notify.RunComplete]
+	Messages       pubsub.Subscriber[message.Message]
 }
 
 // BridgeLocal subscribes to local pub/sub brokers and forwards
@@ -98,12 +81,6 @@ func BridgeLocal(ctx context.Context, c *Client, src BridgeSources) {
 	if c == nil {
 		return
 	}
-	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[permission.PermissionRequest] {
-		return src.PermRequests.Subscribe(subCtx)
-	})
-	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[permission.PermissionNotification] {
-		return src.PermNotifications.SubscribeNotifications(subCtx)
-	})
 	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[notify.RunComplete] {
 		return src.RunCompletions.Subscribe(subCtx)
 	})

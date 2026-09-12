@@ -4,6 +4,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,642 +16,466 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/session"
-
-	_ "github.com/joho/godotenv/autoload"
 )
 
 func TestMain(m *testing.M) {
 	slog.SetLogLoggerLevel(slog.LevelError)
 	// The persistent terminal session runs a plain sh: deterministic
-	// startup (no rc files) keeps the recorded bash tool results
-	// byte-stable.
+	// startup (no rc files) keeps the bash tool results stable.
 	os.Setenv("SHELL", "/bin/sh")
 	os.Exit(m.Run())
 }
 
-var modelPairs = []modelPair{
-	{"deepseek-v4", hyperBuilder("deepseek-v4-pro-0813"), hyperBuilder("deepseek-v4-flash-0731")},
-}
+// scriptedAgent builds a coder agent whose large model replays the given
+// script. The small model (titles, summaries) always answers in words.
+func scriptedAgent(t *testing.T, client *http.Client, turns ...scriptedTurn) (SessionAgent, fakeEnv, *scriptedModel) {
+	t.Helper()
 
-func getModels(t *testing.T, r testRecorder, pair modelPair) (fantasy.LanguageModel, fantasy.LanguageModel) {
-	large, err := pair.largeModel(t, r)
-	require.NoError(t, err)
-	small, err := pair.smallModel(t, r)
-	require.NoError(t, err)
-	return large, small
-}
-
-// staleCassettes names the replayed conversations whose recordings no
-// longer match the current prompts and tool definitions. They drifted
-// beyond the request bodies, which is more than `just restamp` can
-// rewrite, so they only come back with `just record` against the live
-// provider (needs HARNESS_HYPER_API_KEY). Skipped rather than failing, so
-// the rest of the suite still gates the build.
-var staleCassettes = map[string]bool{
-	"read_a_file":         true,
-	"update_a_file":       true,
-	"download_tool":       true,
-	"ls_tool":             true,
-	"multiedit_tool":      true,
-	"write_tool":          true,
-	"parallel_tool_calls": true,
-}
-
-func setupAgent(t *testing.T, pair modelPair) (SessionAgent, fakeEnv) {
-	name := t.Name()
-	if i := strings.LastIndex(name, "/"); i >= 0 {
-		name = name[i+1:]
-	}
-	if staleCassettes[name] {
-		t.Skip("cassette drifted beyond request bodies; re-record with `just record`")
-	}
-	r := newTestRecorder(t)
-	large, small := getModels(t, r, pair)
 	env := testEnv(t)
-
 	createSimpleGoProject(t, env.workingDir)
-	agent, err := coderAgent(r, env, large, small)
+
+	large := newScriptedModel(turns...)
+	agent, err := coderAgent(client, env, large, textModel("A Session"))
 	require.NoError(t, err)
-	return agent, env
+	return agent, env, large
 }
 
+// runScript drives one agent turn to completion and returns the messages
+// it persisted.
+func runScript(t *testing.T, agent SessionAgent, env fakeEnv, prompt string) []message.Message {
+	t.Helper()
+
+	sess, err := env.sessions.Create(t.Context(), "New Session")
+	require.NoError(t, err)
+
+	res, err := agent.Run(t.Context(), SessionAgentCall{
+		Prompt:          prompt,
+		SessionID:       sess.ID,
+		MaxOutputTokens: 10000,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	return msgs
+}
+
+// toolResults pairs every tool result back to the call that produced it
+// and returns them keyed by tool name. Pairing by call id (rather than
+// just scanning for a tool name) is the part of the agent loop these
+// tests exist to check: a result that reaches the conversation under the
+// wrong id is indistinguishable from a correct one by name alone.
+func toolResults(t *testing.T, msgs []message.Message) map[string]message.ToolResult {
+	t.Helper()
+
+	nameByCallID := map[string]string{}
+	for _, msg := range msgs {
+		if msg.Role != message.Assistant {
+			continue
+		}
+		for _, tc := range msg.ToolCalls() {
+			require.NotEmpty(t, tc.ID, "tool call %q has no id", tc.Name)
+			require.NotContains(t, nameByCallID, tc.ID, "duplicate tool call id %q", tc.ID)
+			nameByCallID[tc.ID] = tc.Name
+		}
+	}
+
+	out := map[string]message.ToolResult{}
+	for _, msg := range msgs {
+		if msg.Role != message.Tool {
+			continue
+		}
+		for _, tr := range msg.ToolResults() {
+			name, ok := nameByCallID[tr.ToolCallID]
+			require.True(t, ok, "tool result for unknown call id %q", tr.ToolCallID)
+			out[name] = tr
+		}
+	}
+	return out
+}
+
+// serveOnce returns an http client that answers every request with body,
+// along with the URL to point a tool at. It replaces the recorded HTTP
+// traffic the network-facing tools used to replay from a cassette.
+func serveOnce(t *testing.T, contentType, body string) (*http.Client, string) {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		fmt.Fprint(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.Client(), srv.URL
+}
+
+// redirectClient returns a client that sends every request to target,
+// whatever URL the caller asked for. The sourcegraph tool builds its own
+// endpoint, so this is how its traffic is intercepted.
+func redirectClient(t *testing.T, target string) *http.Client {
+	t.Helper()
+
+	u, err := url.Parse(target)
+	require.NoError(t, err)
+	return &http.Client{Transport: rewriteHost{host: u.Host, scheme: u.Scheme}}
+}
+
+type rewriteHost struct {
+	host   string
+	scheme string
+}
+
+func (r rewriteHost) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.URL.Host = r.host
+	req.URL.Scheme = r.scheme
+	req.Host = r.host
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// TestCoderAgent checks the agent loop against a scripted model: a tool
+// call the model asks for is dispatched, its result is persisted and
+// paired back to the call, and its side effects land on disk.
+//
+// The model's decisions are scripted rather than replayed from a recorded
+// provider. See scriptedModel for why.
 func TestCoderAgent(t *testing.T) {
+	t.Parallel()
+
 	if runtime.GOOS == "windows" {
 		t.Skip("skipping on windows for now")
 	}
 
-	for _, pair := range modelPairs {
-		t.Run(pair.name, func(t *testing.T) {
-			t.Run("simple test", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "Hello",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-				// Should have the agent and user message
-				assert.Equal(t, len(msgs), 2)
-			})
-			t.Run("read a file", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "Read the go mod",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-				foundFile := false
-				var tcID string
-			out:
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.ViewToolName {
-								tcID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == tcID {
-								if strings.Contains(tr.Content, "module example.com/testproject") {
-									foundFile = true
-									break out
-								}
-							}
-						}
-					}
-				}
-				require.True(t, foundFile)
-			})
-			t.Run("update a file", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "update the main.go file by changing the print to say hello from harness",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundRead := false
-				foundWrite := false
-				var readTCID, writeTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.ViewToolName {
-								readTCID = tc.ID
-							}
-							if tc.Name == tools.EditToolName || tc.Name == tools.WriteToolName {
-								writeTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == readTCID {
-								foundRead = true
-							}
-							if tr.ToolCallID == writeTCID {
-								foundWrite = true
-							}
-						}
-					}
-				}
-
-				require.True(t, foundRead, "Expected to find a read operation")
-				require.True(t, foundWrite, "Expected to find a write operation")
-
-				mainGoPath := filepath.Join(env.workingDir, "main.go")
-				content, err := os.ReadFile(mainGoPath)
-				require.NoError(t, err)
-				require.Contains(t, strings.ToLower(string(content)), "hello from harness")
-			})
-			t.Run("bash tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use bash to create a file named test.txt with content 'hello bash'. do not print its timestamp",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundBash := false
-				var bashTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.BashToolName {
-								bashTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == bashTCID {
-								foundBash = true
-							}
-						}
-					}
-				}
-
-				require.True(t, foundBash, "Expected to find a bash operation")
-
-				testFilePath := filepath.Join(env.workingDir, "test.txt")
-				content, err := os.ReadFile(testFilePath)
-				require.NoError(t, err)
-				require.Contains(t, string(content), "hello bash")
-			})
-			t.Run("download tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "download the file from https://example-files.online-convert.com/document/txt/example.txt and save it as example.txt",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundDownload := false
-				var downloadTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.DownloadToolName {
-								downloadTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == downloadTCID {
-								foundDownload = true
-							}
-						}
-					}
-				}
-
-				require.True(t, foundDownload, "Expected to find a download operation")
-
-				examplePath := filepath.Join(env.workingDir, "example.txt")
-				_, err = os.Stat(examplePath)
-				require.NoError(t, err, "Expected example.txt file to exist")
-			})
-			t.Run("fetch tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "fetch the content from https://example-files.online-convert.com/website/html/example.html and tell me if it contains the word 'John Doe'",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundFetch := false
-				var fetchTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.FetchToolName {
-								fetchTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == fetchTCID {
-								foundFetch = true
-							}
-						}
-					}
-				}
-
-				require.True(t, foundFetch, "Expected to find a fetch operation")
-			})
-			t.Run("glob tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use glob to find all .go files in the current directory",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundGlob := false
-				var globTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.GlobToolName {
-								globTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == globTCID {
-								foundGlob = true
-								require.Contains(t, tr.Content, "main.go", "Expected glob to find main.go")
-							}
-						}
-					}
-				}
-
-				require.True(t, foundGlob, "Expected to find a glob operation")
-			})
-			t.Run("grep tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use grep to search for the word 'package' in go files",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundGrep := false
-				var grepTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.GrepToolName {
-								grepTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == grepTCID {
-								foundGrep = true
-								require.Contains(t, tr.Content, "main.go", "Expected grep to find main.go")
-							}
-						}
-					}
-				}
-
-				require.True(t, foundGrep, "Expected to find a grep operation")
-			})
-			t.Run("ls tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use ls to list the files in the current directory",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundLS := false
-				var lsTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.LSToolName {
-								lsTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == lsTCID {
-								foundLS = true
-								require.Contains(t, tr.Content, "main.go", "Expected ls to list main.go")
-								require.Contains(t, tr.Content, "go.mod", "Expected ls to list go.mod")
-							}
-						}
-					}
-				}
-
-				require.True(t, foundLS, "Expected to find an ls operation")
-			})
-			t.Run("multiedit tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use multiedit to change 'Hello, World!' to 'Hello, Harness!' and add a comment '// Greeting' above the fmt.Println line in main.go",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundMultiEdit := false
-				var multiEditTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.MultiEditToolName {
-								multiEditTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == multiEditTCID {
-								foundMultiEdit = true
-							}
-						}
-					}
-				}
-
-				require.True(t, foundMultiEdit, "Expected to find a multiedit operation")
-
-				mainGoPath := filepath.Join(env.workingDir, "main.go")
-				content, err := os.ReadFile(mainGoPath)
-				require.NoError(t, err)
-				require.Contains(t, string(content), "Hello, Harness!", "Expected file to contain 'Hello, Harness!'")
-			})
-			t.Run("sourcegraph tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use sourcegraph to search for 'func main' in Go repositories",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundSourcegraph := false
-				var sourcegraphTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.SourcegraphToolName {
-								sourcegraphTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == sourcegraphTCID {
-								foundSourcegraph = true
-							}
-						}
-					}
-				}
-
-				require.True(t, foundSourcegraph, "Expected to find a sourcegraph operation")
-			})
-			t.Run("write tool", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use write to create a new file called config.json with content '{\"name\": \"test\", \"version\": \"1.0.0\"}'",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				foundWrite := false
-				var writeTCID string
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant {
-						for _, tc := range msg.ToolCalls() {
-							if tc.Name == tools.WriteToolName {
-								writeTCID = tc.ID
-							}
-						}
-					}
-					if msg.Role == message.Tool {
-						for _, tr := range msg.ToolResults() {
-							if tr.ToolCallID == writeTCID {
-								foundWrite = true
-							}
-						}
-					}
-				}
-
-				require.True(t, foundWrite, "Expected to find a write operation")
-
-				configPath := filepath.Join(env.workingDir, "config.json")
-				content, err := os.ReadFile(configPath)
-				require.NoError(t, err)
-				require.Contains(t, string(content), "test", "Expected config.json to contain 'test'")
-				require.Contains(t, string(content), "1.0.0", "Expected config.json to contain '1.0.0'")
-			})
-			t.Run("parallel tool calls", func(t *testing.T) {
-				agent, env := setupAgent(t, pair)
-
-				session, err := env.sessions.Create(t.Context(), "New Session")
-				require.NoError(t, err)
-
-				res, err := agent.Run(t.Context(), SessionAgentCall{
-					Prompt:          "use glob to find all .go files and use ls to list the current directory, it is very important that you run both tool calls in parallel",
-					SessionID:       session.ID,
-					MaxOutputTokens: 10000,
-				})
-				require.NoError(t, err)
-				assert.NotNil(t, res)
-
-				msgs, err := env.messages.List(t.Context(), session.ID)
-				require.NoError(t, err)
-
-				var assistantMsg *message.Message
-				var toolMsgs []message.Message
-
-				for _, msg := range msgs {
-					if msg.Role == message.Assistant && len(msg.ToolCalls()) > 0 {
-						assistantMsg = &msg
-					}
-					if msg.Role == message.Tool {
-						toolMsgs = append(toolMsgs, msg)
-					}
-				}
-
-				require.NotNil(t, assistantMsg, "Expected to find an assistant message with tool calls")
-				require.NotNil(t, toolMsgs, "Expected to find a tool message")
-
-				toolCalls := assistantMsg.ToolCalls()
-				require.GreaterOrEqual(t, len(toolCalls), 2, "Expected at least 2 tool calls in parallel")
-
-				foundGlob := false
-				foundLS := false
-				var globTCID, lsTCID string
-
-				for _, tc := range toolCalls {
-					if tc.Name == tools.GlobToolName {
-						foundGlob = true
-						globTCID = tc.ID
-					}
-					if tc.Name == tools.LSToolName {
-						foundLS = true
-						lsTCID = tc.ID
-					}
-				}
-
-				require.True(t, foundGlob, "Expected to find a glob tool call")
-				require.True(t, foundLS, "Expected to find an ls tool call")
-
-				require.GreaterOrEqual(t, len(toolMsgs), 2, "Expected at least 2 tool results in the same message")
-
-				foundGlobResult := false
-				foundLSResult := false
-
-				for _, msg := range toolMsgs {
-					for _, tr := range msg.ToolResults() {
-						if tr.ToolCallID == globTCID {
-							foundGlobResult = true
-							require.Contains(t, tr.Content, "main.go", "Expected glob result to contain main.go")
-							require.False(t, tr.IsError, "Expected glob result to not be an error")
-						}
-						if tr.ToolCallID == lsTCID {
-							foundLSResult = true
-							require.Contains(t, tr.Content, "main.go", "Expected ls result to contain main.go")
-							require.False(t, tr.IsError, "Expected ls result to not be an error")
-						}
-					}
-				}
-
-				require.True(t, foundGlobResult, "Expected to find glob tool result")
-				require.True(t, foundLSResult, "Expected to find ls tool result")
-			})
+	t.Run("plain answer persists both messages", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{text: "Hello back"})
+		msgs := runScript(t, agent, env, "Hello")
+
+		require.Len(t, msgs, 2)
+		require.Equal(t, message.User, msgs[0].Role)
+		require.Equal(t, message.Assistant, msgs[1].Role)
+		require.Contains(t, msgs[1].Content().Text, "Hello back")
+	})
+
+	t.Run("view", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
+			calls: []scriptedCall{{
+				name:  tools.ViewToolName,
+				input: map[string]any{"file_path": "go.mod"},
+			}},
 		})
-	}
+		res := toolResults(t, runScript(t, agent, env, "Read the go mod"))
+
+		view, ok := res[tools.ViewToolName]
+		require.True(t, ok, "expected a view result")
+		require.False(t, view.IsError, "view failed: %s", view.Content)
+		require.Contains(t, view.Content, "module example.com/testproject")
+	})
+
+	t.Run("edit rewrites the file", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil,
+			scriptedTurn{calls: []scriptedCall{{
+				name:  tools.ViewToolName,
+				input: map[string]any{"file_path": "main.go"},
+			}}},
+			scriptedTurn{calls: []scriptedCall{{
+				name: tools.EditToolName,
+				input: map[string]any{
+					"file_path":  "main.go",
+					"old_string": `fmt.Println("Hello, World!")`,
+					"new_string": `fmt.Println("hello from harness")`,
+				},
+			}}},
+		)
+		res := toolResults(t, runScript(t, agent, env, "update main.go"))
+
+		require.Contains(t, res, tools.ViewToolName, "expected a read before the write")
+		edit, ok := res[tools.EditToolName]
+		require.True(t, ok, "expected an edit result")
+		require.False(t, edit.IsError, "edit failed: %s", edit.Content)
+
+		content, err := os.ReadFile(filepath.Join(env.workingDir, "main.go"))
+		require.NoError(t, err)
+		require.Contains(t, strings.ToLower(string(content)), "hello from harness")
+	})
+
+	t.Run("write creates the file", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
+			calls: []scriptedCall{{
+				name: tools.WriteToolName,
+				input: map[string]any{
+					"file_path": "greeting.txt",
+					"content":   "hello from write",
+				},
+			}},
+		})
+		res := toolResults(t, runScript(t, agent, env, "write a greeting"))
+
+		write, ok := res[tools.WriteToolName]
+		require.True(t, ok, "expected a write result")
+		require.False(t, write.IsError, "write failed: %s", write.Content)
+
+		content, err := os.ReadFile(filepath.Join(env.workingDir, "greeting.txt"))
+		require.NoError(t, err)
+		require.Equal(t, "hello from write", string(content))
+	})
+
+	t.Run("multiedit applies every edit", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil,
+			scriptedTurn{calls: []scriptedCall{{
+				name:  tools.ViewToolName,
+				input: map[string]any{"file_path": "main.go"},
+			}}},
+			scriptedTurn{calls: []scriptedCall{{
+				name: tools.MultiEditToolName,
+				input: map[string]any{
+					"file_path": "main.go",
+					"edits": []any{
+						map[string]any{
+							"old_string": "Hello, World!",
+							"new_string": "Hello, Harness!",
+						},
+						map[string]any{
+							"old_string": "\tfmt.Println",
+							"new_string": "\t// Greeting\n\tfmt.Println",
+						},
+					},
+				},
+			}}},
+		)
+		res := toolResults(t, runScript(t, agent, env, "multiedit main.go"))
+
+		multi, ok := res[tools.MultiEditToolName]
+		require.True(t, ok, "expected a multiedit result")
+		require.False(t, multi.IsError, "multiedit failed: %s", multi.Content)
+
+		content, err := os.ReadFile(filepath.Join(env.workingDir, "main.go"))
+		require.NoError(t, err)
+		require.Contains(t, string(content), "Hello, Harness!")
+		require.Contains(t, string(content), "// Greeting")
+	})
+
+	t.Run("bash", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
+			calls: []scriptedCall{{
+				name: tools.BashToolName,
+				input: map[string]any{
+					"command":     "printf 'hello bash' > test.txt",
+					"description": "create test.txt",
+				},
+			}},
+		})
+		res := toolResults(t, runScript(t, agent, env, "create test.txt"))
+
+		bash, ok := res[tools.BashToolName]
+		require.True(t, ok, "expected a bash result")
+		require.False(t, bash.IsError, "bash failed: %s", bash.Content)
+
+		content, err := os.ReadFile(filepath.Join(env.workingDir, "test.txt"))
+		require.NoError(t, err)
+		require.Contains(t, string(content), "hello bash")
+	})
+
+	t.Run("glob", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
+			calls: []scriptedCall{{
+				name:  tools.GlobToolName,
+				input: map[string]any{"pattern": "*.go"},
+			}},
+		})
+		res := toolResults(t, runScript(t, agent, env, "find the go files"))
+
+		glob, ok := res[tools.GlobToolName]
+		require.True(t, ok, "expected a glob result")
+		require.False(t, glob.IsError, "glob failed: %s", glob.Content)
+		require.Contains(t, glob.Content, "main.go")
+	})
+
+	t.Run("grep", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
+			calls: []scriptedCall{{
+				name:  tools.GrepToolName,
+				input: map[string]any{"pattern": "Hello, World"},
+			}},
+		})
+		res := toolResults(t, runScript(t, agent, env, "search for the greeting"))
+
+		grep, ok := res[tools.GrepToolName]
+		require.True(t, ok, "expected a grep result")
+		require.False(t, grep.IsError, "grep failed: %s", grep.Content)
+		require.Contains(t, grep.Content, "main.go")
+	})
+
+	t.Run("ls", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
+			calls: []scriptedCall{{
+				name:  tools.LSToolName,
+				input: map[string]any{"path": "."},
+			}},
+		})
+		res := toolResults(t, runScript(t, agent, env, "list the directory"))
+
+		ls, ok := res[tools.LSToolName]
+		require.True(t, ok, "expected an ls result")
+		require.False(t, ls.IsError, "ls failed: %s", ls.Content)
+		require.Contains(t, ls.Content, "main.go")
+	})
+
+	t.Run("download writes the body to disk", func(t *testing.T) {
+		t.Parallel()
+
+		client, addr := serveOnce(t, "text/plain", "downloaded body")
+		agent, env, _ := scriptedAgent(t, client, scriptedTurn{
+			calls: []scriptedCall{{
+				name: tools.DownloadToolName,
+				input: map[string]any{
+					"url":       addr + "/example.txt",
+					"file_path": "example.txt",
+				},
+			}},
+		})
+		res := toolResults(t, runScript(t, agent, env, "download the file"))
+
+		dl, ok := res[tools.DownloadToolName]
+		require.True(t, ok, "expected a download result")
+		require.False(t, dl.IsError, "download failed: %s", dl.Content)
+
+		content, err := os.ReadFile(filepath.Join(env.workingDir, "example.txt"))
+		require.NoError(t, err)
+		require.Equal(t, "downloaded body", string(content))
+	})
+
+	t.Run("fetch returns the body", func(t *testing.T) {
+		t.Parallel()
+
+		client, addr := serveOnce(t, "text/html", "<html><body><p>John Doe</p></body></html>")
+		agent, env, _ := scriptedAgent(t, client, scriptedTurn{
+			calls: []scriptedCall{{
+				name: tools.FetchToolName,
+				input: map[string]any{
+					"url":    addr + "/example.html",
+					"format": "text",
+				},
+			}},
+		})
+		res := toolResults(t, runScript(t, agent, env, "fetch the page"))
+
+		fetch, ok := res[tools.FetchToolName]
+		require.True(t, ok, "expected a fetch result")
+		require.False(t, fetch.IsError, "fetch failed: %s", fetch.Content)
+		require.Contains(t, fetch.Content, "John Doe")
+	})
+
+	t.Run("sourcegraph", func(t *testing.T) {
+		t.Parallel()
+
+		_, addr := serveOnce(t, "application/json",
+			`{"data":{"search":{"results":{"matchCount":1,"results":[]}}}}`)
+		agent, env, _ := scriptedAgent(t, redirectClient(t, addr), scriptedTurn{
+			calls: []scriptedCall{{
+				name:  tools.SourcegraphToolName,
+				input: map[string]any{"query": "func main"},
+			}},
+		})
+		res := toolResults(t, runScript(t, agent, env, "search sourcegraph"))
+
+		sg, ok := res[tools.SourcegraphToolName]
+		require.True(t, ok, "expected a sourcegraph result")
+		require.False(t, sg.IsError, "sourcegraph failed: %s", sg.Content)
+	})
+
+	// Two calls in one assistant message must both be dispatched and both
+	// come back paired to their own call.
+	t.Run("parallel tool calls", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
+			calls: []scriptedCall{
+				{name: tools.GlobToolName, input: map[string]any{"pattern": "*.go"}},
+				{name: tools.LSToolName, input: map[string]any{"path": "."}},
+			},
+		})
+		msgs := runScript(t, agent, env, "glob and ls at once")
+
+		var withCalls *message.Message
+		for i, msg := range msgs {
+			if msg.Role == message.Assistant && len(msg.ToolCalls()) > 0 {
+				withCalls = &msgs[i]
+			}
+		}
+		require.NotNil(t, withCalls, "expected an assistant message carrying tool calls")
+		require.Len(t, withCalls.ToolCalls(), 2, "both calls belong to one message")
+
+		res := toolResults(t, msgs)
+		glob, ok := res[tools.GlobToolName]
+		require.True(t, ok, "expected a glob result")
+		require.False(t, glob.IsError, "glob failed: %s", glob.Content)
+		require.Contains(t, glob.Content, "main.go")
+
+		ls, ok := res[tools.LSToolName]
+		require.True(t, ok, "expected an ls result")
+		require.False(t, ls.IsError, "ls failed: %s", ls.Content)
+		require.Contains(t, ls.Content, "main.go")
+	})
+
+	// A failing tool must come back as an error result the model can see,
+	// not as a hard error that aborts the turn.
+	t.Run("tool error reaches the conversation", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
+			calls: []scriptedCall{{
+				name:  tools.ViewToolName,
+				input: map[string]any{"file_path": "does-not-exist.go"},
+			}},
+		})
+		res := toolResults(t, runScript(t, agent, env, "read a missing file"))
+
+		view, ok := res[tools.ViewToolName]
+		require.True(t, ok, "expected a view result even though it failed")
+		require.True(t, view.IsError, "expected an error result, got: %s", view.Content)
+	})
+
+	// The loop must keep going after a tool result: the model gets another
+	// turn, and what it says then is what the conversation ends on.
+	t.Run("loop continues after a tool result", func(t *testing.T) {
+		t.Parallel()
+
+		agent, env, model := scriptedAgent(t, nil,
+			scriptedTurn{calls: []scriptedCall{{
+				name:  tools.LSToolName,
+				input: map[string]any{"path": "."},
+			}}},
+			scriptedTurn{text: "I looked, and there are two files."},
+		)
+		msgs := runScript(t, agent, env, "what is in here")
+
+		require.GreaterOrEqual(t, len(model.sentCalls()), 2,
+			"the model must be called again after the tool result")
+		require.Contains(t, msgs[len(msgs)-1].Content().Text, "there are two files")
+	})
 }
 
 func makeTestTodos(n int) []session.Todo {

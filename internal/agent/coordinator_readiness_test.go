@@ -58,7 +58,6 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 		cfg:         cfg,
 		sessions:    env.sessions,
 		messages:    env.messages,
-		permissions: env.permissions,
 		history:     env.history,
 		filetracker: *env.filetracker,
 		// Simulate a slow MCP initialization through the coordinator's

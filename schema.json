@@ -82,10 +82,6 @@
           "$ref": "#/$defs/Options",
           "description": "General application options"
         },
-        "permissions": {
-          "$ref": "#/$defs/Permissions",
-          "description": "Permission settings for tool usage"
-        },
         "tools": {
           "$ref": "#/$defs/Tools",
           "description": "Tool configurations"
@@ -656,28 +652,6 @@
             8,
             48
           ]
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "Permissions": {
-      "properties": {
-        "allowed_tools": {
-          "items": {
-            "type": "string",
-            "examples": [
-              "bash",
-              "view"
-            ]
-          },
-          "type": "array",
-          "description": "List of tools that don't require permission prompts"
-        },
-        "yolo": {
-          "type": "boolean",
-          "description": "Skip all permission prompts (yolo mode). This build defaults to true, set false to restore prompts",
-          "default": true
         }
       },
       "additionalProperties": false,

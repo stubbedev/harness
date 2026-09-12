@@ -15,7 +15,6 @@ import (
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
 	lsputil "github.com/stubbedev/harness/internal/lsp/util"
-	"github.com/stubbedev/harness/internal/permission"
 )
 
 type RenameParams struct {
@@ -31,7 +30,6 @@ var renameDescription string
 
 func NewRenameTool(
 	lspManager *lsp.Manager,
-	permissions permission.Service,
 	files history.Service,
 	filetracker filetracker.Service,
 ) fantasy.AgentTool {
@@ -61,20 +59,6 @@ func NewRenameTool(
 			}
 
 			sessionID := GetSessionFromContext(ctx)
-			if sessionID != "" && permissions != nil {
-				granted, err := permissions.Request(ctx, permission.CreatePermissionRequest{
-					SessionID:   sessionID,
-					ToolName:    RenameToolName,
-					Description: fmt.Sprintf("Rename '%s' to '%s'", params.Symbol, params.NewName),
-				})
-				if err != nil {
-					return fantasy.ToolResponse{}, fmt.Errorf("permission request failed: %w", err)
-				}
-				if !granted {
-					return NewPermissionDeniedResponse(), nil
-				}
-			}
-
 			affectedFiles := collectAffectedFiles(edit)
 
 			if files != nil && sessionID != "" {

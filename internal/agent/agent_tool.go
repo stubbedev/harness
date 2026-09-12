@@ -15,7 +15,6 @@ import (
 	"github.com/stubbedev/harness/internal/agent/prompt"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/subagents"
 )
@@ -69,44 +68,6 @@ func findSubagentByName(active []*subagents.Subagent, name string) *subagents.Su
 		}
 	}
 	return nil
-}
-
-// subagentSessionSetup returns a SessionSetup callback that applies the
-// subagent's permission mode to the freshly-created sub-session. Returns
-// nil when no setup is needed.
-func (c *coordinator) subagentSessionSetup(sa *subagents.Subagent) func(sessionID string) {
-	if sa.PermissionMode != subagents.PermissionModeBypassPermissions {
-		return nil
-	}
-	return func(sessionID string) {
-		c.permissions.AutoApproveSession(sessionID)
-	}
-}
-
-// confirmBypassPermissions gates permissionMode: bypassPermissions behind an
-// explicit user confirmation for every dispatch of a subagent that is not
-// user-scoped. A repository can ship a subagent definition with a description
-// crafted to get auto-dispatched, so repo-provided bypass must never
-// auto-approve a whole child session without the user seeing it. Returns
-// (zero, true) when dispatch may proceed and (denial response, false)
-// otherwise. Yolo mode and the standard allowlist/auto-approve paths are
-// honored by the permission service itself.
-func (c *coordinator) confirmBypassPermissions(ctx context.Context, sa *subagents.Subagent, sessionID, toolCallID string) (fantasy.ToolResponse, bool) {
-	if sa.PermissionMode != subagents.PermissionModeBypassPermissions || subagents.InGlobalDir(sa.FilePath) {
-		return fantasy.ToolResponse{}, true
-	}
-	granted, err := c.permissions.Request(ctx, permission.CreatePermissionRequest{
-		SessionID:   sessionID,
-		ToolCallID:  toolCallID,
-		ToolName:    AgentToolName,
-		Description: fmt.Sprintf("Subagent %q is defined in this project and requests bypassPermissions: it would run with every tool call auto-approved.", sa.Name),
-		Action:      "bypass_permissions:" + sa.Name,
-		Path:        sa.FilePath,
-	})
-	if err != nil || !granted {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("subagent %q requests bypassPermissions and the user did not approve it", sa.Name)), false
-	}
-	return fantasy.ToolResponse{}, true
 }
 
 // describeSubagentForEnum renders one line of the subagent_type enum's
@@ -317,10 +278,6 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
 			}
 
-			if resp, ok := c.confirmBypassPermissions(ctx, sa, sessionID, call.ID); !ok {
-				return resp, nil
-			}
-
 			agentCfg := sa.ToConfigAgent(coderCfg)
 			// Config-driven setup failures (prompt build, model/provider that
 			// passed discovery but fails at build) are surfaced as tool-error
@@ -361,7 +318,6 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				ToolCallID:     call.ID,
 				Prompt:         params.Prompt,
 				SessionTitle:   sa.Name + " Agent Session",
-				SessionSetup:   c.subagentSessionSetup(sa),
 				AgentName:      sa.Name,
 				AgentColor:     sa.ResolvedColor(),
 				AgentModel:     agent.Model().ModelCfg.Model,

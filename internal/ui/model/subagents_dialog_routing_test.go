@@ -31,8 +31,8 @@ var _ dialog.Dialog = (*recordingDialog)(nil)
 // TestHandleSubagentsDialogMsg_RoutesByIDNotFront verifies that the subagents
 // dialog receives its async results even when another dialog has opened on top
 // of it. Its initial fetch, running-list refresh, and mutation rollback all
-// arrive after a round trip, and anything can open in the meantime — a
-// permission prompt during exactly the agent run the user opened the dialog to
+// arrive after a round trip, and anything can open in the meantime — a quit
+// confirmation during exactly the agent run the user opened the dialog to
 // watch. Routing to the front dialog would drop those messages, and nothing
 // re-requests them.
 func TestHandleSubagentsDialogMsg_RoutesByIDNotFront(t *testing.T) {
@@ -43,10 +43,10 @@ func TestHandleSubagentsDialogMsg_RoutesByIDNotFront(t *testing.T) {
 
 	subagentsDialog := &recordingDialog{id: dialog.SubagentsID}
 	u.dialog.OpenDialog(subagentsDialog)
-	u.dialog.OpenDialogWithGrace(&recordingDialog{id: dialog.PermissionsID})
+	u.dialog.OpenDialogWithGrace(&recordingDialog{id: dialog.QuitID})
 
-	require.Equal(t, dialog.PermissionsID, u.dialog.DialogLast().ID(),
-		"the permission prompt must be in front for this test to mean anything")
+	require.Equal(t, dialog.QuitID, u.dialog.DialogLast().ID(),
+		"the quit dialog must be in front for this test to mean anything")
 
 	msg := dialog.SubagentsInitialDataMsg{}
 	require.Nil(t, u.handleSubagentsDialogMsg(msg))

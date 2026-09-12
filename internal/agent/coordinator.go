@@ -37,7 +37,6 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/oauth/copilot"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
@@ -144,7 +143,6 @@ type coordinator struct {
 	cfg         *config.ConfigStore
 	sessions    session.Service
 	messages    message.Service
-	permissions permission.Service
 	questions   question.Service
 	history     history.Service
 	filetracker filetracker.Service
@@ -215,7 +213,6 @@ type CoordinatorOptions struct {
 	Config       *config.ConfigStore
 	Sessions     session.Service
 	Messages     message.Service
-	Permissions  permission.Service
 	Questions    question.Service
 	History      history.Service
 	FileTracker  filetracker.Service
@@ -246,7 +243,6 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		cfg:                opts.Config,
 		sessions:           opts.Sessions,
 		messages:           opts.Messages,
-		permissions:        opts.Permissions,
 		questions:          opts.Questions,
 		history:            opts.History,
 		filetracker:        opts.FileTracker,
@@ -917,7 +913,6 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		AutoSummarizeRatio:   c.cfg.Config().Options.AutoSummarizeRatio,
 		AutoSummarizeBuffer:  c.cfg.Config().Options.AutoSummarizeBuffer,
 		MaxRetries:           c.cfg.Config().Options.MaxRetries,
-		IsYolo:               c.permissions.SkipRequests(),
 		Sessions:             c.sessions,
 		Messages:             c.messages,
 		Tools:                nil,
@@ -999,22 +994,22 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID, c.questions),
+		tools.NewBashTool(c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID, c.questions),
 		tools.NewHarnessInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewHarnessLogsTool(logFile),
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
-		tools.NewDownloadTool(c.permissions, c.cfg.WorkingDir(), nil),
-		tools.NewEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewFetchTool(c.permissions, c.cfg.WorkingDir(), nil),
+		tools.NewDownloadTool(c.cfg.WorkingDir(), nil),
+		tools.NewEditTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewMultiEditTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewFetchTool(c.cfg.WorkingDir(), nil),
 		tools.NewGlobTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Glob),
 		tools.NewGrepTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Grep),
-		tools.NewLsTool(c.permissions, c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
+		tools.NewLsTool(c.cfg.WorkingDir(), c.cfg.Config().Tools.Ls),
 		tools.NewSourcegraphTool(nil),
 		tools.NewTodosTool(c.sessions),
-		tools.NewViewTool(c.lspManager, c.permissions, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspManager, c.permissions, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewViewTool(c.lspManager, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
+		tools.NewWriteTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
 
 	// Question tool is interactive-only and not available to sub-agents.
@@ -1032,16 +1027,16 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			tools.NewSymbolsTool(c.lspManager),
 			tools.NewDefinitionTool(c.lspManager),
 			tools.NewCallHierarchyTool(c.lspManager),
-			tools.NewRenameTool(c.lspManager, c.permissions, c.history, c.filetracker),
-			tools.NewReplaceSymbolTool(c.lspManager, c.permissions, c.history, c.filetracker),
+			tools.NewRenameTool(c.lspManager, c.history, c.filetracker),
+			tools.NewReplaceSymbolTool(c.lspManager, c.history, c.filetracker),
 		)
 	}
 
 	if len(c.cfg.Config().MCP) > 0 {
 		allTools = append(
 			allTools,
-			tools.NewListMCPResourcesTool(c.cfg, c.permissions),
-			tools.NewReadMCPResourceTool(c.cfg, c.permissions),
+			tools.NewListMCPResourcesTool(c.cfg),
+			tools.NewReadMCPResourceTool(c.cfg),
 		)
 	}
 
@@ -1052,7 +1047,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
-	for _, tool := range tools.GetMCPTools(c.permissions, c.cfg, c.cfg.WorkingDir()) {
+	for _, tool := range tools.GetMCPTools(c.cfg, c.cfg.WorkingDir()) {
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)
@@ -1085,6 +1080,19 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
 	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+
+	// The batch tool composes the tools above, so it is built from the
+	// finished list and appended after it. Calling the wrapped tools
+	// means a call made from inside a plan fires the same PreToolUse
+	// hooks as one the model makes directly, and a hook that denies a
+	// tool still denies it here. Batch is not in the list it closes
+	// over, so a plan cannot nest another plan.
+	if slices.Contains(agent.AllowedTools, tools.BatchToolName) {
+		callable := slices.Clone(filteredTools)
+		filteredTools = append(filteredTools, tools.NewBatchTool(func() []fantasy.AgentTool {
+			return callable
+		}))
+	}
 
 	return filteredTools, nil
 }

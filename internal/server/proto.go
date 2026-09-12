@@ -1027,36 +1027,6 @@ func (c *controllerV1) handleGetWorkspaceAgentDefaultSmallModel(w http.ResponseW
 	jsonEncode(w, model)
 }
 
-// handlePostWorkspacePermissionsGrant grants a permission request.
-//
-//	@Summary		Grant permission
-//	@Tags			permissions
-//	@Accept			json
-//	@Param			id		path	string				true	"Workspace ID"
-//	@Param			request	body	proto.PermissionGrant	true	"Permission grant"
-//	@Success		200	{object}	proto.PermissionGrantResponse
-//	@Failure		400	{object}	proto.Error
-//	@Failure		404	{object}	proto.Error
-//	@Failure		500	{object}	proto.Error
-//	@Router			/workspaces/{id}/permissions/grant [post]
-func (c *controllerV1) handlePostWorkspacePermissionsGrant(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	var req proto.PermissionGrant
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	resolved, err := c.backend.GrantPermission(id, req)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, proto.PermissionGrantResponse{Resolved: resolved})
-}
-
 // handlePostWorkspaceQuestionsAnswer submits answers for a batch question.
 //
 //	@Summary		Answer question batch
@@ -1107,54 +1077,6 @@ func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter,
 		return
 	}
 	jsonEncode(w, proto.QuestionAnswerResponse{Resolved: cancelled})
-}
-
-// handlePostWorkspacePermissionsSkip sets whether to skip permission prompts.
-//
-//	@Summary		Set skip permissions
-//	@Tags			permissions
-//	@Accept			json
-//	@Param			id		path	string						true	"Workspace ID"
-//	@Param			request	body	proto.PermissionSkipRequest	true	"Permission skip request"
-//	@Success		200
-//	@Failure		400	{object}	proto.Error
-//	@Failure		404	{object}	proto.Error
-//	@Failure		500	{object}	proto.Error
-//	@Router			/workspaces/{id}/permissions/skip [post]
-func (c *controllerV1) handlePostWorkspacePermissionsSkip(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	var req proto.PermissionSkipRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	if err := c.backend.SetPermissionsSkip(id, req.Skip); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-}
-
-// handleGetWorkspacePermissionsSkip returns whether permission prompts are skipped.
-//
-//	@Summary		Get skip permissions status
-//	@Tags			permissions
-//	@Produce		json
-//	@Param			id	path		string						true	"Workspace ID"
-//	@Success		200	{object}	proto.PermissionSkipRequest
-//	@Failure		404	{object}	proto.Error
-//	@Failure		500	{object}	proto.Error
-//	@Router			/workspaces/{id}/permissions/skip [get]
-func (c *controllerV1) handleGetWorkspacePermissionsSkip(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	skip, err := c.backend.GetPermissionsSkip(id)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, proto.PermissionSkipRequest{Skip: skip})
 }
 
 // handleError maps backend errors to HTTP status codes and writes the

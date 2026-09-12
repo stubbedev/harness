@@ -183,18 +183,6 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				if !sendEvent(ctx, events, e) {
 					return
 				}
-			case pubsub.PayloadTypePermissionRequest:
-				var e pubsub.Event[proto.PermissionRequest]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypePermissionNotification:
-				var e pubsub.Event[proto.PermissionNotification]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
 			case pubsub.PayloadTypeQuestionRequest:
 				var e pubsub.Event[proto.QuestionRequest]
 				_ = json.Unmarshal(p.Payload, &e)
@@ -672,27 +660,6 @@ func (c *Client) ListSessions(ctx context.Context, id string) ([]proto.Session, 
 	return sessions, nil
 }
 
-// GrantPermission grants a permission on a workspace. The returned
-// bool reports whether this call resolved the pending request (true)
-// or found it already resolved by a previous caller (false). A false
-// value is not an error — it just means another subscriber resolved
-// the same request first.
-func (c *Client) GrantPermission(ctx context.Context, id string, req proto.PermissionGrant) (bool, error) {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/permissions/grant", id), nil, jsonBody(req), http.Header{"Content-Type": []string{"application/json"}})
-	if err != nil {
-		return false, fmt.Errorf("failed to grant permission: %w", err)
-	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("failed to grant permission: status code %d", rsp.StatusCode)
-	}
-	var resp proto.PermissionGrantResponse
-	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
-		return false, fmt.Errorf("failed to decode grant permission response: %w", err)
-	}
-	return resp.Resolved, nil
-}
-
 // AnswerQuestionBatch submits answers for a batch question on a
 // workspace. Returns true if this call resolved the pending
 // request, false if already resolved by another caller.
@@ -729,36 +696,6 @@ func (c *Client) CancelQuestionBatch(ctx context.Context, id string) (bool, erro
 		return false, fmt.Errorf("failed to decode cancel question batch response: %w", err)
 	}
 	return resp.Resolved, nil
-}
-
-// SetPermissionsSkipRequests sets the skip-requests flag for a workspace.
-func (c *Client) SetPermissionsSkipRequests(ctx context.Context, id string, skip bool) error {
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/permissions/skip", id), nil, jsonBody(proto.PermissionSkipRequest{Skip: skip}), http.Header{"Content-Type": []string{"application/json"}})
-	if err != nil {
-		return fmt.Errorf("failed to set permissions skip requests: %w", err)
-	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to set permissions skip requests: status code %d", rsp.StatusCode)
-	}
-	return nil
-}
-
-// GetPermissionsSkipRequests retrieves the skip-requests flag for a workspace.
-func (c *Client) GetPermissionsSkipRequests(ctx context.Context, id string) (bool, error) {
-	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/permissions/skip", id), nil, nil)
-	if err != nil {
-		return false, fmt.Errorf("failed to get permissions skip requests: %w", err)
-	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("failed to get permissions skip requests: status code %d", rsp.StatusCode)
-	}
-	var skip proto.PermissionSkipRequest
-	if err := json.NewDecoder(rsp.Body).Decode(&skip); err != nil {
-		return false, fmt.Errorf("failed to decode permissions skip requests: %w", err)
-	}
-	return skip.Skip, nil
 }
 
 // GetConfig retrieves the workspace-specific configuration.

@@ -40,7 +40,6 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 		cfg:         cfg,
 		sessions:    env.sessions,
 		messages:    env.messages,
-		permissions: env.permissions,
 		history:     env.history,
 		filetracker: *env.filetracker,
 		agents:      make(map[string]SessionAgent),

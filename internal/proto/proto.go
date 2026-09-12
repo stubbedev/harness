@@ -15,7 +15,6 @@ import (
 type Workspace struct {
 	ID       string         `json:"id"`
 	Path     string         `json:"path"`
-	YOLO     bool           `json:"yolo,omitempty"`
 	Debug    bool           `json:"debug,omitempty"`
 	DataDir  string         `json:"data_dir,omitempty"`
 	Version  string         `json:"version,omitempty"`
@@ -172,41 +171,6 @@ func (a AgentSession) IsZero() bool {
 	return a.ID == "" && !a.IsBusy
 }
 
-// PermissionAction represents an action taken on a permission request.
-type PermissionAction string
-
-const (
-	PermissionAllow           PermissionAction = "allow"
-	PermissionAllowForSession PermissionAction = "allow_session"
-	PermissionDeny            PermissionAction = "deny"
-)
-
-// MarshalText implements the [encoding.TextMarshaler] interface.
-func (p PermissionAction) MarshalText() ([]byte, error) {
-	return []byte(p), nil
-}
-
-// UnmarshalText implements the [encoding.TextUnmarshaler] interface.
-func (p *PermissionAction) UnmarshalText(text []byte) error {
-	*p = PermissionAction(text)
-	return nil
-}
-
-// PermissionGrant represents a permission grant request.
-type PermissionGrant struct {
-	Permission PermissionRequest `json:"permission"`
-	Action     PermissionAction  `json:"action"`
-}
-
-// PermissionGrantResponse is the server's response to a permission
-// grant call. Resolved is true when this call resolved the pending
-// request, and false when the request had already been resolved by a
-// previous caller (e.g., another client in a multi-subscriber UI). A
-// false value is not an error.
-type PermissionGrantResponse struct {
-	Resolved bool `json:"resolved"`
-}
-
 // QuestionRequest is the wire format for a batch question
 // sent from server to client over SSE.
 type QuestionRequest struct {
@@ -261,11 +225,6 @@ type QuestionAnswerResponse struct {
 // resolved so non-answering clients can dismiss their forms.
 type QuestionNotification struct {
 	BatchID string `json:"batch_id"`
-}
-
-// PermissionSkipRequest represents a request to skip permission prompts.
-type PermissionSkipRequest struct {
-	Skip bool `json:"skip"`
 }
 
 // LSPEventType represents the type of LSP event.

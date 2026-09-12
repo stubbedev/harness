@@ -39,7 +39,6 @@ func TestReplaceContentPreservesCRLFAndMetadata(t *testing.T) {
 	tracker := &mockEditFileTracker{lastRead: time.Now().Add(time.Second)}
 	edit := editContext{
 		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
-		permissions: &mockPermissionService{},
 		files:       &mockHistoryService{},
 		filetracker: tracker,
 		workingDir:  dir,
@@ -70,7 +69,6 @@ func TestDeleteContentRejectsMultipleMatchesWithoutReplaceAll(t *testing.T) {
 
 	edit := editContext{
 		ctx:         context.WithValue(t.Context(), SessionIDContextKey, "session"),
-		permissions: &mockPermissionService{},
 		files:       &mockHistoryService{},
 		filetracker: &mockEditFileTracker{lastRead: time.Now().Add(time.Second)},
 		workingDir:  dir,

@@ -217,7 +217,8 @@ Reuses the universal rules:
 ### Differences from `PreToolUse`
 
 - No `updated_input`: there are no tool inputs at this point.
-- No permission-prompt bypass: there's no permission prompt for a user prompt.
+- No tool gating: a user prompt is not a tool call, so `decision` has nothing
+  to block.
 - `decision: "allow"` is functionally identical to silence. It exists only for
   symmetry with `PreToolUse` and to give hook authors a consistent vocabulary.
   (Could be argued both ways — consider dropping it here.)

@@ -23,7 +23,6 @@ import (
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/oauth"
 	mcpoauth "github.com/stubbedev/harness/internal/oauth/mcp"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/version"
 	"golang.org/x/oauth2"
@@ -294,7 +293,7 @@ func Close(ctx context.Context) error {
 }
 
 // Initialize initializes MCP clients based on the provided configuration.
-func Initialize(ctx context.Context, permissions permission.Service, cfg *config.ConfigStore) {
+func Initialize(ctx context.Context, cfg *config.ConfigStore) {
 	ArmInit()
 	slog.Info("Initializing MCP clients")
 	start := time.Now()

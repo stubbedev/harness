@@ -154,10 +154,6 @@ providers:
         name: Llama 3.3
         context_window: 128000
 
-permissions:
-  # Auto-approve some tools.
-  allowed_tools: [view, edit]
-
 mcp:
   # Add an MCP server, with a GitHub API token stored in 1Password.
   github:
@@ -354,7 +350,7 @@ When Harness is run against a shared backend (for example two TUIs talking to
 the same `harness serve`), clients are grouped into **workspaces** keyed by
 their resolved `--cwd`. Two clients with the same `--cwd` join the same
 underlying workspace, so they share the session list, message history,
-permission queue, LSP, and MCP state.
+LSP, and MCP state.
 
 Joining is implicit: pointing a second client at the same working directory
 attaches it to the existing workspace. Each new invocation, however, starts
@@ -370,9 +366,9 @@ session is "in progress" on another client and joining it will mirror that
 view live.
 
 The first client to create a workspace fixes its process-wide flags. In
-particular, `--yolo` and `--debug` follow a **first-wins** rule: later
-clients that arrive at the same `--cwd` with different values for those
-flags do not change the running workspace. A debug log line is emitted
+particular, `--debug` follows a **first-wins** rule: later clients that
+arrive at the same `--cwd` with a different value do not change the
+running workspace. A debug log line is emitted
 recording the mismatch, and the workspace keeps the flags it was created
 with.
 
@@ -416,17 +412,6 @@ control but don't want Harness to consider when providing context.
 The `.harnessignore` file uses the same syntax as `.gitignore` and can be placed
 in the root of your project or in subdirectories.
 
-### Allowing Tools
-
-By default, Harness will ask you for permission before running tool calls. If
-you'd like, you can allow tools to be executed without prompting you for
-permissions. Use this with care.
-
-```yaml
-permissions:
-  allowed_tools: [view, ls, grep, edit, mcp_context7_get-library-doc]
-```
-
 ### Disabling Built-In Tools
 
 You can also deny tools, hiding then from the agent entirely:
@@ -437,11 +422,6 @@ options:
 ```
 
 To disable tools from MCP servers, see the [MCP config section](#mcps).
-
-### You only live once
-
-You can also skip all permission prompts completely by running Harness with the
-`--yolo` flag. Be very, very careful with this feature.
 
 ### Disabling Skills
 
@@ -544,8 +524,8 @@ Skills with `disable-model-invocation` won't appear in the model's available ski
 
 ### Desktop notifications
 
-Harness sends desktop notifications when a tool call requires permission and when
-the agent finishes its turn. They're only sent when the terminal window isn't
+Harness sends desktop notifications when the agent asks a question and when
+it finishes its turn. They're only sent when the terminal window isn't
 focused _and_ your terminal supports reporting the focus state.
 
 ```yaml

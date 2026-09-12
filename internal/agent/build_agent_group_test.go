@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/prompt"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/permission"
 	"github.com/stubbedev/harness/internal/subagents"
 	"golang.org/x/sync/errgroup"
 )
@@ -47,10 +46,9 @@ func newOfflineCoordinator(t *testing.T, env fakeEnv) *coordinator {
 	}
 
 	c, err := NewCoordinator(t.Context(), CoordinatorOptions{
-		Config:      cfg,
-		Sessions:    env.sessions,
-		Messages:    env.messages,
-		Permissions: permission.NewPermissionService(env.workingDir, true, nil),
+		Config:   cfg,
+		Sessions: env.sessions,
+		Messages: env.messages,
 	})
 	require.NoError(t, err)
 	return c.(*coordinator)
