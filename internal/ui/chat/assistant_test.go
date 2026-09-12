@@ -140,3 +140,22 @@ func TestAssistantMessageItemHandleMouseClick(t *testing.T) {
 	require.False(t, item.HandleMouseClick(ansi.MouseRight, 0, 2))
 	require.Equal(t, thinkingCollapsed, item.thinkingViewMode)
 }
+
+// TestAssistantSpinnerIsAlwaysLabeled covers the stretch between a tool
+// result landing and the model's first token, when the assistant message is
+// still empty. The spinner there used to carry no label, which reads as the
+// finished tool call above it still running rather than as the model working.
+func TestAssistantSpinnerIsAlwaysLabeled(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+
+	waiting := &message.Message{ID: "m1", Role: message.Assistant}
+	item := NewAssistantMessageItem(&sty, waiting).(*AssistantMessageItem)
+	require.True(t, item.isSpinning(), "an empty unfinished assistant message spins")
+	require.Contains(t, ansi.Strip(item.renderSpinning()), "Thinking")
+
+	summary := &message.Message{ID: "m2", Role: message.Assistant, IsSummaryMessage: true}
+	summaryItem := NewAssistantMessageItem(&sty, summary).(*AssistantMessageItem)
+	require.Contains(t, ansi.Strip(summaryItem.renderSpinning()), "Summarizing")
+}

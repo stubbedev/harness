@@ -345,8 +345,10 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 	// Set initial state
 	c.SetServerState(StateStarting)
 
-	// Try to ping the server with a simple request
-	ticker := time.NewTicker(500 * time.Millisecond)
+	// Poll for readiness. The first tick lands almost immediately: a server
+	// that is already up should not cost a full poll interval before anything
+	// waiting on it (a view of the first file of its type) can proceed.
+	ticker := time.NewTicker(25 * time.Millisecond)
 	defer ticker.Stop()
 
 	if c.debug {
@@ -635,56 +637,70 @@ func (c *Client) WaitForDiagnostics(ctx context.Context, timeout time.Duration) 
 	defer deadline.Stop()
 	firstChangeTimer := time.NewTimer(min(timeout, firstChangeDuration))
 	defer firstChangeTimer.Stop()
-	previousVersion := c.diagnostics.Version()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
 
+	if !c.waitForDiagnosticsChange(ctx, deadline.C, firstChangeTimer.C) {
+		// No change arrived quickly — server isn't republishing.
+		return
+	}
+	// Diagnostics changed — now wait for them to settle.
+	c.waitForDiagnosticsToSettle(ctx, deadline.C, settleDuration)
+}
+
+// waitForDiagnosticsChange blocks until the diagnostics version moves, and
+// reports whether it did. It is woken by the publication itself rather than by
+// polling, so a server that answers in 5ms costs 5ms.
+func (c *Client) waitForDiagnosticsChange(ctx context.Context, deadline, giveUp <-chan time.Time) bool {
+	previousVersion := c.diagnostics.Version()
 	for {
+		// Read the wake channel before the version: see [csync.VersionedMap.Changed].
+		changed := c.diagnostics.Changed()
+		if c.diagnostics.Version() != previousVersion {
+			return true
+		}
 		select {
 		case <-ctx.Done():
-			return
-		case <-deadline.C:
-			return
-		case <-firstChangeTimer.C:
-			// No change arrived quickly — server isn't republishing.
-			return
-		case <-ticker.C:
-			currentVersion := c.diagnostics.Version()
-			if currentVersion != previousVersion {
-				// Diagnostics changed — now wait for them to settle.
-				c.waitForDiagnosticsToSettle(ctx, deadline.C, settleDuration)
-				return
-			}
+			return false
+		case <-deadline:
+			return false
+		case <-giveUp:
+			return false
+		case <-changed:
+			return true
 		}
 	}
 }
 
-// waitForDiagnosticsToSettle waits until diagnostics version stays the same
-// for settleDuration, indicating the LSP server has finished publishing.
+// waitForDiagnosticsToSettle waits until the diagnostics version stays the
+// same for settleDuration, indicating the LSP server has finished publishing.
 func (c *Client) waitForDiagnosticsToSettle(ctx context.Context, deadline <-chan time.Time, settleDuration time.Duration) {
-	lastVersion := c.diagnostics.Version()
-	settleTicker := time.NewTicker(50 * time.Millisecond)
-	defer settleTicker.Stop()
-
-	// Track how long the version has been stable.
-	stableStart := time.Now()
+	settle := time.NewTimer(settleDuration)
+	defer settle.Stop()
 
 	for {
+		// Read the wake channel before the version: see [csync.VersionedMap.Changed].
+		changed := c.diagnostics.Changed()
+		lastVersion := c.diagnostics.Version()
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-deadline:
 			return
-		case <-settleTicker.C:
-			currentVersion := c.diagnostics.Version()
-			if currentVersion != lastVersion {
-				// New change detected — reset the stable timer.
-				lastVersion = currentVersion
-				stableStart = time.Now()
-			} else if time.Since(stableStart) >= settleDuration {
-				// Diagnostics have been stable for the settle duration.
+		case <-settle.C:
+			// Stable for the whole settle window.
+			if c.diagnostics.Version() == lastVersion {
 				return
 			}
+			settle.Reset(settleDuration)
+		case <-changed:
+			// New change — restart the settle window.
+			if !settle.Stop() {
+				select {
+				case <-settle.C:
+				default:
+				}
+			}
+			settle.Reset(settleDuration)
 		}
 	}
 }

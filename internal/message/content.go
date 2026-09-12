@@ -187,6 +187,35 @@ type Message struct {
 	// figure is the one shown.
 	PrismHypercreditSavings *float64
 	PrismDollarSavings      *float64
+
+	// Builders backing the two parts that grow one provider delta at a
+	// time. Concatenating a string per delta copies everything received
+	// so far on every token, which is quadratic in the length of the
+	// response; a builder appends with amortized growth and hands back
+	// the accumulated string without copying it.
+	//
+	// They are an optimization, never the source of truth: the parts
+	// stay authoritative and a builder that has fallen out of step with
+	// its part (a retry, a clone, a message read back from the database)
+	// is rebuilt from it. See [Message.appendTo].
+	textBuilder      *strings.Builder
+	reasoningBuilder *strings.Builder
+}
+
+// appendTo appends delta to current using builder, returning the grown
+// string. The builder is rebuilt from current whenever the two have
+// drifted apart, which is what makes every other path free to replace or
+// drop a part without knowing a builder exists.
+func appendTo(builder **strings.Builder, current, delta string) string {
+	if *builder == nil || (*builder).Len() != len(current) {
+		*builder = &strings.Builder{}
+		(*builder).Grow(len(current) + len(delta))
+		(*builder).WriteString(current)
+	}
+	(*builder).WriteString(delta)
+	// strings.Builder never rewrites bytes it has already handed out, so
+	// String is a view of the buffer rather than a copy of it.
+	return (*builder).String()
 }
 
 func (m *Message) Content() TextContent {
@@ -300,7 +329,8 @@ func (m *Message) AppendContent(delta string) {
 	// appended to every one of them, multiplying the visible response.
 	for i, part := range m.Parts {
 		if c, ok := part.(TextContent); ok {
-			m.Parts[i] = TextContent{Text: c.Text + delta}
+			c.Text = appendTo(&m.textBuilder, c.Text, delta)
+			m.Parts[i] = c
 			return
 		}
 	}
@@ -311,12 +341,12 @@ func (m *Message) AppendReasoningContent(delta string) {
 	// See AppendContent above - append to the first match only.
 	for i, part := range m.Parts {
 		if c, ok := part.(ReasoningContent); ok {
-			m.Parts[i] = ReasoningContent{
-				Thinking:   c.Thinking + delta,
-				Signature:  c.Signature,
-				StartedAt:  c.StartedAt,
-				FinishedAt: c.FinishedAt,
-			}
+			// Grown in place: rebuilding the struct from a handful of
+			// named fields silently dropped every other one, so a
+			// thought signature or the Responses metadata recorded
+			// mid-stream was lost by the delta that followed it.
+			c.Thinking = appendTo(&m.reasoningBuilder, c.Thinking, delta)
+			m.Parts[i] = c
 			return
 		}
 	}
@@ -477,6 +507,13 @@ func (m *Message) Clone() Message {
 	clone := *m
 	clone.Parts = make([]ContentPart, len(m.Parts))
 	copy(clone.Parts, m.Parts)
+	// The clone starts its own builders. Sharing them would have two
+	// messages appending into one buffer, and the length guard cannot
+	// catch that: right after a clone both sides are the same length.
+	// Copying the text itself is not needed — the strings the parts
+	// already hold stay valid however the original's buffer grows.
+	clone.textBuilder = nil
+	clone.reasoningBuilder = nil
 	return clone
 }
 

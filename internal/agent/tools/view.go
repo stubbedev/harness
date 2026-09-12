@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -244,8 +243,11 @@ func NewViewTool(
 				return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
 			}
 
+			// Reading a file never waits on a language server. Whatever the
+			// servers have already published about this file is reported
+			// below; anything they are still working out shows up on the next
+			// read, or on the edit that actually cares about it.
 			openInLSPs(ctx, lspManager, filePath)
-			waitForLSPDiagnostics(ctx, lspManager, filePath, 300*time.Millisecond)
 			output := "<file>\n"
 			output += addLineNumbers(content, params.Offset+1)
 

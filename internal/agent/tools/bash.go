@@ -62,6 +62,12 @@ const (
 	DefaultAutoBackgroundAfter = 60 // Commands taking longer automatically become background jobs
 	MaxOutputLength            = 30000
 	BashNoOutput               = "no output"
+
+	// backgroundStartGrace is how long a command started in the background is
+	// given to fail fast before the tool reports it as running. It is a
+	// ceiling, not a delay: a command that exits sooner is reported as soon
+	// as it does.
+	backgroundStartGrace = time.Second
 )
 
 //go:embed bash.md.tpl
@@ -276,8 +282,13 @@ func NewBashTool(permissions permission.Service, workingDir string, attribution 
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
 
-				// Wait a short time to detect fast failures (blocked commands, syntax errors, etc.)
-				time.Sleep(1 * time.Second)
+				// Wait a short time to detect fast failures (blocked commands,
+				// syntax errors, etc.), returning the moment the command exits
+				// instead of always burning the whole grace period.
+				graceCtx, cancelGrace := context.WithTimeout(ctx, backgroundStartGrace)
+				bgShell.WaitContext(graceCtx)
+				cancelGrace()
+
 				stdout, stderr, done, execErr := bgShell.GetOutput()
 
 				if done {

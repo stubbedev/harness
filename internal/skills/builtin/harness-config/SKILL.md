@@ -238,7 +238,7 @@ options:
     exit_banner: default # default | compact | none
     git_status: true
     show_thinking: true
-    textarea_min_height: 3
+    textarea_min_height: 1
     completions:
       max_depth: 5
       max_items: 500

@@ -200,3 +200,22 @@ func TestWaitForDiagnostics_NilClient(t *testing.T) {
 	// Should not panic.
 	c.WaitForDiagnostics(context.Background(), time.Second)
 }
+
+func TestWaitForDiagnostics_SettlesPromptly(t *testing.T) {
+	t.Parallel()
+
+	c := newTestClient()
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		c.diagnostics.Set(protocol.DocumentURI("file:///test.go"), nil)
+	}()
+
+	start := time.Now()
+	c.WaitForDiagnostics(t.Context(), 5*time.Second)
+	elapsed := time.Since(start)
+
+	// Publication plus one settle window (300ms) and nothing else: the wait is
+	// woken by the change, not by a poll interval.
+	require.Less(t, elapsed, 450*time.Millisecond, "settle should not add polling slack")
+}

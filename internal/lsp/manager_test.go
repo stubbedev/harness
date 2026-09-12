@@ -113,3 +113,37 @@ func TestCanAutoStartCachesMissingCommand(t *testing.T) {
 	require.False(t, manager.canAutoStart("gopls", "main.go", t.TempDir(), server))
 	require.Equal(t, 1, lookups)
 }
+
+func TestStartAsyncFanoutIsDeduped(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, 3, 26, 0, 0, 0, 0, time.UTC)
+	now := base
+
+	manager := &Manager{
+		recentFanout: csync.NewMap[string, time.Time](),
+		now:          func() time.Time { return now },
+	}
+
+	require.True(t, manager.shouldFanout("/repo/internal/lsp/client.go"))
+	// Same file type, same directory: the answer cannot have changed.
+	require.False(t, manager.shouldFanout("/repo/internal/lsp/client.go"))
+	require.False(t, manager.shouldFanout("/repo/internal/lsp/manager.go"))
+	// A different file type, or the same one elsewhere, gets its own look:
+	// which servers handle a file depends on both.
+	require.True(t, manager.shouldFanout("/repo/internal/lsp/notes.md"))
+	require.True(t, manager.shouldFanout("/repo/internal/agent/agent.go"))
+
+	now = now.Add(fanoutRetryDelay + time.Second)
+	require.True(t, manager.shouldFanout("/repo/internal/lsp/client.go"))
+}
+
+func TestStartAsyncFanoutWithoutCache(t *testing.T) {
+	t.Parallel()
+
+	// Managers built by hand (tests, zero values) have no cache and must
+	// still fan out rather than silently never starting a server.
+	manager := &Manager{now: time.Now}
+	require.True(t, manager.shouldFanout("/repo/a.go"))
+	require.True(t, manager.shouldFanout("/repo/a.go"))
+}

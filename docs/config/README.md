@@ -341,7 +341,7 @@ options:
     exit_banner: default # default | compact | none
     git_status: true # branch and working-tree status in the header
     show_thinking: true # render reasoning blocks in the transcript
-    textarea_min_height: 3 # collapsed height of the prompt; it grows to fit
+    textarea_min_height: 1 # collapsed height of the prompt; it grows to fit
     completions:
       max_depth: 5
       max_items: 500

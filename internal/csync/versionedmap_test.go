@@ -2,6 +2,7 @@ package csync
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -86,4 +87,68 @@ func TestVersionedMap_ConcurrentAccess(t *testing.T) {
 	// Final version should be at least the expected minimum
 	require.GreaterOrEqual(t, vm.Version(), expectedMinVersion)
 	require.Equal(t, 0, vm.Len())
+}
+
+func TestVersionedMapChangedWakesOnSet(t *testing.T) {
+	t.Parallel()
+
+	vm := NewVersionedMap[string, int]()
+	changed := vm.Changed()
+
+	select {
+	case <-changed:
+		t.Fatal("channel closed before any change")
+	default:
+	}
+
+	go vm.Set("a", 1)
+
+	select {
+	case <-changed:
+	case <-time.After(time.Second):
+		t.Fatal("Changed channel was not closed by Set")
+	}
+
+	// A fresh channel is handed out after a change.
+	next := vm.Changed()
+	select {
+	case <-next:
+		t.Fatal("stale channel returned after a change")
+	default:
+	}
+
+	go vm.Del("a")
+	select {
+	case <-next:
+	case <-time.After(time.Second):
+		t.Fatal("Changed channel was not closed by Del")
+	}
+}
+
+func TestVersionedMapChangedNoMissedWakeup(t *testing.T) {
+	t.Parallel()
+
+	// The documented ordering — read Changed, then Version — must never let a
+	// waiter miss a change that lands between the two reads.
+	for range 200 {
+		vm := NewVersionedMap[string, int]()
+		before := vm.Version()
+
+		start := make(chan struct{})
+		go func() {
+			<-start
+			vm.Set("a", 1)
+		}()
+
+		close(start)
+		changed := vm.Changed()
+		if vm.Version() != before {
+			continue // Saw the new version directly.
+		}
+		select {
+		case <-changed:
+		case <-time.After(time.Second):
+			t.Fatal("waiter saw neither the new version nor a wakeup")
+		}
+	}
 }

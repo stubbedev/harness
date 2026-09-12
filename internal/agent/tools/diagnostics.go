@@ -21,6 +21,13 @@ type DiagnosticsParams struct {
 
 const DiagnosticsToolName = "lsp_diagnostics"
 
+// writeDiagnosticsTimeout is the ceiling on how long a write (edit, write,
+// rename) waits for a language server to report on what it just changed. It is
+// only reached by a server that keeps republishing; one that answers and goes
+// quiet is waited out by the settle window instead, and one that says nothing
+// at all gives up after the shorter first-change window.
+const writeDiagnosticsTimeout = 5 * time.Second
+
 //go:embed diagnostics.md
 var diagnosticsDescription string
 
@@ -29,6 +36,12 @@ func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		DiagnosticsToolName,
 		diagnosticsDescription,
 		func(ctx context.Context, params DiagnosticsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			// The one caller that exists to report diagnostics and nothing
+			// else, so it is the one that waits for a cold server to come up
+			// rather than answering "no problems" because nothing is running.
+			if params.FilePath != "" && lspManager != nil {
+				lspManager.Start(ctx, params.FilePath)
+			}
 			notifyLSPs(ctx, lspManager, params.FilePath)
 			output := getDiagnostics(params.FilePath, lspManager)
 			return fantasy.NewTextResponse(output), nil
@@ -36,9 +49,14 @@ func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	)
 }
 
-// openInLSPs ensures LSP servers are running and aware of the file, but does
-// not notify changes or wait for fresh diagnostics. Use this for read-only
-// operations like view where the file content hasn't changed.
+// openInLSPs makes the LSP servers aware of the file without blocking on any
+// part of it: servers that are not up yet are started in the background, and
+// the file is opened — a one-way notification — only on clients that are
+// already running. Nothing here waits for a diagnostic.
+//
+// Use this for read-only operations like view. The file content hasn't
+// changed, so a server has nothing new to say about it, and a read that waits
+// on one pays that cost on every file the model looks at.
 func openInLSPs(
 	ctx context.Context,
 	manager *lsp.Manager,
@@ -48,7 +66,10 @@ func openInLSPs(
 		return
 	}
 
-	manager.Start(ctx, filepath)
+	// Detached from the tool call's context: the call returns long before a
+	// cold server finishes starting, and cancelling it then would leave the
+	// server half-initialized.
+	manager.StartAsync(context.WithoutCancel(ctx), filepath)
 
 	for client := range manager.Clients().Seq() {
 		if !client.HandlesFile(filepath) {
@@ -56,31 +77,6 @@ func openInLSPs(
 		}
 		_ = client.OpenFileOnDemand(ctx, filepath)
 	}
-}
-
-// waitForLSPDiagnostics waits briefly for diagnostics publication after a file
-// has been opened. Intended for read-only situations where viewing up-to-date
-// files matters but latency should remain low (i.e. when using the view tool).
-func waitForLSPDiagnostics(
-	ctx context.Context,
-	manager *lsp.Manager,
-	filepath string,
-	timeout time.Duration,
-) {
-	if filepath == "" || manager == nil || timeout <= 0 {
-		return
-	}
-
-	var wg sync.WaitGroup
-	for client := range manager.Clients().Seq() {
-		if !client.HandlesFile(filepath) {
-			continue
-		}
-		wg.Go(func() {
-			client.WaitForDiagnostics(ctx, timeout)
-		})
-	}
-	wg.Wait()
 }
 
 // notifyLSPs notifies LSP servers that a file has changed and waits for
@@ -104,14 +100,18 @@ func notifyLSPs(
 				if err := client.NotifyWorkspaceChange(ctx); err != nil {
 					slog.WarnContext(ctx, "Failed to notify workspace change", "error", err)
 				}
-				client.WaitForDiagnostics(ctx, 5*time.Second)
+				client.WaitForDiagnostics(ctx, writeDiagnosticsTimeout)
 			})
 		}
 		wg.Wait()
 		return
 	}
 
-	manager.Start(ctx, filepath)
+	// Start servers in the background. An edit waits for what a running
+	// server has to say about it, but never for a cold server to come up:
+	// that is seconds of process spawn and workspace indexing, and the
+	// diagnostics it would eventually produce arrive on the next edit anyway.
+	manager.StartAsync(context.WithoutCancel(ctx), filepath)
 
 	var wg sync.WaitGroup
 	for client := range manager.Clients().Seq() {
@@ -121,7 +121,7 @@ func notifyLSPs(
 		_ = client.OpenFileOnDemand(ctx, filepath)
 		_ = client.NotifyChange(ctx, filepath)
 		wg.Go(func() {
-			client.WaitForDiagnostics(ctx, 5*time.Second)
+			client.WaitForDiagnostics(ctx, writeDiagnosticsTimeout)
 		})
 	}
 	wg.Wait()

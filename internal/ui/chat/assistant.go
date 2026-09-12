@@ -113,6 +113,56 @@ func fnv64(s string) uint64 {
 	return h.Sum64()
 }
 
+// incrementalHash keeps the FNV-64a hash of a string that grows by
+// appending, so a section that is re-keyed on every animation frame is
+// not re-hashed from the start each time — which would be quadratic in
+// the length of a streaming response.
+//
+// sample holds a short prefix of the hashed text. That is how an append
+// is told apart from a rewrite (a user retry restarts the text from
+// scratch) without re-reading the whole thing. See CHARM-1785.
+type incrementalHash struct {
+	hash   uint64
+	length int
+	sample string
+}
+
+// hashSampleLen is how much of the hashed text is kept to detect a
+// rewrite. Long enough that two different responses are very unlikely
+// to share it, short enough to compare for free.
+const hashSampleLen = 64
+
+// sum returns the FNV-64a hash of s. It continues from the saved state
+// when s extends the text hashed last time, and re-hashes in full when
+// s shrank or diverged from it.
+func (h *incrementalHash) sum(s string) uint64 {
+	const fnvPrime64 = 1099511628211
+
+	sampleLen := min(len(s), hashSampleLen)
+	if h.length > 0 && len(s) >= h.length && s[:sampleLen] == h.sample {
+		sum := h.hash
+		for i := h.length; i < len(s); i++ {
+			sum ^= uint64(s[i])
+			sum *= fnvPrime64
+		}
+		h.hash = sum
+		h.length = len(s)
+		return sum
+	}
+
+	// First call, or the text diverged or shrank.
+	sum := fnv64(s)
+	h.hash = sum
+	h.length = len(s)
+	h.sample = s[:sampleLen]
+	return sum
+}
+
+// reset drops the saved state so the next sum re-hashes in full.
+func (h *incrementalHash) reset() {
+	*h = incrementalHash{}
+}
+
 // countLines returns the number of lines in s (i.e. the number of
 // newline-separated segments). Equivalent to len(strings.Split(s,
 // "\n")) but allocates nothing. See CHARM-1785.
@@ -185,15 +235,12 @@ type AssistantMessageItem struct {
 	thinkingViewMode  thinkingViewMode
 	thinkingBoxHeight int // Tracks the rendered thinking box height for click detection.
 
-	// Incremental FNV-64a hash of the thinking text. Avoids
-	// re-hashing the entire accumulated text on every streaming
-	// tick. thinkingHashSample holds a short prefix of the hashed
-	// text so we can detect divergence (e.g. a user retry that
-	// rewrites the thinking from scratch) without re-hashing the
-	// whole thing. See CHARM-1785.
-	thinkingHash       uint64
-	thinkingHashLen    int
-	thinkingHashSample string
+	// Incremental FNV-64a hashes of the two sections that grow while
+	// the turn streams. Both are re-keyed on every animation frame, so
+	// hashing them from the start each time is quadratic in the length
+	// of the response. See CHARM-1785.
+	thinkingHash incrementalHash
+	contentHash  incrementalHash
 
 	// Per-section render caches. Splitting these out means content
 	// streaming does not invalidate the (often expensive) thinking
@@ -215,6 +262,11 @@ type AssistantMessageItem struct {
 	// thinking text, which burns CPU and starves the terminal emulator
 	// during long reasoning traces.
 	streamingThinking streamingMarkdown
+
+	// animLabel is the label currently set on the spinner. Setting one
+	// re-renders it rune by rune, so the label is only pushed when it
+	// actually changes rather than on every animation frame.
+	animLabel string
 }
 
 var _ Expandable = (*AssistantMessageItem)(nil)
@@ -443,7 +495,7 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 // accumulated text. See CHARM-1785.
 func (a *AssistantMessageItem) thinkingKey() (uint64, uint64) {
 	thinking := a.message.ReasoningContent().Thinking
-	srcHash := a.thinkingHashIncremental(thinking)
+	srcHash := a.thinkingHash.sum(thinking)
 
 	showFooter := !a.message.IsThinking() || len(a.message.ToolCalls()) > 0
 	var durationStr string
@@ -465,39 +517,10 @@ func (a *AssistantMessageItem) thinkingKey() (uint64, uint64) {
 	return srcHash, extra
 }
 
-// thinkingHashIncremental returns the FNV-64a hash of thinking,
-// continuing from the saved state when thinking is a prefix-extension
-// of the previously hashed text. Falls back to a full re-hash when
-// the text shrinks or diverges (e.g. user retried the turn).
-func (a *AssistantMessageItem) thinkingHashIncremental(thinking string) uint64 {
-	// Detect divergence: if the saved sample no longer matches the
-	// start of the current text, the content was rewritten (retry)
-	// and we must re-hash from scratch.
-	sampleLen := min(len(thinking), 64)
-	if a.thinkingHashLen > 0 && len(thinking) >= a.thinkingHashLen &&
-		thinking[:sampleLen] == a.thinkingHashSample {
-		// Fast path: continue hashing from saved state.
-		h := a.thinkingHash
-		for i := a.thinkingHashLen; i < len(thinking); i++ {
-			h ^= uint64(thinking[i])
-			h *= 1099511628211
-		}
-		a.thinkingHash = h
-		a.thinkingHashLen = len(thinking)
-		return h
-	}
-	// Full re-hash (first call, or text diverged/shrank).
-	h := fnv64(thinking)
-	a.thinkingHash = h
-	a.thinkingHashLen = len(thinking)
-	a.thinkingHashSample = thinking[:sampleLen]
-	return h
-}
-
 // contentKey returns the (srcHash, extra) cache key components for the
 // main content section.
 func (a *AssistantMessageItem) contentKey() (uint64, uint64) {
-	return fnv64(a.message.Content().Text), 0
+	return a.contentHash.sum(a.message.Content().Text), 0
 }
 
 // errorKey returns the (srcHash, extra) cache key components for the
@@ -640,10 +663,18 @@ func (a *AssistantMessageItem) renderMarkdown(content string, width int) string 
 }
 
 func (a *AssistantMessageItem) renderSpinning() string {
-	if a.message.IsThinking() {
-		a.anim.SetLabel("Thinking")
-	} else if a.message.IsSummaryMessage {
-		a.anim.SetLabel("Summarizing")
+	// This spinner runs from the moment the request goes out, which includes
+	// the stretch before any reasoning or content comes back. Label that
+	// stretch too: an unlabeled spinner under a finished tool call reads as
+	// the tool still running, when what is actually happening is the model
+	// reading its output.
+	label := "Thinking"
+	if a.message.IsSummaryMessage {
+		label = "Summarizing"
+	}
+	if a.animLabel != label {
+		a.animLabel = label
+		a.anim.SetLabel(label)
 	}
 	return a.anim.Render()
 }
@@ -722,9 +753,8 @@ func (a *AssistantMessageItem) clearCache() {
 	a.errorSec.reset()
 	a.streamingContent.Reset()
 	a.streamingThinking.Reset()
-	a.thinkingHash = 0
-	a.thinkingHashLen = 0
-	a.thinkingHashSample = ""
+	a.thinkingHash.reset()
+	a.contentHash.reset()
 }
 
 // ToggleExpanded advances the F5 thinking view-mode cycle and returns

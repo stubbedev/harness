@@ -229,3 +229,98 @@ func TestAppendReasoningContent_OnlyAppendsToFirstMatch(t *testing.T) {
 	require.Equal(t, "b", m.Parts[1].(ReasoningContent).Thinking,
 		"second ReasoningContent part must be untouched")
 }
+
+// TestAppendContentMatchesConcatenation pins the builder fast path against
+// the obvious implementation it replaced.
+func TestAppendContentMatchesConcatenation(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{Role: Assistant}
+	var want string
+	for i := range 500 {
+		delta := fmt.Sprintf("delta-%d ", i)
+		want += delta
+		msg.AppendContent(delta)
+		require.Equal(t, want, msg.Content().Text, "after delta %d", i)
+	}
+}
+
+// TestAppendContentCloneIsASnapshot is the invariant the shared builder
+// could break: a clone handed to the writer must not change under it while
+// the original keeps streaming.
+func TestAppendContentCloneIsASnapshot(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{Role: Assistant}
+	for range 100 {
+		msg.AppendContent("chunk ")
+	}
+
+	snapshot := msg.Clone()
+	frozen := snapshot.Content().Text
+
+	for range 100 {
+		msg.AppendContent("more ")
+	}
+
+	require.Equal(t, frozen, snapshot.Content().Text, "clone changed under the writer")
+	require.NotEqual(t, frozen, msg.Content().Text, "original should have grown")
+
+	// The clone must also be safe to append to on its own.
+	snapshot.AppendContent("!")
+	require.Equal(t, frozen+"!", snapshot.Content().Text)
+	require.False(t, strings.HasSuffix(msg.Content().Text, "!"), "writing to the clone leaked into the original")
+}
+
+// TestAppendContentAfterReset covers the retry path: ResetStreamedContent
+// drops the text part, and the deltas that follow must not be appended onto
+// the text that was thrown away.
+func TestAppendContentAfterReset(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{Role: Assistant}
+	msg.AppendContent("first attempt, quite a long one")
+	msg.ResetStreamedContent()
+
+	msg.AppendContent("second ")
+	msg.AppendContent("attempt")
+	require.Equal(t, "second attempt", msg.Content().Text)
+}
+
+// TestAppendContentAfterExternalRewrite covers a part replaced by something
+// that knows nothing about the builder, such as a message read back from the
+// database.
+func TestAppendContentAfterExternalRewrite(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{Role: Assistant}
+	msg.AppendContent("streamed")
+
+	msg.Parts = []ContentPart{TextContent{Text: "replaced"}}
+	msg.AppendContent(" and grown")
+	require.Equal(t, "replaced and grown", msg.Content().Text)
+}
+
+// TestAppendReasoningContentPreservesFields guards the fields the old
+// implementation dropped: it rebuilt ReasoningContent from four named
+// fields, so anything recorded mid-stream was erased by the next delta.
+func TestAppendReasoningContentPreservesFields(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{Role: Assistant}
+	msg.AppendReasoningContent("thinking ")
+
+	reasoning := msg.ReasoningContent()
+	reasoning.ThoughtSignature = "sig-abc"
+	reasoning.ToolID = "tool-1"
+	reasoning.Signature = "outer-sig"
+	msg.Parts[0] = reasoning
+
+	msg.AppendReasoningContent("more")
+
+	got := msg.ReasoningContent()
+	require.Equal(t, "thinking more", got.Thinking)
+	require.Equal(t, "sig-abc", got.ThoughtSignature)
+	require.Equal(t, "tool-1", got.ToolID)
+	require.Equal(t, "outer-sig", got.Signature)
+}

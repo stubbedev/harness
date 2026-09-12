@@ -21,17 +21,26 @@ import (
 	"github.com/stubbedev/harness/internal/fsext"
 )
 
-const unavailableRetryDelay = 30 * time.Second
+const (
+	unavailableRetryDelay = 30 * time.Second
+
+	// fanoutRetryDelay is how long StartAsync remembers that it already
+	// considered every server for a given file type and directory.
+	fanoutRetryDelay = 30 * time.Second
+)
 
 // Manager handles lazy initialization of LSP clients based on file types.
 type Manager struct {
 	clients     *csync.Map[string, *Client]
 	unavailable *csync.Map[string, time.Time]
-	cfg         *config.ConfigStore
-	manager     *powernapconfig.Manager
-	callback    func(name string, client *Client)
-	now         func() time.Time
-	lookPath    func(string) (string, error)
+	// recentFanout remembers which (file type, directory) pairs StartAsync
+	// has already fanned out for, keyed as ext + NUL + dir.
+	recentFanout *csync.Map[string, time.Time]
+	cfg          *config.ConfigStore
+	manager      *powernapconfig.Manager
+	callback     func(name string, client *Client)
+	now          func() time.Time
+	lookPath     func(string) (string, error)
 }
 
 // NewManager creates a new LSP manager service.
@@ -62,13 +71,14 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 	}
 
 	return &Manager{
-		clients:     csync.NewMap[string, *Client](),
-		unavailable: csync.NewMap[string, time.Time](),
-		cfg:         cfg,
-		manager:     manager,
-		callback:    func(string, *Client) {}, // default no-op callback
-		now:         time.Now,
-		lookPath:    exec.LookPath,
+		clients:      csync.NewMap[string, *Client](),
+		unavailable:  csync.NewMap[string, time.Time](),
+		recentFanout: csync.NewMap[string, time.Time](),
+		cfg:          cfg,
+		manager:      manager,
+		callback:     func(string, *Client) {}, // default no-op callback
+		now:          time.Now,
+		lookPath:     exec.LookPath,
 	}
 }
 
@@ -116,6 +126,45 @@ func (s *Manager) Start(ctx context.Context, path string) {
 		})
 	}
 	wg.Wait()
+}
+
+// StartAsync starts the LSP servers that can handle the given file path
+// without blocking the caller. Bringing a server up means spawning a process
+// and waiting out its initialize handshake, which is seconds for something
+// like gopls on a large module — far too long to hold up a file read or an
+// edit. Every caller that wants servers warm rather than wants them now uses
+// this; Start is for the rare caller that must have the server before it can
+// continue.
+//
+// Repeat calls for the same kind of file in the same directory are dropped for
+// fanoutRetryDelay. Without that, reading a hundred files means a hundred
+// walks over every bundled server definition, each one re-deciding that the
+// same servers are already running or still not installed.
+//
+// The context is used only for the servers' own lifetime, never to bound the
+// startup: pass one that outlives the call that triggered it.
+func (s *Manager) StartAsync(ctx context.Context, path string) {
+	if !s.shouldFanout(path) {
+		return
+	}
+	go s.Start(ctx, path)
+}
+
+// shouldFanout reports whether StartAsync should walk the server list for
+// path, recording the decision so the next caller for the same file type and
+// directory is dropped until fanoutRetryDelay has passed. The record is made
+// before the fan-out runs, not after, so concurrent reads of sibling files
+// collapse into the one already in flight.
+func (s *Manager) shouldFanout(path string) bool {
+	if s.recentFanout == nil {
+		return true
+	}
+	key := filepath.Ext(path) + "\x00" + filepath.Dir(path)
+	if at, ok := s.recentFanout.Get(key); ok && s.now().Sub(at) < fanoutRetryDelay {
+		return false
+	}
+	s.recentFanout.Set(key, s.now())
+	return true
 }
 
 // skipAutoStartCommands contains commands that are too generic or ambiguous to

@@ -285,7 +285,7 @@ type TUIOptions struct {
 	ExitBanner        ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Harness,enum=default,enum=compact,enum=none,default=default"`
 	GitStatus         *bool       `json:"git_status,omitempty" jsonschema:"description=Show git branch and working-tree status in the compact header,default=true"`
 	ShowThinking      *bool       `json:"show_thinking,omitempty" jsonschema:"description=Render model reasoning (thinking) blocks in the transcript. Reasoning is still requested\\, streamed and stored when disabled - only the rendering is suppressed,default=true"`
-	TextareaMinHeight *int        `json:"textarea_min_height,omitempty" jsonschema:"description=Minimum height of the prompt textarea in rows. The textarea grows to fit content\\, so this only sets the collapsed floor. Values below 1 are clamped to 1.,default=3,example=1,example=5"`
+	TextareaMinHeight *int        `json:"textarea_min_height,omitempty" jsonschema:"description=Minimum height of the prompt textarea in rows. The textarea grows to fit content\\, so this only sets the collapsed floor. Values below 1 are clamped to 1.,default=1,example=1,example=3,example=5"`
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The
@@ -310,7 +310,7 @@ func (t *TUIOptions) ShouldShowThinking() bool {
 
 // DefaultTextareaMinHeight is the prompt textarea's minimum height in rows
 // when options.tui.textarea_min_height is unset.
-const DefaultTextareaMinHeight = 3
+const DefaultTextareaMinHeight = 1
 
 // MinTextareaHeight returns the prompt textarea's minimum height in rows.
 // Unset values fall back to DefaultTextareaMinHeight; values below one are
