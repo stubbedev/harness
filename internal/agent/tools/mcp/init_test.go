@@ -829,11 +829,16 @@ func TestBeginAuth_Concurrent(t *testing.T) {
 // for sessionless streamable-HTTP servers such as GitHub MCP. Those servers
 // complete the SEP-2575 server/discover probe without ever issuing a
 // Mcp-Session-Id, then answer the follow-up "subscriptions/listen" POST
-// (which the go-sdk opens whenever any tools/prompts/resources list-changed
-// handler is registered) with HTTP 404. The SDK maps that 404 to
-// mcp.ErrSessionMissing and fails the whole connection asynchronously, so
-// the next RPC (here tools/list) errors. With Sessionless set, the
-// handlers are omitted, no listen stream is opened, and the server works.
+// with HTTP 404. With Sessionless set, the tools/prompts/resources
+// list-changed handlers are omitted, no listen stream is opened, and the
+// server works.
+//
+// The go-sdk used to open that stream whenever any of those handlers was
+// registered, map the 404 to mcp.ErrSessionMissing, and fail the whole
+// connection asynchronously, so the next RPC errored. Since v1.8.0-pre.2
+// it opens no stream against a server that issued no session id, so the
+// default configuration works too -- the opt-out now buys certainty
+// rather than a working connection.
 //
 // The stub server mimics GitHub: it answers server/discover (no session
 // id), 404s any subscriptions/listen, and serves tools/list.
@@ -903,14 +908,20 @@ func TestCreateSession_Sessionless(t *testing.T) {
 		require.Zero(t, listenTotal.Load(), "no subscriptions/listen stream should be opened when disabled")
 	})
 
-	t.Run("default opens listen stream and breaks sessionless server", func(t *testing.T) {
+	// The SDK no longer opens the listen stream against a server that
+	// issued no session id, so a sessionless server now works on the
+	// default configuration too: this subtest used to pin the opposite
+	// (a 404 on the stream poisoning the connection) and is kept as the
+	// regression guard for the day that comes back. The opt-out stays
+	// meaningful either way -- it suppresses the handlers outright
+	// rather than relying on the SDK to decide -- and the subtest above
+	// is what pins it.
+	t.Run("default works against a sessionless server", func(t *testing.T) {
 		srv, listenTotal := newStub(t)
 		const name = "sessionless-default"
 		states.Del(name)
 		t.Cleanup(func() { states.Del(name) })
 
-		// Connect itself succeeds; the listen stream fails asynchronously
-		// and poisons the connection, so the subsequent tools/list fails.
 		cfg := config.MCPConfig{Type: config.MCPHttp, URL: srv.URL, Timeout: 15}
 		sess, err := createSession(t.Context(), nil, name, cfg, resolver, false)
 		require.NoError(t, err)
@@ -918,8 +929,8 @@ func TestCreateSession_Sessionless(t *testing.T) {
 		t.Cleanup(func() { sess.Close() })
 
 		_, err = sess.ListTools(t.Context(), &mcp.ListToolsParams{})
-		require.Error(t, err, "default handlers open a listen stream that the sessionless server 404s")
-		require.Contains(t, err.Error(), "session not found")
-		require.GreaterOrEqual(t, listenTotal.Load(), int64(1), "expected the listen stream attempt")
+		require.NoError(t, err, "a server that issues no session id must still serve tools")
+		require.Zero(t, listenTotal.Load(),
+			"the SDK must not open a listen stream against a server that issued no session id")
 	})
 }
