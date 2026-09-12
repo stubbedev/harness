@@ -72,9 +72,14 @@ func (d *YesNo) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		d.answer(d.respond(!d.selectedNo))
 		return true, nil
 	case key.Matches(msg, d.keyYes):
+		// The selection is the answer of record (see Response), so the
+		// shortcut has to move it, the way a click on the button does,
+		// and not just remember what was pressed.
+		d.selectedNo = false
 		d.answer(d.respond(true))
 		return true, nil
 	case key.Matches(msg, d.keyNo):
+		d.selectedNo = true
 		d.answer(d.respond(false))
 		return true, nil
 	case key.Matches(msg, d.keyNote):
