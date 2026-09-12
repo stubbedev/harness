@@ -63,6 +63,15 @@ const (
 	// command's prompt to land after the quiet window trips, before the
 	// silence is read as anything else.
 	ptySettleForPromptMs = 300
+	// ptyFenceWait is how long the fence marker gets to come back
+	// before a call gives up on clearing the session and runs anyway: a
+	// session that does not answer has something in it, which is what
+	// the run did unconditionally before the fence existed.
+	ptyFenceWait = 2 * time.Second
+	// ptyFenceSettle is the grace the prompt following the fence gets to
+	// land, so it is drained along with the fence instead of being left
+	// behind to satisfy the wait for the command that comes next.
+	ptyFenceSettle = 300 * time.Millisecond
 	// ptyMaxWait bounds how long one call keeps leasing patience
 	// forward to a command that is still producing output, so a stream
 	// that never ends cannot hold a call forever.
@@ -77,6 +86,17 @@ const (
 	ptySentinelFmt      = `printf '__exit_%s:%%d@%%s__' "$?" "$PWD"`
 	ptySentinelReFmt    = `__exit_%s:(-?\d+)@(.*)__`
 	ptySentinelLooseFmt = `__exit_%s:-?\d+@`
+
+	// The fence is the same idea at the other end of a command: a
+	// marker printed before it, so a call only ever waits on and
+	// reports bytes its own command caused. Without it the prompt
+	// printed after the previous command's sentinel is still sitting in
+	// the buffer, and the next call can "finish" against that stale
+	// prompt and drain output belonging to the call before it. The %%s
+	// keeps the echoed command line from matching the pattern, the same
+	// trick the exit sentinel plays with %%d.
+	ptyFenceFmt   = `printf '__begin_%s:%%s__' "ok"`
+	ptyFenceReFmt = `__begin_%s:ok__`
 
 	// ptySetupCmd prepares the session: aliases are stripped so commands
 	// run with their standard meanings (functions and environment from
@@ -99,6 +119,10 @@ type sentinel struct {
 	cmd   string
 	parse *regexp.Regexp
 	loose *regexp.Regexp
+	// begin is the fence a call prints before its command, and beginRe
+	// the pattern that recognises it once it comes back.
+	begin   string
+	beginRe *regexp.Regexp
 }
 
 func newSentinel() sentinel {
@@ -113,8 +137,10 @@ func newSentinel() sentinel {
 		cmd: fmt.Sprintf(ptySentinelFmt, tag),
 		// The greedy (.*) takes everything up to the final "__" on the
 		// line, so working directories containing underscores parse.
-		parse: regexp.MustCompile(fmt.Sprintf(ptySentinelReFmt, tag)),
-		loose: regexp.MustCompile(fmt.Sprintf(ptySentinelLooseFmt, tag)),
+		parse:   regexp.MustCompile(fmt.Sprintf(ptySentinelReFmt, tag)),
+		loose:   regexp.MustCompile(fmt.Sprintf(ptySentinelLooseFmt, tag)),
+		begin:   fmt.Sprintf(ptyFenceFmt, tag),
+		beginRe: regexp.MustCompile(fmt.Sprintf(ptyFenceReFmt, tag)),
 	}
 }
 
@@ -126,6 +152,11 @@ var (
 	// ptySetupCmd. Seeing it after a command means the shell - not some
 	// program the command started - has control back.
 	ptyPromptRe = regexp.MustCompile("\x1b\\]133;A")
+	// ptyPromptSplitRe is the same marker with its terminator (BEL, or
+	// the ST form some emulators send), so cleaning can replace the
+	// whole sequence with the line break the prompt implies rather than
+	// leaving the text around it joined together.
+	ptyPromptSplitRe = regexp.MustCompile("\x1b\\]133;A(?:\x07|\x1b\\\\)?")
 	// ptyPasteRe is the fallback prompt heuristic for a shell whose
 	// prompt could not be replaced: bracketed-paste-enable, which POSIX
 	// shells emit before a prompt. It over-matches (TUIs and REPLs send
@@ -555,6 +586,98 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	return s, nil
 }
 
+// fence clears the session down to a known point before a command is
+// sent: it prints a marker of its own, waits for it to come back,
+// swallows the prompt that follows it, and drains everything up to
+// there. Whatever was in the buffer - the tail of the previous call's
+// output, the prompt its sentinel left behind - belongs to a call that
+// has already reported, so a command sent after the fence can only see
+// bytes it caused itself.
+//
+// A session that does not answer the fence has something running in
+// it. Nothing is drained in that case and the command goes out anyway,
+// exactly as it did before the fence existed; clean drops the marker if
+// it surfaces later.
+func (r *ptyRunner) fence(ctx context.Context, s ptyTerminal) {
+	var mark sentinel
+	var promptRe *regexp.Regexp
+	r.setState(func() { mark, promptRe = r.sentinel, r.promptRe })
+	if mark.beginRe == nil || promptRe == nil {
+		return
+	}
+	if err := r.send(s, []byte(mark.begin+"\n")); err != nil {
+		return
+	}
+	if s.WaitForAny(ctx, []*regexp.Regexp{mark.beginRe}, ptyFenceWait) != 0 {
+		return
+	}
+	// Taking the prompt that follows the fence is the point of waiting
+	// here: left in the buffer, it is exactly what the next wait would
+	// read as the command it is about to send having already finished.
+	_ = s.WaitForAny(ctx, []*regexp.Regexp{promptRe}, ptyFenceSettle)
+	s.Drain()
+}
+
+// Reset kills the session's shell and opens a fresh one in its place.
+// It is the way out of a terminal that cannot be talked down - a
+// process ignoring ctrl-c, a shell left in a mode nothing answers in -
+// and it deliberately does not wait for the command lock: the call
+// stuck on that lock is the thing being rescued. Everything the old
+// shell held (cd, exported variables, activated environments, the sudo
+// credential) is gone with it.
+func (r *ptyRunner) Reset(ctx context.Context) error {
+	r.mu.Lock()
+	old := r.session
+	r.session = nil
+	r.inFlight = false
+	r.orphan = false
+	r.lastRunning = false
+	r.restarted = false
+	r.lastEcho = nil
+	r.lastScreen = ""
+	r.mu.Unlock()
+
+	if old != nil {
+		old.Close()
+	}
+	if _, err := r.terminal(ctx); err != nil {
+		return err
+	}
+	// The run that was in flight against the old shell unwinds once its
+	// session closes and writes its own verdict into the runner on the
+	// way out; clear that behind it so the fresh shell does not start
+	// out looking busy.
+	r.setState(func() {
+		r.inFlight = false
+		r.orphan = false
+		r.lastRunning = false
+		r.restarted = false
+	})
+	return nil
+}
+
+// ptyResetAll closes every terminal session open for a working
+// directory - the primary one and any sibling opened while it was busy
+// - and returns the primary, running a fresh shell.
+func ptyResetAll(ctx context.Context, cwd string, ask question.Service) (*ptyRunner, error) {
+	for slot := 1; slot < ptyMaxSlots; slot++ {
+		ptyRunnersMu.Lock()
+		sibling, ok := ptyRunners[slotKey(cwd, slot)]
+		if ok {
+			delete(ptyRunners, sibling.key)
+		}
+		ptyRunnersMu.Unlock()
+		if ok {
+			sibling.Close()
+		}
+	}
+	primary := ptyRunnerSlot(cwd, 0, ask)
+	if err := primary.Reset(ctx); err != nil {
+		return nil, err
+	}
+	return primary, nil
+}
+
 // Run sends a command and waits for it to reach a state the caller can
 // act on, driven by events rather than a fixed timer: the shell's prompt
 // returning (the command finished, and the completion sentinel recovers
@@ -581,6 +704,12 @@ func (r *ptyRunner) Run(ctx context.Context, command string, waitSeconds int) (r
 	if s.AltScreen() {
 		return PTYResult{}, errAltScreenBusy
 	}
+
+	// Start this command from a known point: everything the previous
+	// call left behind is drained first, so nothing it printed can end
+	// up in this call's output and its prompt cannot be mistaken for
+	// this command finishing.
+	r.fence(ctx, s)
 
 	echo := strings.Split(command, "\n")
 	r.setState(func() {
@@ -1224,15 +1353,23 @@ func (r *ptyRunner) collectBusy(ctx context.Context, s ptyTerminal, busy bool) P
 // clean normalizes terminal output for the model: CRLF and lone CR to
 // LF, ANSI escape sequences stripped, backspaces resolved, echoed
 // command lines and prompt residue removed, blank edges trimmed.
-// Bracketed-paste markers are turned into line breaks first: a prompt is
-// printed right after the closing marker, so without this, unterminated
-// output (printf %s, ...) glues onto the prompt and the next echoed
-// command.
+//
+// Prompt markers are turned into line breaks first. A prompt is printed
+// the moment a command finishes, so without this, output that did not
+// end in a newline (printf %s, a progress line) glues onto the prompt
+// and onto the echo of whatever is typed next - and since what is typed
+// next is the exit sentinel, the line then matches the sentinel and the
+// output is dropped along with it. Both markers have to be split on:
+// the OSC 133 marker this session installs as its prompt, and the
+// bracketed-paste enable that shells with a line editor send just
+// before it. A shell that has neither - dash, or bash built without
+// readline - otherwise loses every unterminated line it prints.
 func (r *ptyRunner) clean(raw string, echo []string) string {
 	var mark sentinel
 	r.setState(func() { mark = r.sentinel })
 
 	out := strings.ReplaceAll(raw, "\r\n", "\n")
+	out = ptyPromptSplitRe.ReplaceAllString(out, "\n")
 	out = strings.ReplaceAll(out, "\x1b[?2004h", "\n")
 	out = strings.ReplaceAll(out, "\x1b[?2004l", "\n")
 	out = strings.ReplaceAll(out, "\r", "\n")
@@ -1243,6 +1380,12 @@ func (r *ptyRunner) clean(raw string, echo []string) string {
 	for line := range strings.SplitSeq(out, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.Contains(trimmed, mark.cmd) || mark.parse.MatchString(trimmed) || mark.loose.MatchString(trimmed) {
+			continue
+		}
+		// A fence the session was too busy to answer runs late, once
+		// whatever held it up is done; it is bookkeeping either way and
+		// never the caller's output.
+		if mark.begin != "" && (strings.Contains(trimmed, mark.begin) || mark.beginRe.MatchString(trimmed)) {
 			continue
 		}
 		if m := promptPartialRe.FindStringSubmatch(line); m != nil {

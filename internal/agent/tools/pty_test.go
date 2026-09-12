@@ -452,3 +452,98 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 	_, stillThere := ptyRunners[r.cwd]
 	require.True(t, stillThere, "the just-used runner must survive the reap")
 }
+
+// Output a call leaves behind belongs to that call. A backgrounded job
+// that prints after its call returned, or a prompt the previous command
+// left in the buffer, must not surface in the next command's result:
+// before each command the session is fenced down to a known point.
+func TestPtyRunner_EarlierOutputStaysOutOfTheNextCall(t *testing.T) {
+	r := newTestRunner(t)
+
+	_, err := r.Run(t.Context(), "(sleep 1; echo LATE) &", 10)
+	require.NoError(t, err)
+
+	// Let the backgrounded job print into the session while no call is
+	// waiting on it.
+	time.Sleep(1500 * time.Millisecond)
+
+	res, err := r.Run(t.Context(), "echo second", 10)
+	require.NoError(t, err)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	require.Equal(t, "second", res.Output, "a command reports its own output and nothing else")
+}
+
+// Reset is the way out of a session that cannot be talked down: the
+// shell is killed and a fresh one takes its place, so everything the
+// old one held is gone and commands work again.
+func TestPtyRunner_ResetStartsAFreshShell(t *testing.T) {
+	r := newTestRunner(t)
+
+	_, err := r.Run(t.Context(), "export PTY_RESET_VAR=before", 10)
+	require.NoError(t, err)
+
+	require.NoError(t, r.Reset(t.Context()))
+
+	res, err := r.Run(t.Context(), "printf %s \"$PTY_RESET_VAR\"", 10)
+	require.NoError(t, err)
+	require.Equal(t, "", res.Output, "the new shell has none of the old one's state")
+
+	alive, err := r.Run(t.Context(), "echo alive", 10)
+	require.NoError(t, err)
+	require.Equal(t, "alive", alive.Output)
+	require.NotNil(t, alive.ExitCode)
+	require.Equal(t, 0, *alive.ExitCode)
+}
+
+// A command left running does not survive a reset: killing the shell is
+// the point, and the session comes back usable rather than busy.
+func TestPtyRunner_ResetClearsARunningCommand(t *testing.T) {
+	r := newTestRunner(t)
+
+	res, err := r.Run(t.Context(), "sleep 30", 1)
+	require.NoError(t, err)
+	require.True(t, res.Running)
+
+	require.NoError(t, r.Reset(t.Context()))
+	require.False(t, r.occupied(), "a reset session is free")
+
+	done, err := r.Run(t.Context(), "echo back", 10)
+	require.NoError(t, err)
+	require.Equal(t, "back", done.Output)
+}
+
+// A shell without a line editor - dash, or bash built without readline -
+// sends no bracketed-paste marker before its prompt, so the only thing
+// separating a command's output from the prompt behind it is the prompt
+// marker itself. Output that did not end in a newline must survive
+// that: before the marker was split on, it glued onto the echoed exit
+// sentinel, matched the sentinel, and was dropped with it.
+func TestPtyRunner_CleanKeepsUnterminatedOutputWithoutBracketedPaste(t *testing.T) {
+	r := &ptyRunner{cwd: t.TempDir()}
+	r.sentinel = newSentinel()
+	r.promptRe = ptyPromptRe
+
+	cmd := `printf %s "$PTY_TEST_VAR"`
+	// What a paste-less shell puts on the wire: the echoed command, the
+	// output with no trailing newline, the prompt marker, then the echo
+	// of the sentinel and its answer.
+	// collectResult cuts the sentinel answer off before cleaning, so
+	// what arrives here ends with the echo of the sentinel command.
+	raw := cmd + "\r\npersisted" + "\x1b]133;A\x07" + r.sentinel.cmd + "\r\n"
+
+	require.Equal(t, "persisted", r.clean(raw, []string{cmd}))
+}
+
+func TestPtyRunner_CleanDropsPromptAndSentinelLines(t *testing.T) {
+	r := &ptyRunner{cwd: t.TempDir()}
+	r.sentinel = newSentinel()
+	r.promptRe = ptyPromptRe
+
+	cmd := "echo hello"
+	raw := cmd + "\r\nhello\r\n\x1b]133;A\x07" + r.sentinel.cmd + "\r\n" +
+		"\x1b]133;A\x07" + r.sentinel.begin + "\r\n"
+
+	require.Equal(t, "hello", r.clean(raw, []string{cmd}),
+		"prompt markers, the exit sentinel and the fence are bookkeeping, not output")
+}

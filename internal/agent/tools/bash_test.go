@@ -122,3 +122,65 @@ func TestTruncateOutputEmoji(t *testing.T) {
 	require.True(t, utf8.ValidString(out), "truncated output must stay valid UTF-8")
 	require.Contains(t, out, "lines truncated")
 }
+
+// The schema has to admit the calls the tool's own description asks
+// for: a poll carries nothing at all, and keystrokes carry no command.
+// A required parameter here rejects those calls before the tool ever
+// sees them.
+func TestBashTool_SchemaRequiresNothing(t *testing.T) {
+	t.Parallel()
+
+	tool := newBashToolForTest(t.TempDir())
+	require.Empty(t, tool.Info().Required,
+		"every bash parameter is optional; a poll is an empty call")
+
+	for _, name := range []string{"description", "command", "input", "keys", "resize", "reset"} {
+		require.Contains(t, tool.Info().Parameters, name)
+	}
+}
+
+func TestConflictingBashInputs(t *testing.T) {
+	t.Parallel()
+
+	require.Empty(t, conflictingBashInputs(BashParams{Command: "ls"}))
+	require.Empty(t, conflictingBashInputs(BashParams{Keys: "ctrl+c"}))
+	require.Empty(t, conflictingBashInputs(BashParams{}), "a poll asks for nothing and is fine")
+
+	conflict := conflictingBashInputs(BashParams{Command: "ls", Keys: "ctrl+c"})
+	require.Contains(t, conflict, "command")
+	require.Contains(t, conflict, "keys")
+
+	require.NotEmpty(t, conflictingBashInputs(BashParams{Command: "ls", Reset: true}))
+	require.NotEmpty(t, conflictingBashInputs(BashParams{Input: "y\n", Resize: "80x24"}))
+}
+
+func TestBashTool_RejectsCombinedCall(t *testing.T) {
+	requireTerminalSession(t)
+	t.Parallel()
+
+	tool := newBashToolForTest(t.TempDir())
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runBashTool(t, tool, ctx, BashParams{
+		Description: "two things at once",
+		Command:     "echo hi",
+		Keys:        "ctrl+c",
+	})
+
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "Send one of them per call")
+}
+
+func TestBashLabel(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "mine", bashLabel(BashParams{Description: "mine", Command: "ls"}))
+	require.Equal(t, "poll terminal session", bashLabel(BashParams{}))
+	require.Equal(t, "keys: ctrl+c", bashLabel(BashParams{Keys: "ctrl+c"}))
+	require.Equal(t, "reset terminal session", bashLabel(BashParams{Reset: true}))
+	require.Equal(t, "input to running program", bashLabel(BashParams{Input: "y\n"}))
+	require.Equal(t, "git status", bashLabel(BashParams{Command: "git status\ngit log"}),
+		"a command with no description labels itself with its first line")
+	require.LessOrEqual(t, utf8.RuneCountInString(bashLabel(BashParams{Command: strings.Repeat("x", 200)})), 60,
+		"a runaway command line is shortened to something that fits a label")
+}

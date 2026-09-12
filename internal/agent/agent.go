@@ -723,6 +723,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		fantasy.WithTools(agentTools...),
 		a.retryOption(),
 		fantasy.WithUserAgent(userAgent),
+		// Fix what can be fixed from the call itself - malformed JSON, a
+		// missing label - rather than spending a turn asking the model
+		// to send it again.
+		fantasy.WithRepairToolCall(tools.RepairToolCall),
 	)
 
 	sessionLock := sync.Mutex{}
@@ -2249,6 +2253,22 @@ func (a *sessionAgent) Model() Model {
 	return a.largeModel.Get()
 }
 
+// validationHint describes the tool a rejected call was aimed at, so
+// the model has the shape it needs rather than only the complaint. It
+// is empty for every error that is not the agent refusing a call on its
+// parameters.
+func (a *sessionAgent) validationHint(name string, err error) string {
+	if !tools.IsValidationError(err) {
+		return ""
+	}
+	for _, t := range a.tools.Copy() {
+		if info := t.Info(); info.Name == name {
+			return tools.ValidationHint(info, err)
+		}
+	}
+	return ""
+}
+
 // convertToToolResult converts a fantasy tool result to a message tool result.
 func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) message.ToolResult {
 	baseResult := message.ToolResult{
@@ -2265,6 +2285,12 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 	case fantasy.ToolResultContentTypeError:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentError](result.Result); ok {
 			baseResult.Content = r.Error.Error()
+			// "missing required parameter: x" names what was wrong and
+			// nothing about what right looks like, which leaves the next
+			// call to guesswork. Say what the tool actually takes.
+			if hint := a.validationHint(result.ToolName, r.Error); hint != "" {
+				baseResult.Content += "\n\n" + hint
+			}
 			baseResult.IsError = true
 		}
 	case fantasy.ToolResultContentTypeMedia:

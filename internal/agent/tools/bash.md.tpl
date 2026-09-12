@@ -9,6 +9,7 @@ On Windows the session falls back to the mvdan/sh interpreter; interactive progr
 - While an interactive program is holding that session, a command opens a second one instead of being typed into the program — like a second terminal tab. The response says when that happened; the second shell is separate, so it does not have the first one's cd, exports or activated environments. Keystrokes (`input`, `keys`) and polls always go to the session with the program in it.
 - It is a full terminal: anything you could run interactively as a human works here — editors (vim, nvim), TUIs (htop, lazygit, k9s), REPLs (python, psql, node), pagers, ssh, password prompts, watch commands. Do not hesitate to launch them; never claim they are impossible here.
 - Aliases are stripped at startup (unalias -a), so commands run with their standard meanings. Functions and environment from the user's rc files remain.
+- A command's result contains that command's output and nothing else: the session is cleared to a known point before each one, so anything printed between calls (a job you backgrounded with `&`, a stray daemon) never turns up misattributed in a later command's output. Poll to see what such a job has printed.
 </the_session>
 
 <calling_patterns>
@@ -19,6 +20,9 @@ On Windows the session falls back to the mvdan/sh interpreter; interactive progr
    While a command from an earlier call is still running, the poll WAITS for it - its completion with exit code, its next question, or its timeout - instead of returning a snapshot you would have to keep re-taking. One poll is one event; do not re-poll on a timer.
    Keystrokes still work while a command is running - that is how you answer a command that stopped to ask something. Such a call returns the screen as it stands and says so; the command's own output still goes to the call waiting on it.
 5. Resize: set `resize` to "COLSxROWS" when a full-screen program needs more room. The size sticks for the session.
+6. Unwedge: set `reset` to true to kill the session's shell and start a fresh one. This is the last resort for a terminal nothing answers in — a program ignoring ctrl+c, a shell stuck in a mode keys do not get through. The new shell has none of the old one's cd, exported variables, activated environments or sudo credential, so use it only after keys/input and ctrl+c have failed.
+
+One call does one thing: `command`, `input`, `keys`, `resize` and `reset` are alternatives, not a combination, and a call that sets two of them is rejected rather than guessed at. `description` is optional everywhere; send it with a command so the user can see what is running.
 6. The call returns when the command reaches a state you can act on, tracked from the process itself rather than by a timer: finished (exit code and full output), stopped and waiting for input (the response says so - answer with input/keys), a full-screen program taking over, or genuinely idle with no output, CPU or memory activity. A command that keeps producing output or burning CPU is tracked until it finishes; you do not need to poll progress.
 </calling_patterns>
 
@@ -41,6 +45,8 @@ Editors, pagers and TUIs (nvim, less, htop, lazygit, k9s, git log without --no-p
 - The sudo credential stays valid on the session's terminal after the first authentication — later sudo calls in the same session run without another password
 - If sudo asks for a password, the user is prompted through a masked dialog in the Harness UI; wait for the command to finish, never try to type the password yourself
 - Multiline commands and heredocs work (send them via command)
+- The session runs the user's own shell — here that is `{{ .Shell }}` — not a POSIX-minimal one, and shells disagree about unquoted arguments. Quote anything holding a glob character that is not meant to be expanded by the shell (`--include='*.go'`, `grep -F 'a*b'`): in zsh a pattern that matches no file fails the whole command with "no matches found" instead of being passed through as a literal. Quote or avoid bare `=`, `==`, `!`, `^` and `{...}` arguments for the same reason
+- Prefer `printf '%s\n' ...` over `echo` for anything containing backslashes or leading dashes; `echo`'s behaviour differs between shells
 - IMPORTANT: Use Grep/Glob/Agent tools instead of 'find'/'grep' for code search. Use View/LS tools instead of 'cat'/'head'/'tail'/'ls' for file reading
 - Chain with ';' or '&&', avoid newlines except in quoted strings
 {{- if .RgAvailable }}

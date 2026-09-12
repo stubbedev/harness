@@ -30,7 +30,8 @@ const (
 	// context.
 	maxFanOut = 256
 
-	// batchParallelism bounds concurrent tool calls within one for_each.
+	// batchParallelism bounds concurrent tool calls within one for_each,
+	// except for the tools in serialTools, which run one at a time.
 	batchParallelism = 8
 
 	// maxBatchResultBytes caps what the tool returns to the model. A
@@ -41,6 +42,14 @@ const (
 
 //go:embed batch.md
 var batchDescription string
+
+// serialTools are the tools a for_each runs one item at a time. They
+// share one piece of state across every call - the terminal session -
+// so running several at once interleaves them rather than parallelising
+// them.
+var serialTools = map[string]bool{
+	BashToolName: true,
+}
 
 // BatchStep is one tool call, or one fan-out of the same tool call over a
 // list of items.
@@ -310,7 +319,17 @@ func runStep(ctx context.Context, step BatchStep, tool fantasy.AgentTool, env *b
 	results := make([]any, len(items))
 	failures := make([]bool, len(items))
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(batchParallelism)
+	// Tools that own a shared, stateful resource run one at a time. bash
+	// is the one that matters: every call goes to the same persistent
+	// terminal session, so a fan-out either queues behind itself or
+	// spills into sibling shells that have none of the first one's cd
+	// and exports - and either way the results stop lining up with the
+	// commands that produced them.
+	if serialTools[step.Tool] {
+		g.SetLimit(1)
+	} else {
+		g.SetLimit(batchParallelism)
+	}
 	var mu sync.Mutex
 
 	for i, item := range items {

@@ -24,11 +24,15 @@ import (
 )
 
 type BashParams struct {
-	Description         string `json:"description" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
-	Command             string `json:"command" description:"The command to run in the persistent terminal session. Leave empty with input set to send keystrokes to a running program, or both empty to poll its output."`
+	// Nothing here is required: a poll is an empty call, and keys or
+	// input carry no command. A schema that demanded either would
+	// reject the very calls this tool's own description asks for.
+	Description         string `json:"description,omitempty" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
+	Command             string `json:"command,omitempty" description:"The command to run in the persistent terminal session. Leave empty with input set to send keystrokes to a running program, or both empty to poll its output."`
 	Input               string `json:"input,omitempty" description:"Raw keystrokes to send to the terminal (text, answers to prompts, key sequences for the running program). Append \\n to submit a line. Use instead of command when something interactive is already running."`
 	Keys                string `json:"keys,omitempty" description:"Named keys to send instead of raw text, comma separated in order (e.g. \"ctrl+c\" or \"escape, :, w, q, enter\"). Supported: enter, tab, backtab, escape, space, backspace, delete, up, down, left, right, home, end, pageup, pagedown, insert, f1-f12, any ctrl+<letter>, and single characters typed literally."`
 	Resize              string `json:"resize,omitempty" description:"Resize the terminal as COLSxROWS (e.g. \"240x60\") and return the redrawn screen. Use when a full-screen program needs more room; the size sticks for the whole session."`
+	Reset               bool   `json:"reset,omitempty" description:"Set to true (boolean) to kill the terminal session's shell and start a fresh one. Use when the session is wedged - a program that ignores ctrl+c, a shell left in a mode nothing answers in. Everything the old shell held (cd, exported variables, activated environments, the sudo credential) is gone with it."`
 	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory the terminal session was opened in; the session itself tracks cd"`
 	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in a detached background shell. Use job_output to read the output later. Prefer this only for servers and watchers; everything else belongs in the terminal session."`
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait once the command goes idle before returning it as still running (default: 60). Output, CPU or memory activity keeps the wait going, so this only ends a call that has genuinely stalled; hard ceiling 15 minutes"`
@@ -75,6 +79,7 @@ type bashDescriptionData struct {
 	GhAvailable     bool
 	DefaultRows     int
 	DefaultCols     int
+	Shell           string
 }
 
 var bannedCommands = []string{
@@ -163,11 +168,87 @@ func bashDescription(attribution *config.Attribution, modelID string) string {
 		GhAvailable:     ghAvailable,
 		DefaultRows:     descRows,
 		DefaultCols:     descCols,
+		// The session runs the user's own shell, and they do not agree
+		// on what an unquoted argument means: a glob that matches
+		// nothing is an error in zsh and a literal word in bash, and
+		// what a bare = or ! does differs too. Naming the shell lets the
+		// model quote for the one it is actually talking to.
+		Shell: filepath.Base(term.Shell()),
 	}); err != nil {
 		// this should never happen.
 		panic("failed to execute bash description template: " + err.Error())
 	}
 	return out.String()
+}
+
+// conflictingBashInputs reports, as a message for the model, when one
+// call asks for two different things at once. Each of command, input,
+// keys, resize and reset goes to a different place in the session, so
+// there is no order in which honouring both is what the caller meant.
+// It returns the empty string when the call is unambiguous.
+func conflictingBashInputs(p BashParams) string {
+	var asked []string
+	if p.Command != "" {
+		asked = append(asked, "command")
+	}
+	if p.Input != "" {
+		asked = append(asked, "input")
+	}
+	if p.Keys != "" {
+		asked = append(asked, "keys")
+	}
+	if p.Resize != "" {
+		asked = append(asked, "resize")
+	}
+	if p.Reset {
+		asked = append(asked, "reset")
+	}
+	if len(asked) < 2 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"This call set %s together, and they do different things: a command needs a shell at a prompt, "+
+			"input and keys go to whatever program is running, resize redraws the screen, and reset kills "+
+			"the shell. Send one of them per call - typically %s first, then the next call.",
+		strings.Join(asked, " and "), asked[0],
+	)
+}
+
+// bashLabel is what the call is called in the UI and in the message
+// metadata. The model's own description is used whenever it sent one;
+// the rest is for the calls that carry no command to describe - a
+// keystroke, a poll - where demanding a description would be a schema
+// requirement standing between the agent and a working call.
+func bashLabel(p BashParams) string {
+	switch {
+	case p.Description != "":
+		return p.Description
+	case p.Reset:
+		return "reset terminal session"
+	case p.Resize != "":
+		return "resize terminal to " + p.Resize
+	case p.Keys != "":
+		return "keys: " + p.Keys
+	case p.Input != "":
+		return "input to running program"
+	case p.Command != "":
+		return firstLine(p.Command)
+	default:
+		return "poll terminal session"
+	}
+}
+
+// firstLine is a one-line stand-in for a command with no description:
+// its first line, shortened to something that fits a label.
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	const max = 60
+	// Counted in runes, not bytes: a label cut mid-rune renders as a
+	// replacement character.
+	if runes := []rune(line); len(runes) > max {
+		return string(runes[:max-1]) + "…"
+	}
+	return line
 }
 
 func blockFuncs() []shell.BlockFunc {
@@ -252,7 +333,7 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 						StartTime:        startTime.UnixMilli(),
 						EndTime:          time.Now().UnixMilli(),
 						Output:           stdout,
-						Description:      params.Description,
+						Description:      bashLabel(params),
 						Background:       params.RunInBackground,
 						WorkingDirectory: bgShell.WorkingDir,
 					}
@@ -267,7 +348,7 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 				metadata := BashResponseMetadata{
 					StartTime:        startTime.UnixMilli(),
 					EndTime:          time.Now().UnixMilli(),
-					Description:      params.Description,
+					Description:      bashLabel(params),
 					WorkingDirectory: bgShell.WorkingDir,
 					Background:       true,
 					ShellID:          bgShell.ID,
@@ -279,6 +360,17 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 			// Everything synchronous goes through the persistent terminal
 			// session: a command runs and reports its exit code, input
 			// drives whatever is running, and an empty call polls.
+			//
+			// One call does one of those things. A command sent
+			// alongside keystrokes is ambiguous - the keystrokes belong
+			// to whatever is running, the command needs a free shell -
+			// and silently picking one of them is how a call that looked
+			// like it worked turns out to have typed a command into an
+			// editor.
+			if conflict := conflictingBashInputs(params); conflict != "" {
+				return fantasy.NewTextErrorResponse(conflict), nil
+			}
+
 			startTime := time.Now()
 			waitSeconds := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
 
@@ -290,6 +382,8 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 			var err error
 			session := ptyInteractiveRunner(execWorkingDir, questions)
 			switch {
+			case params.Reset:
+				session, err = ptyResetAll(ctx, execWorkingDir, questions)
 			case params.Resize != "":
 				var rows, cols int
 				if rows, cols, err = parseTerminalSize(params.Resize); err == nil {
@@ -334,6 +428,8 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 				header = "Still running in the terminal session (no exit code yet) but making no measurable progress - no output, no CPU, no memory change. Send input or keys to interact with it, poll (empty call) to wait for it to finish, or ctrl+c (keys) to stop it."
 			case result.ExitCode != nil && *result.ExitCode != 0:
 				header = fmt.Sprintf("Exit code %d", *result.ExitCode)
+			case params.Reset:
+				header = "Terminal session reset: the old shell was killed and a fresh one is running. Its working directory, exported variables, activated environments and sudo credential are gone."
 			case params.Resize != "":
 				rows, cols := session.Size()
 				header = fmt.Sprintf("Terminal resized to %dx%d.", cols, rows)
@@ -349,7 +445,7 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 				StartTime:        startTime.UnixMilli(),
 				EndTime:          time.Now().UnixMilli(),
 				Output:           stdout,
-				Description:      params.Description,
+				Description:      bashLabel(params),
 				WorkingDirectory: cmp.Or(result.Cwd, execWorkingDir),
 			}
 
