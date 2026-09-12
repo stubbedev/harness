@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -942,7 +943,14 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.Respons
 func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sid := r.PathValue("sid")
-	if err := c.backend.SummarizeSession(r.Context(), id, sid); err != nil {
+	// Optional focus instructions from /compact.
+	var body struct {
+		Instructions string `json:"instructions"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
+	}
+	if err := c.backend.SummarizeSession(r.Context(), id, sid, body.Instructions); err != nil {
 		c.handleError(w, r, err)
 		return
 	}

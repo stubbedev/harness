@@ -1678,74 +1678,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/workspaces/{id}/mcp/docker/disable": {
-            "post": {
-                "tags": [
-                    "mcp"
-                ],
-                "summary": "Disable Docker MCP",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            }
-        },
-        "/workspaces/{id}/mcp/docker/enable": {
-            "post": {
-                "tags": [
-                    "mcp"
-                ],
-                "summary": "Enable Docker MCP",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            }
-        },
         "/workspaces/{id}/mcp/get-prompt": {
             "post": {
                 "consumes": [
@@ -3027,22 +2959,20 @@ const docTemplate = `{
                 1000000000,
                 60000000000,
                 3600000000000,
-                2000000000,
+                60000000000,
                 5000000000,
                 45000000000,
                 10000000000,
-                10000000000,
-                300000000000,
-                60000000000
+                2000000000,
+                300000000000
             ],
             "x-enum-varnames": [
-                "renameRetryBudget",
+                "DefaultRequestTimeout",
                 "configLockDeadline",
                 "refreshLockDeadline",
                 "credentialWriteLockDeadline",
-                "dockerMCPAvailabilityTTL",
-                "resolveTimeout",
-                "DefaultRequestTimeout"
+                "renameRetryBudget",
+                "resolveTimeout"
             ]
         },
         "config.ExitBanner": {
@@ -3196,7 +3126,7 @@ const docTemplate = `{
                     ]
                 },
                 "sessionless": {
-                    "description": "Sessionless marks a server that does not maintain an MCP session (it\nnever issues a Mcp-Session-Id). When true, Harness omits the\ntools/prompts/resources list-changed handlers: the go-sdk opens a\nSEP-2575 \"subscriptions/listen\" stream whenever any of those handlers\nis set, and sessionless streamable-HTTP servers (e.g. GitHub MCP)\nanswer that POST with 404 (\"session not found\"), which the SDK treats\nas fatal. The cost is no live list-changed notifications from this\nserver.\n\nWhen nil, Harness auto-detects a set of known sessionless servers (see\nIsSessionless); set it explicitly to override that detection.",
+                    "description": "Sessionless marks a server that does not maintain an MCP session (it\nnever issues a Mcp-Session-Id). When true, Harness omits the\ntools/prompts/resources list-changed handlers: the go-sdk opens a\nSEP-2575 \"subscriptions/listen\" stream whenever any of those handlers\nis set, and sessionless streamable-HTTP servers answer that POST\nwith 404 (\"session not found\"), which the SDK treats as fatal. The\ncost is no live list-changed notifications from this server.\n\nSet it explicitly on servers that behave this way.",
                     "type": "boolean"
                 },
                 "timeout": {

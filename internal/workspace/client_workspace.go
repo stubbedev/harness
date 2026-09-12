@@ -311,8 +311,8 @@ func (w *ClientWorkspace) AgentClearQueue(sessionID string) {
 	_ = w.client.ClearAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
 }
 
-func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
-	return w.client.AgentSummarizeSession(ctx, w.workspaceID(), sessionID)
+func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID, instructions string) error {
+	return w.client.AgentSummarizeSession(ctx, w.workspaceID(), sessionID, instructions)
 }
 
 func (w *ClientWorkspace) UpdateAgentModel(ctx context.Context) error {
@@ -679,14 +679,6 @@ func (w *ClientWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPro
 
 func (w *ClientWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
 	return w.client.GetMCPPrompt(context.Background(), w.workspaceID(), clientID, promptID, args)
-}
-
-func (w *ClientWorkspace) EnableDockerMCP(ctx context.Context) error {
-	return w.client.EnableDockerMCP(ctx, w.workspaceID())
-}
-
-func (w *ClientWorkspace) DisableDockerMCP() error {
-	return w.client.DisableDockerMCP(context.Background(), w.workspaceID())
 }
 
 func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) error {

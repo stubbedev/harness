@@ -2102,13 +2102,39 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, func() tea.Msg {
-			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID)
+			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID, "")
 			if err != nil {
 				return util.ReportError(err)()
 			}
 			return nil
 		})
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionCompact:
+		if m.isAgentBusy() {
+			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before compacting session..."))
+			break
+		}
+		if msg.Args == nil {
+			m.dialog.CloseFrontDialog()
+			argsDialog := dialog.NewArguments(
+				m.com,
+				"Compact Session",
+				"Optionally steer what the compacted summary keeps.",
+				msg.Arguments,
+				msg,
+			)
+			m.dialog.OpenDialog(argsDialog)
+			break
+		}
+		instructions := msg.Args["instructions"]
+		cmds = append(cmds, func() tea.Msg {
+			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID, instructions)
+			if err != nil {
+				return util.ReportError(err)()
+			}
+			return nil
+		})
+		m.dialog.CloseFrontDialog()
 	case dialog.ActionSaveSummary:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before saving the summary..."))
@@ -2213,12 +2239,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
-	case dialog.ActionEnableDockerMCP:
-		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = append(cmds, m.enableDockerMCP)
-	case dialog.ActionDisableDockerMCP:
-		m.dialog.CloseDialog(dialog.CommandsID)
-		cmds = append(cmds, m.disableDockerMCP)
 	case dialog.ActionInitializeProject:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -5534,21 +5554,4 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 			return nil
 		},
 	)
-}
-
-func (m *UI) enableDockerMCP() tea.Msg {
-	ctx := context.Background()
-	if err := m.com.Workspace.EnableDockerMCP(ctx); err != nil {
-		return util.ReportError(err)()
-	}
-
-	return util.NewInfoMsg("Docker MCP enabled and started successfully")
-}
-
-func (m *UI) disableDockerMCP() tea.Msg {
-	if err := m.com.Workspace.DisableDockerMCP(); err != nil {
-		return util.ReportError(err)()
-	}
-
-	return util.NewInfoMsg("Docker MCP disabled successfully")
 }

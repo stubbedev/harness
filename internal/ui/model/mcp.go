@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
-	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -61,10 +60,6 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 	for _, m := range mcps {
 		var icon string
 		title := m.Name
-		// Show "Docker MCP" instead of the config name for Docker MCP.
-		if m.Name == config.DockerMCPName {
-			title = "Docker MCP"
-		}
 		title = t.Resource.Name.Render(title)
 		var description string
 		var extraContent string

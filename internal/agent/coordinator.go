@@ -133,7 +133,7 @@ type Coordinator interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string) error
+	Summarize(context.Context, string, string) error
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
@@ -168,6 +168,23 @@ type coordinator struct {
 	// fallback snapshot used only when no manager was supplied (e.g. tests).
 	subagentsMgr    *subagents.Manager
 	activeSubagents []*subagents.Subagent
+
+	// hooks fires user-configured hook events from anywhere in the agent
+	// pipeline. It reads the live config on every event, so config
+	// reloads take effect on the next fire.
+	hooks *hooks.Registry
+
+	// subagentMessages is the inbox for cross-session messaging: messages
+	// sub-agents send via the send_message tool, keyed by child session
+	// ID and drained into the dispatch tool result when the run ends.
+	subagentMessages *csync.Map[string, []string]
+
+	// expandedMCPTools records which tools of defer-loaded (tool-search)
+	// MCP servers have been loaded into the coder agent's tool set.
+	// Server name -> tool names. Consulted by buildTools so a loaded
+	// tool survives the tool rebuild that runs at the start of every
+	// turn; entries never expire until the process does.
+	expandedMCPTools *csync.Map[string, map[string]bool]
 
 	// runtime tracks which sub-agents are currently running.
 	runtime *subagents.Runtime
@@ -255,6 +272,9 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills:       activeSkills,
 		skillTracker:       skillTracker,
 		interactive:        opts.Interactive,
+		hooks:              hooks.NewRegistry(opts.Config, opts.Config.WorkingDir(), opts.Config.WorkingDir()),
+		expandedMCPTools:   csync.NewMap[string, map[string]bool](),
+		subagentMessages:   csync.NewMap[string, []string](),
 		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
 		dispatchSem:        make(chan struct{}, maxConcurrentSubagents(opts.Config)),
@@ -918,6 +938,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
+		Hooks:                c.hooks,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -984,13 +1005,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools = append(allTools, agenticFetchTool)
 	}
 
-	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "harness.log")
-
-	// Build hook runner if PreToolUse hooks are configured.
-	var hookRunner *hooks.Runner
-	if preToolHooks := c.cfg.Config().Hooks[hooks.EventPreToolUse]; len(preToolHooks) > 0 {
-		hookRunner = hooks.NewRunner(preToolHooks, c.cfg.WorkingDir(), c.cfg.WorkingDir())
+	if isSubAgent {
+		// Cross-session messaging: sub-agents can message their
+		// orchestrator mid-run. The inbox is drained into the dispatch
+		// result by runSubAgent.
+		allTools = append(allTools, &sendMessageTool{coord: c})
 	}
+
+	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "harness.log")
 
 	allTools = append(
 		allTools,
@@ -1047,7 +1069,20 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		}
 	}
 
+	// Tool search: servers whose tools are defer-loaded are hidden
+	// behind a search tool instead of being expanded. Only the top-level
+	// agent defers: sub-agents would have no way to load what they find
+	// (their dispatch is one shot), and curated AllowedMCP lists already
+	// bound the context cost.
+	var deferredServers map[string]bool
+	if !isSubAgent {
+		deferredServers = c.deferredMCPServers(agent)
+	}
+
 	for _, tool := range tools.GetMCPTools(c.cfg, c.cfg.WorkingDir()) {
+		if deferredServers[tool.MCP()] && !c.mcpToolExpanded(tool.MCP(), tool.MCPToolName()) {
+			continue
+		}
 		if agent.AllowedMCP == nil {
 			// No MCP restrictions
 			filteredTools = append(filteredTools, tool)
@@ -1070,6 +1105,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			slog.Debug("MCP not allowed", "tool", tool.Name(), "agent", agent.Name)
 		}
 	}
+	for _, server := range slices.Sorted(maps.Keys(deferredServers)) {
+		filteredTools = append(filteredTools, &mcpSearchTool{server: server, coord: c})
+	}
+
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
@@ -1079,7 +1118,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// without hook interception to avoid firing the user's hook N times
 	// per delegated turn. The top-level invocation of the sub-agent tool
 	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, hookRunner, isSubAgent)
+	filteredTools = wrapToolsWithHooks(filteredTools, c.hooks, isSubAgent)
 
 	// The batch tool composes the tools above, so it is built from the
 	// finished list and appended after it. Calling the wrapped tools
@@ -1581,7 +1620,7 @@ func (c *coordinator) QueuedPromptsList(sessionID string) []string {
 	return c.currentAgent.QueuedPromptsList(sessionID)
 }
 
-func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
+func (c *coordinator) Summarize(ctx context.Context, sessionID, instructions string) error {
 	providerCfg, ok := c.cfg.Config().Providers.Get(c.currentAgent.Model().ModelCfg.Provider)
 	if !ok {
 		return errModelProviderNotConfigured
@@ -1593,7 +1632,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID string) error {
 
 	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
 	// the same path used by regular turns.
-	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg))
+	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg), instructions)
 }
 
 // GenerateTitle generates a session title using the current agent.
@@ -1850,6 +1889,20 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	finalStatus := subagents.StatusCompleted
 	defer func() { c.runtime.Finish(session.ID, finalStatus) }()
 
+	// resp carries every non-error return so the deferred SubagentStop
+	// hook can annotate the response the orchestrator sees. ctx is
+	// detached from cancellation: by the time this runs the parent turn
+	// (and its context) may already be gone, while each hook's own
+	// timeout still bounds its runtime.
+	var resp fantasy.ToolResponse
+	defer func() {
+		// Inbox first: messages the sub-agent sent via send_message are
+		// delivered with the result even when the run failed or was
+		// cancelled — that guarantee is the tool's whole point.
+		appendSubagentMessages(&resp, c.drainSubagentMessages(session.ID))
+		c.fireSubagentStopHooks(context.WithoutCancel(ctx), session.ID, params.AgentName, finalStatus, &resp)
+	}()
+
 	// Get model configuration
 	model := params.Agent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
@@ -1864,7 +1917,8 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 		// would abort the whole parent turn where the parent agent could
 		// otherwise report the failure and continue.
 		finalStatus = subagents.StatusFailed
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to run subagent: %s", errModelProviderNotConfigured)), nil
+		resp = fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to run subagent: %s", errModelProviderNotConfigured))
+		return resp, nil
 	}
 
 	// Surface a "retrying" status on the subagent while OnAuthRefresh
@@ -1906,10 +1960,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			finalStatus = subagents.StatusCancelled
-			return fantasy.NewTextErrorResponse("Subagent cancelled by user"), nil
+			resp = fantasy.NewTextErrorResponse("Subagent cancelled by user")
+			return resp, nil
 		}
 		finalStatus = subagents.StatusFailed
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), nil
+		resp = fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err))
+		return resp, nil
 	}
 
 	// Update parent session cost on a best-effort basis. A failure here must
@@ -1925,9 +1981,34 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 
 	output := subAgentOutput(result)
 	if output == "" {
-		return fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output."), nil
+		resp = fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output.")
+		return resp, nil
 	}
-	return fantasy.NewTextResponse(output), nil
+	resp = fantasy.NewTextResponse(output)
+	return resp, nil
+}
+
+// fireSubagentStopHooks fires SubagentStop after a dispatched sub-agent
+// finished. status is the runtime status (completed, cancelled, failed).
+// The event's decisions are informational, but context returned by hooks
+// is appended to the tool response so the orchestrating model sees it.
+func (c *coordinator) fireSubagentStopHooks(ctx context.Context, sessionID, agentName, status string, resp *fantasy.ToolResponse) {
+	if resp == nil || !c.hooks.Has(hooks.EventSubagentStop) {
+		return
+	}
+	res, err := c.hooks.Run(ctx, hooks.EventContext{
+		Event:        hooks.EventSubagentStop,
+		SessionID:    sessionID,
+		SubagentType: agentName,
+		Message:      status,
+	})
+	if err != nil {
+		slog.Warn("SubagentStop hook error", "error", err)
+		return
+	}
+	if res.Context != "" {
+		resp.Content = appendNote(resp.Content, res.Context)
+	}
 }
 
 func subAgentOutput(result *fantasy.AgentResult) string {

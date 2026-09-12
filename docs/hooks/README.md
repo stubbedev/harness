@@ -17,8 +17,8 @@ forward.
 - Hooks are Claude Code-compatible
 - Harness ships with a builtin `harness-hook` skill write, edit, and configure
   hooks; just tell Harness how to configure Harness
-- Harness currently supports just one hook, `PreToolUse`, with plans to support
-  the full gamut; please let us know which hooks you'd like to see next
+- Hooks fire on nine events across the tool, prompt, turn, session, and
+  compaction lifecycle (see [Events](#events))
 - Hooks run in parallel for speed, but their results compose in config order
   for determinism
 
@@ -28,9 +28,15 @@ forward.
 - Rewrite tool input: turn `node` calls info `deno`, scrub secrets from
   commands, rewrite all mentions of "Haskell" into "Haskell, The Best
   Language", and so on
+- React after the fact: annotate tool output, flag lint errors on files the
+  agent just touched, halt a runaway turn
+- Rewrite or veto prompts before they reach the model: expand shorthand,
+  strip secrets, refuse prompts that mention `production.env`
 - Inject context: add notes to the model's context whenever certain tools are
-  called. For example: "remember to run gofumpt after editing Go files"
-- Block tools: refuse bash commands matching a pattern you consider unsafe
+  called or whenever a session starts. For example: "remember to run gofumpt
+  after editing Go files"
+- Observe the lifecycle: log every sub-agent result, notify another system
+  when a turn finishes or a session gets compacted
 - Log certain tool calls
 
 …And lots more. Show us what you're building!
@@ -156,7 +162,25 @@ wins when rewriting input, but first deny wins when blocking.
 
 ## Events
 
-Here are the events you can hook into (spoiler: there's currently just one):
+These are the events you can hook into:
+
+| Event              | Fires                                                     | Matcher subject | Effect of decisions |
+| ------------------ | --------------------------------------------------------- | --------------- | ------------------- |
+| `PreToolUse`       | Before every tool call                                    | Tool name       | `deny` blocks the call, `halt` ends the turn |
+| `PostToolUse`      | After every tool call completes                           | Tool name       | `deny` appends feedback, `halt` ends the turn |
+| `UserPromptSubmit` | After you submit a prompt, before it reaches the model    | —               | `deny`/`halt` blocks the turn |
+| `SessionStart`     | On the first prompt of a session                          | —               | Informational; `context` reaches the model |
+| `Stop`             | When the top-level agent finishes a turn                  | —               | Informational       |
+| `SubagentStop`     | When a dispatched sub-agent finishes                       | Sub-agent type  | Informational; `context` reaches the orchestrator |
+| `Notification`     | When a user notification is sent (finished, error, retry) | —               | Informational       |
+| `PreCompact`       | Before a session is summarized                            | —               | Informational       |
+| `PostCompact`      | After a session was summarized                            | —               | Informational       |
+
+> [!NOTE]
+> Event names are case insensitive and snake-caseable, so `PreToolUse`,
+> `pretooluse`, `PRETOOLUSE`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
+> An unknown event name is a config error — you'll see it at load time,
+> not on the first fire.
 
 ### PreToolUse
 
@@ -167,18 +191,83 @@ stuff, and so on.
 **Matched against**: the tool name (e.g. `bash`, `edit`, `write`,
 `mcp_github_create_pull_request`).
 
-> [!NOTE]
-> Event names are case insensitive and snake-caseable, so `PreToolUse`,
-> `pretooluse`, `PRETOOLUSE`, `pre_tool_use`, and `PRE_TOOL_USE` all work.
-
 **Scope**: `PreToolUse` only fires on the **top-level agent's** tool calls.
 Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run without hook
 interception so a single delegated turn doesn't trigger your hook N times. The
 outer sub-agent tool call itself _is_ hooked, so policy like "never let the
 agent spawn sub-agents" still works.
 
-Hooks are keyed by event name. Only `command` is required, and you can omit
-`matcher` to match all tools.
+### PostToolUse
+
+Fires after a tool call completes, with the tool's response in the payload
+(`tool_response.content`, `tool_response.is_error`). The tool already ran, so
+nothing can un-run it:
+
+- `deny` does **not** block anything: the reason is appended to the response as
+  feedback ("Hook feedback: …") so the model sees it and can react — e.g. run
+  the linter after a hook flagged a file.
+- `halt` still ends the turn after the tool result is recorded.
+- `context` is appended to the tool response.
+- `updated_input` is ignored; the input already happened.
+
+**Matched against**: the tool name. Same top-level-only scope as
+`PreToolUse`.
+
+### UserPromptSubmit
+
+Fires after you hit Enter but before the prompt reaches the model. This is the
+place to:
+
+- Inject context the model should have ("current branch: feat/login; last
+  commit: …") — returned `context` is appended to the outbound prompt inside a
+  `<hook-context>` block.
+- Rewrite the prompt: `updated_prompt` replaces the prompt sent to the model.
+  The stored message keeps what you typed, so the transcript stays honest.
+- Block the prompt: `deny` (or `halt`) aborts the turn before anything is
+  persisted; the reason becomes the run error you see.
+
+It fires on every dispatched prompt, including queued ones that run as their
+own turn. Prompts folded into an already-running turn do not re-fire it.
+
+### SessionStart
+
+Fires on the first prompt of a session (a new session, or the first turn after
+`/clear`). Informational: decisions are logged, not enforced, but returned
+`context` is injected into that first outbound prompt the same way as
+`UserPromptSubmit` context.
+
+### Stop
+
+Fires when the top-level agent finishes a turn successfully. Informational —
+decisions and `context` are logged only. Use it for logging, metrics, or
+notifying external systems that the agent went idle.
+
+### SubagentStop
+
+Fires when a dispatched sub-agent finishes (completed, cancelled, or failed).
+The payload carries the sub-agent type and final status. Informational, but
+returned `context` is appended to the sub-agent's report so the orchestrating
+model sees it.
+
+**Matched against**: the sub-agent type (`task`, `fast`, or a custom agent
+name).
+
+### Notification
+
+Fires whenever Harness sends a user notification: agent finished its turn,
+agent errored after retries, or a provider request is being retried. The
+payload carries `notification_type` and `message`. Informational.
+
+### PreCompact / PostCompact
+
+Fire immediately before and after a session is summarized — either
+automatically (context window threshold, `trigger: "auto"`) or on demand
+(`/summarize`, `trigger: "manual"`). Informational: a hook cannot veto or
+steer a compaction.
+
+Hooks are keyed by event name. Only `command` is required. `matcher` only
+applies to events with a subject (the tool events and `SubagentStop`); omit it
+to match all.
 
 ## Building Hooks
 
@@ -209,18 +298,23 @@ available when input is more complex.
 
 The available environment variables are:
 
-| Variable                     | Description                                    |
-| ---------------------------- | ---------------------------------------------- |
-| `HARNESS`                      | Always `1` when running under Harness.           |
-| `AGENT`                      | Always `harness`.                                |
-| `AI_AGENT`                   | Always `harness`.                                |
-| `HARNESS_EVENT`                | The hook event name (e.g. `PreToolUse`).       |
-| `HARNESS_TOOL_NAME`            | The tool being called (e.g. `bash`).           |
-| `HARNESS_SESSION_ID`           | Current session ID.                            |
-| `HARNESS_CWD`                  | Working directory.                             |
-| `HARNESS_PROJECT_DIR`          | Project root directory.                        |
-| `HARNESS_TOOL_INPUT_COMMAND`   | For `bash` calls: the shell command being run. |
-| `HARNESS_TOOL_INPUT_FILE_PATH` | For file tools: the target file path.          |
+| Variable                       | Description                                          |
+| ------------------------------ | ---------------------------------------------------- |
+| `HARNESS`                      | Always `1` when running under Harness.               |
+| `AGENT`                        | Always `harness`.                                    |
+| `AI_AGENT`                     | Always `harness`.                                    |
+| `HARNESS_EVENT`                | The hook event name (e.g. `PreToolUse`).             |
+| `HARNESS_TOOL_NAME`            | The tool being called, for tool events (e.g. `bash`). |
+| `HARNESS_SESSION_ID`           | Current session ID.                                  |
+| `HARNESS_CWD`                  | Working directory.                                   |
+| `HARNESS_PROJECT_DIR`          | Project root directory.                              |
+| `HARNESS_TOOL_INPUT_COMMAND`   | For `bash` calls: the shell command being run.       |
+| `HARNESS_TOOL_INPUT_FILE_PATH` | For file tools: the target file path.                |
+| `HARNESS_PROMPT`               | For `UserPromptSubmit`/`SessionStart`: the prompt.   |
+| `HARNESS_SUBAGENT_TYPE`        | For `SubagentStop`: the sub-agent type.              |
+| `HARNESS_TRIGGER`              | For `Pre`/`PostCompact`: `auto` or `manual`.         |
+| `HARNESS_NOTIFICATION_TYPE`    | For `Notification`: the notification type.           |
+| `HARNESS_MESSAGE`              | For `Notification`/`SubagentStop`: the message/status. |
 
 The `HARNESS`, `AGENT`, and `AI_AGENT` markers are also set by the `bash`
 tool, so a script can detect "am I running under Harness?" the same way in
@@ -302,10 +396,12 @@ the input, or still deny/halt with a reason:
 {
   "version": 1, // Output envelope version. Optional; defaults to 1.
   "decision": "allow", // "allow", "deny", or null. Omit for no opinion.
-  "halt": false, // If true, halts the turn entirely.
+  "halt": false, // If true, halts the turn entirely. Where the event
+                  // supports halting; see [Events](#events).
   "reason": "LGTM", // Shown when denying or halting.
   "context": "Scrubbed secrets", // String or array of strings. Appended to what the model sees.
-  "updated_input": { "command": "…" }, // Shallow-merged into the tool's input before execution.
+  "updated_input": { "command": "…" }, // PreToolUse only. Shallow-merged into the tool's input.
+  "updated_prompt": "…", // UserPromptSubmit only. Replaces the outbound prompt.
 }
 ```
 
@@ -542,7 +638,10 @@ Each entry in a `hooks.<EventName>` list:
 # command when omitted.
 - name: no-rm-rf
 
-  # string. Optional. Regex tested against the tool name. Omit to match all.
+  # string. Optional. Regex tested against the event's subject: the tool
+  # name for tool events, the sub-agent type for SubagentStop. Omit to
+  # match all. Events without a subject ignore it (an empty matcher is
+  # the only thing that matches them).
   matcher: "^bash$"
 
   # string. Required. Shell command to run.
@@ -586,6 +685,84 @@ Extends the common payload:
   },
 }
 ```
+
+### Stdin payload — PostToolUse
+
+Extends the common payload:
+
+```jsonc
+{
+  // ...common fields...
+
+  // string. The tool that ran.
+  "tool_name": "bash",
+
+  // object. The input the tool ran with (after any PreToolUse rewrite).
+  "tool_input": { "command": "npm test" },
+
+  // object. The completed tool call's outcome.
+  "tool_response": {
+    "content": "all tests passed",
+    "is_error": false,
+  },
+}
+```
+
+### Stdin payload — UserPromptSubmit
+
+```jsonc
+{
+  // ...common fields...
+
+  // string. The prompt as the user typed it.
+  "prompt": "fix the login flow",
+
+  // string[]. Attachment file names, when the prompt carried any.
+  "attachments": ["screenshot.png"],
+}
+```
+
+### Stdin payload — SubagentStop
+
+```jsonc
+{
+  // ...common fields...
+
+  // string. The dispatched sub-agent type ("task", "fast", or custom).
+  "subagent_type": "fast",
+
+  // string. Final status: "completed", "cancelled", or "failed".
+  "message": "completed",
+}
+```
+
+### Stdin payload — PreCompact / PostCompact
+
+```jsonc
+{
+  // ...common fields...
+
+  // string. "auto" (context window threshold) or "manual" (/summarize).
+  "trigger": "auto",
+}
+```
+
+### Stdin payload — Notification
+
+```jsonc
+{
+  // ...common fields...
+
+  // string. One of "agent_finished", "error", "agent_retrying".
+  "notification_type": "agent_finished",
+
+  // string. Human-readable message (may be empty).
+  "message": "",
+}
+```
+
+`SessionStart` and `Stop` carry only the common fields (plus `prompt` on
+`SessionStart`).
 
 ### Output envelope (common)
 
@@ -632,6 +809,32 @@ Extends the common envelope:
 }
 ```
 
+### Output envelope — UserPromptSubmit
+
+Extends the common envelope:
+
+```jsonc
+{
+  // ...common fields...
+
+  // "deny" (or halt: true) blocks the submission: the turn never reaches
+  // the model and the reason becomes the run error the user sees.
+  "decision": "deny",
+
+  // string. Full replacement for the outbound prompt — not a merge patch.
+  // The stored message keeps the original; only the model sees the rewrite.
+  "updated_prompt": "fix the login flow (clarified)",
+}
+```
+
+### Output envelope — other events
+
+`PostToolUse`, `SessionStart`, `Stop`, `SubagentStop`, `Notification`, and
+`Pre`/`PostCompact` use the common envelope only. On `PostToolUse` a `deny`
+appends the reason to the tool response as feedback instead of blocking; on
+the informational events decisions are logged and `context` is delivered as
+documented under [Events](#events).
+
 ### Exit codes
 
 | Code  | Meaning                                                                  |
@@ -641,8 +844,10 @@ Extends the common envelope:
 | `49`  | Halt the whole turn. Stderr becomes the halt reason. Stdout is ignored.  |
 | other | Non-blocking error. Logged and ignored; the tool call proceeds.          |
 
-Exit `2` only applies to events that can block something. On events where
-there's nothing to block, it's treated as a non-blocking error.
+Exit `2` only applies to events that can block something (`PreToolUse` blocks
+the tool call, `UserPromptSubmit` blocks the turn, `PostToolUse` downgrades to
+feedback). On purely informational events it's treated as a non-blocking
+error.
 
 ### Aggregation
 
@@ -664,6 +869,11 @@ PreToolUse-specific rules:
 5. `updated_input` patches shallow-merge sequentially against the original
    `tool_input`. Later patches override earlier ones on colliding keys. Patches
    are **ignored** if the final decision is deny or halt.
+
+UserPromptSubmit-specific rules:
+
+6. `updated_prompt` is a full replacement, and the **last** hook in config
+   order wins. A final decision of deny or halt discards any rewrite.
 
 ### Environment variables
 

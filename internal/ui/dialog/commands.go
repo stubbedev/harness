@@ -37,10 +37,6 @@ const (
 )
 
 // Commands represents a dialog that shows available commands.
-type dockerMCPAvailabilityCheckedMsg struct {
-	available bool
-}
-
 type Commands struct {
 	com    *common.Common
 	keyMap struct {
@@ -71,9 +67,6 @@ type Commands struct {
 
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
-
-	dockerMCPAvailable     *bool
-	dockerMCPCheckInFlight bool
 }
 
 var _ Dialog = (*Commands)(nil)
@@ -135,10 +128,6 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary, h
 	closeKey.SetHelp("esc", "cancel")
 	c.keyMap.Close = closeKey
 
-	if available, known := config.DockerMCPAvailabilityCached(); known {
-		c.dockerMCPAvailable = &available
-	}
-
 	// Set initial commands
 	c.setCommandItems(c.selected)
 
@@ -158,27 +147,6 @@ func (c *Commands) ID() string {
 // HandleMsg implements [Dialog].
 func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
-	case dockerMCPAvailabilityCheckedMsg:
-		c.dockerMCPAvailable = &msg.available
-		c.dockerMCPCheckInFlight = false
-		if c.selected == SystemCommands {
-			// Preserve the current selection across the rebuild to avoid reset
-			var prevID string
-			if item, ok := c.list.SelectedItem().(*CommandItem); ok && item != nil {
-				prevID = item.id
-			}
-			c.setCommandItems(c.selected)
-			if prevID != "" {
-				for i, it := range c.list.FilteredItems() {
-					if ci, ok := it.(*CommandItem); ok && ci != nil && ci.id == prevID {
-						c.list.SetSelected(i)
-						c.list.ScrollToSelected()
-						break
-					}
-				}
-			}
-		}
-		return nil
 	case spinner.TickMsg:
 		if c.loading {
 			var cmd tea.Cmd
@@ -244,18 +212,8 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
-func checkDockerMCPAvailabilityCmd() tea.Cmd {
-	return func() tea.Msg {
-		return dockerMCPAvailabilityCheckedMsg{available: config.RefreshDockerMCPAvailability()}
-	}
-}
-
 func (c *Commands) InitialCmd() tea.Cmd {
-	if c.dockerMCPAvailable != nil || c.dockerMCPCheckInFlight {
-		return nil
-	}
-	c.dockerMCPCheckInFlight = true
-	return checkDockerMCPAvailabilityCmd()
+	return nil
 }
 
 // Cursor returns the cursor position relative to the dialog.
@@ -447,6 +405,15 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 	c.input.SetValue("")
 }
 
+// compactArguments defines the optional /compact focus prompt. Declared at
+// package scope because the local variable in defaultCommands shadows the
+// commands package.
+var compactArguments = []commands.Argument{{
+	ID:          "instructions",
+	Title:       "Focus",
+	Description: "Optional: what the compacted summary should keep. Leave empty for a general summary.",
+}}
+
 // defaultCommands returns the list of default system commands.
 func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
@@ -460,6 +427,10 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// Only show compact command if there's an active session
 	if c.hasSession {
 		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "compact", "Compact Session (with focus)", "", ActionCompact{
+			SessionID: c.sessionID,
+			Arguments: compactArguments,
+		}))
 	}
 
 	// Only show the export command when there is a conversation to export
@@ -519,16 +490,6 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// antipattern.
 	if os.Getenv("EDITOR") != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
-	}
-
-	// Add Docker MCP command if available and not already enabled.
-	if !cfg.IsDockerMCPEnabled() && c.dockerMCPAvailable != nil && *c.dockerMCPAvailable {
-		commands = append(commands, NewCommandItem(c.com.Styles, "enable_docker_mcp", "Enable Docker MCP Catalog", "", ActionEnableDockerMCP{}))
-	}
-
-	// Add disable Docker MCP command if it's currently enabled
-	if cfg.IsDockerMCPEnabled() {
-		commands = append(commands, NewCommandItem(c.com.Styles, "disable_docker_mcp", "Disable Docker MCP Catalog", "", ActionDisableDockerMCP{}))
 	}
 
 	if c.hasTodos || c.hasQueue {

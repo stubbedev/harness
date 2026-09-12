@@ -152,7 +152,7 @@ type Workspace interface {
 	AgentQueuedPrompts(sessionID string) int
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)
-	AgentSummarize(ctx context.Context, sessionID string) error
+	AgentSummarize(ctx context.Context, sessionID, instructions string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
@@ -213,8 +213,6 @@ type Workspace interface {
 	ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error)
 	ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error)
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
-	EnableDockerMCP(ctx context.Context) error
-	DisableDockerMCP() error
 	MCPAuthenticate(ctx context.Context, name string) error
 	MCPPendingAuth() []mcptools.PendingAuthServer
 	MCPAuthURL(name string) string

@@ -1408,6 +1408,21 @@ func ProjectSubagentsDir(workingDir string) []string {
 
 func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
 
+// knownHookEvents is the set of canonical hook event names accepted in
+// config. Mirrors hooks.EventNames(); config cannot import hooks (hooks
+// imports config), so the list is duplicated here.
+var knownHookEvents = map[string]bool{
+	"PreToolUse":       true,
+	"PostToolUse":      true,
+	"UserPromptSubmit": true,
+	"SessionStart":     true,
+	"Stop":             true,
+	"SubagentStop":     true,
+	"Notification":     true,
+	"PreCompact":       true,
+	"PostCompact":      true,
+}
+
 // normalizeHookEvent maps user-provided event names to their canonical
 // form. Matching is case-insensitive and accepts snake_case variants
 // (e.g. "pre_tool_use" → "PreToolUse").
@@ -1415,6 +1430,22 @@ func normalizeHookEvent(name string) string {
 	switch strings.ToLower(strings.ReplaceAll(name, "_", "")) {
 	case "pretooluse":
 		return "PreToolUse"
+	case "posttooluse":
+		return "PostToolUse"
+	case "userpromptsubmit":
+		return "UserPromptSubmit"
+	case "sessionstart":
+		return "SessionStart"
+	case "stop":
+		return "Stop"
+	case "subagentstop":
+		return "SubagentStop"
+	case "notification":
+		return "Notification"
+	case "precompact":
+		return "PreCompact"
+	case "postcompact":
+		return "PostCompact"
 	default:
 		return name
 	}
@@ -1429,6 +1460,9 @@ func (c *Config) ValidateHooks() error {
 	// Normalize event name keys.
 	for event, eventHooks := range c.Hooks {
 		canonical := normalizeHookEvent(event)
+		if !knownHookEvents[canonical] {
+			return fmt.Errorf("hook event %q is not supported", event)
+		}
 		if canonical != event {
 			c.Hooks[canonical] = append(c.Hooks[canonical], eventHooks...)
 			delete(c.Hooks, event)

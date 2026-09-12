@@ -1044,6 +1044,13 @@ func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
 	}
 }
 
+// SwapTestConfig atomically replaces the in-memory config, simulating a
+// reload for tests that need to observe config changes without touching
+// disk. Production code goes through ReloadFromDisk.
+func (s *ConfigStore) SwapTestConfig(cfg *Config) {
+	s.setConfig(cfg)
+}
+
 // NewTestStoreWithWorkingDir creates a ConfigStore for testing purposes with
 // an explicit working directory set. This is required for scope-detection
 // tests in the workspace package.

@@ -43,6 +43,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/hooks"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/session"
@@ -163,7 +164,9 @@ type SessionAgent interface {
 	QueuedPrompts(sessionID string) int
 	QueuedPromptsList(sessionID string) []string
 	ClearQueue(sessionID string)
-	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error) error
+	// Summarize compacts the session. instructions optionally steers
+	// what the summary focuses on (manual /compact input).
+	Summarize(context.Context, string, fantasy.ProviderOptions, func(context.Context, *fantasy.ProviderError) error, string) error
 	Model() Model
 	GenerateTitle(ctx context.Context, sessionID, userPrompt string)
 }
@@ -201,6 +204,12 @@ type sessionAgent struct {
 	maxRetries           *int
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
+
+	// hooks fires user-configured hook events for this agent's runs.
+	// Sub-agents hold the registry too, but the prompt/turn/compact
+	// events are gated on isSubAgent so only the top-level agent fires
+	// them; SubagentStop fires from the coordinator's dispatch path.
+	hooks *hooks.Registry
 
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
@@ -259,6 +268,7 @@ type SessionAgentOptions struct {
 	Tools                []fantasy.AgentTool
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
+	Hooks                *hooks.Registry
 }
 
 func NewSessionAgent(
@@ -280,6 +290,7 @@ func NewSessionAgent(
 		tools:                csync.NewSliceFrom(opts.Tools),
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
+		hooks:                opts.Hooks,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -588,6 +599,45 @@ func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgent
 // session. It is exported so callers that accept a run before dispatching it
 // (e.g. backend.SendMessage) can apply the same checks and keep the error
 // contract consistent.
+// publishNotification fires Notification hooks for n and then publishes
+// it to the notification broker. Sub-agents and agents without a
+// publisher skip straight to the (no-op) publish.
+func (a *sessionAgent) publishNotification(ctx context.Context, n notify.Notification) {
+	if a.notify == nil {
+		return
+	}
+	if !a.isSubAgent && a.hooks.Has(hooks.EventNotification) {
+		if _, err := a.hooks.Run(ctx, hooks.EventContext{
+			Event:            hooks.EventNotification,
+			SessionID:        n.SessionID,
+			NotificationType: string(n.Type),
+			Message:          n.Message,
+		}); err != nil {
+			slog.Warn("Notification hook error", "error", err)
+		}
+	}
+	a.notify.Publish(pubsub.CreatedEvent, n)
+}
+
+// fireStopHooks fires the Stop event after a completed top-level turn.
+// The event is informational: hook decisions are logged, not enforced.
+func (a *sessionAgent) fireStopHooks(ctx context.Context, sessionID string) {
+	if a.isSubAgent || !a.hooks.Has(hooks.EventStop) {
+		return
+	}
+	res, err := a.hooks.Run(ctx, hooks.EventContext{
+		Event:     hooks.EventStop,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		slog.Warn("Stop hook error", "error", err)
+		return
+	}
+	if res.Context != "" {
+		slog.Info("Stop hook context", "context", res.Context)
+	}
+}
+
 func ValidateCall(call SessionAgentCall) error {
 	if call.Prompt == "" && !message.ContainsTextAttachment(call.Attachments) {
 		return ErrEmptyPrompt
@@ -749,6 +799,63 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		go a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
 	}
 
+	// Fire the pre-prompt hooks: SessionStart on the first turn of a
+	// session, then UserPromptSubmit on every dispatched prompt. These
+	// run before the user message is persisted so a denial leaves no
+	// orphaned turn behind. The outbound prompt is what the model sees;
+	// the stored message keeps the prompt exactly as the user typed it.
+	outboundPrompt := call.Prompt
+	var promptHookContexts []string
+	if !a.isSubAgent {
+		if !hasUserTextMessage(msgs) && a.hooks.Has(hooks.EventSessionStart) {
+			res, hookErr := a.hooks.Run(ctx, hooks.EventContext{
+				Event:     hooks.EventSessionStart,
+				SessionID: call.SessionID,
+				Prompt:    call.Prompt,
+			})
+			if hookErr != nil {
+				slog.Warn("SessionStart hook error", "error", hookErr)
+			}
+			if res.Context != "" {
+				promptHookContexts = append(promptHookContexts, res.Context)
+			}
+		}
+		if a.hooks.Has(hooks.EventUserPromptSubmit) {
+			attachments := make([]string, len(call.Attachments))
+			for i, att := range call.Attachments {
+				attachments[i] = att.FileName
+			}
+			res, hookErr := a.hooks.Run(ctx, hooks.EventContext{
+				Event:       hooks.EventUserPromptSubmit,
+				SessionID:   call.SessionID,
+				Prompt:      call.Prompt,
+				Attachments: attachments,
+			})
+			if hookErr != nil {
+				slog.Warn("UserPromptSubmit hook error", "error", hookErr)
+			}
+			if res.Decision == hooks.DecisionDeny || res.Halt {
+				blockErr := fmt.Errorf("prompt blocked by hook: %s", res.Reason)
+				complete := notify.RunComplete{
+					SessionID: call.SessionID,
+					RunID:     call.RunID,
+					Error:     blockErr.Error(),
+				}
+				a.publishRunComplete(ctx, call, complete)
+				return nil, blockErr
+			}
+			if res.UpdatedPrompt != "" {
+				outboundPrompt = res.UpdatedPrompt
+			}
+			if res.Context != "" {
+				promptHookContexts = append(promptHookContexts, res.Context)
+			}
+		}
+	}
+	if len(promptHookContexts) > 0 {
+		outboundPrompt += "\n\n<hook-context>\n" + strings.Join(promptHookContexts, "\n") + "\n</hook-context>"
+	}
+
 	// Add the user message to the session.
 	_, err = a.createUserMessage(ctx, call)
 	if err != nil {
@@ -838,7 +945,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		maxOutputTokens = &call.MaxOutputTokens
 	}
 	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:           message.PromptWithTextAttachments(call.Prompt, call.Attachments),
+		Prompt:           message.PromptWithTextAttachments(outboundPrompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
 		Headers:          sessionHeaders(call.SessionID),
@@ -986,7 +1093,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				if err != nil {
 					reason = err.Error()
 				}
-				a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+				a.publishNotification(ctx, notify.Notification{
 					SessionID:    call.SessionID,
 					SessionTitle: currentSession.Title,
 					Type:         notify.TypeAgentRetrying,
@@ -1260,7 +1367,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if retryAttempt > 1 {
 				attempts = fmt.Sprintf("%d retries", retryAttempt)
 			}
-			a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+			a.publishNotification(ctx, notify.Notification{
 				SessionID:    call.SessionID,
 				SessionTitle: currentSession.Title,
 				Type:         notify.TypeAgentError,
@@ -1272,7 +1379,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	if shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.Summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh); summarizeErr != nil {
+		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", ""); summarizeErr != nil {
 			return nil, summarizeErr
 		}
 		// If the agent wasn't done...
@@ -1297,7 +1404,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Send notification that agent has finished its turn (skip for
 	// nested/non-interactive sessions).
 	if !call.NonInteractive && a.notify != nil {
-		a.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+		a.publishNotification(ctx, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: currentSession.Title,
 			Type:         notify.TypeAgentFinished,
@@ -1358,6 +1465,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			a.cancelMark.Del(call.SessionID)
 		}
 		mu.Unlock()
+		a.fireStopHooks(ctx, call.SessionID)
 		return result, err
 	}
 	// There are queued messages, restart the loop. Suppress the outer
@@ -1407,7 +1515,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
-func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error) error {
+func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, instructions string) error {
+	return a.summarize(ctx, sessionID, opts, onAuthRefresh, "manual", instructions)
+}
+
+// summarize compacts the session. trigger is "manual" (user-invoked) or
+// "auto" (context window threshold) and is passed to Pre/PostCompact
+// hooks; instructions optionally steers the summary's focus.
+func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, trigger, instructions string) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
 	}
@@ -1430,6 +1545,18 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	}
 
 	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
+
+	// PreCompact is informational: it observes the imminent compaction
+	// (with its trigger) but cannot veto or steer it.
+	if !a.isSubAgent && a.hooks.Has(hooks.EventPreCompact) {
+		if _, hookErr := a.hooks.Run(ctx, hooks.EventContext{
+			Event:     hooks.EventPreCompact,
+			SessionID: sessionID,
+			Trigger:   trigger,
+		}); hookErr != nil {
+			slog.Warn("PreCompact hook error", "error", hookErr)
+		}
+	}
 
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
@@ -1458,7 +1585,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos)
+	summaryPromptText := buildSummaryPrompt(currentSession.Todos, instructions)
 
 	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
 		Prompt:          summaryPromptText,
@@ -1541,6 +1668,17 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	_, err = a.sessions.Save(genCtx, currentSession)
 	if err != nil {
 		return err
+	}
+
+	// PostCompact is informational, mirroring PreCompact after the fact.
+	if !a.isSubAgent && a.hooks.Has(hooks.EventPostCompact) {
+		if _, hookErr := a.hooks.Run(ctx, hooks.EventContext{
+			Event:     hooks.EventPostCompact,
+			SessionID: sessionID,
+			Trigger:   trigger,
+		}); hookErr != nil {
+			slog.Warn("PostCompact hook error", "error", hookErr)
+		}
 	}
 
 	// Release the active request before processing queued messages so that
@@ -2426,9 +2564,15 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.
-func buildSummaryPrompt(todos []session.Todo) string {
+// instructions, when non-empty, steers what the summary focuses on.
+func buildSummaryPrompt(todos []session.Todo, instructions string) string {
 	var sb strings.Builder
 	sb.WriteString("Provide a detailed summary of our conversation above.")
+	if instructions = strings.TrimSpace(instructions); instructions != "" {
+		sb.WriteString("\n\n## Focus\n\n")
+		sb.WriteString(instructions)
+		sb.WriteString("\n")
+	}
 	if len(todos) > 0 {
 		sb.WriteString("\n\n## Current Todo List\n\n")
 		for _, t := range todos {

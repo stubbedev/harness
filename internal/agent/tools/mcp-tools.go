@@ -17,15 +17,22 @@ func GetMCPTools(cfg *config.ConfigStore, wd string) []*Tool {
 	var result []*Tool
 	for mcpName, tools := range mcp.Tools() {
 		for _, tool := range tools {
-			result = append(result, &Tool{
-				mcpName:    mcpName,
-				tool:       tool,
-				workingDir: wd,
-				cfg:        cfg,
-			})
+			result = append(result, NewMCPTool(mcpName, tool, cfg, wd))
 		}
 	}
 	return result
+}
+
+// NewMCPTool wraps a raw registry tool from the named server as an
+// AgentTool. Exported so on-demand loaders (tool search) can wrap a
+// single tool the same way GetMCPTools wraps every tool.
+func NewMCPTool(mcpName string, tool *mcp.Tool, cfg *config.ConfigStore, wd string) *Tool {
+	return &Tool{
+		mcpName:    mcpName,
+		tool:       tool,
+		workingDir: wd,
+		cfg:        cfg,
+	}
 }
 
 // Tool is a tool from a MCP.

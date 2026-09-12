@@ -73,23 +73,21 @@ definitions:
     - 1000000000
     - 60000000000
     - 3600000000000
-    - 2000000000
+    - 60000000000
     - 5000000000
     - 45000000000
     - 10000000000
-    - 10000000000
+    - 2000000000
     - 300000000000
-    - 60000000000
     format: int64
     type: integer
     x-enum-varnames:
-    - renameRetryBudget
+    - DefaultRequestTimeout
     - configLockDeadline
     - refreshLockDeadline
     - credentialWriteLockDeadline
-    - dockerMCPAvailabilityTTL
+    - renameRetryBudget
     - resolveTimeout
-    - DefaultRequestTimeout
   config.ExitBanner:
     enum:
     - default
@@ -225,13 +223,11 @@ definitions:
           never issues a Mcp-Session-Id). When true, Harness omits the
           tools/prompts/resources list-changed handlers: the go-sdk opens a
           SEP-2575 "subscriptions/listen" stream whenever any of those handlers
-          is set, and sessionless streamable-HTTP servers (e.g. GitHub MCP)
-          answer that POST with 404 ("session not found"), which the SDK treats
-          as fatal. The cost is no live list-changed notifications from this
-          server.
+          is set, and sessionless streamable-HTTP servers answer that POST
+          with 404 ("session not found"), which the SDK treats as fatal. The
+          cost is no live list-changed notifications from this server.
 
-          When nil, Harness auto-detects a set of known sessionless servers (see
-          IsSessionless); set it explicitly to override that detection.
+          Set it explicitly on servers that behave this way.
         type: boolean
       timeout:
         type: integer
@@ -2173,50 +2169,6 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Get MCP OAuth authorization URL
-      tags:
-      - mcp
-  /workspaces/{id}/mcp/docker/disable:
-    post:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Disable Docker MCP
-      tags:
-      - mcp
-  /workspaces/{id}/mcp/docker/enable:
-    post:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Enable Docker MCP
       tags:
       - mcp
   /workspaces/{id}/mcp/get-prompt:

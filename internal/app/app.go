@@ -148,7 +148,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 	// Arm initialization synchronously before launching it so WaitForInit
 	// blocks for the in-flight init instead of racing the goroutine and
-	// returning before any MCP tools register.
+	// returning before any MCP tools register. Elicitation must be wired
+	// first: Initialize advertises the capability only when a handler is
+	// installed.
+	wireMCPElicitation(app.Questions)
 	mcp.ArmInit()
 	go mcp.Initialize(ctx, store)
 

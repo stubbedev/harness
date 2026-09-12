@@ -973,7 +973,13 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 			slog.Log(ctx, level, "MCP log", "name", name, "logger", req.Params.Logger, "data", req.Params.Data)
 		},
 	}
-	if !m.IsSessionless(resolver) {
+	// Advertise elicitation only when someone can actually answer: the
+	// handler routes server questions to the user via the question
+	// service (see SetElicitationHandler).
+	if elicit := currentElicitationHandler(name); elicit != nil {
+		opts.ElicitationHandler = elicit
+	}
+	if !m.IsSessionless() {
 		opts.ToolListChangedHandler = func(context.Context, *mcp.ToolListChangedRequest) {
 			broker.Publish(pubsub.UpdatedEvent, Event{
 				Type: EventToolsListChanged,

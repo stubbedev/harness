@@ -86,9 +86,26 @@ func (r *Runner) Hooks() []config.HookConfig {
 }
 
 // Run executes all matching hooks for the given event and tool, returning
-// an aggregated result.
+// an aggregated result. Prefer RunEvent for events that carry more than
+// tool fields.
 func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolInputJSON string) (AggregateResult, error) {
-	matching := r.matchingHooks(toolName)
+	return r.RunEvent(ctx, EventContext{
+		Event:     eventName,
+		SessionID: sessionID,
+		CWD:       r.cwd,
+		ToolName:  toolName,
+		ToolInput: toolInputJSON,
+	})
+}
+
+// RunEvent executes all hooks matching the event context. The matcher is
+// tested against the context's subject (tool name, or sub-agent type for
+// SubagentStop).
+func (r *Runner) RunEvent(ctx context.Context, ec EventContext) (AggregateResult, error) {
+	if ec.CWD == "" {
+		ec.CWD = r.cwd
+	}
+	matching := r.matchingHooks(ec.Subject())
 	if len(matching) == 0 {
 		return AggregateResult{Decision: DecisionNone}, nil
 	}
@@ -104,8 +121,8 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 		deduped = append(deduped, h)
 	}
 
-	envVars := BuildEnv(eventName, toolName, sessionID, r.cwd, r.projectDir, toolInputJSON)
-	payload := BuildPayload(eventName, sessionID, r.cwd, toolName, toolInputJSON)
+	envVars := BuildEventEnv(ec, r.projectDir)
+	payload := BuildEventPayload(ec)
 
 	results := make([]HookResult, len(deduped))
 	var wg sync.WaitGroup
@@ -119,7 +136,7 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	}
 	wg.Wait()
 
-	agg := aggregate(results, toolInputJSON)
+	agg := aggregate(results, ec.ToolInput)
 	agg.Hooks = make([]HookInfo, len(deduped))
 	for i, h := range deduped {
 		agg.Hooks[i] = HookInfo{
@@ -133,20 +150,20 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 	}
 	slog.Info(
 		"Hook completed",
-		"event", eventName,
-		"tool", toolName,
+		"event", ec.Event,
+		"tool", ec.ToolName,
 		"hooks", len(deduped),
 		"decision", agg.Decision.String(),
 	)
 	return agg, nil
 }
 
-// matchingHooks returns hooks whose matcher matches the tool name (or has
+// matchingHooks returns hooks whose matcher matches the subject (or has
 // no matcher, which matches everything).
-func (r *Runner) matchingHooks(toolName string) []config.HookConfig {
+func (r *Runner) matchingHooks(subject string) []config.HookConfig {
 	var matched []config.HookConfig
 	for _, h := range r.hooks {
-		if h.matcher == nil || h.matcher.MatchString(toolName) {
+		if h.matcher == nil || h.matcher.MatchString(subject) {
 			matched = append(matched, h.cfg)
 		}
 	}

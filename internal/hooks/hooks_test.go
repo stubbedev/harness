@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"sync"
@@ -772,4 +773,251 @@ func TestParseStdoutClaudeCodeFormat(t *testing.T) {
 		require.Equal(t, DecisionAllow, r.Decision)
 		require.Equal(t, "hello", r.Context)
 	})
+}
+
+func TestParseStdoutUpdatedPrompt(t *testing.T) {
+	t.Parallel()
+
+	r := parseStdout(`{"decision":"allow","updated_prompt":"fix the login flow (clarified)"}`)
+	require.Equal(t, "fix the login flow (clarified)", r.UpdatedPrompt)
+
+	r = parseStdout(`{"updated_prompt":null}`)
+	require.Empty(t, r.UpdatedPrompt)
+
+	r = parseStdout(`{"decision":"allow"}`)
+	require.Empty(t, r.UpdatedPrompt)
+}
+
+func TestAggregateUpdatedPromptLastWriterWins(t *testing.T) {
+	t.Parallel()
+
+	agg := aggregate([]HookResult{
+		{UpdatedPrompt: "first"},
+		{UpdatedPrompt: "second"},
+		{},
+		{UpdatedPrompt: "third"},
+	}, `{}`)
+	require.Equal(t, "third", agg.UpdatedPrompt)
+
+	agg = aggregate([]HookResult{{}, {}}, `{}`)
+	require.Empty(t, agg.UpdatedPrompt)
+}
+
+func TestBuildEventPayloadEventSpecificFields(t *testing.T) {
+	t.Parallel()
+
+	t.Run("PostToolUse", func(t *testing.T) {
+		t.Parallel()
+		payload := BuildEventPayload(EventContext{
+			Event:        EventPostToolUse,
+			SessionID:    "sess-1",
+			CWD:          "/work",
+			ToolName:     "bash",
+			ToolInput:    `{"command":"ls"}`,
+			ToolResponse: &ToolResponse{Content: "file1\nfile2", IsError: false},
+		})
+		assertJSONFields(t, payload, map[string]any{
+			"event":      "PostToolUse",
+			"tool_name":  "bash",
+			"tool_input": map[string]any{"command": "ls"},
+			"tool_response": map[string]any{
+				"content":  "file1\nfile2",
+				"is_error": false,
+			},
+		})
+		// Prompt must not appear on tool events.
+		require.NotContains(t, string(payload), `"prompt"`)
+	})
+
+	t.Run("UserPromptSubmit", func(t *testing.T) {
+		t.Parallel()
+		payload := BuildEventPayload(EventContext{
+			Event:       EventUserPromptSubmit,
+			SessionID:   "sess-1",
+			CWD:         "/work",
+			Prompt:      "fix the login flow",
+			Attachments: []string{"screenshot.png"},
+		})
+		assertJSONFields(t, payload, map[string]any{
+			"event":       "UserPromptSubmit",
+			"prompt":      "fix the login flow",
+			"attachments": []any{"screenshot.png"},
+		})
+		// Tool fields must not appear on prompt events.
+		require.NotContains(t, string(payload), `"tool_name"`)
+		require.NotContains(t, string(payload), `"tool_input"`)
+	})
+
+	t.Run("SubagentStop", func(t *testing.T) {
+		t.Parallel()
+		payload := BuildEventPayload(EventContext{
+			Event:        EventSubagentStop,
+			SessionID:    "child-1",
+			CWD:          "/work",
+			SubagentType: "fast",
+			Message:      "completed",
+		})
+		assertJSONFields(t, payload, map[string]any{
+			"event":         "SubagentStop",
+			"subagent_type": "fast",
+			"message":       "completed",
+		})
+	})
+
+	t.Run("PreCompact", func(t *testing.T) {
+		t.Parallel()
+		payload := BuildEventPayload(EventContext{
+			Event:   EventPreCompact,
+			CWD:     "/work",
+			Trigger: "auto",
+		})
+		assertJSONFields(t, payload, map[string]any{
+			"event":   "PreCompact",
+			"trigger": "auto",
+		})
+	})
+}
+
+// assertJSONFields unmarshals payload and requires every expected key to
+// deep-equal the want value.
+func assertJSONFields(t *testing.T, payload []byte, want map[string]any) {
+	t.Helper()
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(payload, &got))
+	for k, v := range want {
+		require.Contains(t, got, k)
+		require.Equal(t, v, got[k], "field %q", k)
+	}
+}
+
+func TestEventContextSubject(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "bash", EventContext{Event: EventPreToolUse, ToolName: "bash"}.Subject())
+	require.Equal(t, "fast", EventContext{Event: EventSubagentStop, SubagentType: "fast"}.Subject())
+	require.Empty(t, EventContext{Event: EventStop}.Subject())
+}
+
+func TestRunnerSubagentStopMatchesSubagentType(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			EventSubagentStop: {
+				{Matcher: "^fast$", Command: `echo '{"context":"from fast hook"}'`},
+			},
+		},
+	}
+	require.NoError(t, cfg.ValidateHooks())
+	r := NewRunner(cfg.Hooks[EventSubagentStop], t.TempDir(), t.TempDir())
+
+	res, err := r.RunEvent(context.Background(), EventContext{
+		Event:        EventSubagentStop,
+		SessionID:    "child-1",
+		SubagentType: "fast",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.HookCount)
+	require.Equal(t, "from fast hook", res.Context)
+
+	res, err = r.RunEvent(context.Background(), EventContext{
+		Event:        EventSubagentStop,
+		SessionID:    "child-1",
+		SubagentType: "task",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 0, res.HookCount)
+}
+
+func TestRegistryNilSafe(t *testing.T) {
+	t.Parallel()
+
+	var r *Registry
+	require.False(t, r.Has(EventPreToolUse))
+	res, err := r.Run(context.Background(), EventContext{Event: EventPreToolUse})
+	require.NoError(t, err)
+	require.Equal(t, 0, res.HookCount)
+	require.Equal(t, DecisionNone, res.Decision)
+}
+
+func TestRegistryRunsConfiguredEvent(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			EventStop: {{Command: `echo '{"context":"turn done"}'`}},
+		},
+	}
+	require.NoError(t, cfg.ValidateHooks())
+	r := NewRegistry(config.NewTestStore(cfg), t.TempDir(), t.TempDir())
+
+	require.False(t, r.Has(EventPreToolUse))
+	require.True(t, r.Has(EventStop))
+
+	res, err := r.Run(context.Background(), EventContext{
+		Event:     EventStop,
+		SessionID: "sess-1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.HookCount)
+	require.Equal(t, "turn done", res.Context)
+}
+
+func TestRegistryPicksUpConfigReload(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	require.NoError(t, cfg.ValidateHooks())
+	store := config.NewTestStore(cfg)
+	r := NewRegistry(store, t.TempDir(), t.TempDir())
+
+	require.False(t, r.Has(EventStop))
+
+	reloaded := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			EventStop: {{Command: `exit 0`}},
+		},
+	}
+	require.NoError(t, reloaded.ValidateHooks())
+	store.SwapTestConfig(reloaded)
+
+	require.True(t, r.Has(EventStop), "registry must read the live config, not a startup snapshot")
+}
+
+func TestValidateHooksRejectsUnknownEvent(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			"PostToolUze": {{Command: `exit 0`}},
+		},
+	}
+	err := cfg.ValidateHooks()
+	require.ErrorContains(t, err, "not supported")
+	require.ErrorContains(t, err, "PostToolUze")
+}
+
+func TestValidateHooksNormalizesAllEventNames(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Hooks: map[string][]config.HookConfig{
+			"pre_tool_use":        {{Command: `exit 0`}},
+			"post_tool_use":      {{Command: `exit 0`}},
+			"USER_PROMPT_SUBMIT": {{Command: `exit 0`}},
+			"subagent_stop":      {{Command: `exit 0`}},
+			"precompact":         {{Command: `exit 0`}},
+			"POST_COMPACT":       {{Command: `exit 0`}},
+			"session_start":      {{Command: `exit 0`}},
+			"stop":               {{Command: `exit 0`}},
+			"notification":       {{Command: `exit 0`}},
+		},
+	}
+	require.NoError(t, cfg.ValidateHooks())
+	for _, event := range EventNames() {
+		require.Contains(t, cfg.Hooks, event)
+	}
+	require.NotContains(t, cfg.Hooks, "pre_tool_use")
+	require.NotContains(t, cfg.Hooks, "post_tool_use")
+	require.NotContains(t, cfg.Hooks, "USER_PROMPT_SUBMIT")
 }

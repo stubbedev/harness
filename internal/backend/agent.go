@@ -178,8 +178,9 @@ func (b *Backend) CancelSession(workspaceID, sessionID string) error {
 	return nil
 }
 
-// SummarizeSession triggers a session summarization.
-func (b *Backend) SummarizeSession(ctx context.Context, workspaceID, sessionID string) error {
+// SummarizeSession triggers a session summarization. instructions, when
+// non-empty, steer the summary's focus.
+func (b *Backend) SummarizeSession(ctx context.Context, workspaceID, sessionID, instructions string) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
@@ -189,7 +190,7 @@ func (b *Backend) SummarizeSession(ctx context.Context, workspaceID, sessionID s
 		return ErrAgentNotInitialized
 	}
 
-	return ws.AgentCoordinator.Summarize(ctx, sessionID)
+	return ws.AgentCoordinator.Summarize(ctx, sessionID, instructions)
 }
 
 // QueuedPrompts returns the number of queued prompts for the session.

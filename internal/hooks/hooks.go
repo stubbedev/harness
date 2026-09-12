@@ -13,7 +13,44 @@ import (
 // Hook event name constants.
 const (
 	EventPreToolUse = "PreToolUse"
+	// EventPostToolUse fires after a tool call completes. The payload
+	// carries the tool response in addition to the input.
+	EventPostToolUse = "PostToolUse"
+	// EventUserPromptSubmit fires after the user submits a prompt but
+	// before it reaches the model. Can block, rewrite, or annotate the
+	// prompt.
+	EventUserPromptSubmit = "UserPromptSubmit"
+	// EventSessionStart fires on the first prompt of a session.
+	EventSessionStart = "SessionStart"
+	// EventStop fires when the top-level agent finishes a turn.
+	EventStop = "Stop"
+	// EventSubagentStop fires when a dispatched sub-agent finishes.
+	EventSubagentStop = "SubagentStop"
+	// EventNotification fires when Harness sends a user notification
+	// (agent finished, agent error, provider retry).
+	EventNotification = "Notification"
+	// EventPreCompact fires before a session is summarized/compacted.
+	EventPreCompact = "PreCompact"
+	// EventPostCompact fires after a session was summarized/compacted.
+	EventPostCompact = "PostCompact"
 )
+
+// EventNames lists every event this build understands, in a stable order.
+// Mirrored for config validation in internal/config/load.go; keep both in
+// sync.
+func EventNames() []string {
+	return []string{
+		EventPreToolUse,
+		EventPostToolUse,
+		EventUserPromptSubmit,
+		EventSessionStart,
+		EventStop,
+		EventSubagentStop,
+		EventNotification,
+		EventPreCompact,
+		EventPostCompact,
+	}
+}
 
 // HaltExitCode is the exit code that halts the whole turn. 2 blocks the
 // current tool call; 49 sits in the no-man's-land between the
@@ -67,22 +104,24 @@ func (d Decision) String() string {
 
 // HookResult holds the parsed output of a single hook execution.
 type HookResult struct {
-	Decision     Decision
-	Halt         bool   // If true, halt the whole turn.
-	Reason       string // Deny or halt reason (same field, different audience).
-	Context      string
-	UpdatedInput string // Shallow-merge patch against tool_input (opaque JSON).
+	Decision      Decision
+	Halt          bool   // If true, halt the whole turn.
+	Reason        string // Deny or halt reason (same field, different audience).
+	Context       string
+	UpdatedInput  string // Shallow-merge patch against tool_input (opaque JSON).
+	UpdatedPrompt string // Full replacement for the user prompt (UserPromptSubmit).
 }
 
 // AggregateResult holds the combined outcome of all hooks for an event.
 type AggregateResult struct {
-	Decision     Decision
-	Halt         bool       // Any hook requested halt.
-	HookCount    int        // Number of hooks that ran.
-	Hooks        []HookInfo // Info about each hook that ran (config order).
-	Reason       string     // Concatenated deny/halt reasons (newline-separated).
-	Context      string     // Concatenated context from all hooks.
-	UpdatedInput string     // Merged tool_input JSON (empty if no patches).
+	Decision      Decision
+	Halt          bool       // Any hook requested halt.
+	HookCount     int        // Number of hooks that ran.
+	Hooks         []HookInfo // Info about each hook that ran (config order).
+	Reason        string     // Concatenated deny/halt reasons (newline-separated).
+	Context       string     // Concatenated context from all hooks.
+	UpdatedInput  string     // Merged tool_input JSON (empty if no patches).
+	UpdatedPrompt string     // Last non-empty updated_prompt in config order.
 }
 
 // aggregate merges multiple HookResults into a single AggregateResult.
@@ -93,12 +132,13 @@ type AggregateResult struct {
 // ones on colliding keys.
 func aggregate(results []HookResult, origToolInput string) AggregateResult {
 	var (
-		decision Decision
-		halt     bool
-		reasons  []string
-		contexts []string
-		merged   = origToolInput
-		anyPatch = false
+		decision      Decision
+		halt          bool
+		reasons       []string
+		contexts      []string
+		merged        = origToolInput
+		anyPatch      = false
+		updatedPrompt string
 	)
 	for _, r := range results {
 		switch r.Decision {
@@ -138,6 +178,12 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 			merged = next
 			anyPatch = true
 		}
+		// A prompt is a single string with no key structure to merge
+		// against, so updated_prompt is a full replacement: later hooks
+		// in config order win.
+		if r.UpdatedPrompt != "" {
+			updatedPrompt = r.UpdatedPrompt
+		}
 	}
 
 	agg := AggregateResult{
@@ -154,6 +200,7 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 	if len(contexts) > 0 {
 		agg.Context = strings.Join(contexts, "\n")
 	}
+	agg.UpdatedPrompt = updatedPrompt
 	return agg
 }
 

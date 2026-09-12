@@ -61,6 +61,13 @@ type (
 	ActionSummarize                   struct {
 		SessionID string
 	}
+	// ActionCompact compacts (summarizes) the session, optionally steered
+	// by focus instructions collected through the arguments dialog.
+	ActionCompact struct {
+		SessionID string
+		Arguments []commands.Argument
+		Args      map[string]string
+	}
 	// ActionSaveSummary is a message to save the current session summary
 	// to a markdown file in the data directory.
 	ActionSaveSummary struct {
@@ -112,10 +119,6 @@ type (
 		Arguments   []commands.Argument
 		Args        map[string]string // Actual argument values
 	}
-	// ActionEnableDockerMCP is a message to enable Docker MCP.
-	ActionEnableDockerMCP struct{}
-	// ActionDisableDockerMCP is a message to disable Docker MCP.
-	ActionDisableDockerMCP struct{}
 )
 
 // Messages for MCP OAuth authentication dialog.

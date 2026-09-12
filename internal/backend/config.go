@@ -2,8 +2,6 @@ package backend
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
 	"github.com/stubbedev/harness/internal/agent"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
@@ -191,55 +189,6 @@ func (b *Backend) ListSkills(workspaceID string) ([]proto.SkillInfo, error) {
 		}
 	}
 	return result, nil
-}
-
-// EnableDockerMCP validates Docker MCP availability, stages the
-// configuration, starts the MCP client, and persists the config.
-func (b *Backend) EnableDockerMCP(ctx context.Context, workspaceID string) error {
-	ws, err := b.GetWorkspace(workspaceID)
-	if err != nil {
-		return err
-	}
-
-	mcpConfig, err := ws.Cfg.PrepareDockerMCPConfig()
-	if err != nil {
-		return err
-	}
-
-	if err := mcptools.InitializeSingle(ctx, config.DockerMCPName, ws.Cfg); err != nil {
-		disableErr := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName)
-		ws.Cfg.RemoveDockerMCPInMemory()
-		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
-	}
-
-	if err := ws.Cfg.PersistDockerMCPConfig(mcpConfig); err != nil {
-		disableErr := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName)
-		ws.Cfg.RemoveDockerMCPInMemory()
-		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
-	}
-
-	publishConfigChanged(ws)
-	return nil
-}
-
-// DisableDockerMCP closes the Docker MCP client, removes the
-// configuration, and persists the change.
-func (b *Backend) DisableDockerMCP(workspaceID string) error {
-	ws, err := b.GetWorkspace(workspaceID)
-	if err != nil {
-		return err
-	}
-
-	if err := mcptools.DisableSingle(ws.Cfg, config.DockerMCPName); err != nil {
-		return fmt.Errorf("failed to disable docker MCP: %w", err)
-	}
-
-	if err := ws.Cfg.DisableDockerMCP(); err != nil {
-		return err
-	}
-
-	publishConfigChanged(ws)
-	return nil
 }
 
 // RefreshMCPTools refreshes the tools for a named MCP server.

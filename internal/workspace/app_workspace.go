@@ -224,11 +224,11 @@ func (w *AppWorkspace) AgentClearQueue(sessionID string) {
 	}
 }
 
-func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID string) error {
+func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID, instructions string) error {
 	if w.app.AgentCoordinator == nil {
 		return errors.New("agent coordinator not initialized")
 	}
-	return w.app.AgentCoordinator.Summarize(ctx, sessionID)
+	return w.app.AgentCoordinator.Summarize(ctx, sessionID, instructions)
 }
 
 func (w *AppWorkspace) UpdateAgentModel(ctx context.Context) error {
@@ -675,34 +675,6 @@ func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]commands.MCPPrompt, er
 
 func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
 	return commands.GetMCPPrompt(w.store, clientID, promptID, args)
-}
-
-func (w *AppWorkspace) EnableDockerMCP(ctx context.Context) error {
-	mcpConfig, err := w.store.PrepareDockerMCPConfig()
-	if err != nil {
-		return err
-	}
-
-	if err := mcptools.InitializeSingle(ctx, config.DockerMCPName, w.store); err != nil {
-		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
-		w.store.RemoveDockerMCPInMemory()
-		return fmt.Errorf("failed to start docker MCP: %w", errors.Join(err, disableErr))
-	}
-
-	if err := w.store.PersistDockerMCPConfig(mcpConfig); err != nil {
-		disableErr := mcptools.DisableSingle(w.store, config.DockerMCPName)
-		w.store.RemoveDockerMCPInMemory()
-		return fmt.Errorf("docker MCP started but failed to persist configuration: %w", errors.Join(err, disableErr))
-	}
-
-	return nil
-}
-
-func (w *AppWorkspace) DisableDockerMCP() error {
-	if err := mcptools.DisableSingle(w.store, config.DockerMCPName); err != nil {
-		return fmt.Errorf("failed to disable docker MCP: %w", err)
-	}
-	return w.store.DisableDockerMCP()
 }
 
 func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {

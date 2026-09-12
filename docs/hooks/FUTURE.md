@@ -150,110 +150,31 @@ unaffected.
   full tree. But call it out explicitly in docs so users aren't surprised by N²
   explosions on pathological configs.
 
-## `UserPromptSubmit` event
+## `SessionEnd` event
 
-**Status:** not implemented.
+**Status:** planned, not implemented.
 
 ### Motivation
 
-Today Harness supports exactly one hook event, `PreToolUse`. That's enough to gate
-and rewrite tool calls but nothing else. The next-most-useful event is
-`UserPromptSubmit`: fires after the user hits Enter but before the turn hits the
-LLM. Lets hooks inject context, rewrite prompts, or gate on content without the
-mutation complexity of `PostToolUse` (output scrubbing, error coercion, size
-limits — all rabbit holes).
+Session deletion (`harness session delete`, the TUI sessions dialog) is the
+one lifecycle edge with no hook. A `SessionEnd` event would let users run
+cleanup (remove scratch dirs, revoke temp credentials, archive transcripts)
+when a session goes away.
 
-### Use cases
+The wrinkle is plumbing: deletion flows through `session.Service.Delete` at
+three call sites (CLI, HTTP API, workspace), none of which currently hold a
+hooks registry. The clean fix is an optional callback on the session service
+constructed in `app.New`, or a coordinator-level delete path. Decide before
+wiring; don't sprinkle fires at the call sites.
 
-- Prepend project context the user didn't think to include ("current branch:
-  `feat/x`; last commit: `<sha> <title>`").
-- Point at reference files via `context_files` (when that lands) so the agent
-  knows where to look without being force-fed contents.
-- Redact secrets out of the prompt before it leaves the machine.
-- Refuse prompts matching a policy ("don't send anything mentioning
-  `production.env`") — with `deny` and a reason the user sees.
-- Expand shorthand (`@TODO` → "please address the TODO in …").
-
-### Proposed shape
-
-Stdin payload extends the common envelope with the prompt:
-
-```jsonc
-{
-  "event": "UserPromptSubmit",
-  "session_id": "…",
-  "cwd": "/home/user/project",
-  "prompt": "fix the login flow",
-  "attachments": ["screenshot.png"],
-}
-```
-
-Output envelope reuses common fields plus one new per-event field,
-`updated_prompt`:
-
-```jsonc
-{
-  "decision": "allow", // optional; deny blocks the submission entirely
-  "reason": "includes a production secret", // shown to the user when denying
-  "context": "Current branch: feat/login",
-  "updated_prompt": "fix the login flow\n\n(from @TODO on line 42)",
-}
-```
-
-`updated_prompt` is a **full replacement** — not a merge patch — because a
-prompt is a single string with no natural key structure. If multiple hooks emit
-`updated_prompt`, later hooks in config order win.
-
-### Aggregation
-
-Reuses the universal rules:
-
-- `halt` is sticky. Halts the whole turn before the LLM is called.
-- `context` concatenates in config order.
-- `updated_prompt`: last writer wins.
-- `decision: "deny"` blocks the submission. The user sees `reason`; the turn
-  never reaches the LLM.
-
-### Differences from `PreToolUse`
-
-- No `updated_input`: there are no tool inputs at this point.
-- No tool gating: a user prompt is not a tool call, so `decision` has nothing
-  to block.
-- `decision: "allow"` is functionally identical to silence. It exists only for
-  symmetry with `PreToolUse` and to give hook authors a consistent vocabulary.
-  (Could be argued both ways — consider dropping it here.)
-- Fires on every user submission, including follow-ups in the same session.
-  Hooks should be fast; no subprocess-per-keystroke scenarios but the per-turn
-  overhead is real.
-
-### Implementation sketch
-
-- New event constant `EventUserPromptSubmit` in `internal/hooks/hooks.go`.
-- `Runner.Run` already takes an event name; no interface change.
-- A new call site in `sessionAgent.Run` (or the coordinator's Run path) that
-  fires hooks after creating the user message but before the first LLM call. If
-  the aggregate decision is `deny` or `halt`, abort the turn and surface
-  `reason` to the user.
-- If hooks return `context`, prepend it to the prompt seen by the LLM (or attach
-  as a system-message-level note — decide based on how the prompt is threaded
-  through fantasy).
-- If hooks return `updated_prompt`, replace the prompt body before the first LLM
-  call. The message row in the DB should still store the _original_ prompt so
-  the user sees what they typed; only the outbound version is rewritten. (Or:
-  store both, show the original, send the rewritten — mirror how `updated_input`
-  is handled today.)
+Note that `Stop` (turn end) and `SubagentStop` already exist — `SessionEnd`
+is strictly about the session record being deleted, not about turns ending.
 
 ### Open questions
 
-- Store original vs rewritten prompt? Probably both, with UI showing original
-  and a subtle indicator that a hook modified it.
-- Do hooks fire on queued prompts too, or only when actually dispatched? If the
-  user queues three prompts and the hook blocks the second, what happens to the
-  third? Simplest rule: fire when dispatched; denial skips to the next queued
-  prompt with a visible note.
-- What about the `/commands` prefix? Does `UserPromptSubmit` fire for slash
-  commands, or are those intercepted earlier? Probably earlier — hooks see only
-  freeform prompts that would actually reach the LLM.
+- Should it also fire on app exit for the live session? Claude Code's
+  `SessionEnd` does; exit-time hooks are easy to lose to shutdown races.
+- Payload: session id, title, parent session id?
 
 ## Cross-platform shell (Windows support)
 
