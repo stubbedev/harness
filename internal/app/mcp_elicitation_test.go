@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -233,4 +234,92 @@ func TestParseElicitationSchema(t *testing.T) {
 	}, "branch"))
 	assert.Equal(t, []string{"branch"}, schema.Required)
 	assert.Equal(t, "which branch", schema.Properties["branch"].Description)
+}
+
+// fakeQuestions is a question.Service whose Ask returns whatever the test
+// wants, so the handler's decline paths can be exercised without a TUI.
+type fakeQuestions struct {
+	question.Service
+	answers []question.Answer
+	err     error
+	asked   *question.Request
+}
+
+func (f *fakeQuestions) Ask(_ context.Context, req question.Request) ([]question.Answer, error) {
+	f.asked = &req
+	return f.answers, f.err
+}
+
+func TestElicitationHandler(t *testing.T) {
+	t.Parallel()
+
+	yes := true
+	schema := schemaOf(map[string]any{
+		"branch": map[string]any{"type": "string"},
+	}, "branch")
+
+	t.Run("an answered form accepts", func(t *testing.T) {
+		t.Parallel()
+
+		questions := &fakeQuestions{answers: []question.Answer{{QuestionID: "branch", FillInText: "main"}}}
+		res, err := elicitationHandler(questions)(t.Context(), "forge", &mcpsdk.ElicitParams{
+			Message:         "Which branch?",
+			RequestedSchema: schema,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "accept", res.Action)
+		assert.Equal(t, map[string]any{"branch": "main"}, res.Content)
+		require.NotNil(t, questions.asked)
+		assert.Len(t, questions.asked.Questions, 1)
+	})
+
+	// Esc on the form cancels the pending question. The server gets a
+	// decline, which is an answer it can act on, rather than an error or
+	// a call that never returns.
+	t.Run("a cancelled form declines", func(t *testing.T) {
+		t.Parallel()
+
+		res, err := elicitationHandler(&fakeQuestions{err: question.ErrCancelled})(
+			t.Context(), "forge", &mcpsdk.ElicitParams{Message: "Which branch?", RequestedSchema: schema})
+		require.NoError(t, err)
+		assert.Equal(t, "decline", res.Action)
+		assert.Nil(t, res.Content)
+	})
+
+	// A turn cancelled while the question is open takes the context down
+	// with it. That is not a decline the user chose, so it surfaces as an
+	// error; the MCP layer turns it into a decline for the server.
+	t.Run("a cancelled context is an error", func(t *testing.T) {
+		t.Parallel()
+
+		res, err := elicitationHandler(&fakeQuestions{err: context.Canceled})(
+			t.Context(), "forge", &mcpsdk.ElicitParams{Message: "Which branch?", RequestedSchema: schema})
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, res)
+	})
+
+	t.Run("declines what the terminal cannot present", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name   string
+			params *mcpsdk.ElicitParams
+		}{
+			{"no params", nil},
+			{"a URL elicitation", &mcpsdk.ElicitParams{URL: "https://example.com/authorize"}},
+			{"url mode", &mcpsdk.ElicitParams{Mode: "url"}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				questions := &fakeQuestions{answers: []question.Answer{{QuestionID: "branch", Yes: &yes}}}
+				res, err := elicitationHandler(questions)(t.Context(), "forge", tt.params)
+				require.NoError(t, err)
+				assert.Equal(t, "decline", res.Action)
+				// Nothing was put in front of the user.
+				assert.Nil(t, questions.asked)
+			})
+		}
+	})
 }

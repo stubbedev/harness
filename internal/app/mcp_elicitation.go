@@ -22,7 +22,12 @@ import (
 // (URL elicitations, schemas beyond five fields) is declined so the
 // server can fall back rather than hang.
 func wireMCPElicitation(questions question.Service) {
-	harnessmcp.SetElicitationHandler(func(ctx context.Context, server string, params *mcpsdk.ElicitParams) (*mcpsdk.ElicitResult, error) {
+	harnessmcp.SetElicitationHandler(elicitationHandler(questions))
+}
+
+// elicitationHandler builds the handler wireMCPElicitation installs.
+func elicitationHandler(questions question.Service) harnessmcp.ElicitationHandler {
+	return func(ctx context.Context, server string, params *mcpsdk.ElicitParams) (*mcpsdk.ElicitResult, error) {
 		if params == nil {
 			return &mcpsdk.ElicitResult{Action: "decline"}, nil
 		}
@@ -51,7 +56,7 @@ func wireMCPElicitation(questions question.Service) {
 			return nil, contentErr
 		}
 		return &mcpsdk.ElicitResult{Action: "accept", Content: content}, nil
-	})
+	}
 }
 
 // elicitationSchema is the subset of JSON schema the elicitation form
