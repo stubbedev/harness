@@ -335,3 +335,10 @@ func (i *LSPClientInfo) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
+// SummarizeRequest steers what a session summary keeps. An empty
+// Instructions asks for a general summary, which is what /compact sends
+// when the user skips the focus prompt.
+type SummarizeRequest struct {
+	Instructions string `json:"instructions,omitempty"`
+}

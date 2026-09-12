@@ -8,6 +8,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/csync"
 )
 
 // SendMessageToolName is the tool sub-agents use to message their
@@ -104,4 +105,10 @@ func appendSubagentMessages(resp *fantasy.ToolResponse, messages []string) {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, msg)
 	}
 	resp.Content += b.String()
+}
+
+// newSubagentInbox builds the per-run inbox the coordinator hands to
+// recordSubagentMessage and drainSubagentMessages.
+func newSubagentInbox() *csync.Map[string, []string] {
+	return csync.NewMap[string, []string]()
 }

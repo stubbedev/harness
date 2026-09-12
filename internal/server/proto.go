@@ -934,8 +934,10 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.Respons
 //
 //	@Summary		Summarize session
 //	@Tags			agent
-//	@Param			id	path	string	true	"Workspace ID"
-//	@Param			sid	path	string	true	"Session ID"
+//	@Accept			json
+//	@Param			id		path	string					true	"Workspace ID"
+//	@Param			sid		path	string					true	"Session ID"
+//	@Param			request	body	proto.SummarizeRequest	false	"Focus instructions"
 //	@Success		200
 //	@Failure		404	{object}	proto.Error
 //	@Failure		500	{object}	proto.Error
@@ -944,9 +946,7 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseW
 	id := r.PathValue("id")
 	sid := r.PathValue("sid")
 	// Optional focus instructions from /compact.
-	var body struct {
-		Instructions string `json:"instructions"`
-	}
+	var body proto.SummarizeRequest
 	if r.Body != nil {
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
 	}

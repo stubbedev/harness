@@ -274,7 +274,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		interactive:        opts.Interactive,
 		hooks:              hooks.NewRegistry(opts.Config, opts.Config.WorkingDir(), opts.Config.WorkingDir()),
 		expandedMCPTools:   csync.NewMap[string, map[string]bool](),
-		subagentMessages:   csync.NewMap[string, []string](),
+		subagentMessages:   newSubagentInbox(),
 		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
 		dispatchSem:        make(chan struct{}, maxConcurrentSubagents(opts.Config)),
@@ -1859,7 +1859,7 @@ func callTopK(providerCfg config.ProviderConfig, topK *int64) *int64 {
 // runSubAgent runs a sub-agent and handles session management and cost accumulation.
 // It creates a sub-session, runs the agent with the given prompt, and propagates
 // the cost to the parent session.
-func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (fantasy.ToolResponse, error) {
+func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (resp fantasy.ToolResponse, _ error) {
 	// Create sub-session
 	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
@@ -1889,12 +1889,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (f
 	finalStatus := subagents.StatusCompleted
 	defer func() { c.runtime.Finish(session.ID, finalStatus) }()
 
-	// resp carries every non-error return so the deferred SubagentStop
-	// hook can annotate the response the orchestrator sees. ctx is
-	// detached from cancellation: by the time this runs the parent turn
-	// (and its context) may already be gone, while each hook's own
-	// timeout still bounds its runtime.
-	var resp fantasy.ToolResponse
+	// resp is the named return so the deferred inbox drain and the
+	// SubagentStop hook can annotate the response the orchestrator
+	// actually receives — annotating a local would be copied over by the
+	// return. ctx is detached from cancellation: by the time this runs the
+	// parent turn (and its context) may already be gone, while each hook's
+	// own timeout still bounds its runtime.
 	defer func() {
 		// Inbox first: messages the sub-agent sent via send_message are
 		// delivered with the result even when the run failed or was

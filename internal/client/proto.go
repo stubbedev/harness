@@ -553,7 +553,7 @@ func (c *Client) GetAgentSessionInfo(ctx context.Context, id string, sessionID s
 func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID string, instructions string) error {
 	var body io.Reader
 	if instructions != "" {
-		payload, err := json.Marshal(map[string]string{"instructions": instructions})
+		payload, err := json.Marshal(proto.SummarizeRequest{Instructions: instructions})
 		if err != nil {
 			return fmt.Errorf("failed to summarize session: %w", err)
 		}

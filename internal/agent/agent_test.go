@@ -16,6 +16,7 @@ import (
 
 	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/config"
@@ -1305,5 +1306,44 @@ func TestProviderRetryLogFields(t *testing.T) {
 			"retry_delay", "1s",
 			"status_code", 503,
 		}, fields)
+	})
+}
+
+// TestBuildSummaryPrompt covers the /compact focus: the instructions the
+// arguments dialog collects have to reach the summary prompt, and an empty
+// focus still has to ask for a general summary.
+func TestBuildSummaryPrompt(t *testing.T) {
+	t.Parallel()
+
+	todos := []session.Todo{{Content: "ship it", Status: "in_progress"}}
+
+	t.Run("no focus asks for a general summary", func(t *testing.T) {
+		t.Parallel()
+
+		prompt := buildSummaryPrompt(nil, "")
+		assert.Equal(t, "Provide a detailed summary of our conversation above.", prompt)
+	})
+
+	t.Run("blank focus is not a focus", func(t *testing.T) {
+		t.Parallel()
+
+		assert.NotContains(t, buildSummaryPrompt(nil, "   \n\t "), "## Focus")
+	})
+
+	t.Run("focus reaches the prompt", func(t *testing.T) {
+		t.Parallel()
+
+		prompt := buildSummaryPrompt(nil, "  keep the auth work  ")
+		assert.Contains(t, prompt, "## Focus\n\nkeep the auth work\n")
+	})
+
+	t.Run("focus and todos both land", func(t *testing.T) {
+		t.Parallel()
+
+		prompt := buildSummaryPrompt(todos, "keep the auth work")
+		assert.Contains(t, prompt, "## Focus")
+		assert.Contains(t, prompt, "keep the auth work")
+		assert.Contains(t, prompt, "- [in_progress] ship it")
+		assert.Less(t, strings.Index(prompt, "## Focus"), strings.Index(prompt, "## Current Todo List"))
 	})
 }

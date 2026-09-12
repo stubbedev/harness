@@ -74,20 +74,20 @@ definitions:
     - 60000000000
     - 3600000000000
     - 60000000000
+    - 300000000000
     - 5000000000
     - 45000000000
     - 10000000000
     - 2000000000
-    - 300000000000
     format: int64
     type: integer
     x-enum-varnames:
     - DefaultRequestTimeout
+    - resolveTimeout
     - configLockDeadline
     - refreshLockDeadline
     - credentialWriteLockDeadline
     - renameRetryBudget
-    - resolveTimeout
   config.ExitBanner:
     enum:
     - default
@@ -231,6 +231,14 @@ definitions:
         type: boolean
       timeout:
         type: integer
+      tool_search:
+        description: |-
+          ToolSearch defer-loads this server's tools behind a search tool
+          instead of expanding every tool schema into the model's context.
+          nil means automatic: defer when the server lists more than
+          DefaultMCPToolSearchThreshold tools. true always defers, false
+          never does.
+        type: boolean
       type:
         $ref: '#/definitions/config.MCPType'
       url:
@@ -1018,6 +1026,11 @@ definitions:
       state:
         $ref: '#/definitions/proto.SkillDiscoveryState'
     type: object
+  proto.SummarizeRequest:
+    properties:
+      instructions:
+        type: string
+    type: object
   proto.Todo:
     properties:
       active_form:
@@ -1558,6 +1571,8 @@ paths:
       - agent
   /workspaces/{id}/agent/sessions/{sid}/summarize:
     post:
+      consumes:
+      - application/json
       parameters:
       - description: Workspace ID
         in: path
@@ -1569,6 +1584,11 @@ paths:
         name: sid
         required: true
         type: string
+      - description: Focus instructions
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/proto.SummarizeRequest'
       responses:
         "200":
           description: OK

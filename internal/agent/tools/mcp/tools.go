@@ -253,3 +253,19 @@ func decodeBase64(data []byte) ([]byte, bool) {
 	}
 	return nil, false
 }
+
+// RegisterToolsForTest publishes tools for a server into the process-wide
+// registry and returns a function that restores the previous entry. Only
+// tests call this: in a running harness the registry is filled by the MCP
+// client lifecycle.
+func RegisterToolsForTest(server string, tools []*Tool) (restore func()) {
+	previous, had := allTools.Get(server)
+	allTools.Set(server, tools)
+	return func() {
+		if had {
+			allTools.Set(server, previous)
+			return
+		}
+		allTools.Del(server)
+	}
+}

@@ -102,9 +102,11 @@ func elicitationQuestion(server string, params *mcpsdk.ElicitParams) (*question.
 	// forms (where the TUI shows it next to the input) and as the
 	// confirmation header on multi-field forms.
 	if len(questions) == 1 {
-		if questions[0].Description == "" {
-			questions[0].Description = message
-		}
+		// A one-field form has no confirmation header to carry the
+		// message, so it becomes the description — otherwise the user is
+		// asked for a value with only the generated "Required field ..."
+		// line to go on and never sees what the server actually asked.
+		questions[0].Description = message
 	} else {
 		confirmTitle := fmt.Sprintf("%s needs input", server)
 		confirmDesc := message

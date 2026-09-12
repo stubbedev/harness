@@ -740,6 +740,9 @@ const docTemplate = `{
         },
         "/workspaces/{id}/agent/sessions/{sid}/summarize": {
             "post": {
+                "consumes": [
+                    "application/json"
+                ],
                 "tags": [
                     "agent"
                 ],
@@ -758,6 +761,14 @@ const docTemplate = `{
                         "name": "sid",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Focus instructions",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/proto.SummarizeRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -2960,19 +2971,19 @@ const docTemplate = `{
                 60000000000,
                 3600000000000,
                 60000000000,
+                300000000000,
                 5000000000,
                 45000000000,
                 10000000000,
-                2000000000,
-                300000000000
+                2000000000
             ],
             "x-enum-varnames": [
                 "DefaultRequestTimeout",
+                "resolveTimeout",
                 "configLockDeadline",
                 "refreshLockDeadline",
                 "credentialWriteLockDeadline",
-                "renameRetryBudget",
-                "resolveTimeout"
+                "renameRetryBudget"
             ]
         },
         "config.ExitBanner": {
@@ -3131,6 +3142,10 @@ const docTemplate = `{
                 },
                 "timeout": {
                     "type": "integer"
+                },
+                "tool_search": {
+                    "description": "ToolSearch defer-loads this server's tools behind a search tool\ninstead of expanding every tool schema into the model's context.\nnil means automatic: defer when the server lists more than\nDefaultMCPToolSearchThreshold tools. true always defers, false\nnever does.",
+                    "type": "boolean"
                 },
                 "type": {
                     "$ref": "#/definitions/config.MCPType"
@@ -4274,6 +4289,14 @@ const docTemplate = `{
                 },
                 "state": {
                     "$ref": "#/definitions/proto.SkillDiscoveryState"
+                }
+            }
+        },
+        "proto.SummarizeRequest": {
+            "type": "object",
+            "properties": {
+                "instructions": {
+                    "type": "string"
                 }
             }
         },
