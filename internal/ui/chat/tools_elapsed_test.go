@@ -16,7 +16,14 @@ func TestBaseToolMessageItemElapsed(t *testing.T) {
 	tc := message.ToolCall{ID: "toolu_1", Name: "bash", Finished: false}
 	item := newBaseToolMessageItem(&sty, tc, nil, &BashToolRenderContext{}, false)
 
-	require.Greater(t, item.elapsed(), time.Duration(0), "a live tool must report elapsed time")
+	// A live tool's timer runs from the moment the item was built. How
+	// soon that shows as more than zero is the clock's business, not the
+	// item's: Windows advances its monotonic clock about once a
+	// millisecond, so reading the timer immediately after construction
+	// legitimately measures nothing at all.
+	require.Eventually(t, func() bool {
+		return item.elapsed() > 0
+	}, time.Second, time.Millisecond, "a live tool must report elapsed time")
 
 	item.SetToolCall(message.ToolCall{ID: "toolu_1", Name: "bash", Finished: true})
 	require.False(t, item.finishedAt.IsZero(), "finishing must capture the end time")
