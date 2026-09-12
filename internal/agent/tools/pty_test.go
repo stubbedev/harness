@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -144,8 +145,27 @@ func TestPtyRunner_StillRunning(t *testing.T) {
 // A command that stops to ask something is detected from the process
 // state, not waited out to the budget: the call returns as waiting for
 // input within a couple of seconds even with a minute of budget left.
+//
+// That detection reads the foreground job's state out of procfs, so it
+// exists on Linux and nowhere else (see term.SampleJob). Everywhere
+// else the call has nothing to detect with and falls back to its wait
+// budget, reporting the command as still running - which is the
+// behaviour asserted below, with a budget short enough to be worth
+// waiting for.
 func TestPtyRunner_RunReturnsWhenInputNeeded(t *testing.T) {
 	r := newTestRunner(t)
+
+	if runtime.GOOS != "linux" {
+		res, err := r.Run(t.Context(), "read answer; echo \"got:$answer\"", 2)
+		require.NoError(t, err)
+		require.True(t, res.Running)
+		require.Nil(t, res.ExitCode)
+
+		done, err := r.Input(t.Context(), "hello\n")
+		require.NoError(t, err)
+		require.Contains(t, done.Output, "got:hello")
+		return
+	}
 
 	start := time.Now()
 	res, err := r.Run(t.Context(), "read answer; echo \"got:$answer\"", 60)
