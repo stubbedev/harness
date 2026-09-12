@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -44,9 +45,47 @@ func TestMCPSearchToolRun(t *testing.T) {
 	t.Run("name matches rank above description matches", func(t *testing.T) {
 		tool := searchToolWithRegistry(t, "forge", tools)
 
+		matches, total := tool.search("issue")
+		assert.Equal(t, 3, total)
+		// issue_create before issue_comment: equal name matches, but the
+		// shorter name wins fzf's unmatched-char penalty.
 		assert.Equal(t,
-			[]string{"issue_comment", "issue_create", "release_publish"},
-			tool.search("issue"))
+			[]string{"issue_create", "issue_comment", "release_publish"},
+			matches)
+	})
+
+	// A model writes natural queries, not bare substrings; every term must
+	// match somewhere, fuzzily and case-insensitively.
+	t.Run("multi-word and fuzzy queries match", func(t *testing.T) {
+		tool := searchToolWithRegistry(t, "forge", []*mcp.Tool{
+			{Name: "issue_create", Description: "Open a new issue"},
+			{Name: "pull_request_merge", Description: "Merge a pull request"},
+			{Name: "list_workflow_runs", Description: "List CI workflow runs"},
+		})
+
+		tests := []struct {
+			query   string
+			want    []string
+			partial bool
+		}{
+			{query: "issue", want: []string{"issue_create"}},
+			{query: "create issue", want: []string{"issue_create"}},
+			{query: "create an issue", want: []string{"issue_create"}},
+			{query: "isue", want: []string{"issue_create"}, partial: true},
+			{query: "merge PR", want: []string{"pull_request_merge"}},
+			{query: "ci runs", want: []string{"list_workflow_runs"}},
+			{query: "workflow", want: []string{"list_workflow_runs"}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.query, func(t *testing.T) {
+				matches, _ := tool.search(tt.query)
+				if tt.partial {
+					assert.Contains(t, matches, tt.want[0])
+					return
+				}
+				assert.Equal(t, tt.want, matches)
+			})
+		}
 	})
 
 	t.Run("a query matching nothing says so rather than erroring", func(t *testing.T) {
@@ -67,7 +106,16 @@ func TestMCPSearchToolRun(t *testing.T) {
 		}
 		tool := searchToolWithRegistry(t, "big", many)
 
-		assert.Len(t, tool.search("tool_"), mcpSearchResultLimit)
+		matches, total := tool.search("tool_")
+		assert.Len(t, matches, mcpSearchResultLimit)
+		assert.Equal(t, mcpSearchResultLimit+5, total)
+
+		resp, err := tool.Run(t.Context(), fantasy.ToolCall{Input: `{"query":"tool_"}`})
+		require.NoError(t, err)
+		require.False(t, resp.IsError)
+		assert.Contains(t, resp.Content,
+			fmt.Sprintf("%d tool(s) match \"tool_\" (of %d on the server); showing the best %d. Narrow the query to see the others:",
+				mcpSearchResultLimit+5, mcpSearchResultLimit+5, mcpSearchResultLimit))
 	})
 
 	t.Run("long descriptions are elided", func(t *testing.T) {

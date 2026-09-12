@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/sahilm/fuzzy"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
 )
@@ -35,7 +36,7 @@ func (s *mcpSearchTool) Info() fantasy.ToolInfo {
 			`Search and load tools from the "%s" MCP server, which exposes %d tools that are not listed here to save context.
 
 Two-step usage:
-1. Run with {"query": "keyword"} to list matching tools (matched against tool name and description).
+1. Run with {"query": "keyword ..."} to list matching tools. Keywords are matched fuzzily against tool names and descriptions; every keyword must match, and name matches rank higher.
 2. Run with {"load": ["tool_name", ...]} to load the ones you need. Loaded tools appear in your tool list from your next step, with their full input schemas.
 
 Both fields may be combined in one call. Prefer loading few tools at a time.`,
@@ -44,7 +45,7 @@ Both fields may be combined in one call. Prefer loading few tools at a time.`,
 		Parameters: map[string]any{
 			"query": map[string]any{
 				"type":        "string",
-				"description": "Keyword matched against tool names and descriptions. Empty matches nothing.",
+				"description": "Keywords, space-separated. Every keyword must fuzzy-match the tool's name or description; name matches rank higher. Empty matches nothing.",
 			},
 			"load": map[string]any{
 				"type":        "array",
@@ -72,18 +73,17 @@ func (s *mcpSearchTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 
 	var b strings.Builder
 	if params.Query != "" {
-		matches := s.search(params.Query)
-		if len(matches) == 0 {
+		matches, matched := s.search(params.Query)
+		switch {
+		case matched == 0:
 			fmt.Fprintf(&b, "No tools matching %q on server %q.\n", params.Query, s.server)
-		} else {
-			fmt.Fprintf(&b, "%d tool(s) matching %q (of %d total):\n", len(matches), params.Query, s.coord.mcpServerToolCount(s.server))
-			for _, name := range matches {
-				desc := s.coord.mcpToolDescription(s.server, name)
-				if len(desc) > 200 {
-					desc = desc[:200] + "…"
-				}
-				fmt.Fprintf(&b, "- %s: %s\n", name, desc)
-			}
+		case matched > len(matches):
+			fmt.Fprintf(&b, "%d tool(s) match %q (of %d on the server); showing the best %d. Narrow the query to see the others:\n",
+				matched, params.Query, s.coord.mcpServerToolCount(s.server), len(matches))
+			s.writeMatches(&b, matches)
+		default:
+			fmt.Fprintf(&b, "%d tool(s) matching %q (of %d total):\n", matched, params.Query, s.coord.mcpServerToolCount(s.server))
+			s.writeMatches(&b, matches)
 		}
 	}
 
@@ -109,28 +109,68 @@ func (s *mcpSearchTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 	return fantasy.NewTextResponse(strings.TrimRight(b.String(), "\n")), nil
 }
 
-// search returns up to mcpSearchResultLimit tool names matching the query,
-// ranked: name prefix, name substring, then description substring, each
-// group alphabetically.
-func (s *mcpSearchTool) search(query string) []string {
-	q := strings.ToLower(query)
-	var prefix, nameMatch, descMatch []string
+// writeMatches lists one "- name: description" line per tool, eliding
+// descriptions past 200 runes so one search stays context-cheap.
+func (s *mcpSearchTool) writeMatches(b *strings.Builder, names []string) {
+	for _, name := range names {
+		desc := s.coord.mcpToolDescription(s.server, name)
+		if len(desc) > 200 {
+			desc = desc[:200] + "…"
+		}
+		fmt.Fprintf(b, "- %s: %s\n", name, desc)
+	}
+}
+
+// search scores the server's tools with the fzf algorithm and returns the
+// top mcpSearchResultLimit names plus how many matched in total. The query
+// is split on whitespace and every term must match somewhere, the way fzf's
+// extended search AND's its terms. Each term scores against the name and
+// the description — a name match counts double — and a tool's score is the
+// sum over terms; ties break alphabetically.
+func (s *mcpSearchTool) search(query string) ([]string, int) {
+	terms := strings.Fields(strings.ToLower(query))
+	type scored struct {
+		name  string
+		score int
+	}
+	var matches []scored
 	for _, name := range s.coord.mcpServerToolNames(s.server) {
+		desc := strings.ToLower(s.coord.mcpToolDescription(s.server, name))
 		lower := strings.ToLower(name)
-		switch {
-		case strings.HasPrefix(lower, q):
-			prefix = append(prefix, name)
-		case strings.Contains(lower, q):
-			nameMatch = append(nameMatch, name)
-		case strings.Contains(strings.ToLower(s.coord.mcpToolDescription(s.server, name)), q):
-			descMatch = append(descMatch, name)
+		total := 0
+		allTerms := true
+		for _, term := range terms {
+			best, found := 0, false
+			for _, m := range fuzzy.Find(term, []string{lower}) {
+				if !found || m.Score*2 > best {
+					best, found = m.Score*2, true
+				}
+			}
+			for _, m := range fuzzy.Find(term, []string{desc}) {
+				if !found || m.Score > best {
+					best, found = m.Score, true
+				}
+			}
+			if !found {
+				allTerms = false
+				break
+			}
+			total += best
+		}
+		if allTerms {
+			matches = append(matches, scored{name: name, score: total})
 		}
 	}
-	matches := append(append(prefix, nameMatch...), descMatch...)
-	if len(matches) > mcpSearchResultLimit {
+	slices.SortStableFunc(matches, func(a, b scored) int { return b.score - a.score })
+	total := len(matches)
+	if total > mcpSearchResultLimit {
 		matches = matches[:mcpSearchResultLimit]
 	}
-	return matches
+	names := make([]string, len(matches))
+	for i, m := range matches {
+		names[i] = m.name
+	}
+	return names, total
 }
 
 // mcpServerToolCount returns how many tools the named server exposes in
