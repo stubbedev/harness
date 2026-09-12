@@ -49,6 +49,18 @@ func waitReady(t *testing.T, s *Session) {
 	s.Drain()
 }
 
+// waitOutput waits for the pattern in everything printed since the
+// previous match, not only in what arrives after the call. WaitForPattern
+// resets its scan position on entry, so a shell that answers inside the
+// gap between Send returning and the wait starting - preempted test
+// goroutine, loaded runner - has its answer skipped, and the wait then
+// sits out its whole timeout for output that is already buffered.
+// WaitForAny keeps scanning from where the last match ended instead.
+func waitOutput(t *testing.T, s *Session, pattern *regexp.Regexp, timeout time.Duration) bool {
+	t.Helper()
+	return s.WaitForAny(t.Context(), []*regexp.Regexp{pattern}, timeout) >= 0
+}
+
 func startTestSession(t *testing.T) *Session {
 	t.Helper()
 	if _, err := os.Stat("/bin/sh"); err != nil {
@@ -69,7 +81,7 @@ func TestSession_RunCommandAndReadOutput(t *testing.T) {
 	s.Drain()
 
 	require.NoError(t, s.Send([]byte("echo hello-term\n")))
-	require.True(t, s.WaitForPattern(t.Context(), regexp.MustCompile("hello-term"), testTimeout(10*time.Second)))
+	require.True(t, waitOutput(t, s, regexp.MustCompile("hello-term"), testTimeout(10*time.Second)))
 
 	out := string(s.Drain())
 	require.Contains(t, out, "hello-term")
@@ -84,10 +96,10 @@ func TestSession_InteractivePrompt(t *testing.T) {
 	// A program that reads from stdin: this hangs a pipe-based runner
 	// forever, but the PTY just shows the prompt.
 	require.NoError(t, s.Send([]byte("read name; echo \"got:$name\"\n")))
-	require.True(t, s.WaitForPattern(t.Context(), regexp.MustCompile("got:"), 500*time.Millisecond) || true)
+	require.True(t, waitOutput(t, s, regexp.MustCompile("got:"), 500*time.Millisecond) || true)
 	// The read blocks; feed it input.
 	require.NoError(t, s.Send([]byte("agent\n")))
-	require.True(t, s.WaitForPattern(t.Context(), regexp.MustCompile(`got:agent`), testTimeout(10*time.Second)))
+	require.True(t, waitOutput(t, s, regexp.MustCompile(`got:agent`), testTimeout(10*time.Second)))
 }
 
 func TestSession_ExitDetected(t *testing.T) {
@@ -165,7 +177,7 @@ func TestSessionScreenAndAltScreen(t *testing.T) {
 	require.False(t, s.AltScreen())
 
 	require.NoError(t, s.Send([]byte("printf 'on the screen'\n")))
-	require.True(t, s.WaitForPattern(t.Context(), regexp.MustCompile("on the screen"), testTimeout(5*time.Second)))
+	require.True(t, waitOutput(t, s, regexp.MustCompile("on the screen"), testTimeout(5*time.Second)))
 	require.Contains(t, s.Screen(), "on the screen")
 
 	// A program taking the alternate screen is visible as such, and the
@@ -197,7 +209,7 @@ func TestSessionResize(t *testing.T) {
 	require.Equal(t, 80, cols)
 
 	require.NoError(t, s.Send([]byte("printf '%s %s' \"$(tput lines)\" \"$(tput cols)\"\n")))
-	require.True(t, s.WaitForPattern(t.Context(), regexp.MustCompile(`24 80`), testTimeout(5*time.Second)))
+	require.True(t, waitOutput(t, s, regexp.MustCompile(`24 80`), testTimeout(5*time.Second)))
 
 	// Out-of-range dimensions are clamped, never applied verbatim.
 	require.NoError(t, s.Resize(1, 5))
