@@ -198,6 +198,13 @@ release level:
         git add package.nix
         git commit -m "chore(nix): update vendorHash for $new"
     fi
+    # GitHub honours [skip ci] on a tag push too, so a tag landing on the
+    # vendorHash commit that .github/workflows/flake.yml pushes ("chore(nix):
+    # update vendorHash [skip ci]") creates the tag and the release quietly
+    # never builds. Put an empty commit under the tag in that case.
+    if git log -1 --format=%B | grep -qiE '\[(skip ci|ci skip)\]'; then
+        git commit --allow-empty -m "chore: release $new"
+    fi
     git tag --annotate -m "$new" "$new"
     git push origin HEAD
     git push origin "$new"
