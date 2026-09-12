@@ -458,11 +458,14 @@ func (g *ToolGroupMessageItem) lastRunningTool() ToolMessageItem {
 }
 
 // oneLiner renders one tool call as a single line: status glyph, tool
-// name and an argument summary, truncated to width.
+// name and an argument summary, truncated to width. A running call gets
+// the pending dot, not the tool's full scrambled spinner (a 15-cell
+// animation with its own timer would crowd the line; the group header
+// already carries the live animation).
 func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int) string {
 	glyph := g.sty.Tool.IconSuccess.Render()
 	if a, ok := t.(Animatable); ok && a.Spinning() {
-		glyph = a.(toolSpinner).spinnerFrame()
+		glyph = g.sty.Tool.IconPending.Render()
 	} else if res := t.Result(); res != nil && res.IsError {
 		glyph = g.sty.Tool.IconError.Render()
 	} else if t.Status() == ToolStatusCanceled {
@@ -509,13 +512,4 @@ func firstLine(s string) string {
 		s = s[:i]
 	}
 	return strings.Join(strings.Fields(s), " ")
-}
-
-// toolSpinner is implemented by tool items that can render their live
-// spinner frame.
-type toolSpinner interface{ spinnerFrame() string }
-
-// spinnerFrame returns the current animation frame of a running tool.
-func (t *baseToolMessageItem) spinnerFrame() string {
-	return t.anim.Render()
 }
