@@ -15,8 +15,8 @@ import (
 type ElicitationHandler = func(ctx context.Context, server string, params *mcp.ElicitParams) (*mcp.ElicitResult, error)
 
 var (
-	elicitationMu       sync.RWMutex
-	elicitationHandler  ElicitationHandler
+	elicitationMu      sync.RWMutex
+	elicitationHandler ElicitationHandler
 )
 
 // SetElicitationHandler installs the process-wide elicitation handler.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -118,13 +119,7 @@ func elicitationQuestion(server string, params *mcpsdk.ElicitParams) (*question.
 }
 
 func elicitationPropertyQuestion(name string, prop elicitationProperty, required []string) question.Question {
-	isRequired := false
-	for _, r := range required {
-		if r == name {
-			isRequired = true
-			break
-		}
-	}
+	isRequired := slices.Contains(required, name)
 	prefix := "Optional"
 	if isRequired {
 		prefix = "Required"

@@ -59,7 +59,7 @@ func (t *sendMessageTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
-		return fantasy.NewTextErrorResponse("invalid parameters: "+err.Error()), nil
+		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
 	}
 	message := strings.TrimSpace(params.Message)
 	if message == "" {
@@ -70,13 +70,21 @@ func (t *sendMessageTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 }
 
 // recordSubagentMessage appends to the per-run inbox of a child session.
+// The inbox is optional: a coordinator built without one (tests that
+// exercise a single dispatch path) just drops the message.
 func (c *coordinator) recordSubagentMessage(childSessionID, message string) {
+	if c.subagentMessages == nil {
+		return
+	}
 	existing, _ := c.subagentMessages.Get(childSessionID)
 	c.subagentMessages.Set(childSessionID, append(existing, message))
 }
 
 // drainSubagentMessages returns and clears the inbox of a child session.
 func (c *coordinator) drainSubagentMessages(childSessionID string) []string {
+	if c.subagentMessages == nil {
+		return nil
+	}
 	msgs, ok := c.subagentMessages.Get(childSessionID)
 	if ok {
 		c.subagentMessages.Del(childSessionID)

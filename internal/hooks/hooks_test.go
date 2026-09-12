@@ -1002,7 +1002,7 @@ func TestValidateHooksNormalizesAllEventNames(t *testing.T) {
 
 	cfg := &config.Config{
 		Hooks: map[string][]config.HookConfig{
-			"pre_tool_use":        {{Command: `exit 0`}},
+			"pre_tool_use":       {{Command: `exit 0`}},
 			"post_tool_use":      {{Command: `exit 0`}},
 			"USER_PROMPT_SUBMIT": {{Command: `exit 0`}},
 			"subagent_stop":      {{Command: `exit 0`}},

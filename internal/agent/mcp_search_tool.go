@@ -64,7 +64,7 @@ func (s *mcpSearchTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 		Load  []string `json:"load"`
 	}
 	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
-		return fantasy.NewTextErrorResponse("invalid parameters: "+err.Error()), nil
+		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
 	}
 	if params.Query == "" && len(params.Load) == 0 {
 		return fantasy.NewTextErrorResponse(`provide "query" to search or "load" to load tools (both is fine)`), nil
@@ -100,7 +100,7 @@ func (s *mcpSearchTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 				fmt.Sprintf("unknown tool(s) on server %q: %s", s.server, strings.Join(unknown, ", "))), nil
 		}
 		if err := s.coord.expandMCPServerTools(ctx, s.server, params.Load); err != nil {
-			return fantasy.NewTextErrorResponse("failed to load tools: "+err.Error()), nil
+			return fantasy.NewTextErrorResponse("failed to load tools: " + err.Error()), nil
 		}
 		fmt.Fprintf(&b, "Loaded %d tool(s) from %q. They appear in your tool list from your next step: %s\n",
 			len(params.Load), s.server, strings.Join(params.Load, ", "))
