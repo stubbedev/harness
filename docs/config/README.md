@@ -284,8 +284,7 @@ options:
   debug_lsp: false # log LSP traffic too
   auto_lsp: true # start language servers automatically
   progress: true # progress output in non-interactive runs
-  init_prompt: true # offer to initialize a project with no context file
-  initialize_as: AGENTS.md # filename written by that initialization
+  initialize_as: AGENTS.md # filename written by the "init" command
   data_directory: .harness # per-project state and logs
   notifications: auto # auto | native | osc | bell | disabled
   request_timeout: 60 # seconds of inactivity per model request; 0 disables it

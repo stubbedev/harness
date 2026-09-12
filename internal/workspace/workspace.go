@@ -195,8 +195,6 @@ type Workspace interface {
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
 
 	// Project lifecycle
-	ProjectNeedsInitialization() (bool, error)
-	MarkProjectInitialized() error
 	InitializePrompt() (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)

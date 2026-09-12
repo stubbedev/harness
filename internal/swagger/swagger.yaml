@@ -73,23 +73,23 @@ definitions:
     - 1000000000
     - 60000000000
     - 3600000000000
-    - 300000000000
-    - 60000000000
-    - 10000000000
+    - 2000000000
     - 5000000000
     - 45000000000
     - 10000000000
-    - 2000000000
+    - 10000000000
+    - 300000000000
+    - 60000000000
     format: int64
     type: integer
     x-enum-varnames:
-    - resolveTimeout
-    - DefaultRequestTimeout
-    - dockerMCPAvailabilityTTL
+    - renameRetryBudget
     - configLockDeadline
     - refreshLockDeadline
     - credentialWriteLockDeadline
-    - renameRetryBudget
+    - dockerMCPAvailabilityTTL
+    - resolveTimeout
+    - DefaultRequestTimeout
   config.ExitBanner:
     enum:
     - default
@@ -254,19 +254,6 @@ definitions:
     additionalProperties:
       $ref: '#/definitions/config.MCPConfig'
     type: object
-  config.Permissions:
-    properties:
-      allowed_tools:
-        items:
-          type: string
-        type: array
-      yolo:
-        description: |-
-          Yolo skips every permission prompt. This fork defaults it to true;
-          set permissions.yolo false in the config file
-          to restore prompting. The --yolo flag forces it on regardless.
-        type: boolean
-    type: object
   config.SelectedModel:
     properties:
       frequency_penalty:
@@ -412,8 +399,6 @@ definitions:
         type: object
       options:
         $ref: '#/definitions/github_com_stubbedev_harness_internal_config.Options'
-      permissions:
-        $ref: '#/definitions/config.Permissions'
       providers:
         allOf:
         - $ref: '#/definitions/csync.Map-string-config_ProviderConfig'
@@ -487,10 +472,13 @@ definitions:
         items:
           type: string
         type: array
-      init_prompt:
-        type: boolean
       initialize_as:
         type: string
+      max_concurrent_subagents:
+        description: |-
+          MaxConcurrentSubagents bounds how many dispatched sub-agents run at
+          once. Dispatches beyond the limit wait for a slot instead of failing.
+        type: integer
       max_retries:
         type: integer
       notifications:
@@ -887,60 +875,10 @@ definitions:
     - User
     - System
     - Tool
-  proto.PermissionAction:
-    enum:
-    - allow
-    - allow_session
-    - deny
-    type: string
-    x-enum-varnames:
-    - PermissionAllow
-    - PermissionAllowForSession
-    - PermissionDeny
-  proto.PermissionGrant:
-    properties:
-      action:
-        $ref: '#/definitions/proto.PermissionAction'
-      permission:
-        $ref: '#/definitions/proto.PermissionRequest'
-    type: object
-  proto.PermissionGrantResponse:
-    properties:
-      resolved:
-        type: boolean
-    type: object
-  proto.PermissionRequest:
-    properties:
-      action:
-        type: string
-      description:
-        type: string
-      id:
-        type: string
-      params: {}
-      path:
-        type: string
-      session_id:
-        type: string
-      tool_call_id:
-        type: string
-      tool_name:
-        type: string
-    type: object
-  proto.PermissionSkipRequest:
-    properties:
-      skip:
-        type: boolean
-    type: object
   proto.ProjectInitPromptResponse:
     properties:
       prompt:
         type: string
-    type: object
-  proto.ProjectNeedsInitResponse:
-    properties:
-      needs_init:
-        type: boolean
     type: object
   proto.QuestionAnswer:
     properties:
@@ -1141,8 +1079,6 @@ definitions:
         type: array
       version:
         type: string
-      yolo:
-        type: boolean
     type: object
 info:
   contact:
@@ -2573,123 +2509,6 @@ paths:
       summary: Get all user messages for workspace
       tags:
       - workspaces
-  /workspaces/{id}/permissions/grant:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Permission grant
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/proto.PermissionGrant'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/proto.PermissionGrantResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Grant permission
-      tags:
-      - permissions
-  /workspaces/{id}/permissions/skip:
-    get:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/proto.PermissionSkipRequest'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Get skip permissions status
-      tags:
-      - permissions
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Permission skip request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/proto.PermissionSkipRequest'
-      responses:
-        "200":
-          description: OK
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Set skip permissions
-      tags:
-      - permissions
-  /workspaces/{id}/project/init:
-    post:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Mark project as initialized
-      tags:
-      - project
   /workspaces/{id}/project/init-prompt:
     get:
       parameters:
@@ -2714,32 +2533,6 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Get project initialization prompt
-      tags:
-      - project
-  /workspaces/{id}/project/needs-init:
-    get:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/proto.ProjectNeedsInitResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Check if project needs initialization
       tags:
       - project
   /workspaces/{id}/providers:

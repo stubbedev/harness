@@ -577,11 +577,6 @@
             "docs/LLMs.md"
           ]
         },
-        "init_prompt": {
-          "type": "boolean",
-          "description": "Show the project initialization prompt when a project has no context file. Set to false to never ask",
-          "default": true
-        },
         "auto_lsp": {
           "type": "boolean",
           "description": "Automatically setup LSPs based on root markers",

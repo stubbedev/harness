@@ -201,7 +201,6 @@ options:
   debug_lsp: false
   auto_lsp: true
   progress: true
-  init_prompt: true
   initialize_as: AGENTS.md
   data_directory: .harness
   notifications: auto # auto | native | osc | bell | disabled

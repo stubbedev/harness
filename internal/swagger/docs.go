@@ -2190,185 +2190,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/workspaces/{id}/permissions/grant": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "tags": [
-                    "permissions"
-                ],
-                "summary": "Grant permission",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Permission grant",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/proto.PermissionGrant"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/proto.PermissionGrantResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            }
-        },
-        "/workspaces/{id}/permissions/skip": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "permissions"
-                ],
-                "summary": "Get skip permissions status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/proto.PermissionSkipRequest"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "tags": [
-                    "permissions"
-                ],
-                "summary": "Set skip permissions",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Permission skip request",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/proto.PermissionSkipRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            }
-        },
-        "/workspaces/{id}/project/init": {
-            "post": {
-                "tags": [
-                    "project"
-                ],
-                "summary": "Mark project as initialized",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            }
-        },
         "/workspaces/{id}/project/init-prompt": {
             "get": {
                 "produces": [
@@ -2392,46 +2213,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/proto.ProjectInitPromptResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            }
-        },
-        "/workspaces/{id}/project/needs-init": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "project"
-                ],
-                "summary": "Check if project needs initialization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/proto.ProjectNeedsInitResponse"
                         }
                     },
                     "404": {
@@ -3246,22 +3027,22 @@ const docTemplate = `{
                 1000000000,
                 60000000000,
                 3600000000000,
-                300000000000,
-                60000000000,
-                10000000000,
+                2000000000,
                 5000000000,
                 45000000000,
                 10000000000,
-                2000000000
+                10000000000,
+                300000000000,
+                60000000000
             ],
             "x-enum-varnames": [
-                "resolveTimeout",
-                "DefaultRequestTimeout",
-                "dockerMCPAvailabilityTTL",
+                "renameRetryBudget",
                 "configLockDeadline",
                 "refreshLockDeadline",
                 "credentialWriteLockDeadline",
-                "renameRetryBudget"
+                "dockerMCPAvailabilityTTL",
+                "resolveTimeout",
+                "DefaultRequestTimeout"
             ]
         },
         "config.ExitBanner": {
@@ -3446,21 +3227,6 @@ const docTemplate = `{
             "type": "object",
             "additionalProperties": {
                 "$ref": "#/definitions/config.MCPConfig"
-            }
-        },
-        "config.Permissions": {
-            "type": "object",
-            "properties": {
-                "allowed_tools": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "yolo": {
-                    "description": "Yolo skips every permission prompt. This fork defaults it to true;\nset permissions.yolo false in the config file\nto restore prompting. The --yolo flag forces it on regardless.",
-                    "type": "boolean"
-                }
             }
         },
         "config.SelectedModel": {
@@ -3664,9 +3430,6 @@ const docTemplate = `{
                 "options": {
                     "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Options"
                 },
-                "permissions": {
-                    "$ref": "#/definitions/config.Permissions"
-                },
                 "providers": {
                     "description": "The providers that are configured",
                     "allOf": [
@@ -3762,11 +3525,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
-                "init_prompt": {
-                    "type": "boolean"
-                },
                 "initialize_as": {
                     "type": "string"
+                },
+                "max_concurrent_subagents": {
+                    "description": "MaxConcurrentSubagents bounds how many dispatched sub-agents run at\nonce. Dispatches beyond the limit wait for a slot instead of failing.",
+                    "type": "integer"
                 },
                 "max_retries": {
                     "type": "integer"
@@ -4357,86 +4121,11 @@ const docTemplate = `{
                 "Tool"
             ]
         },
-        "proto.PermissionAction": {
-            "type": "string",
-            "enum": [
-                "allow",
-                "allow_session",
-                "deny"
-            ],
-            "x-enum-varnames": [
-                "PermissionAllow",
-                "PermissionAllowForSession",
-                "PermissionDeny"
-            ]
-        },
-        "proto.PermissionGrant": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "$ref": "#/definitions/proto.PermissionAction"
-                },
-                "permission": {
-                    "$ref": "#/definitions/proto.PermissionRequest"
-                }
-            }
-        },
-        "proto.PermissionGrantResponse": {
-            "type": "object",
-            "properties": {
-                "resolved": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "proto.PermissionRequest": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "params": {},
-                "path": {
-                    "type": "string"
-                },
-                "session_id": {
-                    "type": "string"
-                },
-                "tool_call_id": {
-                    "type": "string"
-                },
-                "tool_name": {
-                    "type": "string"
-                }
-            }
-        },
-        "proto.PermissionSkipRequest": {
-            "type": "object",
-            "properties": {
-                "skip": {
-                    "type": "boolean"
-                }
-            }
-        },
         "proto.ProjectInitPromptResponse": {
             "type": "object",
             "properties": {
                 "prompt": {
                     "type": "string"
-                }
-            }
-        },
-        "proto.ProjectNeedsInitResponse": {
-            "type": "object",
-            "properties": {
-                "needs_init": {
-                    "type": "boolean"
                 }
             }
         },
@@ -4735,9 +4424,6 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "string"
-                },
-                "yolo": {
-                    "type": "boolean"
                 }
             }
         }

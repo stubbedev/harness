@@ -112,13 +112,6 @@ func TestSetProviderAPIKey_PublishesConfigChanged(t *testing.T) {
 	awaitConfigChanged(t, evc, ws.ID)
 }
 
-func TestMarkProjectInitialized_PublishesConfigChanged(t *testing.T) {
-	b, ws, evc := newPublishingWorkspace(t)
-
-	require.NoError(t, b.MarkProjectInitialized(ws.ID))
-	awaitConfigChanged(t, evc, ws.ID)
-}
-
 // TestImportCopilot_PublishesConfigChanged exercises the success path
 // by seeding a token file in the location ImportCopilot scans, then
 // asserting the event fires only when ok==true.
