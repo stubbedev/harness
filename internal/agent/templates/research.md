@@ -1,0 +1,1 @@
+Research a question across the web with a sub-agent that searches, follows links between pages, and synthesises an answer with sources. Slower and costlier than fetch and web_search: use those to read one page or run one search, and this when the answer is spread over several pages you would otherwise have to find and read yourself.

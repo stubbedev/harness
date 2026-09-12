@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"time"
 
 	"charm.land/fantasy"
 
@@ -16,58 +15,50 @@ import (
 	"github.com/stubbedev/harness/internal/subagents"
 )
 
-//go:embed templates/agentic_fetch.md
-var agenticFetchToolDescription string
+//go:embed templates/research.md
+var researchToolDescription string
 
-// agenticFetchValidationResult holds the validated parameters from the tool call context.
-type agenticFetchValidationResult struct {
+// researchValidationResult holds the validated parameters from the tool call context.
+type researchValidationResult struct {
 	SessionID      string
 	AgentMessageID string
 }
 
-// validateAgenticFetchParams validates the tool call parameters and extracts required context values.
-func validateAgenticFetchParams(ctx context.Context, params tools.AgenticFetchParams) (agenticFetchValidationResult, error) {
+// validateResearchParams validates the tool call parameters and extracts required context values.
+func validateResearchParams(ctx context.Context, params tools.ResearchParams) (researchValidationResult, error) {
 	if params.Prompt == "" {
-		return agenticFetchValidationResult{}, errors.New("prompt is required")
+		return researchValidationResult{}, errors.New("prompt is required")
 	}
 
 	sessionID := tools.GetSessionFromContext(ctx)
 	if sessionID == "" {
-		return agenticFetchValidationResult{}, errors.New("session id missing from context")
+		return researchValidationResult{}, errors.New("session id missing from context")
 	}
 
 	agentMessageID := tools.GetMessageFromContext(ctx)
 	if agentMessageID == "" {
-		return agenticFetchValidationResult{}, errors.New("agent message id missing from context")
+		return researchValidationResult{}, errors.New("agent message id missing from context")
 	}
 
-	return agenticFetchValidationResult{
+	return researchValidationResult{
 		SessionID:      sessionID,
 		AgentMessageID: agentMessageID,
 	}, nil
 }
 
-//go:embed templates/agentic_fetch_prompt.md.tpl
-var agenticFetchPromptTmpl []byte
+//go:embed templates/research_prompt.md.tpl
+var researchPromptTmpl []byte
 
-func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (fantasy.AgentTool, error) {
+func (c *coordinator) researchTool(_ context.Context, client *http.Client) (fantasy.AgentTool, error) {
 	if client == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.MaxIdleConns = 100
-		transport.MaxIdleConnsPerHost = 10
-		transport.IdleConnTimeout = 90 * time.Second
-
-		client = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: transport,
-		}
+		client = tools.DefaultHTTPClient()
 	}
 
 	return fantasy.NewParallelAgentTool(
-		tools.AgenticFetchToolName,
-		agenticFetchToolDescription,
-		func(ctx context.Context, params tools.AgenticFetchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			validationResult, err := validateAgenticFetchParams(ctx, params)
+		tools.ResearchToolName,
+		researchToolDescription,
+		func(ctx context.Context, params tools.ResearchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			validationResult, err := validateResearchParams(ctx, params)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
@@ -82,10 +73,16 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 
 			if params.URL != "" {
 				// URL mode: fetch the URL content first.
-				content, err := tools.FetchURLAndConvert(ctx, client, params.URL)
+				res, err := tools.FetchURL(ctx, client, params.URL, tools.FetchFormatMarkdown)
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
 				}
+				if res.Binary {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf(
+						"The response from %s is not text (%s, %d bytes); use the download tool to save it instead.",
+						params.URL, res.ContentType, res.Size)), nil
+				}
+				content := res.Content
 
 				hasLargeContent := len(content) > tools.LargeContentThreshold
 
@@ -108,14 +105,14 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				}
 			} else {
 				// Search mode: let the sub-agent search and fetch as needed.
-				fullPrompt = fmt.Sprintf("%s\n\nUse the web_search tool to find relevant information. Break down the question into smaller, focused searches if needed. After searching, use web_fetch to get detailed content from the most relevant results.", params.Prompt)
+				fullPrompt = fmt.Sprintf("%s\n\nUse the web_search tool to find relevant information. Break down the question into smaller, focused searches if needed. After searching, use fetch to get detailed content from the most relevant results.", params.Prompt)
 			}
 
 			promptOpts := []prompt.Option{
 				prompt.WithWorkingDir(tmpDir),
 			}
 
-			promptTemplate, err := prompt.NewPrompt("agentic_fetch", string(agenticFetchPromptTmpl), promptOpts...)
+			promptTemplate, err := prompt.NewPrompt("research", string(researchPromptTmpl), promptOpts...)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %s", err)
 			}
@@ -135,19 +132,16 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				return fantasy.ToolResponse{}, errors.New("small model provider not configured")
 			}
 
-			webFetchTool := tools.NewWebFetchTool(tmpDir, client)
-			webSearchTool := tools.NewWebSearchTool(client)
 			fetchTools := []fantasy.AgentTool{
-				webFetchTool,
-				webSearchTool,
+				tools.NewFetchTool(client),
+				tools.NewWebSearchTool(client),
 				tools.NewGlobTool(tmpDir, c.cfg.Config().Tools.Glob),
 				tools.NewGrepTool(tmpDir, c.cfg.Config().Tools.Grep),
-				tools.NewSourcegraphTool(client),
 				tools.NewViewTool(c.lspManager, c.filetracker, nil, tmpDir),
 			}
 
 			// Sub-agent tools run without hook interception. The top-level
-			// `agentic_fetch` call itself is already wrapped from the coder's
+			// `research` call itself is already wrapped from the coder's
 			// side; firing hooks again for every inner tool call would run
 			// the user's hooks N times per delegated turn.
 
@@ -173,8 +167,8 @@ func (c *coordinator) agenticFetchTool(_ context.Context, client *http.Client) (
 				ToolCallID:     call.ID,
 				Prompt:         fullPrompt,
 				SessionTitle:   "Fetch Analysis",
-				AgentName:      tools.AgenticFetchToolName,
-				AgentColor:     subagents.AutoColor(tools.AgenticFetchToolName),
+				AgentName:      tools.ResearchToolName,
+				AgentColor:     subagents.AutoColor(tools.ResearchToolName),
 				AgentModel:     agent.Model().ModelCfg.Model,
 			})
 		},

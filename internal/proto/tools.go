@@ -44,15 +44,6 @@ type DiagnosticsParams struct {
 	FilePath string `json:"file_path"`
 }
 
-const DownloadToolName = "download"
-
-// DownloadParams represents the parameters for the download tool.
-type DownloadParams struct {
-	URL      string `json:"url"`
-	FilePath string `json:"file_path"`
-	Timeout  int    `json:"timeout,omitempty"`
-}
-
 const EditToolName = "edit"
 
 // EditParams represents the parameters for the edit tool.
@@ -75,13 +66,15 @@ const FetchToolName = "fetch"
 
 // FetchParams represents the parameters for the fetch tool.
 type FetchParams struct {
-	URL     string `json:"url"`
-	Format  string `json:"format"`
-	Timeout int    `json:"timeout,omitempty"`
+	URL      string `json:"url"`
+	Format   string `json:"format,omitempty"`
+	Timeout  int    `json:"timeout,omitempty"`
+	Download bool   `json:"download,omitempty"`
+	FileName string `json:"file_name,omitempty"`
 }
 
-// AgenticFetchToolName is the name of the agentic_fetch tool.
-const AgenticFetchToolName = tools.AgenticFetchToolName
+// ResearchToolName is the name of the research tool.
+const ResearchToolName = tools.ResearchToolName
 
 const GlobToolName = "glob"
 
@@ -157,22 +150,6 @@ type MultiEditResponseMetadata struct {
 	OldContent   string `json:"old_content,omitempty"`
 	NewContent   string `json:"new_content,omitempty"`
 	EditsApplied int    `json:"edits_applied"`
-}
-
-const SourcegraphToolName = "sourcegraph"
-
-// SourcegraphParams represents the parameters for the sourcegraph tool.
-type SourcegraphParams struct {
-	Query         string `json:"query"`
-	Count         int    `json:"count,omitempty"`
-	ContextWindow int    `json:"context_window,omitempty"`
-	Timeout       int    `json:"timeout,omitempty"`
-}
-
-// SourcegraphResponseMetadata represents the metadata for a sourcegraph tool response.
-type SourcegraphResponseMetadata struct {
-	NumberOfMatches int  `json:"number_of_matches"`
-	Truncated       bool `json:"truncated"`
 }
 
 const ViewToolName = "view"

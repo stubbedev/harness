@@ -6,7 +6,6 @@ import (
 	"html/template"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"charm.land/fantasy"
 )
@@ -19,18 +18,12 @@ var webSearchDescriptionTpl = template.Must(
 		Parse(string(webSearchDescriptionTmpl)),
 )
 
-// NewWebSearchTool creates a web search tool for sub-agents (no permissions needed).
+// NewWebSearchTool creates the web search tool. It is a read-only tool
+// like any other: sub-agents get it because they get the read-only tool
+// set, not because it is theirs.
 func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 	if client == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.MaxIdleConns = 100
-		transport.MaxIdleConnsPerHost = 10
-		transport.IdleConnTimeout = 90 * time.Second
-
-		client = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: transport,
-		}
+		client = DefaultHTTPClient()
 	}
 
 	return fantasy.NewParallelAgentTool(

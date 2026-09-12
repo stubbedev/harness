@@ -5,20 +5,22 @@ import (
 	_ "embed"
 	"fmt"
 	"html/template"
-	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"path"
 	"strings"
+	"sync"
 	"time"
-	"unicode/utf8"
 
 	"charm.land/fantasy"
-	md "github.com/JohannesKaufmann/html-to-markdown"
-	"github.com/PuerkitoBio/goquery"
 )
 
 const (
 	FetchToolName = "fetch"
-	MaxFetchSize  = 100 * 1024 // 100KB
+	// MaxFetchSize is how much converted content is returned inline
+	// before the page is spilled to a file instead.
+	MaxFetchSize = LargeContentThreshold
 )
 
 //go:embed fetch.md.tpl
@@ -41,17 +43,12 @@ func fetchDescription() string {
 	})
 }
 
-func NewFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
-	if client == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.MaxIdleConns = 100
-		transport.MaxIdleConnsPerHost = 10
-		transport.IdleConnTimeout = 90 * time.Second
+// maxFetchTimeoutSeconds bounds the per-call timeout parameter.
+const maxFetchTimeoutSeconds = 120
 
-		client = &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: transport,
-		}
+func NewFetchTool(client *http.Client) fantasy.AgentTool {
+	if client == nil {
+		client = DefaultHTTPClient()
 	}
 
 	return fantasy.NewParallelAgentTool(
@@ -61,139 +58,190 @@ func NewFetchTool(workingDir string, client *http.Client) fantasy.AgentTool {
 			if params.URL == "" {
 				return fantasy.NewTextErrorResponse("URL parameter is required"), nil
 			}
-
-			format := strings.ToLower(params.Format)
-			if format != "text" && format != "markdown" && format != "html" {
+			format, ok := ParseFetchFormat(params.Format)
+			if !ok {
 				return fantasy.NewTextErrorResponse("Format must be one of: text, markdown, html"), nil
 			}
-
 			if !strings.HasPrefix(params.URL, "http://") && !strings.HasPrefix(params.URL, "https://") {
 				return fantasy.NewTextErrorResponse("URL must start with http:// or https://"), nil
 			}
 
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
+			maxTimeout := maxFetchTimeoutSeconds
+			if params.Download {
+				maxTimeout = maxDownloadTimeoutSeconds
 			}
-
-			// maxFetchTimeoutSeconds is the maximum allowed timeout for fetch requests (2 minutes)
-			const maxFetchTimeoutSeconds = 120
-
-			// Handle timeout with context
 			requestCtx := ctx
 			if params.Timeout > 0 {
-				if params.Timeout > maxFetchTimeoutSeconds {
-					params.Timeout = maxFetchTimeoutSeconds
-				}
+				timeout := min(params.Timeout, maxTimeout)
 				var cancel context.CancelFunc
-				requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
+				requestCtx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 				defer cancel()
 			}
 
-			req, err := http.NewRequestWithContext(requestCtx, "GET", params.URL, nil)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to create request: %w", err)
+			sessionID := GetSessionFromContext(ctx)
+			if params.Download {
+				return downloadToolResponse(requestCtx, downloadClient(client), sessionID, params.URL, params.FileName)
 			}
-
-			req.Header.Set("User-Agent", "harness/1.0")
-
-			resp, err := client.Do(req)
-			if err != nil {
-				// Preserve abort semantics when the caller cancelled the run.
-				if requestCtx.Err() == context.Canceled {
-					return fantasy.ToolResponse{}, err
-				}
-				// Network failures (timeouts, DNS errors) should degrade to a
-				// recoverable tool error so the agent can retry or move on.
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d", resp.StatusCode)), nil
-			}
-
-			body, err := io.ReadAll(io.LimitReader(resp.Body, MaxFetchSize))
-			if err != nil {
-				return fantasy.NewTextErrorResponse("Failed to read response body: " + err.Error()), nil
-			}
-
-			content := string(body)
-
-			validUTF8 := utf8.ValidString(content)
-			if !validUTF8 {
-				return fantasy.NewTextErrorResponse("Response content is not valid UTF-8"), nil
-			}
-			contentType := resp.Header.Get("Content-Type")
-
-			switch format {
-			case "text":
-				if strings.Contains(contentType, "text/html") {
-					text, err := extractTextFromHTML(content)
-					if err != nil {
-						return fantasy.NewTextErrorResponse("Failed to extract text from HTML: " + err.Error()), nil
-					}
-					content = text
-				}
-
-			case "markdown":
-				if strings.Contains(contentType, "text/html") {
-					markdown, err := convertHTMLToMarkdown(content)
-					if err != nil {
-						return fantasy.NewTextErrorResponse("Failed to convert HTML to Markdown: " + err.Error()), nil
-					}
-					content = markdown
-				}
-
-				content = "```\n" + content + "\n```"
-
-			case "html":
-				// return only the body of the HTML document
-				if strings.Contains(contentType, "text/html") {
-					doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
-					if err != nil {
-						return fantasy.NewTextErrorResponse("Failed to parse HTML: " + err.Error()), nil
-					}
-					body, err := doc.Find("body").Html()
-					if err != nil {
-						return fantasy.NewTextErrorResponse("Failed to extract body from HTML: " + err.Error()), nil
-					}
-					if body == "" {
-						return fantasy.NewTextErrorResponse("No body content found in HTML"), nil
-					}
-					content = "<html>\n<body>\n" + body + "\n</body>\n</html>"
-				}
-			}
-			// truncate content if it exceeds max read size
-			if int64(len(content)) >= MaxFetchSize {
-				content = content[:MaxFetchSize]
-				content += fmt.Sprintf("\n\n[Content truncated to %d bytes]", MaxFetchSize)
-			}
-
-			return fantasy.NewTextResponse(content), nil
+			return fetchToolResponse(requestCtx, client, sessionID, params.URL, format)
 		},
 	)
 }
 
-func extractTextFromHTML(html string) (string, error) {
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+// fetchToolResponse runs one fetch and renders it as a tool response: the
+// content inline, or a file to read when the page is large. Shared by
+// every caller, so a sub-agent fetching a page behaves exactly like the
+// top-level agent doing it.
+func fetchToolResponse(ctx context.Context, client *http.Client, sessionID, url string, format FetchFormat) (fantasy.ToolResponse, error) {
+	res, err := FetchURL(ctx, client, url, format)
 	if err != nil {
-		return "", err
+		// Preserve abort semantics when the caller cancelled the run;
+		// everything else degrades to a tool error the agent can retry
+		// or work around.
+		if ctx.Err() != nil {
+			return fantasy.ToolResponse{}, err
+		}
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to fetch URL: %s", err)), nil
 	}
 
-	text := doc.Find("body").Text()
-	text = strings.Join(strings.Fields(text), " ")
+	var b strings.Builder
+	fmt.Fprintf(&b, "Fetched %s", url)
+	if res.FinalURL != url {
+		fmt.Fprintf(&b, " (redirected to %s)", res.FinalURL)
+	}
 
-	return text, nil
+	if res.Binary {
+		fmt.Fprintf(&b, "\n\nThe response is not text (%s, %d bytes), so there is nothing to read here. Call fetch again with \"download\": true to save it to a file.",
+			contentTypeOrUnknown(res.ContentType), res.Size)
+		return fantasy.NewTextResponse(b.String()), nil
+	}
+
+	if res.Truncated {
+		fmt.Fprintf(&b, "\n\n[Response truncated at %d bytes]", MaxFetchBytes)
+	}
+
+	if len(res.Content) > MaxFetchSize {
+		path, err := spillFetchedContent(sessionID, res.Content, format)
+		if err != nil {
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to save fetched content: %s", err)), nil
+		}
+		fmt.Fprintf(&b, " (large page, %d bytes)\n\nContent saved to: %s\n\nUse the view and grep tools to read it.", len(res.Content), path)
+		return fantasy.NewTextResponse(b.String()), nil
+	}
+
+	b.WriteString(":\n\n")
+	b.WriteString(res.Content)
+	return fantasy.NewTextResponse(b.String()), nil
 }
 
-func convertHTMLToMarkdown(html string) (string, error) {
-	converter := md.NewConverter("", true, nil)
-
-	markdown, err := converter.ConvertString(html)
+// spillFetchedContent writes a large page into the session scratch
+// directory so the model can view and grep it instead of carrying it in
+// context. It is a working file, so it does not belong in the repository.
+func spillFetchedContent(sessionID, content string, format FetchFormat) (string, error) {
+	dir, err := ScratchDir(sessionID, fetchScratchKind)
 	if err != nil {
 		return "", err
 	}
+	file, err := os.CreateTemp(dir, "page-*"+fetchFileExtension(format))
+	if err != nil {
+		return "", err
+	}
+	if _, err := file.WriteString(content); err != nil {
+		_ = file.Close()
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	return file.Name(), nil
+}
 
-	return markdown, nil
+func fetchFileExtension(format FetchFormat) string {
+	switch format {
+	case FetchFormatHTML:
+		return ".html"
+	case FetchFormatText:
+		return ".txt"
+	default:
+		return ".md"
+	}
+}
+
+func contentTypeOrUnknown(contentType string) string {
+	if contentType == "" {
+		return "unknown content type"
+	}
+	return contentType
+}
+
+// fetchScratchKind is the scratch sub-directory spilled pages land in.
+const fetchScratchKind = "pages"
+
+// maxDownloadTimeoutSeconds bounds the timeout parameter when the fetch
+// is a download: a large file legitimately takes minutes where a page
+// does not.
+const maxDownloadTimeoutSeconds = 600
+
+// downloadClient gives a download the longer timeout unless the caller
+// supplied a client of their own.
+func downloadClient(client *http.Client) *http.Client {
+	if client == nil || client == DefaultHTTPClient() {
+		return downloadHTTPClient()
+	}
+	return client
+}
+
+func downloadHTTPClient() *http.Client {
+	downloadClientOnce.Do(func() {
+		downloadClientInstance = NewHTTPClient(5 * time.Minute)
+	})
+	return downloadClientInstance
+}
+
+var (
+	downloadClientOnce     sync.Once
+	downloadClientInstance *http.Client
+)
+
+// downloadToolResponse streams a URL to a file in the session scratch
+// directory. Nothing is converted and nothing has to be text, so this is
+// the path for archives, images and PDFs.
+func downloadToolResponse(ctx context.Context, client *http.Client, sessionID, url, fileName string) (fantasy.ToolResponse, error) {
+	dir, err := ScratchDir(sessionID, downloadScratchKind)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+
+	res, err := StreamURLToFile(ctx, client, url, dir, fileName)
+	if err != nil {
+		if ctx.Err() != nil {
+			return fantasy.ToolResponse{}, err
+		}
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to download from URL: %s", err)), nil
+	}
+
+	msg := fmt.Sprintf("Downloaded %d bytes from %s to %s", res.Bytes, url, res.Path)
+	if res.ContentType != "" {
+		msg += fmt.Sprintf(" (Content-Type: %s)", res.ContentType)
+	}
+	if res.NamedByServer {
+		msg += "\n\nThe file name came from the server's Content-Disposition header."
+	}
+	return fantasy.NewTextResponse(msg), nil
+}
+
+// downloadScratchKind is the scratch sub-directory downloads land in.
+const downloadScratchKind = "downloads"
+
+// fileNameFromURL picks a file name from a URL when the caller did not
+// name one. A URL with nothing usable in its path becomes "download".
+func fileNameFromURL(rawURL string) string {
+	name := rawURL
+	if parsed, err := url.Parse(rawURL); err == nil {
+		name = parsed.Path
+	}
+	name = path.Base(strings.TrimSuffix(name, "/"))
+	if name == "" || name == "." || name == "/" {
+		return "download"
+	}
+	return name
 }

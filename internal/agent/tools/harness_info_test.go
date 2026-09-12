@@ -154,12 +154,12 @@ func TestHarnessInfo_DisabledTools(t *testing.T) {
 
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
-		Options:   &config.Options{DisabledTools: []string{"sourcegraph", "agentic_fetch"}},
+		Options:   &config.Options{DisabledTools: []string{"web_search", "research"}},
 	})
 
 	output := buildHarnessInfo(cfg, nil, nil, nil, nil)
 	require.Contains(t, output, "[tools]")
-	require.Contains(t, output, "disabled = agentic_fetch, sourcegraph")
+	require.Contains(t, output, "disabled = research, web_search")
 }
 
 func TestHarnessInfo_Options(t *testing.T) {

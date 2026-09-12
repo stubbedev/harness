@@ -208,31 +208,31 @@ func (r *AgentToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 }
 
 // -----------------------------------------------------------------------------
-// Agentic Fetch Tool
+// Research Tool
 // -----------------------------------------------------------------------------
 
-// AgenticFetchToolMessageItem is a message item that represents an agentic fetch tool call.
-type AgenticFetchToolMessageItem struct {
+// ResearchToolMessageItem is a message item that represents a research tool call.
+type ResearchToolMessageItem struct {
 	*baseToolMessageItem
 
 	nestedTools []ToolMessageItem
 }
 
 var (
-	_ ToolMessageItem     = (*AgenticFetchToolMessageItem)(nil)
-	_ NestedToolContainer = (*AgenticFetchToolMessageItem)(nil)
+	_ ToolMessageItem     = (*ResearchToolMessageItem)(nil)
+	_ NestedToolContainer = (*ResearchToolMessageItem)(nil)
 )
 
-// NewAgenticFetchToolMessageItem creates a new [AgenticFetchToolMessageItem].
-func NewAgenticFetchToolMessageItem(
+// NewResearchToolMessageItem creates a new [ResearchToolMessageItem].
+func NewResearchToolMessageItem(
 	sty *styles.Styles,
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
-) *AgenticFetchToolMessageItem {
-	t := &AgenticFetchToolMessageItem{}
-	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &AgenticFetchToolRenderContext{fetch: t}, canceled)
-	// For the agentic fetch tool we keep spinning until the tool call is finished.
+) *ResearchToolMessageItem {
+	t := &ResearchToolMessageItem{}
+	t.baseToolMessageItem = newBaseToolMessageItem(sty, toolCall, result, &ResearchToolRenderContext{fetch: t}, canceled)
+	// For the research tool we keep spinning until the tool call is finished.
 	t.spinningFunc = func(state SpinningState) bool {
 		return !state.HasResult() && !state.IsCanceled()
 	}
@@ -242,7 +242,7 @@ func NewAgenticFetchToolMessageItem(
 // Advance implements [Animatable]. See [AgentToolMessageItem.Advance]
 // for the parent-bump rationale; without an override the embedded base
 // Advance would never advance the nested children.
-func (a *AgenticFetchToolMessageItem) Advance() bool {
+func (a *ResearchToolMessageItem) Advance() bool {
 	if a.result != nil || a.Status() == ToolStatusCanceled {
 		return false
 	}
@@ -255,20 +255,20 @@ func (a *AgenticFetchToolMessageItem) Advance() bool {
 }
 
 // NestedTools returns the nested tools.
-func (a *AgenticFetchToolMessageItem) NestedTools() []ToolMessageItem {
+func (a *ResearchToolMessageItem) NestedTools() []ToolMessageItem {
 	return a.nestedTools
 }
 
 // SetNestedTools sets the nested tools. Always bumps the version;
 // see [AgentToolMessageItem.SetNestedTools] for the rationale.
-func (a *AgenticFetchToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
+func (a *ResearchToolMessageItem) SetNestedTools(tools []ToolMessageItem) {
 	a.nestedTools = tools
 	a.clearCache()
 	a.Bump()
 }
 
 // AddNestedTool adds a nested tool.
-func (a *AgenticFetchToolMessageItem) AddNestedTool(tool ToolMessageItem) {
+func (a *ResearchToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	// Mark nested tools as simple (compact) rendering.
 	if s, ok := tool.(Compactable); ok {
 		s.SetCompact(true)
@@ -278,25 +278,25 @@ func (a *AgenticFetchToolMessageItem) AddNestedTool(tool ToolMessageItem) {
 	a.Bump()
 }
 
-// AgenticFetchToolRenderContext renders agentic fetch tool messages.
-type AgenticFetchToolRenderContext struct {
-	fetch *AgenticFetchToolMessageItem
+// ResearchToolRenderContext renders research tool messages.
+type ResearchToolRenderContext struct {
+	fetch *ResearchToolMessageItem
 }
 
-// agenticFetchParams matches tools.AgenticFetchParams.
-type agenticFetchParams struct {
+// researchParams matches tools.ResearchParams.
+type researchParams struct {
 	URL    string `json:"url,omitempty"`
 	Prompt string `json:"prompt"`
 }
 
 // RenderTool implements the [ToolRenderer] interface.
-func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+func (r *ResearchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if !opts.ToolCall.Finished && !opts.IsCanceled() && len(r.fetch.nestedTools) == 0 {
-		return pendingTool(sty, "Agentic Fetch", opts.Anim, opts.Compact)
+		return pendingTool(sty, "Research", opts.Anim, opts.Compact)
 	}
 
-	var params agenticFetchParams
+	var params researchParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	prompt := params.Prompt
@@ -310,13 +310,13 @@ func (r *AgenticFetchToolRenderContext) RenderTool(sty *styles.Styles, width int
 		toolParams = append(toolParams, params.URL)
 	}
 
-	header := toolHeader(sty, opts.Status, "Agentic Fetch", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, "Research", cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
 	// Build the prompt tag.
-	promptTag := sty.Tool.AgenticFetchPromptTag.Render("Prompt")
+	promptTag := sty.Tool.ResearchPromptTag.Render("Prompt")
 	promptTagWidth := lipgloss.Width(promptTag)
 
 	// Calculate remaining width for prompt text.

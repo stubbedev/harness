@@ -311,15 +311,15 @@ func TestAgentToolMessageItem_NestedToolMutatorsBumpVersion(t *testing.T) {
 	})
 }
 
-// TestAgenticFetchToolMessageItem_NestedToolMutatorsBumpVersion is
-// the agentic-fetch counterpart to the agent-tool nested mutator
+// TestResearchToolMessageItem_NestedToolMutatorsBumpVersion is
+// the research counterpart to the agent-tool nested mutator
 // bump test above.
-func TestAgenticFetchToolMessageItem_NestedToolMutatorsBumpVersion(t *testing.T) {
+func TestResearchToolMessageItem_NestedToolMutatorsBumpVersion(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	parent := message.ToolCall{ID: "fetch-parent", Name: "agentic_fetch", Input: `{}`, Finished: false}
-	item := NewAgenticFetchToolMessageItem(&sty, parent, nil, false)
+	parent := message.ToolCall{ID: "fetch-parent", Name: "research", Input: `{}`, Finished: false}
+	item := NewResearchToolMessageItem(&sty, parent, nil, false)
 
 	mkChild := func(id string) ToolMessageItem {
 		tc := message.ToolCall{ID: id, Name: "fetch", Input: `{}`, Finished: false}
@@ -379,14 +379,14 @@ func TestAgentToolMessageItem_NestedChildInPlaceMutationBumpsParent(t *testing.T
 		"parent SetNestedTools must bump even when child pointers are unchanged (in-place child mutation invalidates parent's pre-rendered output)")
 }
 
-// TestAgenticFetchToolMessageItem_NestedChildInPlaceMutationBumpsParent
-// is the agentic-fetch counterpart of the T5 regression test.
-func TestAgenticFetchToolMessageItem_NestedChildInPlaceMutationBumpsParent(t *testing.T) {
+// TestResearchToolMessageItem_NestedChildInPlaceMutationBumpsParent
+// is the research counterpart of the T5 regression test.
+func TestResearchToolMessageItem_NestedChildInPlaceMutationBumpsParent(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	parent := message.ToolCall{ID: "fetch-parent", Name: "agentic_fetch", Input: `{}`, Finished: false}
-	item := NewAgenticFetchToolMessageItem(&sty, parent, nil, false)
+	parent := message.ToolCall{ID: "fetch-parent", Name: "research", Input: `{}`, Finished: false}
+	item := NewResearchToolMessageItem(&sty, parent, nil, false)
 
 	childTC := message.ToolCall{ID: "c1", Name: "fetch", Input: `{}`, Finished: false}
 	child := NewToolMessageItem(&sty, "msg", childTC, nil, false, "")
@@ -489,16 +489,16 @@ func TestAgentToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	})
 }
 
-// TestAgenticFetchToolMessageItem_AdvanceBumpsVersion is the
-// agentic-fetch counterpart of the agent-tool Advance bump test.
+// TestResearchToolMessageItem_AdvanceBumpsVersion is the
+// research counterpart of the agent-tool Advance bump test.
 // Without an explicit override the embedded base Advance would never
 // advance the nested children; this test locks in the override.
-func TestAgenticFetchToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
+func TestResearchToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	parentTC := message.ToolCall{ID: "fetch-parent", Name: "agentic_fetch", Input: `{}`, Finished: false}
-	parent := NewAgenticFetchToolMessageItem(&sty, parentTC, nil, false)
+	parentTC := message.ToolCall{ID: "fetch-parent", Name: "research", Input: `{}`, Finished: false}
+	parent := NewResearchToolMessageItem(&sty, parentTC, nil, false)
 
 	childTC := message.ToolCall{ID: "fetch-child", Name: "fetch", Input: `{}`, Finished: false}
 	child := NewToolMessageItem(&sty, "msg", childTC, nil, false, "")

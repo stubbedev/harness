@@ -418,7 +418,7 @@ You can also deny tools, hiding then from the agent entirely:
 
 ```yaml
 options:
-  disabled_tools: [bash, sourcegraph]
+  disabled_tools: [bash, web_search]
 ```
 
 To disable tools from MCP servers, see the [MCP config section](#mcps).

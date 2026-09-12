@@ -116,8 +116,8 @@ func serveOnce(t *testing.T, contentType, body string) (*http.Client, string) {
 }
 
 // redirectClient returns a client that sends every request to target,
-// whatever URL the caller asked for. The sourcegraph tool builds its own
-// endpoint, so this is how its traffic is intercepted.
+// whatever URL the caller asked for, for tools that build their own
+// endpoint rather than taking one from the model.
 func redirectClient(t *testing.T, target string) *http.Client {
 	t.Helper()
 
@@ -344,28 +344,33 @@ func TestCoderAgent(t *testing.T) {
 		require.Contains(t, ls.Content, "main.go")
 	})
 
-	t.Run("download writes the body to disk", func(t *testing.T) {
+	// Downloading is a fetch parameter, and the file lands in the
+	// session's scratch directory rather than the working tree.
+	t.Run("fetch with download writes the body to disk", func(t *testing.T) {
 		t.Parallel()
 
 		client, addr := serveOnce(t, "text/plain", "downloaded body")
 		agent, env, _ := scriptedAgent(t, client, scriptedTurn{
 			calls: []scriptedCall{{
-				name: tools.DownloadToolName,
+				name: tools.FetchToolName,
 				input: map[string]any{
-					"url":       addr + "/example.txt",
-					"file_path": "example.txt",
+					"url":      addr + "/example.txt",
+					"download": true,
 				},
 			}},
 		})
 		res := toolResults(t, runScript(t, agent, env, "download the file"))
 
-		dl, ok := res[tools.DownloadToolName]
-		require.True(t, ok, "expected a download result")
+		dl, ok := res[tools.FetchToolName]
+		require.True(t, ok, "expected a fetch result")
 		require.False(t, dl.IsError, "download failed: %s", dl.Content)
 
-		content, err := os.ReadFile(filepath.Join(env.workingDir, "example.txt"))
+		path := downloadedPath(t, dl.Content)
+		t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(path)) })
+		content, err := os.ReadFile(path)
 		require.NoError(t, err)
 		require.Equal(t, "downloaded body", string(content))
+		require.Equal(t, "example.txt", filepath.Base(path))
 	})
 
 	t.Run("fetch returns the body", func(t *testing.T) {
@@ -387,24 +392,6 @@ func TestCoderAgent(t *testing.T) {
 		require.True(t, ok, "expected a fetch result")
 		require.False(t, fetch.IsError, "fetch failed: %s", fetch.Content)
 		require.Contains(t, fetch.Content, "John Doe")
-	})
-
-	t.Run("sourcegraph", func(t *testing.T) {
-		t.Parallel()
-
-		_, addr := serveOnce(t, "application/json",
-			`{"data":{"search":{"results":{"matchCount":1,"results":[]}}}}`)
-		agent, env, _ := scriptedAgent(t, redirectClient(t, addr), scriptedTurn{
-			calls: []scriptedCall{{
-				name:  tools.SourcegraphToolName,
-				input: map[string]any{"query": "func main"},
-			}},
-		})
-		res := toolResults(t, runScript(t, agent, env, "search sourcegraph"))
-
-		sg, ok := res[tools.SourcegraphToolName]
-		require.True(t, ok, "expected a sourcegraph result")
-		require.False(t, sg.IsError, "sourcegraph failed: %s", sg.Content)
 	})
 
 	// Two calls in one assistant message must both be dispatched and both
@@ -1346,4 +1333,14 @@ func TestBuildSummaryPrompt(t *testing.T) {
 		assert.Contains(t, prompt, "- [in_progress] ship it")
 		assert.Less(t, strings.Index(prompt, "## Focus"), strings.Index(prompt, "## Current Todo List"))
 	})
+}
+
+// downloadedPath pulls the saved path out of a fetch download result,
+// which reads "Downloaded N bytes from <url> to <path> (Content-Type: …)".
+func downloadedPath(t *testing.T, content string) string {
+	t.Helper()
+	_, after, found := strings.Cut(content, " to ")
+	require.True(t, found, "no path in download result: %s", content)
+	path, _, _ := strings.Cut(after, " (Content-Type:")
+	return strings.TrimSpace(strings.SplitN(path, "\n", 2)[0])
 }

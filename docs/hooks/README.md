@@ -192,7 +192,7 @@ stuff, and so on.
 `mcp_github_create_pull_request`).
 
 **Scope**: `PreToolUse` only fires on the **top-level agent's** tool calls.
-Sub-agents (the `agent` task tool, `agentic_fetch`, etc.) run without hook
+Sub-agents (the `agent` task tool, `research`, etc.) run without hook
 interception so a single delegated turn doesn't trigger your hook N times. The
 outer sub-agent tool call itself _is_ hooked, so policy like "never let the
 agent spawn sub-agents" still works.
