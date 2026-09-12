@@ -65,7 +65,10 @@ func TestGlobalSubagentsDirs(t *testing.T) {
 func TestProjectSubagentsDir(t *testing.T) {
 	t.Parallel()
 
-	workingDir := "/some/project"
+	// An absolute path built with filepath so the "all paths are absolute"
+	// check means the same thing on Windows, where "\\some\\project" has no
+	// volume and is therefore not absolute.
+	workingDir := filepath.Join(t.TempDir(), "some", "project")
 	dirs := ProjectSubagentsDir(workingDir)
 
 	t.Run("contains .agents/subagents under workingDir", func(t *testing.T) {
@@ -89,7 +92,7 @@ func TestProjectSubagentsDir(t *testing.T) {
 	t.Run("does not contain skills paths", func(t *testing.T) {
 		t.Parallel()
 		for _, d := range dirs {
-			require.False(t, strings.Contains(d, "/skills/") || strings.HasSuffix(d, "/skills"),
+			require.False(t, strings.Contains(d, string(filepath.Separator)+"skills"+string(filepath.Separator)) || strings.HasSuffix(d, string(filepath.Separator)+"skills"),
 				"subagents path must not contain a skills segment; got %q", d)
 		}
 	})

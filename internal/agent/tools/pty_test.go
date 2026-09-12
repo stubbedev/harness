@@ -19,7 +19,45 @@ func newTestRunner(t *testing.T) *ptyRunner {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("no /bin/sh on this platform")
 	}
-	t.Setenv("SHELL", "/bin/sh")
+	return newRunnerWithShell(t, "/bin/sh")
+}
+
+// newBracketedPasteRunner opens a runner over a shell that asks for bracketed
+// paste. Whether a shell asks is the shell's business, not ours -- /bin/sh is
+// dash on Debian and bash 3.2 on macOS, and a bash built without readline asks
+// for nothing either -- so try the shells this machine has and skip when none
+// of them turns the mode on.
+func newBracketedPasteRunner(t *testing.T) *ptyRunner {
+	t.Helper()
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh on this platform")
+	}
+	candidates := []string{"/bin/bash"}
+	if p, err := exec.LookPath("bash"); err == nil {
+		candidates = append(candidates, p)
+	}
+	candidates = append(candidates, "/bin/sh")
+
+	for _, shell := range candidates {
+		if _, err := os.Stat(shell); err != nil {
+			continue
+		}
+		r := newRunnerWithShell(t, shell)
+		if r.session.BracketedPaste() {
+			return r
+		}
+		// Nil out the session so the runner's cleanup does not close it twice.
+		r.session.Close()
+		r.session = nil
+	}
+	t.Skip("no shell on this machine asks for bracketed paste")
+	return nil
+}
+
+// newRunnerWithShell opens a runner over the given shell in a temp directory.
+func newRunnerWithShell(t *testing.T, shell string) *ptyRunner {
+	t.Helper()
+	t.Setenv("SHELL", shell)
 	r := &ptyRunner{cwd: t.TempDir()}
 	t.Cleanup(func() {
 		if r.session != nil {

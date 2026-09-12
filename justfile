@@ -11,7 +11,10 @@ export GOEXPERIMENT := "greenteagc"
 # a working copy. Empty outside a git checkout, in which case the version falls
 # back to the Go build info.
 version := `git describe --long 2>/dev/null || echo ""`
-ldflags := if version == "" { "" } else { "-ldflags=-X github.com/stubbedev/harness/internal/version.Version=" + version }
+# Quoted at every use: the value holds a space, and an unquoted `{{ ldflags }}`
+# is split into two arguments by the shell. Empty means an empty -ldflags, which
+# the linker ignores, so the version falls back to the Go build info.
+ldflags := if version == "" { "-ldflags=" } else { "-ldflags=-X github.com/stubbedev/harness/internal/version.Version=" + version }
 
 default:
     @just --list
@@ -33,7 +36,7 @@ test-fast *args:
 
 # Build the binary into the working directory.
 build:
-    go build -v {{ ldflags }} .
+    go build -v "{{ ldflags }}" .
 
 # Compile everything without producing a binary.
 build-check:
@@ -42,7 +45,7 @@ build-check:
 # Install the binary into GOBIN.
 install:
     git fetch --tags
-    go install {{ ldflags }} -v .
+    go install "{{ ldflags }}" -v .
 
 fmt:
     gofumpt -w .

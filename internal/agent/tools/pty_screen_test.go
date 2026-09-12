@@ -282,7 +282,7 @@ func TestPtyRunner_PollDoesNotStealARunningCommandsOutput(t *testing.T) {
 // Several lines typed into a shell run one at a time and fight with
 // auto-indent. Delivered as a paste, they arrive as one block.
 func TestPtyRunner_MultilineInputIsPasted(t *testing.T) {
-	r := newTestRunner(t)
+	r := newBracketedPasteRunner(t)
 
 	// Bracketed paste is on at the prompt of an interactive shell.
 	require.True(t, r.session.BracketedPaste(), "the shell should have bracketed paste on")

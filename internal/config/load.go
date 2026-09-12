@@ -130,6 +130,11 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return nil, fmt.Errorf("failed to configure providers: %w", err)
 	}
 
+	// Agents depend only on the tool set, not on any provider, and callers
+	// (the sub-agent dispatcher among them) look them up even when nothing is
+	// configured yet, so set them up before the unconfigured early return.
+	store.SetupAgents()
+
 	if !cfg.IsConfigured() {
 		slog.Warn("No providers configured")
 		return store, nil
@@ -156,7 +161,6 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 			return nil, fmt.Errorf("failed to update preferred small model: %w", err)
 		}
 	}
-	store.SetupAgents()
 
 	// Capture initial staleness snapshot. Track every discovered config path,
 	// not just the ones that loaded, so a config file created after startup
