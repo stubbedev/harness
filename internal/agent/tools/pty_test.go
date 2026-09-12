@@ -112,7 +112,20 @@ func TestPtyRunner_CwdTracks(t *testing.T) {
 
 	res, err := r.Run(t.Context(), "cd sub", 10)
 	require.NoError(t, err)
-	require.Equal(t, sub, res.Cwd)
+	// The shell reports the directory it is actually in, which is the
+	// resolved one: on macOS the temp directory lives under /var, a
+	// symlink to /private/var, so comparing the two spellings literally
+	// fails there while testing nothing about tracking the cd.
+	require.Equal(t, resolved(t, sub), resolved(t, res.Cwd))
+}
+
+// resolved is a path with every symlink along it followed, so two
+// spellings of the same directory compare equal.
+func resolved(t *testing.T, path string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(path)
+	require.NoError(t, err)
+	return real
 }
 
 func TestPtyRunner_StillRunning(t *testing.T) {
