@@ -618,6 +618,9 @@ func (m *UI) Init() tea.Cmd {
 	if cmd := m.dispatchBusyRefresh(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	// Subscribe to git watcher changes so the header repaints itself
+	// when a background refresh produces a different summary.
+	cmds = append(cmds, waitGitStatusChanged)
 	cmds = append(cmds, m.checkPendingMCPAuth())
 	return tea.Batch(cmds...)
 }
@@ -808,6 +811,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notifyWindowFocused = true
 	case tea.BlurMsg:
 		m.notifyWindowFocused = false
+	case gitStatusChangedMsg:
+		// A background git refresh produced a different summary;
+		// re-arm the subscription and let the repaint read the cache.
+		cmds = append(cmds, waitGitStatusChanged)
 	case pubsub.Event[notify.Notification]:
 		if cmd := m.handleAgentNotification(msg.Payload); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -1002,6 +1009,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.autoExpandPillsIfReasonable()
 		}
 	case pubsub.Event[message.Message]:
+		// Any tool result may have written to the tree - edit, write,
+		// bash, even an MCP tool - so ask the git segment to re-check
+		// itself. The poke is debounced into at most one git invocation
+		// per gitWatchDebounce window.
+		if hasToolResult(msg.Payload) {
+			gitWatch.pokeSoon()
+		}
 		// Check if this is a child session message for an agent tool.
 		if m.session == nil {
 			break

@@ -112,8 +112,8 @@ func renderHeaderDetails(
 	var leftParts []string
 	leftParts = append(leftParts, t.Header.WorkingDir.Render(cwd))
 	if com.Config().Options.TUI.ShowGitStatus() {
-		// The git segment reads from a TTL cache fed by a background
-		// poll, so this never blocks on a subprocess.
+		// The git segment reads a cache the git watcher refreshes in
+		// the background, so this never blocks on a subprocess.
 		if seg := gitHeaderParts(t, com.Workspace.WorkingDir()); seg != "" {
 			leftParts = append(leftParts, seg)
 		}

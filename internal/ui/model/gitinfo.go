@@ -6,30 +6,18 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 const (
-	// gitInfoTTL bounds how often the header re-polls git. The draw path
-	// only ever reads a cached string, so a refresh is one background
-	// subprocess pair per interval, never a per-frame exec.
-	gitInfoTTL = 5 * time.Second
 	// gitBranchGlyph is the powerline branch symbol, matching the one
 	// starship renders for git branches.
 	gitBranchGlyph = "\ue0a0"
 	// gitInfoTimeout bounds each git invocation so a wedged repo (e.g. a
 	// hanging hook or stale NFS mount) cannot pile up processes.
 	gitInfoTimeout = 2 * time.Second
-)
-
-var (
-	gitMu         sync.Mutex
-	gitCache      string
-	gitRefreshAt  time.Time
-	gitRefreshing bool
 )
 
 // gitSummary is the structured git segment: branch, working-tree
@@ -66,48 +54,32 @@ func gitHeaderParts(t *styles.Styles, dir string) string {
 	return segment
 }
 
-// gitStatusInfo returns the cached status for dir, refreshing it
-// asynchronously when the TTL has expired. The first frames of a session
-// may render without git state; it appears once the background poll
-// lands. The cache is keyed by nothing but time: Harness draws a single
-// working directory at a time, and a workspace switch falls back to the
-// stale string for at most one TTL.
+// gitStatusInfo returns the cached status for dir, filled by the git
+// watcher (see gitwatch.go): filesystem events in the git directory,
+// agent tool results and a slow backstop ticker refresh it in the
+// background, and each directory has its own cache entry so a workspace
+// switch can never show the previous workspace's summary. The draw path
+// never runs git; the first frames of a session may render without git
+// state until the initial refresh lands.
 func gitStatusInfo(dir string) string {
-	if dir == "" {
-		return ""
-	}
-	gitMu.Lock()
-	if gitRefreshing || time.Now().Before(gitRefreshAt) {
-		cached := gitCache
-		gitMu.Unlock()
-		return cached
-	}
-	gitRefreshing = true
-	// Read the stale value while still holding the lock: the refresh
-	// goroutine below writes gitCache, so reading it after the unlock
-	// races with that write.
-	cached := gitCache
-	gitMu.Unlock()
-	go func() {
-		info := collectGitInfo(dir)
-		gitMu.Lock()
-		gitCache = info
-		gitRefreshAt = time.Now().Add(gitInfoTTL)
-		gitRefreshing = false
-		gitMu.Unlock()
-	}()
-	return cached
+	return gitWatch.status(dir)
 }
 
-// collectGitInfo shells out to git twice - branch, then porcelain status
-// - and formats the result. Outside a repo, or when git is missing, it
-// returns "" and the header drops the segment.
+// collectGitInfo shells out to git exactly once - `git status` with the
+// branch header carries everything the segment shows - and formats the
+// result. A detached HEAD costs one extra rev-parse for the short SHA.
+// Outside a repo, or when git is missing, it returns "" and the header
+// drops the segment.
 func collectGitInfo(dir string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), gitInfoTimeout)
 	defer cancel()
 
-	branch, err := gitOutput(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil || branch == "" {
+	status, err := gitOutput(ctx, dir, "status", "--porcelain=v1", "--branch")
+	if err != nil {
+		return ""
+	}
+	branch := branchFromPorcelain(status)
+	if branch == "" {
 		return ""
 	}
 	if branch == "HEAD" {
@@ -117,12 +89,28 @@ func collectGitInfo(dir string) string {
 			branch = sha
 		}
 	}
-
-	status, err := gitOutput(ctx, dir, "status", "--porcelain=v1", "--branch")
-	if err != nil {
-		return gitBranchGlyph + " " + branch
-	}
 	return formatGitStatus(branch, status)
+}
+
+// branchFromPorcelain extracts the branch name from the "## " header
+// line of `git status --porcelain=v1 --branch`: "main" from
+// "## main...origin/main", "main" from an unborn branch's "## No
+// commits yet on main", and "HEAD" when detached.
+func branchFromPorcelain(status string) string {
+	for line := range strings.SplitSeq(status, "\n") {
+		if rest, ok := strings.CutPrefix(line, "## "); ok {
+			// The upstream is separated by a literal "...", which a
+			// branch name cannot contain (".." is invalid in refs),
+			// so dotted names like release/1.0 survive the cut.
+			if i := strings.Index(rest, "..."); i >= 0 {
+				rest = rest[:i]
+			}
+			rest = strings.TrimSpace(rest)
+			rest = strings.TrimPrefix(rest, "No commits yet on ")
+			return strings.TrimSuffix(rest, " (no branch)")
+		}
+	}
+	return ""
 }
 
 // parseGitSummary splits a cached "<glyph> branch [counts]" string back
