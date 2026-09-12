@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -175,4 +176,50 @@ func TestGroupSubCursorNavigation(t *testing.T) {
 	u.chat.Blur()
 	group.SetFocused(false)
 	require.Equal(t, -1, group.SelectedChild())
+}
+
+// TestCollapseRestoresView is the "reset the render after collapsing"
+// regression: expanding a group pushes later content off-screen, and
+// collapsing it (via escape) must re-anchor the view on the group so
+// that content comes back instead of staying scrolled past it.
+func TestCollapseRestoresView(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+
+	// A group followed by enough text items to fill the viewport.
+	u.chat.SetMessages(
+		newToolItemForGroup(u, "t1"),
+		newToolItemForGroup(u, "t2"),
+	)
+	for i := range 30 {
+		_ = i
+		u.chat.AppendMessages(chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+			ID:   fmt.Sprintf("m-%d", i),
+			Role: message.Assistant,
+			Parts: []message.ContentPart{
+				message.TextContent{Text: fmt.Sprintf("filler line %d", i)},
+			},
+		}))
+	}
+	u.chat.SetSize(80, 10)
+	u.chat.Focus()
+	u.chat.SetSelected(0)
+
+	// Expand the run, then scroll down as the expanded content pushes
+	// the filler off-screen.
+	u.chat.EnterSelectedItem()
+	require.True(t, u.chat.list.SelectedItem().(*chat.ToolGroupMessageItem).ExpandedLevel())
+	u.chat.ScrollBy(15)
+
+	offsetBefore, _ := u.chat.list.ScrollPosition()
+	require.Greater(t, offsetBefore, 0, "the expanded content should have scrolled the view")
+
+	// Escaping out re-anchors the group: the offset returns to it
+	// rather than staying wherever the expansion pushed the view.
+	require.True(t, u.chat.AscendSelectedItem())
+	require.True(t, u.chat.AscendSelectedItem())
+	g := u.chat.list.SelectedItem().(*chat.ToolGroupMessageItem)
+	require.False(t, g.ExpandedLevel())
+	offsetAfter, _ := u.chat.list.ScrollPosition()
+	assert.Equal(t, 0, offsetAfter, "collapsing must restore the view to the group")
 }

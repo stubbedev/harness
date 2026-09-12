@@ -108,6 +108,18 @@ func (g *ToolGroupMessageItem) SetFocused(focused bool) {
 // ExpandedLevel reports whether the group shows its one-liner level.
 func (g *ToolGroupMessageItem) ExpandedLevel() bool { return g.expanded }
 
+// FullyRenderedChildren counts the calls currently showing their full
+// view, so callers can tell whether a level change shrank the render.
+func (g *ToolGroupMessageItem) FullyRenderedChildren() int {
+	n := 0
+	for _, t := range g.tools {
+		if isToolExpanded(t) {
+			n++
+		}
+	}
+	return n
+}
+
 // SelectedChild returns the sub-cursor's child index, or -1 when the
 // cursor is on the group row.
 func (g *ToolGroupMessageItem) SelectedChild() int { return g.selectedChild }
