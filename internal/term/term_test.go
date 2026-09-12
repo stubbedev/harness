@@ -18,16 +18,35 @@ func testTimeout(d time.Duration) time.Duration {
 	return 3 * d
 }
 
-// waitReady waits for the shell to print its first prompt, then for the
-// stream to settle. WaitForQuiet on its own is satisfied by a session that
-// has produced nothing yet: on a loaded machine the shell can still be
-// starting, and bash discards typeahead when readline initializes, so a
-// command typed at that point is swallowed and the test waits out its
-// timeout for output that will never come.
+// readyProbe is a command whose output cannot be confused with its own
+// echo: the terminal echoes the line as typed, so the echo carries the
+// "%s" and only the shell's answer carries "ok".
+const readyProbe = `printf '__ready:%s__\n' ok`
+
+var readyProbeRe = regexp.MustCompile(`__ready:ok__`)
+
+// waitReady waits until the shell answers - not merely until it has
+// printed something. A shell that has shown its prompt may still throw
+// away what is typed at it: bash discards typeahead when readline
+// initialises, and the line discipline is reconfigured after the child
+// opens the tty either way. A command sent into that window is swallowed
+// without a trace, and the test that sent it then waits out its whole
+// timeout for output that will never come - which is exactly how these
+// tests failed on loaded CI machines.
+//
+// So probe until an answer comes back, then drain the probes. Sending
+// the probe repeatedly is safe: a shell that ate the first one never ran
+// it, and one that ran several just answered several times.
 func waitReady(t *testing.T, s *Session) {
 	t.Helper()
-	require.Eventually(t, func() bool { return s.PendingLen() > 0 }, testTimeout(5*time.Second), 20*time.Millisecond)
+	require.Eventually(t, func() bool {
+		if err := s.Send([]byte(readyProbe + "\n")); err != nil {
+			return false
+		}
+		return s.WaitForPattern(t.Context(), readyProbeRe, time.Second)
+	}, testTimeout(10*time.Second), 50*time.Millisecond, "the shell never answered a probe")
 	require.True(t, s.WaitForQuiet(t.Context(), 300*time.Millisecond, testTimeout(5*time.Second)))
+	s.Drain()
 }
 
 func startTestSession(t *testing.T) *Session {
