@@ -368,6 +368,13 @@ type UI struct {
 	taskRows       []taskRow
 	taskSpinner    spinner.Model
 	tasksView      string
+	// reapedAgentTasks records dispatches whose task was already reaped
+	// (result landed or terminal runtime status). Assistant-message
+	// updates keep arriving after that — the step-finish update publishes
+	// after its tool results — and would otherwise resurrect the finished
+	// dispatch as a running task. Tool call IDs are unique per dispatch,
+	// so entries survive session switches without colliding.
+	reapedAgentTasks map[string]bool
 	// taskCursor / taskSubCursor drive keyboard navigation of the
 	// strip: taskCursor indexes the visible entries, taskSubCursor the
 	// cursor task's nested calls (-1 = on the task row itself).

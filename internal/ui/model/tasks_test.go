@@ -230,3 +230,56 @@ func TestStripCountsDispatchesOnly(t *testing.T) {
 	_ = u.appendSessionMessage(toolMsg)
 	require.Len(t, u.agentTasks, 1, "plain tool results never reap subagent tasks")
 }
+
+// TestStripDoesNotResurrectFinishedDispatch pins the ordering that ghosts
+// the strip: fantasy delivers a step's tool results before the
+// step-finish update of the assistant message, so the dispatch's task is
+// reaped and then upsertAgentTask sees the same tool call again. The
+// second update must not re-register the finished dispatch.
+func TestStripDoesNotResurrectFinishedDispatch(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+
+	msg := message.Message{ID: "m1", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
+		message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"dig"}`, Finished: true},
+	}}
+	_ = u.updateSessionMessage(msg)
+	require.Len(t, u.agentTasks, 1)
+
+	resultMsg := message.Message{ID: "tm1", SessionID: "s1", Role: message.Tool, Parts: []message.ContentPart{
+		message.ToolResult{ToolCallID: "a1", Name: "agent", Content: "found it"},
+	}}
+	_ = u.appendSessionMessage(resultMsg)
+	require.Empty(t, u.agentTasks, "the dispatch's result reaps its task")
+	require.Nil(t, u.chat.MessageItem(chat.SubagentWaitID))
+
+	// The step-finish update re-delivers the same assistant message,
+	// finish part included, after the result landed.
+	msg.Parts = append(msg.Parts, message.Finish{Reason: message.FinishReasonToolUse})
+	_ = u.updateSessionMessage(msg)
+	assert.Empty(t, u.agentTasks, "a post-result update must not resurrect the task")
+	assert.False(t, u.tasksSpinning())
+	assert.Nil(t, u.chat.MessageItem(chat.SubagentWaitID))
+
+	// The same guard holds when the reap came from a terminal runtime
+	// status instead of the tool result.
+	_ = u.updateSessionMessage(message.Message{ID: "m2", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
+		message.ToolCall{ID: "a2", Name: "agent", Input: `{"prompt":"more"}`, Finished: true},
+	}})
+	require.Len(t, u.agentTasks, 1)
+	u.reapAgentTask("a2")
+	require.Empty(t, u.agentTasks)
+	_ = u.updateSessionMessage(message.Message{ID: "m2", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
+		message.ToolCall{ID: "a2", Name: "agent", Input: `{"prompt":"more"}`, Finished: true},
+		message.Finish{Reason: message.FinishReasonToolUse},
+	}})
+	assert.Empty(t, u.agentTasks, "a runtime-reaped dispatch stays gone too")
+
+	// A fresh dispatch in a later step still registers normally.
+	_ = u.updateSessionMessage(message.Message{ID: "m3", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
+		message.ToolCall{ID: "a3", Name: "agent", Input: `{"prompt":"next"}`, Finished: true},
+	}})
+	assert.Len(t, u.agentTasks, 1, "unrelated later dispatches still register")
+}

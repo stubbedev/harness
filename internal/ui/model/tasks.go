@@ -57,6 +57,13 @@ func (m *UI) agentTaskByToolCall(toolCallID string) *agentTask {
 // keeps running until its result or a terminal RuntimeEvent lands, so
 // neither flag reaps here.
 func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd {
+	// A settled dispatch stays gone: the step-finish update of the
+	// assistant message publishes after its tool results, so this call
+	// runs again for an already-reaped task and would resurrect it as a
+	// forever-running ghost.
+	if m.reapedAgentTasks[tc.ID] {
+		return nil
+	}
 	task := m.agentTaskByToolCall(tc.ID)
 	if task == nil {
 		task = &agentTask{
@@ -105,8 +112,14 @@ func (m *UI) resolveAgentTaskResult(tr message.ToolResult) bool {
 	return true
 }
 
-// reapAgentTask removes a finished task from the strip.
+// reapAgentTask removes a finished task from the strip and marks the
+// dispatch as settled so late assistant-message updates for the same
+// tool call cannot re-register it.
 func (m *UI) reapAgentTask(toolCallID string) {
+	if m.reapedAgentTasks == nil {
+		m.reapedAgentTasks = make(map[string]bool)
+	}
+	m.reapedAgentTasks[toolCallID] = true
 	for i, t := range m.agentTasks {
 		if t.toolCallID == toolCallID {
 			m.agentTasks = append(m.agentTasks[:i], m.agentTasks[i+1:]...)
