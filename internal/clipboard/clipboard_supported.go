@@ -5,6 +5,7 @@ package clipboard
 import (
 	"bytes"
 	"context"
+	"time"
 
 	"golang.design/x/clipboard"
 )
@@ -32,11 +33,18 @@ func writeText(text string) error {
 	if _, err := clipboard.Write(context.Background(), clipboard.FmtText, []byte(text)); err != nil {
 		return ErrWriteFailed
 	}
-	data, err := clipboard.Read(context.Background(), clipboard.FmtText)
-	if err != nil || !bytes.Equal(data, []byte(text)) {
-		return ErrWriteFailed
+	// Clipboard managers (wl-clip-persist, clipman, GPaste, ...) take over the
+	// selection right after a write to cache the content. An immediate read
+	// can race that takeover and catch an empty or stale selection even though
+	// the copy landed, so give the manager a moment before declaring failure.
+	for range 4 {
+		data, err := clipboard.Read(context.Background(), clipboard.FmtText)
+		if err == nil && bytes.Equal(data, []byte(text)) {
+			return nil
+		}
+		time.Sleep(30 * time.Millisecond)
 	}
-	return nil
+	return ErrWriteFailed
 }
 
 func read(f Format) ([]byte, error) {
