@@ -42,7 +42,7 @@ require (
 	github.com/vishvananda/netlink v1.3.0
 	github.com/vishvananda/netns v0.0.4
 	github.com/vtolstov/go-ioctl v0.0.0-20151206205506-6be9cced4810
-	golang.org/x/crypto v0.45.0
+	golang.org/x/crypto v0.57.0
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
 	golang.org/x/net v0.47.0
 	golang.org/x/sys v0.38.0

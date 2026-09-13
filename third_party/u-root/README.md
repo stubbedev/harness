@@ -22,6 +22,10 @@ here until a patch lands upstream.
 - `pkg/ls/fileinfo_dragonfly.go`: added, same conversion using DragonFly's
   `Atim`/`Ctim` fields; `BirthTime` stays the zero time since DragonFly's
   `Stat_t` has no birth time.
+- `go.mod`: `golang.org/x/crypto` requirement raised to `v0.57.0` (the
+  version the root module already resolves to) so the vendored `go.mod`
+  does not trip the grype critical-severity gate on the directory scan
+  (GHSA-jppx-rxg9-jmrx, fixed in v0.52.0).
 
 Everything else is byte-identical to the upstream pseudo-version (verified
 with `diff -r` against the module cache).
