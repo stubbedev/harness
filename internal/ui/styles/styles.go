@@ -306,6 +306,7 @@ type Styles struct {
 		ErrorTitle       lipgloss.Style
 		ErrorDetails     lipgloss.Style
 		ToolCallFocused  lipgloss.Style
+		ToolCallSelected lipgloss.Style
 		ToolCallCompact  lipgloss.Style
 		ToolCallBlurred  lipgloss.Style
 
@@ -507,12 +508,6 @@ type Styles struct {
 			KeyText   lipgloss.Style // Left key cell of a key/value row
 			ValueText lipgloss.Style // Right value cell of a key/value row
 			ParamsBg  color.Color    // Background color behind highlighted JSON parameters
-		}
-
-		Quit struct {
-			Content lipgloss.Style // Wrapper for the quit dialog's inner content
-			Hint    lipgloss.Style // Style for quit hint
-			Frame   lipgloss.Style // Outer rounded border framing the quit dialog
 		}
 
 		APIKey struct {

@@ -888,6 +888,12 @@ func quickStyle(o quickStyleOpts) Styles {
 		BorderStyle(messageFocussedBorder).
 		BorderLeft(true).
 		BorderForeground(o.successMostSubtle)
+	// The sub-cursor's line inside a focused group or task strip: same
+	// bar shape, brighter color, so selection reads from the bar alone.
+	s.Messages.ToolCallSelected = muted.PaddingLeft(1).
+		BorderStyle(messageFocussedBorder).
+		BorderLeft(true).
+		BorderForeground(o.success)
 	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
 	s.Messages.ToolCallCompact = muted
@@ -948,7 +954,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	// secondary hints like keybind shortcuts, so mute it when blurred and
 	// keep it readable on the focused row.
 	s.Dialog.ListItem.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
+	// Matches the highlighted row's text color so the info column reads
+	// as part of the selection instead of staying muted.
+	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(o.onPrimary)
 
 	// Dialog.Models
 	s.Dialog.Models.ConfiguredText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
@@ -958,10 +966,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Permissions.ValueText = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Dialog.Permissions.ParamsBg = o.bgLessVisible
 
-	// Dialog.Quit
-	s.Dialog.Quit.Content = lipgloss.NewStyle().Foreground(o.fgBase)
-	s.Dialog.Quit.Hint = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Dialog.Quit.Frame = lipgloss.NewStyle().BorderForeground(o.primary).Border(lipgloss.RoundedBorder()).Padding(1, 2)
 	s.Dialog.View = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)
 	s.Dialog.PrimaryText = base.Padding(0, 1).Foreground(o.primary)
 	s.Dialog.SecondaryText = base.Padding(0, 1).Foreground(o.fgMostSubtle)
@@ -1024,7 +1028,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Sessions.RenamingingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
 	s.Dialog.Sessions.RenamingPlaceholder = base.Foreground(o.fgMoreSubtle)
 	s.Dialog.Sessions.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.onPrimary)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(o.bgLessVisible).Background(o.success).Padding(0, 1).Bold(true).SetString("OKAY!")

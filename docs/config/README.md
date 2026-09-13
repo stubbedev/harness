@@ -361,7 +361,7 @@ An unknown action name or an empty key list is warned about in the log and
 ignored; it never blocks startup. Chords (two-key sequences) are not
 supported — every action is a single keypress.
 
-Not rebindable yet: keys inside dialogs (quit confirm, sessions, models,
+Not rebindable yet: keys inside dialogs (sessions, models,
 command palette, question prompts), the textarea's movement/editing keys
 (word-jump, delete-word, line-start, ...), and bang-mode `!` entry/exit.
 

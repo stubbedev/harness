@@ -1,6 +1,7 @@
 package model
 
 import (
+	"image"
 	"strings"
 	"time"
 
@@ -68,10 +69,15 @@ func (s *Status) SetHideHelp(hideHelp bool) {
 }
 
 // Draw draws the status bar onto the screen.
+//
+// The help (and the info message drawn over it) is anchored at the
+// bottom of the area: the status rect is one row taller than the help
+// view, and drawing from the top would leave the terminal's last row
+// empty.
 func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	if !s.hideHelp {
 		helpView := s.com.Styles.Status.Help.Render(s.help.View(s.helpKm))
-		uv.NewStyledString(helpView).Draw(scr, area)
+		uv.NewStyledString(helpView).Draw(scr, bottomRect(area, lipgloss.Height(helpView)))
 	}
 
 	// Render notifications
@@ -111,7 +117,13 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	info := msgStyle.Render(msg)
 
 	// Draw the info message over the help view
-	uv.NewStyledString(ind+info).Draw(scr, area)
+	uv.NewStyledString(ind+info).Draw(scr, bottomRect(area, 1))
+}
+
+// bottomRect returns the bottom-most rows of area with the given
+// height, clamped to the area itself.
+func bottomRect(area uv.Rectangle, height int) uv.Rectangle {
+	return image.Rect(area.Min.X, max(area.Min.Y, area.Max.Y-height), area.Max.X, area.Max.Y)
 }
 
 // clearInfoMsgCmd returns a command that clears the info message after the

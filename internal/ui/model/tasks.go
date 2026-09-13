@@ -680,11 +680,12 @@ func (m *UI) renderTaskDetails(task *agentTask, width, subCursor int) []string {
 	for j, nested := range task.nested {
 		indent := "  "
 		if j == subCursor {
-			indent = "> "
+			indent = t.Messages.ToolCallSelected.Render()
 		}
 		if probe, ok := nested.(interface{ IsCompact() bool }); ok && !probe.IsCompact() {
-			// Expanded call: render its full view beneath the one-liners.
-			for ln := range strings.SplitSeq(nested.Render(inner), "\n") {
+			// Expanded call: RawRender skips the per-item left prefix so
+			// the full view keeps the one-liner indentation.
+			for ln := range strings.SplitSeq(nested.RawRender(inner), "\n") {
 				lines = append(lines, indent+ln)
 			}
 			continue

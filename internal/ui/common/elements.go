@@ -201,10 +201,9 @@ func Status(t *styles.Styles, opts StatusOpts, width int) string {
 	return strings.Join(content, " ")
 }
 
-// Section renders a section header with a title and a horizontal line filling
-// the remaining width.
+// Section renders a section header with a title; the remaining width is
+// empty space (right-aligned info, when given, keeps its position).
 func Section(t *styles.Styles, text string, width int, info ...string) string {
-	char := styles.SectionSeparator
 	length := lipgloss.Width(text) + 1
 	remainingWidth := width - length
 
@@ -219,25 +218,22 @@ func Section(t *styles.Styles, text string, width int, info ...string) string {
 
 	text = t.Section.Title.Render(text)
 	if remainingWidth > 0 {
-		text = text + " " + t.Section.Line.Render(strings.Repeat(char, remainingWidth)) + infoText
+		text = text + " " + strings.Repeat(" ", remainingWidth) + infoText
 	}
 	return text
 }
 
-// DialogTitle renders a dialog title with a decorative line filling the
-// remaining width. When the title alone exceeds the available width it is
+// DialogTitle renders a dialog title, padded with empty space to the
+// full width. When the title alone exceeds the available width it is
 // truncated with an ellipsis so it never wraps.
 func DialogTitle(t *styles.Styles, title string, width int, fromColor, toColor color.Color) string {
 	if width > 0 && lipgloss.Width(title) > width {
 		return ansi.Truncate(title, width, "…")
 	}
-	char := "╱"
 	length := lipgloss.Width(title) + 1
 	remainingWidth := width - length
 	if remainingWidth > 0 {
-		lines := strings.Repeat(char, remainingWidth)
-		lines = styles.ApplyForegroundGrad(t.Dialog.TitleLineBase, lines, fromColor, toColor)
-		title = title + " " + lines
+		title = title + " " + strings.Repeat(" ", remainingWidth)
 	}
 	return title
 }

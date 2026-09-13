@@ -350,16 +350,28 @@ func (g *ToolGroupMessageItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (
 
 // RawRender implements [MessageItem].
 func (g *ToolGroupMessageItem) RawRender(width int) string {
+	lines, _, _ := g.renderLines(width)
+	return strings.Join(lines, "\n")
+}
+
+// renderLines builds the group's output lines and reports the inclusive
+// line range occupied by the sub-cursor's child (-1s when the cursor
+// sits on the group row or the group is unfocused), so Render can
+// recolor that child's focus bar. Children render at the one-liner
+// indentation whether collapsed or expanded: the expanded view uses
+// RawRender, which omits the per-item left prefix Render would add.
+func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart, selEnd int) {
 	contentWidth := max(width-MessageLeftPaddingTotal, 1)
+	selStart, selEnd = -1, -1
 
 	// A singleton renders as the call's own one-liner (or full render
 	// once expanded) - a "Ran (1 tool calls)" header says nothing the
 	// one-liner does not.
 	if len(g.tools) == 1 {
 		if g.expanded {
-			return g.tools[0].Render(contentWidth)
+			return strings.Split(g.tools[0].Render(contentWidth), "\n"), -1, -1
 		}
-		return g.oneLiner(g.tools[0], contentWidth)
+		return []string{g.oneLiner(g.tools[0], contentWidth)}, -1, -1
 	}
 
 	running := false
@@ -399,24 +411,23 @@ func (g *ToolGroupMessageItem) RawRender(width int) string {
 		g.sty.Tool.NameNormal.Render(verb),
 		g.sty.Tool.Body.Render("("+calls+")"))
 
-	var lines []string
 	lines = append(lines, header)
 
 	if g.expanded {
 		for i, t := range g.tools {
-			indent := subItemIndentString
-			if i == g.selectedChild && g.focused {
-				indent = subItemSelectedString
-			}
+			start := len(lines)
 			if isToolExpanded(t) {
-				for ln := range strings.SplitSeq(t.Render(contentWidth-subItemIndent), "\n") {
-					lines = append(lines, indent+ln)
+				for ln := range strings.SplitSeq(t.RawRender(contentWidth), "\n") {
+					lines = append(lines, subItemIndentString+ln)
 				}
 			} else {
-				lines = append(lines, indent+g.oneLiner(t, contentWidth-subItemIndent))
+				lines = append(lines, subItemIndentString+g.oneLiner(t, contentWidth-subItemIndent))
+			}
+			if g.focused && i == g.selectedChild {
+				selStart, selEnd = start, len(lines)-1
 			}
 		}
-		return strings.Join(lines, "\n")
+		return lines, selStart, selEnd
 	}
 
 	// Collapsed with work in flight: keep the live call visible beneath
@@ -426,10 +437,12 @@ func (g *ToolGroupMessageItem) RawRender(width int) string {
 			lines = append(lines, subItemIndentString+g.oneLiner(last, contentWidth-subItemIndent))
 		}
 	}
-	return strings.Join(lines, "\n")
+	return lines, -1, -1
 }
 
-// Render renders the group with the shared per-line focus prefix.
+// Render renders the group with the shared per-line focus prefix. The
+// sub-cursor's child gets the same bar in a brighter color instead of a
+// text marker, so its lines stay aligned with its siblings'.
 func (g *ToolGroupMessageItem) Render(width int) string {
 	useCache := !g.Spinning()
 	if useCache {
@@ -438,12 +451,18 @@ func (g *ToolGroupMessageItem) Render(width int) string {
 		}
 	}
 	prefix := g.sty.Messages.ToolCallBlurred.Render()
+	selectedPrefix := prefix
 	if g.focused {
 		prefix = g.sty.Messages.ToolCallFocused.Render()
+		selectedPrefix = g.sty.Messages.ToolCallSelected.Render()
 	}
-	lines := strings.Split(g.RawRender(width), "\n")
+	lines, selStart, selEnd := g.renderLines(width)
 	for i, ln := range lines {
-		lines[i] = prefix + ln
+		p := prefix
+		if i >= selStart && i <= selEnd {
+			p = selectedPrefix
+		}
+		lines[i] = p + ln
 	}
 	out := strings.Join(lines, "\n")
 	if useCache {
@@ -491,9 +510,8 @@ func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int) string {
 }
 
 const (
-	subItemIndent         = 2
-	subItemIndentString   = "  "
-	subItemSelectedString = "> "
+	subItemIndent       = 2
+	subItemIndentString = "  "
 )
 
 // ToolCallSummary extracts a one-line argument summary from a tool call

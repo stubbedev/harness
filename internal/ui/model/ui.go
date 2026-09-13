@@ -127,6 +127,8 @@ type shellStreamMsg struct {
 type (
 	// cancelTimerExpiredMsg is sent when the cancel timer expires.
 	cancelTimerExpiredMsg struct{}
+	// quitTimerExpiredMsg is sent when the quit timer expires.
+	quitTimerExpiredMsg struct{}
 	// userCommandsLoadedMsg is sent when user commands are loaded.
 	userCommandsLoadedMsg struct {
 		Commands []commands.CustomCommand
@@ -251,6 +253,10 @@ type UI struct {
 
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
+
+	// isQuitting tracks whether the user has pressed the quit key once,
+	// arming the double-press quit window.
+	isQuitting bool
 
 	// bangMode tracks whether the editor is in bang (!) shell mode.
 	bangMode     bool
@@ -1181,6 +1187,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleQuestionNotification(msg.Payload)
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
+	case quitTimerExpiredMsg:
+		m.isQuitting = false
 	case tea.TerminalVersionMsg:
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
@@ -2599,9 +2607,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return false
 	}
 
-	if key.Matches(msg, m.keyMap.Quit) && !m.dialog.ContainsDialog(dialog.QuitID) {
-		// Always handle quit keys first
-		if cmd := m.openQuitDialog(); cmd != nil {
+	if key.Matches(msg, m.keyMap.Quit) {
+		// Always handle quit keys first: the first press arms a short
+		// window, a second press within it quits without a dialog.
+		if cmd := m.quit(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 
@@ -2731,7 +2740,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				value = strings.TrimSpace(value)
 				if value == "exit" || value == "quit" {
-					return m.openQuitDialog()
+					return tea.Quit
 				}
 
 				if m.bangMode && value != "" {
@@ -3288,8 +3297,9 @@ func (m *UI) ShortHelp() []key.Binding {
 
 	switch m.state {
 	case uiChat:
-		// Show cancel binding if agent is busy.
-		if m.isAgentBusy() {
+		// Show cancel binding if agent is busy. Esc cancels only from
+		// the editor, so hint it only there.
+		if m.isAgentBusy() && m.focus == uiFocusEditor {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
@@ -3351,9 +3361,13 @@ func (m *UI) ShortHelp() []key.Binding {
 		)
 	}
 
+	quit := k.Quit
+	if m.isQuitting {
+		quit.SetHelp(quit.Help().Key, "press again to quit")
+	}
 	binds = append(
 		binds,
-		k.Quit,
+		quit,
 		k.Help,
 	)
 
@@ -3380,8 +3394,9 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 	switch m.state {
 	case uiChat:
-		// Show cancel binding if agent is busy.
-		if m.isAgentBusy() {
+		// Show cancel binding if agent is busy; esc cancels only from
+		// the editor.
+		if m.isAgentBusy() && m.focus == uiFocusEditor {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
@@ -3514,11 +3529,15 @@ func (m *UI) FullHelp() [][]key.Binding {
 		}
 	}
 
+	quit := k.Quit
+	if m.isQuitting {
+		quit.SetHelp(quit.Help().Key, "press again to quit")
+	}
 	binds = append(
 		binds,
 		[]key.Binding{
 			help,
-			k.Quit,
+			quit,
 		},
 	)
 
@@ -4412,13 +4431,43 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 	return tea.Batch(cmds...)
 }
 
-const cancelTimerDuration = 2 * time.Second
+const (
+	cancelTimerDuration = 2 * time.Second
+	quitTimerDuration   = 1 * time.Second
+)
 
 // cancelTimerCmd creates a command that expires the cancel timer.
 func cancelTimerCmd() tea.Cmd {
 	return tea.Tick(cancelTimerDuration, func(time.Time) tea.Msg {
 		return cancelTimerExpiredMsg{}
 	})
+}
+
+// quitTimerCmd creates a command that expires the quit timer.
+func quitTimerCmd() tea.Cmd {
+	return tea.Tick(quitTimerDuration, func(time.Time) tea.Msg {
+		return quitTimerExpiredMsg{}
+	})
+}
+
+// quit handles the quit key press: the first press arms a short window and
+// hints the user; a second press within the window quits the application
+// without a confirmation dialog.
+func (m *UI) quit() tea.Cmd {
+	if m.isQuitting {
+		m.isQuitting = false
+		return tea.Quit
+	}
+
+	m.isQuitting = true
+	keyHint := "ctrl+c"
+	if keys := m.keyMap.Quit.Keys(); len(keys) > 0 {
+		keyHint = keys[0]
+	}
+	return tea.Batch(
+		util.ReportWarn("Press "+keyHint+" again to quit"),
+		quitTimerCmd(),
+	)
 }
 
 // cancelAgent handles the cancel key press. The first press sets isCanceling to true
@@ -4507,28 +4556,11 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openFilesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case dialog.QuitID:
-		if cmd := m.openQuitDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 	default:
 		// Unknown dialog
 		break
 	}
 	return tea.Batch(cmds...)
-}
-
-// openQuitDialog opens the quit confirmation dialog.
-func (m *UI) openQuitDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.QuitID) {
-		// Bring to front
-		m.dialog.BringToFront(dialog.QuitID)
-		return nil
-	}
-
-	quitDialog := dialog.NewQuit(m.com)
-	m.dialog.OpenDialog(quitDialog)
-	return nil
 }
 
 // openModelsDialog opens the models dialog.
