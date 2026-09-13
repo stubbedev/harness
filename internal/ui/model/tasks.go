@@ -12,7 +12,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/agent"
-	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
@@ -53,7 +52,10 @@ func (m *UI) agentTaskByToolCall(toolCallID string) *agentTask {
 }
 
 // upsertAgentTask registers or updates the task for an agent tool call
-// seen in a parent-session assistant message.
+// seen in a parent-session assistant message. A call whose Finished
+// flag flips only means the model finished emitting it — the subagent
+// keeps running until its result or a terminal RuntimeEvent lands, so
+// neither flag reaps here.
 func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd {
 	task := m.agentTaskByToolCall(tc.ID)
 	if task == nil {
@@ -69,20 +71,15 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 	_ = json.Unmarshal([]byte(tc.Input), &params)
 	task.name = params.SubagentType
 	if task.name == "" {
-		task.name = config.AgentTask
+		task.name = subagentDisplayName
 	}
 	if task.color == "" {
 		task.color = subagents.AutoColor(task.name)
 	}
 	task.prompt = params.Prompt
-	if tc.Finished && task.result == nil {
-		// Finished without a recorded result (e.g. the session was
-		// reloaded mid-write); it cannot still be running.
-		m.reapAgentTask(tc.ID)
-		return nil
-	}
 
 	if m.tasksSpinning() {
+		m.syncSubagentWaitItem()
 		m.updateLayoutAndSize()
 		return m.taskSpinner.Tick
 	}
@@ -121,7 +118,12 @@ func (m *UI) reapAgentTask(toolCallID string) {
 		m.taskSubCursor = -1
 	}
 	m.clampTaskCursor()
+	m.syncSubagentWaitItem()
 }
+
+// subagentDisplayName is the strip title for a dispatch that did not
+// name a subagent type.
+const subagentDisplayName = "subagent"
 
 // tasksSpinning reports whether any tracked task is still in flight.
 func (m *UI) tasksSpinning() bool {
@@ -138,6 +140,42 @@ func (m *UI) resetAgentTasks() {
 	m.agentTasks = nil
 	m.expandedTaskID = ""
 	m.taskRows = nil
+	m.syncSubagentWaitItem()
+}
+
+// syncSubagentWaitItem keeps the transcript's "Waiting for N
+// subagents" entry in step with the running set: appended and animated
+// while dispatches are in flight, removed once they all settle. The
+// timer counts from the oldest running dispatch.
+func (m *UI) syncSubagentWaitItem() {
+	if m.state != uiChat || m.chat == nil {
+		return
+	}
+	if !m.tasksSpinning() {
+		if m.chat != nil && m.chat.MessageItem(chat.SubagentWaitID) != nil {
+			m.chat.RemoveMessage(chat.SubagentWaitID)
+		}
+		return
+	}
+	oldest := time.Now()
+	for _, t := range m.agentTasks {
+		if t.status == subagents.StatusRunning || t.status == subagents.StatusRetrying {
+			if t.startedAt.Before(oldest) {
+				oldest = t.startedAt
+			}
+		}
+	}
+	if item, ok := m.chat.MessageItem(chat.SubagentWaitID).(*chat.SubagentWaitItem); ok {
+		item.Update(len(m.agentTasks), oldest)
+		return
+	}
+	m.chat.AppendMessages(chat.NewSubagentWaitItem(m.com.Styles, len(m.agentTasks), oldest))
+	// Subagent waits can outlive the parent's own streaming traffic;
+	// keep the animation clock allowed so the spinner stays live.
+	m.chat.SetAnimationsAllowed(true)
+	if m.chat.Follow() {
+		m.chat.ScrollToBottom()
+	}
 }
 
 // loadAgentTasks rebuilds the task list from a session's persisted
@@ -158,7 +196,11 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			}
 			_, hasResult := toolResults[tc.ID]
 			canceled := msg.FinishReason() == message.FinishReasonCanceled
-			if hasResult || canceled || tc.Finished || !busy {
+			// A set Finished flag only means the model finished emitting
+			// the call; the subagent runs until a result lands. Skip only
+			// dispatches that settled, or that cannot be running because
+			// the session is idle.
+			if hasResult || canceled || !busy {
 				continue
 			}
 			task := &agentTask{
@@ -170,7 +212,7 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			_ = json.Unmarshal([]byte(tc.Input), &params)
 			task.name = params.SubagentType
 			if task.name == "" {
-				task.name = config.AgentTask
+				task.name = subagentDisplayName
 			}
 			task.color = subagents.AutoColor(task.name)
 			task.prompt = params.Prompt
@@ -180,6 +222,7 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 		}
 	}
 	m.clampTaskCursor()
+	m.syncSubagentWaitItem()
 }
 
 // loadTaskNestedTools fetches a finished subagent's own tool calls from

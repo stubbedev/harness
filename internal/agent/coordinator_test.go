@@ -276,7 +276,7 @@ func TestRunSubAgent(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		_, err = coord.runSubAgent(ctx, subAgentParams{
+		resp, err := coord.runSubAgent(ctx, subAgentParams{
 			Agent:          agent,
 			SessionID:      parentSession.ID,
 			AgentMessageID: "msg-1",
@@ -284,7 +284,13 @@ func TestRunSubAgent(t *testing.T) {
 			Prompt:         "test",
 			SessionTitle:   "Test",
 		})
-		require.Error(t, err)
+		// Session-creation failures land as tool-error responses, not
+		// bare errors: a bare error would abort the whole parallel
+		// dispatch batch in fantasy instead of degrading this one
+		// dispatch.
+		require.NoError(t, err)
+		require.True(t, resp.IsError)
+		require.Contains(t, resp.Content, "Failed to create subagent session")
 	})
 
 	t.Run("provider not configured", func(t *testing.T) {

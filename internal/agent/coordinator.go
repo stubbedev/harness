@@ -1863,7 +1863,12 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
 	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("create session: %w", err)
+		// A tool-error response, not a bare error: dispatches run in
+		// parallel batches, and a bare error from any one of them aborts
+		// the whole step in fantasy, discarding the sibling dispatches'
+		// results. As a tool error the model sees the failure and the
+		// turn continues.
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create subagent session: %v", err)), nil
 	}
 
 	// Call session setup function if provided

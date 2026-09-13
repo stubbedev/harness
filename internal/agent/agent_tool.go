@@ -234,11 +234,16 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 
 			sessionID := tools.GetSessionFromContext(ctx)
 			if sessionID == "" {
-				return fantasy.ToolResponse{}, errors.New("session id missing from context")
+				// Tool-error responses, never bare errors: a bare error from
+				// any tool in a batch aborts the whole step in fantasy,
+				// discarding the sibling dispatches' results and failing the
+				// turn. As a tool error the model sees the failure, the
+				// batch completes, and the turn continues.
+				return fantasy.NewTextErrorResponse("session id missing from context"), nil
 			}
 			agentMessageID := tools.GetMessageFromContext(ctx)
 			if agentMessageID == "" {
-				return fantasy.ToolResponse{}, errors.New("agent message id missing from context")
+				return fantasy.NewTextErrorResponse("agent message id missing from context"), nil
 			}
 
 			// Every dispatch below runs a whole child session, so the
@@ -247,7 +252,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 			// failing, so a wide fan-out completes in waves.
 			release, slotErr := c.acquireDispatchSlot(ctx)
 			if slotErr != nil {
-				return fantasy.ToolResponse{}, slotErr
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("acquire dispatch slot: %v", slotErr)), nil
 			}
 			defer release()
 

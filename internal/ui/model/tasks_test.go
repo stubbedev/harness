@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
@@ -157,4 +158,75 @@ func TestBackgroundTasksKeyboardNavigation(t *testing.T) {
 	u.ascendTaskAtCursor()
 	u.ascendTaskAtCursor()
 	require.Equal(t, uiFocusEditor, u.focus)
+}
+
+// TestSubagentWaitEntry covers the transcript's live wait entry: it
+// appears with the running count while subagents are in flight, survives
+// the assistant message flipping its tool calls to Finished (that only
+// means the model finished emitting them), updates the count, and leaves
+// once the last result lands.
+func TestSubagentWaitEntry(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.width = 100
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
+	require.NotNil(t, u.chat.MessageItem(chat.SubagentWaitID), "a running dispatch adds the wait entry")
+	wait := u.chat.MessageItem(chat.SubagentWaitID).(*chat.SubagentWaitItem)
+	assert.Contains(t, ansi.Strip(wait.Render(80)), "Waiting for 1 subagent")
+
+	// The emitted flag flipping must not reap the running subagent.
+	finished := agentToolCall("a1")
+	finished.Finished = true
+	_ = u.upsertAgentTask(msg, finished)
+	require.NotNil(t, u.agentTaskByToolCall("a1"), "an emitted-but-unresolved dispatch keeps running")
+	require.NotNil(t, u.chat.MessageItem(chat.SubagentWaitID))
+
+	// A second dispatch updates the count in place.
+	_ = u.upsertAgentTask(msg, agentToolCall("a2"))
+	assert.Contains(t, ansi.Strip(wait.Render(80)), "Waiting for 2 subagents")
+
+	// Results reap both; the wait entry leaves with the last one.
+	_ = u.resolveAgentTaskResult(message.ToolResult{ToolCallID: "a1", Name: "agent", Content: "ok"})
+	require.NotNil(t, u.chat.MessageItem(chat.SubagentWaitID), "one subagent still running")
+	assert.Contains(t, ansi.Strip(wait.Render(80)), "Waiting for 1 subagent")
+	_ = u.resolveAgentTaskResult(message.ToolResult{ToolCallID: "a2", Name: "agent", Content: "ok"})
+	assert.Nil(t, u.chat.MessageItem(chat.SubagentWaitID), "the wait entry leaves when all settle")
+}
+
+// TestStripCountsDispatchesOnly pins that the strip and the wait entry
+// count only agent/research dispatches: the main agent's own tool calls
+// (bash, view, ...) never create tasks, and child-session traffic (the
+// subagent's own work, including its own dispatches) attaches as nested
+// detail rather than new top-level rows.
+func TestStripCountsDispatchesOnly(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+
+	// One turn: two plain tool calls and one dispatch.
+	msg := message.Message{ID: "m1", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
+		message.ToolCall{ID: "b1", Name: "Bash", Input: `{"command":"ls"}`, Finished: true},
+		message.ToolCall{ID: "v1", Name: "View", Input: `{"file_path":"a.go"}`, Finished: true},
+	}}
+	_ = u.updateSessionMessage(msg)
+	require.Len(t, u.agentTasks, 0, "plain tool calls never count as subagents")
+	require.Nil(t, u.chat.MessageItem(chat.SubagentWaitID))
+
+	msg.Parts = append(msg.Parts, message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"dig"}`})
+	_ = u.updateSessionMessage(msg)
+	require.Len(t, u.agentTasks, 1)
+	wait := u.chat.MessageItem(chat.SubagentWaitID).(*chat.SubagentWaitItem)
+	assert.Contains(t, ansi.Strip(wait.Render(80)), "Waiting for 1 subagent")
+
+	// Results for the plain tools must not reap the dispatch's task.
+	toolMsg := message.Message{ID: "tm1", SessionID: "s1", Role: message.Tool, Parts: []message.ContentPart{
+		message.ToolResult{ToolCallID: "b1", Name: "Bash", Content: "ok"},
+		message.ToolResult{ToolCallID: "v1", Name: "View", Content: "ok"},
+	}}
+	_ = u.appendSessionMessage(toolMsg)
+	require.Len(t, u.agentTasks, 1, "plain tool results never reap subagent tasks")
 }
