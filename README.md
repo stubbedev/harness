@@ -750,7 +750,7 @@ your explicit model fields win on conflicts.
 ## Logging
 
 Sometimes you need to look at logs. Luckily, Harness logs all sorts of
-stuff. Logs are stored in `./.harness/logs/harness.log` relative to the project.
+stuff. Logs are stored in the workspace data directory under the global data root (`~/.local/share/harness/workspaces/<hash>-<project>/logs/harness.log` on Linux), keyed per project.
 
 The CLI also contains some helper commands to make perusing recent logs easier:
 

@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/event"
@@ -99,9 +100,10 @@ func init() {
 }
 
 type sessionServices struct {
-	sessions session.Service
-	messages message.Service
-	cfg      *config.ConfigStore
+	sessions    session.Service
+	messages    message.Service
+	checkpoints *checkpoints.Service
+	cfg         *config.ConfigStore
 }
 
 func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func(), error) {
@@ -125,10 +127,13 @@ func sessionSetup(cmd *cobra.Command) (context.Context, *sessionServices, func()
 	}
 
 	queries := db.New(conn)
+	sessions := session.NewService(queries, conn)
+	messages := message.NewService(queries)
 	svc := &sessionServices{
-		sessions: session.NewService(queries, conn),
-		messages: message.NewService(queries),
-		cfg:      cfg,
+		sessions:    sessions,
+		messages:    messages,
+		checkpoints: checkpoints.NewService(queries, "", dataDir, messages, sessions),
+		cfg:         cfg,
 	}
 	return ctx, svc, func() { conn.Close() }, nil
 }
@@ -304,6 +309,8 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 	if err := svc.sessions.Delete(ctx, sess.ID); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
+	svc.checkpoints.DeleteSession(sess.ID)
+	svc.checkpoints.DeleteSession(sess.ID)
 
 	out := cmd.OutOrStdout()
 	if sessionDeleteJSON {

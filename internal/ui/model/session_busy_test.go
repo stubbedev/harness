@@ -51,6 +51,7 @@ type countingWorkspace struct {
 	permSetCalls    int
 	clearQueueCalls int
 	cancelCalls     int
+	cancelTurnCalls int
 	modelCalls      int
 	lspStateCalls   int
 	lspDiagCalls    int
@@ -96,6 +97,10 @@ func (w *countingWorkspace) AgentQueuedPromptsList(string) []string {
 
 func (w *countingWorkspace) AgentClearQueue(string) { w.clearQueueCalls++; w.queued = nil }
 func (w *countingWorkspace) AgentCancel(string)     { w.cancelCalls++ }
+
+// cancelTurnCalls records AgentCancelTurn requests (the esc-while-busy
+// path) separately from full cancels.
+func (w *countingWorkspace) AgentCancelTurn(string) { w.cancelTurnCalls++ }
 
 func (w *countingWorkspace) AgentModel() workspace.AgentModel {
 	w.modelCalls++
@@ -143,6 +148,7 @@ func (w *countingWorkspace) resetCounters() {
 	w.readyCalls, w.agentBusyCalls = 0, 0
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
 	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
+	w.cancelTurnCalls = 0
 	w.modelCalls, w.lspStateCalls, w.lspDiagCalls = 0, 0, 0
 }
 
@@ -515,30 +521,33 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 
 	// Second press must actually cancel.
 	m.cancelAgent()
-	require.Equal(t, 1, ws.cancelCalls, "second esc press must cancel the agent")
+	require.Equal(t, 1, ws.cancelTurnCalls, "second esc press must interrupt the running turn")
 }
 
-// TestCancelAgentClearsQueueFromCachedCount: the queue-clear decision must
-// come from the memoized count — no synchronous AgentQueuedPrompts probe —
-// and clearing must zero the cached count immediately.
-func TestCancelAgentClearsQueueFromCachedCount(t *testing.T) {
+// TestCancelAgentCancelsTurnNotQueue: escape while the agent is busy
+// interrupts the running turn and leaves the queued prompts alone — no
+// synchronous queue probe on the esc path, and no queue clear either.
+func TestCancelAgentCancelsTurnNotQueue(t *testing.T) {
 	pinTTLs(t)
 
-	ws := &countingWorkspace{ready: true, queued: []string{"a"}}
+	ws := &countingWorkspace{ready: true, agentBusy: true, queued: []string{"a"}}
 	m := newBusyUI(ws)
 	warmCaches(m, true)
 	m.promptQueue = 1
 	m.promptQueueItems = []string{"a"}
 	ws.resetCounters()
 
-	cmd := m.cancelAgent()
-	require.Nil(t, cmd)
-	require.Equal(t, 1, ws.clearQueueCalls, "esc with a queue must clear it")
-	require.Zero(t, ws.queuedCalls, "the decision must use the cached count, not a probe")
-	require.Zero(t, ws.queueListCalls, "the decision must use the cached count, not a probe")
-	require.Zero(t, m.promptQueue, "the cached count must be zeroed immediately")
-	require.Empty(t, m.promptQueueItems)
-	require.False(t, m.isCanceling, "clearing the queue must not arm cancellation")
+	require.NotNil(t, m.cancelAgent(), "first esc press arms the double-press cancel")
+	require.True(t, m.isCanceling, "first esc press must arm cancellation")
+	require.Zero(t, ws.clearQueueCalls, "esc must not clear the queue")
+	require.Zero(t, ws.cancelTurnCalls, "the armed press cancels nothing yet")
+
+	m.cancelAgent()
+	require.Equal(t, 1, ws.cancelTurnCalls, "second esc press interrupts the turn")
+	require.Zero(t, ws.cancelCalls, "the TUI esc path never issues a full cancel")
+	require.Zero(t, ws.clearQueueCalls, "the queue must survive a turn cancel")
+	require.Equal(t, 1, m.promptQueue, "the cached queue count is untouched")
+	require.Equal(t, []string{"a"}, m.promptQueueItems)
 }
 
 // TestBackstopRefreshesStaleCaches: when the memoized state outlives its TTL

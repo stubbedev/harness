@@ -15,6 +15,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/fsext"
@@ -66,7 +67,11 @@ func (w *AppWorkspace) SaveSession(ctx context.Context, sess session.Session) (s
 }
 
 func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
-	return w.app.Sessions.Delete(ctx, sessionID)
+	if err := w.app.Sessions.Delete(ctx, sessionID); err != nil {
+		return err
+	}
+	w.app.Checkpoints.DeleteSession(sessionID)
+	return nil
 }
 
 func (w *AppWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
@@ -165,6 +170,12 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 func (w *AppWorkspace) AgentCancel(sessionID string) {
 	if w.app.AgentCoordinator != nil {
 		w.app.AgentCoordinator.Cancel(sessionID)
+	}
+}
+
+func (w *AppWorkspace) AgentCancelTurn(sessionID string) {
+	if w.app.AgentCoordinator != nil {
+		w.app.AgentCoordinator.CancelTurn(sessionID)
 	}
 }
 
@@ -711,3 +722,16 @@ func (w *AppWorkspace) Store() *config.ConfigStore {
 
 // Compile-time check that AppWorkspace implements Workspace.
 var _ Workspace = (*AppWorkspace)(nil)
+
+// -- Checkpoints --
+
+func (w *AppWorkspace) ListCheckpoints(ctx context.Context, sessionID string) ([]checkpoints.Checkpoint, error) {
+	return w.app.Checkpoints.List(ctx, sessionID)
+}
+
+func (w *AppWorkspace) Rewind(ctx context.Context, sessionID, messageID string, mode checkpoints.Mode) error {
+	if w.app.AgentCoordinator != nil && w.app.AgentCoordinator.IsSessionBusy(sessionID) {
+		return errors.New("cannot rewind while the agent is running")
+	}
+	return w.app.Checkpoints.Rewind(ctx, sessionID, messageID, mode)
+}

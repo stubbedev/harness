@@ -16,6 +16,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
@@ -238,6 +239,10 @@ func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, c
 
 func (w *ClientWorkspace) AgentCancel(sessionID string) {
 	_ = w.client.CancelAgentSession(context.Background(), w.workspaceID(), sessionID)
+}
+
+func (w *ClientWorkspace) AgentCancelTurn(sessionID string) {
+	_ = w.client.CancelAgentSessionTurn(context.Background(), w.workspaceID(), sessionID)
 }
 
 func (w *ClientWorkspace) AgentIsBusy() bool {
@@ -1365,4 +1370,28 @@ func protoQuestionsToDomain(qs []proto.QuestionItem) []question.Question {
 		}
 	}
 	return out
+}
+
+// -- Checkpoints --
+
+func (w *ClientWorkspace) ListCheckpoints(ctx context.Context, sessionID string) ([]checkpoints.Checkpoint, error) {
+	cps, err := w.client.ListCheckpoints(ctx, w.workspaceID(), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]checkpoints.Checkpoint, len(cps))
+	for i, cp := range cps {
+		out[i] = checkpoints.Checkpoint{
+			ID:        cp.ID,
+			SessionID: cp.SessionID,
+			MessageID: cp.MessageID,
+			CommitSHA: cp.CommitSHA,
+			CreatedAt: cp.CreatedAt,
+		}
+	}
+	return out, nil
+}
+
+func (w *ClientWorkspace) Rewind(ctx context.Context, sessionID, messageID string, mode checkpoints.Mode) error {
+	return w.client.RewindSession(ctx, w.workspaceID(), sessionID, messageID, string(mode))
 }

@@ -31,11 +31,12 @@ type runCoordinator struct {
 	release  chan struct{}
 	returnFn func(ctx context.Context) error
 
-	mu         sync.Mutex
-	gotCtx     context.Context
-	ranCount   atomic.Int32
-	entered    chan struct{} // closed exactly once when Run is first entered.
-	enteredOne sync.Once
+	mu              sync.Mutex
+	gotCtx          context.Context
+	ranCount        atomic.Int32
+	cancelTurnCalls atomic.Int32
+	entered         chan struct{} // closed exactly once when Run is first entered.
+	enteredOne      sync.Once
 }
 
 func newRunCoordinator(returnFn func(ctx context.Context) error) *runCoordinator {
@@ -67,9 +68,10 @@ func (s *runCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepted
 func (s *runCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 	return nil
 }
-func (s *runCoordinator) Cancel(string) {}
-func (s *runCoordinator) CancelAll()    {}
-func (s *runCoordinator) IsBusy() bool  { return false }
+func (s *runCoordinator) Cancel(string)     {}
+func (s *runCoordinator) CancelTurn(string) { s.cancelTurnCalls.Add(1) }
+func (s *runCoordinator) CancelAll()        {}
+func (s *runCoordinator) IsBusy() bool      { return false }
 func (s *runCoordinator) IsSessionBusy(string) bool {
 	return false
 }
@@ -120,6 +122,28 @@ func postAgent(t *testing.T, c *controllerV1, ctx context.Context, wsID, session
 	rec := httptest.NewRecorder()
 	c.handlePostWorkspaceAgent(rec, req)
 	return rec
+}
+
+// TestPostAgentSessionCancelTurn_RoutesToTurnCancel verifies the
+// interrupt-and-steer endpoint: it must issue a turn-only cancel — the
+// running turn stops, queued prompts survive — and never the
+// drop-everything Cancel.
+func TestPostAgentSessionCancelTurn_RoutesToTurnCancel(t *testing.T) {
+	t.Parallel()
+
+	coord := newRunCoordinator(func(context.Context) error { return nil })
+	c, wsID := buildAgentWorkspace(t, coord)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+		"/v1/workspaces/"+wsID+"/agent/sessions/S1/cancel-turn", nil)
+	req.SetPathValue("id", wsID)
+	req.SetPathValue("sid", "S1")
+	rec := httptest.NewRecorder()
+	c.handlePostWorkspaceAgentSessionCancelTurn(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int32(1), coord.cancelTurnCalls.Load(),
+		"the endpoint must issue exactly one turn-only cancel")
 }
 
 // TestPostAgent_ReturnsOKOnContextCanceled verifies that when another

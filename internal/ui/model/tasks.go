@@ -529,9 +529,10 @@ func (m *UI) enterTaskAtCursor() {
 }
 
 // ascendTaskAtCursor implements the escape key: go out one level. A
-// fully rendered call collapses, then the cursor returns to the task
-// row, then the task collapses; with nothing left to leave, the strip
-// hands focus back to the editor.
+// fully rendered call collapses back to its one-liner; with the
+// selection already collapsed (or on the task row), the task itself
+// collapses. With nothing left to leave, the strip hands focus back to
+// the editor.
 func (m *UI) ascendTaskAtCursor() {
 	if len(m.agentTasks) == 0 {
 		m.focusEditorFromTasks()
@@ -539,22 +540,21 @@ func (m *UI) ascendTaskAtCursor() {
 	}
 	m.clampTaskCursor()
 	task := m.agentTasks[m.taskCursor]
-	switch {
-	case m.taskSubCursor >= 0 && m.taskSubCursor < len(task.nested):
+	if m.taskSubCursor >= 0 && m.taskSubCursor < len(task.nested) {
 		nested := task.nested[m.taskSubCursor]
 		if probe, ok := nested.(interface{ IsCompact() bool }); ok && !probe.IsCompact() {
 			toggleNestedFullView(nested)
 			m.updateLayoutAndSize()
 			return
 		}
-		m.taskSubCursor = -1
-	case m.expandedTaskID == task.toolCallID:
+	}
+	if m.expandedTaskID == task.toolCallID {
 		m.expandedTaskID = ""
 		m.taskSubCursor = -1
 		m.updateLayoutAndSize()
-	default:
-		m.focusEditorFromTasks()
+		return
 	}
+	m.focusEditorFromTasks()
 }
 
 // handleTaskKey processes a keypress while the strip is focused. Arrows

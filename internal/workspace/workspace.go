@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/catwalk/pkg/catwalk"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/history"
@@ -134,10 +135,24 @@ type Workspace interface {
 	ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	ListAllUserMessages(ctx context.Context) ([]message.Message, error)
 
+	// Checkpoints
+	// ListCheckpoints returns the per-turn working-tree snapshots
+	// recorded for a session, oldest first.
+	ListCheckpoints(ctx context.Context, sessionID string) ([]checkpoints.Checkpoint, error)
+	// Rewind restores a session to the state just before the given
+	// user message was sent: the transcript, the files on disk, or
+	// both. It fails while the session is busy.
+	Rewind(ctx context.Context, sessionID, messageID string, mode checkpoints.Mode) error
+
 	// Agent
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
 	AgentCancel(sessionID string)
+	// AgentCancelTurn interrupts the session's active run only: queued
+	// prompts survive and run once the interrupted turn unwinds. It is
+	// the interrupt-and-steer escape path; AgentCancel is the
+	// drop-everything variant.
+	AgentCancelTurn(sessionID string)
 	AgentIsBusy() bool
 	AgentIsSessionBusy(sessionID string) bool
 	AgentModel() AgentModel

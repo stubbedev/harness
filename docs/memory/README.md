@@ -6,8 +6,8 @@ Context files are static and user-owned; memory is dynamic and agent-owned.
 
 ## Storage
 
-Memories live in the workspace SQLite database (`.harness/harness.db`, or your
-`options.data_directory`) in a `memories` table, alongside sessions. That gives
+Memories live in the workspace SQLite database (in the workspace data directory
+under the global data root, or your `options.data_directory`) in a `memories` table, alongside sessions. That gives
 per-project scoping and cross-session durability for free: a new session in the
 same workspace sees everything saved before. No markdown files are written into
 your repo, and nothing memory-related needs gitignoring.

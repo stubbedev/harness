@@ -55,7 +55,11 @@ git working tree root, so a stray `harness.yaml` above your project is never
 adopted. Deeper directories win over shallower ones.
 
 Two locations are **machine-owned**: `state.yaml` in the global data directory
-and in the project's data directory (`.harness/` by default). Harness writes
+and in the workspace data directory. The workspace data directory defaults to
+a per-project folder under the global data root
+(`~/.local/share/harness/workspaces/<hash>-<project>/` on Linux), so nothing
+harness-owned is written inside your project; an explicit
+`options.data_directory` overrides it. Harness writes
 API keys you paste into the TUI, OAuth tokens, the selected and recently-used
 models, and UI preferences there. Those writes round-trip through JSON, so
 comments in a `state.yaml` will not survive. The files you author are never
@@ -285,7 +289,7 @@ options:
   auto_lsp: true # start language servers automatically
   progress: true # progress output in non-interactive runs
   initialize_as: AGENTS.md # filename written by the "init" command
-  data_directory: .harness # per-project state and logs
+  data_directory: "" # empty = per-project dir under the global data root
   notifications: auto # auto | native | osc | bell | disabled
   request_timeout: 60 # seconds of inactivity per model request; 0 disables it
   max_retries: 3 # retries for a failing request

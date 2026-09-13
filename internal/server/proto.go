@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stubbedev/harness/internal/backend"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/session"
 )
@@ -888,6 +889,28 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionCancel(w http.ResponseWrit
 	w.WriteHeader(http.StatusOK)
 }
 
+// handlePostWorkspaceAgentSessionCancelTurn interrupts the session's
+// active run only; queued prompts survive and run once the interrupted
+// turn unwinds. It backs the TUI's escape key.
+//
+//	@Summary		Cancel the session's active agent turn
+//	@Tags			agent
+//	@Param			id	path	string	true	"Workspace ID"
+//	@Param			sid	path	string	true	"Session ID"
+//	@Success		200
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/sessions/{sid}/cancel-turn [post]
+func (c *controllerV1) handlePostWorkspaceAgentSessionCancelTurn(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+	if err := c.backend.CancelSessionTurn(id, sid); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 // handleGetWorkspaceAgentSessionPromptQueued returns whether a queued prompt exists.
 //
 //	@Summary		Get queued prompt status
@@ -1142,4 +1165,69 @@ func jsonError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(proto.Error{Message: message})
+}
+
+// handleGetWorkspaceSessionCheckpoints returns a session's rewind
+// checkpoints.
+//
+//	@Summary		Get session checkpoints
+//	@Tags			sessions
+//	@Produce		json
+//	@Param			id	path		string	true	"Workspace ID"
+//	@Param			sid	path		string	true	"Session ID"
+//	@Success		200	{array}		proto.Checkpoint
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/sessions/{sid}/checkpoints [get]
+func (c *controllerV1) handleGetWorkspaceSessionCheckpoints(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+	checkpoints, err := c.backend.ListCheckpoints(r.Context(), id, sid)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	out := make([]proto.Checkpoint, len(checkpoints))
+	for i, cp := range checkpoints {
+		out[i] = proto.Checkpoint{
+			ID:        cp.ID,
+			SessionID: cp.SessionID,
+			MessageID: cp.MessageID,
+			CommitSHA: cp.CommitSHA,
+			CreatedAt: cp.CreatedAt,
+		}
+	}
+	jsonEncode(w, out)
+}
+
+// handlePostWorkspaceSessionRewind rewinds a session to an earlier
+// turn.
+//
+//	@Summary		Rewind session
+//	@Tags			sessions
+//	@Accept			json
+//	@Param			id		path	string				true	"Workspace ID"
+//	@Param			sid		path	string				true	"Session ID"
+//	@Param			request	body	proto.RewindRequest	true	"Rewind request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/sessions/{sid}/rewind [post]
+func (c *controllerV1) handlePostWorkspaceSessionRewind(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sid := r.PathValue("sid")
+
+	var req proto.RewindRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.Rewind(r.Context(), id, sid, req.MessageID, checkpoints.Mode(req.Mode)); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }

@@ -470,11 +470,14 @@ type Options struct {
 	// window above 200k tokens before the session is summarized. Zero keeps
 	// the default of 20000.
 	AutoSummarizeBuffer int64 `json:"auto_summarize_buffer,omitempty" jsonschema:"description=Tokens kept free in a context window above 200k tokens before the session is summarized (default 20000),minimum=0,example=40000"`
-	// DataDirectory is where Harness keeps per-project state such as
-	// the SQLite database and workspace overrides. Relative paths are
-	// resolved against the working directory; absolute paths are used
-	// verbatim. After defaulting the stored value is always absolute.
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.,default=.harness,example=.harness"`
+	// DataDirectory is where Harness keeps per-workspace machine-owned
+	// state such as the SQLite database, logs and workspace overrides.
+	// It defaults to a per-workspace directory under the global data
+	// root, so nothing harness-owned is written inside the project.
+	// Relative paths are resolved against the working directory;
+	// absolute paths are used verbatim. After defaulting the stored
+	// value is always absolute.
+	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Defaults to a per-workspace directory under the global data root. Relative paths are resolved against the working directory; absolute paths are used as-is."`
 	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=bash,example=web_search"`
 	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
 	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`

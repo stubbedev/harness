@@ -25,6 +25,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent/prompt"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/discover"
@@ -128,6 +129,10 @@ type Coordinator interface {
 	RunAccepted(ctx context.Context, accept *AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
 	Cancel(sessionID string)
+	// CancelTurn interrupts the session's active run only: queued
+	// prompts and accepted runs survive and run once the interrupted
+	// turn unwinds. Cancel is the drop-everything variant.
+	CancelTurn(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
@@ -238,6 +243,10 @@ type coordinator struct {
 	// feature regardless of config.
 	memory memory.Service
 
+	// checkpoints records per-turn working-tree snapshots for rewind,
+	// or nil when disabled. Only the top-level coder agent uses it.
+	checkpoints *checkpoints.Service
+
 	// waitForInit, when non-nil, replaces mcp.WaitForInit for the readiness
 	// waits in run and buildAgent. It is a test seam: it lets a test simulate
 	// a slow MCP initialization without arming the mcp package's process-wide
@@ -265,7 +274,10 @@ type CoordinatorOptions struct {
 	Runtime      *subagents.Runtime
 	// Memory is the durable cross-session memory service. Optional: nil
 	// disables the memory tool and prompt injection.
-	Memory      memory.Service
+	Memory memory.Service
+	// Checkpoints records per-turn working-tree snapshots so a session
+	// can be rewound. Optional: nil disables checkpoints.
+	Checkpoints *checkpoints.Service
 	Interactive bool
 }
 
@@ -287,6 +299,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		cfg:                opts.Config,
 		sessions:           opts.Sessions,
 		messages:           opts.Messages,
+		checkpoints:        opts.Checkpoints,
 		questions:          opts.Questions,
 		history:            opts.History,
 		filetracker:        opts.FileTracker,
@@ -1554,6 +1567,10 @@ func (c *coordinator) Cancel(sessionID string) {
 		}
 	}
 	c.currentAgent.Cancel(sessionID)
+}
+
+func (c *coordinator) CancelTurn(sessionID string) {
+	c.currentAgent.CancelTurn(sessionID)
 }
 
 func (c *coordinator) CancelAll() {

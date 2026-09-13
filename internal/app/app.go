@@ -22,6 +22,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/clipboard"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/db"
@@ -60,6 +61,10 @@ type App struct {
 	Questions   question.Service
 	FileTracker filetracker.Service
 	Memory      memory.Service
+	// Checkpoints snapshots the working tree at each user turn so a
+	// session can be rewound. Nil-safe: a nil service disables the
+	// feature.
+	Checkpoints *checkpoints.Service
 
 	AgentCoordinator agent.Coordinator
 
@@ -119,9 +124,16 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Questions:   question.NewService(),
 		FileTracker: filetracker.NewService(q),
 		Memory:      memories,
-		LSPManager:  lsp.NewManager(store),
-		Skills:      skillsMgr,
-		Subagents:   subagentsMgr,
+		Checkpoints: checkpoints.NewService(
+			q,
+			store.WorkingDir(),
+			cfg.Options.DataDirectory,
+			messages,
+			sessions,
+		),
+		LSPManager: lsp.NewManager(store),
+		Skills:     skillsMgr,
+		Subagents:  subagentsMgr,
 
 		// Created eagerly (rather than lazily in initCoderAgent) so
 		// Subscribe's one-time nil check always finds a live Runtime: on an
@@ -750,6 +762,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Config:       app.config,
 		Sessions:     app.Sessions,
 		Messages:     app.Messages,
+		Checkpoints:  app.Checkpoints,
 		Questions:    app.Questions,
 		History:      app.History,
 		FileTracker:  app.FileTracker,

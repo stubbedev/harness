@@ -37,6 +37,7 @@ import (
 	agenttools "github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/clipboard"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
@@ -108,6 +109,29 @@ const (
 
 type openEditorMsg struct {
 	Text string
+}
+
+// rewindSession performs the rewind on a background command and, for
+// modes that restore the conversation, refills the editor with the
+// rewound prompt so it can be edited and re-sent. It mirrors
+// exportConversationToFile's error reporting.
+func (m *UI) rewindSession(sessionID, messageID, prompt string, mode checkpoints.Mode) tea.Cmd {
+	return func() tea.Msg {
+		err := m.com.Workspace.Rewind(context.Background(), sessionID, messageID, mode)
+		if err != nil {
+			return util.CmdHandler(util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  fmt.Sprintf("Rewind failed: %v", err),
+			})()
+		}
+		if mode != checkpoints.ModeFiles {
+			return tea.Sequence(
+				func() tea.Msg { return openEditorMsg{Text: prompt} },
+				util.ReportInfo("Rewound. Resend or edit the restored prompt."),
+			)()
+		}
+		return util.ReportInfo("Working tree restored from checkpoint.")()
+	}
 }
 
 type shellResultMsg struct {
@@ -398,6 +422,11 @@ type UI struct {
 	// in-flight fetch captures it at dispatch and its result is discarded
 	// if the generation has moved on (see workspace_cache.go).
 	promptQueueGen uint64
+	// queuedPromptsShown are the transcript placeholders for prompts
+	// queued behind the running turn (see queued_prompts.go). They are
+	// UI-local: nothing persists until the agent dequeues the prompt.
+	queuedPromptsShown []*chat.QueuedMessageItem
+	queuedPromptSeq    int
 	// agentBusyCache memoizes the workspace busy
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
@@ -1680,6 +1709,10 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// messages; they do not render in the transcript.
 	m.loadAgentTasks(msgPtrs, toolResultMap)
 
+	// The rebuilt list drops the old session's queued-prompt
+	// placeholders with it.
+	m.resetQueuedPrompts()
+
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually
 	// being busy: a session that was killed mid-generation can persist an
@@ -1759,6 +1792,9 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
 		m.chat.AppendMessages(items...)
 		m.chat.ScrollToBottom()
+		// A queued prompt became a real message: drop its placeholder in
+		// the same pass so the swap is invisible.
+		m.materializeQueuedPrompt(msg.Content().Text)
 	case message.Assistant:
 		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.com.Workspace.WorkingDir())
 		m.chat.AppendMessages(items...)
@@ -2035,6 +2071,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 	case dialog.ActionExportConversation:
 		cmds = append(cmds, m.exportConversationToFile(msg.SessionID))
 		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionRewindConfirmed:
+		m.dialog.CloseDialog(dialog.RewindID)
+		cmds = append(cmds, m.rewindSession(msg.SessionID, msg.MessageID, msg.Prompt, msg.Mode))
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
 		m.dialog.CloseDialog(dialog.CommandsID)
@@ -3303,8 +3342,6 @@ func (m *UI) ShortHelp() []key.Binding {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.promptQueue > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, cancelBinding)
 		}
@@ -3400,8 +3437,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp("esc", "press again to cancel")
-			} else if m.promptQueue > 0 {
-				cancelBinding.SetHelp("esc", "clear queue")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
 		}
@@ -4317,6 +4352,10 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 
 	// Capture session ID to avoid race with main goroutine updating m.session.
 	sessionID := m.session.ID
+	// Capture the pre-send state: a prompt submitted while the agent is
+	// busy (or behind an existing queue) is enqueued server-side, so show
+	// it in the transcript right away as a queued placeholder.
+	willQueue := m.isAgentBusy() || m.promptQueue > 0
 	// Optimistically mark the agent busy: the prompt we are about to submit
 	// either starts a run or is enqueued behind one. This keeps esc pressed
 	// right after enter routing to cancelAgent instead of reading a stale
@@ -4326,6 +4365,9 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	m.agentBusyCache.set(true)
 	m.busyFetchGen++
 	m.invalidatePromptQueue()
+	if willQueue {
+		m.appendQueuedPrompt(content)
+	}
 	// A new turn supersedes any lingering retry notice.
 	m.clearRetryNotice()
 	cmds = append(cmds, func() tea.Msg {
@@ -4470,9 +4512,12 @@ func (m *UI) quit() tea.Cmd {
 	)
 }
 
-// cancelAgent handles the cancel key press. The first press sets isCanceling to true
-// and starts a timer. The second press (before the timer expires) actually
-// cancels the agent.
+// cancelAgent handles the cancel key press while the agent is busy. The
+// first press sets isCanceling to true and starts a timer. The second
+// press (before the timer expires) interrupts the running turn — the
+// turn only: queued prompts survive it (they stay rendered in the
+// transcript and run once the interrupted turn unwinds), so escape never
+// cancels the message.
 func (m *UI) cancelAgent() tea.Cmd {
 	if !m.hasSession() {
 		return nil
@@ -4485,7 +4530,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 	}
 
 	if m.isCanceling {
-		// Second escape press — actually cancel.
+		// Second escape press — interrupt the running turn.
 		m.isCanceling = false
 
 		// Cancel a running bang command if one is in progress.
@@ -4494,29 +4539,16 @@ func (m *UI) cancelAgent() tea.Cmd {
 			m.bangCancel = nil
 		}
 
-		m.com.Workspace.AgentCancel(m.session.ID)
+		m.com.Workspace.AgentCancelTurn(m.session.ID)
 		// Stop the spinning todo indicator and drop the memoized busy
 		// state the cancel just changed; the pill re-renders now from
 		// last-known state and again when the off-thread refresh (and
-		// the agent's own events) land.
+		// the agent's own events) land. The queued-prompt cache stays:
+		// a turn-only cancel keeps the queue.
 		m.todoIsSpinning = false
 		m.invalidateBusyCaches()
 		m.renderPills()
 		return m.dispatchBusyRefresh()
-	}
-
-	// Queued prompts pending: esc clears the queue. Decide from the cached
-	// count (event-driven) instead of a synchronous workspace probe.
-	if m.promptQueue > 0 {
-		m.com.Workspace.AgentClearQueue(m.session.ID)
-		m.promptQueue = 0
-		m.promptQueueItems = nil
-		m.promptQueueCheckedAt = time.Now()
-		// Bump the queue generation so a fetch started before this clear
-		// cannot land and repopulate the pill we just emptied.
-		m.invalidatePromptQueue()
-		m.updateLayoutAndSize()
-		return nil
 	}
 
 	// First escape press - set canceling state and start timer.
@@ -4548,6 +4580,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openThemesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.RewindID:
+		if cmd := m.openRewindDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.NotificationsID:
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4561,6 +4597,28 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		break
 	}
 	return tea.Batch(cmds...)
+}
+
+// openRewindDialog opens the rewind picker over the session's user
+// turns. Rewinding mid-run would race the tools still writing, so a
+// busy agent refuses entry.
+func (m *UI) openRewindDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.RewindID) {
+		m.dialog.BringToFront(dialog.RewindID)
+		return nil
+	}
+	if m.session == nil {
+		return nil
+	}
+	if m.isAgentBusy() {
+		return util.ReportWarn("Agent is working, please wait...")
+	}
+	rewind, err := dialog.NewRewind(m.com, m.session.ID)
+	if err != nil {
+		return util.ReportError(err)
+	}
+	m.dialog.OpenDialog(rewind)
+	return nil
 }
 
 // openModelsDialog opens the models dialog.

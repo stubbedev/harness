@@ -44,7 +44,19 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
 	}
 
+	// A data directory set on the command line or in a config file is
+	// used verbatim; only the defaulted location is migrated from the
+	// legacy in-repo .harness layout.
+	explicitDataDir := dataDir != "" || (cfg.Options != nil && cfg.Options.DataDirectory != "")
+	appliedDefaultDataDir := false
+
 	cfg.setDefaults(workingDir, dataDir)
+	if !explicitDataDir && cfg.Options.DataDirectory != "" {
+		appliedDefaultDataDir = true
+	}
+	if appliedDefaultDataDir {
+		migrateLegacyDataDir(workingDir, cfg.Options.DataDirectory)
+	}
 
 	store := &ConfigStore{
 		config:         cfg,
@@ -573,11 +585,11 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
-		if path, ok := fsext.LookupClosestBounded(workingDir, projectBoundary(workingDir), defaultDataDirectory); ok {
-			c.Options.DataDirectory = path
-		} else {
-			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
-		}
+		// Machine-owned state lives under the global data root, one
+		// directory per workspace, so nothing harness-owned is written
+		// inside the user's project. An explicit options.data_directory
+		// from the config file still wins.
+		c.Options.DataDirectory = DefaultWorkspaceDataDirectory(workingDir)
 	}
 	c.Options.DataDirectory = filepath.Clean(filepathext.SmartJoin(workingDir, c.Options.DataDirectory))
 	if c.Providers == nil {

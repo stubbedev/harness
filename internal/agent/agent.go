@@ -41,6 +41,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/hooks"
@@ -158,6 +159,9 @@ type SessionAgent interface {
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
 	Cancel(sessionID string)
+	// CancelTurn interrupts the session's active run only; queued
+	// prompts and accepted runs survive it.
+	CancelTurn(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
@@ -198,6 +202,7 @@ type sessionAgent struct {
 	isSubAgent           bool
 	sessions             session.Service
 	messages             message.Service
+	checkpoints          *checkpoints.Service
 	disableAutoSummarize bool
 	autoSummarizeRatio   float64
 	autoSummarizeBuffer  int64
@@ -270,10 +275,15 @@ type SessionAgentOptions struct {
 	MaxRetries           *int
 	Sessions             session.Service
 	Messages             message.Service
-	Tools                []fantasy.AgentTool
-	Notify               pubsub.Publisher[notify.Notification]
-	RunComplete          pubsub.Publisher[notify.RunComplete]
-	Hooks                *hooks.Registry
+	// Checkpoints snapshots the working tree at each user turn so
+	// the session can be rewound. Nil disables checkpoints. It is
+	// ignored for sub-agents: only the top-level coder agent records
+	// rewind points.
+	Checkpoints *checkpoints.Service
+	Tools       []fantasy.AgentTool
+	Notify      pubsub.Publisher[notify.Notification]
+	RunComplete pubsub.Publisher[notify.RunComplete]
+	Hooks       *hooks.Registry
 	// SubagentInbox, when set, is drained per step so messages from
 	// running background sub-agents reach this session mid-turn.
 	SubagentInbox SubagentInboxSource
@@ -291,6 +301,7 @@ func NewSessionAgent(
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		checkpoints:          opts.Checkpoints,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		autoSummarizeRatio:   opts.AutoSummarizeRatio,
 		autoSummarizeBuffer:  opts.AutoSummarizeBuffer,
@@ -1279,131 +1290,26 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					return nil, persistErr
 				}
 			}
-			return result, err
+			if !isCancelErr {
+				return result, err
+			}
+			// Canceled with no assistant message: fall through to the
+			// queue handoff below so queued prompts still run. The
+			// failed-turn persistence block is skipped — there is no
+			// assistant state to persist.
+		} else if persistErr := a.persistFailedTurn(ctx, call.SessionID, currentSession.Title, currentAssistant, largeModel, err, retryAttempt); persistErr != nil {
+			return nil, persistErr
+		} else if !isCancelErr {
+			return nil, err
 		}
-		// Persist final state with a context detached from the run
-		// context. The run context (ctx) is derived from the
-		// workspace context, which workspace shutdown cancels before
-		// agent goroutines finish; using ctx here would drop the
-		// final assistant state. WithoutCancel keeps the values
-		// (e.g. session ID) while ignoring cancellation, and a short
-		// timeout bounds the cleanup writes.
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cleanupCancel()
-		// Ensure we finish thinking on error to close the reasoning state.
-		currentAssistant.FinishThinking()
-		toolCalls := currentAssistant.ToolCalls()
-		// INFO: we use the cleanup context here because the genCtx has been cancelled.
-		msgs, createErr := a.messages.List(cleanupCtx, currentAssistant.SessionID)
-		if createErr != nil {
-			return nil, createErr
-		}
-		for _, tc := range toolCalls {
-			if !tc.Finished {
-				tc.Finished = true
-				tc.Input = "{}"
-				currentAssistant.AddToolCall(tc)
-				updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
-				if updateErr != nil {
-					return nil, updateErr
-				}
-			}
-
-			found := false
-			for _, msg := range msgs {
-				if msg.Role == message.Tool {
-					for _, tr := range msg.ToolResults() {
-						if tr.ToolCallID == tc.ID {
-							found = true
-							break
-						}
-					}
-				}
-				if found {
-					break
-				}
-			}
-			if found {
-				continue
-			}
-			content := "There was an error while executing the tool"
-			if isCancelErr {
-				content = "Error: user cancelled assistant tool calling"
-			}
-			toolResult := message.ToolResult{
-				ToolCallID: tc.ID,
-				Name:       tc.Name,
-				Content:    content,
-				IsError:    true,
-			}
-			_, createErr = a.messages.Create(cleanupCtx, currentAssistant.SessionID, message.CreateMessageParams{
-				Role: message.Tool,
-				Parts: []message.ContentPart{
-					toolResult,
-				},
-			})
-			if createErr != nil {
-				return nil, createErr
-			}
-		}
-		var providerErr *fantasy.ProviderError
-		const defaultTitle = "Provider Error"
-		linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
-		if isCancelErr {
-			currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
-		} else if requestTimedOutErr, ok := errors.AsType[*requestTimeoutError](err); ok {
-			// Checked before the provider branches so a deadline our own
-			// request timeout imposed is never reported as a provider error.
-			currentAssistant.AddFinish(message.FinishReasonError, "Request timed out", requestTimedOutErr.userMessage())
-		} else if isHyper && errors.As(err, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
-			currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "harness auth" to re-authenticate.`)
-		} else if errors.As(err, &providerErr) {
-			if providerErr.Message == "The requested model is not supported." {
-				url := "https://github.com/settings/copilot/features"
-				link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
-				currentAssistant.AddFinish(
-					message.FinishReasonError,
-					"Copilot model not enabled",
-					fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
-				)
-			} else {
-				currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
-			}
-		} else if fantasyErr, ok := errors.AsType[*fantasy.Error](err); ok {
-			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
-		} else if fantasy.IsTransportError(err) {
-			wrapped := fantasy.NewTransportError(err)
-			currentAssistant.AddFinish(message.FinishReasonError, stringext.Capitalize(wrapped.Title), wrapped.Message)
-		} else {
-			currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, err.Error())
-		}
-		// Note: we use the cleanup context here because the genCtx has been
-		// cancelled.
-		updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
-		if updateErr != nil {
-			return nil, updateErr
-		}
-		// The error is already persisted in the chat above. If this
-		// turn went through retries, emit one terminal toast signal:
-		// per-attempt notices were status-bar only, so without this
-		// an away user would never learn the run actually failed.
-		// Cancellations stay silent; the cancel path has its own UX.
-		if retryAttempt > 0 && !isCancelErr && a.notify != nil {
-			attempts := "1 retry"
-			if retryAttempt > 1 {
-				attempts = fmt.Sprintf("%d retries", retryAttempt)
-			}
-			a.publishNotification(ctx, notify.Notification{
-				SessionID:    call.SessionID,
-				SessionTitle: currentSession.Title,
-				Type:         notify.TypeAgentError,
-				Message:      fmt.Sprintf("failed after %s: %v", attempts, err),
-			})
-		}
-		return nil, err
+		// A canceled turn falls through to the queue handoff below
+		// instead of returning early: the queue survives a turn-only
+		// cancel (CancelTurn), and its prompts run as follow-up turns —
+		// the interrupt-and-steer flow. A full Cancel drops the queue
+		// itself, so the handoff sees an empty queue and returns.
 	}
 
-	if shouldSummarize {
+	if err == nil && shouldSummarize {
 		a.activeRequests.Del(call.SessionID)
 		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", ""); summarizeErr != nil {
 			return nil, summarizeErr
@@ -1428,8 +1334,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	cancel()
 
 	// Send notification that agent has finished its turn (skip for
-	// nested/non-interactive sessions).
-	if !call.NonInteractive && a.notify != nil {
+	// nested/non-interactive sessions, and for turns that ended in an
+	// error or a cancel — those have their own UX).
+	if err == nil && !call.NonInteractive && a.notify != nil {
 		a.publishNotification(ctx, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: currentSession.Title,
@@ -1491,7 +1398,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			a.cancelMark.Del(call.SessionID)
 		}
 		mu.Unlock()
-		a.fireStopHooks(ctx, call.SessionID)
+		// Stop hooks fire on completed turns only: a turn that ended in
+		// an error or was canceled is not a completion. A canceled turn
+		// handing off to a queued prompt fires Stop once that follow-up
+		// turn completes.
+		if err == nil {
+			a.fireStopHooks(ctx, call.SessionID)
+		}
 		return result, err
 	}
 	// There are queued messages, restart the loop. Suppress the outer
@@ -1539,6 +1452,144 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		a.publishRunComplete(ctx, call, complete)
 	}
 	return a.Run(ctx, firstQueuedMessage)
+}
+
+// persistFailedTurn writes the terminal state of a streaming turn that
+// ended with streamErr: unfinished tool calls are closed with error
+// results, the failure (or cancellation) is recorded on the assistant
+// message, and a terminal retry notice is published when the turn went
+// through retries. It returns nil when the state was persisted and the
+// error that stopped the persistence otherwise.
+func (a *sessionAgent) persistFailedTurn(
+	ctx context.Context,
+	sessionID, sessionTitle string,
+	currentAssistant *message.Message,
+	largeModel Model,
+	streamErr error,
+	retryAttempt int,
+) error {
+	isCancelErr := errors.Is(streamErr, context.Canceled)
+	isHyper := largeModel.ModelCfg.Provider == hyper.Name
+	// Persist final state with a context detached from the run
+	// context. The run context (ctx) is derived from the
+	// workspace context, which workspace shutdown cancels before
+	// agent goroutines finish; using ctx here would drop the
+	// final assistant state. WithoutCancel keeps the values
+	// (e.g. session ID) while ignoring cancellation, and a short
+	// timeout bounds the cleanup writes.
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cleanupCancel()
+	// Ensure we finish thinking on error to close the reasoning state.
+	currentAssistant.FinishThinking()
+	toolCalls := currentAssistant.ToolCalls()
+	// INFO: we use the cleanup context here because the genCtx has been cancelled.
+	msgs, listErr := a.messages.List(cleanupCtx, currentAssistant.SessionID)
+	if listErr != nil {
+		return listErr
+	}
+	for _, tc := range toolCalls {
+		if !tc.Finished {
+			tc.Finished = true
+			tc.Input = "{}"
+			currentAssistant.AddToolCall(tc)
+			updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
+			if updateErr != nil {
+				return updateErr
+			}
+		}
+
+		found := false
+		for _, msg := range msgs {
+			if msg.Role == message.Tool {
+				for _, tr := range msg.ToolResults() {
+					if tr.ToolCallID == tc.ID {
+						found = true
+						break
+					}
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		content := "There was an error while executing the tool"
+		if isCancelErr {
+			content = "Error: user cancelled assistant tool calling"
+		}
+		toolResult := message.ToolResult{
+			ToolCallID: tc.ID,
+			Name:       tc.Name,
+			Content:    content,
+			IsError:    true,
+		}
+		_, createErr := a.messages.Create(cleanupCtx, currentAssistant.SessionID, message.CreateMessageParams{
+			Role: message.Tool,
+			Parts: []message.ContentPart{
+				toolResult,
+			},
+		})
+		if createErr != nil {
+			return createErr
+		}
+	}
+	var providerErr *fantasy.ProviderError
+	const defaultTitle = "Provider Error"
+	linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
+	if isCancelErr {
+		currentAssistant.AddFinish(message.FinishReasonCanceled, "User canceled request", "")
+	} else if requestTimedOutErr, ok := errors.AsType[*requestTimeoutError](streamErr); ok {
+		// Checked before the provider branches so a deadline our own
+		// request timeout imposed is never reported as a provider error.
+		currentAssistant.AddFinish(message.FinishReasonError, "Request timed out", requestTimedOutErr.userMessage())
+	} else if isHyper && errors.As(streamErr, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
+		currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "harness auth" to re-authenticate.`)
+	} else if errors.As(streamErr, &providerErr) {
+		if providerErr.Message == "The requested model is not supported." {
+			url := "https://github.com/settings/copilot/features"
+			link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
+			currentAssistant.AddFinish(
+				message.FinishReasonError,
+				"Copilot model not enabled",
+				fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
+			)
+		} else {
+			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
+		}
+	} else if fantasyErr, ok := errors.AsType[*fantasy.Error](streamErr); ok {
+		currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(fantasyErr.Title), defaultTitle), fantasyErr.Message)
+	} else if fantasy.IsTransportError(streamErr) {
+		wrapped := fantasy.NewTransportError(streamErr)
+		currentAssistant.AddFinish(message.FinishReasonError, stringext.Capitalize(wrapped.Title), wrapped.Message)
+	} else {
+		currentAssistant.AddFinish(message.FinishReasonError, defaultTitle, streamErr.Error())
+	}
+	// Note: we use the cleanup context here because the genCtx has been
+	// cancelled.
+	updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
+	if updateErr != nil {
+		return updateErr
+	}
+	// The error is already persisted in the chat above. If this
+	// turn went through retries, emit one terminal toast signal:
+	// per-attempt notices were status-bar only, so without this
+	// an away user would never learn the run actually failed.
+	// Cancellations stay silent; the cancel path has its own UX.
+	if retryAttempt > 0 && !isCancelErr && a.notify != nil {
+		attempts := "1 retry"
+		if retryAttempt > 1 {
+			attempts = fmt.Sprintf("%d retries", retryAttempt)
+		}
+		a.publishNotification(ctx, notify.Notification{
+			SessionID:    sessionID,
+			SessionTitle: sessionTitle,
+			Type:         notify.TypeAgentError,
+			Message:      fmt.Sprintf("failed after %s: %v", attempts, streamErr),
+		})
+	}
+	return nil
 }
 
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, instructions string) error {
@@ -1766,6 +1817,16 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 	})
 	if err != nil {
 		return message.Message{}, fmt.Errorf("failed to create user message: %w", err)
+	}
+
+	// Snapshot the working tree as the turn starts, before any tool
+	// runs, so a rewind to this message restores the state the prompt
+	// was submitted into. A failed snapshot never blocks the turn; it
+	// only leaves this turn without a files rewind point.
+	if a.checkpoints.Enabled() && !a.isSubAgent {
+		if err := a.checkpoints.Snapshot(ctx, call.SessionID, msg.ID); err != nil {
+			slog.Warn("Failed to snapshot working tree for rewind", "error", err)
+		}
 	}
 	return msg, nil
 }
@@ -2280,6 +2341,22 @@ func summaryCompletionTokens(usage fantasy.Usage, summaryMessage message.Message
 		return usage.OutputTokens
 	}
 	return approxTokenCount(summaryMessage.Content().Text) + approxTokenCount(summaryMessage.ReasoningContent().String())
+}
+
+func (a *sessionAgent) CancelTurn(sessionID string) {
+	// Turn-only cancel: interrupt the active request (regular or
+	// summarize) and nothing else. Queued prompts and accepted runs are
+	// left untouched so they still run once the interrupted turn
+	// unwinds — this is the interrupt-and-steer path. Cancel is the
+	// drop-everything variant.
+	if ac, ok := a.activeRequests.Get(sessionID); ok && ac != nil {
+		slog.Debug("Turn cancellation initiated", "session_id", sessionID)
+		ac.cancel()
+	}
+	if ac, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && ac != nil {
+		slog.Debug("Summarize turn cancellation initiated", "session_id", sessionID)
+		ac.cancel()
+	}
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {

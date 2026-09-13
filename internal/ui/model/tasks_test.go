@@ -133,14 +133,26 @@ func TestBackgroundTasksKeyboardNavigation(t *testing.T) {
 	assert.False(t, task.nested[0].(interface{ IsCompact() bool }).IsCompact(), "the cursor's call renders its full view")
 	assert.True(t, task.nested[1].(interface{ IsCompact() bool }).IsCompact())
 
-	// Escape climbs out one level at a time: the call's full view, the
-	// call cursor, the task, then focus back to the editor.
+	// Escape climbs out: the call's full view collapses to its one-liner,
+	// the next escape collapses the task, and with nothing left to leave,
+	// focus returns to the editor.
 	u.ascendTaskAtCursor()
 	assert.True(t, task.nested[0].(interface{ IsCompact() bool }).IsCompact(), "escape collapses the call to its one-liner")
 	u.ascendTaskAtCursor()
+	require.Empty(t, u.expandedTaskID)
 	require.Equal(t, -1, u.taskSubCursor)
 	u.ascendTaskAtCursor()
+	require.Equal(t, uiFocusEditor, u.focus)
+
+	// A selection that is already a one-liner collapses the task in a
+	// single escape: clearing the selection marker alone would waste a
+	// keypress.
+	u.focusTasks()
+	u.enterTaskAtCursor()
+	require.Equal(t, 0, u.taskSubCursor)
+	u.ascendTaskAtCursor()
 	require.Empty(t, u.expandedTaskID)
+	require.Equal(t, -1, u.taskSubCursor)
 
 	// Re-enter and walk the calls: down to the last (stays put past it),
 	// up climbs back to the task row.

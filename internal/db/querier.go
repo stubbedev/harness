@@ -12,6 +12,7 @@ import (
 type Querier interface {
 	AddSessionCost(ctx context.Context, arg AddSessionCostParams) (int64, error)
 	CountMemories(ctx context.Context) (int64, error)
+	CreateCheckpoint(ctx context.Context, arg CreateCheckpointParams) (Checkpoint, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMemory(ctx context.Context, arg CreateMemoryParams) (Memory, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
@@ -20,9 +21,11 @@ type Querier interface {
 	DeleteMemory(ctx context.Context, id string) (int64, error)
 	DeleteMessage(ctx context.Context, id string) error
 	DeleteSession(ctx context.Context, id string) error
+	DeleteSessionCheckpoints(ctx context.Context, sessionID string) error
 	DeleteSessionFiles(ctx context.Context, sessionID string) error
 	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	GetAverageResponseTime(ctx context.Context) (int64, error)
+	GetCheckpointByMessage(ctx context.Context, messageID string) (Checkpoint, error)
 	GetFile(ctx context.Context, id string) (File, error)
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
@@ -41,6 +44,7 @@ type Querier interface {
 	GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error)
 	GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	ListCheckpointsBySession(ctx context.Context, sessionID string) ([]Checkpoint, error)
 	ListChildSessions(ctx context.Context, parentSessionID sql.NullString) ([]Session, error)
 	ListFilesByPath(ctx context.Context, path string) ([]File, error)
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)

@@ -180,6 +180,10 @@ func (c *scriptedCoordinator) RunAccepted(ctx context.Context, accept *agent.Acc
 
 func (c *scriptedCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
 
+func (c *scriptedCoordinator) CancelTurn(sessionID string) {
+	c.Cancel(sessionID)
+}
+
 func (c *scriptedCoordinator) Cancel(sessionID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

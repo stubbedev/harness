@@ -35,3 +35,21 @@ type Todo struct {
 	Status     string `json:"status"`
 	ActiveForm string `json:"active_form"`
 }
+
+// Checkpoint maps a user message to the working-tree snapshot taken
+// when the prompt was submitted, so the session can be rewound to it.
+type Checkpoint struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	MessageID string `json:"message_id"`
+	CommitSHA string `json:"commit_sha"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+// RewindRequest restores a session to an earlier turn. MessageID is
+// the user message to rewind to; Mode is one of "conversation",
+// "files", or "both".
+type RewindRequest struct {
+	MessageID string `json:"message_id"`
+	Mode      string `json:"mode"`
+}

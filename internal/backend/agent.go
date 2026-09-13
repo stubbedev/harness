@@ -178,6 +178,20 @@ func (b *Backend) CancelSession(workspaceID, sessionID string) error {
 	return nil
 }
 
+// CancelSessionTurn interrupts the session's active run only; queued
+// prompts survive and run once the interrupted turn unwinds.
+func (b *Backend) CancelSessionTurn(workspaceID, sessionID string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	if ws.AgentCoordinator != nil {
+		ws.AgentCoordinator.CancelTurn(sessionID)
+	}
+	return nil
+}
+
 // SummarizeSession triggers a session summarization. instructions, when
 // non-empty, steer the summary's focus.
 func (b *Backend) SummarizeSession(ctx context.Context, workspaceID, sessionID, instructions string) error {

@@ -250,6 +250,10 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	countChanged := len(msg.prompts) != m.promptQueue
 	m.promptQueueItems = msg.prompts
 	m.promptQueue = len(msg.prompts)
+	// The authoritative queue drives the transcript's queued-prompt
+	// placeholders: entries that left it drop out, entries not yet shown
+	// appear.
+	m.reconcileQueuedPrompts(msg.prompts)
 	if countChanged {
 		m.updateLayoutAndSize()
 	} else if itemsChanged {

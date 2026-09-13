@@ -808,6 +808,20 @@ func (c *Client) CancelAgentSession(ctx context.Context, id string, sessionID st
 	return nil
 }
 
+// CancelAgentSessionTurn interrupts the session's active run only;
+// queued prompts survive and run once the interrupted turn unwinds.
+func (c *Client) CancelAgentSessionTurn(ctx context.Context, id string, sessionID string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/cancel-turn", id, sessionID), nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to cancel agent session turn: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to cancel agent session turn: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
 // GetAgentSessionQueuedPromptsList retrieves the list of queued prompt
 // strings for a session.
 func (c *Client) GetAgentSessionQueuedPromptsList(ctx context.Context, id string, sessionID string) ([]string, error) {
@@ -921,6 +935,37 @@ func (c *Client) LSPStopAll(ctx context.Context, id string) error {
 	defer rsp.Body.Close()
 	if rsp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to stop LSPs: status code %d", rsp.StatusCode)
+	}
+	return nil
+}
+
+// ListCheckpoints retrieves a session's rewind checkpoints.
+func (c *Client) ListCheckpoints(ctx context.Context, id string, sessionID string) ([]proto.Checkpoint, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/checkpoints", id, sessionID), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get checkpoints: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get checkpoints: status code %d", rsp.StatusCode)
+	}
+	var checkpoints []proto.Checkpoint
+	if err := json.NewDecoder(rsp.Body).Decode(&checkpoints); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("failed to decode checkpoints: %w", err)
+	}
+	return checkpoints, nil
+}
+
+// RewindSession rewinds a session to an earlier turn.
+func (c *Client) RewindSession(ctx context.Context, id, sessionID, messageID, mode string) error {
+	body := jsonBody(proto.RewindRequest{MessageID: messageID, Mode: mode})
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s/rewind", id, sessionID), nil, body, http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to rewind session: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to rewind session: status code %d", rsp.StatusCode)
 	}
 	return nil
 }

@@ -2,7 +2,10 @@ package backend
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/session"
@@ -100,14 +103,19 @@ func (b *Backend) SaveSession(ctx context.Context, workspaceID string, sess sess
 	return ws.Sessions.Save(ctx, sess)
 }
 
-// DeleteSession deletes a session from the given workspace.
+// DeleteSession deletes a session from the given workspace, along
+// with the snapshot objects its turns accumulated.
 func (b *Backend) DeleteSession(ctx context.Context, workspaceID, sessionID string) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return err
 	}
 
-	return ws.Sessions.Delete(ctx, sessionID)
+	if err := ws.Sessions.Delete(ctx, sessionID); err != nil {
+		return err
+	}
+	ws.Checkpoints.DeleteSession(sessionID)
+	return nil
 }
 
 // ListUserMessages returns user-role messages for a session.
@@ -128,4 +136,45 @@ func (b *Backend) ListAllUserMessages(ctx context.Context, workspaceID string) (
 	}
 
 	return ws.Messages.ListAllUserMessages(ctx)
+}
+
+// ListCheckpoints returns the rewind checkpoints recorded for a
+// session, oldest first.
+func (b *Backend) ListCheckpoints(ctx context.Context, workspaceID, sessionID string) ([]checkpoints.Checkpoint, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	return ws.Checkpoints.List(ctx, sessionID)
+}
+
+// Rewind restores a session to the state it was in just before the
+// given user message was sent. It refuses while the session is busy:
+// rewinding mid-run would race the tools still writing to the tree.
+func (b *Backend) Rewind(ctx context.Context, workspaceID, sessionID, messageID string, mode checkpoints.Mode) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+
+	if ws.AgentCoordinator != nil && ws.AgentCoordinator.IsSessionBusy(sessionID) {
+		return errors.New("cannot rewind while the agent is running")
+	}
+	mode, err = normalizeRewindMode(mode)
+	if err != nil {
+		return err
+	}
+	return ws.Checkpoints.Rewind(ctx, sessionID, messageID, mode)
+}
+
+func normalizeRewindMode(mode checkpoints.Mode) (checkpoints.Mode, error) {
+	if mode == "" {
+		return checkpoints.ModeBoth, nil
+	}
+	if m, err := checkpoints.ParseMode(string(mode)); err == nil {
+		return m, nil
+	} else {
+		return mode, fmt.Errorf("invalid rewind mode %q", string(mode))
+	}
 }

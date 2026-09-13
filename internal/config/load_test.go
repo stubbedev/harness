@@ -314,6 +314,7 @@ func testStore(cfg *Config) *ConfigStore {
 
 func TestConfig_setDefaults(t *testing.T) {
 	t.Run("sets default data directory", func(t *testing.T) {
+		t.Setenv("HARNESS_GLOBAL_DATA", t.TempDir())
 		cfg := &Config{}
 		workingDir := t.TempDir()
 
@@ -326,7 +327,19 @@ func TestConfig_setDefaults(t *testing.T) {
 		require.NotNil(t, cfg.Models)
 		require.NotNil(t, cfg.LSP)
 		require.NotNil(t, cfg.MCP)
-		require.Equal(t, filepath.Join(workingDir, ".harness"), cfg.Options.DataDirectory)
+		// The default data directory lives under the global data root,
+		// not inside the project, and resolves deterministically.
+		require.Equal(t,
+			DefaultWorkspaceDataDirectory(workingDir),
+			cfg.Options.DataDirectory,
+		)
+		cfg.setDefaults(workingDir, "")
+		require.Equal(t,
+			DefaultWorkspaceDataDirectory(workingDir),
+			cfg.Options.DataDirectory,
+			"default data directory must be deterministic",
+		)
+		require.NoFileExists(t, filepath.Join(workingDir, defaultDataDirectory))
 		require.Equal(t, "AGENTS.md", cfg.Options.InitializeAs)
 		// DiffMode is deliberately left empty: the permissions dialog treats
 		// the zero value as "pick split or unified based on terminal width".
@@ -425,10 +438,12 @@ func TestConfig_setDefaults(t *testing.T) {
 	})
 
 	t.Run("does not adopt .harness from a parent project", func(t *testing.T) {
+		t.Setenv("HARNESS_GLOBAL_DATA", t.TempDir())
 		parent := t.TempDir()
 
-		// .harness in the parent: it should not be reused by the child
-		// because there is no git context joining them.
+		// A legacy .harness in the parent must not become the child's
+		// data directory: without a git context joining them, each gets
+		// its own workspace directory under the global root.
 		require.NoError(t, os.Mkdir(filepath.Join(parent, defaultDataDirectory), 0o755))
 
 		child := filepath.Join(parent, "child")
@@ -437,21 +452,21 @@ func TestConfig_setDefaults(t *testing.T) {
 		cfg := &Config{}
 		cfg.setDefaults(child, "")
 
-		require.Equal(
-			t,
-			filepath.Clean(filepath.Join(child, defaultDataDirectory)),
-			filepath.Clean(cfg.Options.DataDirectory),
-		)
+		require.Equal(t, DefaultWorkspaceDataDirectory(child), cfg.Options.DataDirectory)
+		require.NotEqual(t, DefaultWorkspaceDataDirectory(parent), cfg.Options.DataDirectory)
 	})
 
-	t.Run("does not climb out of git worktree to find .harness", func(t *testing.T) {
+	t.Run("subdirectories of a git worktree share one workspace directory", func(t *testing.T) {
+		t.Setenv("HARNESS_GLOBAL_DATA", t.TempDir())
 		if _, err := exec.LookPath("git"); err != nil {
 			t.Skip("git not available")
 		}
 
 		parent := t.TempDir()
 
-		// Stray .harness above the worktree root.
+		// A stray legacy .harness above the worktree root must be
+		// irrelevant: the workspace is keyed by the git worktree root,
+		// never by anything outside it.
 		require.NoError(t, os.Mkdir(filepath.Join(parent, defaultDataDirectory), 0o755))
 
 		worktree := filepath.Join(parent, "worktree")
@@ -467,24 +482,14 @@ func TestConfig_setDefaults(t *testing.T) {
 		gitInit.Dir = worktree
 		require.NoError(t, gitInit.Run())
 
-		cfg := &Config{}
-		cfg.setDefaults(sub, "")
+		subCfg := &Config{}
+		subCfg.setDefaults(sub, "")
+		rootCfg := &Config{}
+		rootCfg.setDefaults(worktree, "")
 
-		// Resolve symlinks because TempDir on macOS sits under /var
-		// which is a symlink to /private/var. The data directory has
-		// not been created yet, so resolve its parent and join.
-		gotDir, gotName := filepath.Split(cfg.Options.DataDirectory)
-		gotEvalDir, err := filepath.EvalSymlinks(filepath.Clean(gotDir))
-		require.NoError(t, err)
-		gotEval := filepath.Join(gotEvalDir, gotName)
-
-		strayEval, err := filepath.EvalSymlinks(filepath.Join(parent, defaultDataDirectory))
-		require.NoError(t, err)
-		require.NotEqual(t, strayEval, gotEval, "must not adopt parent .harness")
-
-		subEval, err := filepath.EvalSymlinks(sub)
-		require.NoError(t, err)
-		require.Equal(t, filepath.Join(subEval, defaultDataDirectory), gotEval)
+		require.Equal(t, rootCfg.Options.DataDirectory, subCfg.Options.DataDirectory,
+			"subdir launches must share the worktree-root workspace")
+		require.NotContains(t, subCfg.Options.DataDirectory, filepath.Join(parent, defaultDataDirectory))
 	})
 }
 
