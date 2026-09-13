@@ -37,6 +37,12 @@ type countingWorkspace struct {
 	lspDiags        map[string]lsp.DiagnosticCounts
 	runningSubagent []workspace.RunningSubagentInfo
 
+	// summarizeCalls records every AgentSummarize request (the /compact and
+	// summarize entry points) so tests can pin the focus instructions they
+	// delivered. Not part of syncProbes: it is a user action, not a
+	// per-message probe.
+	summarizeCalls []summarizeCall
+
 	readyCalls      int
 	agentBusyCalls  int
 	queuedCalls     int
@@ -52,6 +58,17 @@ type countingWorkspace struct {
 
 func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
 func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
+
+// summarizeCall is one recorded AgentSummarize request.
+type summarizeCall struct {
+	sessionID    string
+	instructions string
+}
+
+func (w *countingWorkspace) AgentSummarize(_ context.Context, sessionID, instructions string) error {
+	w.summarizeCalls = append(w.summarizeCalls, summarizeCall{sessionID: sessionID, instructions: instructions})
+	return nil
+}
 
 // ParseAgentToolSessionID reports "not a child session"; the background
 // tasks strip probes it for running-subagent events.
