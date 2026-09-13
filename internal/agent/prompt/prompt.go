@@ -33,6 +33,10 @@ type Prompt struct {
 	// memoryIndex is the pre-rendered durable-memory index (see
 	// WithMemoryIndex) injected into prompts that render .MemoryIndex.
 	memoryIndex string
+	// memoryEnabled records that the caller turned the memory block on
+	// (see WithMemoryEnabled). Independent of memoryIndex so the steering
+	// text renders even on an empty store.
+	memoryEnabled bool
 	// availSkillXMLSet records that the caller supplied availSkillXML, so an
 	// intentionally empty block is distinguishable from "not provided" and
 	// still skips discovery.
@@ -59,6 +63,7 @@ type PromptDat struct {
 	SubagentBody       string
 	PreloadedSkillsXML string
 	MemoryIndex        string
+	MemoryEnabled      bool
 }
 
 type ContextFile struct {
@@ -125,10 +130,18 @@ func WithAvailableSkillsXML(xml string) Option {
 // WithMemoryIndex sets the pre-rendered durable-memory index for prompts
 // that render the memory block. The caller supplies the already-rendered
 // index (see memory.Service.Index) so this package stays independent of the
-// database; an empty string omits the block entirely (no memories yet, or
-// memory disabled).
+// database. Requires WithMemoryEnabled; an empty string renders the block
+// with an empty-store notice instead of an index.
 func WithMemoryIndex(index string) Option {
 	return func(p *Prompt) { p.memoryIndex = index }
+}
+
+// WithMemoryEnabled turns the memory block on. The block carries the
+// write-steering instructions and renders even when the store is empty,
+// so a fresh workspace still tells the agent to save memories; without
+// this option the block is omitted entirely (memory disabled).
+func WithMemoryEnabled(enabled bool) Option {
+	return func(p *Prompt) { p.memoryEnabled = enabled }
 }
 
 func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
@@ -290,6 +303,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		SubagentBody:       p.subagentBody,
 		PreloadedSkillsXML: p.preloadedSkillsXML,
 		MemoryIndex:        p.memoryIndex,
+		MemoryEnabled:      p.memoryEnabled,
 	}
 	if isGit {
 		var err error

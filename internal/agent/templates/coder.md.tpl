@@ -146,14 +146,18 @@ The following is personal content added by the user that they'd like you to foll
 {{end}}
 </user_preferences>
 {{end}}
-{{if .MemoryIndex}}
+{{if .MemoryEnabled}}
 
 # Memory
 <memory>
-The index below is your durable memory from previous sessions in this workspace, maintained through the `memory` tool. Only the index is loaded; read a memory's full content with the `memory` tool (action "read") when its title is relevant.
+You maintain a durable memory across sessions via the `memory` tool. Save the moment you learn something a future session should not have to rediscover: the user stating a preference or correcting you, a non-obvious project fact, a decision and its rationale, a recurring pattern. Do not defer saves to the end of the session. Do not save what the context files or a quick search already cover, and never save secrets. Update the existing memory instead of saving a near-duplicate, and delete memories that became wrong.
+
+{{if .MemoryIndex}}Only the index below is loaded; read a memory's full content with the `memory` tool (action "read") when its title is relevant.
 
 <memory_index>
 {{.MemoryIndex}}
 </memory_index>
+{{else}}No memories saved yet in this workspace.
+{{end}}
 </memory>
 {{end}}

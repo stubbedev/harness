@@ -14,11 +14,9 @@ your repo, and nothing memory-related needs gitignoring.
 
 ## How it works
 
-1. **Index injection.** A compact index (one line per memory: id, category,
-   title) is rendered into the coder agent's system prompt at the start of
-   every turn, bounded by `options.memory.index_budget` characters (default
-   4000). Saving or deleting a memory is reflected on the next turn.
-2. **The `memory` tool.** The agent reads full notes on demand and maintains
+1. **Prompt steering.** While memory is enabled, the coder system prompt carries a `# Memory` block telling the agent what is worth saving (user preferences, corrections, non-obvious project facts, decisions and their rationale, recurring patterns), to save the moment it learns something rather than batching to the end, and what to keep out (rediscoverable facts, secrets). The block renders even on an empty store, so a fresh workspace is steered from the first session.
+2. **Index injection.** The block also carries a compact index (one line per memory: id, category, title), refreshed at the start of every turn and bounded by `options.memory.index_budget` characters (default 4000). Saving or deleting a memory is reflected on the next turn.
+3. **The `memory` tool.** The agent reads full notes on demand and maintains
    the store via five actions: `save`, `read`, `search`, `list`, `delete`.
    Saving without an id upserts by title, so re-saving the same title updates
    the note instead of duplicating it.

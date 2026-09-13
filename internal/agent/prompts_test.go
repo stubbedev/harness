@@ -65,3 +65,64 @@ func TestCoderPrompt_OmitsAvailableSubagentsWhenEmpty(t *testing.T) {
 
 	require.NotContains(t, systemPrompt, "<available_subagents>")
 }
+
+// TestCoderPrompt_MemoryBlockSteersWrites verifies that the memory block
+// carries the write-steering instructions and the index when memory is
+// enabled — the path coordinator.go wires whenever the feature is on.
+func TestCoderPrompt_MemoryBlockSteersWrites(t *testing.T) {
+	t.Parallel()
+
+	p, err := coderPrompt(
+		prompt.WithMemoryEnabled(true),
+		prompt.WithMemoryIndex("- [build-commands] (project) How to build"),
+	)
+	require.NoError(t, err)
+
+	store := newPromptTestStore(t)
+
+	systemPrompt, err := p.Build(context.Background(), "test-provider", "test-model", store)
+	require.NoError(t, err)
+
+	require.Contains(t, systemPrompt, "# Memory")
+	require.Contains(t, systemPrompt, "durable memory across sessions")
+	require.Contains(t, systemPrompt, "Save the moment you learn")
+	require.Contains(t, systemPrompt, "<memory_index>")
+	require.Contains(t, systemPrompt, "[build-commands] (project) How to build")
+}
+
+// TestCoderPrompt_MemoryBlockSteersEvenWhenEmpty verifies the block still
+// renders with the steering text on an empty store, so a fresh workspace
+// is told to start saving memories rather than waiting for an index that
+// only appears once something exists.
+func TestCoderPrompt_MemoryBlockSteersEvenWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	p, err := coderPrompt(prompt.WithMemoryEnabled(true))
+	require.NoError(t, err)
+
+	store := newPromptTestStore(t)
+
+	systemPrompt, err := p.Build(context.Background(), "test-provider", "test-model", store)
+	require.NoError(t, err)
+
+	require.Contains(t, systemPrompt, "# Memory")
+	require.Contains(t, systemPrompt, "Save the moment you learn")
+	require.Contains(t, systemPrompt, "No memories saved yet")
+	require.NotContains(t, systemPrompt, "<memory_index>")
+}
+
+// TestCoderPrompt_OmitsMemoryWhenDisabled verifies the whole memory block
+// is absent when the enabled option was never supplied (feature off).
+func TestCoderPrompt_OmitsMemoryWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	p, err := coderPrompt()
+	require.NoError(t, err)
+
+	store := newPromptTestStore(t)
+
+	systemPrompt, err := p.Build(context.Background(), "test-provider", "test-model", store)
+	require.NoError(t, err)
+
+	require.NotContains(t, systemPrompt, "# Memory")
+}

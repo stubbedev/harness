@@ -14,7 +14,7 @@ Save, read, search, list, or delete durable memories that persist across session
 - project: non-obvious codebase facts that took real effort to discover and are not in the context files or easily rediscovered from the repo.
 - reference: pointers to external material - docs, issues, discussions, related repos.
 
-Save when the user states a durable preference, corrects you, or you discover something a future session would otherwise have to rediscover. Update the existing memory instead of saving a near-duplicate; delete memories that became wrong or obsolete.
+Save when the user states a durable preference, corrects you, or you discover something a future session would otherwise have to rediscover. Save the moment you learn it, during the session — do not batch saves to the end. Update the existing memory instead of saving a near-duplicate; delete memories that became wrong or obsolete.
 </when_to_save>
 
 <when_not_to_save>

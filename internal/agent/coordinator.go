@@ -208,13 +208,15 @@ type coordinator struct {
 	// just runs in waves.
 	dispatchSem chan struct{}
 
-	// subagentPromptXML is the <available_subagents> XML currently baked into
-	// the coder system prompt, and memoryIndex is the durable-memory index
-	// currently baked into it. refreshCoderSystemPrompt compares both each
-	// turn so Library reloads and memory changes reach the prompt without a
-	// rebuild when nothing changed. Guarded by subagentPromptXMLMu.
+	// subagentPromptXML is the <available_subagents> XML currently baked
+	// into the coder system prompt, and memoryIndex/memoryInPrompt are the
+	// durable-memory index and enabled state currently baked into it.
+	// refreshCoderSystemPrompt compares all three each turn so Library
+	// reloads and memory changes reach the prompt without a rebuild when
+	// nothing changed. Guarded by subagentPromptXMLMu.
 	subagentPromptXML   string
 	memoryIndex         string
+	memoryInPrompt      bool
 	subagentPromptXMLMu sync.Mutex
 
 	// memory is the durable cross-session memory service, or nil when the
@@ -306,14 +308,18 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	// TODO: make this dynamic when we support multiple agents
 	subagentXML := subagents.ToPromptXML(c.activeSubagentsList())
 	c.subagentPromptXML = subagentXML
-	memIndex := c.renderMemoryIndex(ctx)
-	c.memoryIndex = memIndex
+	memEnabled := c.memoryEnabled()
+	c.memoryInPrompt = memEnabled
+	c.memoryIndex = c.renderMemoryIndex(ctx)
 	promptOpts := []prompt.Option{
 		prompt.WithWorkingDir(c.cfg.WorkingDir()),
 		prompt.WithAvailableSubagentsXML(subagentXML),
 	}
-	if memIndex != "" {
-		promptOpts = append(promptOpts, prompt.WithMemoryIndex(memIndex))
+	if memEnabled {
+		promptOpts = append(promptOpts, prompt.WithMemoryEnabled(true))
+		if c.memoryIndex != "" {
+			promptOpts = append(promptOpts, prompt.WithMemoryIndex(c.memoryIndex))
+		}
 	}
 	coderPr, err := coderPrompt(promptOpts...)
 	if err != nil {
@@ -1608,6 +1614,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 // the pre-refresh behavior of serving a stale snapshot.
 func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model) {
 	xml := subagents.ToPromptXML(c.activeSubagentsList())
+	memEnabled := c.memoryEnabled()
 	memIndex := c.renderMemoryIndex(ctx)
 
 	// The compare, the SetSystemPrompt and the store are one critical section.
@@ -1619,7 +1626,7 @@ func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model)
 	// the cost is one redundant wait rather than a duplicate build.
 	c.subagentPromptXMLMu.Lock()
 	defer c.subagentPromptXMLMu.Unlock()
-	if xml == c.subagentPromptXML && memIndex == c.memoryIndex {
+	if xml == c.subagentPromptXML && memEnabled == c.memoryInPrompt && memIndex == c.memoryIndex {
 		return
 	}
 
@@ -1627,8 +1634,11 @@ func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model)
 		prompt.WithWorkingDir(c.cfg.WorkingDir()),
 		prompt.WithAvailableSubagentsXML(xml),
 	}
-	if memIndex != "" {
-		promptOpts = append(promptOpts, prompt.WithMemoryIndex(memIndex))
+	if memEnabled {
+		promptOpts = append(promptOpts, prompt.WithMemoryEnabled(true))
+		if memIndex != "" {
+			promptOpts = append(promptOpts, prompt.WithMemoryIndex(memIndex))
+		}
 	}
 	pr, err := coderPrompt(promptOpts...)
 	if err != nil {
@@ -1642,6 +1652,7 @@ func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model)
 	}
 	c.currentAgent.SetSystemPrompt(systemPrompt)
 	c.subagentPromptXML = xml
+	c.memoryInPrompt = memEnabled
 	c.memoryIndex = memIndex
 }
 
@@ -1654,8 +1665,9 @@ func (c *coordinator) memoryEnabled() bool {
 
 // renderMemoryIndex loads the durable-memory index for the system
 // prompt, honoring the configured character budget. Empty when the
-// feature is off, the store is empty, or the query fails (logged; an
-// empty index just omits the block).
+// feature is off, the store is empty, or the query fails (logged; the
+// memory block still renders with its empty-store notice while the
+// feature is enabled).
 func (c *coordinator) renderMemoryIndex(ctx context.Context) string {
 	if !c.memoryEnabled() {
 		return ""
