@@ -107,13 +107,33 @@ const (
 	// prompt and drain output belonging to the call before it. The %%s
 	// keeps the echoed command line from matching the pattern, the same
 	// trick the exit sentinel plays with %%d.
-	ptyFenceFmt   = `printf '__begin_%s:%%s__' "ok"`
+	//
+	// The fence also re-asserts the session guard from ptySetupCmd
+	// before every command: a command that re-sources the user's rc
+	// files (source ~/.zshrc, direnv, a nested shell) can bring aliases
+	// and history settings back, and the next command must not inherit
+	// them. Like the marker, the guard runs before the command and its
+	// output is drained with the fence, so it never reaches a call's
+	// reported output.
+	ptyFenceFmt   = `unalias -a 2>/dev/null; HISTFILE=/dev/null; printf '__begin_%s:%%s__' "ok"`
 	ptyFenceReFmt = `__begin_%s:ok__`
 
-	// ptySetupCmd prepares the session: aliases are stripped so commands
-	// run with their standard meanings (functions and environment from
-	// the rc files are kept), and the prompt is replaced with an OSC 133
-	// "prompt start" marker.
+	// ptyHistoryOffCmd is sent as its own line before ptySetupCmd. zsh
+	// with inc_append_history or share_history writes every accepted
+	// line to HISTFILE the moment it is entered - before the line
+	// itself executes - so a guard that sets HISTFILE inside a longer
+	// line would record that whole line in the user's history file.
+	// This bare assignment is the only line that can ever leak, and it
+	// is inert plumbing: no agent command, no marker.
+	ptyHistoryOffCmd = `HISTFILE=/dev/null`
+
+	// ptySetupCmd prepares the session: alias expansion is switched off
+	// and every alias loaded by the rc files is stripped, so commands run
+	// with their standard meanings (functions and environment from the
+	// rc files are kept), and history is sandboxed - HISTFILE points at
+	// /dev/null and every auto-write option is off - so nothing the
+	// agent types ever lands in the user's history file. The prompt is
+	// replaced with an OSC 133 "prompt start" marker.
 	//
 	// The marker is what tells the runner a command has finished. It has
 	// to be something only the shell emits: the previous heuristic
@@ -121,7 +141,21 @@ const (
 	// full-screen program and every readline REPL also sends, so
 	// starting nvim looked exactly like a finished command and the
 	// sentinel was typed into the editor.
-	ptySetupCmd = `unalias -a 2>/dev/null; PROMPT_COMMAND=""; RPS1=""; RPROMPT=""; PS2=""; PS1="$(printf '\033]133;A\007')"`
+	//
+	// Each shell-specific switch is stderr-guarded so the one line works
+	// across zsh (setopt/unalias -a), bash (shopt) and plain POSIX
+	// shells, where the unknown builtins and options just error on
+	// stderr while the rest of the line still runs. One switch earns
+	// its absence: zsh treats an unknown option to its own `set` builtin
+	// as a parse error and refuses to run the WHOLE line, so no
+	// `set +o history` may appear here - it would silently keep the
+	// prompt marker below from ever installing. Bash needs it even less:
+	// with HISTFILE on /dev/null, PROMPT_COMMAND cleared and histappend
+	// off, its in-memory history has nowhere to go.
+	ptySetupCmd = `unalias -a 2>/dev/null; setopt no_aliases 2>/dev/null; shopt -u expand_aliases 2>/dev/null; ` +
+		`HISTFILE=/dev/null; SAVEHIST=0; shopt -u histappend 2>/dev/null; ` +
+		`unsetopt share_history inc_append_history inc_append_history_time append_history 2>/dev/null; ` +
+		`PROMPT_COMMAND=""; RPS1=""; RPROMPT=""; PS2=""; PS1="$(printf '\033]133;A\007')"`
 )
 
 // sentinel is one session's completion marker: the command that prints
@@ -591,6 +625,14 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	// command's output starts clean.
 	_ = s.WaitForQuiet(ctx, ptyStartupMs*time.Millisecond, 5*time.Second)
 	s.Drain()
+
+	// Sandbox history before anything else: see ptyHistoryOffCmd. The
+	// short settle lets the assignment land before the setup line is
+	// accepted, so the setup line itself cannot be recorded either.
+	if err := s.Send([]byte(ptyHistoryOffCmd + "\n")); err == nil {
+		_ = s.WaitForQuiet(ctx, 300*time.Millisecond, 2*time.Second)
+		s.Drain()
+	}
 
 	// Strip aliases and install the prompt marker. If the marker never
 	// arrives - an exotic shell, a prompt framework that reinstalls its
