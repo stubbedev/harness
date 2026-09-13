@@ -30,6 +30,9 @@ type Prompt struct {
 	preloadedSkillsXML string
 	availSubagentXML   string
 	availSkillXML      string
+	// memoryIndex is the pre-rendered durable-memory index (see
+	// WithMemoryIndex) injected into prompts that render .MemoryIndex.
+	memoryIndex string
 	// availSkillXMLSet records that the caller supplied availSkillXML, so an
 	// intentionally empty block is distinguishable from "not provided" and
 	// still skips discovery.
@@ -55,6 +58,7 @@ type PromptDat struct {
 	AvailSubagentXML   string
 	SubagentBody       string
 	PreloadedSkillsXML string
+	MemoryIndex        string
 }
 
 type ContextFile struct {
@@ -116,6 +120,15 @@ func WithAvailableSkillsXML(xml string) Option {
 		p.availSkillXML = xml
 		p.availSkillXMLSet = true
 	}
+}
+
+// WithMemoryIndex sets the pre-rendered durable-memory index for prompts
+// that render the memory block. The caller supplies the already-rendered
+// index (see memory.Service.Index) so this package stays independent of the
+// database; an empty string omits the block entirely (no memories yet, or
+// memory disabled).
+func WithMemoryIndex(index string) Option {
+	return func(p *Prompt) { p.memoryIndex = index }
 }
 
 func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
@@ -276,6 +289,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		AvailSubagentXML:   p.availSubagentXML,
 		SubagentBody:       p.subagentBody,
 		PreloadedSkillsXML: p.preloadedSkillsXML,
+		MemoryIndex:        p.memoryIndex,
 	}
 	if isGit {
 		var err error

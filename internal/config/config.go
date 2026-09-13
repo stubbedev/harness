@@ -357,6 +357,50 @@ func (c Completions) Limits() (depth, items int) {
 	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
 }
 
+// MemoryOptions configures the agent's durable cross-session memory.
+type MemoryOptions struct {
+	Enabled *bool `json:"enabled,omitempty" jsonschema:"description=Let the agent keep durable notes across sessions and load their index into every session,default=true"`
+	// MaxMemories caps how many memories are kept. When exceeded, the
+	// least-used unpinned memories are reaped.
+	MaxMemories *int `json:"max_memories,omitempty" jsonschema:"description=Maximum memories to keep. Beyond this the least-used unpinned memories are deleted,minimum=1,default=500,example=100"`
+	// IndexBudget bounds the character size of the memory index injected
+	// into the system prompt.
+	IndexBudget *int `json:"index_budget,omitempty" jsonschema:"description=Character budget for the memory index injected into the system prompt,minimum=200,default=4000,example=2000"`
+}
+
+// IsEnabled reports whether agent memory is active. The nil receiver and
+// the unset pointer both mean enabled.
+func (m *MemoryOptions) IsEnabled() bool {
+	return m == nil || m.Enabled == nil || *m.Enabled
+}
+
+// DefaultMaxMemories is the memory cap when options.memory.max_memories
+// is unset.
+const DefaultMaxMemories = 500
+
+// DefaultMemoryIndexBudget is the system-prompt character budget for the
+// memory index when options.memory.index_budget is unset.
+const DefaultMemoryIndexBudget = 4000
+
+// GetMaxMemories returns the memory cap. Unset falls back to
+// DefaultMaxMemories; values below one are clamped to one.
+func (m *MemoryOptions) GetMaxMemories() int {
+	if m == nil || m.MaxMemories == nil {
+		return DefaultMaxMemories
+	}
+	return max(1, *m.MaxMemories)
+}
+
+// GetIndexBudget returns the memory index character budget. Unset falls
+// back to DefaultMemoryIndexBudget; values below 200 are clamped to 200
+// so the index stays useful.
+func (m *MemoryOptions) GetIndexBudget() int {
+	if m == nil || m.IndexBudget == nil {
+		return DefaultMemoryIndexBudget
+	}
+	return max(200, *m.IndexBudget)
+}
+
 // Diff mode options.
 const (
 	DiffModeUnified = "unified" // Inline unified diffs
@@ -409,14 +453,15 @@ func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
 }
 
 type Options struct {
-	ContextPaths         []string    `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=HARNESS.md"`
-	GlobalContextPaths   []string    `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/harness/HARNESS.md,default=~/.config/AGENTS.md"`
-	SkillsPaths          []string    `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/harness/skills,example=./skills"`
-	TUI                  *TUIOptions `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
-	Debug                bool        `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
-	DebugLSP             bool        `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
-	DisableAutoSummarize bool        `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
-	MaxRetries           *int        `json:"max_retries,omitempty" jsonschema:"description=Maximum retries for failed model requests. Unset uses the Fantasy default of 3.,minimum=0,default=3"`
+	ContextPaths         []string       `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=HARNESS.md"`
+	GlobalContextPaths   []string       `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/harness/HARNESS.md,default=~/.config/AGENTS.md"`
+	SkillsPaths          []string       `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/harness/skills,example=./skills"`
+	TUI                  *TUIOptions    `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
+	Memory               *MemoryOptions `json:"memory,omitempty" jsonschema:"description=Durable agent memory options"`
+	Debug                bool           `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
+	DebugLSP             bool           `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
+	DisableAutoSummarize bool           `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
+	MaxRetries           *int           `json:"max_retries,omitempty" jsonschema:"description=Maximum retries for failed model requests. Unset uses the Fantasy default of 3.,minimum=0,default=3"`
 	// AutoSummarizeRatio is the share of a context window of up to 200k
 	// tokens that is kept free before the session is summarized. Zero keeps
 	// the default of 0.2.
@@ -857,6 +902,10 @@ func (c *Config) cloneForWrite() *Config {
 			}
 			opts.TUI = &tui
 		}
+		if c.Options.Memory != nil {
+			mem := *c.Options.Memory
+			opts.Memory = &mem
+		}
 		nc.Options = &opts
 	}
 	return &nc
@@ -1048,6 +1097,7 @@ func allToolNames() []string {
 		"glob",
 		"grep",
 		"ls",
+		"memory",
 		"question",
 		"web_search",
 		"send_message",

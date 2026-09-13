@@ -32,6 +32,7 @@ import (
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/log"
 	"github.com/stubbedev/harness/internal/lsp"
+	"github.com/stubbedev/harness/internal/memory"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
@@ -58,6 +59,7 @@ type App struct {
 	History     history.Service
 	Questions   question.Service
 	FileTracker filetracker.Service
+	Memory      memory.Service
 
 	AgentCoordinator agent.Coordinator
 
@@ -101,6 +103,14 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 	files := history.NewService(q, conn)
+	// Memory reads its reap limit lazily so live config reloads of
+	// options.memory.max_memories are honored without rebuilding.
+	memories := memory.NewService(q, memory.WithReapLimit(func() int {
+		if cfg := store.Config(); cfg != nil && cfg.Options != nil {
+			return cfg.Options.Memory.GetMaxMemories()
+		}
+		return config.DefaultMaxMemories
+	}))
 	cfg := store.Config()
 	app := &App{
 		Sessions:    sessions,
@@ -108,6 +118,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		History:     files,
 		Questions:   question.NewService(),
 		FileTracker: filetracker.NewService(q),
+		Memory:      memories,
 		LSPManager:  lsp.NewManager(store),
 		Skills:      skillsMgr,
 		Subagents:   subagentsMgr,
@@ -748,6 +759,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Skills:       app.Skills,
 		SubagentsMgr: app.Subagents,
 		Runtime:      app.SubagentRuntime,
+		Memory:       app.Memory,
 		Interactive:  interactive,
 	})
 	if err != nil {

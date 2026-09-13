@@ -38,6 +38,7 @@ internal/
     input.go                       Stdin payload builder, env vars, stdout parsing (Harness + Claude Code compat)
   session/session.go               Session CRUD backed by SQLite
   message/                         Message model and content types
+  memory/                          Durable agent memory: cross-session notes, secret scrubbing, index rendering
   db/                              SQLite via sqlc, with migrations
     sql/                           Raw SQL queries (consumed by sqlc)
     migrations/                    Schema migrations

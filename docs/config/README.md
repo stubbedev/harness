@@ -310,6 +310,9 @@ options:
   attribution:
     trailer_style: assisted-by # none | co-authored-by | assisted-by
     generated_with: true # add the "Generated with" trailer
+
+  memory:
+    enabled: true # durable agent notes across sessions
 ```
 
 > [!IMPORTANT]
@@ -425,6 +428,21 @@ command palette, question prompts), the textarea's movement/editing keys
 > from both). Rebinding an action only affects that action; if two actions
 > end up on the same key, the first handler in the editor/chat dispatch order
 > wins.
+
+### Memory
+
+The agent keeps durable notes across sessions (user preferences, feedback,
+non-obvious project facts, references) in the workspace database and loads a
+compact index of them into every session. See
+[the memory docs](../memory/README.md) for how it works.
+
+```yaml
+options:
+  memory:
+    enabled: true # turn the memory tool and index injection off with false
+    max_memories: 500 # least-used unpinned memories are deleted beyond this
+    index_budget: 4000 # characters of index injected into the system prompt
+```
 
 ## Environment interpolation
 

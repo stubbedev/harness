@@ -138,7 +138,7 @@ func TestDispatcherTool_Run_InvalidJSON_ReturnsErrorResponse(t *testing.T) {
 	require.True(t, resp.IsError)
 }
 
-func TestDispatcherTool_Run_EmptySubagentType_RoutesToTask(t *testing.T) {
+func TestDispatcherTool_Run_EmptySubagentType_PassesThrough(t *testing.T) {
 	t.Parallel()
 
 	var capturedParams AgentDispatchParams
@@ -154,7 +154,9 @@ func TestDispatcherTool_Run_EmptySubagentType_RoutesToTask(t *testing.T) {
 	_, err := dt.Run(context.Background(), fantasy.ToolCall{Input: string(input)})
 
 	require.NoError(t, err)
-	require.Empty(t, capturedParams.SubagentType) // dispatch receives params as-is; routing is in the closure
+	// The dispatcher passes params through as-is; defaulting an omitted
+	// subagent_type to the fast agent happens in the dispatch closure.
+	require.Empty(t, capturedParams.SubagentType)
 }
 
 func TestDispatcherTool_ProviderOptions_RoundTrip(t *testing.T) {
@@ -293,7 +295,6 @@ func TestAgentTool_SubagentBuildFailure_SurfacedAsToolError(t *testing.T) {
 	require.Contains(t, resp.Content, "broken")
 }
 
-// TestConfirmBypassPermissions verifies the per-dispatch confirmation gate for
 // TestAgentTool_TaskDispatch_BuildsOnLocalGroup verifies the task path of the
 // dispatcher end-to-end with a real (offline) coordinator: the dispatch waits
 // for the task agent's local build group before running, the run failure
@@ -322,7 +323,8 @@ func TestAgentTool_TaskDispatch_BuildsOnLocalGroup(t *testing.T) {
 	ctx := context.WithValue(runCtx, tools.SessionIDContextKey, parentSession.ID)
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
 
-	input, err := json.Marshal(AgentDispatchParams{Prompt: "find something"})
+	// The type is explicit: an omitted type now defaults to the fast agent.
+	input, err := json.Marshal(AgentDispatchParams{SubagentType: config.AgentTask, Prompt: "find something"})
 	require.NoError(t, err)
 
 	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
@@ -351,7 +353,8 @@ func TestAgentTool_TaskBuildFailureIsRetryable(t *testing.T) {
 	require.NoError(t, err)
 	dt := tool.(*dispatcherTool)
 
-	input, err := json.Marshal(AgentDispatchParams{Prompt: "find something"})
+	// The type is explicit: an omitted type now defaults to the fast agent.
+	input, err := json.Marshal(AgentDispatchParams{SubagentType: config.AgentTask, Prompt: "find something"})
 	require.NoError(t, err)
 
 	// Break the task build: no small model selected.
@@ -381,6 +384,43 @@ func TestAgentTool_TaskBuildFailureIsRetryable(t *testing.T) {
 	require.NotContains(t, resp.Content, "build task agent",
 		"the task build must be retried after a failure, not replay the cached error")
 	require.Contains(t, resp.Content, "Failed to generate response")
+}
+
+// TestAgentTool_EmptySubagentType_RoutesToFast pins the lean-light default:
+// a dispatch that omits subagent_type must build the fast agent — the task
+// agent's tool set on the small model — rather than the large-model task
+// agent. Breaking the small-model selection makes the routing observable in
+// the tool error, which names the agent it tried to build.
+func TestAgentTool_EmptySubagentType_RoutesToFast(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	tool, err := coord.agentTool(t.Context())
+	require.NoError(t, err)
+	dt := tool.(*dispatcherTool)
+
+	// The fast agent builds on the small model, so removing the small-model
+	// selection fails its build immediately — no network, no retries.
+	delete(coord.cfg.Config().Models, config.SelectedModelTypeSmall)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+	input, err := json.Marshal(AgentDispatchParams{Prompt: "find something"})
+	require.NoError(t, err)
+
+	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "build fast agent",
+		"an omitted subagent_type must route to the fast (small-model) agent")
+	require.NotContains(t, resp.Content, "build task agent")
 }
 
 // dispatchTypeParam extracts the subagent_type parameter's enum and

@@ -34,6 +34,7 @@ import (
 	"github.com/stubbedev/harness/internal/hooks"
 	"github.com/stubbedev/harness/internal/log"
 	"github.com/stubbedev/harness/internal/lsp"
+	"github.com/stubbedev/harness/internal/memory"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/oauth/copilot"
@@ -208,11 +209,18 @@ type coordinator struct {
 	dispatchSem chan struct{}
 
 	// subagentPromptXML is the <available_subagents> XML currently baked into
-	// the coder system prompt. refreshCoderSystemPrompt compares against it
-	// each turn so Library reloads reach the prompt without a rebuild when
-	// nothing changed. Guarded by subagentPromptXMLMu.
+	// the coder system prompt, and memoryIndex is the durable-memory index
+	// currently baked into it. refreshCoderSystemPrompt compares both each
+	// turn so Library reloads and memory changes reach the prompt without a
+	// rebuild when nothing changed. Guarded by subagentPromptXMLMu.
 	subagentPromptXML   string
+	memoryIndex         string
 	subagentPromptXMLMu sync.Mutex
+
+	// memory is the durable cross-session memory service, or nil when the
+	// caller wired no database (some tests). A nil service disables the
+	// feature regardless of config.
+	memory memory.Service
 
 	// waitForInit, when non-nil, replaces mcp.WaitForInit for the readiness
 	// waits in run and buildAgent. It is a test seam: it lets a test simulate
@@ -239,7 +247,10 @@ type CoordinatorOptions struct {
 	Skills       *skills.Manager
 	SubagentsMgr *subagents.Manager
 	Runtime      *subagents.Runtime
-	Interactive  bool
+	// Memory is the durable cross-session memory service. Optional: nil
+	// disables the memory tool and prompt injection.
+	Memory      memory.Service
+	Interactive bool
 }
 
 func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, error) {
@@ -278,6 +289,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
 		dispatchSem:        make(chan struct{}, maxConcurrentSubagents(opts.Config)),
+		memory:             opts.Memory,
 	}
 
 	c.subagentsMgr = opts.SubagentsMgr
@@ -294,15 +306,21 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	// TODO: make this dynamic when we support multiple agents
 	subagentXML := subagents.ToPromptXML(c.activeSubagentsList())
 	c.subagentPromptXML = subagentXML
-	prompt, err := coderPrompt(
+	memIndex := c.renderMemoryIndex(ctx)
+	c.memoryIndex = memIndex
+	promptOpts := []prompt.Option{
 		prompt.WithWorkingDir(c.cfg.WorkingDir()),
 		prompt.WithAvailableSubagentsXML(subagentXML),
-	)
+	}
+	if memIndex != "" {
+		promptOpts = append(promptOpts, prompt.WithMemoryIndex(memIndex))
+	}
+	coderPr, err := coderPrompt(promptOpts...)
 	if err != nil {
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, prompt, agentCfg, false, subagentModel{}, &c.readyWg)
+	agent, err := c.buildAgent(ctx, coderPr, agentCfg, false, subagentModel{}, &c.readyWg)
 	if err != nil {
 		return nil, err
 	}
@@ -1038,6 +1056,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools = append(allTools, tools.NewQuestionTool(c.questions))
 	}
 
+	// Durable memory: surfaced to every agent whose AllowedTools list
+	// includes it. The default task/fast agents resolve to a read-only
+	// tool set that excludes it, so by default only the orchestrator
+	// writes memory; a user-defined subagent opts in by listing the tool.
+	if c.memoryEnabled() {
+		allTools = append(allTools, tools.NewMemoryTool(c.memory))
+	}
+
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
 		allTools = append(
@@ -1570,16 +1596,19 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 	return nil
 }
 
-// refreshCoderSystemPrompt rebuilds the coder system prompt when the active
-// subagent set changed since the prompt was last built, so the
-// <available_subagents> block tracks Library reloads like the subagent_type
-// enum (rebuilt by buildTools above) and the dispatch lookup already do.
-// UpdateModels runs at the start of every turn, and the rebuild is skipped
-// when nothing changed, so the steady-state cost is one string compare. A
-// rebuild failure keeps the previous prompt and only logs — matching the
-// pre-refresh behavior of serving a stale snapshot.
+// refreshCoderSystemPrompt rebuilds the coder system prompt when the
+// active subagent set or the durable-memory index changed since the
+// prompt was last built, so the <available_subagents> block tracks
+// Library reloads like the subagent_type enum (rebuilt by buildTools
+// above) and the dispatch lookup already do, and the memory index tracks
+// saves and deletes from earlier turns. UpdateModels runs at the start
+// of every turn, and the rebuild is skipped when nothing changed, so the
+// steady-state cost is two string compares (plus one small memory query).
+// A rebuild failure keeps the previous prompt and only logs — matching
+// the pre-refresh behavior of serving a stale snapshot.
 func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model) {
 	xml := subagents.ToPromptXML(c.activeSubagentsList())
+	memIndex := c.renderMemoryIndex(ctx)
 
 	// The compare, the SetSystemPrompt and the store are one critical section.
 	// Releasing the lock across the rebuild lets two concurrent refreshes both
@@ -1590,14 +1619,18 @@ func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model)
 	// the cost is one redundant wait rather than a duplicate build.
 	c.subagentPromptXMLMu.Lock()
 	defer c.subagentPromptXMLMu.Unlock()
-	if xml == c.subagentPromptXML {
+	if xml == c.subagentPromptXML && memIndex == c.memoryIndex {
 		return
 	}
 
-	pr, err := coderPrompt(
+	promptOpts := []prompt.Option{
 		prompt.WithWorkingDir(c.cfg.WorkingDir()),
 		prompt.WithAvailableSubagentsXML(xml),
-	)
+	}
+	if memIndex != "" {
+		promptOpts = append(promptOpts, prompt.WithMemoryIndex(memIndex))
+	}
+	pr, err := coderPrompt(promptOpts...)
 	if err != nil {
 		slog.Warn("Failed to rebuild coder prompt after subagent reload", "error", err)
 		return
@@ -1609,6 +1642,31 @@ func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model)
 	}
 	c.currentAgent.SetSystemPrompt(systemPrompt)
 	c.subagentPromptXML = xml
+	c.memoryIndex = memIndex
+}
+
+// memoryEnabled reports whether the durable-memory feature is active.
+// A nil service (no database wired, e.g. in tests) disables it regardless
+// of config.
+func (c *coordinator) memoryEnabled() bool {
+	return c.memory != nil && c.cfg.Config().Options.Memory.IsEnabled()
+}
+
+// renderMemoryIndex loads the durable-memory index for the system
+// prompt, honoring the configured character budget. Empty when the
+// feature is off, the store is empty, or the query fails (logged; an
+// empty index just omits the block).
+func (c *coordinator) renderMemoryIndex(ctx context.Context) string {
+	if !c.memoryEnabled() {
+		return ""
+	}
+	budget := c.cfg.Config().Options.Memory.GetIndexBudget()
+	index, err := c.memory.Index(ctx, budget)
+	if err != nil {
+		slog.Warn("Failed to load memory index", "error", err)
+		return ""
+	}
+	return index
 }
 
 func (c *coordinator) QueuedPrompts(sessionID string) int {

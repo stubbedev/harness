@@ -363,6 +363,35 @@
       },
       "type": "object"
     },
+    "MemoryOptions": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Let the agent keep durable notes across sessions and load their index into every session",
+          "default": true
+        },
+        "max_memories": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum memories to keep. Beyond this the least-used unpinned memories are deleted",
+          "default": 500,
+          "examples": [
+            100
+          ]
+        },
+        "index_budget": {
+          "type": "integer",
+          "minimum": 200,
+          "description": "Character budget for the memory index injected into the system prompt",
+          "default": 4000,
+          "examples": [
+            2000
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Model": {
       "properties": {
         "id": {
@@ -506,6 +535,10 @@
         "tui": {
           "$ref": "#/$defs/TUIOptions",
           "description": "Terminal user interface options"
+        },
+        "memory": {
+          "$ref": "#/$defs/MemoryOptions",
+          "description": "Durable agent memory options"
         },
         "debug": {
           "type": "boolean",
