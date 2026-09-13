@@ -107,8 +107,8 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 	}
 
 	typeDesc := `The type of agent to use. Lean light: the default is the small model, and the large model is an escalation you opt into.
-- "fast": the same read-only tools on the small model, and the default when subagent_type is omitted. Use for any well-scoped lookup or survey piece, and dispatch many in the same message — it is cheap enough that splitting a survey across several of them beats doing it yourself.
-- "task": the same read-only tools on the large model. Reserve for the genuinely open-ended piece that needs judgment — when a cheap pass would likely come back wrong or useless. Reaching for it by habit defeats its cost.`
+- "fast": the same read-and-edit tools on the small model, and the default when subagent_type is omitted. Use for any well-scoped lookup, survey, or edit piece, and dispatch many in the same message — it is cheap enough that splitting work across several of them beats doing it yourself.
+- "task": the same read-and-edit tools on the large model. Reserve for the genuinely open-ended piece that needs judgment — when a cheap pass would likely come back wrong or useless. Reaching for it by habit defeats its cost.`
 	if len(reachable) > 0 {
 		lines := make([]string, 0, len(reachable))
 		for _, sa := range reachable {

@@ -19,8 +19,8 @@ var webSearchDescriptionTpl = template.Must(
 )
 
 // NewWebSearchTool creates the web search tool. It is a read-only tool
-// like any other: sub-agents get it because they get the read-only tool
-// set, not because it is theirs.
+// like any other: sub-agents get it because it is read-only, not because
+// it is theirs.
 func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		client = DefaultHTTPClient()

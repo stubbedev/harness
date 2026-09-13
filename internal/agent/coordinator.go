@@ -1087,9 +1087,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 
 	// Durable memory: surfaced to every agent whose AllowedTools list
-	// includes it. The default task/fast agents resolve to a read-only
-	// tool set that excludes it, so by default only the orchestrator
-	// writes memory; a user-defined subagent opts in by listing the tool.
+	// includes it. The default task/fast agents resolve to a subagent tool
+	// set that excludes it, so by default only the orchestrator writes
+	// memory; a user-defined subagent opts in by listing the tool.
 	if c.memoryEnabled() {
 		allTools = append(allTools, tools.NewMemoryTool(c.memory))
 	}

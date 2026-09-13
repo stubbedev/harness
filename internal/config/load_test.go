@@ -902,7 +902,7 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"batch", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "web_search", "send_message", "view"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"batch", "edit", "multiedit", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "web_search", "send_message", "view", "write"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -923,7 +923,8 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"batch", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "web_search", "send_message", "view"}, taskAgent.AllowedTools)
+	// edit is in the disabled set, so it drops out of the subagent tool set.
+	assert.Equal(t, []string{"batch", "multiedit", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "web_search", "send_message", "view", "write"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
@@ -951,7 +952,9 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Len(t, taskAgent.AllowedTools, 0)
+	// The write tools survive disabling every read-only tool: the built-in
+	// subagent set is read-and-edit, not read-only.
+	assert.Equal(t, []string{"edit", "multiedit", "write"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {

@@ -50,7 +50,7 @@ guarantee — never ask the agent to memorize credentials.
 ## Sub-agents
 
 By default only the orchestrator (coder agent) has the `memory` tool; the
-built-in `task` and `fast` sub-agents resolve to a read-only tool set that
+built-in `task` and `fast` sub-agents resolve to a subagent tool set that
 excludes it. A custom subagent definition can opt in by listing `memory` in its
 `tools` frontmatter; it then shares the workspace store with the orchestrator.
 

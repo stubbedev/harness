@@ -59,8 +59,8 @@ const (
 const (
 	AgentCoder string = "coder"
 	AgentTask  string = "task"
-	// AgentFast is the task agent's cheap twin: same read-only tool set, run
-	// on the small model. It exists so fanning work out in parallel has a
+	// AgentFast is the task agent's cheap twin: same tool set, run on the
+	// small model. It exists so fanning work out in parallel has a
 	// zero-config target that does not cost a large-model call per branch.
 	AgentFast string = "fast"
 )
@@ -1118,10 +1118,14 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 	return filterSlice(allTools, disabledTools, false)
 }
 
-func resolveReadOnlyTools(tools []string) []string {
-	readOnlyTools := []string{"batch", "glob", "grep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "send_message", "view", "web_search"}
+func resolveSubagentTools(tools []string) []string {
+	// The built-in task/fast agents read and edit files but run no
+	// commands: bash is deliberately excluded so a dispatched agent stays
+	// a scoped, cheap worker rather than an arbitrary executor. Specialized
+	// agents are unaffected — they build their own allowlist in frontmatter.
+	subagentTools := []string{"batch", "edit", "glob", "grep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "multiedit", "send_message", "view", "web_search", "write"}
 	// filter to only include tools that are in allowedtools (include mode)
-	return filterSlice(tools, readOnlyTools, true)
+	return filterSlice(tools, subagentTools, true)
 }
 
 func filterSlice(data []string, mask []string, include bool) []string {
@@ -1155,7 +1159,7 @@ func (c *Config) SetupAgents() {
 			Description:  "An agent that helps with searching for context and finding implementation details.",
 			Model:        SelectedModelTypeLarge,
 			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: resolveReadOnlyTools(allowedTools),
+			AllowedTools: resolveSubagentTools(allowedTools),
 			// NO MCPs or LSPs by default
 			AllowedMCP: map[string][]string{},
 		},
@@ -1163,10 +1167,10 @@ func (c *Config) SetupAgents() {
 		AgentFast: {
 			ID:           AgentFast,
 			Name:         "Fast",
-			Description:  "A cheap read-only agent for one narrow lookup, run on the small model. Dispatch many in parallel.",
+			Description:  "A cheap agent for one narrow lookup, survey, or edit, run on the small model. Dispatch many in parallel.",
 			Model:        SelectedModelTypeSmall,
 			ContextPaths: c.Options.ContextPaths,
-			AllowedTools: resolveReadOnlyTools(allowedTools),
+			AllowedTools: resolveSubagentTools(allowedTools),
 			// NO MCPs or LSPs by default, same as the task agent.
 			AllowedMCP: map[string][]string{},
 		},

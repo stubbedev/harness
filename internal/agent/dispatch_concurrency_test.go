@@ -102,9 +102,9 @@ func TestAcquireDispatchSlot_ReleaseIsIdempotent(t *testing.T) {
 }
 
 // TestFastAgentConfigured pins the built-in fast agent: the small model, and
-// the same read-only, MCP-free tool set as the task agent. A fast agent that
-// silently ran on the large model would make fan-out expensive rather than
-// cheap, which is the whole reason it exists.
+// the same read-and-edit, MCP-free tool set as the task agent. A fast agent
+// that silently ran on the large model would make fan-out expensive rather
+// than cheap, which is the whole reason it exists.
 func TestFastAgentConfigured(t *testing.T) {
 	t.Parallel()
 
@@ -119,9 +119,11 @@ func TestFastAgentConfigured(t *testing.T) {
 
 	task := agents[config.AgentTask]
 	require.Equal(t, task.AllowedTools, fast.AllowedTools, "fast is the task agent's tool set on a cheaper model")
-	require.NotContains(t, fast.AllowedTools, "edit")
-	require.NotContains(t, fast.AllowedTools, "write")
-	require.NotContains(t, fast.AllowedTools, "bash")
+	for _, tool := range []string{"edit", "multiedit", "write"} {
+		require.Contains(t, fast.AllowedTools, tool, "built-in subagents read and edit files")
+	}
+	require.NotContains(t, fast.AllowedTools, "bash", "built-in subagents must not run commands")
+	require.NotContains(t, fast.AllowedTools, "memory", "built-in subagents must not write memory")
 }
 
 func TestMaxConcurrentSubagents_ConfiguredAndClamped(t *testing.T) {
