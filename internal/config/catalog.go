@@ -38,9 +38,9 @@ var (
 )
 
 // catalogSync memoizes the provider catalog for the process. The cache
-// lives in the harness SQLite database; the embedded seed catalog is
-// the last-resort fallback when the database has no row (first run) and
-// the live fetch fails.
+// lives in the harness SQLite database; when the database has no row
+// (first run) and the live fetch fails, the catalog is empty and only
+// manually configured providers remain.
 type catalogSync struct {
 	once       sync.Once
 	result     []catalog.Provider
@@ -66,24 +66,19 @@ func (s *catalogSync) Get(ctx context.Context) ([]catalog.Provider, error) {
 	// The result and the error are memoized together so that every
 	// caller sees the same outcome, not just the one that won the once.
 	s.once.Do(func() {
-		if !s.autoupdate {
-			slog.Info("Using embedded seed catalog (auto-update disabled)")
-			s.result = catalog.Embedded()
-			return
-		}
-
 		conn, connErr := db.Connect(context.WithoutCancel(ctx), s.dataDir)
 		if connErr != nil {
 			slog.Warn("Could not open catalog cache database", "error", connErr)
 		}
 
 		// Serve the cached catalog when it is fresh enough. This is the
-		// common startup path: one small query, no network.
+		// common startup path: one small query, no network. With
+		// auto-update disabled the cache is served at any age.
 		if conn != nil {
 			if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
 				providers, decodeErr := decodeCatalog(row.Data)
-				if decodeErr == nil && len(providers) > 0 &&
-					time.Since(time.Unix(row.FetchedAt, 0)) < catalogRefreshInterval {
+				fresh := time.Since(time.Unix(row.FetchedAt, 0)) < catalogRefreshInterval
+				if decodeErr == nil && len(providers) > 0 && (fresh || !s.autoupdate) {
 					slog.Info("Using cached catalog", "fetched_at", time.Unix(row.FetchedAt, 0))
 					s.result = providers
 					return
@@ -102,9 +97,9 @@ func (s *catalogSync) Get(ctx context.Context) ([]catalog.Provider, error) {
 		}
 
 		// The fetch failed or came back empty. A stale database row is
-		// the next-best answer, and the embedded seed is the last one.
-		// Being offline is routine, so this is logged rather than
-		// reported to the caller unless nothing usable exists at all.
+		// the next-best answer. Being offline is routine, so this is
+		// logged rather than reported to the caller unless nothing
+		// usable exists at all.
 		if conn != nil {
 			if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
 				if providers, decodeErr := decodeCatalog(row.Data); decodeErr == nil && len(providers) > 0 {
@@ -117,8 +112,8 @@ func (s *catalogSync) Get(ctx context.Context) ([]catalog.Provider, error) {
 		if fetchErr == nil {
 			fetchErr = errors.New("catalog sources returned no providers")
 		}
-		slog.Warn("Could not fetch catalog, using embedded seed", "error", fetchErr)
-		s.result = catalog.Embedded()
+		slog.Warn("Could not fetch catalog; only manually configured providers are available", "error", fetchErr)
+		s.result = nil
 		s.err = fetchErr
 	})
 	return s.result, s.err

@@ -372,7 +372,7 @@ func TestDispatchAppliesEffort_EndToEnd(t *testing.T) {
 	}
 
 	base := config.Agent{
-		AllowedTools: []string{"bash", "grep"},
+		AllowedTools: []string{"shell", "grep"},
 		Model:        config.SelectedModelTypeLarge,
 	}
 	agentCfg := sa.ToConfigAgent(base)

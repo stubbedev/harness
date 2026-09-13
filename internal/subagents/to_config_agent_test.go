@@ -20,12 +20,12 @@ func TestToConfigAgent(t *testing.T) {
 			name:     "no_restrictions",
 			subagent: Subagent{Name: "my-agent", Description: "Does something."},
 			base: config.Agent{
-				AllowedTools: []string{"bash", "grep", "view"},
+				AllowedTools: []string{"shell", "grep", "view"},
 				Model:        config.SelectedModelTypeLarge,
 			},
 			check: func(t *testing.T, result config.Agent) {
 				t.Helper()
-				require.Equal(t, []string{"bash", "grep", "view"}, result.AllowedTools)
+				require.Equal(t, []string{"shell", "grep", "view"}, result.AllowedTools)
 			},
 		},
 		{
@@ -39,7 +39,7 @@ func TestToConfigAgent(t *testing.T) {
 				Tools:       ToolList{},
 			},
 			base: config.Agent{
-				AllowedTools: []string{"bash", "grep", "view", "edit"},
+				AllowedTools: []string{"shell", "grep", "view", "edit"},
 				Model:        config.SelectedModelTypeLarge,
 			},
 			check: func(t *testing.T, result config.Agent) {
@@ -55,7 +55,7 @@ func TestToConfigAgent(t *testing.T) {
 				Tools:       ToolList{"grep", "view"},
 			},
 			base: config.Agent{
-				AllowedTools: []string{"bash", "grep", "view", "edit"},
+				AllowedTools: []string{"shell", "grep", "view", "edit"},
 				Model:        config.SelectedModelTypeLarge,
 			},
 			check: func(t *testing.T, result config.Agent) {
@@ -71,12 +71,12 @@ func TestToConfigAgent(t *testing.T) {
 				DisallowedTools: ToolList{"view"},
 			},
 			base: config.Agent{
-				AllowedTools: []string{"bash", "grep", "view"},
+				AllowedTools: []string{"shell", "grep", "view"},
 				Model:        config.SelectedModelTypeLarge,
 			},
 			check: func(t *testing.T, result config.Agent) {
 				t.Helper()
-				require.ElementsMatch(t, []string{"bash", "grep"}, result.AllowedTools)
+				require.ElementsMatch(t, []string{"shell", "grep"}, result.AllowedTools)
 			},
 		},
 		{
@@ -84,17 +84,17 @@ func TestToConfigAgent(t *testing.T) {
 			subagent: Subagent{
 				Name:            "my-agent",
 				Description:     "Does something.",
-				DisallowedTools: ToolList{"bash"},
-				Tools:           ToolList{"grep", "bash"},
+				DisallowedTools: ToolList{"shell"},
+				Tools:           ToolList{"grep", "shell"},
 			},
 			base: config.Agent{
-				AllowedTools: []string{"bash", "grep", "view"},
+				AllowedTools: []string{"shell", "grep", "view"},
 				Model:        config.SelectedModelTypeLarge,
 			},
 			check: func(t *testing.T, result config.Agent) {
 				t.Helper()
-				// disallowed removes "bash" first → base becomes ["grep","view"]
-				// then tools filter intersects with ["grep","bash"] → only "grep" survives
+				// disallowed removes "shell" first → base becomes ["grep","view"]
+				// then tools filter intersects with ["grep","shell"] → only "grep" survives
 				require.ElementsMatch(t, []string{"grep"}, result.AllowedTools)
 			},
 		},

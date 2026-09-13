@@ -31,21 +31,15 @@ var catalogSyncer = &catalogSync{}
 // database cache and whether or not auto update is enabled.
 //
 // It will:
-// 1. if auto update is disabled, it'll return the embedded seed catalog
-// at the time of release.
-// 2. load the cached catalog from the SQLite database when it is less
-// than a day old.
-// 3. try to get the fresh list from models.dev (plus OpenRouter for the
-// openrouter entry), and return either this new list, the stale cached
-// list, or the embedded seed if all others fail.
+// 1. load the cached catalog from the SQLite database when it is less
+// than a day old (at any age when auto update is disabled).
+// 2. otherwise try to get the fresh list from models.dev (plus
+// OpenRouter for the openrouter entry), and return either this new
+// list or the stale cached list if the fetch fails.
 //
 // A returned error is advisory: it reports that the catalog could not
-// be cached, or that the live sources returned nothing usable. It never
-// means that no providers are available, so callers should surface it
-// as a warning and keep using the returned list. A refresh that simply
-// could not reach the network is not an error at all: the cached or
-// embedded catalog is a sound answer, so those are logged and the
-// fallback is returned.
+// be cached, or that the live sources returned nothing usable and no
+// cache exists. Callers decide whether an empty catalog is fatal.
 func Providers(cfg *Config) ([]catalog.Provider, error) {
 	providerOnce.Do(func() {
 		autoupdate := !cfg.Options.DisableProviderAutoUpdate
@@ -62,14 +56,13 @@ func Providers(cfg *Config) ([]catalog.Provider, error) {
 		client := liveCatalogClient{}
 		catalogSyncer.Init(client, cfg.Options.DataDirectory, autoupdate)
 
-		// A failure to refresh or cache the catalog is worth
-		// reporting, but the syncer still hands back the cached or
-		// embedded list. Dropping that would leave the user with no
-		// providers at all over a transient disk or network problem.
+		// A failure to refresh or cache the catalog is worth reporting
+		// to the caller, which decides whether an empty catalog is
+		// fatal or the manually configured providers suffice.
 		items, err := catalogSyncer.Get(ctx)
 		if err != nil {
 			err = fmt.Errorf( //nolint:staticcheck
-				"Harness was unable to fetch an updated model catalog. Consider setting HARNESS_DISABLE_PROVIDER_AUTO_UPDATE=1 to use the embedded catalog bundled at the time of this Harness release. You can also update providers manually. For more info see harness update-providers --help.\n\nCause: %w",
+				"Harness was unable to fetch an updated model catalog. You can also update providers manually. For more info see harness update-providers --help.\n\nCause: %w",
 				err,
 			)
 		}
@@ -95,20 +88,14 @@ func UpdateProviderInList(provider catalog.Provider) {
 }
 
 // UpdateProviders refreshes the stored model catalog. With no argument
-// the catalog is fetched live from models.dev and OpenRouter.
-// "embedded" seeds the stored catalog from the copy bundled at release
-// time, and a path or URL is read as either a models.dev api.json
-// document or a plain provider list.
+// the catalog is fetched live from models.dev and OpenRouter. A path
+// or URL is read as either a models.dev api.json document or a plain
+// provider list.
 func UpdateProviders(cfg *Config, pathOrURL string) error {
 	var providers []catalog.Provider
 	var err error
 
 	switch {
-	case pathOrURL == "embedded":
-		providers = catalog.Embedded()
-		if len(providers) == 0 {
-			return fmt.Errorf("no providers found in the embedded catalog")
-		}
 	case pathOrURL == "":
 		providers, err = catalog.FetchCatalog(context.Background(), nil)
 		if err != nil {

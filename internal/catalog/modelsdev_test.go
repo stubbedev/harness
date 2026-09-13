@@ -13,6 +13,7 @@ func fixtureModelsDev() modelsDev {
 			ID:   "anthropic",
 			Name: "Anthropic",
 			NPM:  "@ai-sdk/anthropic",
+			Env:  []string{"ANTHROPIC_API_KEY"},
 			Models: map[string]modelsDevModel{
 				"claude-x": {
 					ID: "claude-x", Name: "Claude X", Reasoning: true,
@@ -41,7 +42,7 @@ func fixtureModelsDev() modelsDev {
 			Name: "Z.AI",
 			NPM:  "@ai-sdk/openai-compatible",
 			API:  "https://api.z.ai/api/paas/v4",
-			Env:  []string{"ZAI_API_KEY"},
+			Env:  []string{"ZHIPU_API_KEY"},
 			Models: map[string]modelsDevModel{
 				"glm-x": {ID: "glm-x", Name: "GLM X", Limit: modelsDevLimit{Context: 128000, Output: 4096}},
 			},
@@ -73,7 +74,7 @@ func findProvider(providers []Provider, id InferenceProvider) (Provider, bool) {
 	return Provider{}, false
 }
 
-func TestTranslateModelsDevCuratesOverlayEntries(t *testing.T) {
+func TestTranslateModelsDevNativeProtocol(t *testing.T) {
 	t.Parallel()
 
 	providers := translateModelsDev(fixtureModelsDev())
@@ -82,39 +83,33 @@ func TestTranslateModelsDevCuratesOverlayEntries(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, TypeAnthropic, anthropic.Type)
 	require.Equal(t, "$ANTHROPIC_API_KEY", anthropic.APIKey)
-	// The curated entry keeps its overlay identity even though the
-	// source carries the same id, and deprecated models are dropped.
+	// Deprecated models are dropped from the entry.
 	require.Len(t, anthropic.Models, 1)
 	require.Equal(t, "claude-x", anthropic.Models[0].ID)
 	require.True(t, anthropic.Models[0].SupportsImages)
 	require.True(t, anthropic.Models[0].CanReason)
+	// Native-protocol entries carry no endpoint; the SDK default
+	// applies and users can override via config.
+	require.Empty(t, anthropic.APIEndpoint)
 }
 
-func TestTranslateModelsDevAdoptsUnknownProviders(t *testing.T) {
+func TestTranslateModelsDevAdoptsOpenAICompatProviders(t *testing.T) {
 	t.Parallel()
 
 	providers := translateModelsDev(fixtureModelsDev())
 
 	deepinfra, ok := findProvider(providers, "deepinfra")
-	require.True(t, ok, "an uncurated provider with a base URL is adopted")
+	require.True(t, ok, "an entry with a base URL is adopted")
 	require.Equal(t, TypeOpenAICompat, deepinfra.Type, "unmapped npm falls back to openai-compat")
 	require.Equal(t, "https://api.deepinfra.com/v1/openai", deepinfra.APIEndpoint)
 	require.Equal(t, "$DEEPINFRA_API_KEY", deepinfra.APIKey)
 	require.Len(t, deepinfra.Models, 1)
 	require.Equal(t, int64(32000), deepinfra.Models[0].ContextWindow)
-}
-
-func TestTranslateModelsDevOverlayWinsOverSource(t *testing.T) {
-	t.Parallel()
-
-	providers := translateModelsDev(fixtureModelsDev())
 
 	zai, ok := findProvider(providers, "zai")
 	require.True(t, ok)
-	// The overlay endpoint (coding endpoint) wins over the generic
-	// models.dev api field.
-	require.Equal(t, "https://api.z.ai/api/coding/paas/v4", zai.APIEndpoint)
-	require.Len(t, zai.Models, 1, "source models replace the seed list")
+	require.Equal(t, "https://api.z.ai/api/paas/v4", zai.APIEndpoint)
+	require.Equal(t, "$ZHIPU_API_KEY", zai.APIKey)
 }
 
 func TestTranslateModelsDevSkipsUnusableProviders(t *testing.T) {
@@ -155,12 +150,10 @@ func TestTranslateModelsDevDeterministicOrder(t *testing.T) {
 	a := translateModelsDev(fixtureModelsDev())
 	b := translateModelsDev(fixtureModelsDev())
 
-	tailA := a[len(overlays):]
-	tailB := b[len(overlays):]
-	require.Equal(t, tailA, tailB, "adopted providers sort deterministically")
-	require.True(t, slices.IsSortedFunc(tailA, func(x, y Provider) int {
+	require.Equal(t, a, b, "the catalog sorts deterministically")
+	require.True(t, slices.IsSortedFunc(a, func(x, y Provider) int {
 		return int(x.ID[0]) - int(y.ID[0])
-	}) || len(tailA) <= 1)
+	}) || len(a) <= 1)
 }
 
 func TestNpmToType(t *testing.T) {

@@ -56,6 +56,13 @@ func TestProviders_AutoUpdateDisabled(t *testing.T) {
 	resetProviderState()
 	defer resetProviderState()
 
+	// With auto-update disabled the cached catalog is served at any
+	// age and never fetched.
+	cached := []catalog.Provider{
+		{Name: "Cached", ID: "c1", Models: []catalog.Model{{ID: "m1"}}},
+	}
+	seedCatalogDB(t, tmpDir, cached, time.Now().Add(-72*time.Hour))
+
 	cfg := &Config{
 		Options: &Options{
 			DisableProviderAutoUpdate: true,
@@ -65,8 +72,8 @@ func TestProviders_AutoUpdateDisabled(t *testing.T) {
 
 	providers, err := Providers(cfg)
 	require.NoError(t, err)
-	require.NotNil(t, providers)
-	require.Greater(t, len(providers), 5, "expected embedded seed providers")
+	require.Len(t, providers, 1, "expected the cached catalog regardless of age")
+	require.Equal(t, "Cached", providers[0].Name)
 }
 
 func TestProviders_HonorsDisableDefaultProviders(t *testing.T) {
@@ -146,7 +153,7 @@ func TestCatalogSync_FetchSuccessStoresInDB(t *testing.T) {
 	require.Equal(t, "Fresh", cached[0].Name)
 }
 
-func TestCatalogSync_EmbeddedFallbackWhenFetchFails(t *testing.T) {
+func TestCatalogSync_EmptyCatalogWhenFetchFailsWithNoCache(t *testing.T) {
 	dataDir := t.TempDir()
 
 	client := &mockCatalogClient{err: errors.New("network error")}
@@ -155,7 +162,7 @@ func TestCatalogSync_EmbeddedFallbackWhenFetchFails(t *testing.T) {
 
 	providers, err := syncer.Get(t.Context())
 	require.Error(t, err, "with no cache and no fetch the failure is reported")
-	require.NotEmpty(t, providers, "the embedded seed is the last-resort catalog")
+	require.Empty(t, providers, "there is no built-in fallback catalog; config-only providers remain")
 }
 
 // TestProviders_KeepsCatalogWhenDBUnavailable covers a data directory

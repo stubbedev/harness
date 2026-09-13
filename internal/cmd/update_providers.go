@@ -23,9 +23,6 @@ provider list.`,
 # Refresh the catalog from models.dev (default)
 harness update-providers
 
-# Seed the catalog from the copy bundled with this release
-harness update-providers embedded
-
 # Update the catalog from a custom URL
 harness update-providers https://example.com/api.json
 

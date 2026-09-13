@@ -31,12 +31,12 @@ func TestParseContent(t *testing.T) {
 			content: `---
 name: my-agent
 description: A test agent.
-tools: view, grep, bash
+tools: view, grep, shell
 ---
 `,
 			wantName:        "my-agent",
 			wantDescription: "A test agent.",
-			wantTools:       []string{"view", "grep", "bash"},
+			wantTools:       []string{"view", "grep", "shell"},
 		},
 		{
 			name: "yaml_array_tools",
@@ -98,7 +98,7 @@ description: A fully specified agent.
 model: large
 tools:
   - view
-  - bash
+  - shell
 disallowedTools: write, edit
 skills:
   - pdf-processing
@@ -112,7 +112,7 @@ This is the system prompt body.
 			wantName:        "my-agent",
 			wantDescription: "A fully specified agent.",
 			wantModel:       "large",
-			wantTools:       []string{"view", "bash"},
+			wantTools:       []string{"view", "shell"},
 			wantDisallowed:  []string{"write", "edit"},
 			wantSkills:      []string{"pdf-processing", "data-analysis"},
 			wantMCPServers:  []string{"filesystem"},
@@ -354,8 +354,8 @@ func TestValidate(t *testing.T) {
 			agent: Subagent{
 				Name:            "my-agent",
 				Description:     "Something.",
-				Tools:           ToolList{"bash", "grep"},
-				DisallowedTools: ToolList{"bash"},
+				Tools:           ToolList{"shell", "grep"},
+				DisallowedTools: ToolList{"shell"},
 			},
 			wantErr: true,
 			errMsg:  "both",
@@ -1140,15 +1140,15 @@ func TestValidate_ReportsAllToolOverlaps(t *testing.T) {
 	sa := Subagent{
 		Name:            "reviewer",
 		Description:     "Reviews things.",
-		Tools:           ToolList{"view", "edit", "bash"},
-		DisallowedTools: ToolList{"view", "edit", "bash"},
+		Tools:           ToolList{"view", "edit", "shell"},
+		DisallowedTools: ToolList{"view", "edit", "shell"},
 	}
 
 	err := sa.Validate()
 	require.Error(t, err)
 	require.ErrorContains(t, err, "view")
 	require.ErrorContains(t, err, "edit")
-	require.ErrorContains(t, err, "bash")
+	require.ErrorContains(t, err, "shell")
 }
 
 // TestParseContent_EmptyToolListIsNotAbsent verifies that ToolList keeps the
@@ -1268,7 +1268,7 @@ func TestValidate_RejectsUnknownToolNames(t *testing.T) {
 		sa := Subagent{
 			Name:        "reviewer",
 			Description: "Reviews things.",
-			Tools:       ToolList{"view", "grep", "bash"},
+			Tools:       ToolList{"view", "grep", "shell"},
 		}
 		require.NoError(t, sa.Validate())
 	})

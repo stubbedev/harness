@@ -118,77 +118,17 @@ func fetchModelsDev(ctx context.Context, client *http.Client) (modelsDev, error)
 }
 
 // translateModelsDev converts the models.dev catalog into harness
-// providers using the overlay for identity, protocol, and defaults.
-// Providers whose overlay has no models.dev source fall back to their
-// embedded seed model list, so the catalog never loses a provider the
-// live source has not adopted yet.
-//
-// Providers that the overlay does not curate are adopted automatically
-// from the models.dev entry itself: the protocol derives from the AI
-// SDK package the entry targets, the endpoint from its OpenAI-compatible
-// base URL, and the API key template from its declared environment
-// variables. Adopted providers appear in the picker and become usable
-// as soon as the user sets the matching key, with no harness-side code
-// or data changes.
+// providers. Every models.dev entry that carries enough information to
+// be usable becomes a catalog provider: the protocol derives from the
+// AI SDK package the entry targets, the endpoint from its
+// OpenAI-compatible base URL, and the API key template from its
+// declared environment variables. Entries without a mappable protocol
+// or base URL are skipped; a user can always add such a provider by
+// hand through their config.
 func translateModelsDev(md modelsDev) []Provider {
-	seed := seedProviders()
-	seedByID := make(map[InferenceProvider]Provider, len(seed))
-	for _, p := range seed {
-		seedByID[p.ID] = p
-	}
-
-	consumed := make(map[string]bool, len(overlays))
-	providers := make([]Provider, 0, len(overlays))
-	for _, o := range overlays {
-		if o.SourceID != "" {
-			consumed[o.SourceID] = true
-		}
-		p := Provider{
-			ID:                  o.ID,
-			Name:                o.Name,
-			APIKey:              o.APIKey,
-			APIEndpoint:         o.APIEndpoint,
-			Type:                o.Type,
-			DefaultLargeModelID: o.DefaultLargeModelID,
-			DefaultSmallModelID: o.DefaultSmallModelID,
-			DefaultHeaders:      o.DefaultHeaders,
-			Models:              seedByID[o.ID].Models,
-		}
-
-		if o.LiveModelSource != "" {
-			// Model lists for live-sourced providers are filled in by
-			// their own fetcher in fetchCatalog.
-			providers = append(providers, p)
-			continue
-		}
-
-		src, ok := md[o.SourceID]
-		if !ok || o.SourceID == "" || len(src.Models) == 0 {
-			// Keep the seed models; identity and endpoint still come
-			// from the overlay.
-			providers = append(providers, p)
-			continue
-		}
-
-		models, skipped := translateModelsDevModels(src)
-		if len(models) == 0 && skipped > 0 {
-			// Keep the seed models when the live list has nothing left
-			// after filtering.
-			models = seedByID[o.ID].Models
-		}
-		if len(models) == 0 {
-			// Keep the seed models; identity and endpoint still come
-			// from the overlay.
-			providers = append(providers, p)
-			continue
-		}
-		sortModels(models)
-		p.Models = models
-		providers = append(providers, p)
-	}
-
+	providers := make([]Provider, 0, len(md))
 	for sourceID, src := range md {
-		if consumed[sourceID] || len(src.Models) == 0 {
+		if len(src.Models) == 0 {
 			continue
 		}
 		adopted, ok := adoptModelsDevProvider(sourceID, src)
@@ -204,14 +144,56 @@ func translateModelsDev(md modelsDev) []Provider {
 		providers = append(providers, adopted)
 	}
 
-	// Adopted entries inherit models.dev's random map order; sort them
-	// so the catalog output is deterministic. Curated overlay entries
-	// keep their order ahead of the adopted tail.
-	adoptedStart := len(overlays)
-	slices.SortStableFunc(providers[adoptedStart:], func(a, b Provider) int {
+	// models.dev is a JSON object, so iteration order is random; sort
+	// the catalog by ID for deterministic output.
+	slices.SortStableFunc(providers, func(a, b Provider) int {
 		return strings.Compare(string(a.ID), string(b.ID))
 	})
 	return providers
+}
+
+// ParseProviders decodes a provider catalog from raw JSON. It accepts
+// both shapes harness understands: the models.dev api.json document
+// (an object keyed by provider id) and a plain array of providers, as
+// written by hand-maintained files. The models.dev shape is translated
+// through the same adoption rules as the live fetch; the array shape
+// is used verbatim.
+func ParseProviders(data []byte) ([]Provider, error) {
+	trimmed := strings.TrimLeft(string(data), " \t\r\n")
+	if strings.HasPrefix(trimmed, "[") {
+		var providers []Provider
+		if err := json.Unmarshal(data, &providers); err != nil {
+			return nil, fmt.Errorf("failed to decode provider list: %w", err)
+		}
+		if len(providers) == 0 {
+			return nil, fmt.Errorf("no providers found in the provided source")
+		}
+		return providers, nil
+	}
+
+	var md modelsDev
+	if err := json.Unmarshal(data, &md); err != nil {
+		return nil, fmt.Errorf("failed to decode provider data: %w", err)
+	}
+	if len(md) == 0 {
+		return nil, fmt.Errorf("no providers found in the provided source")
+	}
+	return translateModelsDev(md), nil
+}
+
+// sortModels orders models largest-context-first so the default-model
+// heuristic (which falls back to the first model) lands on a capable
+// model and the model picker surfaces flagship models first.
+func sortModels(models []Model) {
+	slices.SortStableFunc(models, func(a, b Model) int {
+		if a.ContextWindow != b.ContextWindow {
+			if a.ContextWindow > b.ContextWindow {
+				return -1
+			}
+			return 1
+		}
+		return 0
+	})
 }
 
 // adoptModelsDevProvider derives a harness provider from an uncurated

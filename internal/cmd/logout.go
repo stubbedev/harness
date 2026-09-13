@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/config"
 )
@@ -88,8 +89,8 @@ func logoutCopilot(c *client.Client, wsID string) error {
 	ctx := getLogoutContext()
 
 	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.copilot.api_key"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers.copilot.oauth"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+string(catalog.InferenceProviderCopilot)+".api_key"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+string(catalog.InferenceProviderCopilot)+".oauth"),
 	); err != nil {
 		return err
 	}
@@ -114,7 +115,7 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
 	// Only OAuth-based providers support login/logout. Keep this list in sync
 	// with the switch in RunE and the login command.
 	oauthProviders := map[string]string{
-		"copilot": "GitHub Copilot",
+		string(catalog.InferenceProviderCopilot): "GitHub Copilot",
 	}
 
 	var loggedIn []loggedInProvider

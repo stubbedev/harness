@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/clipboard"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/oauth"
@@ -67,7 +68,7 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 	if !force {
 		cfg := ws.Config()
 		if cfg != nil {
-			if pc, ok := cfg.Providers.Get("copilot"); ok && pc.OAuthToken != nil {
+			if pc, ok := cfg.Providers.Get(string(catalog.InferenceProviderCopilot)); ok && pc.OAuthToken != nil {
 				fmt.Println("You are already logged in to GitHub Copilot.")
 				fmt.Println("Use --force to re-authenticate.")
 				return nil
@@ -128,7 +129,7 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 		token = t
 	}
 
-	if err := ws.SetProviderAPIKey(config.ScopeGlobal, "copilot", token); err != nil {
+	if err := ws.SetProviderAPIKey(config.ScopeGlobal, string(catalog.InferenceProviderCopilot), token); err != nil {
 		return err
 	}
 

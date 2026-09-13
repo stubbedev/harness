@@ -29,14 +29,14 @@ type InferenceProvider string
 const (
 	InferenceProviderOpenAI           InferenceProvider = "openai"
 	InferenceProviderAnthropic        InferenceProvider = "anthropic"
-	InferenceProviderGemini           InferenceProvider = "gemini"
+	InferenceProviderGemini           InferenceProvider = "google"
 	InferenceProviderAzure            InferenceProvider = "azure"
-	InferenceProviderBedrock          InferenceProvider = "bedrock"
-	InferenceProviderVertexAI         InferenceProvider = "vertexai"
+	InferenceProviderBedrock          InferenceProvider = "amazon-bedrock"
+	InferenceProviderVertexAI         InferenceProvider = "google-vertex"
 	InferenceProviderXAI              InferenceProvider = "xai"
 	InferenceProviderZAI              InferenceProvider = "zai"
-	InferenceProviderZhipu            InferenceProvider = "zhipu"
-	InferenceProviderZhipuCoding      InferenceProvider = "zhipu-coding"
+	InferenceProviderZhipu            InferenceProvider = "zhipuai"
+	InferenceProviderZhipuCoding      InferenceProvider = "zhipuai-coding-plan"
 	InferenceProviderGROQ             InferenceProvider = "groq"
 	InferenceProviderOpenRouter       InferenceProvider = "openrouter"
 	InferenceProviderCerebras         InferenceProvider = "cerebras"
@@ -45,24 +45,24 @@ const (
 	InferenceProviderChutes           InferenceProvider = "chutes"
 	InferenceProviderHuggingFace      InferenceProvider = "huggingface"
 	InferenceAIHubMix                 InferenceProvider = "aihubmix"
-	InferenceKimiCoding               InferenceProvider = "kimi-coding"
-	InferenceProviderCopilot          InferenceProvider = "copilot"
+	InferenceKimiCoding               InferenceProvider = "kimi-for-coding"
+	InferenceProviderCopilot          InferenceProvider = "github-copilot"
 	InferenceProviderCortecs          InferenceProvider = "cortecs"
 	InferenceProviderVercel           InferenceProvider = "vercel"
 	InferenceProviderMiniMax          InferenceProvider = "minimax"
-	InferenceProviderMiniMaxChina     InferenceProvider = "minimax-china"
+	InferenceProviderMiniMaxChina     InferenceProvider = "minimax-cn"
 	InferenceProviderIoNet            InferenceProvider = "ionet"
-	InferenceProviderQiniuCloud       InferenceProvider = "qiniucloud"
+	InferenceProviderQiniuCloud       InferenceProvider = "qiniu-ai"
 	InferenceProviderAvian            InferenceProvider = "avian"
 	InferenceProviderNebius           InferenceProvider = "nebius"
 	InferenceProviderNeuralwatt       InferenceProvider = "neuralwatt"
-	InferenceProviderOpenCodeZen      InferenceProvider = "opencode-zen"
+	InferenceProviderOpenCodeZen      InferenceProvider = "opencode"
 	InferenceProviderOpenCodeGo       InferenceProvider = "opencode-go"
-	InferenceProviderAlibabaSingapore InferenceProvider = "alibaba-singapore"
+	InferenceProviderAlibabaSingapore InferenceProvider = "alibaba"
 	InferenceProviderAlibabaUS        InferenceProvider = "alibaba-us"
-	InferenceProviderFireworks        InferenceProvider = "fireworks"
+	InferenceProviderFireworks        InferenceProvider = "fireworks-ai"
 	InferenceProviderBaseten          InferenceProvider = "baseten"
-	InferenceProviderMoonshot         InferenceProvider = "moonshot"
+	InferenceProviderMoonshot         InferenceProvider = "moonshotai"
 	InferenceProviderAtlasCloud       InferenceProvider = "atlascloud"
 )
 
@@ -104,48 +104,6 @@ type Model struct {
 	DefaultReasoningEffort string       `json:"default_reasoning_effort,omitempty"`
 	SupportsImages         bool         `json:"supports_attachments"`
 	Options                ModelOptions `json:"options,omitzero"`
-}
-
-// KnownProviders returns all the known inference providers.
-func KnownProviders() []InferenceProvider {
-	return []InferenceProvider{
-		InferenceProviderOpenAI,
-		InferenceProviderAnthropic,
-		InferenceProviderGemini,
-		InferenceProviderAzure,
-		InferenceProviderBedrock,
-		InferenceProviderVertexAI,
-		InferenceProviderXAI,
-		InferenceProviderZAI,
-		InferenceProviderZhipu,
-		InferenceProviderZhipuCoding,
-		InferenceProviderGROQ,
-		InferenceProviderOpenRouter,
-		InferenceProviderCerebras,
-		InferenceProviderDeepSeek,
-		InferenceProviderVenice,
-		InferenceProviderChutes,
-		InferenceProviderHuggingFace,
-		InferenceAIHubMix,
-		InferenceKimiCoding,
-		InferenceProviderCopilot,
-		InferenceProviderCortecs,
-		InferenceProviderVercel,
-		InferenceProviderMiniMax,
-		InferenceProviderMiniMaxChina,
-		InferenceProviderQiniuCloud,
-		InferenceProviderAvian,
-		InferenceProviderNebius,
-		InferenceProviderNeuralwatt,
-		InferenceProviderOpenCodeZen,
-		InferenceProviderOpenCodeGo,
-		InferenceProviderAlibabaSingapore,
-		InferenceProviderAlibabaUS,
-		InferenceProviderFireworks,
-		InferenceProviderBaseten,
-		InferenceProviderMoonshot,
-		InferenceProviderAtlasCloud,
-	}
 }
 
 // KnownProviderTypes returns all the known inference providers types.

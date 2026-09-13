@@ -782,11 +782,16 @@ local SQLite database, so startups stay fast and offline-friendly. When new
 providers and models are available, or when model metadata changes, Harness
 automatically updates your local configuration.
 
-Providers that Harness does not curate by hand are adopted automatically
-from models.dev: their API format, endpoint, and key variable are derived
-from the models.dev entry itself. They show up in the model picker and
-become usable as soon as the key they declare is set, so a new provider
-appearing upstream needs no Harness release.
+There is no hand-maintained provider list in Harness. Every models.dev entry
+that carries enough information to be usable becomes a provider
+automatically: the API format derives from the AI SDK package the entry
+targets, the endpoint from its published base URL, and the API key variable
+from its declared environment. New providers and models appear upstream with
+no Harness release; a provider shows up in the model picker and becomes
+usable as soon as the key it declares is set.
+
+Anything models.dev does not know about can still be used by configuring it
+by hand — see [Custom Providers](#custom-providers).
 
 ### Custom provider catalog
 
@@ -797,7 +802,8 @@ the `MODELS_DEV_URL` environment variable (e.g. `export MODELS_DEV_URL=http://lo
 
 For those with restricted internet access, or those who prefer to work in
 air-gapped environments, this might not be want you want, and this feature can
-be disabled.
+be disabled. When disabled, Harness serves the last catalog cached in the
+local database regardless of age and never reaches the network for it.
 
 To disable automatic provider updates in your config:
 
@@ -826,9 +832,6 @@ harness update-providers https://example.com/
 
 # Update providers from a local file.
 harness update-providers /path/to/local-providers.json
-
-# Reset the catalog to the snapshot embedded at Harness build time.
-harness update-providers embedded
 
 # For more info:
 harness update-providers --help

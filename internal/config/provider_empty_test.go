@@ -29,7 +29,7 @@ func TestCatalogSync_GetEmptyResultFromClient(t *testing.T) {
 	providers, err := syncer.Get(t.Context())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no providers")
-	require.NotEmpty(t, providers, "the embedded seed is the fallback")
+	require.Empty(t, providers, "there is no built-in fallback catalog")
 
 	// No catalog row is stored for empty results.
 	conn, connErr := db.Connect(context.Background(), dataDir)
