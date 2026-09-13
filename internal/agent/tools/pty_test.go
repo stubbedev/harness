@@ -349,16 +349,19 @@ func TestPtyRunner_PlainQuestionIsNotMasked(t *testing.T) {
 func TestPtyRunner_WrongPasswordReopensMaskedDialog(t *testing.T) {
 	r, ask := newAskRunner(t, "wrong-one", "open-sesame")
 
+	// The prompt string is assembled at runtime so the tty echo of the
+	// command line itself never contains the literal "Password: ": on a
+	// slow machine that echo is still in flight when the real prompts
+	// appear, and a stale match re-opens the dialog after the answers
+	// were consumed (and the run ends up interrupted).
 	res, err := r.Run(t.Context(),
-		`/bin/sh -c 'stty -echo; printf "Password: "; read a; `+
-			`printf "\nSorry, try again.\n"; printf "Password: "; read b; stty echo; `+
+		`/bin/sh -c 'stty -echo; w=word; printf "Pass%s: " "$w"; read a; `+
+			`printf "\nSorry, try again.\n"; printf "Pass%s: " "$w"; read b; stty echo; `+
 			`[ "$b" = open-sesame ] && printf ok || printf bad'`, 30)
 	require.NoError(t, err)
 	asks := ask.asks()
-	// At least the initial ask and the rejected-retry ask: on a slow
-	// machine the echo of the command text (which itself contains
-	// "Password: ") can re-trigger the detector after the answers were
-	// already delivered, so the exact count is not part of the contract.
+	// At least the initial ask and the rejected-retry ask: the exact
+	// count is not part of the contract on a loaded runner.
 	require.GreaterOrEqual(t, len(asks), 2)
 	require.Contains(t, asks[1].Questions[0].Text, "previous attempt was rejected")
 	require.NotNil(t, res.ExitCode)

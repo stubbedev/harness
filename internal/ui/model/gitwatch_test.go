@@ -32,9 +32,16 @@ func TestResolveGitDirs(t *testing.T) {
 
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main")
+	// git rev-parse canonicalizes the path: symlinks are resolved (a
+	// macOS temp dir lives under /private/var) and Windows gets long
+	// names with forward slashes. Expect that form.
+	canonical, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	canonical = filepath.ToSlash(canonical)
+	wantGitDir := canonical + "/.git"
 	d := resolveGitDirs(dir)
-	require.Equal(t, filepath.Join(dir, ".git"), d.gitDir)
-	require.Equal(t, filepath.Join(dir, ".git"), d.commonDir)
+	require.Equal(t, wantGitDir, filepath.ToSlash(d.gitDir))
+	require.Equal(t, wantGitDir, filepath.ToSlash(d.commonDir))
 
 	d = resolveGitDirs(t.TempDir())
 	require.Empty(t, d.gitDir)
