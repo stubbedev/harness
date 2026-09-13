@@ -44,3 +44,39 @@ func TestResetIdempotent(t *testing.T) {
 
 	require.Equal(t, 0, length)
 }
+
+func TestFit(t *testing.T) {
+	t.Parallel()
+
+	src := image.NewRGBA(image.Rect(0, 0, 100, 50))
+
+	t.Run("image that fits is returned unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		require.Same(t, src, fit(src, 100, 50))
+		require.Same(t, src, fit(src, 200, 100))
+	})
+
+	t.Run("scales down keeping the aspect ratio", func(t *testing.T) {
+		t.Parallel()
+
+		out := fit(src, 50, 50)
+		require.Equal(t, 50, out.Bounds().Dx())
+		require.Equal(t, 25, out.Bounds().Dy())
+	})
+
+	t.Run("scales to the other bound when it is tighter", func(t *testing.T) {
+		t.Parallel()
+
+		out := fit(src, 200, 10)
+		require.Equal(t, 20, out.Bounds().Dx())
+		require.Equal(t, 10, out.Bounds().Dy())
+	})
+
+	t.Run("degenerate dimensions return an empty image", func(t *testing.T) {
+		t.Parallel()
+
+		require.Empty(t, fit(src, 0, 10).Bounds().Dx())
+		require.Empty(t, fit(src, 10, 0).Bounds().Dx())
+	})
+}

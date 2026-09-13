@@ -8,15 +8,16 @@ import (
 	"image/color"
 	"io"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/ansi/kitty"
-	"github.com/disintegration/imaging"
 	paintbrush "github.com/jordanella/go-ansi-paintbrush"
 	"github.com/stubbedev/harness/internal/ui/util"
+	"golang.org/x/image/draw"
 )
 
 // TransmittedMsg is a message indicating that an image has been transmitted to
@@ -75,6 +76,41 @@ func ResetCache() {
 	cachedMutex.Unlock()
 }
 
+// fit scales img down to fit within maxWidth and maxHeight, keeping the
+// aspect ratio. An image that already fits is returned unchanged.
+func fit(img image.Image, maxWidth, maxHeight int) image.Image {
+	if maxWidth <= 0 || maxHeight <= 0 {
+		return image.NewNRGBA(image.Rect(0, 0, 0, 0))
+	}
+
+	srcBounds := img.Bounds()
+	srcW, srcH := srcBounds.Dx(), srcBounds.Dy()
+	if srcW <= 0 || srcH <= 0 || (srcW <= maxWidth && srcH <= maxHeight) {
+		return img
+	}
+
+	srcAspect := float64(srcW) / float64(srcH)
+	maxAspect := float64(maxWidth) / float64(maxHeight)
+	var newW, newH int
+	if srcAspect > maxAspect {
+		newW = maxWidth
+		newH = int(math.Round(float64(newW) / srcAspect))
+	} else {
+		newH = maxHeight
+		newW = int(math.Round(float64(newH) * srcAspect))
+	}
+	if newW < 1 {
+		newW = 1
+	}
+	if newH < 1 {
+		newH = 1
+	}
+
+	dst := image.NewNRGBA(image.Rect(0, 0, newW, newH))
+	draw.CatmullRom.Scale(dst, dst.Bounds(), img, srcBounds, draw.Src, nil)
+	return dst
+}
+
 // fitImage resizes the image to fit within the specified dimensions in
 // terminal cells, maintaining the aspect ratio.
 func fitImage(id string, img image.Image, cs CellSize, cols, rows int) image.Image {
@@ -98,7 +134,7 @@ func fitImage(id string, img image.Image, cs CellSize, cols, rows int) image.Ima
 	maxWidth := cols * cs.Width
 	maxHeight := rows * cs.Height
 
-	img = imaging.Fit(img, maxWidth, maxHeight, imaging.Lanczos)
+	img = fit(img, maxWidth, maxHeight)
 
 	cachedMutex.Lock()
 	cachedImages[key] = cachedImage{
