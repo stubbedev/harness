@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stubbedev/harness/internal/agent/notify"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
@@ -101,6 +102,13 @@ func (w *countingWorkspace) AgentCancel(string)     { w.cancelCalls++ }
 // cancelTurnCalls records AgentCancelTurn requests (the esc-while-busy
 // path) separately from full cancels.
 func (w *countingWorkspace) AgentCancelTurn(string) { w.cancelTurnCalls++ }
+
+// ListCheckpoints returns none; the rewind picker opens fine without
+// working-tree snapshots (turns simply list without the files-only
+// mode).
+func (w *countingWorkspace) ListCheckpoints(context.Context, string) ([]checkpoints.Checkpoint, error) {
+	return nil, nil
+}
 
 func (w *countingWorkspace) AgentModel() workspace.AgentModel {
 	w.modelCalls++

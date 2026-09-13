@@ -277,6 +277,12 @@ type UI struct {
 
 	// isCanceling tracks whether the user has pressed escape once to cancel.
 	isCanceling bool
+	// rewindEscArmed tracks the first escape of the idle double-escape
+	// that opens the rewind picker (the cancel-last-message path). It
+	// shares the cancel timer window and is mutually exclusive with
+	// isCanceling: while the agent is busy escape cancels the turn
+	// instead.
+	rewindEscArmed bool
 
 	// isQuitting tracks whether the user has pressed the quit key once,
 	// arming the double-press quit window.
@@ -1216,6 +1222,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleQuestionNotification(msg.Payload)
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
+		m.rewindEscArmed = false
 	case quitTimerExpiredMsg:
 		m.isQuitting = false
 	case tea.TerminalVersionMsg:
@@ -2862,6 +2869,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Editor.Escape):
+				if consumed, cmd := m.handleRewindEscape(); consumed {
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					break
+				}
 				cmd := m.handleHistoryEscape(msg)
 				if cmd != nil {
 					cmds = append(cmds, cmd)
@@ -3344,6 +3357,12 @@ func (m *UI) ShortHelp() []key.Binding {
 				cancelBinding.SetHelp("esc", "press again to cancel")
 			}
 			binds = append(binds, cancelBinding)
+		} else if m.focus == uiFocusEditor && m.rewindEscArmed {
+			// Idle with the first escape pressed: the next one opens the
+			// rewind picker.
+			rewindBinding := k.Chat.Cancel
+			rewindBinding.SetHelp("esc", "press again to rewind")
+			binds = append(binds, rewindBinding)
 		}
 
 		switch m.focus {
@@ -3439,6 +3458,10 @@ func (m *UI) FullHelp() [][]key.Binding {
 				cancelBinding.SetHelp("esc", "press again to cancel")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
+		} else if m.focus == uiFocusEditor && m.rewindEscArmed {
+			rewindBinding := k.Chat.Cancel
+			rewindBinding.SetHelp("esc", "press again to rewind")
+			binds = append(binds, []key.Binding{rewindBinding})
 		}
 
 		mainBinds := []key.Binding{}
@@ -4532,6 +4555,7 @@ func (m *UI) cancelAgent() tea.Cmd {
 	if m.isCanceling {
 		// Second escape press — interrupt the running turn.
 		m.isCanceling = false
+		m.rewindEscArmed = false
 
 		// Cancel a running bang command if one is in progress.
 		if m.bangCancel != nil {
@@ -4553,7 +4577,36 @@ func (m *UI) cancelAgent() tea.Cmd {
 
 	// First escape press - set canceling state and start timer.
 	m.isCanceling = true
+	m.rewindEscArmed = false
 	return cancelTimerCmd()
+}
+
+// handleRewindEscape implements the idle half of the escape contract:
+// with no LLM action running, a double escape opens the rewind picker —
+// rewinding to the newest turn cancels the last message and restores
+// its text into the editor. It reports whether it consumed the press; a
+// draft, open completions, or history browsing own the press instead,
+// and while the agent is busy escape stays the turn cancel.
+func (m *UI) handleRewindEscape() (bool, tea.Cmd) {
+	if m.state != uiChat || m.focus != uiFocusEditor || m.isAgentBusy() || !m.hasSession() {
+		m.rewindEscArmed = false
+		return false, nil
+	}
+	// A draft, open completions, or history browsing own the press. The
+	// messages-length guard keeps the zero value of index (0) from
+	// reading as "browsing" before any history has loaded.
+	if m.completionsOpen || (m.promptHistory.index >= 0 && len(m.promptHistory.messages) > 0) || m.textarea.Value() != "" {
+		m.rewindEscArmed = false
+		return false, nil
+	}
+	if m.rewindEscArmed {
+		m.rewindEscArmed = false
+		m.isCanceling = false
+		return true, m.openRewindDialog()
+	}
+	m.rewindEscArmed = true
+	m.isCanceling = false
+	return true, cancelTimerCmd()
 }
 
 // openDialog opens a dialog by its ID.
