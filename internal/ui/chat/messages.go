@@ -539,7 +539,10 @@ var HideThinking bool
 // ShouldRenderAssistantMessage determines if an assistant message should be rendered
 //
 // In some cases the assistant message only has tools so we do not want to render an
-// empty message.
+// empty message. An in-progress thinking block keeps the message alive so its
+// spinner stays visible, but only when thinking actually renders: with
+// HideThinking set, such a message would render as an empty shell (the lone
+// focused border) for as long as its tool calls run.
 func ShouldRenderAssistantMessage(msg *message.Message) bool {
 	content := strings.TrimSpace(msg.Content().Text)
 	thinking := strings.TrimSpace(msg.ReasoningContent().Thinking)
@@ -548,7 +551,8 @@ func ShouldRenderAssistantMessage(msg *message.Message) bool {
 	}
 	isCancelled := msg.FinishReason() == message.FinishReasonCanceled
 	hasToolCalls := len(msg.ToolCalls()) > 0
-	return !hasToolCalls || content != "" || thinking != "" || msg.IsThinking() || msg.IsErrorLike() || isCancelled
+	isThinking := msg.IsThinking() && !HideThinking
+	return !hasToolCalls || content != "" || thinking != "" || isThinking || msg.IsErrorLike() || isCancelled
 }
 
 // BuildToolResultMap creates a map of tool call IDs to their results from a list of messages.
