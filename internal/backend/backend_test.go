@@ -61,6 +61,32 @@ func newClientID(t *testing.T) string {
 	return uuid.New().String()
 }
 
+// tempDataDir returns a temporary directory for a workspace data dir
+// that hosts a real SQLite database. Unlike t.TempDir, its cleanup
+// retries removal for a while: database/sql releases an in-use
+// connection asynchronously after Close, and on Windows an open file
+// cannot be unlinked, so a single-shot RemoveAll is flaky there.
+func tempDataDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "harness-data-")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			err := os.RemoveAll(dir)
+			if err == nil {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Logf("Failed to remove data dir %s: %v", dir, err)
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+	return dir
+}
+
 func TestResolveWorkspaceKey_AbsoluteAndSymlink(t *testing.T) {
 	t.Parallel()
 
@@ -395,7 +421,7 @@ func TestPathDedupe_FullCreate(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 
 	cwd := t.TempDir()
-	dataDir := t.TempDir()
+	dataDir := tempDataDir(t)
 
 	b := New(context.Background(), nil, func() {})
 	b.SetCreateGrace(2 * time.Second)
@@ -430,8 +456,8 @@ func TestPathDedupe_DifferentPaths_DifferentWorkspaces(t *testing.T) {
 
 	cwdA := t.TempDir()
 	cwdB := t.TempDir()
-	dataA := t.TempDir()
-	dataB := t.TempDir()
+	dataA := tempDataDir(t)
+	dataB := tempDataDir(t)
 
 	b := New(context.Background(), nil, func() {})
 	b.SetCreateGrace(2 * time.Second)
@@ -455,7 +481,7 @@ func TestPathDedupe_FirstWinsKeepsOriginalEnv(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 
 	cwd := t.TempDir()
-	dataDir := t.TempDir()
+	dataDir := tempDataDir(t)
 
 	b := New(context.Background(), nil, func() {})
 	b.SetCreateGrace(2 * time.Second)
@@ -491,7 +517,7 @@ func TestPathDedupe_Symlink(t *testing.T) {
 	real := t.TempDir()
 	link := filepath.Join(t.TempDir(), "link")
 	require.NoError(t, os.Symlink(real, link))
-	dataDir := t.TempDir()
+	dataDir := tempDataDir(t)
 
 	b := New(context.Background(), nil, func() {})
 	b.SetCreateGrace(2 * time.Second)
@@ -514,7 +540,7 @@ func TestPathDedupe_NonExistentPath(t *testing.T) {
 
 	parent := t.TempDir()
 	missing := filepath.Join(parent, "does-not-exist")
-	dataDir := t.TempDir()
+	dataDir := tempDataDir(t)
 
 	b := New(context.Background(), nil, func() {})
 	b.SetCreateGrace(2 * time.Second)
@@ -535,7 +561,7 @@ func TestCreateWorkspace_IdempotentSameClient(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 
 	cwd := t.TempDir()
-	dataDir := t.TempDir()
+	dataDir := tempDataDir(t)
 	b := New(context.Background(), nil, func() {})
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
@@ -562,7 +588,7 @@ func TestPathDedupe_ParallelCreates(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 
 	cwd := t.TempDir()
-	dataDir := t.TempDir()
+	dataDir := tempDataDir(t)
 
 	b := New(context.Background(), nil, func() {})
 	b.SetCreateGrace(2 * time.Second)
@@ -709,7 +735,7 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			xdgIsolated(t)
 			cwd := t.TempDir()
-			dataDir := t.TempDir()
+			dataDir := tempDataDir(t)
 			if tc.config != "" {
 				require.NoError(t, os.WriteFile(filepath.Join(cwd, "harness.yaml"), []byte(tc.config), 0o644))
 			}
@@ -747,7 +773,7 @@ func TestFirstWinsMismatch_LogsOnFlagDifferences(t *testing.T) {
 func TestFirstWinsMismatch_NoLogWhenIdentical(t *testing.T) {
 	xdgIsolated(t)
 	cwd := t.TempDir()
-	dataDir := t.TempDir()
+	dataDir := tempDataDir(t)
 
 	buf := captureDebugLogs(t)
 	b := New(context.Background(), nil, func() {})
@@ -812,7 +838,7 @@ func TestChannelOptInBoundary_DuplicateCreate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			xdgIsolated(t)
 			cwd := t.TempDir()
-			dataDir := t.TempDir()
+			dataDir := tempDataDir(t)
 
 			b := New(context.Background(), nil, func() {})
 			b.SetCreateGrace(2 * time.Second)
@@ -1372,7 +1398,7 @@ func TestCreateWorkspace_PendingBalancedOnSuccess(t *testing.T) {
 	b.SetCreateGrace(time.Hour)
 	t.Cleanup(func() { drainBackend(t, b) })
 
-	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), tempDataDir(t), uuid.New().String()))
 	require.NoError(t, err)
 
 	b.mu.Lock()
@@ -1449,7 +1475,7 @@ func TestServer_CreateCancelsPendingIdleShutdown(t *testing.T) {
 
 	// Session 2 arrives within the linger window: creating a workspace
 	// must cancel the pending shutdown.
-	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), uuid.New().String()))
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), tempDataDir(t), uuid.New().String()))
 	require.NoError(t, err)
 
 	b.mu.Lock()
@@ -1656,7 +1682,7 @@ func TestRetireClient_RefusesLaterCreates(t *testing.T) {
 	cid := newClientID(t)
 	require.NoError(t, b.RetireClient(cid))
 
-	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), cid))
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), tempDataDir(t), cid))
 	require.ErrorIs(t, err, ErrClientRetired)
 	require.Zero(t, b.workspaces.Len(), "a refused create must register nothing")
 }
@@ -1676,7 +1702,7 @@ func TestRetireClient_DuringPendingCreate(t *testing.T) {
 	t.Cleanup(func() { drainBackend(t, b) })
 
 	cid := newClientID(t)
-	cwd, dataDir := t.TempDir(), t.TempDir()
+	cwd, dataDir := t.TempDir(), tempDataDir(t)
 
 	createErr := make(chan error, 1)
 	go func() {
@@ -1751,7 +1777,7 @@ func TestShutdownIfIdle_GrantedAndFinal(t *testing.T) {
 	require.True(t, b.ShutdownIfIdle())
 	require.Equal(t, int32(1), shutdowns.Load())
 
-	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), newClientID(t)))
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), tempDataDir(t), newClientID(t)))
 	require.ErrorIs(t, err, ErrServerShuttingDown)
 }
 
@@ -1771,7 +1797,7 @@ func TestIdleShutdown_RefusesLaterCreates(t *testing.T) {
 	require.Eventually(t, func() bool { return shutdowns.Load() == 1 },
 		2*time.Second, 10*time.Millisecond)
 
-	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), cid))
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), tempDataDir(t), cid))
 	require.ErrorIs(t, err, ErrServerShuttingDown,
 		"the client must be told to retry against a replacement server")
 }
