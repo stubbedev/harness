@@ -22,6 +22,7 @@ func TestCatalogSync_GetEmptyResultFromClient(t *testing.T) {
 	t.Parallel()
 
 	dataDir := t.TempDir()
+	t.Cleanup(db.ResetPool)
 
 	syncer := &catalogSync{}
 	syncer.Init(&emptyProviderClient{}, dataDir, true)

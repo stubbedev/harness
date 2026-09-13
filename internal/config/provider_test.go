@@ -31,6 +31,9 @@ func resetProviderState() {
 	providerList = nil
 	providerErr = nil
 	catalogSyncer = &catalogSync{}
+	// Close pooled catalog-cache connections so temp data dirs can be
+	// removed on Windows, where open files cannot be unlinked.
+	db.ResetPool()
 }
 
 // seedCatalogDB writes a catalog row directly into the test database.
@@ -91,6 +94,7 @@ func TestProviders_HonorsDisableDefaultProviders(t *testing.T) {
 
 func TestCatalogSync_FreshDBCacheSkipsFetch(t *testing.T) {
 	dataDir := t.TempDir()
+	t.Cleanup(db.ResetPool)
 
 	cached := []catalog.Provider{
 		{Name: "Cached", ID: "c1", Models: []catalog.Model{{ID: "m1"}}},
@@ -112,6 +116,7 @@ func TestCatalogSync_FreshDBCacheSkipsFetch(t *testing.T) {
 
 func TestCatalogSync_StaleDBCacheUsedWhenFetchFails(t *testing.T) {
 	dataDir := t.TempDir()
+	t.Cleanup(db.ResetPool)
 
 	cached := []catalog.Provider{
 		{Name: "Stale", ID: "c1", Models: []catalog.Model{{ID: "m1"}}},
@@ -130,6 +135,7 @@ func TestCatalogSync_StaleDBCacheUsedWhenFetchFails(t *testing.T) {
 
 func TestCatalogSync_FetchSuccessStoresInDB(t *testing.T) {
 	dataDir := t.TempDir()
+	t.Cleanup(db.ResetPool)
 
 	fresh := []catalog.Provider{
 		{Name: "Fresh", ID: "f1", Models: []catalog.Model{{ID: "m1"}}},
@@ -155,6 +161,7 @@ func TestCatalogSync_FetchSuccessStoresInDB(t *testing.T) {
 
 func TestCatalogSync_EmptyCatalogWhenFetchFailsWithNoCache(t *testing.T) {
 	dataDir := t.TempDir()
+	t.Cleanup(db.ResetPool)
 
 	client := &mockCatalogClient{err: errors.New("network error")}
 	syncer := &catalogSync{}
@@ -184,6 +191,7 @@ func TestProviders_KeepsCatalogWhenDBUnavailable(t *testing.T) {
 
 func TestProviders_UsesMockClientInjectedThroughSyncer(t *testing.T) {
 	dataDir := t.TempDir()
+	t.Cleanup(db.ResetPool)
 
 	client := &mockCatalogClient{providers: []catalog.Provider{
 		{Name: "Provider1", ID: "p1"},
