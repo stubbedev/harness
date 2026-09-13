@@ -16,13 +16,15 @@ import (
 const SendMessageToolName = "send_message"
 
 // sendMessageTool lets a dispatched sub-agent push a message to the
-// orchestrating agent while it is still running. Messages cannot interrupt
-// the orchestrator mid-turn (it is blocked waiting for the dispatch to
-// return), so they are collected in a per-run inbox and appended to the
-// dispatch tool's result — guaranteed delivery even when the sub-agent
-// later fails, times out, or is cancelled. That makes it the right channel
-// for partial findings and for questions whose answers are not needed to
-// continue; the sub-agent's final text output remains its main report.
+// orchestrating agent while it is still running. Delivery depends on how
+// the sub-agent was dispatched: a background child delivers live — the
+// message lands in the dispatching session's inbox and is folded into its
+// next step — while a blocking child's messages are collected per-run and
+// appended to the dispatch tool's result, guaranteed delivery even when the
+// sub-agent later fails, times out, or is cancelled. In both cases that
+// makes it the right channel for partial findings and for questions whose
+// answers are not needed to continue; the sub-agent's final text output
+// remains its main report.
 type sendMessageTool struct {
 	coord *coordinator
 	opts  fantasy.ProviderOptions
@@ -33,8 +35,12 @@ func (t *sendMessageTool) Info() fantasy.ToolInfo {
 		Name: SendMessageToolName,
 		Description: `Send a message to the orchestrating agent that dispatched you.
 
-The orchestrator reads messages when your run completes, so do not wait for a reply. Use this for:
-- Partial findings worth keeping even if the rest of your run fails.
+Do not wait for a reply. Delivery depends on how you were dispatched:
+- In the background: your message reaches the orchestrator as its next step, while you are still running.
+- Otherwise: the orchestrator reads your messages when your run completes.
+
+Use this for:
+- Findings worth acting on before you finish, or worth keeping even if the rest of your run fails.
 - Questions or caveats the orchestrator should weigh when combining your results with other agents'.
 
 Your final response text is still your primary report; do not duplicate it here.`,
@@ -66,19 +72,35 @@ func (t *sendMessageTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 	if message == "" {
 		return fantasy.NewTextErrorResponse(`"message" must not be empty`), nil
 	}
-	t.coord.recordSubagentMessage(sessionID, message)
+	live, err := t.coord.recordSubagentMessage(sessionID, message)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+	if live {
+		return fantasy.NewTextResponse("Message delivered to the orchestrator; it will read it as its next step."), nil
+	}
 	return fantasy.NewTextResponse("Message delivered to the orchestrator; it will be read when your run completes."), nil
 }
 
-// recordSubagentMessage appends to the per-run inbox of a child session.
-// The inbox is optional: a coordinator built without one (tests that
-// exercise a single dispatch path) just drops the message.
-func (c *coordinator) recordSubagentMessage(childSessionID, message string) {
+// recordSubagentMessage routes a sub-agent's message to its orchestrator.
+// A child dispatched in the background delivers live: the message lands in
+// the dispatching session's inbox and is folded into that session's next
+// step, while the child is still running. Any other dispatch keeps the
+// completion-delivery guarantee: the message is appended to the dispatch
+// tool's result when the run ends. It returns whether delivery was live.
+func (c *coordinator) recordSubagentMessage(childSessionID, message string) (bool, error) {
+	if run, ok := c.liveRouteForChild(childSessionID); ok {
+		return true, c.recordLiveSubagentMessage(run, message)
+	}
 	if c.subagentMessages == nil {
-		return
+		// The completion inbox is optional: a coordinator built without
+		// one (tests that exercise a single dispatch path) just drops the
+		// message.
+		return false, nil
 	}
 	existing, _ := c.subagentMessages.Get(childSessionID)
 	c.subagentMessages.Set(childSessionID, append(existing, message))
+	return false, nil
 }
 
 // drainSubagentMessages returns and clears the inbox of a child session.

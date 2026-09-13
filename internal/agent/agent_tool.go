@@ -35,6 +35,7 @@ type AgentParams struct {
 type AgentDispatchParams struct {
 	SubagentType string `json:"subagent_type,omitempty"`
 	Prompt       string `json:"prompt"`
+	Background   bool   `json:"background,omitempty"`
 }
 
 const (
@@ -128,6 +129,10 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			"prompt": map[string]any{
 				"type":        "string",
 				"description": "The task for the agent to perform",
+			},
+			"background": map[string]any{
+				"type":        "boolean",
+				"description": "Start the agent in the background and return immediately with a handle instead of waiting for its result. Messages it sends you arrive as new user messages between your steps while it runs; collect its result with the wait tool using the handle. Default false: the call blocks and returns the agent's final output.",
 			},
 		},
 		Required: []string{"prompt"},
@@ -249,12 +254,51 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 			// Every dispatch below runs a whole child session, so the
 			// concurrency slot is taken here — before any build work — and
 			// held for the run. Over the limit this blocks rather than
-			// failing, so a wide fan-out completes in waves.
+			// failing, so a wide fan-out completes in waves. A background
+			// dispatch transfers the slot to the run instead of holding it
+			// for the tool call: the child holds it until it finishes.
 			release, slotErr := c.acquireDispatchSlot(ctx)
 			if slotErr != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("acquire dispatch slot: %v", slotErr)), nil
 			}
-			defer release()
+
+			// dispatchRun runs the resolved agent as this call's dispatch.
+			// Both blocking and background forms share it; only the slot
+			// ownership differs.
+			handedOff := false
+			dispatchRun := func(agent SessionAgent, title, name, color, model string) (fantasy.ToolResponse, error) {
+				runParams := subAgentParams{
+					Agent:          agent,
+					SessionID:      sessionID,
+					AgentMessageID: agentMessageID,
+					ToolCallID:     call.ID,
+					Prompt:         params.Prompt,
+					SessionTitle:   title,
+					AgentName:      name,
+					AgentColor:     color,
+					AgentModel:     model,
+					Background:     params.Background,
+				}
+				if params.Background {
+					runParams.ReleaseSlot = release
+					handedOff = true
+				}
+				return c.runSubAgent(ctx, runParams)
+			}
+			if params.Background {
+				defer func() {
+					// Once dispatchRun hands the slot to the run, the
+					// background goroutine owns releasing it. If dispatch
+					// never got that far — unknown type, build failure —
+					// give it back here. release is once-wrapped, so this
+					// is a no-op when a failure path already released.
+					if !handedOff {
+						release()
+					}
+				}()
+			} else {
+				defer release()
+			}
 
 			subagentType := params.SubagentType
 			if subagentType == "" {
@@ -268,17 +312,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("build %s agent: %v", subagentType, err)), nil
 				}
-				return c.runSubAgent(ctx, subAgentParams{
-					Agent:          builtAgent,
-					SessionID:      sessionID,
-					AgentMessageID: agentMessageID,
-					ToolCallID:     call.ID,
-					Prompt:         params.Prompt,
-					SessionTitle:   "New Agent Session",
-					AgentName:      subagentType,
-					AgentColor:     subagents.AutoColor(subagentType),
-					AgentModel:     builtAgent.Model().ModelCfg.Model,
-				})
+				return dispatchRun(builtAgent, "New Agent Session", subagentType, subagents.AutoColor(subagentType), builtAgent.Model().ModelCfg.Model)
 			}
 
 			sa := findSubagentByName(c.activeSubagentsList(), subagentType)
@@ -319,17 +353,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
 			}
 
-			return c.runSubAgent(ctx, subAgentParams{
-				Agent:          agent,
-				SessionID:      sessionID,
-				AgentMessageID: agentMessageID,
-				ToolCallID:     call.ID,
-				Prompt:         params.Prompt,
-				SessionTitle:   sa.Name + " Agent Session",
-				AgentName:      sa.Name,
-				AgentColor:     sa.ResolvedColor(),
-				AgentModel:     agent.Model().ModelCfg.Model,
-			})
+			return dispatchRun(agent, sa.Name+" Agent Session", sa.Name, sa.ResolvedColor(), agent.Model().ModelCfg.Model)
 		},
 	}, nil
 }

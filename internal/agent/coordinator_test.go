@@ -67,6 +67,10 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 		messages:           env.messages,
 		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 		subagentMessages:   newSubagentInbox(),
+		liveInbox:          newLiveInbox(),
+		backgroundRuns:     csync.NewMap[string, *backgroundRun](),
+		backgroundByChild:  csync.NewMap[string, string](),
+		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
 	}
 }
 

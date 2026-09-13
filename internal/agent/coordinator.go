@@ -175,10 +175,24 @@ type coordinator struct {
 	// reloads take effect on the next fire.
 	hooks *hooks.Registry
 
-	// subagentMessages is the inbox for cross-session messaging: messages
-	// sub-agents send via the send_message tool, keyed by child session
-	// ID and drained into the dispatch tool result when the run ends.
+	// subagentMessages is the completion inbox for cross-session messaging:
+	// messages sub-agents send via the send_message tool during a blocking
+	// dispatch, keyed by child session ID and drained into the dispatch tool
+	// result when the run ends.
 	subagentMessages *csync.Map[string, []string]
+
+	// liveInbox is the inbox for messages from running background
+	// sub-agents, keyed by the dispatching session and drained per step by
+	// that session's SessionAgent (see PrepareStep) so a message lands in
+	// its dispatcher's next step while the child is still running.
+	liveInbox *liveInbox
+
+	// backgroundRuns tracks background dispatches by handle, and
+	// backgroundByChild maps a background child session ID to its handle so
+	// send_message can route live. Runs are kept after they finish: their
+	// result stays collectable through the wait tool in later turns.
+	backgroundRuns    *csync.Map[string, *backgroundRun]
+	backgroundByChild *csync.Map[string, string]
 
 	// expandedMCPTools records which tools of defer-loaded (tool-search)
 	// MCP servers have been loaded into the coder agent's tool set.
@@ -288,6 +302,9 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		hooks:              hooks.NewRegistry(opts.Config, opts.Config.WorkingDir(), opts.Config.WorkingDir()),
 		expandedMCPTools:   csync.NewMap[string, map[string]bool](),
 		subagentMessages:   newSubagentInbox(),
+		liveInbox:          newLiveInbox(),
+		backgroundRuns:     csync.NewMap[string, *backgroundRun](),
+		backgroundByChild:  csync.NewMap[string, string](),
 		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
 		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
 		dispatchSem:        make(chan struct{}, maxConcurrentSubagents(opts.Config)),
@@ -963,6 +980,10 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
 		Hooks:                c.hooks,
+		// The live inbox is keyed by session, and only a session that can
+		// dispatch (the coder today) ever has entries, so wiring it for
+		// every agent is a no-op for children.
+		SubagentInbox: c,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -1019,6 +1040,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			return nil, err
 		}
 		allTools = append(allTools, agentTool)
+		// The wait tool is the sync point for background dispatches; it is
+		// useless without the dispatcher, so they share a gate.
+		allTools = append(allTools, newWaitTool(c))
 	}
 
 	if slices.Contains(agent.AllowedTools, tools.ResearchToolName) {
@@ -1909,6 +1933,15 @@ type subAgentParams struct {
 	AgentName      string
 	AgentColor     string
 	AgentModel     string
+	// Background runs the child detached from the dispatching turn: the
+	// dispatch tool call returns a handle immediately while the child runs
+	// to completion on its own goroutine (see runSubAgentBackground).
+	Background bool
+	// ReleaseSlot, when set, releases the dispatch concurrency slot. The
+	// dispatch closure owns the slot for a blocking run (via defer); a
+	// background run takes ownership and releases it when the child
+	// finishes, so its slot spans the run, not the tool call.
+	ReleaseSlot func()
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
@@ -1927,12 +1960,17 @@ func callTopK(providerCfg config.ProviderConfig, topK *int64) *int64 {
 
 // runSubAgent runs a sub-agent and handles session management and cost accumulation.
 // It creates a sub-session, runs the agent with the given prompt, and propagates
-// the cost to the parent session.
+// the cost to the parent session. A blocking dispatch returns the child's final
+// output as the tool response; a background dispatch returns a handle immediately
+// (see runSubAgentBackground).
 func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (resp fantasy.ToolResponse, _ error) {
 	// Create sub-session
 	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
 	if err != nil {
+		if params.ReleaseSlot != nil {
+			params.ReleaseSlot()
+		}
 		// A tool-error response, not a bare error: dispatches run in
 		// parallel batches, and a bare error from any one of them aborts
 		// the whole step in fantasy, discarding the sibling dispatches'
@@ -1944,6 +1982,10 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 	// Call session setup function if provided
 	if params.SessionSetup != nil {
 		params.SessionSetup(session.ID)
+	}
+
+	if params.Background {
+		return c.runSubAgentBackground(ctx, session, params)
 	}
 
 	// Make this run individually cancellable by child session ID (see
@@ -1977,6 +2019,19 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 		c.fireSubagentStopHooks(context.WithoutCancel(ctx), session.ID, params.AgentName, finalStatus, &resp)
 	}()
 
+	resp, finalStatus = c.executeSubAgentRun(runCtx, ctx, session, params)
+	return resp, nil
+}
+
+// executeSubAgentRun performs the child run shared by blocking and
+// background dispatches: model and provider resolution, the run itself,
+// cost accumulation, and output handling. It returns the dispatch response
+// — an error response on failure, never a bare error, for the same
+// parallel-batch reason as runSubAgent — and the final runtime status.
+// runCtx is what cancels the child; parentCtx is used for work that must
+// outlive the run (the cost update), so a background caller passes a
+// detached context.
+func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, session session.Session, params subAgentParams) (fantasy.ToolResponse, string) {
 	// Get model configuration
 	model := params.Agent.Model()
 	maxTokens := model.CatwalkCfg.DefaultMaxTokens
@@ -1990,9 +2045,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 		// change under a running dispatch (config reload), and a bare error
 		// would abort the whole parent turn where the parent agent could
 		// otherwise report the failure and continue.
-		finalStatus = subagents.StatusFailed
-		resp = fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to run subagent: %s", errModelProviderNotConfigured))
-		return resp, nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to run subagent: %s", errModelProviderNotConfigured)), subagents.StatusFailed
 	}
 
 	// Surface a "retrying" status on the subagent while OnAuthRefresh
@@ -2033,18 +2086,14 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			finalStatus = subagents.StatusCancelled
-			resp = fantasy.NewTextErrorResponse("Subagent cancelled by user")
-			return resp, nil
+			return fantasy.NewTextErrorResponse("Subagent cancelled by user"), subagents.StatusCancelled
 		}
-		finalStatus = subagents.StatusFailed
-		resp = fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err))
-		return resp, nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), subagents.StatusFailed
 	}
 
 	// Update parent session cost on a best-effort basis. A failure here must
 	// not discard the sub-agent output that was already produced.
-	if err := c.updateParentSessionCost(ctx, session.ID, params.SessionID); err != nil {
+	if err := c.updateParentSessionCost(parentCtx, session.ID, params.SessionID); err != nil {
 		slog.Warn(
 			"Failed to update parent session cost",
 			"child_session", session.ID,
@@ -2055,11 +2104,192 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 
 	output := subAgentOutput(result)
 	if output == "" {
-		resp = fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output.")
-		return resp, nil
+		return fantasy.NewTextErrorResponse("Sub-agent completed but produced no text output."), subagents.StatusCompleted
 	}
-	resp = fantasy.NewTextResponse(output)
-	return resp, nil
+	return fantasy.NewTextResponse(output), subagents.StatusCompleted
+}
+
+// runSubAgentBackground starts a background dispatch: the tool call returns
+// immediately with a handle while the child runs to completion on its own
+// goroutine. The child's context is detached from the dispatching turn (the
+// turn's tool context dies as soon as the dispatch call returns), so only
+// explicit cancellation or process exit ends it — a background agent
+// survives the turn, and even the run, that started it.
+//
+// Messages the child sends via send_message go to the dispatching session's
+// live inbox (folded into its next step by PrepareStep, and woken for the
+// wait tool). The final response, annotated with any SubagentStop hook
+// context, is stored on the run record for the wait tool to hand back.
+func (c *coordinator) runSubAgentBackground(ctx context.Context, session session.Session, params subAgentParams) (fantasy.ToolResponse, error) {
+	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(ctx))
+	handle := c.newBackgroundHandle()
+	run := &backgroundRun{
+		handle:        handle,
+		childSession:  session.ID,
+		parentSession: params.SessionID,
+		agentName:     params.AgentName,
+	}
+	if c.backgroundRuns != nil {
+		c.backgroundRuns.Set(handle, run)
+	}
+	if c.backgroundByChild != nil {
+		c.backgroundByChild.Set(session.ID, handle)
+	}
+	if c.subagentCancels != nil {
+		c.subagentCancels.Set(session.ID, cancelRun)
+	}
+	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
+
+	// The slot transfers to the run: released when the child finishes, not
+	// when the dispatch tool call returns. Every failure path below the
+	// goroutine spawn hands it back.
+	releaseSlot := func() {
+		if params.ReleaseSlot != nil {
+			params.ReleaseSlot()
+		}
+	}
+	go func() {
+		defer func() {
+			if c.backgroundByChild != nil {
+				c.backgroundByChild.Del(session.ID)
+			}
+			if c.subagentCancels != nil {
+				c.subagentCancels.Del(session.ID)
+			}
+			cancelRun()
+			releaseSlot()
+		}()
+		resp, finalStatus := c.executeSubAgentRun(runCtx, context.WithoutCancel(ctx), session, params)
+
+		// A background child's send_message output goes to the live inbox
+		// directly; forward anything that nonetheless landed in the
+		// completion inbox so no message is stranded by a routing race.
+		for _, msg := range c.drainSubagentMessages(session.ID) {
+			if err := c.recordLiveSubagentMessage(run, msg); err != nil {
+				slog.Warn("Dropping stranded subagent message", "child_session", session.ID, "error", err)
+			}
+		}
+		c.fireSubagentStopHooks(context.WithoutCancel(ctx), session.ID, params.AgentName, finalStatus, &resp)
+		run.finish(finalStatus, resp)
+		c.runtime.Finish(session.ID, finalStatus)
+		c.notifySubagentInbox(params.SessionID)
+	}()
+
+	return fantasy.NewTextResponse(fmt.Sprintf(
+		"Started background agent %q with handle %s. It runs independently of this tool call: messages it sends you arrive as new user messages between your steps, and its result is collected with the %s tool using this handle.",
+		params.AgentName, handle, WaitToolName)), nil
+}
+
+// newBackgroundHandle mints a handle unused by any tracked run.
+func (c *coordinator) newBackgroundHandle() string {
+	if c.backgroundRuns == nil {
+		return newSubagentHandle()
+	}
+	for {
+		handle := newSubagentHandle()
+		if _, exists := c.backgroundRuns.Get(handle); !exists {
+			return handle
+		}
+	}
+}
+
+// liveRouteForChild resolves the background run a child session belongs to,
+// if it was dispatched in the background.
+func (c *coordinator) liveRouteForChild(childSessionID string) (*backgroundRun, bool) {
+	if c.backgroundByChild == nil || c.backgroundRuns == nil {
+		return nil, false
+	}
+	handle, ok := c.backgroundByChild.Get(childSessionID)
+	if !ok {
+		return nil, false
+	}
+	run, ok := c.backgroundRuns.Get(handle)
+	if !ok {
+		return nil, false
+	}
+	return run, true
+}
+
+// recordLiveSubagentMessage appends a message from a background child to its
+// dispatcher's live inbox and wakes anyone waiting on that inbox.
+func (c *coordinator) recordLiveSubagentMessage(run *backgroundRun, text string) error {
+	if c.liveInbox == nil {
+		return nil
+	}
+	if err := c.liveInbox.record(run.parentSession, SubagentInboxMessage{
+		AgentName: run.agentName,
+		Handle:    run.handle,
+		Text:      text,
+	}); err != nil {
+		return err
+	}
+	c.liveInbox.notify(run.parentSession)
+	return nil
+}
+
+// notifySubagentInbox wakes waiters on a session's live inbox (a background
+// run just finished).
+func (c *coordinator) notifySubagentInbox(parentSessionID string) {
+	if c.liveInbox != nil {
+		c.liveInbox.notify(parentSessionID)
+	}
+}
+
+// liveInboxSignalChan returns the session's live-inbox wakeup channel for
+// the wait tool's select loop.
+func (c *coordinator) liveInboxSignalChan(parentSessionID string) chan struct{} {
+	if c.liveInbox == nil {
+		return nil
+	}
+	return c.liveInbox.signalChan(parentSessionID)
+}
+
+// drainLiveInboxFrom takes the session's pending messages sent via the given
+// handles, leaving messages from other handles for the step drain.
+func (c *coordinator) drainLiveInboxFrom(parentSessionID string, handles map[string]bool) []SubagentInboxMessage {
+	if c.liveInbox == nil {
+		return nil
+	}
+	return c.liveInbox.drainFrom(parentSessionID, handles)
+}
+
+// DrainSubagentInbox implements SubagentInboxSource for the dispatcher's
+// SessionAgent: it takes every message background children have sent the
+// session so PrepareStep can fold it into the next step.
+func (c *coordinator) DrainSubagentInbox(sessionID string) []SubagentInboxMessage {
+	if c.liveInbox == nil {
+		return nil
+	}
+	return c.liveInbox.drain(sessionID)
+}
+
+// backgroundRunFor resolves a handle to its run, but only for the session
+// that dispatched it — one orchestrator's handles are never another's.
+func (c *coordinator) backgroundRunFor(parentSessionID, handle string) (*backgroundRun, bool) {
+	if c.backgroundRuns == nil {
+		return nil, false
+	}
+	run, ok := c.backgroundRuns.Get(handle)
+	if !ok || run.parentSession != parentSessionID {
+		return nil, false
+	}
+	return run, true
+}
+
+// knownBackgroundHandles lists the handles a session may wait on, for error
+// messages that must not leak another session's handles.
+func (c *coordinator) knownBackgroundHandles(parentSessionID string) []string {
+	if c.backgroundRuns == nil {
+		return nil
+	}
+	var handles []string
+	for run := range c.backgroundRuns.Seq() {
+		if run.parentSession == parentSessionID {
+			handles = append(handles, run.handle)
+		}
+	}
+	slices.Sort(handles)
+	return handles
 }
 
 // fireSubagentStopHooks fires SubagentStop after a dispatched sub-agent

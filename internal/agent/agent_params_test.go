@@ -44,3 +44,17 @@ func TestAgentParams_WireCompatibleWithDispatchParams(t *testing.T) {
 	require.Equal(t, "tester", ap.SubagentType)
 	require.Equal(t, "x", ap.Prompt)
 }
+
+// The background flag must round-trip on the dispatch wire: an omitted or
+// false value stays blocking, an explicit true dispatches in the background.
+func TestAgentDispatchParams_DecodesBackground(t *testing.T) {
+	t.Parallel()
+
+	var blocking AgentDispatchParams
+	require.NoError(t, json.Unmarshal([]byte(`{"prompt":"x"}`), &blocking))
+	require.False(t, blocking.Background)
+
+	var background AgentDispatchParams
+	require.NoError(t, json.Unmarshal([]byte(`{"prompt":"x","background":true}`), &background))
+	require.True(t, background.Background)
+}

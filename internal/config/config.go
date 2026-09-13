@@ -1076,6 +1076,7 @@ func AllToolNames() []string {
 func allToolNames() []string {
 	return []string{
 		"agent",
+		"wait",
 		"batch",
 		"bash",
 		"harness_info",

@@ -211,6 +211,11 @@ type sessionAgent struct {
 	// them; SubagentStop fires from the coordinator's dispatch path.
 	hooks *hooks.Registry
 
+	// subagentInbox, when set, supplies messages background sub-agents
+	// have sent this session. PrepareStep drains it so a message from a
+	// running child lands in its dispatcher's next step.
+	subagentInbox SubagentInboxSource
+
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
 
@@ -269,6 +274,9 @@ type SessionAgentOptions struct {
 	Notify               pubsub.Publisher[notify.Notification]
 	RunComplete          pubsub.Publisher[notify.RunComplete]
 	Hooks                *hooks.Registry
+	// SubagentInbox, when set, is drained per step so messages from
+	// running background sub-agents reach this session mid-turn.
+	SubagentInbox SubagentInboxSource
 }
 
 func NewSessionAgent(
@@ -291,6 +299,7 @@ func NewSessionAgent(
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
 		hooks:                opts.Hooks,
+		subagentInbox:        opts.SubagentInbox,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -984,6 +993,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					return callContext, prepared, createErr
 				}
 				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+			}
+
+			// Fold in messages background sub-agents sent this session since
+			// the last step. This is the live half of a background dispatch:
+			// the message reaches the dispatcher's context — and transcript,
+			// via createUserMessage — without the child having finished.
+			if a.subagentInbox != nil {
+				for _, msg := range a.subagentInbox.DrainSubagentInbox(call.SessionID) {
+					userMessage, createErr := a.createUserMessage(callContext, SessionAgentCall{
+						SessionID: call.SessionID,
+						Prompt:    formatSubagentInboxMessage(msg),
+					})
+					if createErr != nil {
+						return callContext, prepared, createErr
+					}
+					prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+				}
 			}
 
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)

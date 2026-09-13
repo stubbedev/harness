@@ -247,7 +247,8 @@ notifying external systems that the agent went idle.
 Fires when a dispatched sub-agent finishes (completed, cancelled, or failed).
 The payload carries the sub-agent type and final status. Informational, but
 returned `context` is appended to the sub-agent's report so the orchestrating
-model sees it.
+model sees it — for a background dispatch (`agent` with `background: true`)
+the report is the result the orchestrator collects with the `wait` tool.
 
 **Matched against**: the sub-agent type (`task`, `fast`, or a custom agent
 name).
