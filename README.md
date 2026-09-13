@@ -82,7 +82,7 @@ Press <kbd>ctrl+l</kbd> to open the model picker, choose a provider, and paste
 your API key. Harness stores it in its state file and you're off.
 ## API Keys
 
-You can also use Harness with many other providers such as Anthopic, OpenAI,
+You can also use Harness with many other providers such as Anthropic, OpenAI,
 Gemini, OpenRouter and so on. Press <kbd>ctrl+l</kbd> to open the model picker,
 choose the provider of your choice, and paste your API key.
 
