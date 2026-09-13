@@ -757,8 +757,9 @@ Extends the common payload:
   // string. One of "agent_finished", "error", "agent_retrying".
   "notification_type": "agent_finished",
 
-  // string. Human-readable message (may be empty).
-  "message": "",
+  // string. Human-readable message; the key is omitted when there is
+  // nothing to report (e.g. agent_finished).
+  "message": "agent errored after 2 retries",
 }
 ```
 

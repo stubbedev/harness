@@ -32,6 +32,10 @@ type scriptedModel struct {
 	provider string
 	model    string
 
+	// usage is reported on every scripted finish. Tests that need to
+	// push a session over the auto-summarize threshold override it.
+	usage fantasy.Usage
+
 	mu    sync.Mutex
 	turns []scriptedTurn
 	next  int
@@ -59,6 +63,11 @@ func newScriptedModel(turns ...scriptedTurn) *scriptedModel {
 		provider: "scripted",
 		model:    "scripted-model",
 		turns:    turns,
+		usage: fantasy.Usage{
+			InputTokens:  10,
+			OutputTokens: 10,
+			TotalTokens:  20,
+		},
 	}
 }
 
@@ -140,11 +149,7 @@ func (m *scriptedModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 		yield(fantasy.StreamPart{
 			Type:         fantasy.StreamPartTypeFinish,
 			FinishReason: reason,
-			Usage: fantasy.Usage{
-				InputTokens:  10,
-				OutputTokens: 10,
-				TotalTokens:  20,
-			},
+			Usage:        m.usage,
 		})
 	}), nil
 }
@@ -158,11 +163,7 @@ func (m *scriptedModel) Generate(ctx context.Context, call fantasy.Call) (*fanta
 	return &fantasy.Response{
 		Content:      content,
 		FinishReason: fantasy.FinishReasonStop,
-		Usage: fantasy.Usage{
-			InputTokens:  10,
-			OutputTokens: 10,
-			TotalTokens:  20,
-		},
+		Usage:        m.usage,
 	}, nil
 }
 
