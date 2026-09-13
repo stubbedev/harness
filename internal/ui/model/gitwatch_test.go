@@ -30,15 +30,18 @@ func runGit(t *testing.T, dir string, args ...string) {
 func TestResolveGitDirs(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	runGit(t, dir, "init", "-b", "main")
-	// git rev-parse canonicalizes the path: symlinks are resolved (a
-	// macOS temp dir lives under /private/var) and Windows gets long
-	// names with forward slashes. Expect that form.
-	canonical, err := filepath.EvalSymlinks(dir)
+	// Build the repo under the checkout, not TMPDIR: git's rev-printed
+	// path form varies across git versions and runner images (symlinks
+	// resolved or not, Windows short vs long names), and a plain path
+	// under the working tree gives every platform the same answer.
+	base, err := os.Getwd()
 	require.NoError(t, err)
-	canonical = filepath.ToSlash(canonical)
-	wantGitDir := canonical + "/.git"
+	dir, err := os.MkdirTemp(base, "gitdirs-")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	runGit(t, dir, "init", "-b", "main")
+	wantGitDir := filepath.ToSlash(filepath.Join(dir, ".git"))
 	d := resolveGitDirs(dir)
 	require.Equal(t, wantGitDir, filepath.ToSlash(d.gitDir))
 	require.Equal(t, wantGitDir, filepath.ToSlash(d.commonDir))
