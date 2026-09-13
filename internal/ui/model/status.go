@@ -71,9 +71,7 @@ func (s *Status) SetHideHelp(hideHelp bool) {
 // Draw draws the status bar onto the screen.
 //
 // The help (and the info message drawn over it) is anchored at the
-// bottom of the area: the status rect is one row taller than the help
-// view, and drawing from the top would leave the terminal's last row
-// empty.
+// bottom of the area so the hints always hug the terminal's last row.
 func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 	if !s.hideHelp {
 		helpView := s.com.Styles.Status.Help.Render(s.help.View(s.helpKm))

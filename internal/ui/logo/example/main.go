@@ -15,35 +15,27 @@ import (
 func main() {
 	w, _, err := term.GetSize(os.Stdout.Fd())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Could not get terminal size: %s", err)
+		fmt.Fprintf(os.Stderr, "Could not get terminal size: %s\n", err)
+		w = 0
 	}
 
 	s := styles.CharmtonePantera()
 	opts := logo.Opts{
-		FieldColor:   s.Logo.FieldColor,
 		TitleColorA:  s.Logo.TitleColorA,
 		TitleColorB:  s.Logo.TitleColorB,
 		CharmColor:   s.Logo.CharmColor,
 		VersionColor: s.Logo.VersionColor,
 		Width:        w,
-		Unstable:     true,
-	}
-
-	renderCompact := func(hyper bool) string {
-		opts.Hyper = hyper
-		return logo.Render(s.Logo.GradCanvas, "v1.0.0", true, opts)
-	}
-
-	renderWide := func(hyper bool) string {
-		opts.Hyper = hyper
-		return logo.Render(s.Logo.GradCanvas, "v1.0.0", false, opts)
 	}
 
 	lipgloss.Println(
-		lipgloss.JoinHorizontal(lipgloss.Top, renderCompact(false), "  ", renderCompact(true)),
+		logo.Render(s.Logo.GradCanvas, "v1.0.0", opts),
+		logo.Render(s.Logo.GradCanvas, "v1.0.0", logo.Opts{
+			TitleColorA:  opts.TitleColorA,
+			TitleColorB:  opts.TitleColorB,
+			CharmColor:   opts.CharmColor,
+			VersionColor: opts.VersionColor,
+			Width:        40,
+		}),
 	)
-
-	for i := range 6 {
-		lipgloss.Println(renderWide(i > 0))
-	}
 }

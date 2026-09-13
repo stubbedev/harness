@@ -209,16 +209,11 @@ type Styles struct {
 
 	// Logo
 	Logo struct {
-		FieldColor         color.Color
-		TitleColorA        color.Color
-		TitleColorB        color.Color
-		CharmColor         color.Color
-		VersionColor       color.Color
-		SmallCharm         lipgloss.Style // "Charm™" label in SmallRender
-		SmallDiagonals     lipgloss.Style // Diagonal line fill in SmallRender
-		GradCanvas         lipgloss.Style // Blank canvas for gradient painting
-		SmallGradFromColor color.Color    // Small "Harness" wordmark gradient start
-		SmallGradToColor   color.Color    // Small "Harness" wordmark gradient end
+		TitleColorA  color.Color
+		TitleColorB  color.Color
+		CharmColor   color.Color
+		VersionColor color.Color
+		GradCanvas   lipgloss.Style // Blank canvas for gradient painting
 	}
 
 	// Working indicator gradient (spinners/shimmers on assistant "thinking",

@@ -55,13 +55,12 @@ func Render(banner config.ExitBanner, sess *session.Session, width int, theme st
 // logoSection returns the ASCII art logo followed by the parting message.
 func logoSection(contentWidth int, theme string) string {
 	t := styles.ThemeFromConfig(theme)
-	harnessLogo := logo.Render(t.Logo.GradCanvas, version.Version, true, logo.Opts{
-		FieldColor:   t.Logo.FieldColor,
+	harnessLogo := logo.Render(t.Logo.GradCanvas, version.Version, logo.Opts{
 		TitleColorA:  t.Logo.TitleColorA,
 		TitleColorB:  t.Logo.TitleColorB,
 		CharmColor:   t.Logo.CharmColor,
 		VersionColor: t.Logo.VersionColor,
-		Hyper:        false,
+		Width:        contentWidth,
 	})
 	// Wrap the greeting and the message together: wrapping only the message
 	// leaves the greeting's own width unaccounted for and overflows the frame.

@@ -797,16 +797,11 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tab.InactiveStyle = uv.Style{Fg: o.fgMoreSubtle}
 
 	// Logo
-	s.Logo.FieldColor = o.primary
 	s.Logo.TitleColorA = o.secondary
 	s.Logo.TitleColorB = o.primary
 	s.Logo.CharmColor = o.secondary
 	s.Logo.VersionColor = o.primary
-	s.Logo.SmallCharm = lipgloss.NewStyle().Foreground(o.secondary)
-	s.Logo.SmallDiagonals = lipgloss.NewStyle().Foreground(o.primary)
 	s.Logo.GradCanvas = lipgloss.NewStyle()
-	s.Logo.SmallGradFromColor = o.secondary
-	s.Logo.SmallGradToColor = o.primary
 
 	// Section
 	s.Section.Title = subtle
@@ -889,11 +884,11 @@ func quickStyle(o quickStyleOpts) Styles {
 		BorderLeft(true).
 		BorderForeground(o.successMostSubtle)
 	// The sub-cursor's line inside a focused group or task strip: same
-	// bar shape, brighter color, so selection reads from the bar alone.
+	// bar shape, warning yellow so it stands out from the muted bars.
 	s.Messages.ToolCallSelected = muted.PaddingLeft(1).
 		BorderStyle(messageFocussedBorder).
 		BorderLeft(true).
-		BorderForeground(o.success)
+		BorderForeground(o.warning)
 	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
 	s.Messages.ToolCallCompact = muted
