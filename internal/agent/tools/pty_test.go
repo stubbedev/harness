@@ -378,6 +378,31 @@ func TestPtyRunner_ZshUserShell(t *testing.T) {
 	require.Equal(t, "partial-zsh", res.Output)
 }
 
+// A multiline command written straight into a line editor is mangled:
+// zle echoes each line as it arrives, then redisplays it, toggling
+// bracketed paste around every prompt - raw echo debris (blank lines,
+// bells, doubled fragments) that survives cleaning. Commands must be
+// delivered as a paste instead, so the shell takes the whole block at
+// once. The issue's case: a heredoc whose body is many lines of code.
+func TestPtyRunner_ZshUserShellHeredoc(t *testing.T) {
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("zsh not installed")
+	}
+	t.Setenv("SHELL", "zsh")
+	r := &ptyRunner{cwd: t.TempDir()}
+	t.Cleanup(r.Close)
+	_, err := r.terminal(t.Context())
+	require.NoError(t, err)
+
+	cmd := "cat > file.txt <<'EOF'\npackage main\n\nfunc main() {}\nEOF\ncat file.txt"
+	res, err := r.Run(t.Context(), cmd, 15)
+	require.NoError(t, err)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	require.Equal(t, "package main\n\nfunc main() {}", res.Output,
+		"a heredoc's body goes into the file, not the output")
+}
+
 func TestResolveBackspaces(t *testing.T) {
 	t.Parallel()
 

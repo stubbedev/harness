@@ -72,6 +72,11 @@ const (
 	// land, so it is drained along with the fence instead of being left
 	// behind to satisfy the wait for the command that comes next.
 	ptyFenceSettle = 300 * time.Millisecond
+	// ptyFenceQuietMs is the quiet window the fence's wait for the
+	// prompt's mode tail uses: bracketed-paste enable and friends follow
+	// the prompt marker by a write or two, and prompts that send none
+	// end the wait on silence instead.
+	ptyFenceQuietMs = 20
 	// ptyMaxWait bounds how long one call keeps leasing patience
 	// forward to a command that is still producing output, so a stream
 	// that never ends cannot hold a call forever.
@@ -615,6 +620,12 @@ func (r *ptyRunner) fence(ctx context.Context, s ptyTerminal) {
 	// here: left in the buffer, it is exactly what the next wait would
 	// read as the command it is about to send having already finished.
 	_ = s.WaitForAny(ctx, []*regexp.Regexp{promptRe}, ptyFenceSettle)
+	// A line editor's prompt does not end at its marker: the mode tail -
+	// the bracketed-paste enable included - trails it by a write or two.
+	// Wait for that too (or a short quiet spell, for prompts without
+	// one) so the paste tracking the next command's delivery depends on
+	// has settled before the drain.
+	_, _ = s.WaitForAnyOrQuiet(ctx, []*regexp.Regexp{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
 	s.Drain()
 }
 
@@ -728,7 +739,7 @@ func (r *ptyRunner) Run(ctx context.Context, command string, waitSeconds int) (r
 		r.orphan = res.Running && !res.AltScreen && s.Alive()
 	})
 
-	if err := r.send(s, []byte(command+"\n")); err != nil {
+	if err := r.pasteCommand(ctx, s, command); err != nil {
 		return PTYResult{}, err
 	}
 
@@ -1133,10 +1144,10 @@ func (r *ptyRunner) Input(ctx context.Context, text string) (res PTYResult, err 
 // paste delivers text the way a terminal would. Several lines written
 // straight into a shell or a REPL are read as several typed lines: the
 // first one runs on its own, the rest arrive against auto-indent and
-// history expansion, and what comes out is not what was sent. When the
-// program has asked for bracketed paste, wrap the text in the paste
-// markers so it is taken as one block, and submit it with a separate
-// return - a paste that ends in a newline is a newline, not "run this".
+// history expansion. When the program has asked for bracketed paste,
+// wrap the text in the paste markers so it is taken as one block, and
+// submit it with a separate return - a paste that ends in a newline is
+// a newline, not "run this".
 func (r *ptyRunner) paste(s ptyTerminal, text string) error {
 	body, submit := strings.CutSuffix(text, "\n")
 	if !strings.Contains(body, "\n") || !s.BracketedPaste() {
@@ -1151,6 +1162,42 @@ func (r *ptyRunner) paste(s ptyTerminal, text string) error {
 		if err := s.Send([]byte("\r")); err != nil {
 			return fmt.Errorf("terminal session: %w", err)
 		}
+	}
+	return nil
+}
+
+// pasteCommand delivers a command as a terminal delivers a paste, and
+// submits it only after the line editor's echo of the block has settled
+// and been drained. A multiline command written straight in is read as
+// many typed lines: the line editor echoes each one, redraws it with
+// syntax highlighting, and toggles bracketed paste around every prompt -
+// debris that survives cleaning as blank lines, bells and doubled
+// fragments. Wrapped in the paste markers it is one block with one echo,
+// and that echo is dropped whole before the return that runs the
+// command, so the command's own output starts from a clean slate.
+// Single-line commands and programs without bracketed paste keep the
+// plain send path: its one-line echo the cleaner already strips.
+func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command string) error {
+	body := strings.TrimSuffix(command, "\n")
+	if !strings.Contains(body, "\n") || !s.BracketedPaste() {
+		return r.send(s, []byte(command+"\n"))
+	}
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+	if err := s.Paste(body); err != nil {
+		return fmt.Errorf("terminal session: %w", err)
+	}
+	// Everything on the wire between the paste and this drain is the
+	// line editor echoing the block back; once it has gone quiet, drop
+	// it whole instead of trying to clean it line by line. The
+	// echo-line stripping in clean goes with it: with the echo already
+	// gone it would only eat command output that repeats a line of the
+	// command - a heredoc body catted right back, for one.
+	_ = s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 3*time.Second)
+	s.Drain()
+	r.setState(func() { r.lastEcho = nil })
+	if err := s.Send([]byte("\r")); err != nil {
+		return fmt.Errorf("terminal session: %w", err)
 	}
 	return nil
 }
