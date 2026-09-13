@@ -489,6 +489,27 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 	return fold, canceledWithRunID
 }
 
+// joinQueuedCalls merges queued calls without a RunID into a single
+// call: prompts joined with message.QueuedPromptSeparator and
+// attachments concatenated, so a queue drained as one steering burst
+// runs as a single user message. The first call's fields win; queued
+// TUI prompts carry no sampling options of their own.
+func joinQueuedCalls(calls []SessionAgentCall) SessionAgentCall {
+	joined := calls[0]
+	if len(calls) == 1 {
+		return joined
+	}
+	prompts := make([]string, len(calls))
+	for i, call := range calls {
+		prompts[i] = call.Prompt
+	}
+	joined.Prompt = strings.Join(prompts, message.QueuedPromptSeparator)
+	for _, call := range calls[1:] {
+		joined.Attachments = append(joined.Attachments, call.Attachments...)
+	}
+	return joined
+}
+
 // publishCanceledQueueDrops emits a terminal cancelled RunComplete for
 // every dropped queued call that carries a RunID. A queued prompt removed
 // from the queue without ever running — covered by a pending cancel, or
@@ -993,13 +1014,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// is not dropped. A dropped prompt carrying a RunID still gets
 			// its terminal cancelled RunComplete so a caller waiting on it
 			// does not hang. Uncanceled prompts without a RunID are folded
-			// into this turn; uncanceled prompts with a RunID are left
-			// queued so each runs as its own turn (with its own
-			// RunComplete) via the recursive run path below.
+			// into this turn as a single user message joining every drained
+			// prompt (they were queued as one steering burst, and the
+			// transcript shows them as one entry); uncanceled prompts with
+			// a RunID are left queued so each runs as its own turn (with
+			// its own RunComplete) via the recursive run path below.
 			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
 			a.publishCanceledQueueDrops(canceledRunIDs)
-			for _, queued := range fold {
-				userMessage, createErr := a.createUserMessage(callContext, queued)
+			if len(fold) > 0 {
+				userMessage, createErr := a.createUserMessage(callContext, joinQueuedCalls(fold))
 				if createErr != nil {
 					return callContext, prepared, createErr
 				}
@@ -1431,7 +1454,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 	}
 	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(call.SessionID, queuedMessages[1:])
+	rest := queuedMessages[1:]
+	if firstQueuedMessage.RunID == "" {
+		// The leading run of queued prompts without a RunID was queued
+		// as one steering burst: join it into a single turn (and a
+		// single user message). RunID-bearing prompts after the run
+		// each keep their own turn and RunComplete lifecycle.
+		n := 1
+		for n < len(queuedMessages) && queuedMessages[n].RunID == "" {
+			n++
+		}
+		firstQueuedMessage = joinQueuedCalls(queuedMessages[:n])
+		rest = queuedMessages[n:]
+	}
+	a.messageQueue.Set(call.SessionID, rest)
 	// Reserve a fresh accept for the dequeued prompt before dropping the
 	// lock so acceptedRuns > 0 across the handoff into the recursive
 	// Run. This closes the window between this dequeue and the recursive

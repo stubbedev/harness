@@ -86,7 +86,7 @@ func NewService(q db.Querier, workingDir, dataDir string, messages message.Servi
 		enabled:    true,
 	}
 	if _, err := exec.LookPath("git"); err != nil {
-		slog.Info("git not found; file checkpoints are disabled")
+		slog.Info("Git not found; file checkpoints are disabled")
 		s.enabled = false
 	}
 	return s

@@ -582,23 +582,17 @@ type Styles struct {
 		Deleting lipgloss.Style
 	}
 
-	// Pills styles for todo/queue pills
+	// Pills styles for the todo pill
 	Pills struct {
-		Base               lipgloss.Style // Base pill style with padding
-		Focused            lipgloss.Style // Pill with visible rounded border
-		QueueItemPrefix    lipgloss.Style // Prefix for queue list items
-		QueueItemText      lipgloss.Style // Queue list item body text
-		QueueLabel         lipgloss.Style // "N Queued" label text
-		QueueIconBase      lipgloss.Style // Base style for queue gradient triangles
-		QueueGradFromColor color.Color    // Start color for queue indicator gradient
-		QueueGradToColor   color.Color    // End color for queue indicator gradient
-		TodoLabel          lipgloss.Style // "To-Do" label
-		TodoProgress       lipgloss.Style // Todo ratio (e.g. "2/5")
-		TodoCurrentTask    lipgloss.Style // Current in-progress task name
-		TodoSpinner        lipgloss.Style // Todo spinner style
-		HelpKey            lipgloss.Style // Keystroke hint style
-		HelpText           lipgloss.Style // Help action text style
-		Area               lipgloss.Style // Pills area container
+		Base            lipgloss.Style // Base pill style with padding
+		Focused         lipgloss.Style // Pill with visible rounded border
+		TodoLabel       lipgloss.Style // "To-Do" label
+		TodoProgress    lipgloss.Style // Todo ratio (e.g. "2/5")
+		TodoCurrentTask lipgloss.Style // Current in-progress task name
+		TodoSpinner     lipgloss.Style // Todo spinner style
+		HelpKey         lipgloss.Style // Keystroke hint style
+		HelpText        lipgloss.Style // Help action text style
+		Area            lipgloss.Style // Pills area container
 	}
 }
 

@@ -1,82 +1,97 @@
 package model
 
-// Queued-prompt transcript entries.
+// Queued-prompt transcript entry.
 //
 // A prompt submitted while the agent is busy is enqueued server-side and
 // does not exist as a message yet. The transcript nevertheless shows it
 // the moment it is entered: an optimistic placeholder is appended at
 // send time, and the authoritative queue (fetched off-thread, see
-// workspace_cache.go) reconciles the set. When the agent dequeues the
-// prompt it creates the real user message; the placeholder is dropped in
-// the same update pass that appends the real item, so the swap is
-// invisible. Prompts queued from another client appear through the same
-// reconcile.
+// workspace_cache.go) reconciles it. Multiple queued prompts join into
+// the single placeholder — mirroring the single user message the agent
+// creates when the queue drains — so the swap from placeholder to real
+// message happens in one update pass and is invisible. Prompts queued
+// from another client join the same entry through the reconcile.
 
 import (
 	"fmt"
 	"slices"
+	"strings"
 
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/chat"
 )
 
-// appendQueuedPrompt adds a transcript placeholder for a prompt that was
-// just submitted behind a running turn.
+// appendQueuedPrompt adds text to the transcript's queued-prompt
+// placeholder, joining it onto the prompts already shown.
 func (m *UI) appendQueuedPrompt(text string) {
 	if text == "" || m.chat == nil {
 		return
 	}
-	m.queuedPromptSeq++
-	item := chat.NewQueuedMessageItem(m.com.Styles, fmt.Sprintf("queued-prompt-%d", m.queuedPromptSeq), text)
-	m.queuedPromptsShown = append(m.queuedPromptsShown, item)
-	m.chat.AppendMessages(item)
+	m.queuedPrompts = append(m.queuedPrompts, text)
+	m.syncQueuedPromptItem()
+}
+
+// syncQueuedPromptItem aligns the single placeholder item with
+// m.queuedPrompts: it is created on the first queued prompt, re-textured
+// as more join, and dropped when the last one leaves.
+func (m *UI) syncQueuedPromptItem() {
+	if len(m.queuedPrompts) == 0 {
+		if m.queuedPromptItem != nil {
+			m.chat.RemoveMessage(m.queuedPromptItem.ID())
+			m.queuedPromptItem = nil
+		}
+		return
+	}
+	joined := strings.Join(m.queuedPrompts, message.QueuedPromptSeparator)
+	if m.queuedPromptItem == nil {
+		m.queuedPromptSeq++
+		m.queuedPromptItem = chat.NewQueuedMessageItem(m.com.Styles, fmt.Sprintf("queued-prompt-%d", m.queuedPromptSeq), joined)
+		m.chat.AppendMessages(m.queuedPromptItem)
+	} else {
+		m.queuedPromptItem.UpdateText(joined)
+	}
 	m.chat.ScrollToBottom()
 }
 
-// materializeQueuedPrompt drops the first placeholder whose text matches
-// the user message that just landed in the transcript: the queued prompt
-// became a real message.
+// materializeQueuedPrompt consumes the queued prompts that became the
+// user message that just landed in the transcript: the drained queue
+// materializes as a single message joining every queued prompt, and a
+// queued call that ran as its own turn (RunID path) as one segment.
 func (m *UI) materializeQueuedPrompt(text string) {
-	if text == "" || m.chat == nil {
+	if text == "" || m.chat == nil || len(m.queuedPrompts) == 0 {
 		return
 	}
-	for i, item := range m.queuedPromptsShown {
-		if item.Text() == text {
-			m.chat.RemoveMessage(item.ID())
-			m.queuedPromptsShown = slices.Delete(m.queuedPromptsShown, i, i+1)
-			return
+	consumed := 0
+	for i := range m.queuedPrompts {
+		if strings.Join(m.queuedPrompts[:i+1], message.QueuedPromptSeparator) == text {
+			consumed = i + 1
+			break
 		}
 	}
+	if consumed == 0 {
+		return
+	}
+	m.queuedPrompts = m.queuedPrompts[consumed:]
+	m.syncQueuedPromptItem()
 }
 
-// reconcileQueuedPrompts aligns the placeholders with the authoritative
-// queue list: entries that left the queue without a matching user
+// reconcileQueuedPrompts aligns the placeholder with the authoritative
+// queue list: prompts that left the queue without a matching user
 // message (cleared, or drained through a path that never publishes one)
-// drop out, and entries not yet shown — e.g. queued from another client
-// — appear at the end of the transcript.
+// drop out, and prompts not yet shown — e.g. queued from another client
+// — join the entry.
 func (m *UI) reconcileQueuedPrompts(prompts []string) {
 	if m.chat == nil {
 		return
 	}
-	remaining := slices.Clone(prompts)
-	var kept []*chat.QueuedMessageItem
-	for _, item := range m.queuedPromptsShown {
-		idx := slices.Index(remaining, item.Text())
-		if idx >= 0 {
-			kept = append(kept, item)
-			remaining = slices.Delete(remaining, idx, idx+1)
-			continue
-		}
-		m.chat.RemoveMessage(item.ID())
-	}
-	m.queuedPromptsShown = kept
-	for _, text := range remaining {
-		m.appendQueuedPrompt(text)
-	}
+	m.queuedPrompts = slices.Clone(prompts)
+	m.syncQueuedPromptItem()
 }
 
 // resetQueuedPrompts drops placeholder tracking when the transcript is
 // rebuilt from persisted messages (session switch or reload): the
-// rebuild replaces the list, so the placeholders simply cease to exist.
+// rebuild replaces the list, so the placeholder simply ceases to exist.
 func (m *UI) resetQueuedPrompts() {
-	m.queuedPromptsShown = nil
+	m.queuedPrompts = nil
+	m.queuedPromptItem = nil
 }

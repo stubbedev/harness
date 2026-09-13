@@ -49,7 +49,6 @@ type Commands struct {
 	hasSession bool
 	hasSummary bool
 	hasTodos   bool
-	hasQueue   bool
 	selected   CommandType
 
 	spinner spinner.Model
@@ -68,7 +67,7 @@ type Commands struct {
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary, hasTodos, hasQueue bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary, hasTodos bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
@@ -76,7 +75,6 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary, h
 		hasSession:     hasSession,
 		hasSummary:     hasSummary,
 		hasTodos:       hasTodos,
-		hasQueue:       hasQueue,
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
 	}
@@ -484,17 +482,8 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
 	}
 
-	if c.hasTodos || c.hasQueue {
-		var label string
-		switch {
-		case c.hasTodos && c.hasQueue:
-			label = "Toggle To-Dos/Queue"
-		case c.hasQueue:
-			label = "Toggle Queue"
-		default:
-			label = "Toggle To-Dos"
-		}
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", label, "ctrl+t", ActionTogglePills{}))
+	if c.hasTodos {
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", "Toggle To-Dos", "ctrl+t", ActionTogglePills{}))
 	}
 
 	// Add a command for selecting notification style via picker dialog.

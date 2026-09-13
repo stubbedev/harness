@@ -389,8 +389,6 @@ command palette, question prompts), the textarea's movement/editing keys
 | `chat.new_session` | `ctrl+n` |
 | `chat.page_down` | `pgdown`, `space`, `f` |
 | `chat.page_up` | `pgup`, `b` |
-| `chat.pill_left` | `left` |
-| `chat.pill_right` | `right` |
 | `chat.scroll_left` | `shift+left`, `H` |
 | `chat.scroll_right` | `shift+right`, `L` |
 | `chat.tab` | `tab` |

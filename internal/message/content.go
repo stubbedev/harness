@@ -30,6 +30,12 @@ const (
 // cannot be decoded during session replay.
 const mediaLoadFailedPlaceholder = "[Image data could not be loaded]"
 
+// QueuedPromptSeparator joins prompts that were queued behind a running
+// turn into the single user message created when the queue drains. The
+// transcript's queued placeholder joins with the same separator so it
+// materializes into that message.
+const QueuedPromptSeparator = "\n\n"
+
 type FinishReason string
 
 const (

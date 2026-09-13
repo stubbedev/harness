@@ -243,9 +243,6 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 		if !u.pillsExpanded {
 			t.Fatal("expected pillsExpanded to be true")
 		}
-		if u.focusedPillSection != pillSectionTodos {
-			t.Fatalf("expected focusedPillSection to be pillSectionTodos, got %d", u.focusedPillSection)
-		}
 	})
 
 	t.Run("does not expand when terminal is too short", func(t *testing.T) {
@@ -298,7 +295,7 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 		}
 	})
 
-	t.Run("expands for prompt queue when no todos", func(t *testing.T) {
+	t.Run("does not expand when only queued prompts exist", func(t *testing.T) {
 		t.Parallel()
 
 		u := newTestUI()
@@ -308,11 +305,8 @@ func TestAutoExpandPillsIfReasonable(t *testing.T) {
 
 		u.autoExpandPillsIfReasonable()
 
-		if !u.pillsExpanded {
-			t.Fatal("expected pillsExpanded to be true for prompt queue")
-		}
-		if u.focusedPillSection != pillSectionQueue {
-			t.Fatalf("expected focusedPillSection to be pillSectionQueue, got %d", u.focusedPillSection)
+		if u.pillsExpanded {
+			t.Fatal("expected pillsExpanded to be false: queued prompts render in the transcript, not the pills")
 		}
 	})
 

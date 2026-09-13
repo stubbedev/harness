@@ -51,8 +51,6 @@ type KeyMap struct {
 		Tab             key.Binding
 		Details         key.Binding
 		TogglePills     key.Binding
-		PillLeft        key.Binding
-		PillRight       key.Binding
 		Down            key.Binding
 		Up              key.Binding
 		UpDown          key.Binding
@@ -228,14 +226,6 @@ func DefaultKeyMap() KeyMap {
 		key.WithKeys("ctrl+t", "ctrl+space"),
 		key.WithHelp("ctrl+t", "toggle tasks"),
 	)
-	km.Chat.PillLeft = key.NewBinding(
-		key.WithKeys("left"),
-		key.WithHelp("←/→", "switch section"),
-	)
-	km.Chat.PillRight = key.NewBinding(
-		key.WithKeys("right"),
-		key.WithHelp("←/→", "switch section"),
-	)
 
 	km.Chat.Down = key.NewBinding(
 		key.WithKeys("down", "ctrl+j", "j"),
@@ -358,8 +348,6 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"chat.tab":                      &km.Chat.Tab,
 		"chat.details":                  &km.Chat.Details,
 		"chat.toggle_pills":             &km.Chat.TogglePills,
-		"chat.pill_left":                &km.Chat.PillLeft,
-		"chat.pill_right":               &km.Chat.PillRight,
 		"chat.down":                     &km.Chat.Down,
 		"chat.up":                       &km.Chat.Up,
 		"chat.up_down":                  &km.Chat.UpDown,

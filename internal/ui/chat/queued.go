@@ -42,6 +42,18 @@ func NewQueuedMessageItem(sty *styles.Styles, id, text string) *QueuedMessageIte
 // Text returns the queued prompt's text.
 func (q *QueuedMessageItem) Text() string { return q.text }
 
+// UpdateText replaces the placeholder's prompt text: another prompt was
+// queued and joins this entry. Cached renders are invalidated and the
+// version bumped so the list re-renders the entry.
+func (q *QueuedMessageItem) UpdateText(text string) {
+	if q.text == text {
+		return
+	}
+	q.text = text
+	q.clearCache()
+	q.Bump()
+}
+
 // ID implements [Identifiable].
 func (q *QueuedMessageItem) ID() string { return q.id }
 
@@ -54,7 +66,7 @@ func (q *QueuedMessageItem) Finished() bool { return true }
 func (q *QueuedMessageItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)
 
-	content, height, ok := q.getCachedRender(cappedWidth)
+	content, _, ok := q.getCachedRender(cappedWidth)
 	if ok {
 		return content
 	}
@@ -80,7 +92,7 @@ func (q *QueuedMessageItem) RawRender(width int) string {
 	}
 	content = strings.Join(lines, "\n")
 
-	height = lipgloss.Height(content)
+	height := lipgloss.Height(content)
 	q.setCachedRender(content, cappedWidth, height)
 	return content
 }
