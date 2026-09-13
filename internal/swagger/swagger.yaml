@@ -73,21 +73,21 @@ definitions:
     - 1000000000
     - 60000000000
     - 3600000000000
-    - 60000000000
     - 300000000000
+    - 60000000000
+    - 2000000000
     - 5000000000
     - 45000000000
     - 10000000000
-    - 2000000000
     format: int64
     type: integer
     x-enum-varnames:
-    - DefaultRequestTimeout
     - resolveTimeout
+    - DefaultRequestTimeout
+    - renameRetryBudget
     - configLockDeadline
     - refreshLockDeadline
     - credentialWriteLockDeadline
-    - renameRetryBudget
   config.ExitBanner:
     enum:
     - default
@@ -316,6 +316,16 @@ definitions:
         $ref: '#/definitions/config.ExitBanner'
       git_status:
         type: boolean
+      keybinds:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        description: |-
+          Keybinds rebinds TUI keys. Keys are stable action names (e.g.
+          "editor.send_message"); values are one key or a list of keys. Overrides
+          merge over the built-in defaults: only the listed actions change.
+        type: object
       mouse:
         type: boolean
       scrollbar:

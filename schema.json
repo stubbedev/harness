@@ -146,6 +146,19 @@
         "command"
       ]
     },
+    "KeybindList": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      ]
+    },
     "LSPConfig": {
       "properties": {
         "disabled": {
@@ -917,6 +930,13 @@
             3,
             5
           ]
+        },
+        "keybinds": {
+          "additionalProperties": {
+            "$ref": "#/$defs/KeybindList"
+          },
+          "type": "object",
+          "description": "Rebind TUI keys. Maps a stable action name (e.g. editor.send_message or chat.copy) to one key or a list of keys. Only listed actions change; everything else keeps its default binding"
         }
       },
       "additionalProperties": false,

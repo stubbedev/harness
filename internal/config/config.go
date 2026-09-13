@@ -291,6 +291,24 @@ type TUIOptions struct {
 	GitStatus         *bool       `json:"git_status,omitempty" jsonschema:"description=Show git branch and working-tree status in the compact header,default=true"`
 	ShowThinking      *bool       `json:"show_thinking,omitempty" jsonschema:"description=Render model reasoning (thinking) blocks in the transcript. Reasoning is still requested\\, streamed and stored when disabled - only the rendering is suppressed,default=true"`
 	TextareaMinHeight *int        `json:"textarea_min_height,omitempty" jsonschema:"description=Minimum height of the prompt textarea in rows. The textarea grows to fit content\\, so this only sets the collapsed floor. Values below 1 are clamped to 1.,default=1,example=1,example=3,example=5"`
+
+	// Keybinds rebinds TUI keys. Keys are stable action names (e.g.
+	// "editor.send_message"); values are one key or a list of keys. Overrides
+	// merge over the built-in defaults: only the listed actions change.
+	Keybinds map[string]KeybindList `json:"keybinds,omitempty" jsonschema:"description=Rebind TUI keys. Maps a stable action name (e.g. editor.send_message or chat.copy) to one key or a list of keys. Only listed actions change; everything else keeps its default binding"`
+}
+
+// KeybindOverrides returns the user's key overrides as plain string slices.
+// The nil receiver and the unset map both mean "all defaults".
+func (t *TUIOptions) KeybindOverrides() map[string][]string {
+	if t == nil || len(t.Keybinds) == 0 {
+		return nil
+	}
+	overrides := make(map[string][]string, len(t.Keybinds))
+	for action, keys := range t.Keybinds {
+		overrides[action] = keys
+	}
+	return overrides
 }
 
 // IsTransparent reports whether the TUI draws a transparent background. The
@@ -831,6 +849,12 @@ func (c *Config) cloneForWrite() *Config {
 		opts := *c.Options
 		if c.Options.TUI != nil {
 			tui := *c.Options.TUI
+			if c.Options.TUI.Keybinds != nil {
+				tui.Keybinds = make(map[string]KeybindList, len(c.Options.TUI.Keybinds))
+				for action, keys := range c.Options.TUI.Keybinds {
+					tui.Keybinds[action] = slices.Clone(keys)
+				}
+			}
 			opts.TUI = &tui
 		}
 		nc.Options = &opts

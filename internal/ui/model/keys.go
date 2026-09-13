@@ -1,6 +1,13 @@
 package model
 
-import "charm.land/bubbles/v2/key"
+import (
+	"log/slog"
+	"maps"
+	"slices"
+	"strings"
+
+	"charm.land/bubbles/v2/key"
+)
 
 type KeyMap struct {
 	Editor struct {
@@ -311,4 +318,104 @@ func DefaultKeyMap() KeyMap {
 	)
 
 	return km
+}
+
+// keybindActions maps the stable action names accepted by
+// options.tui.keybinds to the bindings they override. Names mirror the
+// KeyMap fields: the global group is bare, the editor group carries the
+// "editor." prefix, and the chat group the "chat." prefix.
+func (km *KeyMap) keybindActions() map[string]*key.Binding {
+	return map[string]*key.Binding{
+		"quit":                          &km.Quit,
+		"help":                          &km.Help,
+		"commands":                      &km.Commands,
+		"models":                        &km.Models,
+		"suspend":                       &km.Suspend,
+		"sessions":                      &km.Sessions,
+		"tab":                           &km.Tab,
+		"parent_session":                &km.ParentSession,
+		"export_conversation":           &km.ExportConversation,
+		"themes":                        &km.Themes,
+		"editor.send_message":           &km.Editor.SendMessage,
+		"editor.open_editor":            &km.Editor.OpenEditor,
+		"editor.newline":                &km.Editor.Newline,
+		"editor.add_image":              &km.Editor.AddImage,
+		"editor.paste_image":            &km.Editor.PasteImage,
+		"editor.paste_text":             &km.Editor.PasteText,
+		"editor.mention_file":           &km.Editor.MentionFile,
+		"editor.commands":               &km.Editor.Commands,
+		"editor.attachment_delete_mode": &km.Editor.AttachmentDeleteMode,
+		"editor.escape":                 &km.Editor.Escape,
+		"editor.delete_all_attachments": &km.Editor.DeleteAllAttachments,
+		"editor.history_prev":           &km.Editor.HistoryPrev,
+		"editor.history_next":           &km.Editor.HistoryNext,
+		"editor.copy_selection":         &km.Editor.CopySelection,
+		"editor.cut_selection":          &km.Editor.CutSelection,
+		"editor.select_all":             &km.Editor.SelectAll,
+		"chat.new_session":              &km.Chat.NewSession,
+		"chat.add_attachment":           &km.Chat.AddAttachment,
+		"chat.cancel":                   &km.Chat.Cancel,
+		"chat.tab":                      &km.Chat.Tab,
+		"chat.details":                  &km.Chat.Details,
+		"chat.toggle_pills":             &km.Chat.TogglePills,
+		"chat.pill_left":                &km.Chat.PillLeft,
+		"chat.pill_right":               &km.Chat.PillRight,
+		"chat.down":                     &km.Chat.Down,
+		"chat.up":                       &km.Chat.Up,
+		"chat.up_down":                  &km.Chat.UpDown,
+		"chat.down_one_item":            &km.Chat.DownOneItem,
+		"chat.up_one_item":              &km.Chat.UpOneItem,
+		"chat.up_down_one_item":         &km.Chat.UpDownOneItem,
+		"chat.page_down":                &km.Chat.PageDown,
+		"chat.page_up":                  &km.Chat.PageUp,
+		"chat.half_page_down":           &km.Chat.HalfPageDown,
+		"chat.half_page_up":             &km.Chat.HalfPageUp,
+		"chat.home":                     &km.Chat.Home,
+		"chat.end":                      &km.Chat.End,
+		"chat.end_follow":               &km.Chat.EndFollow,
+		"chat.copy":                     &km.Chat.Copy,
+		"chat.clear_highlight":          &km.Chat.ClearHighlight,
+		"chat.expand":                   &km.Chat.Expand,
+		"chat.dig_in":                   &km.Chat.DigIn,
+		"chat.scroll_left":              &km.Chat.ScrollLeft,
+		"chat.scroll_right":             &km.Chat.ScrollRight,
+		"chat.background_tasks":         &km.Chat.BackgroundTasks,
+	}
+}
+
+// ApplyKeybinds applies user key overrides from options.tui.keybinds onto
+// the keymap. Overrides merge over the defaults: only the named actions are
+// rebound, everything else keeps its default keys. Unknown action names and
+// empty key lists are warned about and ignored, so a bad entry never blocks
+// startup.
+func (km *KeyMap) ApplyKeybinds(overrides map[string][]string) {
+	if len(overrides) == 0 {
+		return
+	}
+	actions := km.keybindActions()
+	for _, action := range slices.Sorted(maps.Keys(overrides)) {
+		binding, ok := actions[action]
+		if !ok {
+			slog.Warn("Ignoring unknown keybind action", "action", action)
+			continue
+		}
+		keys := overrides[action]
+		if len(keys) == 0 {
+			slog.Warn("Ignoring keybind override with no keys", "action", action)
+			continue
+		}
+		*binding = rebind(*binding, keys)
+	}
+}
+
+// rebind returns a copy of b bound to keys instead of its current ones. The
+// help description survives; the help key text follows the new keys.
+// Bindings without help text (chat.end_follow, the history bindings) stay
+// help-less.
+func rebind(b key.Binding, keys []string) key.Binding {
+	opts := []key.BindingOpt{key.WithKeys(keys...)}
+	if help := b.Help(); help.Desc != "" || help.Key != "" {
+		opts = append(opts, key.WithHelp(strings.Join(keys, "/"), help.Desc))
+	}
+	return key.NewBinding(opts...)
 }

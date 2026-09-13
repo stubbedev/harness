@@ -331,6 +331,9 @@ options:
     git_status: true # branch and working-tree status in the header
     show_thinking: true # render reasoning blocks in the transcript
     textarea_min_height: 1 # collapsed height of the prompt; it grows to fit
+    keybinds:
+      quit: ctrl+q # one key...
+      editor.newline: [shift+enter, ctrl+j] # ...or a list
     completions:
       max_depth: 5
       max_items: 500
@@ -341,6 +344,87 @@ and "Disable Mouse" toggles write to the **global state file**. If a project
 config also sets `theme`, `transparent`, or `mouse`, the project wins on the
 next launch (see [Where config lives](#where-config-lives)), so a toggle can
 look like it silently reverted.
+
+#### Keybinds
+
+`options.tui.keybinds` rebinds TUI keys. Each entry maps a stable action name
+to one key or a list of keys, using the same key spellings the help footer
+shows (`ctrl+x`, `alt+t`, `shift+enter`, `pgup`, `f1`, `@`, ...). Overrides
+**merge over the defaults**: only the actions you list change, everything
+else keeps its built-in binding. Changes apply at startup — restart the TUI
+after editing.
+
+An unknown action name or an empty key list is warned about in the log and
+ignored; it never blocks startup. Chords (two-key sequences) are not
+supported — every action is a single keypress.
+
+Not rebindable yet: keys inside dialogs (quit confirm, sessions, models,
+command palette, question prompts), the textarea's movement/editing keys
+(word-jump, delete-word, line-start, ...), and bang-mode `!` entry/exit.
+
+| Action | Default key(s) |
+| --- | --- |
+| `chat.add_attachment` | `ctrl+f` |
+| `chat.background_tasks` | `ctrl+b` |
+| `chat.cancel` | `esc`, `alt+esc` |
+| `chat.clear_highlight` | `esc`, `alt+esc` |
+| `chat.copy` | `c`, `y`, `C`, `Y` |
+| `chat.details` | `ctrl+d` |
+| `chat.dig_in` | `enter` |
+| `chat.down` | `down`, `ctrl+j`, `j` |
+| `chat.down_one_item` | `shift+down`, `J` |
+| `chat.end` | `G`, `end` |
+| `chat.end_follow` | `ctrl+end` |
+| `chat.expand` | `space` |
+| `chat.half_page_down` | `d` |
+| `chat.half_page_up` | `u` |
+| `chat.home` | `g`, `home` |
+| `chat.new_session` | `ctrl+n` |
+| `chat.page_down` | `pgdown`, `space`, `f` |
+| `chat.page_up` | `pgup`, `b` |
+| `chat.pill_left` | `left` |
+| `chat.pill_right` | `right` |
+| `chat.scroll_left` | `shift+left`, `H` |
+| `chat.scroll_right` | `shift+right`, `L` |
+| `chat.tab` | `tab` |
+| `chat.toggle_pills` | `ctrl+t`, `ctrl+space` |
+| `chat.up` | `up`, `ctrl+k`, `k` |
+| `chat.up_down` | `up`, `down` |
+| `chat.up_down_one_item` | `shift+up`, `shift+down` |
+| `chat.up_one_item` | `shift+up`, `K` |
+| `commands` | `ctrl+p` |
+| `editor.add_image` | `ctrl+f` |
+| `editor.attachment_delete_mode` | `ctrl+r` |
+| `editor.commands` | `/` |
+| `editor.copy_selection` | `ctrl+shift+c` |
+| `editor.cut_selection` | `ctrl+shift+x` |
+| `editor.delete_all_attachments` | `r` |
+| `editor.escape` | `esc`, `alt+esc` |
+| `editor.history_next` | `down` |
+| `editor.history_prev` | `up` |
+| `editor.mention_file` | `@` |
+| `editor.newline` | `shift+enter`, `ctrl+j` |
+| `editor.open_editor` | `ctrl+o` |
+| `editor.paste_image` | `ctrl+v` |
+| `editor.paste_text` | `ctrl+shift+v` |
+| `editor.select_all` | `ctrl+shift+a` |
+| `editor.send_message` | `enter` |
+| `export_conversation` | `ctrl+shift+e` |
+| `help` | `ctrl+g` |
+| `models` | `ctrl+m`, `ctrl+l` |
+| `parent_session` | `ctrl+up` |
+| `quit` | `ctrl+c` |
+| `sessions` | `ctrl+s` |
+| `suspend` | `ctrl+z` |
+| `tab` | `tab` |
+| `themes` | `alt+t` |
+
+> [!NOTE]
+> Several keys are intentionally shared across scopes (e.g. `enter` sends in
+> the editor and digs in within the chat, `ctrl+f` adds an image attachment
+> from both). Rebinding an action only affects that action; if two actions
+> end up on the same key, the first handler in the editor/chat dispatch order
+> wins.
 
 ## Environment interpolation
 

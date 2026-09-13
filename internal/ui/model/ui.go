@@ -439,6 +439,12 @@ type UI struct {
 
 // New creates a new instance of the [UI] model.
 func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
+	// The keymap is built before the components that copy bindings out of
+	// it (the textarea's select-all, the chat items' copy/scroll keys), so
+	// user overrides from options.tui.keybinds reach every consumer.
+	keyMap := DefaultKeyMap()
+	keyMap.ApplyKeybinds(com.Config().Options.TUI.KeybindOverrides())
+
 	// Editor components
 	ta := textarea.New()
 	ta.SetStyles(com.Styles.Editor.Textarea)
@@ -454,10 +460,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		key.WithKeys("home", "ctrl+a"),
 		key.WithHelp("home", "line start"),
 	)
-	ta.KeyMap.SelectAll = key.NewBinding(
-		key.WithKeys("ctrl+shift+a"),
-		key.WithHelp("ctrl+shift+a", "select all"),
-	)
+	ta.KeyMap.SelectAll = keyMap.Editor.SelectAll
 	// Copying is handled by harness's keymap (Editor.CopySelection) so it can
 	// use harness's clipboard backend and user feedback; disable the
 	// textarea's built-in copy binding.
@@ -465,8 +468,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.Focus()
 
 	ch := NewChat(com, com.Config().Options.TUI.Scrollbar)
-
-	keyMap := DefaultKeyMap()
+	ch.SetItemKeymap(chat.ItemKeymap{
+		Copy:        keyMap.Chat.Copy,
+		ScrollLeft:  keyMap.Chat.ScrollLeft,
+		ScrollRight: keyMap.Chat.ScrollRight,
+	})
 
 	// Completions component
 	comp := completions.New(
@@ -1190,8 +1196,15 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyboardEnhancementsMsg:
 		m.keyenh = msg
 		if msg.SupportsKeyDisambiguation() {
-			m.keyMap.Models.SetHelp("ctrl+m", "models")
-			m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
+			// Prefer the disambiguated key in the help text, but only
+			// while the binding still carries it — options.tui.keybinds
+			// may have rebound the action elsewhere.
+			if slices.Contains(m.keyMap.Models.Keys(), "ctrl+m") {
+				m.keyMap.Models.SetHelp("ctrl+m", "models")
+			}
+			if slices.Contains(m.keyMap.Editor.Newline.Keys(), "shift+enter") {
+				m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
+			}
 		}
 	case copyChatHighlightMsg:
 		cmds = append(cmds, m.copyChatHighlight())
@@ -2820,8 +2833,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				curValue := m.textarea.Value()
 				curIdx := len(curValue)
 
-				// Trigger completions on @.
-				if msg.String() == "@" && !m.completionsOpen {
+				// Trigger completions on the mention key.
+				if key.Matches(msg, m.keyMap.Editor.MentionFile) && !m.completionsOpen {
 					// Only show if beginning of prompt or after whitespace.
 					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
 						m.completionsOpen = true
@@ -2873,8 +2886,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.updateHistoryDraft(curValue)
 
 				// After updating textarea, check if we need to filter completions.
-				// Skip filtering on the initial @ keystroke since items are loading async.
-				if m.completionsOpen && msg.String() != "@" {
+				// Skip filtering on the initial mention keystroke since items are loading async.
+				if m.completionsOpen && !key.Matches(msg, m.keyMap.Editor.MentionFile) {
 					newValue := m.textarea.Value()
 					newIdx := len(newValue)
 

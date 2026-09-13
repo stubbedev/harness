@@ -78,6 +78,11 @@ type Chat struct {
 	list     *list.List
 	idInxMap map[string]int // Map of message IDs to their indices in the list
 
+	// itemKeys carries the bindings chat items consult for per-item actions
+	// (copy, horizontal scroll). Seeded from the defaults and replaced by
+	// the model layer with its possibly user-rebound keymap.
+	itemKeys chat.ItemKeymap
+
 	// animRunning is true while the shared animation clock has a tick
 	// outstanding. The clock stops itself when no visible item is spinning
 	// and is re-armed by EnsureAnimating once one is. animGen identifies
@@ -176,6 +181,7 @@ func NewChat(com *common.Common, scrollbarMode string) *Chat {
 		idInxMap:      make(map[string]int),
 		scrollbarMode: scrollbarMode,
 		animAllowed:   true,
+		itemKeys:      chat.DefaultItemKeymap(),
 	}
 	l := list.NewList()
 	l.SetGap(1)
@@ -1127,11 +1133,17 @@ func (m *Chat) ScrollSelectedShellHorizontal(delta int) {
 	}
 }
 
+// SetItemKeymap replaces the bindings chat items consult for per-item
+// actions, so options.tui.keybinds overrides apply there as well.
+func (m *Chat) SetItemKeymap(keys chat.ItemKeymap) {
+	m.itemKeys = keys
+}
+
 // HandleKeyMsg handles key events for the chat component.
 func (m *Chat) HandleKeyMsg(key tea.KeyMsg) (bool, tea.Cmd) {
 	if m.list.Focused() {
 		if handler, ok := m.list.SelectedItem().(chat.KeyEventHandler); ok {
-			return handler.HandleKeyEvent(key)
+			return handler.HandleKeyEvent(key, m.itemKeys)
 		}
 	}
 	return false, nil

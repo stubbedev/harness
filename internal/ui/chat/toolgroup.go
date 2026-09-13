@@ -330,10 +330,10 @@ func (g *ToolGroupMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) 
 	return btn == ansi.MouseLeft
 }
 
-// HandleKeyEvent implements [KeyEventHandler]: c/y copies every call in
-// the group to the clipboard.
-func (g *ToolGroupMessageItem) HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd) {
-	if k := key.String(); k == "c" || k == "y" {
+// HandleKeyEvent implements [KeyEventHandler]: the copy binding copies
+// every call in the group to the clipboard.
+func (g *ToolGroupMessageItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (bool, tea.Cmd) {
+	if keys.MatchesCopy(msg) {
 		var b strings.Builder
 		for i, t := range g.tools {
 			if i > 0 {

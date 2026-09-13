@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/stubbedev/harness/internal/config"
@@ -48,9 +49,50 @@ type Expandable interface {
 	ToggleExpanded() bool
 }
 
+// ItemKeymap holds the key bindings chat items consult in HandleKeyEvent.
+// The model layer owns them, so options.tui.keybinds overrides reach item
+// actions too; items receive the bindings per event instead of hardcoding
+// keys.
+type ItemKeymap struct {
+	Copy        key.Binding
+	ScrollLeft  key.Binding
+	ScrollRight key.Binding
+}
+
+// DefaultItemKeymap returns the item bindings matching the built-in keymap
+// defaults, used until the model layer injects its (possibly rebound) ones.
+func DefaultItemKeymap() ItemKeymap {
+	return ItemKeymap{
+		Copy: key.NewBinding(
+			key.WithKeys("c", "y", "C", "Y"),
+		),
+		ScrollLeft: key.NewBinding(
+			key.WithKeys("shift+left", "H"),
+		),
+		ScrollRight: key.NewBinding(
+			key.WithKeys("shift+right", "L"),
+		),
+	}
+}
+
+// MatchesCopy reports whether msg triggers the copy action.
+func (k ItemKeymap) MatchesCopy(msg tea.KeyMsg) bool {
+	return key.Matches(msg, k.Copy)
+}
+
+// MatchesScrollLeft reports whether msg scrolls the item left.
+func (k ItemKeymap) MatchesScrollLeft(msg tea.KeyMsg) bool {
+	return key.Matches(msg, k.ScrollLeft)
+}
+
+// MatchesScrollRight reports whether msg scrolls the item right.
+func (k ItemKeymap) MatchesScrollRight(msg tea.KeyMsg) bool {
+	return key.Matches(msg, k.ScrollRight)
+}
+
 // KeyEventHandler is an interface for items that can handle key events.
 type KeyEventHandler interface {
-	HandleKeyEvent(key tea.KeyMsg) (bool, tea.Cmd)
+	HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (bool, tea.Cmd)
 }
 
 // MessageItem represents a [message.Message] item that can be displayed in the

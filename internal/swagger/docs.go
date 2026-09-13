@@ -2970,20 +2970,20 @@ const docTemplate = `{
                 1000000000,
                 60000000000,
                 3600000000000,
-                60000000000,
                 300000000000,
+                60000000000,
+                2000000000,
                 5000000000,
                 45000000000,
-                10000000000,
-                2000000000
+                10000000000
             ],
             "x-enum-varnames": [
-                "DefaultRequestTimeout",
                 "resolveTimeout",
+                "DefaultRequestTimeout",
+                "renameRetryBudget",
                 "configLockDeadline",
                 "refreshLockDeadline",
-                "credentialWriteLockDeadline",
-                "renameRetryBudget"
+                "credentialWriteLockDeadline"
             ]
         },
         "config.ExitBanner": {
@@ -3247,6 +3247,16 @@ const docTemplate = `{
                 },
                 "git_status": {
                     "type": "boolean"
+                },
+                "keybinds": {
+                    "description": "Keybinds rebinds TUI keys. Keys are stable action names (e.g.\n\"editor.send_message\"); values are one key or a list of keys. Overrides\nmerge over the built-in defaults: only the listed actions change.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
                 },
                 "mouse": {
                     "type": "boolean"
