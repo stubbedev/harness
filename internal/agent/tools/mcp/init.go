@@ -700,8 +700,28 @@ func teardown(name string) {
 	clearMCPData(name)
 }
 
+// configuredServerNames renders the configured MCP server names for error
+// messages so a caller that used an invented name can see what exists.
+func configuredServerNames(cfg *config.ConfigStore) string {
+	names := make([]string, 0, len(cfg.Config().MCP))
+	for name := range cfg.Config().MCP {
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return "none are configured"
+	}
+	slices.Sort(names)
+	return strings.Join(names, ", ")
+}
+
 func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string) (*ClientSession, error) {
-	m := cfg.Config().MCP[name]
+	m, ok := cfg.Config().MCP[name]
+	if !ok {
+		return nil, fmt.Errorf("mcp '%s' not found in configuration; available: %s", name, configuredServerNames(cfg))
+	}
+	if m.Disabled {
+		return nil, fmt.Errorf("mcp '%s' is disabled", name)
+	}
 	timeout := mcpTimeout(m)
 
 	// Fast path: reuse a healthy session without taking the renewal lock.
@@ -728,7 +748,15 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	// server unavailable.
 	sess, ok := sessions.Get(name)
 	if !ok {
-		return nil, fmt.Errorf("mcp '%s' not available", name)
+		state, hasState := states.Get(name)
+		switch {
+		case !hasState:
+			return nil, fmt.Errorf("mcp '%s' not available", name)
+		case state.State == StateNeedsAuth:
+			return nil, fmt.Errorf("mcp '%s' requires authentication before it can be used", name)
+		default:
+			return nil, fmt.Errorf("mcp '%s' not available (state: %s)", name, state.State)
+		}
 	}
 
 	// A concurrent goroutine may have already renewed the session while we

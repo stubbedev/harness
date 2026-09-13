@@ -14,7 +14,7 @@ import (
 )
 
 type ListMCPResourcesParams struct {
-	MCPName string `json:"mcp_name" description:"The MCP server name"`
+	MCPName string `json:"mcp_name" description:"Name of a configured MCP server"`
 }
 
 const ListMCPResourcesToolName = "list_mcp_resources"

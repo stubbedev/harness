@@ -1072,11 +1072,11 @@ func (m *Chat) EnterSelectedItem() {
 }
 
 // AscendSelectedItem implements the escape key: go out one level. A
-// tool group consumes the escape while it has a level to leave
-// (a fully rendered call, the sub-cursor, or the open group); anything
-// else falls through to the caller's escape handling. When the escape
-// shrank the render, the view re-anchors on the item so the content
-// the expansion pushed off-screen comes back.
+// tool group consumes the escape while it has a level to leave (a
+// fully rendered call under the sub-cursor, or the open group);
+// anything else falls through to the caller's escape handling. When
+// the escape shrank the render, the view re-anchors on the item so the
+// content the expansion pushed off-screen comes back.
 func (m *Chat) AscendSelectedItem() bool {
 	g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem)
 	if !ok {

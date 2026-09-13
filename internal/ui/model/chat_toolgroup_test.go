@@ -217,7 +217,6 @@ func TestCollapseRestoresView(t *testing.T) {
 	// Escaping out re-anchors the group: the offset returns to it
 	// rather than staying wherever the expansion pushed the view.
 	require.True(t, u.chat.AscendSelectedItem())
-	require.True(t, u.chat.AscendSelectedItem())
 	g := u.chat.list.SelectedItem().(*chat.ToolGroupMessageItem)
 	require.False(t, g.ExpandedLevel())
 	offsetAfter, _ := u.chat.list.ScrollPosition()

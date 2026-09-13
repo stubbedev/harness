@@ -2925,8 +2925,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			case key.Matches(msg, m.keyMap.Chat.DigIn):
 				m.chat.EnterSelectedItem()
 			case key.Matches(msg, m.keyMap.Chat.ClearHighlight):
-				// Escape goes out one level: a fully rendered call, then
-				// the sub-cursor, then the open group. At the top level it
+				// Escape goes out one level: a fully rendered call
+				// collapses, then the open group. At the top level it
 				// keeps its existing meaning.
 				m.chat.AscendSelectedItem()
 			case key.Matches(msg, m.keyMap.Chat.Up):

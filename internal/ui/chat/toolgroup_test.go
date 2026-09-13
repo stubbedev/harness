@@ -144,18 +144,37 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		out := ansi.Strip(g.Render(80))
 		assert.Greater(t, strings.Count(out, "\n")+1, 3, "the expanded call shows its body")
 
-		// Escape: the call collapses, then the cursor returns to the
-		// group row, then the group collapses, then escape stops
-		// consuming.
+		// Escape: the call collapses with the cursor kept on it, then
+		// the group collapses, then escape stops consuming.
 		require.True(t, g.Ascend())
 		require.False(t, isToolExpanded(g.ChildTool("t1")))
 		require.True(t, g.ExpandedLevel())
 		require.True(t, g.Ascend())
-		require.Equal(t, -1, g.SelectedChild())
-		require.True(t, g.ExpandedLevel())
-		require.True(t, g.Ascend())
 		require.False(t, g.ExpandedLevel())
 		require.False(t, g.Ascend())
+	})
+
+	t.Run("escape on a collapsed call collapses the group", func(t *testing.T) {
+		t.Parallel()
+		g := NewToolGroupMessageItem(sty, done("t1"))
+		g.AddTool(done("t2"))
+
+		// Nothing expanded: escape collapses the run in one press,
+		// without an intermediate selection-clearing step.
+		g.ExpandAndDescend()
+		require.True(t, g.Ascend())
+		require.False(t, g.ExpandedLevel())
+		require.Equal(t, -1, g.SelectedChild())
+
+		// Even with another call expanded elsewhere, escape on a
+		// collapsed call (or the group row) closes the whole run.
+		g.ExpandAndDescend()
+		g.ToggleSelectedChild()
+		require.True(t, g.SelectChildNext())
+		require.True(t, g.Ascend())
+		require.False(t, g.ExpandedLevel())
+		assert.False(t, isToolExpanded(g.ChildTool("t1")))
+		assert.False(t, isToolExpanded(g.ChildTool("t2")))
 	})
 
 	t.Run("collapsed group keeps the live call visible", func(t *testing.T) {

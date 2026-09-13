@@ -13,8 +13,8 @@ import (
 )
 
 type ReadMCPResourceParams struct {
-	MCPName string `json:"mcp_name" description:"The MCP server name"`
-	URI     string `json:"uri" description:"The resource URI to read"`
+	MCPName string `json:"mcp_name" description:"Name of a configured MCP server; discover names with list_mcp_resources"`
+	URI     string `json:"uri" description:"The resource URI to read, as returned by list_mcp_resources"`
 }
 
 const ReadMCPResourceToolName = "read_mcp_resource"

@@ -345,6 +345,41 @@ func TestGetOrRenewClient_SerializesConcurrentRenewals(t *testing.T) {
 	}
 }
 
+// TestGetOrRenewClient_UnknownServerErrorsWithConfiguredNames pins the error
+// contract for calls naming a server that is not configured — as when a model
+// invents a placeholder name. The error must say the name is unknown and list
+// what is configured so the caller can self-correct, and a configured server
+// without a session must say why (disabled, needs auth) instead of a bare
+// "not available".
+func TestGetOrRenewClient_UnknownServerErrorsWithConfiguredNames(t *testing.T) {
+	const needsAuth = "test-get-or-renew-auth"
+	t.Cleanup(func() { states.Del(needsAuth) })
+
+	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{
+		"alpha":   {Type: config.MCPStdio},
+		"beta":    {Type: config.MCPStdio, Disabled: true},
+		needsAuth: {Type: config.MCPHttp},
+	}})
+
+	_, err := getOrRenewClient(context.Background(), cfg, "unused")
+	require.ErrorContains(t, err, "mcp 'unused' not found in configuration")
+	require.ErrorContains(t, err, "available: alpha, beta, "+needsAuth)
+
+	_, err = getOrRenewClient(context.Background(), cfg, "beta")
+	require.ErrorContains(t, err, "mcp 'beta' is disabled")
+
+	_, err = getOrRenewClient(context.Background(), cfg, "alpha")
+	require.ErrorContains(t, err, "mcp 'alpha' not available")
+
+	updateState(needsAuth, StateNeedsAuth, nil, nil, Counts{})
+	_, err = getOrRenewClient(context.Background(), cfg, needsAuth)
+	require.ErrorContains(t, err, "mcp '"+needsAuth+"' requires authentication")
+
+	empty := config.NewTestStore(&config.Config{})
+	_, err = getOrRenewClient(context.Background(), empty, "unused")
+	require.ErrorContains(t, err, "available: none are configured")
+}
+
 // TestRegisterSessionTools_PopulatesRegistry pins that registerSessionTools —
 // the single seam through which a (re)connected session's tools enter the
 // registry — lists a live session's tools and writes them to allTools.

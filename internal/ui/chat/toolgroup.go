@@ -282,18 +282,17 @@ func (g *ToolGroupMessageItem) DigIn() {
 	g.ExpandAndDescend()
 }
 
-// Ascend implements the escape key, moving out one level: a fully
-// rendered call collapses to its one-liner, the sub-cursor returns to
-// the group row, and an expanded group collapses. Reports whether a
-// level was consumed.
+// Ascend implements the escape key: with the sub-cursor on a call
+// showing its full view, that call collapses and the cursor stays put
+// (so escape can walk the remaining expanded calls one by one); any
+// other escape on an expanded group collapses the group outright.
+// Reports whether a level was consumed.
 func (g *ToolGroupMessageItem) Ascend() bool {
 	switch {
 	case g.selectedChild >= 0 && g.selectedChild < len(g.tools) && isToolExpanded(g.tools[g.selectedChild]):
 		if e, ok := g.tools[g.selectedChild].(Expandable); ok {
 			_ = e.ToggleExpanded()
 		}
-	case g.selectedChild >= 0:
-		g.selectedChild = -1
 	case g.expanded:
 		g.collapse()
 	default:
