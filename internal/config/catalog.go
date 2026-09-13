@@ -70,6 +70,15 @@ func (s *catalogSync) Get(ctx context.Context) ([]catalog.Provider, error) {
 		if connErr != nil {
 			slog.Warn("Could not open catalog cache database", "error", connErr)
 		}
+		// The connection is only used inside this once; release the
+		// pooled reference so the handle does not outlive the caller
+		// (tests remove the data directory, and Windows cannot unlink
+		// open files).
+		defer func() {
+			if conn != nil {
+				_ = db.Release(s.dataDir)
+			}
+		}()
 
 		// Serve the cached catalog when it is fresh enough. This is the
 		// common startup path: one small query, no network. With

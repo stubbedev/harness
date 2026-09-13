@@ -124,6 +124,7 @@ func UpdateProviders(cfg *Config, pathOrURL string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open catalog database: %w", err)
 	}
+	defer func() { _ = db.Release(cfg.Options.DataDirectory) }()
 	if err := storeCatalog(context.Background(), conn, providers); err != nil {
 		return err
 	}
