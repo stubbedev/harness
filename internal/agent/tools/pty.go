@@ -28,11 +28,13 @@ import (
 // (interactive prompts, REPLs, TUIs) just run in the terminal.
 //
 // Exit codes and the working directory are recovered from a sentinel
-// the shell prints after each single-line command. Sudo password
-// prompts are detected in the output stream and answered through a
-// masked TUI prompt, so the password goes from the user straight to
-// the terminal and never enters the model's context; after the first
-// authentication the credential stays valid on the session's tty.
+// the shell prints after each single-line command. Credential
+// prompts (sudo, su, ssh passphrases, docker login, any hidden-line
+// reader) are detected in the output stream and in the terminal's
+// input discipline, and answered through a masked TUI prompt, so the
+// password goes from the user straight to the terminal and never
+// enters the model's context; after the first authentication a sudo
+// credential stays valid on the session's tty.
 
 const (
 	// ptyStartupMs is the quiet window that ends shell startup output
@@ -59,6 +61,11 @@ const (
 	// waiting blindly and looks at what the foreground job is doing:
 	// blocked on the terminal means the command is waiting for input.
 	ptyQuietMs = 1500
+	// ptyEchoSettleMs is how long output that merely looks like a
+	// credential prompt gets for the line discipline to confirm it:
+	// hidden-line readers clear echo before printing their prompt, but
+	// a slow one may still be mid-switch when its text is on the wire.
+	ptyEchoSettleMs = 400
 	// ptySettleForPromptMs is the grace given to a just-finished
 	// command's prompt to land after the quiet window trips, before the
 	// silence is read as anything else.
@@ -150,9 +157,19 @@ func newSentinel() sentinel {
 }
 
 var (
-	// sudoPromptRe matches the password prompt sudo prints when it
-	// authenticates against the session's tty.
-	sudoPromptRe = regexp.MustCompile(`\[sudo\] password for [^:]+:|[Ss]udo password for [^:]+:`)
+	// credPromptRe matches output that looks like a credential prompt:
+	// sudo's in any locale (the "[sudo] ... :" shape survives
+	// translation), a generic password/passphrase/passcode/PIN request,
+	// or sudo's wrong-password line. It is only a fast-path hint: a
+	// match is confirmed against the terminal's input discipline (a
+	// hidden-line read, term.SecretRead) before the masked prompt
+	// opens, so a program that merely prints one of these words - with
+	// echo left on - is not intercepted. Prompts the hint cannot read
+	// (other languages, escape sequences interleaved with the text) are
+	// still caught by the discipline check on the quiet window.
+	credPromptRe = regexp.MustCompile(`(?i)(?:\[sudo\][^:\n]{0,60}:|` +
+		`\b(?:password|passphrase|passcode|passwort|pass phrase|mot de passe|contraseña|pin)\b[^:\n]{0,64}:|` +
+		`sorry, try again)`)
 	// ptyPromptRe matches the OSC 133 prompt marker installed by
 	// ptySetupCmd. Seeing it after a command means the shell - not some
 	// program the command started - has control back.
@@ -229,6 +246,7 @@ type ptyTerminal interface {
 	Size() (rows, cols int)
 	IdleFor() time.Duration
 	SampleJob() term.JobActivity
+	SecretRead() term.SecretReadState
 	ResetWaitSample()
 	RescanFromStart()
 	Close()
@@ -752,8 +770,10 @@ func (r *ptyRunner) Run(ctx context.Context, command string, waitSeconds int) (r
 //
 //   - the shell's prompt marker: the command finished, and
 //     collectResult recovers its exit code and working directory;
-//   - a sudo password prompt: answered through the question service,
-//     with the user's think time added to the budget;
+//   - a credential prompt, seen either as prompt-shaped text (confirmed
+//     against the terminal's input discipline) or as a foreground job
+//     blocked in a hidden-line read: answered through the question
+//     service, with the user's think time added to the budget;
 //   - a full-screen program taking the terminal: its rendered screen;
 //   - output quiet for ptyQuietMs while the foreground job is blocked
 //     reading the terminal: the command is waiting for input (Waiting);
@@ -767,7 +787,7 @@ func (r *ptyRunner) Run(ctx context.Context, command string, waitSeconds int) (r
 // schedule.
 func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []string, waitSeconds int) (PTYResult, error) {
 	s.ResetWaitSample()
-	pats := []*regexp.Regexp{r.promptRe, sudoPromptRe, ptyAltScreenRe}
+	pats := []*regexp.Regexp{r.promptRe, credPromptRe, ptyAltScreenRe}
 	budget := time.Duration(waitSeconds) * time.Second
 	// Output within the lease window counts as progress; the window is
 	// capped by the budget so a short-budget call still returns on time
@@ -775,6 +795,10 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 	lease := min(3*time.Second, budget/2)
 	deadline := time.Now().Add(budget)
 	hardDeadline := time.Now().Add(ptyMaxWait)
+	// asked records that a masked credential prompt was already answered
+	// in this wait; the next one means the reader refused the answer, and
+	// the user is told so.
+	asked := false
 
 	for {
 		if ctx.Err() != nil {
@@ -795,6 +819,22 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 			if m := s.WaitForAny(ctx, pats, ptySettleForPromptMs*time.Millisecond); m >= 0 {
 				matched = m
 			} else if jobWaitingForInput(s.SampleJob()) {
+				if s.SecretRead() == term.SecretReadYes {
+					// The foreground job is blocked reading the terminal
+					// with echo off in line mode: a hidden-line reader
+					// asking for a credential, whatever language its
+					// prompt was printed in (or whether it printed one
+					// at all). Answer it masked rather than reporting
+					// it as a question the model could answer in the
+					// clear.
+					if err := r.answerCredentialPrompt(ctx, s, asked); err != nil {
+						return PTYResult{}, err
+					}
+					asked = true
+					// User think time is not the command's budget.
+					deadline = deadline.Add(2 * time.Minute)
+					continue
+				}
 				// The foreground job is blocked reading the terminal:
 				// the command has asked its question and gone quiet.
 				return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: true, Waiting: true}, nil
@@ -818,9 +858,23 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 			break
 		}
 		switch matched {
-		case 1: // sudo password prompt
-			if err := r.answerSudoPrompt(ctx, s); err != nil {
-				return PTYResult{}, err
+		case 1: // credential-shaped prompt text
+			// Text is only a hint; the input discipline decides. A real
+			// credential reader has switched the terminal to a hidden
+			// line by the time its prompt is on the wire (sudo, su and
+			// ssh all clear echo first), but give a slower one a moment
+			// to flip the bit before dismissing the hint.
+			switch secretReadSettled(s, ptyEchoSettleMs*time.Millisecond) {
+			case term.SecretReadNo:
+				// Echo is on: ordinary output that happens to look like
+				// a prompt. The scan has consumed the match, so waiting
+				// on cannot loop here.
+				continue
+			default:
+				if err := r.answerCredentialPrompt(ctx, s, asked); err != nil {
+					return PTYResult{}, err
+				}
+				asked = true
 			}
 			// User think time is not the command's budget.
 			deadline = deadline.Add(2 * time.Minute)
@@ -1089,37 +1143,61 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 	return res, nil
 }
 
-// answerSudoPrompt drains the prompt output, asks the user for the
-// password through a masked TUI prompt, and submits it to the
-// terminal.
-func (r *ptyRunner) answerSudoPrompt(ctx context.Context, s ptyTerminal) error {
+// answerCredentialPrompt drains the prompt output, asks the user for
+// the secret through a masked TUI prompt, and submits it to the
+// terminal. rejected tells the user the reader turned down the answer
+// that came before (sudo's "Sorry, try again." and kin).
+func (r *ptyRunner) answerCredentialPrompt(ctx context.Context, s ptyTerminal, rejected bool) error {
 	// Drain through the prompt so the answer is not blended into
 	// stale output; the prompt itself is re-shown by the TUI.
 	_ = s.Drain()
 
 	if r.ask == nil {
-		// No question service (e.g. headless run): send ctrl-c so sudo
-		// fails fast instead of hanging the whole wait budget.
+		// No question service (e.g. headless run): send ctrl-c so the
+		// reader fails fast instead of hanging the whole wait budget.
 		_ = s.Send([]byte{0x03})
 		return nil
 	}
 
+	text := "A program in the terminal session is asking for a password"
+	if rejected {
+		text += " again: the previous attempt was rejected"
+	}
 	answers, err := r.ask.Ask(ctx, question.Request{
 		Questions: []question.Question{{
-			ID:          "sudo_password",
+			ID:          "terminal_password",
 			Type:        question.TypeFreeText,
-			Text:        "sudo is asking for your password in the terminal session",
+			Text:        text + " (sudo, su, ssh or similar).",
 			Description: "The password is written directly to the terminal session and is never shown to the model.",
 			Secret:      true,
 		}},
 	})
 	if err != nil {
-		// Cancel the sudo prompt so the shell returns to a prompt.
+		// Cancel the prompt so the reader gives up and the shell returns
+		// to a prompt.
 		_ = s.Send([]byte{0x03})
 		return nil
 	}
 	_ = s.Send([]byte(answers[0].FillInText + "\n"))
 	return nil
+}
+
+// secretReadSettled samples the terminal's input discipline until it
+// says something other than an echoing terminal, or the window closes.
+// A credential reader that just printed its prompt may not have
+// cleared echo yet; a terminal whose echo stays on for the whole window
+// is not reading a secret, whatever its output looked like.
+func secretReadSettled(s ptyTerminal, window time.Duration) term.SecretReadState {
+	deadline := time.Now().Add(window)
+	for {
+		if state := s.SecretRead(); state != term.SecretReadNo {
+			return state
+		}
+		if !time.Now().Before(deadline) {
+			return term.SecretReadNo
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // Input sends raw text to the terminal without a sentinel: answers to

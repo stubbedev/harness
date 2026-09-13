@@ -1,16 +1,21 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/question"
 )
 
 // newTestRunner opens a runner over a real /bin/sh session in a temp
@@ -230,6 +235,132 @@ func TestPtyRunner_InputAnswersPrompt(t *testing.T) {
 	require.NotNil(t, done.ExitCode)
 }
 
+// fakeAsk scripts the masked credential prompts: each Ask pops the next
+// scripted answer (ErrCancelled once they run out) and records the
+// request for assertions.
+type fakeAsk struct {
+	mu       sync.Mutex
+	answers  []string
+	requests []question.Request
+}
+
+func (f *fakeAsk) Ask(_ context.Context, req question.Request) ([]question.Answer, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, req)
+	if len(f.answers) == 0 {
+		return nil, question.ErrCancelled
+	}
+	answer := f.answers[0]
+	f.answers = f.answers[1:]
+	return []question.Answer{{QuestionID: req.Questions[0].ID, FillInText: answer}}, nil
+}
+
+func (f *fakeAsk) asks() []question.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]question.Request{}, f.requests...)
+}
+
+func (f *fakeAsk) Subscribe(context.Context) <-chan pubsub.Event[question.Request] { return nil }
+
+func (f *fakeAsk) SubscribeNotifications(context.Context) <-chan pubsub.Event[question.Notification] {
+	return nil
+}
+
+func (f *fakeAsk) Answer([]question.Answer) bool { return false }
+
+func (f *fakeAsk) Cancel() bool { return false }
+
+// newAskRunner opens a runner whose credential prompts are answered from
+// a script.
+func newAskRunner(t *testing.T, answers ...string) (*ptyRunner, *fakeAsk) {
+	t.Helper()
+	r := newTestRunner(t)
+	ask := &fakeAsk{answers: answers}
+	r.setState(func() { r.ask = ask })
+	return r, ask
+}
+
+// A localized sudo prompt - the shape the old English-only regex missed
+// - opens the masked dialog: the text is prompt-shaped and the reader
+// has switched the terminal to a hidden line. The answer goes to the
+// terminal and neither the prompt nor the password reaches the output.
+func TestPtyRunner_LocalizedSudoPromptOpensMaskedDialog(t *testing.T) {
+	r, ask := newAskRunner(t, "hunter2")
+
+	res, err := r.Run(t.Context(),
+		`/bin/sh -c 'stty -echo; printf "[sudo] Passwort für stubbe: "; read pw; stty echo; printf ok'`, 30)
+	require.NoError(t, err)
+	require.Len(t, ask.asks(), 1)
+	require.True(t, ask.asks()[0].Questions[0].Secret)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	require.Equal(t, "ok", res.Output)
+	require.NotContains(t, res.Output, "hunter2")
+}
+
+// A generic Password: prompt - su, docker login and friends - opens the
+// masked dialog even when nothing in the output says "password" in a
+// language the text hint knows: the foreground job is blocked in a
+// hidden-line read, which is the credential-reader state regardless of
+// what its prompt says.
+func TestPtyRunner_HiddenLineReadWithoutKnownPromptOpensMaskedDialog(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the quiet-window job inspection behind this test is Linux-only (see term.SampleJob)")
+	}
+	r, ask := newAskRunner(t, "hunter2")
+
+	res, err := r.Run(t.Context(),
+		`/bin/sh -c 'stty -echo; printf "Passord: "; read pw; stty echo; printf ok'`, 30)
+	require.NoError(t, err)
+	require.Len(t, ask.asks(), 1)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	require.Equal(t, "ok", res.Output)
+}
+
+// A program that merely prints the word "password" while asking an
+// ordinary question is not intercepted: its echo stays on, so the model
+// gets the waiting-for-input result and answers with input.
+func TestPtyRunner_PlainQuestionIsNotMasked(t *testing.T) {
+	r, ask := newAskRunner(t)
+
+	res, err := r.Run(t.Context(),
+		`/bin/sh -c 'printf "Choose a password policy name: "; read name; printf "got:%s" "$name"'`, 30)
+	require.NoError(t, err)
+	require.Empty(t, ask.asks())
+	require.Nil(t, res.ExitCode)
+	if runtime.GOOS == "linux" {
+		require.True(t, res.Waiting, "an ordinary question waits for input from the model")
+	}
+
+	done, err := r.Input(t.Context(), "alpha\n")
+	require.NoError(t, err)
+	require.Contains(t, done.Output, "got:alpha")
+}
+
+// A wrong password re-opens the masked dialog - the reader clears echo
+// again for the retry - and the user is told the previous attempt was
+// rejected. Neither attempt leaks into the output: echo was off.
+func TestPtyRunner_WrongPasswordReopensMaskedDialog(t *testing.T) {
+	r, ask := newAskRunner(t, "wrong-one", "open-sesame")
+
+	res, err := r.Run(t.Context(),
+		`/bin/sh -c 'stty -echo; printf "Password: "; read a; `+
+			`printf "\nSorry, try again.\n"; printf "Password: "; read b; stty echo; `+
+			`[ "$b" = open-sesame ] && printf ok || printf bad'`, 30)
+	require.NoError(t, err)
+	asks := ask.asks()
+	require.Len(t, asks, 2)
+	require.Contains(t, asks[1].Questions[0].Text, "previous attempt was rejected")
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	require.Equal(t, "ok", res.Output)
+	require.NotContains(t, res.Output, "wrong-one")
+	require.NotContains(t, res.Output, "open-sesame")
+}
+
 func TestPtyRunner_MultilineCommand(t *testing.T) {
 	r := newTestRunner(t)
 
@@ -412,12 +543,35 @@ func TestResolveBackspaces(t *testing.T) {
 	require.Equal(t, "no backspaces", resolveBackspaces("no backspaces"))
 }
 
-func TestPtySudoPromptPattern(t *testing.T) {
+func TestPtyCredPromptPattern(t *testing.T) {
 	t.Parallel()
 
-	require.True(t, sudoPromptRe.MatchString("[sudo] password for stubbe: "))
-	require.True(t, sudoPromptRe.MatchString("sudo password for root: "))
-	require.False(t, sudoPromptRe.MatchString("some password for fun: "))
+	match := []string{
+		"[sudo] password for stubbe: ",
+		"[sudo] Passwort für stubbe: ",
+		"[sudo] Mot de passe de stubbe : ",
+		"sudo password for root: ",
+		"Password: ",
+		"Current password: ",
+		"Enter passphrase for key '/home/u/.ssh/id_ed25519': ",
+		"PIN: ",
+		"Sorry, try again.",
+	}
+	for _, s := range match {
+		require.True(t, credPromptRe.MatchString(s), "should match %q", s)
+	}
+	noMatch := []string{
+		"the password is hunter2", // a value, not a prompt
+		"passwordless login enabled",
+		"pinning: true",
+	}
+	for _, s := range noMatch {
+		require.False(t, credPromptRe.MatchString(s), "should not match %q", s)
+	}
+	// Ordinary output that merely looks prompt-shaped matches the hint;
+	// the echo-bit confirmation is what keeps it from being intercepted
+	// (see TestPtyRunner_PlainQuestionIsNotMasked).
+	require.True(t, credPromptRe.MatchString("some password for fun: "))
 }
 
 func TestPtySentinelParsing(t *testing.T) {

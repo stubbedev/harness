@@ -43,7 +43,7 @@ Editors, pagers and TUIs (nvim, less, htop, lazygit, k9s, git log without --no-p
 
 <usage_notes>
 - The sudo credential stays valid on the session's terminal after the first authentication — later sudo calls in the same session run without another password
-- If sudo asks for a password, the user is prompted through a masked dialog in the Harness UI; wait for the command to finish, never try to type the password yourself
+- If a command asks for a password (sudo, su, ssh, docker login, an ssh passphrase), the user is prompted through a masked dialog in the Harness UI; wait for the command to finish, never try to type the password yourself
 - Multiline commands and heredocs work (send them via command)
 - The session runs the user's own shell — here that is `{{ .Shell }}` — not a POSIX-minimal one, and shells disagree about unquoted arguments. Quote anything holding a glob character that is not meant to be expanded by the shell (`--include='*.go'`, `grep -F 'a*b'`): in zsh a pattern that matches no file fails the whole command with "no matches found" instead of being passed through as a literal. Quote or avoid bare `=`, `==`, `!`, `^` and `{...}` arguments for the same reason
 - Prefer `printf '%s\n' ...` over `echo` for anything containing backslashes or leading dashes; `echo`'s behaviour differs between shells

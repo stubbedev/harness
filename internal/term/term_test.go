@@ -115,6 +115,29 @@ func TestSession_ExitDetected(t *testing.T) {
 	require.False(t, s.Alive())
 }
 
+func TestSession_SecretRead(t *testing.T) {
+	s := startTestSession(t)
+	waitReady(t, s)
+	s.Drain()
+
+	// At an idle prompt the terminal is either echoing (shells without
+	// a line editor) or raw (readline, zle - which echo in software);
+	// neither is a hidden-line read.
+	require.Equal(t, SecretReadNo, s.SecretRead())
+
+	// A hidden-line reader in a child process: the termios shape sudo,
+	// su, ssh and getpass all leave the terminal in while they wait.
+	require.NoError(t, s.Send([]byte("/bin/sh -c 'stty -echo; read x; stty echo'\n")))
+	require.True(t, s.WaitForQuiet(t.Context(), 300*time.Millisecond, testTimeout(5*time.Second)))
+	s.Drain()
+	require.Equal(t, SecretReadYes, s.SecretRead())
+
+	require.NoError(t, s.Send([]byte("secret\n")))
+	require.True(t, s.WaitForQuiet(t.Context(), 300*time.Millisecond, testTimeout(5*time.Second)))
+	s.Drain()
+	require.Equal(t, SecretReadNo, s.SecretRead())
+}
+
 func TestSession_WaitForPatternTimeout(t *testing.T) {
 	s := startTestSession(t)
 	waitReady(t, s)
