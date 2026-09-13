@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/db"
 )
 
 // twoProviderConfig is a config file naming large as the given
@@ -42,6 +43,10 @@ func TestModelSelectionSurvivesPeerWrite(t *testing.T) {
 	t.Setenv("HARNESS_GLOBAL_DATA", dir)
 	resetProviderState()
 	t.Cleanup(resetProviderState)
+	// Load opens the catalog cache database in this directory and the
+	// process-wide pool keeps the handle; release it so the temp dir can
+	// be removed on Windows, where open files cannot be unlinked.
+	t.Cleanup(func() { _ = db.Release(dir) })
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
@@ -79,6 +84,7 @@ func TestModelSelectionYieldsToDiskWhenUnchosen(t *testing.T) {
 	t.Setenv("HARNESS_GLOBAL_DATA", dir)
 	resetProviderState()
 	t.Cleanup(resetProviderState)
+	t.Cleanup(func() { _ = db.Release(dir) })
 
 	require.NoError(t, os.WriteFile(configPath, []byte(twoProviderConfig("openai", "gpt-4")), 0o600))
 
