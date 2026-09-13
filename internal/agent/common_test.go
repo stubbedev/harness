@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/prompt"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/db"
@@ -66,14 +66,14 @@ func testEnv(t *testing.T) fakeEnv {
 func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPrompt string, tools ...fantasy.AgentTool) SessionAgent {
 	largeModel := Model{
 		Model: large,
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catalog.Model{
 			ContextWindow:    200000,
 			DefaultMaxTokens: 10000,
 		},
 	}
 	smallModel := Model{
 		Model: small,
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catalog.Model{
 			ContextWindow:    200000,
 			DefaultMaxTokens: 10000,
 		},
@@ -137,7 +137,7 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 	}
 
 	allTools := []fantasy.AgentTool{
-		tools.NewBashTool(env.workingDir, cfg.Config().Options.Attribution, modelName, nil),
+		tools.NewBashTool(env.workingDir, "coder", cfg.Config().Options.Attribution, modelName, nil),
 		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
 		tools.NewMultiEditTool(nil, env.history, *env.filetracker, env.workingDir),
 		tools.NewFetchTool(client),

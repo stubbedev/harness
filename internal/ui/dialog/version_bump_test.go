@@ -3,9 +3,9 @@ package dialog
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/sahilm/fuzzy"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -102,8 +102,8 @@ func TestModelItem_MutatorsBumpVersion(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	prov := catwalk.Provider{ID: "openai", Name: "OpenAI"}
-	model := catwalk.Model{ID: "gpt-4", Name: "GPT-4"}
+	prov := catalog.Provider{ID: "openai", Name: "OpenAI"}
+	model := catalog.Model{ID: "gpt-4", Name: "GPT-4"}
 	item := NewModelItem(&sty, prov, model, ModelTypeLarge, true)
 
 	requireBump(t, "SetFocused[true]", item, func() {

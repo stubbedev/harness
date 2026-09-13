@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -52,7 +52,7 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 		providers := csync.NewMap[string, config.ProviderConfig]()
 		providers.Set("test-provider", config.ProviderConfig{
 			ID: "test-provider",
-			Models: []catwalk.Model{
+			Models: []catalog.Model{
 				{ID: "test-model", SupportsImages: true},
 			},
 		})

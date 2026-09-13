@@ -10,33 +10,30 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 )
 
-var updateProvidersSource string
-
 var updateProvidersCmd = &cobra.Command{
 	Use:   "update-providers [path-or-url]",
-	Short: "Update providers",
-	Long:  `Update provider information from a specified local path or remote URL.`,
+	Short: "Update the model catalog",
+	Long: `Refresh the provider and model catalog stored in the local database.
+
+With no argument the catalog is fetched live from models.dev, with the
+OpenRouter provider entry taken from OpenRouter's own model API. A path
+or URL is read as either a models.dev api.json document or a plain
+provider list.`,
 	Example: `
-# Update Catwalk providers remotely (default)
+# Refresh the catalog from models.dev (default)
 harness update-providers
 
-# Update Catwalk providers from a custom URL
-harness update-providers https://example.com/providers.json
-
-# Update Catwalk providers from a local file
-harness update-providers /path/to/local-providers.json
-
-# Update Catwalk providers from embedded version
+# Seed the catalog from the copy bundled with this release
 harness update-providers embedded
 
-# Update Hyper provider information
-harness update-providers --source=hyper
+# Update the catalog from a custom URL
+harness update-providers https://example.com/api.json
 
-# Update Hyper from a custom URL
-harness update-providers --source=hyper https://hyper.example.com
+# Update the catalog from a local file
+harness update-providers /path/to/providers.json
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// NOTE(@andreynering): We want to skip logging output do stdout here.
+		// NOTE: We want to skip logging output to stdout here.
 		slog.SetDefault(slog.New(slog.DiscardHandler))
 
 		var pathOrURL string
@@ -44,21 +41,15 @@ harness update-providers --source=hyper https://hyper.example.com
 			pathOrURL = args[0]
 		}
 
-		var err error
-		switch updateProvidersSource {
-		case "catwalk":
-			err = config.UpdateProviders(pathOrURL)
-		case "hyper":
-			err = config.UpdateHyper(pathOrURL)
-		default:
-			return fmt.Errorf("invalid source %q, must be 'catwalk' or 'hyper'", updateProvidersSource)
-		}
-
+		store, err := config.Init(config.GlobalWorkspaceDir(), "", false)
 		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if err := config.UpdateProviders(store.Config(), pathOrURL); err != nil {
 			return err
 		}
 
-		// NOTE(@andreynering): This style is more-or-less copied from Fang's
+		// NOTE: This style is more-or-less copied from Fang's
 		// error message, adapted for success.
 		headerStyle := lipgloss.NewStyle().
 			Foreground(charmtone.Butter).
@@ -70,7 +61,7 @@ harness update-providers --source=hyper https://hyper.example.com
 			SetString("SUCCESS")
 		textStyle := lipgloss.NewStyle().
 			MarginLeft(2).
-			SetString(fmt.Sprintf("%s provider updated successfully.", updateProvidersSource))
+			SetString("Provider catalog updated successfully.")
 
 		fmt.Printf("%s\n%s\n\n", headerStyle.Render(), textStyle.Render())
 		return nil
@@ -78,5 +69,6 @@ harness update-providers --source=hyper https://hyper.example.com
 }
 
 func init() {
-	updateProvidersCmd.Flags().StringVar(&updateProvidersSource, "source", "catwalk", "Provider source to update (catwalk or hyper)")
+	updateProvidersCmd.Flags().String("source", "", "Deprecated and ignored")
+	_ = updateProvidersCmd.Flags().MarkHidden("source")
 }

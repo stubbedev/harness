@@ -250,7 +250,7 @@ func NewToolMessageItem(
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch toolCall.Name {
-	case tools.BashToolName:
+	case tools.ShellToolName:
 		item = NewBashToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobOutputToolName:
 		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
@@ -1222,7 +1222,7 @@ func (t *baseToolMessageItem) formatToolForCopy() string {
 // formatParametersForCopy formats tool parameters for clipboard copying.
 func (t *baseToolMessageItem) formatParametersForCopy() string {
 	switch t.toolCall.Name {
-	case tools.BashToolName:
+	case tools.ShellToolName:
 		var params tools.BashParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			cmd := strings.ReplaceAll(params.Command, "\n", " ")
@@ -1362,7 +1362,7 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 	}
 
 	switch t.toolCall.Name {
-	case tools.BashToolName:
+	case tools.ShellToolName:
 		return t.formatBashResultForCopy()
 	case tools.ViewToolName:
 		return t.formatViewResultForCopy()
@@ -1676,8 +1676,9 @@ func PrettifyToolName(name string) string {
 	switch name {
 	case agent.AgentToolName:
 		return "Agent"
-	case tools.BashToolName:
-		return "Bash"
+	case tools.ShellToolName, "bash":
+		// "bash" is the tool's former name, still on restored calls.
+		return "Shell"
 	case tools.JobOutputToolName:
 		return "Job: Output"
 	case tools.JobKillToolName:

@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/subagents"
 )
@@ -240,7 +240,7 @@ func TestAgentTool_SubagentBuildFailure_SurfacedAsToolError(t *testing.T) {
 		Type:    openaicompat.Name,
 		BaseURL: "http://127.0.0.1:0/v1",
 		APIKey:  "test",
-		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
+		Models:  []catalog.Model{{ID: modelID, DefaultMaxTokens: 4096}},
 	})
 	selected := config.SelectedModel{Provider: providerID, Model: modelID}
 	cfg.Config().Models[config.SelectedModelTypeLarge] = selected

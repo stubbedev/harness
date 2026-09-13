@@ -577,15 +577,15 @@ func TestBatch_ComposesRealTools(t *testing.T) {
 func TestBatch_ForEachRunsSerialToolsOneAtATime(t *testing.T) {
 	t.Parallel()
 
-	require.True(t, serialTools[BashToolName], "bash must be registered as serial")
+	require.True(t, serialTools[ShellToolName], "bash must be registered as serial")
 
-	seen := jsonTool(BashToolName, func(input map[string]any) any {
+	seen := jsonTool(ShellToolName, func(input map[string]any) any {
 		return map[string]any{"v": input["v"]}
 	})
 
 	resp := runPlan(t, BatchParams{
 		Steps: []BatchStep{
-			{ID: "out", Tool: BashToolName, ForEach: "[0,1,2,3,4,5,6,7]", InputJQ: "{v: $item}"},
+			{ID: "out", Tool: ShellToolName, ForEach: "[0,1,2,3,4,5,6,7]", InputJQ: "{v: $item}"},
 		},
 		Return: "$out | map(.v)",
 	}, seen)

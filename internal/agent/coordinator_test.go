@@ -11,13 +11,13 @@ import (
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/subagents"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/discover"
 	"golang.org/x/sync/errgroup"
@@ -82,7 +82,7 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 func newMockAgent(providerID string, maxTokens int64, runFunc func(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)) *mockSessionAgent {
 	return &mockSessionAgent{
 		model: Model{
-			CatwalkCfg: catwalk.Model{
+			CatalogCfg: catalog.Model{
 				DefaultMaxTokens: maxTokens,
 			},
 			ModelCfg: config.SelectedModel{
@@ -245,7 +245,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		agent := &mockSessionAgent{
 			model: Model{
-				CatwalkCfg: catwalk.Model{
+				CatalogCfg: catalog.Model{
 					DefaultMaxTokens: 4096,
 				},
 				ModelCfg: config.SelectedModel{
@@ -754,7 +754,7 @@ func TestResolveModelByID_WithProviderOverride(t *testing.T) {
 	env := testEnv(t)
 	providerCfg := config.ProviderConfig{
 		ID:     "test-provider",
-		Models: []catwalk.Model{{ID: "model-a"}},
+		Models: []catalog.Model{{ID: "model-a"}},
 	}
 	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
 
@@ -766,7 +766,7 @@ func TestResolveModelByID_WithProviderOverride(t *testing.T) {
 	})
 }
 
-// TestFindModelProvider verifies the pure provider/catwalk lookup used by
+// TestFindModelProvider verifies the pure provider/catalog lookup used by
 // resolveModelByID to back a subagent's specific `model:` id.
 func TestFindModelProvider(t *testing.T) {
 	t.Parallel()
@@ -774,7 +774,7 @@ func TestFindModelProvider(t *testing.T) {
 	env := testEnv(t)
 	providerCfg := config.ProviderConfig{
 		ID:     "test-provider",
-		Models: []catwalk.Model{{ID: "model-a"}, {ID: "model-b"}},
+		Models: []catalog.Model{{ID: "model-a"}, {ID: "model-b"}},
 	}
 	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
 
@@ -829,11 +829,11 @@ func TestFindModelProvider_TwoProvidersSameModelID(t *testing.T) {
 
 	cfg.Config().Providers.Set("provider-a", config.ProviderConfig{
 		ID:     "provider-a",
-		Models: []catwalk.Model{{ID: "shared-model"}},
+		Models: []catalog.Model{{ID: "shared-model"}},
 	})
 	cfg.Config().Providers.Set("provider-b", config.ProviderConfig{
 		ID:     "provider-b",
-		Models: []catwalk.Model{{ID: "shared-model"}},
+		Models: []catalog.Model{{ID: "shared-model"}},
 	})
 
 	coord := &coordinator{cfg: cfg, sessions: env.sessions}
@@ -1206,15 +1206,15 @@ func TestGetProviderOptionsReasoningEffort(t *testing.T) {
 	// must land under anthropic.Name so the Anthropic language model picks them up.
 	tests := []struct {
 		name         string
-		providerType catwalk.Type
+		providerType catalog.Type
 	}{
-		{"anthropic honors reasoning_effort", catwalk.Type(anthropic.Name)},
-		{"bedrock honors reasoning_effort", catwalk.Type(bedrock.Name)},
+		{"anthropic honors reasoning_effort", catalog.Type(anthropic.Name)},
+		{"bedrock honors reasoning_effort", catalog.Type(bedrock.Name)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			model := Model{
-				CatwalkCfg: catwalk.Model{
+				CatalogCfg: catalog.Model{
 					ID:              "claude-opus-4-7",
 					CanReason:       true,
 					ReasoningLevels: []string{"max"},
@@ -1271,7 +1271,7 @@ func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
 	for _, providerType := range discover.RegisteredProviderTypes() {
 		t.Run(providerType, func(t *testing.T) {
 			model := Model{
-				CatwalkCfg: catwalk.Model{
+				CatalogCfg: catalog.Model{
 					ID:              "qwen/qwen3-8b",
 					CanReason:       true,
 					ReasoningLevels: []string{"low", "medium", "high"},
@@ -1282,7 +1282,7 @@ func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
 					ReasoningEffort: "high",
 				},
 			}
-			providerCfg := config.ProviderConfig{ID: "local", Type: catwalk.Type(providerType)}
+			providerCfg := config.ProviderConfig{ID: "local", Type: catalog.Type(providerType)}
 
 			opts := getProviderOptions(model, providerCfg)
 
@@ -1298,7 +1298,7 @@ func TestGetProviderOptionsReasoningEffortCustomProvider(t *testing.T) {
 
 func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	model := Model{
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catalog.Model{
 			ID:              "glm-5.2",
 			CanReason:       true,
 			ReasoningLevels: []string{"high", "max"},
@@ -1308,7 +1308,7 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 		},
 	}
 	providerCfg := config.ProviderConfig{
-		ID:   string(catwalk.InferenceProviderZAI),
+		ID:   string(catalog.InferenceProviderZAI),
 		Type: openaicompat.Name,
 	}
 
@@ -1333,7 +1333,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 
 	t.Run("model top_k is injected into extra_body for known custom providers", func(t *testing.T) {
 		model := Model{
-			CatwalkCfg: catwalk.Model{ID: "llama3"},
+			CatalogCfg: catalog.Model{ID: "llama3"},
 			ModelCfg:   config.SelectedModel{Provider: "ollama", TopK: new(int64(40))},
 		}
 
@@ -1348,11 +1348,11 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 		assert.Equal(t, int64(40), topK)
 	})
 
-	t.Run("falls back to catwalk top_k when the model config has none", func(t *testing.T) {
+	t.Run("falls back to catalog top_k when the model config has none", func(t *testing.T) {
 		model := Model{
-			CatwalkCfg: catwalk.Model{
+			CatalogCfg: catalog.Model{
 				ID:      "llama3",
-				Options: catwalk.ModelOptions{TopK: new(int64(64))},
+				Options: catalog.ModelOptions{TopK: new(int64(64))},
 			},
 			ModelCfg: config.SelectedModel{Provider: "ollama"},
 		}
@@ -1370,7 +1370,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 
 	t.Run("does not set extra_body when no top_k is configured anywhere", func(t *testing.T) {
 		model := Model{
-			CatwalkCfg: catwalk.Model{ID: "llama3"},
+			CatalogCfg: catalog.Model{ID: "llama3"},
 			ModelCfg:   config.SelectedModel{Provider: "ollama"},
 		}
 
@@ -1386,7 +1386,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 
 	t.Run("does not overwrite an explicitly configured extra_body.top_k", func(t *testing.T) {
 		model := Model{
-			CatwalkCfg: catwalk.Model{ID: "llama3"},
+			CatalogCfg: catalog.Model{ID: "llama3"},
 			ModelCfg: config.SelectedModel{
 				Provider: "ollama",
 				TopK:     new(int64(40)),
@@ -1407,10 +1407,10 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 
 	t.Run("is not injected for providers outside the known-custom-provider default branch", func(t *testing.T) {
 		model := Model{
-			CatwalkCfg: catwalk.Model{ID: "glm-5.2"},
+			CatalogCfg: catalog.Model{ID: "glm-5.2"},
 			ModelCfg:   config.SelectedModel{Provider: "zai", TopK: new(int64(40))},
 		}
-		providerCfg := config.ProviderConfig{ID: string(catwalk.InferenceProviderZAI), Type: openaicompat.Name}
+		providerCfg := config.ProviderConfig{ID: string(catalog.InferenceProviderZAI), Type: openaicompat.Name}
 
 		opts := getProviderOptions(model, providerCfg)
 
@@ -1425,7 +1425,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 
 func TestGetProviderOptionsMalformedFallback(t *testing.T) {
 	model := Model{
-		CatwalkCfg: catwalk.Model{ID: "llama3"},
+		CatalogCfg: catalog.Model{ID: "llama3"},
 		ModelCfg: config.SelectedModel{
 			Provider:        "ollama",
 			TopK:            new(int64(40)),
@@ -1470,7 +1470,7 @@ func TestCallTopK(t *testing.T) {
 		},
 		{
 			name:        "passed through for anthropic",
-			providerCfg: config.ProviderConfig{ID: "anthropic", Type: catwalk.Type(anthropic.Name)},
+			providerCfg: config.ProviderConfig{ID: "anthropic", Type: catalog.Type(anthropic.Name)},
 			want:        new(int64(40)),
 		},
 	}
@@ -1530,7 +1530,7 @@ func TestResolveModelByID_CacheHitSkipsBuild(t *testing.T) {
 	// No-op provider with a known model so findModelProvider succeeds.
 	providerCfg := config.ProviderConfig{
 		ID:     "test-provider",
-		Models: []catwalk.Model{{ID: "model-x", DefaultMaxTokens: 4096}},
+		Models: []catalog.Model{{ID: "model-x", DefaultMaxTokens: 4096}},
 	}
 	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
 
@@ -1563,7 +1563,7 @@ func TestResolveModelByID_ModelNotFound(t *testing.T) {
 	env := testEnv(t)
 	providerCfg := config.ProviderConfig{
 		ID:     "test-provider",
-		Models: []catwalk.Model{{ID: "model-x", DefaultMaxTokens: 4096}},
+		Models: []catalog.Model{{ID: "model-x", DefaultMaxTokens: 4096}},
 	}
 	coord := newTestCoordinator(t, env, "test-provider", providerCfg)
 

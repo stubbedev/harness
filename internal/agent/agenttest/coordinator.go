@@ -8,9 +8,9 @@ package agenttest
 import (
 	"context"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/stubbedev/harness/internal/agent"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/session"
@@ -51,7 +51,7 @@ func NewCoordinator(
 		Type:    openaicompat.Name,
 		BaseURL: "http://127.0.0.1:0/v1",
 		APIKey:  "test",
-		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
+		Models:  []catalog.Model{{ID: modelID, DefaultMaxTokens: 4096}},
 	})
 	selected := config.SelectedModel{Provider: providerID, Model: modelID}
 	cfg.OverridePreferredModel(config.SelectedModelTypeLarge, selected)

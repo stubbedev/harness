@@ -3,8 +3,8 @@ package subagents
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 )
 
@@ -169,7 +169,7 @@ func TestValidate_EffortField(t *testing.T) {
 func TestApplyEffortToModel_OpenAI(t *testing.T) {
 	t.Parallel()
 
-	m := catwalk.Model{
+	m := catalog.Model{
 		ID:              "o4-mini",
 		CanReason:       true,
 		ReasoningLevels: []string{"low", "medium", "high"},
@@ -208,7 +208,7 @@ func TestApplyEffortToModel_OpenAI(t *testing.T) {
 func TestApplyEffortToModel_Anthropic(t *testing.T) {
 	t.Parallel()
 
-	m := catwalk.Model{
+	m := catalog.Model{
 		ID:              "claude-opus-4-7",
 		CanReason:       true,
 		ReasoningLevels: []string{"low", "medium", "high", "xhigh", "max"},
@@ -245,7 +245,7 @@ func TestApplyEffortToModel_Anthropic(t *testing.T) {
 func TestApplyEffortToModel_EmptyEffort_NoOp(t *testing.T) {
 	t.Parallel()
 
-	m := catwalk.Model{
+	m := catalog.Model{
 		ID:        "o4-mini",
 		CanReason: true,
 	}
@@ -264,7 +264,7 @@ func TestApplyEffortToModel_EmptyEffort_NoOp(t *testing.T) {
 func TestApplyEffortToModel_NonReasoningModel(t *testing.T) {
 	t.Parallel()
 
-	m := catwalk.Model{
+	m := catalog.Model{
 		ID:        "gpt-4o",
 		CanReason: false,
 	}
@@ -289,7 +289,7 @@ func TestApplyEffortToModel_NonReasoningModel(t *testing.T) {
 func TestApplyEffortToModel_PreservesOtherFields(t *testing.T) {
 	t.Parallel()
 
-	m := catwalk.Model{
+	m := catalog.Model{
 		ID:              "o4-mini",
 		CanReason:       true,
 		ReasoningLevels: []string{"low", "medium", "high"},
@@ -312,7 +312,7 @@ func TestApplyEffortToModel_PreservesOtherFields(t *testing.T) {
 func TestApplyEffortToModel_XHighAndMaxPassThrough(t *testing.T) {
 	t.Parallel()
 
-	m := catwalk.Model{
+	m := catalog.Model{
 		ID:              "o4-mini",
 		CanReason:       true,
 		ReasoningLevels: []string{"low", "medium", "high"},
@@ -344,7 +344,7 @@ func TestApplyEffortToModel_XHighAndMaxPassThrough(t *testing.T) {
 func TestApplyEffortToModel_EmptyReasoningLevels(t *testing.T) {
 	t.Parallel()
 
-	m := catwalk.Model{
+	m := catalog.Model{
 		ID:              "some-reasoning-model",
 		CanReason:       true,
 		ReasoningLevels: nil,
@@ -382,7 +382,7 @@ func TestDispatchAppliesEffort_EndToEnd(t *testing.T) {
 		Model:    "o4-mini",
 		Provider: "openai",
 	}
-	catwalkModel := catwalk.Model{
+	catwalkModel := catalog.Model{
 		ID:              "o4-mini",
 		CanReason:       true,
 		ReasoningLevels: []string{"low", "medium", "high"},
@@ -407,7 +407,7 @@ func TestDispatchAppliesEffort_Anthropic_EndToEnd(t *testing.T) {
 				Model:    "claude-opus-4-7",
 				Provider: "anthropic",
 			}
-			catwalkModel := catwalk.Model{
+			catwalkModel := catalog.Model{
 				ID:              "claude-opus-4-7",
 				CanReason:       true,
 				ReasoningLevels: []string{"low", "medium", "high", "xhigh", "max"},
@@ -425,8 +425,8 @@ func TestDispatchAppliesEffort_Anthropic_EndToEnd(t *testing.T) {
 func TestEffortIgnored(t *testing.T) {
 	t.Parallel()
 
-	reasoning := catwalk.Model{ID: "r", CanReason: true}
-	plain := catwalk.Model{ID: "p", CanReason: false}
+	reasoning := catalog.Model{ID: "r", CanReason: true}
+	plain := catalog.Model{ID: "p", CanReason: false}
 
 	require.True(t, EffortIgnored("high", plain), "effort on non-reasoning model is ignored")
 	require.False(t, EffortIgnored("high", reasoning), "effort on reasoning model is honored")

@@ -15,13 +15,13 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/clipboard"
 	"github.com/stubbedev/harness/internal/config"
@@ -630,7 +630,7 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 
 	// Find the provider in the known providers list to get its default small model.
 	knownProviders, _ := config.Providers(cfg)
-	var knownProvider *catwalk.Provider
+	var knownProvider *catalog.Provider
 	for _, p := range knownProviders {
 		if string(p.ID) == providerID {
 			knownProvider = &p

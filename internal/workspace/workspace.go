@@ -10,8 +10,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
@@ -106,7 +106,7 @@ type LSPEvent struct {
 
 // AgentModel holds the model information exposed to the UI.
 type AgentModel struct {
-	CatwalkCfg catwalk.Model
+	CatalogCfg catalog.Model
 	ModelCfg   config.SelectedModel
 }
 

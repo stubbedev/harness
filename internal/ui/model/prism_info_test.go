@@ -50,7 +50,7 @@ func prismToolTurn(finished bool, prismName string) message.Message {
 		SessionID:      "s1",
 		Role:           message.Assistant,
 		Model:          "prism-model",
-		Provider:       "hyper",
+		Provider:       "test-provider",
 		Parts:          parts,
 		PrismModelName: prismName,
 	}

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -17,12 +18,12 @@ var memoryDescription string
 const MemoryToolName = "memory"
 
 type MemoryParams struct {
-	Action   string `json:"action" description:"One of: save, read, search, list, delete"`
-	ID       string `json:"id,omitempty" description:"Memory id (required for read and delete; optional for save)"`
-	Title    string `json:"title,omitempty" description:"Short title (required for save)"`
-	Content  string `json:"content,omitempty" description:"Full note content (required for save; replaces existing content on update)"`
-	Category string `json:"category,omitempty" description:"user, feedback, project, or reference (default project)"`
-	Pinned   *bool  `json:"pinned,omitempty" description:"Pin to protect from reaping (save only; omit to keep the current value)"`
+	Action   string `json:"action" description:"One of: save, edit, read, search, list, delete"`
+	ID       string `json:"id,omitempty" description:"Memory id (required for read and delete; optional for save and edit)"`
+	Title    string `json:"title,omitempty" description:"Short title (required for save; for edit identifies the memory when id is omitted)"`
+	Content  string `json:"content,omitempty" description:"Full note content (required for save and edit; replaces existing content on update)"`
+	Category string `json:"category,omitempty" description:"user, feedback, project, or reference (default project; edit keeps the existing category when omitted)"`
+	Pinned   *bool  `json:"pinned,omitempty" description:"Pin to protect from reaping (save and edit; omit to keep the current value)"`
 	Query    string `json:"query,omitempty" description:"Search query (required for search)"`
 }
 
@@ -37,6 +38,8 @@ func NewMemoryTool(svc memory.Service) fantasy.AgentTool {
 			switch params.Action {
 			case "save":
 				return memorySave(ctx, svc, params)
+			case "edit":
+				return memoryEdit(ctx, svc, params)
 			case "read":
 				return memoryRead(ctx, svc, params)
 			case "search":
@@ -46,7 +49,7 @@ func NewMemoryTool(svc memory.Service) fantasy.AgentTool {
 			case "delete":
 				return memoryDelete(ctx, svc, params)
 			default:
-				return fantasy.ToolResponse{}, fmt.Errorf("invalid action %q: must be one of save, read, search, list, delete", params.Action)
+				return fantasy.ToolResponse{}, fmt.Errorf("invalid action %q: must be one of save, edit, read, search, list, delete", params.Action)
 			}
 		},
 	)
@@ -80,6 +83,72 @@ func memorySave(ctx context.Context, svc memory.Service, params MemoryParams) (f
 		verb = "Saved"
 	}
 	response := fmt.Sprintf("%s memory %s\n\n%s", verb, result.Item.IndexLine(), result.Item.Content)
+	if result.Redactions > 0 {
+		response += fmt.Sprintf("\n\nNote: %d likely secret(s) were redacted before saving.", result.Redactions)
+	}
+	return fantasy.NewTextResponse(response), nil
+}
+
+// memoryEdit updates an existing memory identified by id or exact
+// title. Unlike save it never creates: when the target does not exist
+// it errors and points at save instead, so a typo'd title cannot
+// silently duplicate a memory. Omitted category and pinned keep the
+// stored values.
+func memoryEdit(ctx context.Context, svc memory.Service, params MemoryParams) (fantasy.ToolResponse, error) {
+	if params.Content == "" {
+		return fantasy.ToolResponse{}, errors.New("content is required for edit")
+	}
+
+	var existing memory.Item
+	switch {
+	case params.ID != "":
+		item, err := svc.Get(ctx, params.ID)
+		if err != nil {
+			return fantasy.ToolResponse{}, fmt.Errorf("no memory with id %q: %w", params.ID, err)
+		}
+		existing = item
+	case params.Title != "":
+		matches, err := svc.Search(ctx, params.Title)
+		if err != nil {
+			return fantasy.ToolResponse{}, err
+		}
+		found := false
+		for _, m := range matches {
+			if strings.EqualFold(strings.TrimSpace(m.Title), strings.TrimSpace(params.Title)) {
+				existing = m
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fantasy.ToolResponse{}, fmt.Errorf("no memory titled %q; use save to create it", params.Title)
+		}
+	default:
+		return fantasy.ToolResponse{}, errors.New("id or title is required for edit")
+	}
+
+	title := cmp.Or(params.Title, existing.Title)
+	category := existing.Category
+	if params.Category != "" {
+		parsed, err := memory.ParseCategory(params.Category)
+		if err != nil {
+			return fantasy.ToolResponse{}, err
+		}
+		category = parsed
+	}
+
+	result, err := svc.Save(ctx, memory.SaveInput{
+		ID:       existing.ID,
+		Title:    title,
+		Content:  params.Content,
+		Category: category,
+		Pinned:   params.Pinned,
+	})
+	if err != nil {
+		return fantasy.ToolResponse{}, err
+	}
+
+	response := fmt.Sprintf("Edited memory %s\n\n%s", result.Item.IndexLine(), result.Item.Content)
 	if result.Redactions > 0 {
 		response += fmt.Sprintf("\n\nNote: %d likely secret(s) were redacted before saving.", result.Redactions)
 	}

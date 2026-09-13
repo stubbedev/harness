@@ -3,10 +3,10 @@ package agent
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/prompt"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/subagents"
 	"golang.org/x/sync/errgroup"
@@ -31,7 +31,7 @@ func newOfflineCoordinator(t *testing.T, env fakeEnv) *coordinator {
 		Type:    openaicompat.Name,
 		BaseURL: "http://127.0.0.1:0/v1",
 		APIKey:  "test",
-		Models:  []catwalk.Model{{ID: modelID, DefaultMaxTokens: 4096}},
+		Models:  []catalog.Model{{ID: modelID, DefaultMaxTokens: 4096}},
 	})
 	selected := config.SelectedModel{Provider: providerID, Model: modelID}
 	cfg.Config().Models[config.SelectedModelTypeLarge] = selected

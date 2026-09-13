@@ -3,23 +3,23 @@ package agent
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/subagents"
 )
 
 // These tests pin the effort-application contract that buildAgent relies on:
 // it calls subagents.ApplyEffortToModel on the resolved primary model
-// (primary.ModelCfg, primary.CatwalkCfg). The cases mirror the dispatch path
+// (primary.ModelCfg, primary.CatalogCfg). The cases mirror the dispatch path
 // taken when a named subagent has Effort set.
 
 func TestApplyEffortToModel_HighEffort_OpenAI(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.SelectedModel{Model: "o4-mini", Provider: "openai"}
-	cat := catwalk.Model{
+	cat := catalog.Model{
 		ID:              "o4-mini",
 		CanReason:       true,
 		ReasoningLevels: []string{"low", "medium", "high"},
@@ -35,7 +35,7 @@ func TestApplyEffortToModel_HighEffort_Anthropic(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.SelectedModel{Model: "claude-opus-4-7", Provider: "anthropic"}
-	cat := catwalk.Model{
+	cat := catalog.Model{
 		ID:              "claude-opus-4-7",
 		CanReason:       true,
 		ReasoningLevels: []string{"low", "medium", "high", "xhigh", "max"},
@@ -52,7 +52,7 @@ func TestApplyEffortToModel_EmptyEffort_NoOp(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.SelectedModel{Model: "o4-mini", Provider: "openai"}
-	cat := catwalk.Model{ID: "o4-mini", CanReason: true, ReasoningLevels: []string{"low", "high"}}
+	cat := catalog.Model{ID: "o4-mini", CanReason: true, ReasoningLevels: []string{"low", "high"}}
 
 	got := subagents.ApplyEffortToModel("", cfg, cat)
 
@@ -64,7 +64,7 @@ func TestApplyEffortToModel_PreservesOtherFields(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.SelectedModel{Model: "o4-mini", Provider: "openai", MaxTokens: 4096}
-	cat := catwalk.Model{ID: "o4-mini", CanReason: true, ReasoningLevels: []string{"low", "medium", "high"}}
+	cat := catalog.Model{ID: "o4-mini", CanReason: true, ReasoningLevels: []string{"low", "medium", "high"}}
 
 	got := subagents.ApplyEffortToModel("high", cfg, cat)
 
@@ -78,7 +78,7 @@ func TestApplyEffortToModel_NonReasoningModel(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.SelectedModel{Model: "gpt-4o", Provider: "openai"}
-	cat := catwalk.Model{ID: "gpt-4o", CanReason: false}
+	cat := catalog.Model{ID: "gpt-4o", CanReason: false}
 
 	got := subagents.ApplyEffortToModel("high", cfg, cat)
 

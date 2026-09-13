@@ -7,7 +7,7 @@ import (
 	"slices"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/message"
 )
 
@@ -134,9 +134,9 @@ type BinaryContent struct {
 }
 
 // String returns a base64-encoded string of the binary data.
-func (bc BinaryContent) String(p catwalk.InferenceProvider) string {
+func (bc BinaryContent) String(p catalog.InferenceProvider) string {
 	base64Encoded := base64.StdEncoding.EncodeToString(bc.Data)
-	if p == catwalk.InferenceProviderOpenAI {
+	if p == catalog.InferenceProviderOpenAI {
 		return "data:" + bc.MIMEType + ";base64," + base64Encoded
 	}
 	return base64Encoded

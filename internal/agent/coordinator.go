@@ -18,18 +18,16 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
-	"github.com/stubbedev/harness/internal/agent/hyper"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/prompt"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/discover"
-	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/hooks"
@@ -92,12 +90,12 @@ var copilotResponsesModels = map[string]bool{
 // https://opencode.ai/docs/zen and https://opencode.ai/docs/go.
 func isOpenCodeMessagesModel(providerID, modelID string) bool {
 	switch providerID {
-	case string(catwalk.InferenceProviderOpenCodeGo):
+	case string(catalog.InferenceProviderOpenCodeGo):
 		return strings.HasPrefix(modelID, "minimax-") ||
 			strings.HasPrefix(modelID, "qwen3.6-") ||
 			strings.HasPrefix(modelID, "qwen3.7-") ||
 			strings.HasPrefix(modelID, "qwen3.8-")
-	case string(catwalk.InferenceProviderOpenCodeZen):
+	case string(catalog.InferenceProviderOpenCodeZen):
 		return strings.HasPrefix(modelID, "claude-") ||
 			strings.HasPrefix(modelID, "qwen3.5-") ||
 			strings.HasPrefix(modelID, "qwen3.6-") ||
@@ -422,7 +420,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	}
 
 	model := c.currentAgent.Model()
-	maxTokens := model.CatwalkCfg.DefaultMaxTokens
+	maxTokens := model.CatalogCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
 	}
@@ -490,7 +488,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// retry means the user doesn't need to re-authenticate. AWS SSO is
 	// handled transparently inside OnAuthRefresh, so it needs no post-run
 	// notification here.
-	if originalErr != nil && isUnauthorized(originalErr) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
+	if originalErr != nil && isUnauthorized(originalErr) && c.notify != nil {
 		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			Type:       notify.TypeReAuthenticate,
 			ProviderID: model.ModelCfg.Provider,
@@ -512,18 +510,18 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 // It prefers the user-selected effort when valid, otherwise the model default when
 // valid, and finally falls back to the first configured reasoning level.
 func effectiveReasoningEffort(model Model) string {
-	if !model.CatwalkCfg.CanReason {
+	if !model.CatalogCfg.CanReason {
 		return ""
 	}
 
-	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(model.CatalogCfg.ReasoningLevels, effort) {
 		return effort
 	}
-	if effort := model.CatwalkCfg.DefaultReasoningEffort; effort != "" && slices.Contains(model.CatwalkCfg.ReasoningLevels, effort) {
+	if effort := model.CatalogCfg.DefaultReasoningEffort; effort != "" && slices.Contains(model.CatalogCfg.ReasoningLevels, effort) {
 		return effort
 	}
-	if len(model.CatwalkCfg.ReasoningLevels) > 0 {
-		return model.CatwalkCfg.ReasoningLevels[0]
+	if len(model.CatalogCfg.ReasoningLevels) > 0 {
+		return model.CatalogCfg.ReasoningLevels[0]
 	}
 	return ""
 }
@@ -533,7 +531,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	cfgOpts := []byte("{}")
 	providerCfgOpts := []byte("{}")
-	catwalkOpts := []byte("{}")
+	catalogOpts := []byte("{}")
 
 	if model.ModelCfg.ProviderOptions != nil {
 		data, err := json.Marshal(model.ModelCfg.ProviderOptions)
@@ -549,15 +547,15 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 	}
 
-	if model.CatwalkCfg.Options.ProviderOptions != nil {
-		data, err := json.Marshal(model.CatwalkCfg.Options.ProviderOptions)
+	if model.CatalogCfg.Options.ProviderOptions != nil {
+		data, err := json.Marshal(model.CatalogCfg.Options.ProviderOptions)
 		if err == nil {
-			catwalkOpts = data
+			catalogOpts = data
 		}
 	}
 
 	readers := []io.Reader{
-		bytes.NewReader(catwalkOpts),
+		bytes.NewReader(catalogOpts),
 		bytes.NewReader(providerCfgOpts),
 		bytes.NewReader(cfgOpts),
 	}
@@ -577,9 +575,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	}
 
 	reasoningEffort := effectiveReasoningEffort(model)
-	shouldSetEffort := model.CatwalkCfg.CanReason &&
+	shouldSetEffort := model.CatalogCfg.CanReason &&
 		reasoningEffort != "" &&
-		slices.Contains(model.CatwalkCfg.ReasoningLevels, reasoningEffort)
+		slices.Contains(model.CatalogCfg.ReasoningLevels, reasoningEffort)
 
 	switch providerCfg.Type {
 	case openai.Name, azure.Name:
@@ -587,8 +585,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if !hasReasoningEffort && shouldSetEffort {
 			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
-		if openai.IsResponsesModel(model.CatwalkCfg.ID) {
-			if openai.IsResponsesReasoningModel(model.CatwalkCfg.ID) {
+		if openai.IsResponsesModel(model.CatalogCfg.ID) {
+			if openai.IsResponsesReasoningModel(model.CatalogCfg.ID) {
 				mergedOptions["reasoning_summary"] = "auto"
 				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
 			}
@@ -611,11 +609,11 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		)
 
 		switch providerCfg.ID {
-		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
+		case string(catalog.InferenceProviderAlibabaSingapore), string(catalog.InferenceProviderAlibabaUS):
 			switch {
 			case !hasEffort && shouldSetEffort:
 				extraBody["reasoning_effort"] = reasoningEffort
-			case !hasThink && model.CatwalkCfg.CanReason:
+			case !hasThink && model.CatalogCfg.CanReason:
 				if model.ModelCfg.Think {
 					extraBody["thinking"] = map[string]any{"type": "enabled"}
 				} else {
@@ -667,7 +665,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	case google.Name:
 		_, hasReasoning := mergedOptions["thinking_config"]
 		if !hasReasoning {
-			if strings.HasPrefix(model.CatwalkCfg.ID, "gemini-2") {
+			if strings.HasPrefix(model.CatalogCfg.ID, "gemini-2") {
 				mergedOptions["thinking_config"] = map[string]any{
 					"thinking_budget":  2000,
 					"include_thoughts": true,
@@ -684,19 +682,19 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 			options[google.Name] = parsed
 		}
 
-	case openaicompat.Name, hyper.Name:
+	case openaicompat.Name:
 		extraBody := make(map[string]any)
 
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && shouldSetEffort {
 			switch providerCfg.ID {
-			case string(catwalk.InferenceProviderIoNet):
+			case string(catalog.InferenceProviderIoNet):
 				extraBody["reasoning"] = map[string]string{"effort": reasoningEffort}
-			case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+			case string(catalog.InferenceProviderOpenCodeGo), string(catalog.InferenceProviderOpenCodeZen):
 				// MiniMax models use the "thinking" parameter instead of
 				// "reasoning_effort". Other models on these providers still
 				// use the standard field.
-				if !strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
+				if !strings.HasPrefix(strings.ToLower(model.CatalogCfg.ID), "minimax") {
 					mergedOptions["reasoning_effort"] = reasoningEffort
 				}
 			default:
@@ -709,10 +707,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		// TODO: Abstract this in Fantasy somehow?
 		// TODO: Allow custom providers to specify how to set this?
 		switch providerCfg.ID {
-		case hyper.Name:
-			extraBody["thinking"] = model.ModelCfg.Think
-		case string(catwalk.InferenceProviderIoNet):
-			if _, ok := extraBody["reasoning"]; !ok && model.CatwalkCfg.CanReason {
+		case string(catalog.InferenceProviderIoNet):
+			if _, ok := extraBody["reasoning"]; !ok && model.CatalogCfg.CanReason {
 				if model.ModelCfg.Think {
 					extraBody["reasoning"] = map[string]string{"effort": "medium"}
 				} else {
@@ -720,14 +716,14 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				}
 			}
 
-		case string(catwalk.InferenceProviderZAI), string(catwalk.InferenceProviderDeepSeek):
+		case string(catalog.InferenceProviderZAI), string(catalog.InferenceProviderDeepSeek):
 			if model.ModelCfg.Think || reasoningEffort != "" {
 				extraBody["thinking"] = map[string]any{"type": "enabled"}
 			} else {
 				extraBody["thinking"] = map[string]any{"type": "disabled"}
 			}
 
-		case string(catwalk.InferenceProviderFireworks):
+		case string(catalog.InferenceProviderFireworks):
 			// NOTE: Fireworks break if we set both `reasoning_effort` and `thinking`.
 			if reasoningEffort == "" {
 				if model.ModelCfg.Think {
@@ -737,17 +733,17 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				}
 			}
 
-		case string(catwalk.InferenceProviderBaseten):
+		case string(catalog.InferenceProviderBaseten):
 			extraBody["chat_template_args"] = map[string]any{
 				"enable_thinking": model.ModelCfg.Think || reasoningEffort != "" && reasoningEffort != "none",
 			}
 
-		case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+		case string(catalog.InferenceProviderOpenCodeGo), string(catalog.InferenceProviderOpenCodeZen):
 			// MiniMax M3 uses the "thinking" parameter to control reasoning.
 			// "reasoning_split" must be true so thinking content is returned
 			// in the "reasoning_content" field instead of inline in "content".
-			if strings.HasPrefix(strings.ToLower(model.CatwalkCfg.ID), "minimax") {
-				if model.CatwalkCfg.CanReason && (model.ModelCfg.Think || reasoningEffort != "") {
+			if strings.HasPrefix(strings.ToLower(model.CatalogCfg.ID), "minimax") {
+				if model.CatalogCfg.CanReason && (model.ModelCfg.Think || reasoningEffort != "") {
 					extraBody["thinking"] = map[string]any{"type": "adaptive"}
 					extraBody["reasoning_split"] = true
 				} else {
@@ -755,8 +751,8 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				}
 			}
 
-		case string(catwalk.InferenceProviderAlibabaSingapore), string(catwalk.InferenceProviderAlibabaUS):
-			if model.CatwalkCfg.CanReason && !shouldSetEffort {
+		case string(catalog.InferenceProviderAlibabaSingapore), string(catalog.InferenceProviderAlibabaUS):
+			if model.CatalogCfg.CanReason && !shouldSetEffort {
 				extraBody["enable_thinking"] = model.ModelCfg.Think
 			}
 		}
@@ -774,7 +770,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
 			// Set "top_k" under "extra_body", as it is not part of the OpenAI protocol
 			// and will be explicitly omitted by Fantasy downstream.
-			topK := cmp.Or(model.ModelCfg.TopK, model.CatwalkCfg.Options.TopK)
+			topK := cmp.Or(model.ModelCfg.TopK, model.CatalogCfg.Options.TopK)
 			if topK != nil {
 				extraBody, hasExtraBody := mergedOptions["extra_body"].(map[string]any)
 				if !hasExtraBody {
@@ -825,11 +821,11 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
 	modelOptions := getProviderOptions(model, cfg)
-	temp := cmp.Or(model.ModelCfg.Temperature, model.CatwalkCfg.Options.Temperature)
-	topP := cmp.Or(model.ModelCfg.TopP, model.CatwalkCfg.Options.TopP)
-	topK := cmp.Or(model.ModelCfg.TopK, model.CatwalkCfg.Options.TopK)
-	freqPenalty := cmp.Or(model.ModelCfg.FrequencyPenalty, model.CatwalkCfg.Options.FrequencyPenalty)
-	presPenalty := cmp.Or(model.ModelCfg.PresencePenalty, model.CatwalkCfg.Options.PresencePenalty)
+	temp := cmp.Or(model.ModelCfg.Temperature, model.CatalogCfg.Options.Temperature)
+	topP := cmp.Or(model.ModelCfg.TopP, model.CatalogCfg.Options.TopP)
+	topK := cmp.Or(model.ModelCfg.TopK, model.CatalogCfg.Options.TopK)
+	freqPenalty := cmp.Or(model.ModelCfg.FrequencyPenalty, model.CatalogCfg.Options.FrequencyPenalty)
+	presPenalty := cmp.Or(model.ModelCfg.PresencePenalty, model.CatalogCfg.Options.PresencePenalty)
 	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
 }
 
@@ -856,18 +852,18 @@ func (c *coordinator) activeSkillsList() []*skills.Skill {
 	return c.activeSkills
 }
 
-// findModelProvider returns the provider config and catwalk model for the
+// findModelProvider returns the provider config and catalog model for the
 // provider that offers modelID. When providerOverride is non-empty only that
 // provider is searched. ok is false when no matching provider/model is found.
-func (c *coordinator) findModelProvider(modelID, providerOverride string) (config.ProviderConfig, catwalk.Model, bool) {
+func (c *coordinator) findModelProvider(modelID, providerOverride string) (config.ProviderConfig, catalog.Model, bool) {
 	if providerOverride != "" {
 		p, ok := c.cfg.Config().Providers.Get(providerOverride)
 		if !ok {
-			return config.ProviderConfig{}, catwalk.Model{}, false
+			return config.ProviderConfig{}, catalog.Model{}, false
 		}
-		m, ok := findCatwalkModel(p, modelID)
+		m, ok := findCatalogModel(p, modelID)
 		if !ok {
-			return config.ProviderConfig{}, catwalk.Model{}, false
+			return config.ProviderConfig{}, catalog.Model{}, false
 		}
 		return p, m, true
 	}
@@ -880,26 +876,26 @@ func (c *coordinator) findModelProvider(modelID, providerOverride string) (confi
 		return strings.Compare(a.ID, b.ID)
 	})
 	for _, p := range providers {
-		if m, ok := findCatwalkModel(p, modelID); ok {
+		if m, ok := findCatalogModel(p, modelID); ok {
 			return p, m, true
 		}
 	}
-	return config.ProviderConfig{}, catwalk.Model{}, false
+	return config.ProviderConfig{}, catalog.Model{}, false
 }
 
-// findCatwalkModel returns the catwalk model with the given id from a provider.
-func findCatwalkModel(providerCfg config.ProviderConfig, modelID string) (catwalk.Model, bool) {
+// findCatalogModel returns the catalog model with the given id from a provider.
+func findCatalogModel(providerCfg config.ProviderConfig, modelID string) (catalog.Model, bool) {
 	for _, m := range providerCfg.Models {
 		if m.ID == modelID {
 			return m, true
 		}
 	}
-	return catwalk.Model{}, false
+	return catalog.Model{}, false
 }
 
 // buildModel constructs a Model from an already-resolved provider, selected
-// model, and catwalk model. Shared by buildNamedModel and resolveModelByID.
-func (c *coordinator) buildModel(ctx context.Context, providerCfg config.ProviderConfig, selModel config.SelectedModel, catwalkModel catwalk.Model, isSubAgent bool) (Model, error) {
+// model, and catalog model. Shared by buildNamedModel and resolveModelByID.
+func (c *coordinator) buildModel(ctx context.Context, providerCfg config.ProviderConfig, selModel config.SelectedModel, catalogModel catalog.Model, isSubAgent bool) (Model, error) {
 	provider, err := c.buildProvider(providerCfg, selModel, isSubAgent)
 	if err != nil {
 		return Model{}, err
@@ -909,7 +905,7 @@ func (c *coordinator) buildModel(ctx context.Context, providerCfg config.Provide
 	if err != nil {
 		return Model{}, err
 	}
-	return Model{Model: lm, CatwalkCfg: catwalkModel, ModelCfg: selModel, FlatRate: providerCfg.FlatRate}, nil
+	return Model{Model: lm, CatalogCfg: catalogModel, ModelCfg: selModel, FlatRate: providerCfg.FlatRate}, nil
 }
 
 // resolveModelByID finds the provider that offers modelID and builds a Model
@@ -928,12 +924,12 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 		}
 	}
 
-	providerCfg, catwalkModel, ok := c.findModelProvider(modelID, providerOverride)
+	providerCfg, catalogModel, ok := c.findModelProvider(modelID, providerOverride)
 	if !ok {
 		return Model{}, fmt.Errorf("model %q not found in any configured provider", modelID)
 	}
 	selModel := config.SelectedModel{Provider: providerCfg.ID, Model: modelID}
-	m, err := c.buildModel(ctx, providerCfg, selModel, catwalkModel, isSubAgent)
+	m, err := c.buildModel(ctx, providerCfg, selModel, catalogModel, isSubAgent)
 	if err != nil {
 		return Model{}, err
 	}
@@ -969,11 +965,11 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		return nil, err
 	}
 
-	if subagents.EffortIgnored(sm.Effort, primary.CatwalkCfg) {
+	if subagents.EffortIgnored(sm.Effort, primary.CatalogCfg) {
 		slog.Warn("Subagent effort ignored: model does not support reasoning",
 			"model", primary.ModelCfg.Model, "effort", sm.Effort)
 	}
-	primary.ModelCfg = subagents.ApplyEffortToModel(sm.Effort, primary.ModelCfg, primary.CatwalkCfg)
+	primary.ModelCfg = subagents.ApplyEffortToModel(sm.Effort, primary.ModelCfg, primary.CatalogCfg)
 
 	primaryProviderCfg, _ := c.cfg.Config().Providers.Get(primary.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
@@ -1021,7 +1017,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	wg.Go(func() error {
-		tools, err := c.buildTools(initCtx, agent, isSubAgent, primary.CatwalkCfg.ID)
+		tools, err := c.buildTools(initCtx, agent, isSubAgent, primary.CatalogCfg.ID)
 		if err != nil {
 			return err
 		}
@@ -1042,7 +1038,7 @@ func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
 	return slices.Contains(allowed, AgentToolName)
 }
 
-// buildTools assembles the agent's tool set. modelID is the catwalk id of the
+// buildTools assembles the agent's tool set. modelID is the catalog id of the
 // model the agent actually runs on (the resolved primary), used for
 // model-specific tool guidance such as the bash tool description.
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, modelID string) ([]fantasy.AgentTool, error) {
@@ -1077,7 +1073,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.cfg.WorkingDir(), c.cfg.Config().Options.Attribution, modelID, c.questions),
+		tools.NewBashTool(c.cfg.WorkingDir(), agent.ID, c.cfg.Config().Options.Attribution, modelID, c.questions),
 		tools.NewHarnessInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewHarnessLogsTool(logFile),
 		tools.NewJobOutputTool(),
@@ -1225,7 +1221,7 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
 		headers["Authorization"] = apiKey
-	case providerID == string(catwalk.InferenceProviderMiniMax) || providerID == string(catwalk.InferenceProviderMiniMaxChina):
+	case providerID == string(catalog.InferenceProviderMiniMax) || providerID == string(catalog.InferenceProviderMiniMaxChina):
 		// NOTE: Prevent the SDK from picking up the API key from env.
 		os.Setenv("ANTHROPIC_API_KEY", "")
 		headers["Authorization"] = "Bearer " + apiKey
@@ -1304,7 +1300,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
 	switch providerID {
-	case string(catwalk.InferenceProviderCopilot):
+	case string(catalog.InferenceProviderCopilot):
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
@@ -1314,21 +1310,11 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 
-	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+	case string(catalog.InferenceProviderOpenCodeGo), string(catalog.InferenceProviderOpenCodeZen):
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
 			openaicompat.WithResponsesAPIFunc(isOpenCodeResponsesModel),
-		)
-
-	case hyper.Name:
-		// Hyper may route requests through a Prism model; capture the
-		// router headers so the UI can show which model answered.
-		opts = append(
-			opts,
-			openaicompat.WithLanguageModelOptions(
-				openai.WithLanguageModelHeaderFunc(hyper.HeaderFunc),
-			),
 		)
 	}
 	if httpClient == nil && c.cfg.Config().Options.Debug {
@@ -1391,12 +1377,7 @@ func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]str
 		// Skip, let the SDK do authentication.
 	}
 
-	switch providerID {
-	case string(catwalk.InferenceProviderBedrockEurope):
-		opts = append(opts, bedrock.WithRegion("eu-west-1"))
-	default:
-		opts = append(opts, bedrock.WithRegion("us-east-1"))
-	}
+	opts = append(opts, bedrock.WithRegion("us-east-1"))
 
 	return bedrock.New(opts...)
 }
@@ -1460,14 +1441,14 @@ func (c *coordinator) buildNamedModel(ctx context.Context, modelType config.Sele
 		}
 		return Model{}, errLargeModelProviderNotConfigured
 	}
-	catwalkModel, ok := findCatwalkModel(providerCfg, selModel.Model)
+	catalogModel, ok := findCatalogModel(providerCfg, selModel.Model)
 	if !ok {
 		if isSmall {
 			return Model{}, errSmallModelNotFound
 		}
 		return Model{}, errLargeModelNotFound
 	}
-	return c.buildModel(ctx, providerCfg, selModel, catwalkModel, isSubAgent)
+	return c.buildModel(ctx, providerCfg, selModel, catalogModel, isSubAgent)
 }
 
 func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model config.SelectedModel, isSubAgent bool) (fantasy.Provider, error) {
@@ -1489,7 +1470,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
 
 	switch providerCfg.ID {
-	case string(catwalk.InferenceProviderOpenCodeGo), string(catwalk.InferenceProviderOpenCodeZen):
+	case string(catalog.InferenceProviderOpenCodeGo), string(catalog.InferenceProviderOpenCodeZen):
 		if isOpenCodeMessagesModel(providerCfg.ID, model.Model) {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
 			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
@@ -1513,12 +1494,9 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
-	case openaicompat.Name, hyper.Name:
+	case openaicompat.Name:
 		switch providerCfg.ID {
-		case hyper.Name:
-			baseURL = hyper.BaseURL() + "/v1"
-			headers["x-harness-id"] = event.GetID()
-		case string(catwalk.InferenceProviderZAI):
+		case string(catalog.InferenceProviderZAI):
 			if providerCfg.ExtraBody == nil {
 				providerCfg.ExtraBody = map[string]any{}
 			}
@@ -1633,7 +1611,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return errCoderAgentNotConfigured
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg, false, large.CatwalkCfg.ID)
+	tools, err := c.buildTools(ctx, agentCfg, false, large.CatalogCfg.ID)
 	if err != nil {
 		return err
 	}
@@ -2051,7 +2029,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, session session.Session, params subAgentParams) (fantasy.ToolResponse, string) {
 	// Get model configuration
 	model := params.Agent.Model()
-	maxTokens := model.CatwalkCfg.DefaultMaxTokens
+	maxTokens := model.CatalogCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
 	}
@@ -2095,7 +2073,7 @@ func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, sess
 	result, err := run()
 	// Notify only if still unauthorized after retry. AWS SSO is handled
 	// transparently inside OnAuthRefresh, so it needs no post-run notice.
-	if err != nil && isUnauthorized(err) && c.notify != nil && model.ModelCfg.Provider == hyper.Name {
+	if err != nil && isUnauthorized(err) && c.notify != nil {
 		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			Type:       notify.TypeReAuthenticate,
 			ProviderID: model.ModelCfg.Provider,

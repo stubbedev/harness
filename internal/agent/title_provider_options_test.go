@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/discover"
 )
@@ -17,7 +17,7 @@ import (
 // disable thinking, for example).
 func TestTitleProviderOptions(t *testing.T) {
 	qwenModel := Model{
-		CatwalkCfg: catwalk.Model{ID: "qwen3-32b"},
+		CatalogCfg: catalog.Model{ID: "qwen3-32b"},
 		ModelCfg: config.SelectedModel{
 			Provider: "qwen",
 			ProviderOptions: map[string]any{
@@ -29,8 +29,8 @@ func TestTitleProviderOptions(t *testing.T) {
 	}
 
 	t.Run("a model without provider_options gets no chat_template_kwargs", func(t *testing.T) {
-		m := Model{CatwalkCfg: catwalk.Model{ID: "qwen3-32b"}}
-		opts := getProviderOptions(m, config.ProviderConfig{Type: catwalk.TypeOpenAICompat})
+		m := Model{CatalogCfg: catalog.Model{ID: "qwen3-32b"}}
+		opts := getProviderOptions(m, config.ProviderConfig{Type: catalog.TypeOpenAICompat})
 		parsed, ok := opts[openaicompat.Name].(*openaicompat.ProviderOptions)
 		require.True(t, ok)
 		if parsed.ExtraBody == nil {
@@ -46,7 +46,7 @@ func TestTitleProviderOptions(t *testing.T) {
 
 		providerCfg := config.ProviderConfig{
 			ID:   "qwen",
-			Type: catwalk.Type(discover.RegisteredProviderTypes()[0]),
+			Type: catalog.Type(discover.RegisteredProviderTypes()[0]),
 		}
 
 		opts := getProviderOptions(qwenModel, providerCfg)

@@ -186,7 +186,7 @@ func TestPtySessions_CommandRunsBesideAnInteractiveProgram(t *testing.T) {
 	})
 
 	// Open an editor in the primary session.
-	primary, err := ptyCommandRunner(t.Context(), dir, nil)
+	primary, err := ptyCommandRunner(t.Context(), "test", dir, nil)
 	require.NoError(t, err)
 	require.Equal(t, 0, primary.slot)
 	res, err := primary.Run(t.Context(), "nvim -u NONE", 15)
@@ -195,7 +195,7 @@ func TestPtySessions_CommandRunsBesideAnInteractiveProgram(t *testing.T) {
 
 	// A command now goes to a second session rather than being typed
 	// into the editor.
-	second, err := ptyCommandRunner(t.Context(), dir, nil)
+	second, err := ptyCommandRunner(t.Context(), "test", dir, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, second.slot)
 	done, err := second.Run(t.Context(), "echo beside", 10)
@@ -204,15 +204,15 @@ func TestPtySessions_CommandRunsBesideAnInteractiveProgram(t *testing.T) {
 	require.Equal(t, "beside", done.Output)
 
 	// Keystrokes still find the editor, not the free shell.
-	require.Same(t, primary, ptyInteractiveRunner(dir, nil))
-	res, err = ptyInteractiveRunner(dir, nil).Input(t.Context(), "ibeside too")
+	require.Same(t, primary, ptyInteractiveRunner("test", dir, nil))
+	res, err = ptyInteractiveRunner("test", dir, nil).Input(t.Context(), "ibeside too")
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "beside too")
 
 	// With the editor gone, commands go back to the primary session.
 	_, err = primary.Keys(t.Context(), "escape, :, q, !, enter")
 	require.NoError(t, err)
-	back, err := ptyCommandRunner(t.Context(), dir, nil)
+	back, err := ptyCommandRunner(t.Context(), "test", dir, nil)
 	require.NoError(t, err)
 	require.Equal(t, 0, back.slot)
 }

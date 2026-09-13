@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/lsp"
 )
@@ -117,7 +117,7 @@ type SkillReadResult struct {
 type AgentInfo struct {
 	IsBusy   bool                 `json:"is_busy"`
 	IsReady  bool                 `json:"is_ready"`
-	Model    catwalk.Model        `json:"model"`
+	Model    catalog.Model        `json:"model"`
 	ModelCfg config.SelectedModel `json:"model_cfg"`
 }
 

@@ -1,7 +1,8 @@
-Save, read, search, list, or delete durable memories that persist across sessions. The index of saved memories is loaded into every future session automatically.
+Save, edit, read, search, list, or delete durable memories that persist across sessions. The index of saved memories is loaded into every future session automatically.
 
 <actions>
 - save: create or update a memory. Required: title, content. Omit id to upsert by title (re-saving the same title updates it instead of duplicating). Optional: category (user, feedback, project, reference), pinned (protects from reaping).
+- edit: update an existing memory by id or exact title without risk of creating a duplicate. Required: content plus either id or title. Errors and suggests save when no matching memory exists. Optional: category, pinned (omitted values keep what is stored).
 - read: get one memory's full content by id.
 - search: find memories whose title or content matches a query.
 - list: show all memories as a compact index.

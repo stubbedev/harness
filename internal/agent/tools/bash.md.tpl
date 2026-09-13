@@ -1,4 +1,4 @@
-You run commands in a real interactive terminal: the user's own shell in a persistent pseudo-terminal, shared by every bash call. Treat it exactly as if you were a person sitting at their terminal.
+You run commands in a real interactive terminal: the user's own shell in a persistent pseudo-terminal, shared by every shell call. Treat it exactly as if you were a person sitting at their terminal.
 
 <cross_platform_note>
 On Windows the session falls back to the mvdan/sh interpreter; interactive programs are unavailable there. Use forward slashes for paths.
@@ -6,6 +6,7 @@ On Windows the session falls back to the mvdan/sh interpreter; interactive progr
 
 <the_session>
 - One terminal session lives for the whole conversation. Shell state persists across calls: working directory (cd), exported variables, activated venvs/direnv, and the sudo credential all stick.
+- Each agent in a Harness session — you, and any subagents or the main agent running alongside you — has its own session: they do not share cd, exports, environments or running programs.
 - While an interactive program is holding that session, a command opens a second one instead of being typed into the program — like a second terminal tab. The response says when that happened; the second shell is separate, so it does not have the first one's cd, exports or activated environments. Keystrokes (`input`, `keys`) and polls always go to the session with the program in it.
 - It is a full terminal: anything you could run interactively as a human works here — editors (vim, nvim), TUIs (htop, lazygit, k9s), REPLs (python, psql, node), pagers, ssh, password prompts, watch commands. Do not hesitate to launch them; never claim they are impossible here.
 - Aliases are stripped at startup (unalias -a), so commands run with their standard meanings. Functions and environment from the user's rc files remain.
@@ -45,6 +46,7 @@ Editors, pagers and TUIs (nvim, less, htop, lazygit, k9s, git log without --no-p
 - The sudo credential stays valid on the session's terminal after the first authentication — later sudo calls in the same session run without another password
 - If a command asks for a password (sudo, su, ssh, docker login, an ssh passphrase), the user is prompted through a masked dialog in the Harness UI; wait for the command to finish, never try to type the password yourself
 - Multiline commands and heredocs work (send them via command)
+- Every result ends with `<cwd>…</cwd>`: the session's working directory after the call. The session tracks `cd` across calls, so do not prefix commands with `cd` to get back to a known directory — you are already there
 - The session runs the user's own shell — here that is `{{ .Shell }}` — not a POSIX-minimal one, and shells disagree about unquoted arguments. Quote anything holding a glob character that is not meant to be expanded by the shell (`--include='*.go'`, `grep -F 'a*b'`): in zsh a pattern that matches no file fails the whole command with "no matches found" instead of being passed through as a literal. Quote or avoid bare `=`, `==`, `!`, `^` and `{...}` arguments for the same reason
 - Prefer `printf '%s\n' ...` over `echo` for anything containing backslashes or leading dashes; `echo`'s behaviour differs between shells
 - IMPORTANT: Use Grep/Glob/Agent tools instead of 'find'/'grep' for code search. Use View/LS tools instead of 'cat'/'head'/'tail'/'ls' for file reading

@@ -35,6 +35,7 @@ type Querier interface {
 	GetMemory(ctx context.Context, id string) (Memory, error)
 	GetMemoryByTitle(ctx context.Context, lower string) (Memory, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
+	GetModelCatalog(ctx context.Context) (ModelCatalog, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
 	GetSessionByID(ctx context.Context, id string) (Session, error)
 	GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error)
@@ -59,6 +60,7 @@ type Querier interface {
 	ReapMemories(ctx context.Context, limit int64) (int64, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
+	SaveModelCatalog(ctx context.Context, data string) (ModelCatalog, error)
 	SearchMemories(ctx context.Context, arg SearchMemoriesParams) ([]Memory, error)
 	TouchMemory(ctx context.Context, id string) error
 	UpdateMemory(ctx context.Context, arg UpdateMemoryParams) (Memory, error)

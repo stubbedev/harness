@@ -3,21 +3,21 @@ package dialog
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 func newTestModelGroup(t *testing.T, providerID, providerName string, modelNames ...string) ModelGroup {
 	t.Helper()
 	s := styles.CharmtonePantera()
-	provider := catwalk.Provider{
-		ID:   catwalk.InferenceProvider(providerID),
+	provider := catalog.Provider{
+		ID:   catalog.InferenceProvider(providerID),
 		Name: providerName,
 	}
 	items := make([]*ModelItem, 0, len(modelNames))
 	for _, name := range modelNames {
-		model := catwalk.Model{ID: providerID + ":" + name, Name: name}
+		model := catalog.Model{ID: providerID + ":" + name, Name: name}
 		items = append(items, NewModelItem(&s, provider, model, ModelTypeLarge, false))
 	}
 	return NewModelGroup(&s, providerName, true, items...)

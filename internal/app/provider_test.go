@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 )
 
@@ -76,12 +76,12 @@ func setupMockProviders() map[string]config.ProviderConfig {
 		"openai": {
 			ID:     "openai",
 			Name:   "OpenAI",
-			Models: []catwalk.Model{{ID: "gpt-4o"}, {ID: "gpt-4o-mini"}},
+			Models: []catalog.Model{{ID: "gpt-4o"}, {ID: "gpt-4o-mini"}},
 		},
 		"anthropic": {
 			ID:     "anthropic",
 			Name:   "Anthropic",
-			Models: []catwalk.Model{{ID: "claude-3-sonnet"}, {ID: "claude-3-opus"}},
+			Models: []catalog.Model{{ID: "claude-3-sonnet"}, {ID: "claude-3-opus"}},
 		},
 	}
 }
@@ -91,7 +91,7 @@ func setupMockProvidersWithSlashes() map[string]config.ProviderConfig {
 		"synthetic": {
 			ID:   "synthetic",
 			Name: "Synthetic",
-			Models: []catwalk.Model{
+			Models: []catalog.Model{
 				{ID: "moonshot/kimi-k2"},
 				{ID: "deepseek/deepseek-chat"},
 			},
@@ -99,7 +99,7 @@ func setupMockProvidersWithSlashes() map[string]config.ProviderConfig {
 		"openai": {
 			ID:     "openai",
 			Name:   "OpenAI",
-			Models: []catwalk.Model{{ID: "gpt-4o"}},
+			Models: []catalog.Model{{ID: "gpt-4o"}},
 		},
 	}
 }
@@ -161,11 +161,11 @@ func TestFindModels(t *testing.T) {
 				return map[string]config.ProviderConfig{
 					"openai": {
 						ID:     "openai",
-						Models: []catwalk.Model{{ID: "shared-model"}},
+						Models: []catalog.Model{{ID: "shared-model"}},
 					},
 					"anthropic": {
 						ID:     "anthropic",
-						Models: []catwalk.Model{{ID: "shared-model"}},
+						Models: []catalog.Model{{ID: "shared-model"}},
 					},
 				}
 			},

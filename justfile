@@ -81,10 +81,6 @@ modernize:
 run *args: build
     ./harness {{ args }}
 
-# Run against a Catwalk instance on localhost.
-run-catwalk *args: build
-    CATWALK_URL=http://localhost:8080 ./harness {{ args }}
-
 # Run against a throwaway config and data directory, to exercise onboarding.
 run-onboarding *args: build
     rm -rf tmp/onboarding
@@ -116,15 +112,10 @@ swag:
 sqlc:
     sqlc generate
 
-# Update the embedded Hyper provider catalog.
-hyper:
-    go generate ./internal/agent/hyper/...
-
 # GOPROXY=direct because the module proxy lags a fresh release by minutes.
 # Update the upstream provider and LLM libraries.
 deps:
     GOPROXY=direct GONOSUMDB='charm.land/*' go get charm.land/fantasy@latest
-    GOPROXY=direct GONOSUMDB='charm.land/*' go get charm.land/catwalk@latest
     go mod tidy
 
 # Update golden snapshot files after intentional TUI output changes.

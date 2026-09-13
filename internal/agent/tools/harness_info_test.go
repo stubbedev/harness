@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/lsp"
@@ -64,8 +64,8 @@ func TestHarnessInfo_Providers(t *testing.T) {
 	t.Parallel()
 
 	providers := csync.NewMap[string, config.ProviderConfig]()
-	providers.Set("openai", config.ProviderConfig{Models: make([]catwalk.Model, 8)})
-	providers.Set("anthropic", config.ProviderConfig{Models: make([]catwalk.Model, 12)})
+	providers.Set("openai", config.ProviderConfig{Models: make([]catalog.Model, 8)})
+	providers.Set("anthropic", config.ProviderConfig{Models: make([]catalog.Model, 12)})
 
 	cfg := config.NewTestStore(&config.Config{Providers: providers})
 	output := buildHarnessInfo(cfg, nil, nil, nil, nil)
@@ -83,8 +83,8 @@ func TestHarnessInfo_DisabledProvidersOmitted(t *testing.T) {
 	t.Parallel()
 
 	providers := csync.NewMap[string, config.ProviderConfig]()
-	providers.Set("openai", config.ProviderConfig{Disable: true, Models: make([]catwalk.Model, 8)})
-	providers.Set("anthropic", config.ProviderConfig{Models: make([]catwalk.Model, 12)})
+	providers.Set("openai", config.ProviderConfig{Disable: true, Models: make([]catalog.Model, 8)})
+	providers.Set("anthropic", config.ProviderConfig{Models: make([]catalog.Model, 12)})
 
 	cfg := config.NewTestStore(&config.Config{Providers: providers})
 	output := buildHarnessInfo(cfg, nil, nil, nil, nil)
@@ -249,7 +249,7 @@ func TestHarnessInfo_NoSecrets(t *testing.T) {
 	providers := csync.NewMap[string, config.ProviderConfig]()
 	providers.Set("openai", config.ProviderConfig{
 		APIKey: "sk-super-secret-key-12345",
-		Models: make([]catwalk.Model, 8),
+		Models: make([]catalog.Model, 8),
 	})
 
 	cfg := config.NewTestStore(&config.Config{Providers: providers})
@@ -263,9 +263,9 @@ func TestHarnessInfo_DeterministicOrdering(t *testing.T) {
 	t.Parallel()
 
 	providers := csync.NewMap[string, config.ProviderConfig]()
-	providers.Set("zebra", config.ProviderConfig{Models: make([]catwalk.Model, 1)})
-	providers.Set("alpha", config.ProviderConfig{Models: make([]catwalk.Model, 2)})
-	providers.Set("middle", config.ProviderConfig{Models: make([]catwalk.Model, 3)})
+	providers.Set("zebra", config.ProviderConfig{Models: make([]catalog.Model, 1)})
+	providers.Set("alpha", config.ProviderConfig{Models: make([]catalog.Model, 2)})
+	providers.Set("middle", config.ProviderConfig{Models: make([]catalog.Model, 3)})
 
 	states := map[string]mcp.ClientInfo{
 		"z-mcp": {Name: "z-mcp", State: mcp.StateConnected, Counts: mcp.Counts{Tools: 1}},

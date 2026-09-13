@@ -19,10 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
-	"github.com/stubbedev/harness/internal/agent/hyper"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/discover"
 	"github.com/stubbedev/harness/internal/env"
@@ -32,7 +31,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const defaultCatwalkURL = "https://catwalk.charm.land"
+const defaultCatalogHint = "models.dev"
 
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
@@ -108,14 +107,11 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		assignIfNil(&cfg.Options.TUI.Transparent, true)
 	}
 
-	// Load known providers, this loads the config from catwalk. A failed
-	// refresh still yields the cached or embedded catalog, so only an empty
-	// list is fatal: starting up without providers is worse than starting
-	// up with slightly stale ones. Pass a Hyper token refresher so the
-	// catalog fetch can retry on 401.
-	providers, err := Providers(cfg, func(ctx context.Context) error {
-		return store.RefreshOAuthToken(ctx, ScopeGlobal, "hyper")
-	})
+	// Load known providers, this loads the config from models.dev. A
+	// failed refresh still yields the cached or embedded catalog, so
+	// only an empty list is fatal: starting up without providers is
+	// worse than starting up with slightly stale ones.
+	providers, err := Providers(cfg)
 	if err != nil {
 		if len(providers) == 0 {
 			return nil, err
@@ -231,7 +227,7 @@ func PushPopHarnessEnv() func() {
 	return restore
 }
 
-func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
+func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catalog.Provider) error {
 	knownProviderNames := make(map[string]bool)
 	restore := PushPopHarnessEnv()
 	defer restore()
@@ -256,7 +252,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				p.APIKey = config.APIKey
 			}
 			if len(config.Models) > 0 {
-				models := []catwalk.Model{}
+				models := []catalog.Model{}
 				seen := make(map[string]bool)
 
 				for _, model := range config.Models {
@@ -324,7 +320,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		}
 
 		switch {
-		case p.ID == catwalk.InferenceProviderAnthropic && config.OAuthToken != nil:
+		case p.ID == catalog.InferenceProviderAnthropic && config.OAuthToken != nil:
 			// Claude Code subscription is not supported anymore. Remove to show onboarding.
 			// RemoveConfigField persists the deletion to disk. The in-memory
 			// state is kept consistent by the Providers.Del call below; any
@@ -333,13 +329,13 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			store.RemoveConfigField(ScopeGlobal, "providers.anthropic")
 			c.Providers.Del(string(p.ID))
 			continue
-		case p.ID == catwalk.InferenceProviderCopilot && config.OAuthToken != nil:
+		case p.ID == catalog.InferenceProviderCopilot && config.OAuthToken != nil:
 			prepared.SetupGitHubCopilot()
 		}
 
 		switch p.ID {
 		// Handle specific providers that require additional configuration
-		case catwalk.InferenceProviderVertexAI:
+		case catalog.InferenceProviderVertexAI:
 			var (
 				project  = env.Get("VERTEXAI_PROJECT")
 				location = env.Get("VERTEXAI_LOCATION")
@@ -353,7 +349,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			}
 			prepared.ExtraParams["project"] = project
 			prepared.ExtraParams["location"] = location
-		case catwalk.InferenceProviderAzure:
+		case catalog.InferenceProviderAzure:
 			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
 			if err != nil || endpoint == "" {
 				if configExists {
@@ -364,27 +360,13 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			}
 			prepared.BaseURL = endpoint
 			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
-		case catwalk.InferenceProviderBedrock, catwalk.InferenceProviderBedrockEurope:
+		case catalog.InferenceProviderBedrock:
 			if p.APIKey == "" && !hasAWSCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
 					c.Providers.Del(string(p.ID))
 				}
 				continue
-			}
-		case catwalk.InferenceProvider("hyper"):
-			if apiKey := env.Get("HYPER_API_KEY"); apiKey != "" {
-				prepared.APIKey = apiKey
-				prepared.APIKeyTemplate = apiKey
-			} else {
-				v, err := resolver.ResolveValue(p.APIKey)
-				if v == "" || err != nil {
-					if configExists {
-						slog.Warn("Skipping Hyper provider due to missing API key", "provider", p.ID)
-						c.Providers.Del(string(p.ID))
-					}
-					continue
-				}
 			}
 		default:
 			// if the provider api or endpoint are missing we skip them
@@ -404,7 +386,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	// A provider needs discovery when discover_models is explicitly true,
 	// or when the models list is empty (auto-trigger, unless opted out).
 	type discoveryResult struct {
-		models []catwalk.Model
+		models []catalog.Model
 		err    error
 	}
 
@@ -433,7 +415,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			ExtraHeaders:   pc.ExtraHeaders,
 			ExistingModels: pc.Models,
 		}
-		providerType := cmp.Or(pc.Type, catwalk.TypeOpenAICompat)
+		providerType := cmp.Or(pc.Type, catalog.TypeOpenAICompat)
 		wg.Go(func() {
 			models, err := discover.DiscoverModels(discoverCtx, cfg, resolver)
 			if err == nil && len(models) > 0 {
@@ -459,9 +441,8 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		providerConfig.ID = id
 		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
 		// Default to OpenAI if not set.
-		providerConfig.Type = cmp.Or(providerConfig.Type, catwalk.TypeOpenAICompat)
-		if !slices.Contains(catwalk.KnownProviderTypes(), providerConfig.Type) &&
-			providerConfig.Type != hyper.Name &&
+		providerConfig.Type = cmp.Or(providerConfig.Type, catalog.TypeOpenAICompat)
+		if !slices.Contains(catalog.KnownProviderTypes(), providerConfig.Type) &&
 			!discover.IsKnownCustomProvider(string(providerConfig.Type)) {
 			slog.Warn("Skipping custom provider due to unsupported provider type", "provider", id)
 			c.Providers.Del(id)
@@ -756,7 +737,7 @@ func (c *Config) applyLSPDefaults() {
 	}
 }
 
-func (c *Config) defaultModelSelection(knownProviders []catwalk.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
+func (c *Config) defaultModelSelection(knownProviders []catalog.Provider) (largeModel SelectedModel, smallModel SelectedModel, err error) {
 	if len(knownProviders) == 0 && c.Providers.Len() == 0 {
 		err = fmt.Errorf("no providers configured, please configure at least one provider")
 		return largeModel, smallModel, err
@@ -857,7 +838,7 @@ func applyResolvedModels(cfg *Config, resolved resolvedModels) {
 // invalid. It is pure resolution logic: it does not mutate the store or
 // touch disk. The caller assigns the results to c.Models and persists any
 // fallback corrections as appropriate.
-func resolveSelectedModels(cfg *Config, knownProviders []catwalk.Provider) (resolvedModels, error) {
+func resolveSelectedModels(cfg *Config, knownProviders []catalog.Provider) (resolvedModels, error) {
 	var result resolvedModels
 	defaultLarge, defaultSmall, err := cfg.defaultModelSelection(knownProviders)
 	if err != nil {

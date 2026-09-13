@@ -13,7 +13,6 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/oauth/copilot"
-	"github.com/stubbedev/harness/internal/oauth/hyper"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
@@ -23,11 +22,8 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Harness to a platform",
 	Long: `Login Harness to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: hyper, copilot.`,
+Available platforms are: copilot.`,
 	Example: `
-# Authenticate with Charm Hyper
-harness login
-
 # Authenticate with GitHub Copilot
 harness login copilot
 
@@ -35,7 +31,6 @@ harness login copilot
 harness login -f copilot
   `,
 	ValidArgs: []cobra.Completion{
-		"hyper",
 		"copilot",
 		"github",
 		"github-copilot",
@@ -48,14 +43,12 @@ harness login -f copilot
 		}
 		defer cleanup()
 
-		provider := "hyper"
+		provider := "copilot"
 		if len(args) > 0 {
 			provider = args[0]
 		}
 		force, _ := cmd.Flags().GetBool("force")
 		switch provider {
-		case "hyper":
-			return loginHyper(ws, force)
 		case "copilot", "github", "github-copilot":
 			return loginCopilot(ws, force)
 		default:
@@ -66,70 +59,6 @@ harness login -f copilot
 
 func init() {
 	loginCmd.Flags().BoolP("force", "f", false, "Force re-authentication even if already logged in")
-}
-
-func loginHyper(ws workspace.Workspace, force bool) error {
-	ctx := getLoginContext()
-
-	if !force {
-		cfg := ws.Config()
-		if cfg != nil {
-			if pc, ok := cfg.Providers.Get("hyper"); ok && pc.OAuthToken != nil {
-				fmt.Println("You are already logged in to Hyper.")
-				fmt.Println("Use --force to re-authenticate.")
-				return nil
-			}
-		}
-	}
-
-	resp, err := hyper.InitiateDeviceAuth(ctx)
-	if err != nil {
-		return err
-	}
-
-	clipboard.WriteText(resp.UserCode)
-	fmt.Println("The following code should be on clipboard already:")
-
-	fmt.Println()
-	lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(resp.UserCode))
-	fmt.Println()
-	fmt.Println("Press enter to open this URL, and then paste it there:")
-	fmt.Println()
-	lipgloss.Println(lipgloss.NewStyle().Hyperlink(resp.VerificationURL, "id=hyper").Render(resp.VerificationURL))
-	fmt.Println()
-	waitEnter()
-	if err := browser.OpenURL(resp.VerificationURL); err != nil {
-		fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
-	}
-
-	fmt.Println("Exchanging authorization code...")
-	refreshToken, err := hyper.PollForToken(ctx, resp.DeviceCode, resp.ExpiresIn)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Exchanging refresh token for access token...")
-	token, err := hyper.ExchangeToken(ctx, refreshToken)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Verifying access token...")
-	introspect, err := hyper.IntrospectToken(ctx, token.AccessToken)
-	if err != nil {
-		return fmt.Errorf("token introspection failed: %w", err)
-	}
-	if !introspect.Active {
-		return fmt.Errorf("access token is not active")
-	}
-
-	if err := ws.SetProviderAPIKey(config.ScopeGlobal, "hyper", token); err != nil {
-		return err
-	}
-
-	fmt.Println()
-	fmt.Println("You're now authenticated with Hyper!")
-	return nil
 }
 
 func loginCopilot(ws workspace.Workspace, force bool) error {

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/notify"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/pubsub"
@@ -140,12 +140,12 @@ func (retryNotifyTitleModel) StreamObject(context.Context, fantasy.ObjectCall) (
 func retryNotifyAgent(env fakeEnv, model fantasy.LanguageModel, broker *pubsub.Broker[notify.Notification], maxRetries int) SessionAgent {
 	large := Model{
 		Model:      model,
-		CatwalkCfg: catwalk.Model{ID: "mock-model", ContextWindow: 8192, DefaultMaxTokens: 128},
+		CatalogCfg: catalog.Model{ID: "mock-model", ContextWindow: 8192, DefaultMaxTokens: 128},
 		ModelCfg:   config.SelectedModel{Provider: "mock", Model: "mock-model"},
 	}
 	small := Model{
 		Model:      retryNotifyTitleModel{},
-		CatwalkCfg: catwalk.Model{ID: "mock-model", ContextWindow: 8192, DefaultMaxTokens: 128},
+		CatalogCfg: catalog.Model{ID: "mock-model", ContextWindow: 8192, DefaultMaxTokens: 128},
 		ModelCfg:   config.SelectedModel{Provider: "mock", Model: "mock-model"},
 	}
 	return NewSessionAgent(SessionAgentOptions{

@@ -1,7 +1,7 @@
 package subagents
 
 import (
-	"charm.land/catwalk/pkg/catwalk"
+	"github.com/stubbedev/harness/internal/catalog"
 
 	"github.com/stubbedev/harness/internal/config"
 )
@@ -21,7 +21,7 @@ const (
 // EffortIgnored reports whether a non-empty effort would be silently dropped
 // because the model cannot reason. Callers use it to warn on misconfiguration;
 // ApplyEffortToModel no-ops in the same case.
-func EffortIgnored(effort string, catwalkModel catwalk.Model) bool {
+func EffortIgnored(effort string, catwalkModel catalog.Model) bool {
 	return effort != "" && !catwalkModel.CanReason
 }
 
@@ -35,7 +35,7 @@ func EffortIgnored(effort string, catwalkModel catwalk.Model) bool {
 //   - All other models: ReasoningEffort is set directly to the effort string.
 //     The coordinator's shouldSetEffort check (slices.Contains(ReasoningLevels,
 //     ReasoningEffort)) handles unsupported levels gracefully at dispatch time.
-func ApplyEffortToModel(effort string, selectedModel config.SelectedModel, catwalkModel catwalk.Model) config.SelectedModel {
+func ApplyEffortToModel(effort string, selectedModel config.SelectedModel, catwalkModel catalog.Model) config.SelectedModel {
 	if effort == "" || !catwalkModel.CanReason {
 		return selectedModel
 	}

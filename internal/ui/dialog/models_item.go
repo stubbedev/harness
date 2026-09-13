@@ -1,10 +1,10 @@
 package dialog
 
 import (
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
@@ -69,8 +69,8 @@ func (m *ModelGroup) Render(width int) string {
 type ModelItem struct {
 	*list.Versioned
 
-	prov      catwalk.Provider
-	model     catwalk.Model
+	prov      catalog.Provider
+	model     catalog.Model
 	modelType ModelType
 
 	cache        map[int]string
@@ -104,7 +104,7 @@ func (m *ModelItem) SelectedModelType() config.SelectedModelType {
 var _ ListItem = &ModelItem{}
 
 // NewModelItem creates a new ModelItem.
-func NewModelItem(t *styles.Styles, prov catwalk.Provider, model catwalk.Model, typ ModelType, showProvider bool) *ModelItem {
+func NewModelItem(t *styles.Styles, prov catalog.Provider, model catalog.Model, typ ModelType, showProvider bool) *ModelItem {
 	return &ModelItem{
 		Versioned:    list.NewVersioned(),
 		prov:         prov,

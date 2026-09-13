@@ -66,7 +66,7 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 
 func newBashToolForTest(workingDir string) fantasy.AgentTool {
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(workingDir, attribution, "test-model", nil)
+	return NewBashTool(workingDir, "test", attribution, "test-model", nil)
 }
 
 // requireTerminalSession skips tests that execute commands through the
@@ -87,7 +87,7 @@ func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, para
 
 	call := fantasy.ToolCall{
 		ID:    "test-call",
-		Name:  BashToolName,
+		Name:  ShellToolName,
 		Input: string(input),
 	}
 

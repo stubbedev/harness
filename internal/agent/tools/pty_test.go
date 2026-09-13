@@ -642,7 +642,7 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 	// Fill to the cap.
 	for i := range ptyMaxRunners {
 		dir := t.TempDir()
-		r := ptyRunnerFor(dir, nil)
+		r := ptyRunnerFor("test", dir, nil)
 		if _, err := r.terminal(t.Context()); err != nil {
 			t.Fatalf("open %d: %v", i, err)
 		}
@@ -653,7 +653,7 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 
 	// One more evicts the most idle.
 	time.Sleep(10 * time.Millisecond)
-	r := ptyRunnerFor(t.TempDir(), nil)
+	r := ptyRunnerFor("test", t.TempDir(), nil)
 	_, err := r.terminal(t.Context())
 	require.NoError(t, err)
 	ptyRunnersMu.Lock()
@@ -682,7 +682,7 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 	ptyRunnersMu.Lock()
 	defer ptyRunnersMu.Unlock()
 	require.Len(t, ptyRunners, ptyMaxRunners-1)
-	_, stillThere := ptyRunners[r.cwd]
+	_, stillThere := ptyRunners[slotKey("test", r.cwd, 0)]
 	require.True(t, stillThere, "the just-used runner must survive the reap")
 }
 
@@ -707,12 +707,38 @@ func TestPtyRunner_EarlierOutputStaysOutOfTheNextCall(t *testing.T) {
 	require.Equal(t, "second", res.Output, "a command reports its own output and nothing else")
 }
 
+// Each owner (agent) gets its own set of sessions: the same directory
+// under two owners yields two independent runners, and re-resolving
+// one owner's primary returns the same runner again.
+func TestPtyRunner_OwnersGetSeparateSessions(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh on this platform")
+	}
+
+	ptyRunnersMu.Lock()
+	saved := ptyRunners
+	ptyRunners = map[string]*ptyRunner{}
+	ptyRunnersMu.Unlock()
+	t.Cleanup(func() {
+		ptyRunnersMu.Lock()
+		for _, r := range ptyRunners {
+			r.Close()
+		}
+		ptyRunners = saved
+		ptyRunnersMu.Unlock()
+	})
+
+	a := ptyRunnerFor("agent-a", t.TempDir(), nil)
+	b := ptyRunnerFor("agent-b", a.cwd, nil)
+	require.NotSame(t, a, b, "two owners in one directory must not share a session")
+	require.Same(t, a, ptyRunnerFor("agent-a", a.cwd, nil), "one owner resolves back to its own runner")
+}
+
 // Reset is the way out of a session that cannot be talked down: the
 // shell is killed and a fresh one takes its place, so everything the
 // old one held is gone and commands work again.
 func TestPtyRunner_ResetStartsAFreshShell(t *testing.T) {
 	r := newTestRunner(t)
-
 	_, err := r.Run(t.Context(), "export PTY_RESET_VAR=before", 10)
 	require.NoError(t, err)
 

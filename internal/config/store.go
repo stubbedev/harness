@@ -12,13 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
-	hyperp "github.com/stubbedev/harness/internal/agent/hyper"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/env"
 	"github.com/stubbedev/harness/internal/lock"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/oauth/copilot"
-	"github.com/stubbedev/harness/internal/oauth/hyper"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 	"golang.org/x/sync/singleflight"
@@ -93,7 +91,7 @@ type ConfigStore struct {
 	globalDataPath     string   // $XDG_DATA_HOME/harness/state.yaml
 	workspacePath      string   // .harness/state.yaml
 	loadedPaths        []string // config files that were successfully loaded
-	knownProviders     []catwalk.Provider
+	knownProviders     []catalog.Provider
 	overrides          RuntimeOverrides
 	trackedConfigPaths []string                // unique, normalized config file paths
 	snapshots          map[string]fileSnapshot // path -> snapshot at last capture
@@ -174,70 +172,10 @@ func (s *ConfigStore) Resolve(key string) (string, error) {
 }
 
 // KnownProviders returns the list of known providers.
-func (s *ConfigStore) KnownProviders() []catwalk.Provider {
+func (s *ConfigStore) KnownProviders() []catalog.Provider {
 	s.writeMu.RLock()
 	defer s.writeMu.RUnlock()
 	return s.knownProviders
-}
-
-// RefetchHyperProvider re-fetches the Hyper provider catalog from the
-// remote API and updates the in-memory known providers list and config.
-// This is called after OAuth authentication completes so the latest
-// models are available without restarting.
-func (s *ConfigStore) RefetchHyperProvider(ctx context.Context) error {
-	// Build a fresh client that reads the API key from the live config,
-	// not the stale snapshot captured at startup. The syncer's original
-	// client closes over the startup config and would send an expired
-	// token after OAuth re-authentication.
-	freshClient := realHyperClient{
-		baseURL:    hyperp.BaseURL(),
-		resolveKey: func() string { return resolveHyperAPIKey(s.Config()) },
-	}
-	hyperSyncer.SetClient(freshClient)
-
-	hyperProvider, err := hyperSyncer.Refetch(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to refetch Hyper provider: %w", err)
-	}
-	if hyperProvider.ID == "" {
-		return nil
-	}
-
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-
-	// Replace or insert the Hyper entry in knownProviders.
-	found := false
-	for i, p := range s.knownProviders {
-		if string(p.ID) == string(hyperProvider.ID) {
-			s.knownProviders[i] = hyperProvider
-			found = true
-			break
-		}
-	}
-	if !found {
-		s.knownProviders = append([]catwalk.Provider{hyperProvider}, s.knownProviders...)
-	}
-
-	// Update the Hyper provider config with the refreshed model list
-	// and endpoint. Use cloneForWrite so readers always see a consistent
-	// snapshot (the store's contract forbids in-place config mutation).
-	nc := s.config.cloneForWrite()
-	if pc, ok := nc.Providers.Get(string(hyperProvider.ID)); ok {
-		pc.Models = hyperProvider.Models
-		if hyperProvider.APIEndpoint != "" {
-			pc.BaseURL = hyperProvider.APIEndpoint
-		}
-		nc.Providers.Set(string(hyperProvider.ID), pc)
-	}
-	s.setConfig(nc)
-
-	// Also update the memoized provider list so callers of
-	// config.Providers() (e.g. the models dialog) see fresh data.
-	UpdateProviderInList(hyperProvider)
-
-	s.SetupAgents()
-	return nil
 }
 
 // SetupAgents configures the coder and task agents on the config.
@@ -640,7 +578,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 			providerConfig.APIKey = v.AccessToken
 			providerConfig.OAuthToken = v
 			switch providerID {
-			case string(catwalk.InferenceProviderCopilot):
+			case string(catalog.InferenceProviderCopilot):
 				providerConfig.SetupGitHubCopilot()
 			}
 		}
@@ -652,7 +590,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		setKeyOrToken()
 		cfg.Providers.Set(providerID, providerConfig)
 	} else {
-		var foundProvider *catwalk.Provider
+		var foundProvider *catalog.Provider
 		for _, p := range s.knownProviders {
 			if string(p.ID) == providerID {
 				foundProvider = &p
@@ -677,20 +615,12 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 		}
 		cfg.Providers.Set(providerID, providerConfig)
 	}
-
-	// After authenticating with Hyper, re-fetch the provider catalog so
-	// the latest models are available without restarting.
-	if providerID == "hyper" {
-		if refetchErr := s.RefetchHyperProvider(context.Background()); refetchErr != nil {
-			slog.Warn("Failed to refetch Hyper provider after auth", "error", refetchErr)
-		}
-	}
 	return nil
 }
 
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
 //
-// Providers like Hyper rotate refresh tokens: each exchange consumes the
+// Providers like GitHub Copilot rotate refresh tokens: each exchange consumes the
 // caller's refresh token, issues a new pair, and revokes the old one. If
 // two harness instances (or two goroutines) refresh concurrently with the
 // same stored refresh token, the second exchange reuses an already-revoked
@@ -916,10 +846,8 @@ func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken str
 		return s.exchangeToken(ctx, providerID, refreshToken)
 	}
 	switch providerID {
-	case string(catwalk.InferenceProviderCopilot):
+	case string(catalog.InferenceProviderCopilot):
 		return copilot.RefreshToken(ctx, refreshToken)
-	case hyperp.Name:
-		return hyper.ExchangeToken(ctx, refreshToken)
 	default:
 		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
@@ -957,7 +885,7 @@ func (s *ConfigStore) refreshLockPath(providerID string) string {
 func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) error {
 	providerConfig.OAuthToken = token
 	providerConfig.APIKey = token.AccessToken
-	if providerID == string(catwalk.InferenceProviderCopilot) {
+	if providerID == string(catalog.InferenceProviderCopilot) {
 		providerConfig.SetupGitHubCopilot()
 	}
 	s.Config().Providers.Set(providerID, providerConfig)
@@ -1078,7 +1006,7 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 		return nil, false
 	}
 
-	if err := s.SetProviderAPIKey(ScopeGlobal, string(catwalk.InferenceProviderCopilot), token); err != nil {
+	if err := s.SetProviderAPIKey(ScopeGlobal, string(catalog.InferenceProviderCopilot), token); err != nil {
 		return token, false
 	}
 

@@ -1,6 +1,6 @@
 basePath: /v1
 definitions:
-  catwalk.Model:
+  catalog.Model:
     properties:
       can_reason:
         type: boolean
@@ -23,7 +23,7 @@ definitions:
       name:
         type: string
       options:
-        $ref: '#/definitions/catwalk.ModelOptions'
+        $ref: '#/definitions/catalog.ModelOptions'
       reasoning_levels:
         items:
           type: string
@@ -31,7 +31,7 @@ definitions:
       supports_attachments:
         type: boolean
     type: object
-  catwalk.ModelOptions:
+  catalog.ModelOptions:
     properties:
       frequency_penalty:
         type: number
@@ -74,20 +74,22 @@ definitions:
     - 60000000000
     - 3600000000000
     - 300000000000
-    - 60000000000
-    - 2000000000
+    - 86400000000000
     - 5000000000
     - 45000000000
     - 10000000000
+    - 60000000000
+    - 2000000000
     format: int64
     type: integer
     x-enum-varnames:
     - resolveTimeout
-    - DefaultRequestTimeout
-    - renameRetryBudget
+    - catalogRefreshInterval
     - configLockDeadline
     - refreshLockDeadline
     - credentialWriteLockDeadline
+    - DefaultRequestTimeout
+    - renameRetryBudget
   config.ExitBanner:
     enum:
     - default
@@ -257,6 +259,21 @@ definitions:
   config.MCPs:
     additionalProperties:
       $ref: '#/definitions/config.MCPConfig'
+    type: object
+  config.MemoryOptions:
+    properties:
+      enabled:
+        type: boolean
+      index_budget:
+        description: |-
+          IndexBudget bounds the character size of the memory index injected
+          into the system prompt.
+        type: integer
+      max_memories:
+        description: |-
+          MaxMemories caps how many memories are kept. When exceeded, the
+          least-used unpinned memories are reaped.
+        type: integer
     type: object
   config.SelectedModel:
     properties:
@@ -451,10 +468,13 @@ definitions:
         type: array
       data_directory:
         description: |-
-          DataDirectory is where Harness keeps per-project state such as
-          the SQLite database and workspace overrides. Relative paths are
-          resolved against the working directory; absolute paths are used
-          verbatim. After defaulting the stored value is always absolute.
+          DataDirectory is where Harness keeps per-workspace machine-owned
+          state such as the SQLite database, logs and workspace overrides.
+          It defaults to a per-workspace directory under the global data
+          root, so nothing harness-owned is written inside the project.
+          Relative paths are resolved against the working directory;
+          absolute paths are used verbatim. After defaulting the stored
+          value is always absolute.
         type: string
       debug:
         type: boolean
@@ -495,6 +515,8 @@ definitions:
         type: integer
       max_retries:
         type: integer
+      memory:
+        $ref: '#/definitions/config.MemoryOptions'
       notifications:
         type: string
       progress:
@@ -607,7 +629,7 @@ definitions:
       is_ready:
         type: boolean
       model:
-        $ref: '#/definitions/catwalk.Model'
+        $ref: '#/definitions/catalog.Model'
       model_cfg:
         $ref: '#/definitions/config.SelectedModel'
     type: object
@@ -666,6 +688,19 @@ definitions:
       file_path:
         type: string
       mime_type:
+        type: string
+    type: object
+  proto.Checkpoint:
+    properties:
+      commit_sha:
+        type: string
+      created_at:
+        type: integer
+      id:
+        type: string
+      message_id:
+        type: string
+      session_id:
         type: string
     type: object
   proto.ConfigCompactRequest:
@@ -938,6 +973,13 @@ definitions:
         type: array
       result:
         $ref: '#/definitions/proto.SkillReadResult'
+    type: object
+  proto.RewindRequest:
+    properties:
+      message_id:
+        type: string
+      mode:
+        type: string
     type: object
   proto.ServerControl:
     properties:
@@ -1443,6 +1485,33 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Cancel agent session
+      tags:
+      - agent
+  /workspaces/{id}/agent/sessions/{sid}/cancel-turn:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Cancel the session's active agent turn
       tags:
       - agent
   /workspaces/{id}/agent/sessions/{sid}/prompts/clear:
@@ -2771,6 +2840,39 @@ paths:
       summary: Update session
       tags:
       - sessions
+  /workspaces/{id}/sessions/{sid}/checkpoints:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.Checkpoint'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get session checkpoints
+      tags:
+      - sessions
   /workspaces/{id}/sessions/{sid}/filetracker/files:
     get:
       parameters:
@@ -2901,6 +3003,45 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Get user messages for session
+      tags:
+      - sessions
+  /workspaces/{id}/sessions/{sid}/rewind:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      - description: Rewind request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.RewindRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Rewind session
       tags:
       - sessions
   /workspaces/{id}/skills:

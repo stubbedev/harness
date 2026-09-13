@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 )
 
@@ -83,8 +83,8 @@ func TestBuildProviderOpenCodeRouting(t *testing.T) {
 	t.Parallel()
 
 	for _, providerID := range []string{
-		string(catwalk.InferenceProviderOpenCodeZen),
-		string(catwalk.InferenceProviderOpenCodeGo),
+		string(catalog.InferenceProviderOpenCodeZen),
+		string(catalog.InferenceProviderOpenCodeGo),
 	} {
 		t.Run(providerID, func(t *testing.T) {
 			t.Parallel()
@@ -92,7 +92,7 @@ func TestBuildProviderOpenCodeRouting(t *testing.T) {
 			providerCfg := config.ProviderConfig{
 				ID:      providerID,
 				BaseURL: "https://opencode.ai/zen/v1",
-				Type:    catwalk.TypeOpenAICompat,
+				Type:    catalog.TypeOpenAICompat,
 				APIKey:  "$OPENCODE_API_KEY",
 			}
 			coord := newTestCoordinator(t, env, providerID, providerCfg)

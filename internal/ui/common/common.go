@@ -98,12 +98,6 @@ func ThemeStylesForConfig(cfg *config.Config, providerID string) styles.Styles {
 	return styles.ThemeForProvider(providerID)
 }
 
-// IsHyper reports whether the currently selected large model is provided
-// by Hyper.
-func (c *Common) IsHyper() bool {
-	return largeModelProviderID(c.Workspace) == "hyper"
-}
-
 // CenterRect returns a new [Rectangle] centered within the given area with the
 // specified width and height.
 func CenterRect(area uv.Rectangle, width, height int) uv.Rectangle {

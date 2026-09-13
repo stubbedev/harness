@@ -13,7 +13,7 @@ func TestBaseToolMessageItemElapsed(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	tc := message.ToolCall{ID: "toolu_1", Name: "bash", Finished: false}
+	tc := message.ToolCall{ID: "toolu_1", Name: "shell", Finished: false}
 	item := newBaseToolMessageItem(&sty, tc, nil, &BashToolRenderContext{}, false)
 
 	// A live tool's timer runs from the moment the item was built. How
@@ -25,7 +25,7 @@ func TestBaseToolMessageItemElapsed(t *testing.T) {
 		return item.elapsed() > 0
 	}, time.Second, time.Millisecond, "a live tool must report elapsed time")
 
-	item.SetToolCall(message.ToolCall{ID: "toolu_1", Name: "bash", Finished: true})
+	item.SetToolCall(message.ToolCall{ID: "toolu_1", Name: "shell", Finished: true})
 	require.False(t, item.finishedAt.IsZero(), "finishing must capture the end time")
 
 	frozen := item.elapsed()

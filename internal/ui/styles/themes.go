@@ -17,12 +17,7 @@ import (
 // expensive style rebuild. This is the single source of truth for the
 // provider-to-theme mapping; [ThemeForProvider] builds on it.
 func ThemeKeyForProvider(providerID string) string {
-	switch providerID {
-	case "hyper":
-		return "hyper"
-	default:
-		return "default"
-	}
+	return "default"
 }
 
 // ThemeForProvider returns the Styles associated with the given provider
@@ -30,23 +25,13 @@ func ThemeKeyForProvider(providerID string) string {
 // theme. A theme configured via options.tui.theme always takes
 // precedence over this provider mapping; see [ThemeFromConfig].
 func ThemeForProvider(providerID string) Styles {
-	switch ThemeKeyForProvider(providerID) {
-	case "hyper":
-		return HyperharnessObsidiana()
-	default:
-		return CharmtonePantera()
-	}
+	return CharmtonePantera()
 }
 
 // CharmtonePantera returns the Charmtone dark theme. It's the default style
 // for the UI.
 func CharmtonePantera() Styles {
 	return charmtoneOverrides(quickStyle(charmtoneOpts()))
-}
-
-// HyperharnessObsidiana returns the Hyperharness dark theme.
-func HyperharnessObsidiana() Styles {
-	return CharmtonePantera()
 }
 
 // charmtoneOpts returns the quickStyleOpts palette for the Charmtone dark
@@ -142,11 +127,6 @@ func charmtoneOverrides(s Styles) Styles {
 		Foreground(charmtone.Hazy)
 	s.Messages.ShellPromptBlurred = s.Messages.ShellPromptBlurred.
 		Foreground(charmtone.Hazy)
-
-	// The ◆ hypercredit symbol inside subdued text (e.g. savings
-	// suffixes) uses Mochi so it stays visible against its surroundings.
-	s.Messages.SubduedHypercreditIcon = s.Messages.SubduedHypercreditIcon.
-		Foreground(charmtone.Violet)
 
 	return s
 }

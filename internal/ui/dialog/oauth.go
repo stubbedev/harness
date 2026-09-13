@@ -9,10 +9,10 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/pkg/browser"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -45,7 +45,7 @@ type OAuth struct {
 	com          *common.Common
 	isOnboarding bool
 
-	provider      catwalk.Provider
+	provider      catalog.Provider
 	model         config.SelectedModel
 	modelType     config.SelectedModelType
 	oAuthProvider OAuthProvider
@@ -77,7 +77,7 @@ var _ Dialog = (*OAuth)(nil)
 func newOAuth(
 	com *common.Common,
 	isOnboarding bool,
-	provider catwalk.Provider,
+	provider catalog.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
 	oAuthProvider OAuthProvider,

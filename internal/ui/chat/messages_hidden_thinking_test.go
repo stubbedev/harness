@@ -27,7 +27,7 @@ func thinkingToolCallMsg() *message.Message {
 			},
 			message.ToolCall{
 				ID:       "toolu_1",
-				Name:     "Bash",
+				Name:     "shell",
 				Input:    `{"command":"gh issue view 18"}`,
 				Finished: true,
 			},

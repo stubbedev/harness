@@ -77,7 +77,7 @@ harness models gpt5`,
 			}
 		}
 
-		// Add known but unconfigured providers from catwalk.
+		// Add known but unconfigured providers from the catalog.
 		for _, kp := range cfg.KnownProviders() {
 			providerID := string(kp.ID)
 			if _, exists := entries[providerID]; exists {

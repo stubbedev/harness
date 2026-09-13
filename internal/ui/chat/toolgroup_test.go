@@ -19,7 +19,7 @@ func groupStyles() *styles.Styles {
 func bashTool(id, command string, finished bool) ToolMessageItem {
 	input := `{"command":` + quoteJSON(command) + `}`
 	return NewToolMessageItem(groupStyles(), "msg", message.ToolCall{
-		ID: id, Name: "Bash", Input: input, Finished: finished,
+		ID: id, Name: "shell", Input: input, Finished: finished,
 	}, nil, false, "/tmp")
 }
 
@@ -52,7 +52,7 @@ func TestToolCallSummary(t *testing.T) {
 	}{
 		{
 			name: "bash command keeps the first line",
-			tc:   message.ToolCall{Name: "Bash", Input: `{"command":"git status\n--short"}`},
+			tc:   message.ToolCall{Name: "shell", Input: `{"command":"git status\n--short"}`},
 			want: "git status",
 		},
 		{
@@ -85,7 +85,7 @@ func TestToolGroupRenderLevels(t *testing.T) {
 
 	done := func(id string) ToolMessageItem {
 		item := bashTool(id, "gh issue close 16 --repo x --comment \"Fixed: unpresentable schemas (wider", true)
-		res := message.ToolResult{ToolCallID: id, Name: "Bash", Content: "ok"}
+		res := message.ToolResult{ToolCallID: id, Name: "shell", Content: "ok"}
 		item.SetResult(&res)
 		return item
 	}
@@ -94,7 +94,7 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		t.Parallel()
 		g := NewToolGroupMessageItem(sty, done("t1"))
 		out := ansi.Strip(g.Render(80))
-		assert.Contains(t, out, "Bash")
+		assert.Contains(t, out, "Shell")
 		assert.Contains(t, out, "gh issue close 16")
 		assert.NotContains(t, out, "tool call")
 		assert.Equal(t, 1, strings.Count(out, "\n")+1)
@@ -190,9 +190,9 @@ func TestToolGroupRenderLevels(t *testing.T) {
 	t.Run("every failed call shows the error glyph", func(t *testing.T) {
 		t.Parallel()
 		item := bashTool("t1", "make build", true)
-		item.SetResult(&message.ToolResult{ToolCallID: "t1", Name: "Bash", Content: "boom", IsError: true})
+		item.SetResult(&message.ToolResult{ToolCallID: "t1", Name: "shell", Content: "boom", IsError: true})
 		item2 := bashTool("t2", "make test", true)
-		item2.SetResult(&message.ToolResult{ToolCallID: "t2", Name: "Bash", Content: "boom", IsError: true})
+		item2.SetResult(&message.ToolResult{ToolCallID: "t2", Name: "shell", Content: "boom", IsError: true})
 		g := NewToolGroupMessageItem(sty, item)
 		g.AddTool(item2)
 		assert.Contains(t, g.Render(80), styles.ToolError)
@@ -201,7 +201,7 @@ func TestToolGroupRenderLevels(t *testing.T) {
 	t.Run("partial failure shows the success glyph without the error glyph", func(t *testing.T) {
 		t.Parallel()
 		item := bashTool("t1", "make build", true)
-		item.SetResult(&message.ToolResult{ToolCallID: "t1", Name: "Bash", Content: "boom", IsError: true})
+		item.SetResult(&message.ToolResult{ToolCallID: "t1", Name: "shell", Content: "boom", IsError: true})
 		g := NewToolGroupMessageItem(sty, item)
 		g.AddTool(done("t2"))
 		out := g.Render(80)
@@ -260,7 +260,7 @@ func TestToolGroupAdvanceBumpsVersion(t *testing.T) {
 	require.Greater(t, g.Version(), before, "a spinning group must bump so the list cache re-renders")
 
 	// Settling every child freezes the group: no more frames, no bumps.
-	g.ChildTool("t1").SetResult(&message.ToolResult{ToolCallID: "t1", Name: "Bash", Content: "ok"})
+	g.ChildTool("t1").SetResult(&message.ToolResult{ToolCallID: "t1", Name: "shell", Content: "ok"})
 	g.clearCache()
 	require.False(t, g.Spinning())
 	settled := g.Version()

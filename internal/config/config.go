@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/invopop/jsonschema"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/oauth/copilot"
@@ -99,7 +99,7 @@ type ProviderConfig struct {
 	// The provider's API endpoint.
 	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the provider's API,format=uri,example=https://api.openai.com/v1"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
-	Type catwalk.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,default=openai"`
+	Type catalog.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,default=openai"`
 	// The provider's API key.
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
 	// The original API key template before resolution (for re-resolution on auth errors).
@@ -149,21 +149,21 @@ type ProviderConfig struct {
 	AutoDiscoverModels *bool `json:"discover_models,omitempty" jsonschema:"description=Auto-discover models from /v1/models endpoint. When true with existing models they are merged (yours win),default=true"`
 
 	// The provider models
-	Models []catwalk.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
+	Models []catalog.Model `json:"models,omitempty" jsonschema:"description=List of models available from this provider"`
 }
 
-// ToProvider converts the [ProviderConfig] to a [catwalk.Provider].
-func (c *ProviderConfig) ToProvider() catwalk.Provider {
+// ToProvider converts the [ProviderConfig] to a [catalog.Provider].
+func (c *ProviderConfig) ToProvider() catalog.Provider {
 	// Convert config provider to provider.Provider format
-	provider := catwalk.Provider{
+	provider := catalog.Provider{
 		Name:   c.Name,
-		ID:     catwalk.InferenceProvider(c.ID),
-		Models: make([]catwalk.Model, len(c.Models)),
+		ID:     catalog.InferenceProvider(c.ID),
+		Models: make([]catalog.Model, len(c.Models)),
 	}
 
 	// Convert models
 	for i, model := range c.Models {
-		provider.Models[i] = catwalk.Model{
+		provider.Models[i] = catalog.Model{
 			ID:                     model.ID,
 			Name:                   model.Name,
 			CostPer1MIn:            model.CostPer1MIn,
@@ -941,7 +941,7 @@ func (c *Config) IsConfigured() bool {
 	return len(c.EnabledProviders()) > 0
 }
 
-func (c *Config) GetModel(provider, model string) *catwalk.Model {
+func (c *Config) GetModel(provider, model string) *catalog.Model {
 	if providerConfig, ok := c.Providers.Get(provider); ok {
 		for _, m := range providerConfig.Models {
 			if m.ID == model {
@@ -1026,7 +1026,7 @@ func (c *Config) GetProviderForModel(modelType SelectedModelType) *ProviderConfi
 	return nil
 }
 
-func (c *Config) GetModelByType(modelType SelectedModelType) *catwalk.Model {
+func (c *Config) GetModelByType(modelType SelectedModelType) *catalog.Model {
 	model, ok := c.Models[modelType]
 	if !ok {
 		return nil
@@ -1034,7 +1034,7 @@ func (c *Config) GetModelByType(modelType SelectedModelType) *catwalk.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) LargeModel() *catwalk.Model {
+func (c *Config) LargeModel() *catalog.Model {
 	model, ok := c.Models[SelectedModelTypeLarge]
 	if !ok {
 		return nil
@@ -1056,7 +1056,7 @@ func (c *Config) ResolvedLargeLine() string {
 	return fmt.Sprintf("harness run: %s/%s", m.Provider, m.Model)
 }
 
-func (c *Config) SmallModel() *catwalk.Model {
+func (c *Config) SmallModel() *catalog.Model {
 	model, ok := c.Models[SelectedModelTypeSmall]
 	if !ok {
 		return nil
@@ -1081,7 +1081,7 @@ func allToolNames() []string {
 		"agent",
 		"wait",
 		"batch",
-		"bash",
+		"shell",
 		"harness_info",
 		"harness_logs",
 		"job_output",
@@ -1183,17 +1183,17 @@ func (c *Config) SetupAgents() {
 
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	var (
-		providerID = catwalk.InferenceProvider(c.ID)
+		providerID = catalog.InferenceProvider(c.ID)
 		testURL    = ""
 		headers    = make(map[string]string)
 		apiKey, _  = resolver.ResolveValue(c.APIKey)
 	)
 
 	switch providerID {
-	case catwalk.InferenceProviderMiniMax, catwalk.InferenceProviderMiniMaxChina:
+	case catalog.InferenceProviderMiniMax, catalog.InferenceProviderMiniMaxChina:
 		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
 		return nil
-	case catwalk.InferenceProviderAlibabaSingapore:
+	case catalog.InferenceProviderAlibabaSingapore:
 		// NOTE: Alibaba has no good endpoint we can use to validate the API key.
 		// Let's at least check the pattern.
 		if !strings.HasPrefix(apiKey, "sk-") {
@@ -1203,26 +1203,26 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	}
 
 	switch c.Type {
-	case catwalk.TypeOpenAI, catwalk.TypeOpenAICompat, catwalk.TypeOpenRouter:
+	case catalog.TypeOpenAI, catalog.TypeOpenAICompat, catalog.TypeOpenRouter:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
 
 		switch providerID {
-		case catwalk.InferenceProviderOpenRouter:
+		case catalog.InferenceProviderOpenRouter:
 			testURL = baseURL + "/credits"
-		case catwalk.InferenceProviderOpenCodeGo:
+		case catalog.InferenceProviderOpenCodeGo:
 			testURL = strings.Replace(baseURL, "/go", "", 1) + "/models"
 		default:
 			testURL = baseURL + "/models"
 		}
 
 		headers["Authorization"] = "Bearer " + apiKey
-	case catwalk.TypeAnthropic:
+	case catalog.TypeAnthropic:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")
 
 		switch providerID {
-		case catwalk.InferenceKimiCoding:
+		case catalog.InferenceKimiCoding:
 			testURL = baseURL + "/v1/models"
 		default:
 			testURL = baseURL + "/models"
@@ -1230,11 +1230,11 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
-	case catwalk.TypeGoogle:
+	case catalog.TypeGoogle:
 		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
 		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
-	case catwalk.TypeBedrock:
+	case catalog.TypeBedrock:
 		// NOTE: Bedrock has a `/foundation-models` endpoint that we could in
 		// theory use, but apparently the authorization is region-specific,
 		// so it's not so trivial.
@@ -1242,7 +1242,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			return nil
 		}
 		return errors.New("not a valid bedrock api key")
-	case catwalk.TypeVercel:
+	case catalog.TypeVercel:
 		// NOTE: Vercel does not validate API keys on the `/models` endpoint.
 		if strings.HasPrefix(apiKey, "vck_") { // Vercel API keys
 			return nil
@@ -1272,7 +1272,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	defer resp.Body.Close()
 
 	switch providerID {
-	case catwalk.InferenceProviderZAI:
+	case catalog.InferenceProviderZAI:
 		if resp.StatusCode == http.StatusUnauthorized {
 			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)
 		}

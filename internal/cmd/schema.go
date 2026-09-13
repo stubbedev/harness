@@ -4,10 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/invopop/jsonschema"
 	"github.com/spf13/cobra"
-	"github.com/stubbedev/harness/internal/agent/hyper"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/discover"
 )
@@ -34,7 +33,7 @@ var schemaCmd = &cobra.Command{
 
 // setProviderTypeEnum overwrites the provider `type` enum with the live set
 // of accepted values rather than a hand-maintained struct tag. The values
-// must match exactly what load.go validates against: the catwalk provider
+// must match exactly what load.go validates against: the catalog provider
 // types, the Charm Hyper type, and any locally-discovered providers that
 // self-register an enricher (e.g. ollama, omlx). Sourcing the enum here keeps
 // the published schema from drifting as provider types are added or renamed.
@@ -49,10 +48,9 @@ func setProviderTypeEnum(schema *jsonschema.Schema) {
 	}
 
 	var types []string
-	for _, t := range catwalk.KnownProviderTypes() {
+	for _, t := range catalog.KnownProviderTypes() {
 		types = append(types, string(t))
 	}
-	types = append(types, string(hyper.Name))
 	types = append(types, discover.RegisteredProviderTypes()...)
 
 	typeProp.Enum = make([]any, len(types))

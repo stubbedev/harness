@@ -16,8 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
-	"net/http"
 	"os"
 	"regexp"
 	"slices"
@@ -27,7 +25,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
@@ -38,10 +35,10 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/stubbedev/harness/internal/agent/hyper"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
@@ -178,7 +175,7 @@ type SessionAgent interface {
 
 type Model struct {
 	Model      fantasy.LanguageModel
-	CatwalkCfg catwalk.Model
+	CatalogCfg catalog.Model
 	ModelCfg   config.SelectedModel
 	FlatRate   bool
 }
@@ -988,7 +985,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		a.publishRunComplete(ctx, call, complete)
 	}()
 
-	history, files := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages, call.Attachments...)
+	history, files := a.preparePrompt(msgs, largeModel.CatalogCfg.SupportsImages, call.Attachments...)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -1125,8 +1122,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 			assistantCancel()
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
-			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)
+			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatalogCfg.SupportsImages)
+			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatalogCfg.Name)
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},
@@ -1289,8 +1286,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
-			currentAssistant.PrismModelID, currentAssistant.PrismModelName = extractPrismModel(stepResult.ProviderMetadata)
-			currentAssistant.PrismHypercreditSavings, currentAssistant.PrismDollarSavings = extractPrismSavings(stepResult.ProviderMetadata)
 			sessionLock.Lock()
 			defer sessionLock.Unlock()
 
@@ -1300,7 +1295,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			}
 			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
 			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
-			extractHyperCredits(stepResult.ProviderMetadata)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {
 				return sessionErr
@@ -1310,7 +1304,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
-				cw := int64(largeModel.CatwalkCfg.ContextWindow)
+				cw := int64(largeModel.CatalogCfg.ContextWindow)
 				// If context window is unknown (0), skip auto-summarize
 				// to avoid immediately truncating custom/local models.
 				if cw == 0 {
@@ -1334,12 +1328,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
 	if err != nil {
-		isHyper := largeModel.ModelCfg.Provider == hyper.Name
 		isCancelErr := errors.Is(err, context.Canceled)
 		slog.Info("Agent stream returned error",
 			"error", err.Error(),
 			"error_type", fmt.Sprintf("%T", err),
-			"is_hyper", isHyper,
 			"is_cancel", isCancelErr)
 		if currentAssistant == nil {
 			// Cancel-before-assistant-creation window: the run was
@@ -1546,7 +1538,6 @@ func (a *sessionAgent) persistFailedTurn(
 	retryAttempt int,
 ) error {
 	isCancelErr := errors.Is(streamErr, context.Canceled)
-	isHyper := largeModel.ModelCfg.Provider == hyper.Name
 	// Persist final state with a context detached from the run
 	// context. The run context (ctx) is derived from the
 	// workspace context, which workspace shutdown cancels before
@@ -1612,7 +1603,6 @@ func (a *sessionAgent) persistFailedTurn(
 			return createErr
 		}
 	}
-	var providerErr *fantasy.ProviderError
 	const defaultTitle = "Provider Error"
 	linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
 	if isCancelErr {
@@ -1621,16 +1611,14 @@ func (a *sessionAgent) persistFailedTurn(
 		// Checked before the provider branches so a deadline our own
 		// request timeout imposed is never reported as a provider error.
 		currentAssistant.AddFinish(message.FinishReasonError, "Request timed out", requestTimedOutErr.userMessage())
-	} else if isHyper && errors.As(streamErr, &providerErr) && providerErr.StatusCode == http.StatusUnauthorized {
-		currentAssistant.AddFinish(message.FinishReasonError, "Unauthorized", `Please re-authenticate with Hyper. You can also run "harness auth" to re-authenticate.`)
-	} else if errors.As(streamErr, &providerErr) {
+	} else if providerErr, ok := errors.AsType[*fantasy.ProviderError](streamErr); ok {
 		if providerErr.Message == "The requested model is not supported." {
 			url := "https://github.com/settings/copilot/features"
 			link := linkStyle.Hyperlink(url, "id=copilot").Render(url)
 			currentAssistant.AddFinish(
 				message.FinishReasonError,
 				"Copilot model not enabled",
-				fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatwalkCfg.Name, link),
+				fmt.Sprintf("%q is not enabled in Copilot. Go to the following page to enable it. Then, wait 5 minutes before trying again. %s", largeModel.CatalogCfg.Name, link),
 			)
 		} else {
 			currentAssistant.AddFinish(message.FinishReasonError, cmp.Or(stringext.Capitalize(providerErr.Title), defaultTitle), providerErr.Message)
@@ -1698,7 +1686,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		return nil
 	}
 
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatwalkCfg.SupportsImages)
+	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatalogCfg.SupportsImages)
 
 	// PreCompact is informational: it observes the imminent compaction
 	// (with its trigger) but cannot veto or steer it.
@@ -1808,7 +1796,6 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 			}
 			openrouterCost = &newCost
 		}
-		extractHyperCredits(step.ProviderMetadata)
 	}
 
 	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
@@ -2203,8 +2190,8 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 	var success bool
 	for _, attempt := range attempts {
 		tok := int64(40)
-		if attempt.model.CatwalkCfg.CanReason {
-			tok = attempt.model.CatwalkCfg.DefaultMaxTokens
+		if attempt.model.CatalogCfg.CanReason {
+			tok = attempt.model.CatalogCfg.DefaultMaxTokens
 		}
 		agent := newAgent(attempt.model.Model, titlePrompt, tok)
 		call := streamCall
@@ -2262,10 +2249,9 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 			}
 			openrouterCost = &newCost
 		}
-		extractHyperCredits(step.ProviderMetadata)
 	}
 
-	modelConfig := model.CatwalkCfg
+	modelConfig := model.CatalogCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
@@ -2307,76 +2293,12 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 	return &opts.Usage.Cost
 }
 
-// extractHyperCredits reads usage.remaining.hypercredits from OpenAI
-// provider metadata and stores it for the next FetchCredits call.
-func extractHyperCredits(metadata fantasy.ProviderMetadata) {
-	openaiMeta, ok := metadata[openai.Name]
-	if !ok {
-		return
-	}
-	pm, ok := openaiMeta.(*openai.ProviderMetadata)
-	if !ok {
-		return
-	}
-	var remaining struct {
-		Hypercredits float64 `json:"hypercredits"`
-	}
-	if pm.ExtraField("remaining", &remaining) && remaining.Hypercredits > 0 {
-		hyper.SetBalance(int(math.Round(remaining.Hypercredits)))
-	}
-}
-
-// extractPrismModel returns the ID and name of the model that actually
-// served the turn, as reported by the Hyper Prism model router headers,
-// or empty strings when the turn was not routed through a Prism model.
-func extractPrismModel(metadata fantasy.ProviderMetadata) (modelID, modelName string) {
-	openaiMeta, ok := metadata[openai.Name]
-	if !ok {
-		return "", ""
-	}
-	pm, ok := openaiMeta.(*openai.ProviderMetadata)
-	if !ok {
-		return "", ""
-	}
-	_ = pm.ExtraField(hyper.PrismModelIDField, &modelID)
-	_ = pm.ExtraField(hyper.PrismModelNameField, &modelName)
-	return modelID, modelName
-}
-
-// extractPrismSavings returns the hypercredit and dollar savings from
-// routing the turn through the Hyper Prism model router, as reported by
-// its savings trailers, or nil when not reported or malformed.
-func extractPrismSavings(metadata fantasy.ProviderMetadata) (hypercredits, dollars *float64) {
-	openaiMeta, ok := metadata[openai.Name]
-	if !ok {
-		return nil, nil
-	}
-	pm, ok := openaiMeta.(*openai.ProviderMetadata)
-	if !ok {
-		return nil, nil
-	}
-	return extraFieldFloat(pm, hyper.PrismHypercreditSavingsField), extraFieldFloat(pm, hyper.PrismDollarSavingsField)
-}
-
-func extraFieldFloat(pm *openai.ProviderMetadata, key string) *float64 {
-	var value string
-	if !pm.ExtraField(key, &value) {
-		return nil
-	}
-	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		slog.Warn("Could not parse Prism savings", "key", key, "value", value, "error", err)
-		return nil
-	}
-	return &parsed
-}
-
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {
 	if !usageIsZero(usage) {
 		session.EstimatedUsage = estimated
 	}
 
-	modelConfig := model.CatwalkCfg
+	modelConfig := model.CatalogCfg
 	cost := modelConfig.CostPer1MInCached/1e6*float64(usage.CacheCreationTokens) +
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
@@ -2658,15 +2580,14 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
 func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model) []fantasy.Message {
-	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderAnthropic) ||
-		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrock) ||
-		largeModel.ModelCfg.Provider == string(catwalk.InferenceProviderBedrockEurope)
+	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catalog.InferenceProviderAnthropic) ||
+		largeModel.ModelCfg.Provider == string(catalog.InferenceProviderBedrock)
 
 	if providerSupportsMedia {
 		return messages
 	}
 
-	supportsImages := largeModel.CatwalkCfg.SupportsImages
+	supportsImages := largeModel.CatalogCfg.SupportsImages
 
 	convertedMessages := make([]fantasy.Message, 0, len(messages))
 

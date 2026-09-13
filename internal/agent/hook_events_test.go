@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/notify"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/hooks"
 	"github.com/stubbedev/harness/internal/message"
@@ -343,8 +343,8 @@ func TestStopHook(t *testing.T) {
 		logPath := filepath.Join(t.TempDir(), "hooks.log")
 		env := testEnv(t)
 		sa := NewSessionAgent(SessionAgentOptions{
-			LargeModel:           Model{Model: textModel("done"), CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
-			SmallModel:           Model{Model: textModel("A Session"), CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+			LargeModel:           Model{Model: textModel("done"), CatalogCfg: catalog.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+			SmallModel:           Model{Model: textModel("A Session"), CatalogCfg: catalog.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
 			SystemPrompt:         "fake system prompt",
 			IsSubAgent:           true,
 			DisableAutoSummarize: true,
@@ -505,8 +505,8 @@ func TestCompactHooks(t *testing.T) {
 		large := newScriptedModel(scriptedTurn{text: "hello"})
 		large.usage = fantasy.Usage{InputTokens: 950, OutputTokens: 60, TotalTokens: 1010}
 		sa := NewSessionAgent(SessionAgentOptions{
-			LargeModel:   Model{Model: large, CatwalkCfg: catwalk.Model{ContextWindow: 1200, DefaultMaxTokens: 4096}},
-			SmallModel:   Model{Model: textModel("summary"), CatwalkCfg: catwalk.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
+			LargeModel:   Model{Model: large, CatalogCfg: catalog.Model{ContextWindow: 1200, DefaultMaxTokens: 4096}},
+			SmallModel:   Model{Model: textModel("summary"), CatalogCfg: catalog.Model{ContextWindow: 200000, DefaultMaxTokens: 10000}},
 			SystemPrompt: "fake system prompt",
 			Sessions:     env.sessions,
 			Messages:     env.messages,

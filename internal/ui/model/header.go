@@ -50,7 +50,6 @@ func (h *header) drawHeader(
 	detailsOpen bool,
 	width int,
 	lspErrorCount int,
-	hyperCredits *int,
 	breadcrumb string,
 ) {
 	h.width = width
@@ -72,7 +71,6 @@ func (h *header) drawHeader(
 		session,
 		lspErrorCount,
 		detailsOpen,
-		hyperCredits,
 		breadcrumb,
 	)
 
@@ -98,14 +96,13 @@ func (h *header) drawHeader(
 
 // renderHeaderDetails renders the two halves of the compact status line:
 // the left (breadcrumb when viewing a child session, working directory and
-// git state) and the right (LSP errors, context usage with model,
-// hypercredits, and the details hint).
+// git state) and the right (LSP errors, context usage with model, and the
+// details hint).
 func renderHeaderDetails(
 	com *common.Common,
 	session *session.Session,
 	lspErrorCount int,
 	detailsOpen bool,
-	hyperCredits *int,
 	breadcrumb string,
 ) (left, right string) {
 	t := com.Styles
@@ -131,8 +128,8 @@ func renderHeaderDetails(
 		}
 	}
 
-	// Right: diagnostics, context usage with the model ID, hypercredits,
-	// and the session-details hint.
+	// Right: diagnostics, context usage with the model ID, and the
+	// session-details hint.
 	var rightParts []string
 	if lspErrorCount > 0 {
 		rightParts = append(rightParts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))
@@ -149,11 +146,6 @@ func renderHeaderDetails(
 			percentageText = "~" + percentageText
 		}
 		rightParts = append(rightParts, t.Header.Percentage.Render(percentageText))
-	}
-
-	if com.IsHyper() && hyperCredits != nil {
-		hc := t.Header.HypercreditIcon.Render(styles.HypercreditIcon) + " " + t.Header.Percentage.Render(common.FormatCredits(*hyperCredits))
-		rightParts = append(rightParts, hc)
 	}
 
 	const keystroke = "ctrl+d"

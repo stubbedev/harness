@@ -413,11 +413,7 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 		arrow := a.sty.Messages.AssistantInfoProvider.Render("→")
 		modelFormatted = fmt.Sprintf("%s %s %s", modelFormatted, arrow, routedModel)
 	}
-	savings := prismSavingsSuffix(a.sty, a.message)
 	if !isFinalTurn {
-		if savings != "" {
-			return fmt.Sprintf("%s %s %s", icon, modelFormatted, savings)
-		}
 		return fmt.Sprintf("%s %s", icon, modelFormatted)
 	}
 	providerName := a.message.Provider
@@ -428,42 +424,12 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	duration := time.Unix(finishData.Time, 0).Sub(a.lastUserMessageTime)
 	infoMsg := a.sty.Messages.AssistantInfoDuration.Render(fmt.Sprintf("in %s", duration))
 	assistant := fmt.Sprintf("%s %s %s %s", icon, modelFormatted, provider, infoMsg)
-	if savings != "" {
-		assistant = fmt.Sprintf("%s %s", assistant, savings)
-	}
 	return common.Section(a.sty, assistant, width)
 }
 
 // cappedMessageWidth returns the maximum width for message content for readability.
 func cappedMessageWidth(availableWidth int) int {
 	return min(availableWidth-MessageLeftPaddingTotal, maxTextWidth)
-}
-
-// prismSavingsSuffix returns the styled Prism savings suffix for the
-// message, or an empty string when none was reported. The hypercredit
-// symbol carries the sidebar's hypercredit color; the rest is subdued
-// like the provider. Hypercredits are preferred over dollars when both
-// are present, matching Hyper's either/or credit model.
-func prismSavingsSuffix(sty *styles.Styles, msg *message.Message) string {
-	switch {
-	case msg.PrismHypercreditSavings != nil:
-		icon := sty.Messages.SubduedHypercreditIcon.Render(styles.HypercreditIcon)
-		rest := sty.Messages.AssistantInfoProvider.Render(fmt.Sprintf(" %s Saved", formatHypercreditSavings(*msg.PrismHypercreditSavings)))
-		return icon + rest
-	case msg.PrismDollarSavings != nil:
-		return sty.Messages.AssistantInfoProvider.Render(fmt.Sprintf("• $%.2f Saved", *msg.PrismDollarSavings))
-	default:
-		return ""
-	}
-}
-
-// formatHypercreditSavings rounds hypercredits to whole numbers at 1 and
-// above, keeping a single decimal below that.
-func formatHypercreditSavings(v float64) string {
-	if v >= 1 {
-		return fmt.Sprintf("%.0f", v)
-	}
-	return fmt.Sprintf("%.1f", v)
 }
 
 // ExtractMessageItems extracts [MessageItem]s from a [message.Message]. It

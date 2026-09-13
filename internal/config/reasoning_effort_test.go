@@ -3,15 +3,15 @@ package config
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/csync"
 )
 
 func TestConfig_ValidateReasoningEffort(t *testing.T) {
 	t.Parallel()
 
-	newConfig := func(models ...catwalk.Model) *Config {
+	newConfig := func(models ...catalog.Model) *Config {
 		return &Config{
 			Providers: csync.NewMapFrom(map[string]ProviderConfig{
 				"openai": {
@@ -24,7 +24,7 @@ func TestConfig_ValidateReasoningEffort(t *testing.T) {
 
 	t.Run("supported effort passes", func(t *testing.T) {
 		t.Parallel()
-		cfg := newConfig(catwalk.Model{
+		cfg := newConfig(catalog.Model{
 			ID:              "gpt-5",
 			CanReason:       true,
 			ReasoningLevels: []string{"low", "medium", "high"},
@@ -34,7 +34,7 @@ func TestConfig_ValidateReasoningEffort(t *testing.T) {
 
 	t.Run("unsupported effort lists accepted values", func(t *testing.T) {
 		t.Parallel()
-		cfg := newConfig(catwalk.Model{
+		cfg := newConfig(catalog.Model{
 			ID:              "gpt-5",
 			CanReason:       true,
 			ReasoningLevels: []string{"low", "medium", "high"},
@@ -48,7 +48,7 @@ func TestConfig_ValidateReasoningEffort(t *testing.T) {
 
 	t.Run("model without reasoning levels rejects any effort", func(t *testing.T) {
 		t.Parallel()
-		cfg := newConfig(catwalk.Model{ID: "gpt-4o"})
+		cfg := newConfig(catalog.Model{ID: "gpt-4o"})
 		err := cfg.ValidateReasoningEffort("openai", "gpt-4o", "low")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "does not support reasoning effort")
@@ -56,7 +56,7 @@ func TestConfig_ValidateReasoningEffort(t *testing.T) {
 
 	t.Run("unknown model errors", func(t *testing.T) {
 		t.Parallel()
-		cfg := newConfig(catwalk.Model{ID: "gpt-4o"})
+		cfg := newConfig(catalog.Model{ID: "gpt-4o"})
 		err := cfg.ValidateReasoningEffort("openai", "gpt-5", "low")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "not found")
@@ -64,7 +64,7 @@ func TestConfig_ValidateReasoningEffort(t *testing.T) {
 
 	t.Run("empty effort is rejected like any other value", func(t *testing.T) {
 		t.Parallel()
-		cfg := newConfig(catwalk.Model{
+		cfg := newConfig(catalog.Model{
 			ID:              "gpt-5",
 			CanReason:       true,
 			ReasoningLevels: []string{"low", "medium", "high"},

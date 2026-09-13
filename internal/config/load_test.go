@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/env"
 	"github.com/stubbedev/harness/internal/oauth"
@@ -519,12 +519,12 @@ func TestConfig_setDefaults_autoSummarize(t *testing.T) {
 }
 
 func TestConfig_configureProviders(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models: []catwalk.Model{{
+			Models: []catalog.Model{{
 				ID: "test-model",
 			}},
 		},
@@ -546,12 +546,12 @@ func TestConfig_configureProviders(t *testing.T) {
 }
 
 func TestConfig_configureProvidersWithOverride(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models: []catwalk.Model{{
+			Models: []catalog.Model{{
 				ID: "test-model",
 			}},
 		},
@@ -563,7 +563,7 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	cfg.Providers.Set("openai", ProviderConfig{
 		APIKey:  "xyz",
 		BaseURL: "https://api.openai.com/v2",
-		Models: []catwalk.Model{
+		Models: []catalog.Model{
 			{
 				ID:   "test-model",
 				Name: "Updated",
@@ -592,12 +592,12 @@ func TestConfig_configureProvidersWithOverride(t *testing.T) {
 }
 
 func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models: []catwalk.Model{{
+			Models: []catalog.Model{{
 				ID: "test-model",
 			}},
 		},
@@ -608,7 +608,7 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 			"custom": {
 				APIKey:  "xyz",
 				BaseURL: "https://api.someendpoint.com/v2",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID: "test-model",
 					},
@@ -639,12 +639,12 @@ func TestConfig_configureProvidersWithNewProvider(t *testing.T) {
 }
 
 func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
-			ID:          catwalk.InferenceProviderBedrock,
+			ID:          catalog.InferenceProviderBedrock,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []catwalk.Model{{
+			Models: []catalog.Model{{
 				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
 			}},
 		},
@@ -668,12 +668,12 @@ func TestConfig_configureProvidersBedrockWithCredentials(t *testing.T) {
 }
 
 func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
-			ID:          catwalk.InferenceProviderBedrock,
+			ID:          catalog.InferenceProviderBedrock,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []catwalk.Model{{
+			Models: []catalog.Model{{
 				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
 			}},
 		},
@@ -690,12 +690,12 @@ func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 }
 
 func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
-			ID:          catwalk.InferenceProviderVertexAI,
+			ID:          catalog.InferenceProviderVertexAI,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []catwalk.Model{{
+			Models: []catalog.Model{{
 				ID: "gemini-pro",
 			}},
 		},
@@ -721,12 +721,12 @@ func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 }
 
 func TestConfig_configureProvidersVertexAIWithoutCredentials(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
-			ID:          catwalk.InferenceProviderVertexAI,
+			ID:          catalog.InferenceProviderVertexAI,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []catwalk.Model{{
+			Models: []catalog.Model{{
 				ID: "gemini-pro",
 			}},
 		},
@@ -747,12 +747,12 @@ func TestConfig_configureProvidersVertexAIWithoutCredentials(t *testing.T) {
 }
 
 func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
-			ID:          catwalk.InferenceProviderVertexAI,
+			ID:          catalog.InferenceProviderVertexAI,
 			APIKey:      "",
 			APIEndpoint: "",
-			Models: []catwalk.Model{{
+			Models: []catalog.Model{{
 				ID: "gemini-pro",
 			}},
 		},
@@ -772,12 +772,12 @@ func TestConfig_configureProvidersVertexAIMissingProject(t *testing.T) {
 }
 
 func TestConfig_configureProvidersSetProviderID(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models: []catwalk.Model{{
+			Models: []catalog.Model{{
 				ID: "test-model",
 			}},
 		},
@@ -963,12 +963,12 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 }
 
 func TestConfig_configureProvidersWithDisabledProvider(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models: []catwalk.Model{{
+			Models: []catalog.Model{{
 				ID: "test-model",
 			}},
 		},
@@ -1002,7 +1002,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 			Providers: csync.NewMapFrom(map[string]ProviderConfig{
 				"custom": {
 					BaseURL: "https://api.custom.com/v1",
-					Models: []catwalk.Model{{
+					Models: []catalog.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -1015,7 +1015,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 1)
@@ -1028,7 +1028,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 			Providers: csync.NewMapFrom(map[string]ProviderConfig{
 				"custom": {
 					APIKey: "test-key",
-					Models: []catwalk.Model{{
+					Models: []catalog.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -1038,7 +1038,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 0)
@@ -1052,7 +1052,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "$(echo https://api.custom.com/v1)",
-					Models: []catwalk.Model{{
+					Models: []catalog.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -1062,7 +1062,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, 1, cfg.Providers.Len())
@@ -1076,7 +1076,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "$CUSTOM_API_URL",
-					Models: []catwalk.Model{{
+					Models: []catalog.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -1088,7 +1088,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 			"CUSTOM_API_URL": "https://api.custom.com/v1",
 		})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, 1, cfg.Providers.Len())
@@ -1102,7 +1102,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "$MISSING_API_URL",
-					Models: []catwalk.Model{{
+					Models: []catalog.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -1112,7 +1112,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, 0, cfg.Providers.Len())
@@ -1126,7 +1126,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "$MISSING_API_URL",
-					Models: []catwalk.Model{{
+					Models: []catalog.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -1137,7 +1137,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.Error(t, err, "the sole custom provider is invalid after resolution, so configuration must fail")
 	})
 
@@ -1147,7 +1147,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Models:  []catwalk.Model{},
+					Models:  []catalog.Model{},
 				},
 			}),
 		}
@@ -1155,7 +1155,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		// Discovery fails (unreachable URL) so provider is removed.
@@ -1171,7 +1171,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:             "test-key",
 					BaseURL:            "https://api.custom.com/v1",
-					Models:             []catwalk.Model{},
+					Models:             []catalog.Model{},
 					AutoDiscoverModels: &discoverFalse,
 				},
 			}),
@@ -1180,7 +1180,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, 0, cfg.Providers.Len())
@@ -1204,7 +1204,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: server.URL + "/v1",
-					Models: []catwalk.Model{
+					Models: []catalog.Model{
 						{ID: "existing-model", Name: "My Custom Name", ContextWindow: 200000},
 					},
 					AutoDiscoverModels: &discoverTrue,
@@ -1215,7 +1215,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, 1, cfg.Providers.Len())
@@ -1238,7 +1238,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Models: []catwalk.Model{
+					Models: []catalog.Model{
 						{ID: "my-model", Name: "My Model"},
 					},
 				},
@@ -1248,7 +1248,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, 1, cfg.Providers.Len())
@@ -1280,7 +1280,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, 1, cfg.Providers.Len())
@@ -1298,7 +1298,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
 					Type:    "unsupported",
-					Models: []catwalk.Model{{
+					Models: []catalog.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -1308,7 +1308,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 0)
@@ -1322,8 +1322,8 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Type:    catwalk.TypeOpenAI,
-					Models: []catwalk.Model{{
+					Type:    catalog.TypeOpenAI,
+					Models: []catalog.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -1333,7 +1333,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 1)
@@ -1350,8 +1350,8 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom-anthropic": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.anthropic.com/v1",
-					Type:    catwalk.TypeAnthropic,
-					Models: []catwalk.Model{{
+					Type:    catalog.TypeAnthropic,
+					Models: []catalog.Model{{
 						ID: "claude-3-sonnet",
 					}},
 				},
@@ -1361,7 +1361,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 1)
@@ -1370,7 +1370,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		require.Equal(t, "custom-anthropic", customProvider.ID)
 		require.Equal(t, "test-key", customProvider.APIKey)
 		require.Equal(t, "https://api.anthropic.com/v1", customProvider.BaseURL)
-		require.Equal(t, catwalk.TypeAnthropic, customProvider.Type)
+		require.Equal(t, catalog.TypeAnthropic, customProvider.Type)
 	})
 
 	t.Run("disabled custom provider is removed", func(t *testing.T) {
@@ -1379,9 +1379,9 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Type:    catwalk.TypeOpenAI,
+					Type:    catalog.TypeOpenAI,
 					Disable: true,
-					Models: []catwalk.Model{{
+					Models: []catalog.Model{{
 						ID: "test-model",
 					}},
 				},
@@ -1391,7 +1391,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
 
 		require.Equal(t, cfg.Providers.Len(), 0)
@@ -1402,12 +1402,12 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 
 func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 	t.Run("VertexAI provider removed when credentials missing with existing config", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
-				ID:          catwalk.InferenceProviderVertexAI,
+				ID:          catalog.InferenceProviderVertexAI,
 				APIKey:      "",
 				APIEndpoint: "",
-				Models: []catwalk.Model{{
+				Models: []catalog.Model{{
 					ID: "gemini-pro",
 				}},
 			},
@@ -1435,12 +1435,12 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 	})
 
 	t.Run("Bedrock provider removed when AWS credentials missing with existing config", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
-				ID:          catwalk.InferenceProviderBedrock,
+				ID:          catalog.InferenceProviderBedrock,
 				APIKey:      "",
 				APIEndpoint: "",
-				Models: []catwalk.Model{{
+				Models: []catalog.Model{{
 					ID: "anthropic.claude-sonnet-4-20250514-v1:0",
 				}},
 			},
@@ -1466,12 +1466,12 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 	})
 
 	t.Run("provider removed when API key missing with existing config", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:          "openai",
 				APIKey:      "$MISSING_API_KEY",
 				APIEndpoint: "https://api.openai.com/v1",
-				Models: []catwalk.Model{{
+				Models: []catalog.Model{{
 					ID: "test-model",
 				}},
 			},
@@ -1497,12 +1497,12 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 	})
 
 	t.Run("known provider should still be added if the endpoint is missing the client will use default endpoints", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:          "openai",
 				APIKey:      "$OPENAI_API_KEY",
 				APIEndpoint: "$MISSING_ENDPOINT",
-				Models: []catwalk.Model{{
+				Models: []catalog.Model{{
 					ID: "test-model",
 				}},
 			},
@@ -1532,13 +1532,13 @@ func TestConfig_configureProvidersEnhancedCredentialValidation(t *testing.T) {
 
 func TestConfig_defaultModelSelection(t *testing.T) {
 	t.Run("default behavior uses the default models for given provider", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
@@ -1568,13 +1568,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		require.Equal(t, int64(500), small.MaxTokens)
 	})
 	t.Run("should error if no providers configured", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "$MISSING_KEY",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
@@ -1598,13 +1598,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		require.Error(t, err)
 	})
 	t.Run("should not error if model is missing", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID:               "not-large-model",
 						DefaultMaxTokens: 1000,
@@ -1628,13 +1628,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 	})
 
 	t.Run("should configure the default models with a custom provider", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "$MISSING", // will not be included in the config
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID:               "not-large-model",
 						DefaultMaxTokens: 1000,
@@ -1652,7 +1652,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Models: []catwalk.Model{
+					Models: []catalog.Model{
 						{
 							ID:               "model",
 							DefaultMaxTokens: 600,
@@ -1677,13 +1677,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 	})
 
 	t.Run("should fail if no model configured", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "$MISSING", // will not be included in the config
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID:               "not-large-model",
 						DefaultMaxTokens: 1000,
@@ -1701,7 +1701,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Models:  []catwalk.Model{},
+					Models:  []catalog.Model{},
 				},
 			}),
 		}
@@ -1714,13 +1714,13 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 		require.Error(t, err)
 	})
 	t.Run("should use the default provider first", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "set",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
@@ -1738,7 +1738,7 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 				"custom": {
 					APIKey:  "test-key",
 					BaseURL: "https://api.custom.com/v1",
-					Models: []catwalk.Model{
+					Models: []catalog.Model{
 						{
 							ID:               "large-model",
 							DefaultMaxTokens: 1000,
@@ -1765,12 +1765,12 @@ func TestConfig_defaultModelSelection(t *testing.T) {
 
 func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 	t.Run("when enabled, ignores all default providers and requires full specification", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:          "openai",
 				APIKey:      "$OPENAI_API_KEY",
 				APIEndpoint: "https://api.openai.com/v1",
-				Models: []catwalk.Model{{
+				Models: []catalog.Model{{
 					ID: "gpt-4",
 				}},
 			},
@@ -1805,12 +1805,12 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 	})
 
 	t.Run("when enabled, fully specified providers work", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:          "openai",
 				APIKey:      "$OPENAI_API_KEY",
 				APIEndpoint: "https://api.openai.com/v1",
-				Models: []catwalk.Model{{
+				Models: []catalog.Model{{
 					ID: "gpt-4",
 				}},
 			},
@@ -1825,7 +1825,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 				"my-llm": {
 					APIKey:  "$MY_API_KEY",
 					BaseURL: "https://my-llm.example.com/v1",
-					Models: []catwalk.Model{{
+					Models: []catalog.Model{{
 						ID: "my-model",
 					}},
 				},
@@ -1854,12 +1854,12 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 	})
 
 	t.Run("when disabled, includes all known providers with valid credentials", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:          "openai",
 				APIKey:      "$OPENAI_API_KEY",
 				APIEndpoint: "https://api.openai.com/v1",
-				Models: []catwalk.Model{{
+				Models: []catalog.Model{{
 					ID: "gpt-4",
 				}},
 			},
@@ -1867,7 +1867,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 				ID:          "anthropic",
 				APIKey:      "$ANTHROPIC_API_KEY",
 				APIEndpoint: "https://api.anthropic.com/v1",
-				Models: []catwalk.Model{{
+				Models: []catalog.Model{{
 					ID: "claude-3",
 				}},
 			},
@@ -1912,7 +1912,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 				"my-llm": {
 					APIKey:  "test-key",
 					BaseURL: "https://my-llm.example.com/v1",
-					Models:  []catwalk.Model{}, // No models.
+					Models:  []catalog.Model{}, // No models.
 				},
 			}),
 		}
@@ -1920,7 +1920,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.ErrorContains(t, err, "no custom providers")
 
 		// Discovery fails (unreachable URL) so provider is removed.
@@ -1935,7 +1935,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 			Providers: csync.NewMapFrom(map[string]ProviderConfig{
 				"my-llm": {
 					APIKey: "test-key",
-					Models: []catwalk.Model{{ID: "model"}},
+					Models: []catalog.Model{{ID: "model"}},
 					// No BaseURL.
 				},
 			}),
@@ -1944,7 +1944,7 @@ func TestConfig_configureProvidersDisableDefaultProviders(t *testing.T) {
 
 		env := env.NewFromMap(map[string]string{})
 		resolver := NewShellVariableResolver(env)
-		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catwalk.Provider{})
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.ErrorContains(t, err, "no custom providers")
 
 		// Provider should be rejected for missing base_url.
@@ -1980,13 +1980,13 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		globalPath := filepath.Join(dir, "harness.yaml")
 		require.NoError(t, os.WriteFile(globalPath, []byte(`{"models":{"large":{"provider":"ghost","model":"missing"}}}`), 0o600))
 
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{ID: "large-model", DefaultMaxTokens: 1000},
 					{ID: "small-model", DefaultMaxTokens: 500},
 				},
@@ -2023,13 +2023,13 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Contains(t, string(data), `"model":"missing"`)
 	})
 	t.Run("should override defaults", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID:               "larger-model",
 						DefaultMaxTokens: 2000,
@@ -2073,13 +2073,13 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		require.Equal(t, int64(500), small.MaxTokens)
 	})
 	t.Run("should be possible to use multiple providers", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
@@ -2095,7 +2095,7 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 				APIKey:              "abc",
 				DefaultLargeModelID: "a-large-model",
 				DefaultSmallModelID: "a-small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID:               "a-large-model",
 						DefaultMaxTokens: 1000,
@@ -2138,13 +2138,13 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 	})
 
 	t.Run("should override the max tokens only", func(t *testing.T) {
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{
 						ID:               "large-model",
 						DefaultMaxTokens: 1000,
@@ -2184,13 +2184,13 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 		globalPath := filepath.Join(dir, "harness.yaml")
 		require.NoError(t, os.WriteFile(globalPath, []byte(`{}`), 0o600))
 
-		knownProviders := []catwalk.Provider{
+		knownProviders := []catalog.Provider{
 			{
 				ID:                  "openai",
 				APIKey:              "abc",
 				DefaultLargeModelID: "large-model",
 				DefaultSmallModelID: "small-model",
-				Models: []catwalk.Model{
+				Models: []catalog.Model{
 					{ID: "large-model", DefaultMaxTokens: 1000},
 					{ID: "small-model", DefaultMaxTokens: 500},
 				},
@@ -2257,101 +2257,17 @@ func TestConfig_configureSelectedModels(t *testing.T) {
 	})
 }
 
-func TestConfig_configureProviders_HyperAPIKeyFromEnv(t *testing.T) {
-	// Test that HYPER_API_KEY environment variable works without config
-	knownProviders := []catwalk.Provider{
-		{
-			ID:                  "hyper",
-			APIKey:              "", // No API key in provider definition
-			DefaultLargeModelID: "large-model",
-			DefaultSmallModelID: "small-model",
-			Models: []catwalk.Model{
-				{
-					ID:               "large-model",
-					DefaultMaxTokens: 1000,
-				},
-				{
-					ID:               "small-model",
-					DefaultMaxTokens: 500,
-				},
-			},
-		},
-	}
-
-	cfg := &Config{}
-	cfg.setDefaults("/tmp", "")
-	env := env.NewFromMap(map[string]string{
-		"HYPER_API_KEY": "env-api-key",
-	})
-	resolver := NewShellVariableResolver(env)
-	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
-	require.NoError(t, err)
-	require.Equal(t, 1, cfg.Providers.Len())
-
-	// Verify Hyper provider is configured with the env var API key
-	pc, ok := cfg.Providers.Get("hyper")
-	require.True(t, ok, "Hyper provider should be configured")
-	require.Equal(t, "env-api-key", pc.APIKey)
-	require.Equal(t, "env-api-key", pc.APIKeyTemplate)
-}
-
-func TestConfig_configureProviders_HyperAPIKeyFromConfigOverrides(t *testing.T) {
-	// Test that config API key takes precedence when HYPER_API_KEY is also set
-	knownProviders := []catwalk.Provider{
-		{
-			ID:                  "hyper",
-			APIKey:              "provider-api-key",
-			DefaultLargeModelID: "large-model",
-			DefaultSmallModelID: "small-model",
-			Models: []catwalk.Model{
-				{
-					ID:               "large-model",
-					DefaultMaxTokens: 1000,
-				},
-				{
-					ID:               "small-model",
-					DefaultMaxTokens: 500,
-				},
-			},
-		},
-	}
-
-	// User has Hyper configured with an API key
-	cfg := &Config{
-		Providers: csync.NewMapFrom(map[string]ProviderConfig{
-			"hyper": {
-				APIKey: "config-api-key",
-			},
-		}),
-	}
-	cfg.setDefaults("/tmp", "")
-
-	// But they also have HYPER_API_KEY set - env var should take precedence
-	env := env.NewFromMap(map[string]string{
-		"HYPER_API_KEY": "env-api-key",
-	})
-	resolver := NewShellVariableResolver(env)
-	err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders)
-	require.NoError(t, err)
-	require.Equal(t, 1, cfg.Providers.Len())
-
-	// Verify env var takes precedence (as per requirements)
-	pc, ok := cfg.Providers.Get("hyper")
-	require.True(t, ok, "Hyper provider should be configured")
-	require.Equal(t, "env-api-key", pc.APIKey)
-}
-
 // TestConfig_configureProviders_ProviderHeaderResolveError verifies
 // that a failing $(cmd) in a provider header fails the provider load
 // with a clear message that names the offending header. Provider
 // headers share the MCP error contract.
 func TestConfig_configureProviders_ProviderHeaderResolveError(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models:      []catwalk.Model{{ID: "test-model"}},
+			Models:      []catalog.Model{{ID: "test-model"}},
 		},
 	}
 
@@ -2379,18 +2295,18 @@ func TestConfig_configureProviders_ProviderHeaderResolveError(t *testing.T) {
 	require.Contains(t, err.Error(), "X-Broken", "error must name the offending header")
 }
 
-// TestConfig_configureProviders_CatwalkDefaultWithUnsetVarLoads
-// verifies that a Catwalk-style default header like
+// TestConfig_configureProviders_CatalogDefaultWithUnsetVarLoads
+// verifies that a catalog-style default header like
 // "OpenAI-Organization": "$OPENAI_ORG_ID" loads cleanly under lenient
 // nounset (unset → "" → header dropped), and does not fail the load
 // or leave the literal template on the wire.
 func TestConfig_configureProviders_CatwalkDefaultWithUnsetVarLoads(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models:      []catwalk.Model{{ID: "test-model"}},
+			Models:      []catalog.Model{{ID: "test-model"}},
 			DefaultHeaders: map[string]string{
 				"OpenAI-Organization": "$OPENAI_ORG_ID",
 			},
@@ -2426,8 +2342,8 @@ func TestConfig_configureProviders_LiteralEmptyHeaderDropped(t *testing.T) {
 			"my-llm": {
 				APIKey:  "test-key",
 				BaseURL: "https://my-llm.example.com/v1",
-				Type:    catwalk.TypeOpenAI,
-				Models:  []catwalk.Model{{ID: "m"}},
+				Type:    catalog.TypeOpenAI,
+				Models:  []catalog.Model{{ID: "m"}},
 				ExtraHeaders: map[string]string{
 					"X-Custom": "",
 					"X-Kept":   "present",
@@ -2442,7 +2358,7 @@ func TestConfig_configureProviders_LiteralEmptyHeaderDropped(t *testing.T) {
 	})
 	resolver := NewShellVariableResolver(testEnv)
 
-	err := cfg.configureProviders(context.Background(), testStore(cfg), testEnv, resolver, []catwalk.Provider{})
+	err := cfg.configureProviders(context.Background(), testStore(cfg), testEnv, resolver, []catalog.Provider{})
 	require.NoError(t, err)
 
 	pc, ok := cfg.Providers.Get("my-llm")
@@ -2457,12 +2373,12 @@ func TestConfig_configureProviders_LiteralEmptyHeaderDropped(t *testing.T) {
 // empty output, resolves cleanly to "", and must be dropped the same
 // way an unset bare $VAR is. Exercises the known-provider loop.
 func TestConfig_configureProviders_EchoEmptyHeaderDropped(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$OPENAI_API_KEY",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models:      []catwalk.Model{{ID: "test-model"}},
+			Models:      []catalog.Model{{ID: "test-model"}},
 			DefaultHeaders: map[string]string{
 				"X-Empty": "$(echo)",
 				"X-Kept":  "present",
@@ -2502,12 +2418,12 @@ func TestConfig_configureProviders_EchoEmptyHeaderDropped(t *testing.T) {
 // what downstream code — model picker, agent wiring — actually reads,
 // so that's what we pin.
 func TestConfig_configureProviders_UnsetAPIKeySkipsProvider(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$SOMETHING_UNSET",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models:      []catwalk.Model{{ID: "test-model"}},
+			Models:      []catalog.Model{{ID: "test-model"}},
 		},
 	}
 
@@ -2544,12 +2460,12 @@ func TestConfig_configureProviders_UnsetAPIKeySkipsProvider(t *testing.T) {
 // paths doesn't accidentally start propagating $(false) as a load
 // error while keeping unset-var as a silent skip (or vice versa).
 func TestConfig_configureProviders_FailingAPIKeyCmdSkipsProvider(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
 			ID:          "openai",
 			APIKey:      "$(false)",
 			APIEndpoint: "https://api.openai.com/v1",
-			Models:      []catwalk.Model{{ID: "test-model"}},
+			Models:      []catalog.Model{{ID: "test-model"}},
 		},
 	}
 
@@ -2581,12 +2497,12 @@ func TestConfig_configureProviders_FailingAPIKeyCmdSkipsProvider(t *testing.T) {
 // Azure path) are tested; a future refactor that unifies them can
 // rely on these two tests to catch drift.
 func TestConfig_configureProviders_UnsetAzureEndpointSkipsProvider(t *testing.T) {
-	knownProviders := []catwalk.Provider{
+	knownProviders := []catalog.Provider{
 		{
-			ID:          catwalk.InferenceProviderAzure,
+			ID:          catalog.InferenceProviderAzure,
 			APIKey:      "test-key",
 			APIEndpoint: "$UNSET_AZURE_ENDPOINT",
-			Models:      []catwalk.Model{{ID: "test-model"}},
+			Models:      []catalog.Model{{ID: "test-model"}},
 		},
 	}
 

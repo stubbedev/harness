@@ -3,8 +3,8 @@ package config
 import (
 	"testing"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/csync"
 )
 
@@ -13,9 +13,9 @@ func newConfigWithProviders(t *testing.T, providers map[string][]string) *Config
 
 	pMap := csync.NewMap[string, ProviderConfig]()
 	for id, modelIDs := range providers {
-		models := make([]catwalk.Model, 0, len(modelIDs))
+		models := make([]catalog.Model, 0, len(modelIDs))
 		for _, mid := range modelIDs {
-			models = append(models, catwalk.Model{ID: mid})
+			models = append(models, catalog.Model{ID: mid})
 		}
 		pMap.Set(id, ProviderConfig{ID: id, Models: models})
 	}

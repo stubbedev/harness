@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/catwalk/pkg/catwalk"
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/session"
@@ -275,7 +275,7 @@ func TestCoderAgent(t *testing.T) {
 
 		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
 			calls: []scriptedCall{{
-				name: tools.BashToolName,
+				name: tools.ShellToolName,
 				input: map[string]any{
 					"command":     "printf 'hello bash' > test.txt",
 					"description": "create test.txt",
@@ -284,7 +284,7 @@ func TestCoderAgent(t *testing.T) {
 		})
 		res := toolResults(t, runScript(t, agent, env, "create test.txt"))
 
-		bash, ok := res[tools.BashToolName]
+		bash, ok := res[tools.ShellToolName]
 		require.True(t, ok, "expected a bash result")
 		require.False(t, bash.IsError, "bash failed: %s", bash.Content)
 
@@ -1151,7 +1151,7 @@ func TestWorkaroundProviderMediaLimitations_TextOnlyModel(t *testing.T) {
 	// a text placeholder and not create a synthetic user message.
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: "openai"},
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catalog.Model{
 			SupportsImages: false,
 		},
 	}
@@ -1195,7 +1195,7 @@ func TestWorkaroundProviderMediaLimitations_VisionModel(t *testing.T) {
 	// user message with FilePart.
 	largeModel := Model{
 		ModelCfg: config.SelectedModel{Provider: "openai"},
-		CatwalkCfg: catwalk.Model{
+		CatalogCfg: catalog.Model{
 			SupportsImages: true,
 		},
 	}
@@ -1247,8 +1247,8 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 	// Anthropic provider — should return messages unchanged regardless of
 	// SupportsImages, since Anthropic handles media in tool results natively.
 	largeModel := Model{
-		ModelCfg: config.SelectedModel{Provider: string(catwalk.InferenceProviderAnthropic)},
-		CatwalkCfg: catwalk.Model{
+		ModelCfg: config.SelectedModel{Provider: string(catalog.InferenceProviderAnthropic)},
+		CatalogCfg: catalog.Model{
 			SupportsImages: true,
 		},
 	}

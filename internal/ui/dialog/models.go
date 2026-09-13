@@ -10,8 +10,8 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/util"
@@ -78,7 +78,7 @@ type Models struct {
 	isOnboarding bool
 
 	modelType ModelType
-	providers []catwalk.Provider
+	providers []catalog.Provider
 
 	keyMap struct {
 		Tab      key.Binding
@@ -364,9 +364,9 @@ func (m *Models) setProviderItems() error {
 		return fmt.Errorf("failed to get providers: %w", err)
 	}
 
-	containsProviderFunc := func(id string) func(p catwalk.Provider) bool {
-		return func(p catwalk.Provider) bool {
-			return p.ID == catwalk.InferenceProvider(id)
+	containsProviderFunc := func(id string) func(p catalog.Provider) bool {
+		return func(p catalog.Provider) bool {
+			return p.ID == catalog.InferenceProvider(id)
 		}
 	}
 
@@ -404,7 +404,6 @@ func (m *Models) setProviderItems() error {
 	}
 
 	// Now add known providers from the predefined list.
-	// Providers already has Hyper at the front of the list.
 	for _, provider := range m.providers {
 		providerID := string(provider.ID)
 		if addedProviders[providerID] {

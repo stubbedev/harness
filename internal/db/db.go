@@ -99,6 +99,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getMessageStmt, err = db.PrepareContext(ctx, getMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetMessage: %w", err)
 	}
+	if q.getModelCatalogStmt, err = db.PrepareContext(ctx, getModelCatalog); err != nil {
+		return nil, fmt.Errorf("error preparing query GetModelCatalog: %w", err)
+	}
 	if q.getRecentActivityStmt, err = db.PrepareContext(ctx, getRecentActivity); err != nil {
 		return nil, fmt.Errorf("error preparing query GetRecentActivity: %w", err)
 	}
@@ -170,6 +173,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.renameSessionStmt, err = db.PrepareContext(ctx, renameSession); err != nil {
 		return nil, fmt.Errorf("error preparing query RenameSession: %w", err)
+	}
+	if q.saveModelCatalogStmt, err = db.PrepareContext(ctx, saveModelCatalog); err != nil {
+		return nil, fmt.Errorf("error preparing query SaveModelCatalog: %w", err)
 	}
 	if q.searchMemoriesStmt, err = db.PrepareContext(ctx, searchMemories); err != nil {
 		return nil, fmt.Errorf("error preparing query SearchMemories: %w", err)
@@ -319,6 +325,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getMessageStmt: %w", cerr)
 		}
 	}
+	if q.getModelCatalogStmt != nil {
+		if cerr := q.getModelCatalogStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getModelCatalogStmt: %w", cerr)
+		}
+	}
 	if q.getRecentActivityStmt != nil {
 		if cerr := q.getRecentActivityStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getRecentActivityStmt: %w", cerr)
@@ -439,6 +450,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing renameSessionStmt: %w", cerr)
 		}
 	}
+	if q.saveModelCatalogStmt != nil {
+		if cerr := q.saveModelCatalogStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing saveModelCatalogStmt: %w", cerr)
+		}
+	}
 	if q.searchMemoriesStmt != nil {
 		if cerr := q.searchMemoriesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing searchMemoriesStmt: %w", cerr)
@@ -533,6 +549,7 @@ type Queries struct {
 	getMemoryStmt                        *sql.Stmt
 	getMemoryByTitleStmt                 *sql.Stmt
 	getMessageStmt                       *sql.Stmt
+	getModelCatalogStmt                  *sql.Stmt
 	getRecentActivityStmt                *sql.Stmt
 	getSessionByIDStmt                   *sql.Stmt
 	getToolUsageStmt                     *sql.Stmt
@@ -557,6 +574,7 @@ type Queries struct {
 	reapMemoriesStmt                     *sql.Stmt
 	recordFileReadStmt                   *sql.Stmt
 	renameSessionStmt                    *sql.Stmt
+	saveModelCatalogStmt                 *sql.Stmt
 	searchMemoriesStmt                   *sql.Stmt
 	touchMemoryStmt                      *sql.Stmt
 	updateMemoryStmt                     *sql.Stmt
@@ -594,6 +612,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getMemoryStmt:                        q.getMemoryStmt,
 		getMemoryByTitleStmt:                 q.getMemoryByTitleStmt,
 		getMessageStmt:                       q.getMessageStmt,
+		getModelCatalogStmt:                  q.getModelCatalogStmt,
 		getRecentActivityStmt:                q.getRecentActivityStmt,
 		getSessionByIDStmt:                   q.getSessionByIDStmt,
 		getToolUsageStmt:                     q.getToolUsageStmt,
@@ -618,6 +637,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		reapMemoriesStmt:                     q.reapMemoriesStmt,
 		recordFileReadStmt:                   q.recordFileReadStmt,
 		renameSessionStmt:                    q.renameSessionStmt,
+		saveModelCatalogStmt:                 q.saveModelCatalogStmt,
 		searchMemoriesStmt:                   q.searchMemoriesStmt,
 		touchMemoryStmt:                      q.touchMemoryStmt,
 		updateMemoryStmt:                     q.updateMemoryStmt,

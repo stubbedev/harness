@@ -68,6 +68,46 @@ func TestMemoryToolSaveRedactsSecrets(t *testing.T) {
 	require.Contains(t, read.Content, memory.Redacted)
 }
 
+func TestMemoryToolEdit(t *testing.T) {
+	tool := newMemoryToolForTest(t)
+
+	runMemoryTool(t, tool, `{"action":"save","title":"Build commands","content":"just build","category":"project"}`)
+
+	// Edit by exact title updates content without duplicating.
+	edited := runMemoryTool(t, tool, `{"action":"edit","title":"Build commands","content":"just build && just test"}`)
+	require.Contains(t, edited.Content, "Edited memory")
+	require.Contains(t, edited.Content, "just build && just test")
+
+	// Omitted category and pinned keep the stored values.
+	read := runMemoryTool(t, tool, `{"action":"read","id":"build-commands"}`)
+	require.Contains(t, read.Content, "(project)")
+	require.NotContains(t, read.Content, "(feedback)")
+
+	listed := runMemoryTool(t, tool, `{"action":"list"}`)
+	require.Contains(t, listed.Content, "1 memories", "edit must not duplicate the memory")
+
+	// Edit by id works too.
+	byID := runMemoryTool(t, tool, `{"action":"edit","id":"build-commands","content":"just ci","category":"reference"}`)
+	require.Contains(t, byID.Content, "just ci")
+	require.Contains(t, byID.Content, "(reference)")
+
+	// A title that does not exist is an error pointing at save.
+	_, err := tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","title":"Typo Title","content":"x"}`})
+	require.ErrorContains(t, err, "use save to create it")
+
+	// Unknown id is an error as well.
+	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","id":"nope","content":"x"}`})
+	require.ErrorContains(t, err, "no memory with id")
+
+	// Content is required.
+	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","title":"Build commands"}`})
+	require.ErrorContains(t, err, "content is required")
+
+	// Neither id nor title is an error.
+	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","content":"x"}`})
+	require.ErrorContains(t, err, "id or title is required")
+}
+
 func TestMemoryToolValidation(t *testing.T) {
 	tool := newMemoryToolForTest(t)
 

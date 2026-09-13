@@ -124,13 +124,11 @@ Also note that Harness can support nearly any provider, including
 
 ### By the Way
 
-The default model listing comes from [Catwalk][catwalk], an open source catalog
-of models and providers that Harness fetches at startup (see
+The default model listing comes from [models.dev](https://models.dev), an open
+source catalog of models and providers that Harness fetches at startup (see
 [Provider Auto-Updates](#provider-auto-updates) to pin or disable that). A
 provider missing from the catalog can always be added by hand — see
 [Custom Providers](#custom-providers).
-
-[catwalk]: https://github.com/charmbracelet/catwalk
 
 ## Configuration
 
@@ -777,16 +775,23 @@ options:
 ## Provider Auto-Updates
 
 By default, Harness automatically checks for the latest and greatest list of
-providers and models from [Catwalk](https://github.com/charmbracelet/catwalk),
-the open source Harness provider database. This means that when new providers and
-models are available, or when model metadata changes, Harness automatically
-updates your local configuration.
+providers and models from [models.dev](https://models.dev), the open source
+model database, with the OpenRouter entry taken live from OpenRouter's own
+model API. The catalog is refreshed at most once a day and cached in the
+local SQLite database, so startups stay fast and offline-friendly. When new
+providers and models are available, or when model metadata changes, Harness
+automatically updates your local configuration.
+
+Providers that Harness does not curate by hand are adopted automatically
+from models.dev: their API format, endpoint, and key variable are derived
+from the models.dev entry itself. They show up in the model picker and
+become usable as soon as the key they declare is set, so a new provider
+appearing upstream needs no Harness release.
 
 ### Custom provider catalog
 
-You can also override [Catwalk](https://github.com/charmbracelet/catwalk) default URL (for testing, using a fork).
-
-You can do so by setting `CATWALK_URL` enviromental variable. (e.g. `export CATWALK_URL=http://localhost:8000`)
+You can override the models.dev base URL for testing or mirroring by setting
+the `MODELS_DEV_URL` environment variable (e.g. `export MODELS_DEV_URL=http://localhost:8000`).
 
 ### Disabling automatic provider updates
 
@@ -813,16 +818,16 @@ Manually updating providers is possible with the `harness update-providers`
 command:
 
 ```bash
-# Update providers remotely from Catwalk.
+# Refresh the catalog from models.dev.
 harness update-providers
 
-# Update providers from a custom Catwalk base URL.
+# Update the catalog from a custom models.dev-compatible JSON document.
 harness update-providers https://example.com/
 
 # Update providers from a local file.
 harness update-providers /path/to/local-providers.json
 
-# Reset providers to the embedded version, embedded at harness at build time.
+# Reset the catalog to the snapshot embedded at Harness build time.
 harness update-providers embedded
 
 # For more info:

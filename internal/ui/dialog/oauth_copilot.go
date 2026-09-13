@@ -6,7 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/oauth/copilot"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -15,7 +15,7 @@ import (
 func NewOAuthCopilot(
 	com *common.Common,
 	isOnboarding bool,
-	provider catwalk.Provider,
+	provider catalog.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
 ) (*OAuth, tea.Cmd) {

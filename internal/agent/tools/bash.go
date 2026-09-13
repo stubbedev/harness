@@ -49,7 +49,9 @@ type BashResponseMetadata struct {
 }
 
 const (
-	BashToolName = "bash"
+	// ShellToolName is the terminal-session tool's name: it runs the
+	// user's own shell, whatever that is, not bash specifically.
+	ShellToolName = "shell"
 
 	DefaultAutoBackgroundAfter = 60 // Commands taking longer automatically become background jobs
 	MaxOutputLength            = 30000
@@ -283,15 +285,18 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(workingDir string, attribution *config.Attribution, modelID string, questions question.Service) fantasy.AgentTool {
+func NewBashTool(workingDir, owner string, attribution *config.Attribution, modelID string, questions question.Service) fantasy.AgentTool {
 	// The synchronous execution path runs in persistent terminal
 	// sessions (see pty.go): a real PTY whose shell state and sudo
 	// credential survive across calls, with a second session opened on
 	// demand when the first is busy driving an editor or TUI. The
 	// primary one warms up in the background while the agent starts.
-	_ = ptyRunnerFor(workingDir, questions)
+	// Sessions are scoped to the owner - the agent's ID - so every
+	// agent, the coder and each subagent alike, drives its own shell
+	// and none of them can type into, reset or pollute another's.
+	_ = ptyRunnerFor(owner, workingDir, questions)
 	return fantasy.NewAgentTool(
-		BashToolName,
+		ShellToolName,
 		string(bashDescription(attribution, modelID)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			// Determine working directory
@@ -338,7 +343,7 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 						WorkingDirectory: bgShell.WorkingDir,
 					}
 					if stdout == "" {
-						return fantasy.WithResponseMetadata(fantasy.NewTextResponse(BashNoOutput), metadata), nil
+						stdout = BashNoOutput
 					}
 					stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
 					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
@@ -354,6 +359,7 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 					ShellID:          bgShell.ID,
 				}
 				response := fmt.Sprintf("Background shell started with ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
+				response += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 			}
 
@@ -380,10 +386,10 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 			// holding the first.
 			var result PTYResult
 			var err error
-			session := ptyInteractiveRunner(execWorkingDir, questions)
+			session := ptyInteractiveRunner(owner, execWorkingDir, questions)
 			switch {
 			case params.Reset:
-				session, err = ptyResetAll(ctx, execWorkingDir, questions)
+				session, err = ptyResetAll(ctx, owner, execWorkingDir, questions)
 			case params.Resize != "":
 				var rows, cols int
 				if rows, cols, err = parseTerminalSize(params.Resize); err == nil {
@@ -394,7 +400,7 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 			case params.Input != "":
 				result, err = session.Input(ctx, params.Input)
 			case params.Command != "":
-				if session, err = ptyCommandRunner(ctx, execWorkingDir, questions); err == nil {
+				if session, err = ptyCommandRunner(ctx, owner, execWorkingDir, questions); err == nil {
 					result, err = session.Run(ctx, params.Command, waitSeconds)
 				}
 			default:
@@ -441,12 +447,17 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 				header = "No new output."
 			}
 
+			// The best knowledge of where the session is: the last
+			// command's sentinel, else the last completed command on
+			// this session, else the directory it was opened in.
+			cwd := cmp.Or(result.Cwd, session.knownCwd(), execWorkingDir)
+
 			metadata := BashResponseMetadata{
 				StartTime:        startTime.UnixMilli(),
 				EndTime:          time.Now().UnixMilli(),
 				Output:           stdout,
 				Description:      bashLabel(params),
-				WorkingDirectory: cmp.Or(result.Cwd, execWorkingDir),
+				WorkingDirectory: cwd,
 			}
 
 			var sb strings.Builder
@@ -466,10 +477,10 @@ func NewBashTool(workingDir string, attribution *config.Attribution, modelID str
 			}
 			if stdout != "" {
 				sb.WriteString(stdout)
-				fmt.Fprintf(&sb, "\n\n<cwd>%s</cwd>", normalizeWorkingDir(cmp.Or(result.Cwd, execWorkingDir)))
 			} else if header == "" {
 				sb.WriteString(BashNoOutput)
 			}
+			fmt.Fprintf(&sb, "\n\n<cwd>%s</cwd>", normalizeWorkingDir(cwd))
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(sb.String()), metadata), nil
 		},
 	)

@@ -535,6 +535,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaces/{id}/agent/sessions/{sid}/cancel-turn": {
+            "post": {
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Cancel the session's active agent turn",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "sid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/agent/sessions/{sid}/prompts/clear": {
             "post": {
                 "tags": [
@@ -2559,6 +2600,56 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaces/{id}/sessions/{sid}/checkpoints": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Get session checkpoints",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "sid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.Checkpoint"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/sessions/{sid}/filetracker/files": {
             "get": {
                 "produces": [
@@ -2759,6 +2850,65 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaces/{id}/sessions/{sid}/rewind": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Rewind session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "sid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Rewind request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.RewindRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/skills": {
             "get": {
                 "produces": [
@@ -2862,7 +3012,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "catwalk.Model": {
+        "catalog.Model": {
             "type": "object",
             "properties": {
                 "can_reason": {
@@ -2896,7 +3046,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "options": {
-                    "$ref": "#/definitions/catwalk.ModelOptions"
+                    "$ref": "#/definitions/catalog.ModelOptions"
                 },
                 "reasoning_levels": {
                     "type": "array",
@@ -2909,7 +3059,7 @@ const docTemplate = `{
                 }
             }
         },
-        "catwalk.ModelOptions": {
+        "catalog.ModelOptions": {
             "type": "object",
             "properties": {
                 "frequency_penalty": {
@@ -2971,19 +3121,21 @@ const docTemplate = `{
                 60000000000,
                 3600000000000,
                 300000000000,
-                60000000000,
-                2000000000,
+                86400000000000,
                 5000000000,
                 45000000000,
-                10000000000
+                10000000000,
+                60000000000,
+                2000000000
             ],
             "x-enum-varnames": [
                 "resolveTimeout",
-                "DefaultRequestTimeout",
-                "renameRetryBudget",
+                "catalogRefreshInterval",
                 "configLockDeadline",
                 "refreshLockDeadline",
-                "credentialWriteLockDeadline"
+                "credentialWriteLockDeadline",
+                "DefaultRequestTimeout",
+                "renameRetryBudget"
             ]
         },
         "config.ExitBanner": {
@@ -3172,6 +3324,22 @@ const docTemplate = `{
             "type": "object",
             "additionalProperties": {
                 "$ref": "#/definitions/config.MCPConfig"
+            }
+        },
+        "config.MemoryOptions": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "index_budget": {
+                    "description": "IndexBudget bounds the character size of the memory index injected\ninto the system prompt.",
+                    "type": "integer"
+                },
+                "max_memories": {
+                    "description": "MaxMemories caps how many memories are kept. When exceeded, the\nleast-used unpinned memories are reaped.",
+                    "type": "integer"
+                }
             }
         },
         "config.SelectedModel": {
@@ -3432,7 +3600,7 @@ const docTemplate = `{
                     }
                 },
                 "data_directory": {
-                    "description": "DataDirectory is where Harness keeps per-project state such as\nthe SQLite database and workspace overrides. Relative paths are\nresolved against the working directory; absolute paths are used\nverbatim. After defaulting the stored value is always absolute.",
+                    "description": "DataDirectory is where Harness keeps per-workspace machine-owned\nstate such as the SQLite database, logs and workspace overrides.\nIt defaults to a per-workspace directory under the global data\nroot, so nothing harness-owned is written inside the project.\nRelative paths are resolved against the working directory;\nabsolute paths are used verbatim. After defaulting the stored\nvalue is always absolute.",
                     "type": "string"
                 },
                 "debug": {
@@ -3489,6 +3657,9 @@ const docTemplate = `{
                 },
                 "max_retries": {
                     "type": "integer"
+                },
+                "memory": {
+                    "$ref": "#/definitions/config.MemoryOptions"
                 },
                 "notifications": {
                     "type": "string"
@@ -3652,7 +3823,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "model": {
-                    "$ref": "#/definitions/catwalk.Model"
+                    "$ref": "#/definitions/catalog.Model"
                 },
                 "model_cfg": {
                     "$ref": "#/definitions/config.SelectedModel"
@@ -3742,6 +3913,26 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "mime_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.Checkpoint": {
+            "type": "object",
+            "properties": {
+                "commit_sha": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "session_id": {
                     "type": "string"
                 }
             }
@@ -4151,6 +4342,17 @@ const docTemplate = `{
                 },
                 "result": {
                     "$ref": "#/definitions/proto.SkillReadResult"
+                }
+            }
+        },
+        "proto.RewindRequest": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                },
+                "mode": {
+                    "type": "string"
                 }
             }
         },

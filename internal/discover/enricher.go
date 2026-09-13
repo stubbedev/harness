@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"charm.land/catwalk/pkg/catwalk"
+	"github.com/stubbedev/harness/internal/catalog"
 )
 
 // Enricher fills in model metadata (context window, max tokens, pricing,
@@ -15,7 +15,7 @@ type Enricher interface {
 	// EnrichModels takes a slice of bare discovered models and returns
 	// them with metadata populated. Implementations should preserve
 	// existing non-zero fields (user overrides take precedence).
-	EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catwalk.Model) ([]catwalk.Model, error)
+	EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) ([]catalog.Model, error)
 }
 
 // enrichers maps provider type strings to their enrichment

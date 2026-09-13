@@ -299,12 +299,17 @@ type ptyRunner struct {
 	mu     sync.Mutex
 	cmdMu  sync.Mutex
 	sendMu sync.Mutex
-	// key is the registry key, cwd the directory the shell started in,
-	// and slot tells apart the sessions sharing that directory: slot 0
-	// is the primary one, higher slots are opened when it is busy
-	// driving an interactive program.
-	key     string
-	cwd     string
+	// key is the registry key (owner and directory), cwd the directory
+	// the shell started in, and slot tells apart the sessions sharing
+	// that pair: slot 0 is the primary one, higher slots are opened
+	// when it is busy driving an interactive program.
+	key string
+	cwd string
+	// lastCwd is the working directory the last completed command's
+	// sentinel reported - the session's cwd as of then. Calls that run
+	// no command (poll, keys, input) have no sentinel to read, so they
+	// report this instead of the directory the shell started in.
+	lastCwd string
 	slot    int
 	ask     question.Service
 	session ptyTerminal
@@ -423,13 +428,13 @@ func (r *ptyRunner) freeAfterGrace(ctx context.Context) bool {
 }
 
 // ptyCommandRunner picks a session that can take a command now: the
-// primary one, or - while that is busy with an editor, pager or TUI -
-// the first sibling that is free, opening one if needed. Sibling
-// sessions are separate shells: they do not share the cd, exports or
-// virtualenv of the busy one.
-func ptyCommandRunner(ctx context.Context, cwd string, ask question.Service) (*ptyRunner, error) {
+// owner's primary one, or - while that is busy with an editor, pager
+// or TUI - the first sibling that is free, opening one if needed.
+// Sibling sessions are separate shells: they do not share the cd,
+// exports or virtualenv of the busy one.
+func ptyCommandRunner(ctx context.Context, owner, cwd string, ask question.Service) (*ptyRunner, error) {
 	for slot := range ptyMaxSlots {
-		r := ptyRunnerSlot(cwd, slot, ask)
+		r := ptyRunnerSlot(owner, cwd, slot, ask)
 		if !r.occupied() || r.freeAfterGrace(ctx) {
 			return r, nil
 		}
@@ -438,10 +443,10 @@ func ptyCommandRunner(ctx context.Context, cwd string, ask question.Service) (*p
 }
 
 // ptyInteractiveRunner picks the session that input, keys and polls are
-// meant for: the one with a program in it. Nothing is opened here - a
-// keystroke for a program that is not running belongs in the primary
-// session, where the agent last was.
-func ptyInteractiveRunner(cwd string, ask question.Service) *ptyRunner {
+// meant for: the owner's one with a program in it. Nothing is opened
+// here - a keystroke for a program that is not running belongs in the
+// primary session, where the agent last was.
+func ptyInteractiveRunner(owner, cwd string, ask question.Service) *ptyRunner {
 	// A full-screen program is the strongest claim on a keystroke, so
 	// look for one of those before settling for a session that merely
 	// has something running.
@@ -451,14 +456,14 @@ func ptyInteractiveRunner(cwd string, ask question.Service) *ptyRunner {
 	} {
 		for slot := range ptyMaxSlots {
 			ptyRunnersMu.Lock()
-			r, ok := ptyRunners[slotKey(cwd, slot)]
+			r, ok := ptyRunners[slotKey(owner, cwd, slot)]
 			ptyRunnersMu.Unlock()
 			if ok && claims(r) {
 				return r
 			}
 		}
 	}
-	return ptyRunnerSlot(cwd, 0, ask)
+	return ptyRunnerSlot(owner, cwd, 0, ask)
 }
 
 // touch refreshes the runner's idle clock (called from Run/Input/Poll
@@ -495,29 +500,33 @@ func ptyReaperStart() {
 	})
 }
 
-// ptyRunnerFor returns the primary runner for workingDir; siblings for
-// the same directory live in higher slots (see ptySessionFor).
-func ptyRunnerFor(cwd string, ask question.Service) *ptyRunner {
-	return ptyRunnerSlot(cwd, 0, ask)
+// ptyRunnerFor returns the primary runner for one owner's workingDir;
+// siblings for the same directory live in higher slots (see
+// ptySessionFor).
+func ptyRunnerFor(owner, cwd string, ask question.Service) *ptyRunner {
+	return ptyRunnerSlot(owner, cwd, 0, ask)
 }
 
-// slotKey names a runner in the registry: one working directory can
-// have several terminal sessions, so the directory alone is not enough.
-func slotKey(cwd string, slot int) string {
-	if slot == 0 {
-		return cwd
+// slotKey names a runner in the registry. Two dimensions share it:
+// each owner (agent) gets its own set of sessions, and one owner can
+// hold several sessions per directory - slot 0 is the primary, higher
+// slots are opened when it is busy driving an interactive program.
+func slotKey(owner, cwd string, slot int) string {
+	key := owner + "\x00" + cwd
+	if slot != 0 {
+		key += fmt.Sprintf("\x00#%d", slot)
 	}
-	return fmt.Sprintf("%s\x00#%d", cwd, slot)
+	return key
 }
 
-// ptyRunnerSlot returns the runner in one slot of workingDir, creating
-// (and warm-starting) it on first use. The ask service collects sudo
-// passwords from the user; nil disables prompting. Runners are reused
-// until they idle out (ptyIdleTimeout) or are evicted at the cap, so
-// shell state survives across calls without leaking one PTY per
-// working directory forever.
-func ptyRunnerSlot(cwd string, slot int, ask question.Service) *ptyRunner {
-	key := slotKey(cwd, slot)
+// ptyRunnerSlot returns the runner in one slot of owner's workingDir,
+// creating (and warm-starting) it on first use. The ask service
+// collects sudo passwords from the user; nil disables prompting.
+// Runners are reused until they idle out (ptyIdleTimeout) or are
+// evicted at the cap, so shell state survives across calls without
+// leaking one PTY per agent and working directory forever.
+func ptyRunnerSlot(owner, cwd string, slot int, ask question.Service) *ptyRunner {
+	key := slotKey(owner, cwd, slot)
 
 	ptyRunnersMu.Lock()
 	defer ptyRunnersMu.Unlock()
@@ -609,6 +618,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	if r.session != nil {
 		r.restarted = true
 		r.orphan = false
+		r.lastCwd = ""
 		if time.Since(r.startedAt) < ptyRestartDelay {
 			time.Sleep(ptyRestartDelay)
 		}
@@ -706,6 +716,7 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 	r.restarted = false
 	r.lastEcho = nil
 	r.lastScreen = ""
+	r.lastCwd = ""
 	r.mu.Unlock()
 
 	if old != nil {
@@ -730,10 +741,10 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 // ptyResetAll closes every terminal session open for a working
 // directory - the primary one and any sibling opened while it was busy
 // - and returns the primary, running a fresh shell.
-func ptyResetAll(ctx context.Context, cwd string, ask question.Service) (*ptyRunner, error) {
+func ptyResetAll(ctx context.Context, owner, cwd string, ask question.Service) (*ptyRunner, error) {
 	for slot := 1; slot < ptyMaxSlots; slot++ {
 		ptyRunnersMu.Lock()
-		sibling, ok := ptyRunners[slotKey(cwd, slot)]
+		sibling, ok := ptyRunners[slotKey(owner, cwd, slot)]
 		if ok {
 			delete(ptyRunners, sibling.key)
 		}
@@ -742,7 +753,7 @@ func ptyResetAll(ctx context.Context, cwd string, ask question.Service) (*ptyRun
 			sibling.Close()
 		}
 	}
-	primary := ptyRunnerSlot(cwd, 0, ask)
+	primary := ptyRunnerSlot(owner, cwd, 0, ask)
 	if err := primary.Reset(ctx); err != nil {
 		return nil, err
 	}
@@ -1181,8 +1192,19 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 			res.ExitCode = &code
 		}
 		res.Cwd = match[2]
+		r.setState(func() { r.lastCwd = res.Cwd })
 	}
 	return res, nil
+}
+
+// knownCwd returns the session's working directory as of its last
+// completed command, or the empty string when none has completed here
+// yet (the caller falls back to the directory the session was opened
+// in).
+func (r *ptyRunner) knownCwd() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastCwd
 }
 
 // answerCredentialPrompt drains the prompt output, asks the user for

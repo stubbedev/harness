@@ -10,9 +10,9 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/catwalk/pkg/catwalk"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -36,7 +36,7 @@ type APIKeyInput struct {
 	com          *common.Common
 	isOnboarding bool
 
-	provider  catwalk.Provider
+	provider  catalog.Provider
 	model     config.SelectedModel
 	modelType config.SelectedModelType
 
@@ -58,7 +58,7 @@ var _ Dialog = (*APIKeyInput)(nil)
 func NewAPIKeyInput(
 	com *common.Common,
 	isOnboarding bool,
-	provider catwalk.Provider,
+	provider catalog.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
 ) (*APIKeyInput, tea.Cmd) {

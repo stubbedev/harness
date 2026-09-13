@@ -48,7 +48,7 @@ var batchDescription string
 // so running several at once interleaves them rather than parallelising
 // them.
 var serialTools = map[string]bool{
-	BashToolName: true,
+	ShellToolName: true,
 }
 
 // BatchStep is one tool call, or one fan-out of the same tool call over a
