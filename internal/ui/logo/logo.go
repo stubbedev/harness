@@ -22,13 +22,12 @@ const wordmark = `██╗  ██╗ █████╗ ██████╗ 
 type Opts struct {
 	TitleColorA  color.Color // left gradient ramp point
 	TitleColorB  color.Color // right gradient ramp point
-	CharmColor   color.Color // Charm™ text color
 	VersionColor color.Color // version text color
 	Width        int         // width of the rendered logo, used for truncation
 }
 
-// Render renders the Harness logo: the block wordmark beneath a meta
-// row with the Charm™ label on the left and the version on the right.
+// Render renders the Harness logo: the block wordmark with the version
+// right-aligned in the meta row above it.
 func Render(base lipgloss.Style, version string, o Opts) string {
 	fg := func(c color.Color, s string) string {
 		return lipgloss.NewStyle().Foreground(c).Render(s)
@@ -45,13 +44,10 @@ func Render(base lipgloss.Style, version string, o Opts) string {
 	}
 	mark := b.String()
 
-	// Charm and version.
-	charm := " Charm™"
-	const metaRowGap = 1
-	maxVersionWidth := max(0, markWidth-lipgloss.Width(charm)-metaRowGap)
-	version = ansi.Truncate(version, maxVersionWidth, "…") // truncate version if too long.
-	gap := max(0, markWidth-lipgloss.Width(charm)-lipgloss.Width(version))
-	metaRow := fg(o.CharmColor, charm) + strings.Repeat(" ", gap) + fg(o.VersionColor, version)
+	// Version, right-aligned in the meta row above the wordmark.
+	version = ansi.Truncate(version, markWidth, "…") // truncate version if too long.
+	gap := max(0, markWidth-lipgloss.Width(version))
+	metaRow := strings.Repeat(" ", gap) + fg(o.VersionColor, version)
 
 	logo := strings.TrimSpace(metaRow + "\n" + mark)
 

@@ -96,7 +96,6 @@ type Styles struct {
 
 	// Header
 	Header struct {
-		Charm             lipgloss.Style // Style for "Charm™" label
 		Diagonals         lipgloss.Style // Style for diagonal separators (╱)
 		Percentage        lipgloss.Style // Style for context percentage
 		HypercreditIcon   lipgloss.Style // Style for Hypercredit count (◆ N)
@@ -211,7 +210,6 @@ type Styles struct {
 	Logo struct {
 		TitleColorA  color.Color
 		TitleColorB  color.Color
-		CharmColor   color.Color
 		VersionColor color.Color
 		GradCanvas   lipgloss.Style // Blank canvas for gradient painting
 	}
@@ -336,6 +334,7 @@ type Styles struct {
 		IconSuccess   lipgloss.Style
 		IconError     lipgloss.Style
 		IconCancelled lipgloss.Style
+		IconPartial   lipgloss.Style // Yellow checkmark when some calls in a group failed
 
 		// Tool name styles
 		NameNormal lipgloss.Style // Top-level tool name

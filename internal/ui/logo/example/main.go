@@ -23,7 +23,6 @@ func main() {
 	opts := logo.Opts{
 		TitleColorA:  s.Logo.TitleColorA,
 		TitleColorB:  s.Logo.TitleColorB,
-		CharmColor:   s.Logo.CharmColor,
 		VersionColor: s.Logo.VersionColor,
 		Width:        w,
 	}
@@ -33,7 +32,6 @@ func main() {
 		logo.Render(s.Logo.GradCanvas, "v1.0.0", logo.Opts{
 			TitleColorA:  opts.TitleColorA,
 			TitleColorB:  opts.TitleColorB,
-			CharmColor:   opts.CharmColor,
 			VersionColor: opts.VersionColor,
 			Width:        40,
 		}),

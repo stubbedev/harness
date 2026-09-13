@@ -375,28 +375,30 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 	}
 
 	running := false
-	failed := false
 	cancelled := false
+	failed := 0
+	succeeded := 0
 	for _, t := range g.tools {
 		if a, ok := t.(Animatable); ok && a.Spinning() {
 			running = true
 		}
 		if res := t.Result(); res != nil && res.IsError {
-			failed = true
-		}
-		if t.Status() == ToolStatusCanceled {
+			failed++
+		} else if t.Status() == ToolStatusCanceled {
 			cancelled = true
+		} else {
+			succeeded++
 		}
 	}
 
 	verb := "Ran"
 	glyph := g.sty.Tool.IconSuccess.Render()
-	if cancelled && !running {
-		verb = "Ran"
+	if cancelled && failed == 0 {
 		glyph = g.sty.Tool.IconCancelled.Render()
-	}
-	if failed {
+	} else if failed > 0 && succeeded == 0 {
 		glyph = g.sty.Tool.IconError.Render()
+	} else if failed > 0 {
+		glyph = g.sty.Tool.IconPartial.Render()
 	}
 	if running {
 		verb = "Running"

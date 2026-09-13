@@ -26,7 +26,6 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/charmtone"
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -153,18 +152,13 @@ harness --continue
 	},
 }
 
-var heartbit = lipgloss.NewStyle().Foreground(charmtone.Dolly).SetString(`
-    ▄▄▄▄▄▄▄▄    ▄▄▄▄▄▄▄▄
-  ███████████  ███████████
-████████████████████████████
-████████████████████████████
-██████████▀██████▀██████████
-██████████ ██████ ██████████
-▀▀██████▄████▄▄████▄██████▀▀
-  ████████████████████████
-    ████████████████████
-       ▀▀██████████▀▀
-           ▀▀▀▀▀▀
+var logoMark = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffb454")).SetString(`
+██╗  ██╗
+██║  ██║
+███████║
+██╔══██║
+██║  ██║
+╚═╝  ╚═╝
 `)
 
 // printSessionResume prints the exit banner after the TUI exits, including the
@@ -194,7 +188,7 @@ func Execute() {
 	slog.SetDefault(slog.New(slog.DiscardHandler))
 
 	// NOTE: very hacky: we create a colorprofile writer with STDOUT, then make
-	// it forward to a bytes.Buffer, write the colored heartbit to it, and then
+	// it forward to a bytes.Buffer, write the colored logo mark to it, and then
 	// finally prepend it in the version template.
 	// Unfortunately cobra doesn't give us a way to set a function to handle
 	// printing the version, and PreRunE runs after the version is already
@@ -204,7 +198,7 @@ func Execute() {
 		var b bytes.Buffer
 		w := colorprofile.NewWriter(os.Stdout, os.Environ())
 		w.Forward = &b
-		_, _ = w.WriteString(heartbit.String())
+		_, _ = w.WriteString(logoMark.String())
 		rootCmd.SetVersionTemplate(b.String() + "\n" + defaultVersionTemplate)
 	}
 	if err := fang.Execute(

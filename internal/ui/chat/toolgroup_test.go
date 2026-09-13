@@ -187,13 +187,35 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		assert.Contains(t, out, "npm test")
 	})
 
-	t.Run("failed call fails the group row", func(t *testing.T) {
+	t.Run("every failed call shows the error glyph", func(t *testing.T) {
+		t.Parallel()
+		item := bashTool("t1", "make build", true)
+		item.SetResult(&message.ToolResult{ToolCallID: "t1", Name: "Bash", Content: "boom", IsError: true})
+		item2 := bashTool("t2", "make test", true)
+		item2.SetResult(&message.ToolResult{ToolCallID: "t2", Name: "Bash", Content: "boom", IsError: true})
+		g := NewToolGroupMessageItem(sty, item)
+		g.AddTool(item2)
+		assert.Contains(t, g.Render(80), styles.ToolError)
+	})
+
+	t.Run("partial failure shows the success glyph without the error glyph", func(t *testing.T) {
 		t.Parallel()
 		item := bashTool("t1", "make build", true)
 		item.SetResult(&message.ToolResult{ToolCallID: "t1", Name: "Bash", Content: "boom", IsError: true})
 		g := NewToolGroupMessageItem(sty, item)
 		g.AddTool(done("t2"))
-		assert.Contains(t, g.Render(80), styles.ToolError)
+		out := g.Render(80)
+		assert.Contains(t, out, styles.ToolSuccess)
+		assert.NotContains(t, out, styles.ToolError)
+	})
+
+	t.Run("all-succeeded group shows the success glyph", func(t *testing.T) {
+		t.Parallel()
+		g := NewToolGroupMessageItem(sty, done("t1"))
+		g.AddTool(done("t2"))
+		out := g.Render(80)
+		assert.Contains(t, out, styles.ToolSuccess)
+		assert.NotContains(t, out, styles.ToolError)
 	})
 
 	t.Run("one-liners prettify the tool name", func(t *testing.T) {

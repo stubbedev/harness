@@ -18,10 +18,11 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
-//go:embed page.html page.css page.js heartbit.svg heartbit-grumpy.svg charm.svg
+//go:embed page.html page.css page.js mark.svg harness.svg
 var assets embed.FS
 
 // closeDelay is how long the page counts down before asking the browser to
@@ -65,15 +66,11 @@ func Write(w io.Writer, r Result) error {
 	if err != nil {
 		return fmt.Errorf("read callback script: %w", err)
 	}
-	mark, err := assets.ReadFile("heartbit.svg")
+	mark, err := assets.ReadFile("mark.svg")
 	if err != nil {
 		return fmt.Errorf("read callback artwork: %w", err)
 	}
-	grumpy, err := assets.ReadFile("heartbit-grumpy.svg")
-	if err != nil {
-		return fmt.Errorf("read callback grumpy artwork: %w", err)
-	}
-	logo, err := assets.ReadFile("charm.svg")
+	logo, err := assets.ReadFile("harness.svg")
 	if err != nil {
 		return fmt.Errorf("read callback logo: %w", err)
 	}
@@ -90,8 +87,8 @@ func Write(w io.Writer, r Result) error {
 		CloseDelay       int
 		CSS              template.CSS
 		JS               template.JS
-		Heartbit         template.HTML
-		Charm            template.HTML
+		Mark             template.HTML
+		Logo             template.HTML
 		Favicon          template.URL
 	}{
 		Subject:          r.Subject,
@@ -99,18 +96,20 @@ func Write(w io.Writer, r Result) error {
 		ErrorDescription: r.ErrorDescription,
 		CSS:              template.CSS(css),
 		JS:               template.JS(js),
-		Charm:            template.HTML(logo),
+		Logo:             template.HTML(logo),
 	}
 
-	// The artwork reflects the outcome: a smiling heart on success, a
-	// grumpy one when the authorization did not go through. The favicon
-	// matches so the tab itself carries the state.
-	art := mark
+	// The artwork carries the outcome through its color: the amber accent
+	// when authorization went through, coral when it did not. The favicon
+	// is a standalone document where currentColor resolves to black, so
+	// the outcome color is substituted directly.
+	data.Mark = template.HTML(mark)
+	faviconColor := "#ffb454"
 	if r.Failed() {
-		art = grumpy
+		faviconColor = "#ff577d"
 	}
-	data.Heartbit = template.HTML(art)
-	data.Favicon = template.URL("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(art))
+	favicon := strings.Replace(string(mark), "currentColor", faviconColor, 1)
+	data.Favicon = template.URL("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(favicon)))
 
 	if r.Failed() {
 		data.Title = "Authorization failed — Harness"

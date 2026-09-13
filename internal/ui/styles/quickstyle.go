@@ -616,7 +616,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	// borders
 	s.ToolCallSuccess = lipgloss.NewStyle().Foreground(o.success).SetString(ToolSuccess)
 
-	s.Header.Charm = base.Foreground(o.secondary)
 	s.Header.Diagonals = base.Foreground(o.primary)
 	s.Header.Percentage = muted
 	s.Header.HypercreditIcon = base.Foreground(o.secondary)
@@ -641,6 +640,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.IconSuccess = base.Foreground(o.success).SetString(ToolSuccess)
 	s.Tool.IconError = base.Foreground(o.error).SetString(ToolError)
 	s.Tool.IconCancelled = muted.SetString(ToolPending)
+	s.Tool.IconPartial = base.Foreground(o.warning).SetString(ToolSuccess)
 
 	s.Tool.NameNormal = base.Foreground(o.info)
 	s.Tool.NameNested = base.Foreground(o.info)
@@ -799,7 +799,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Logo
 	s.Logo.TitleColorA = o.secondary
 	s.Logo.TitleColorB = o.primary
-	s.Logo.CharmColor = o.secondary
 	s.Logo.VersionColor = o.primary
 	s.Logo.GradCanvas = lipgloss.NewStyle()
 

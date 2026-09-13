@@ -1,6 +1,7 @@
 package callback
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,23 +49,35 @@ func TestWrite_FailureDoesNotAutoClose(t *testing.T) {
 	require.NotContains(t, page, `data-delay=`)
 }
 
-// TestWrite_GrumpyOnFailure proves the artwork matches the outcome: a
-// grumpy heart when authorization fails, the smiling one when it works.
-// The two are told apart by a path unique to each drawing.
-func TestWrite_GrumpyOnFailure(t *testing.T) {
+// TestWrite_ArtworkMatchesOutcome proves the tab favicon matches the
+// outcome: a coral H when authorization fails and an amber one when it
+// works.
+func TestWrite_ArtworkMatchesOutcome(t *testing.T) {
 	t.Parallel()
 
-	// The grumpy drawing carries a dark red accent (#ab2454) that the
-	// smiling heart does not.
-	const grumpy = "#ab2454"
+	favicon := func(t *testing.T, page string) string {
+		t.Helper()
+		const prefix = "image/svg&#43;xml;base64,"
+		start := strings.Index(page, prefix)
+		require.NotEqual(t, -1, start, "page must carry an SVG favicon")
+		rest := page[start+len(prefix):]
+		end := strings.Index(rest, `"`)
+		require.NotEqual(t, -1, end, "favicon href must be quoted")
+		// The template escapes the base64 payload itself.
+		escaped := rest[:end]
+		unescaped := strings.NewReplacer("&#43;", "+", "&#47;", "/", "&#61;", "=").Replace(escaped)
+		raw, err := base64.StdEncoding.DecodeString(unescaped)
+		require.NoError(t, err)
+		return string(raw)
+	}
 
 	var failed strings.Builder
 	require.NoError(t, Write(&failed, Result{ErrorCode: "access_denied"}))
-	require.Contains(t, failed.String(), grumpy)
+	require.Contains(t, favicon(t, failed.String()), "#ff577d")
 
 	var ok strings.Builder
 	require.NoError(t, Write(&ok, Result{Subject: "linear"}))
-	require.NotContains(t, ok.String(), grumpy)
+	require.Contains(t, favicon(t, ok.String()), "#ffb454")
 }
 
 // TestWrite_TerseFailure covers providers that report an error code with no

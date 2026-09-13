@@ -58,7 +58,6 @@ func logoSection(contentWidth int, theme string) string {
 	harnessLogo := logo.Render(t.Logo.GradCanvas, version.Version, logo.Opts{
 		TitleColorA:  t.Logo.TitleColorA,
 		TitleColorB:  t.Logo.TitleColorB,
-		CharmColor:   t.Logo.CharmColor,
 		VersionColor: t.Logo.VersionColor,
 		Width:        contentWidth,
 	})
