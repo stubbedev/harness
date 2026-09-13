@@ -2004,7 +2004,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before compacting session..."))
 			break
 		}
-		if msg.Args == nil {
+		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()
 			argsDialog := dialog.NewArguments(
 				m.com,
@@ -3704,15 +3704,15 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		}
 	}
 
-	// Add app margins
+	// Add app margins. The app area runs all the way down to the help
+	// row: the editor and task strip sit directly above the hints, and
+	// the transcript gets the row a separator would have wasted.
 	var appRect, helpRect image.Rectangle
 	layout.Vertical(
 		layout.Len(area.Dy()-helpHeight),
 		layout.Fill(1),
 	).Split(area).Assign(&appRect, &helpRect)
 	appRect.Min.Y += 1
-	appRect.Max.Y -= 1
-	helpRect.Min.Y -= 1
 	appRect.Min.X += 1
 	appRect.Max.X -= 1
 
