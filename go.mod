@@ -212,3 +212,11 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+// Local forks of dormant upstreams. hinshun/vt10x calls syscall.SYS_IOCTL,
+// which does not exist on Solaris; u-root's pkg/ls reads Stat_t fields that
+// DragonFly's syscall package does not define. See the READMEs under
+// third_party/.
+replace github.com/hinshun/vt10x => ./third_party/vt10x
+
+replace github.com/u-root/u-root => ./third_party/u-root

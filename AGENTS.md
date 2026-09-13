@@ -64,6 +64,10 @@ internal/
 
 ### Key Patterns
 
+- **Vendored forks**: dependencies whose upstream is dormant and broken on a
+  platform we build for are forked into `third_party/<module>` and pinned with
+  a `replace` directive in `go.mod`. Each fork's README documents the patch
+  and how to drop the fork once upstream fixes it.
 - **Config is a Service**: accessed via `config.Service`, not global state.
 - **Tools are self-documenting**: each tool has a `.go` implementation and a
   `.md` description file in `internal/agent/tools/`.
