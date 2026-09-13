@@ -176,6 +176,20 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		g.AddTool(done("t2"))
 		assert.Contains(t, g.Render(80), styles.ToolError)
 	})
+
+	t.Run("one-liners prettify the tool name", func(t *testing.T) {
+		t.Parallel()
+		// Tool calls arrive with the raw lowercase name; the one-liner
+		// must label them the way the full renderers do, matching the
+		// capitalized group verb ("Ran").
+		item := NewToolMessageItem(sty, "msg", message.ToolCall{
+			ID: "t1", Name: "edit", Input: `{"file_path":"/a/b.go"}`, Finished: true,
+		}, nil, false, "/tmp")
+		g := NewToolGroupMessageItem(sty, item)
+		out := ansi.Strip(g.Render(80))
+		assert.Contains(t, out, "Edit")
+		assert.NotContains(t, out, "edit")
+	})
 }
 
 func TestToolGroupChildResolution(t *testing.T) {

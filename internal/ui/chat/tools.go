@@ -1186,7 +1186,7 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 func (t *baseToolMessageItem) formatToolForCopy() string {
 	var parts []string
 
-	toolName := prettifyToolName(t.toolCall.Name)
+	toolName := PrettifyToolName(t.toolCall.Name)
 	parts = append(parts, fmt.Sprintf("## %s Tool Call", toolName))
 
 	if t.toolCall.Input != "" {
@@ -1671,8 +1671,8 @@ func (t *baseToolMessageItem) formatAgentResultForCopy() string {
 	return result.String()
 }
 
-// prettifyToolName returns a human-readable name for tool names.
-func prettifyToolName(name string) string {
+// PrettifyToolName returns a human-readable name for tool names.
+func PrettifyToolName(name string) string {
 	switch name {
 	case agent.AgentToolName:
 		return "Agent"

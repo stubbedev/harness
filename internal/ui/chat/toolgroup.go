@@ -483,7 +483,7 @@ func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int) string {
 	} else if t.Status() == ToolStatusCanceled {
 		glyph = g.sty.Tool.IconCancelled.Render()
 	}
-	name := g.sty.Tool.NameNormal.Render(t.ToolCall().Name)
+	name := g.sty.Tool.NameNormal.Render(PrettifyToolName(t.ToolCall().Name))
 	line := glyph + " " + name
 	if summary := ToolCallSummary(t.ToolCall()); summary != "" {
 		line += " " + g.sty.Tool.Body.Render(summary)

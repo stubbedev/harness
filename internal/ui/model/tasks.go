@@ -702,7 +702,7 @@ func nestedOneLiner(t *styles.Styles, nested chat.ToolMessageItem, width int) st
 	} else if res := nested.Result(); res != nil && res.IsError {
 		glyph = t.Tool.IconError.Render()
 	}
-	name := nested.ToolCall().Name
+	name := chat.PrettifyToolName(nested.ToolCall().Name)
 	line := glyph + " " + name
 	if summary := chat.ToolCallSummary(nested.ToolCall()); summary != "" {
 		line += " " + summary
