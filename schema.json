@@ -580,11 +580,7 @@
         },
         "data_directory": {
           "type": "string",
-          "description": "Directory for storing application data. Relative paths are resolved against the working directory; absolute paths are used as-is.",
-          "default": ".harness",
-          "examples": [
-            ".harness"
-          ]
+          "description": "Directory for storing application data. Defaults to a per-workspace directory under the global data root. Relative paths are resolved against the working directory; absolute paths are used as-is."
         },
         "disabled_tools": {
           "items": {
