@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -487,6 +488,21 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 		a.messageQueue.Set(sessionID, keep)
 	}
 	return fold, canceledWithRunID
+}
+
+// requeueCalls returns calls to the front of the session's queue, under
+// the per-session dispatch mutex, after a fold consumed them but could
+// not create their user message (e.g. the step context was canceled
+// mid-fold). Without this the drained prompts would be silently dropped.
+func (a *sessionAgent) requeueCalls(sessionID string, calls []SessionAgentCall) {
+	if len(calls) == 0 {
+		return
+	}
+	dispatchLock := a.sessionMu(sessionID)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
+	existing, _ := a.messageQueue.Get(sessionID)
+	a.messageQueue.Set(sessionID, append(slices.Clone(calls), existing...))
 }
 
 // joinQueuedCalls merges queued calls without a RunID into a single
@@ -1019,11 +1035,26 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// transcript shows them as one entry); uncanceled prompts with
 			// a RunID are left queued so each runs as its own turn (with
 			// its own RunComplete) via the recursive run path below.
-			fold, canceledRunIDs := a.drainQueueForStep(call.SessionID)
-			a.publishCanceledQueueDrops(canceledRunIDs)
+			//
+			// A step whose context is already canceled — a CancelTurn that
+			// landed between this run registering itself and its first
+			// PrepareStep — must not drain the queue: the follow-up prompts
+			// belong to the turn that runs after this one unwinds, and
+			// folding them here would try to create their user messages on
+			// a dead context, silently dropping them.
+			var fold, canceledRunIDs []SessionAgentCall
+			if callContext.Err() == nil {
+				fold, canceledRunIDs = a.drainQueueForStep(call.SessionID)
+				a.publishCanceledQueueDrops(canceledRunIDs)
+			}
 			if len(fold) > 0 {
 				userMessage, createErr := a.createUserMessage(callContext, joinQueuedCalls(fold))
 				if createErr != nil {
+					// The drain removed these calls from the queue; put
+					// them back so a failed create does not silently drop
+					// the prompts. The turn's error path hands the queue
+					// off to the follow-up run.
+					a.requeueCalls(call.SessionID, fold)
 					return callContext, prepared, createErr
 				}
 				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
@@ -1032,8 +1063,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// Fold in messages background sub-agents sent this session since
 			// the last step. This is the live half of a background dispatch:
 			// the message reaches the dispatcher's context — and transcript,
-			// via createUserMessage — without the child having finished.
-			if a.subagentInbox != nil {
+			// via createUserMessage — without the child having finished. A
+			// canceled step leaves the inbox alone: the messages drain on
+			// the next live step instead of failing to persist here.
+			if a.subagentInbox != nil && callContext.Err() == nil {
 				for _, msg := range a.subagentInbox.DrainSubagentInbox(call.SessionID) {
 					userMessage, createErr := a.createUserMessage(callContext, SessionAgentCall{
 						SessionID: call.SessionID,
@@ -1074,15 +1107,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			sessionLock.Unlock()
 
 			var assistantMsg message.Message
-			assistantMsg, err = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
+			// The assistant row must exist for the turn's terminal persistence
+			// even when a CancelTurn raced this step: create it on a detached
+			// context so a dead step context fails the step only after the
+			// model observed the cancel, letting the turn unwind through the
+			// normal canceled path (and hand off to queued follow-ups).
+			assistantCtx, assistantCancel := context.WithTimeout(context.WithoutCancel(callContext), 5*time.Second)
+			assistantMsg, err = a.messages.Create(assistantCtx, call.SessionID, message.CreateMessageParams{
 				Role:     message.Assistant,
 				Parts:    []message.ContentPart{},
 				Model:    largeModel.ModelCfg.Model,
 				Provider: largeModel.ModelCfg.Provider,
 			})
 			if err != nil {
+				assistantCancel()
 				return callContext, prepared, err
 			}
+			assistantCancel()
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatwalkCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatwalkCfg.Name)

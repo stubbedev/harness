@@ -36,11 +36,7 @@ type fakeEnv struct {
 }
 
 func testEnv(t *testing.T) fakeEnv {
-	workingDir := filepath.Join("/tmp/harness-test/", t.Name())
-	os.RemoveAll(workingDir)
-
-	err := os.MkdirAll(workingDir, 0o755)
-	require.NoError(t, err)
+	workingDir := t.TempDir()
 
 	conn, err := db.Connect(t.Context(), t.TempDir())
 	require.NoError(t, err)
@@ -55,7 +51,6 @@ func testEnv(t *testing.T) fakeEnv {
 
 	t.Cleanup(func() {
 		conn.Close()
-		os.RemoveAll(workingDir)
 	})
 
 	return fakeEnv{

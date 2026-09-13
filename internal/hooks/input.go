@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/stubbedev/harness/internal/shell"
@@ -84,9 +85,12 @@ func (ec EventContext) payload() Payload {
 		}
 	}
 	return Payload{
-		Event:            ec.Event,
-		SessionID:        ec.SessionID,
-		CWD:              ec.CWD,
+		Event:     ec.Event,
+		SessionID: ec.SessionID,
+		// The JSON payload is cross-platform data parsed by hook
+		// scripts, so the path always uses forward slashes. The env
+		// vars keep the platform-native form for shells.
+		CWD:              filepath.ToSlash(ec.CWD),
 		ToolName:         ec.ToolName,
 		ToolInput:        toolInput,
 		ToolResponse:     ec.ToolResponse,
