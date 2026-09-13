@@ -130,9 +130,9 @@ func TestWrapToolsWithHooks(t *testing.T) {
 	})
 	inputs := []fantasy.AgentTool{&fakeTool{name: "a"}, &fakeTool{name: "b"}}
 
-	t.Run("top-level agent wraps every tool", func(t *testing.T) {
+	t.Run("wraps every tool", func(t *testing.T) {
 		t.Parallel()
-		out := wrapToolsWithHooks(inputs, registry, false)
+		out := wrapToolsWithHooks(inputs, registry)
 		require.Len(t, out, len(inputs))
 		for i, tool := range out {
 			_, ok := tool.(*hookedTool)
@@ -140,20 +140,9 @@ func TestWrapToolsWithHooks(t *testing.T) {
 		}
 	})
 
-	t.Run("sub-agent skips the wrap", func(t *testing.T) {
+	t.Run("nil registry skips the wrap", func(t *testing.T) {
 		t.Parallel()
-		out := wrapToolsWithHooks(inputs, registry, true)
-		require.Equal(t, inputs, out, "sub-agent tools should be returned unwrapped")
-		for _, tool := range out {
-			_, isHooked := tool.(*hookedTool)
-			require.False(t, isHooked, "sub-agent tool should not be wrapped")
-		}
-	})
-
-	t.Run("nil registry skips the wrap for both agent kinds", func(t *testing.T) {
-		t.Parallel()
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, false))
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, true))
+		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil))
 	})
 
 	t.Run("registry without tool events skips the wrap", func(t *testing.T) {
@@ -161,7 +150,7 @@ func TestWrapToolsWithHooks(t *testing.T) {
 		stopOnly := newTestRegistry(t, map[string][]config.HookConfig{
 			hooks.EventStop: {{Command: `exit 0`}},
 		})
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, stopOnly, false))
+		require.Equal(t, inputs, wrapToolsWithHooks(inputs, stopOnly))
 	})
 
 	t.Run("PostToolUse-only registry still wraps", func(t *testing.T) {
@@ -169,10 +158,32 @@ func TestWrapToolsWithHooks(t *testing.T) {
 		postOnly := newTestRegistry(t, map[string][]config.HookConfig{
 			hooks.EventPostToolUse: {{Command: `exit 0`}},
 		})
-		out := wrapToolsWithHooks(inputs, postOnly, false)
+		out := wrapToolsWithHooks(inputs, postOnly)
 		for _, tool := range out {
 			_, ok := tool.(*hookedTool)
 			require.True(t, ok)
 		}
 	})
+}
+
+// TestBuildTools_WrapsSubAgentTools pins the policy that sub-agents are
+// hookable the same way the top-level agent is: they call the same toolset,
+// so a PreToolUse rule has to see their calls to mean anything.
+func TestBuildTools_WrapsSubAgentTools(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, "p", config.ProviderConfig{ID: "p"})
+	coord.hooks = newTestRegistry(t, map[string][]config.HookConfig{
+		hooks.EventPreToolUse: {{Command: `exit 0`}},
+	})
+
+	agentCfg := config.Agent{ID: config.AgentTask, Name: "Task", AllowedTools: []string{"glob", "grep", "view"}}
+	toolsList, err := coord.buildTools(t.Context(), agentCfg, true, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, toolsList)
+	for _, tool := range toolsList {
+		_, hooked := tool.(*hookedTool)
+		require.Truef(t, hooked, "sub-agent tool %s should fire hooks", tool.Info().Name)
+	}
 }

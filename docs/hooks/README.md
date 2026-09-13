@@ -191,11 +191,11 @@ stuff, and so on.
 **Matched against**: the tool name (e.g. `bash`, `edit`, `write`,
 `mcp_github_create_pull_request`).
 
-**Scope**: `PreToolUse` only fires on the **top-level agent's** tool calls.
-Sub-agents (the `agent` task tool, `research`, etc.) run without hook
-interception so a single delegated turn doesn't trigger your hook N times. The
-outer sub-agent tool call itself _is_ hooked, so policy like "never let the
-agent spawn sub-agents" still works.
+**Scope**: `PreToolUse` fires on every tool call, including calls made
+from inside sub-agents (`agent` task/fast dispatches, `research`, custom
+subagents): they run the same toolset, so a policy has to see their calls to
+mean anything. A hook fired from a sub-agent sees the child session's ID in
+the payload, which is what distinguishes the call.
 
 ### PostToolUse
 
@@ -210,8 +210,8 @@ nothing can un-run it:
 - `context` is appended to the tool response.
 - `updated_input` is ignored; the input already happened.
 
-**Matched against**: the tool name. Same top-level-only scope as
-`PreToolUse`.
+**Matched against**: the tool name. Same scope as `PreToolUse`: every tool
+call, sub-agent calls included.
 
 ### UserPromptSubmit
 

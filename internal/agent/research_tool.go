@@ -140,10 +140,9 @@ func (c *coordinator) researchTool(_ context.Context, client *http.Client) (fant
 				tools.NewViewTool(c.lspManager, c.filetracker, nil, tmpDir),
 			}
 
-			// Sub-agent tools run without hook interception. The top-level
-			// `research` call itself is already wrapped from the coder's
-			// side; firing hooks again for every inner tool call would run
-			// the user's hooks N times per delegated turn.
+			// Sub-agent tool calls fire the same Pre/PostToolUse hooks as the
+			// top-level agent's; the hooks see this run's (child) session ID.
+			fetchTools = wrapToolsWithHooks(fetchTools, c.hooks)
 
 			agent := NewSessionAgent(SessionAgentOptions{
 				Config:               c.cfg,

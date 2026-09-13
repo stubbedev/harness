@@ -25,11 +25,12 @@ func newHookedTool(inner fantasy.AgentTool, registry *hooks.Registry) *hookedToo
 
 // wrapToolsWithHooks returns a tool slice with each entry wrapped in a
 // hookedTool. Returns the original slice unchanged when no registry is
-// available, when neither tool event has hooks, or when isSubAgent is
-// true — sub-agents never fire hooks, the top-level invocation of the
-// sub-agent tool itself is wrapped on the caller's side.
-func wrapToolsWithHooks(tools []fantasy.AgentTool, registry *hooks.Registry, isSubAgent bool) []fantasy.AgentTool {
-	if registry == nil || isSubAgent {
+// available or when neither tool event has hooks. Sub-agents are wrapped
+// the same as the top-level agent: they call the same toolset, so a
+// PreToolUse policy must see their calls too. Hooks fired from a sub-agent
+// see the child session's ID.
+func wrapToolsWithHooks(tools []fantasy.AgentTool, registry *hooks.Registry) []fantasy.AgentTool {
+	if registry == nil {
 		return tools
 	}
 	if !registry.Has(hooks.EventPreToolUse) && !registry.Has(hooks.EventPostToolUse) {

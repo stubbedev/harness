@@ -1168,12 +1168,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})
 
-	// Wrap tools with hook interception for the top-level agent only.
-	// Sub-agents (the `agent` task tool, `research`, etc.) run
-	// without hook interception to avoid firing the user's hook N times
-	// per delegated turn. The top-level invocation of the sub-agent tool
-	// itself is still wrapped from the coder's side.
-	filteredTools = wrapToolsWithHooks(filteredTools, c.hooks, isSubAgent)
+	// Wrap tools with hook interception for every agent, sub-agents
+	// included: they call the same toolset as the top-level agent, so a
+	// PreToolUse policy has to see their calls to mean anything. A hook
+	// fired from inside a sub-agent sees the child session's ID, which is
+	// what distinguishes the call in the payload.
+	filteredTools = wrapToolsWithHooks(filteredTools, c.hooks)
 
 	// The batch tool composes the tools above, so it is built from the
 	// finished list and appended after it. Calling the wrapped tools
