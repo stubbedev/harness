@@ -92,52 +92,76 @@ type Session struct {
 }
 
 // Shell returns the shell the terminal session should run: the shell
-// Harness itself was launched from when it can be identified (the parent
-// process being one), then the user's login shell ($SHELL), then
-// /bin/sh. Non-POSIX shells are not driven directly because the
-// completion sentinel uses POSIX parameter expansion; they fall back
-// to /bin/sh.
+// Harness itself was launched from when the parent process can be
+// identified as one, then the platform's usual answer for "the user's
+// shell" -- $SHELL on Unix, ComSpec or PowerShell on Windows.
+//
+// Every shell it can name is driven directly, PowerShell and cmd
+// included. The session protocol has a dialect per Kind rather than a
+// POSIX-only path with an interpreter standing in for the real thing
+// elsewhere: the model is told which shell it is talking to and writes
+// for that shell, which is the whole point of handing it a real one.
 func Shell() string {
 	if sh := parentShell(); sh != "" {
 		return sh
 	}
-	if sh := os.Getenv("SHELL"); sh != "" && isPosixShell(sh) {
+	if sh := os.Getenv("SHELL"); sh != "" && KindOf(sh) != KindUnknown {
 		return sh
 	}
-	return "/bin/sh"
+	return defaultShell()
 }
 
-// posixShells are the shells whose builtin printf understands the
-// '__exit:%d@%s__' "$?" "$PWD" sentinel syntax.
-var posixShells = map[string]bool{
-	"bash": true,
-	"zsh":  true,
-	"sh":   true,
-	"dash": true,
-	"ksh":  true,
-	"ash":  true,
+// Kind is the dialect a shell speaks, which decides how the session
+// asks it for an exit code and a working directory.
+type Kind int
+
+const (
+	// KindUnknown is a shell this package cannot drive.
+	KindUnknown Kind = iota
+	// KindPosix is bash, zsh and the other Bourne-family shells.
+	KindPosix
+	// KindPowerShell is Windows PowerShell or PowerShell Core.
+	KindPowerShell
+	// KindCmd is the Windows command interpreter.
+	KindCmd
+)
+
+// shellKinds maps a shell's executable name to the dialect it speaks.
+var shellKinds = map[string]Kind{
+	"bash":       KindPosix,
+	"zsh":        KindPosix,
+	"sh":         KindPosix,
+	"dash":       KindPosix,
+	"ksh":        KindPosix,
+	"ash":        KindPosix,
+	"fish":       KindPosix,
+	"powershell": KindPowerShell,
+	"pwsh":       KindPowerShell,
+	"cmd":        KindCmd,
 }
 
-func isPosixShell(path string) bool {
-	base := strings.TrimSuffix(filepath.Base(path), ".exe")
-	return posixShells[base]
+// KindOf reports the dialect of the shell at path, by executable name.
+// Backslashes are cut as separators whatever the host is: a Windows
+// shell path can be read on any platform (a recorded session, a test),
+// and filepath.Base only knows the running platform's separator.
+func KindOf(path string) Kind {
+	base := strings.ToLower(filepath.Base(path))
+	if i := strings.LastIndexByte(base, '\\'); i >= 0 {
+		base = base[i+1:]
+	}
+	return shellKinds[strings.TrimSuffix(base, ".exe")]
 }
 
 // parentShell reports the shell hosting the Harness process by looking
 // at the parent process name; empty when the parent is not a shell
-// (terminal emulator, systemd, an editor task runner, ...).
+// (terminal emulator, systemd, an editor task runner, ...) or when the
+// platform offers no way to ask.
 func parentShell() string {
-	ppid := os.Getppid()
-	if ppid <= 1 {
+	name := parentProcessName()
+	if name == "" {
 		return ""
 	}
-	comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", ppid))
-	if err != nil {
-		return ""
-	}
-	name := strings.TrimSpace(string(comm))
-	name = strings.TrimSuffix(name, "\n")
-	if !posixShells[name] {
+	if KindOf(name) == KindUnknown {
 		return ""
 	}
 	if path, err := exec.LookPath(name); err == nil {

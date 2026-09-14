@@ -88,74 +88,6 @@ const (
 	// forward to a command that is still producing output, so a stream
 	// that never ends cannot hold a call forever.
 	ptyMaxWait = 15 * time.Minute
-
-	// The sentinel prints the exit code and the working directory after
-	// every command. The %d/%s format specifiers keep the echoed command
-	// line from matching the parse pattern, and each session mixes a
-	// random tag into the marker so a command that happens to print an
-	// exit marker of its own (a log line, this file's own tests) cannot
-	// be read as the shell's answer.
-	ptySentinelFmt      = `printf '__exit_%s:%%d@%%s__' "$?" "$PWD"`
-	ptySentinelReFmt    = `__exit_%s:(-?\d+)@(.*)__`
-	ptySentinelLooseFmt = `__exit_%s:-?\d+@`
-
-	// The fence is the same idea at the other end of a command: a
-	// marker printed before it, so a call only ever waits on and
-	// reports bytes its own command caused. Without it the prompt
-	// printed after the previous command's sentinel is still sitting in
-	// the buffer, and the next call can "finish" against that stale
-	// prompt and drain output belonging to the call before it. The %%s
-	// keeps the echoed command line from matching the pattern, the same
-	// trick the exit sentinel plays with %%d.
-	//
-	// The fence also re-asserts the session guard from ptySetupCmd
-	// before every command: a command that re-sources the user's rc
-	// files (source ~/.zshrc, direnv, a nested shell) can bring aliases
-	// and history settings back, and the next command must not inherit
-	// them. Like the marker, the guard runs before the command and its
-	// output is drained with the fence, so it never reaches a call's
-	// reported output.
-	ptyFenceFmt   = `unalias -a 2>/dev/null; HISTFILE=/dev/null; printf '__begin_%s:%%s__' "ok"`
-	ptyFenceReFmt = `__begin_%s:ok__`
-
-	// ptyHistoryOffCmd is sent as its own line before ptySetupCmd. zsh
-	// with inc_append_history or share_history writes every accepted
-	// line to HISTFILE the moment it is entered - before the line
-	// itself executes - so a guard that sets HISTFILE inside a longer
-	// line would record that whole line in the user's history file.
-	// This bare assignment is the only line that can ever leak, and it
-	// is inert plumbing: no agent command, no marker.
-	ptyHistoryOffCmd = `HISTFILE=/dev/null`
-
-	// ptySetupCmd prepares the session: alias expansion is switched off
-	// and every alias loaded by the rc files is stripped, so commands run
-	// with their standard meanings (functions and environment from the
-	// rc files are kept), and history is sandboxed - HISTFILE points at
-	// /dev/null and every auto-write option is off - so nothing the
-	// agent types ever lands in the user's history file. The prompt is
-	// replaced with an OSC 133 "prompt start" marker.
-	//
-	// The marker is what tells the runner a command has finished. It has
-	// to be something only the shell emits: the previous heuristic
-	// watched for bracketed-paste-enable (ESC [ ? 2004 h), which every
-	// full-screen program and every readline REPL also sends, so
-	// starting nvim looked exactly like a finished command and the
-	// sentinel was typed into the editor.
-	//
-	// Each shell-specific switch is stderr-guarded so the one line works
-	// across zsh (setopt/unalias -a), bash (shopt) and plain POSIX
-	// shells, where the unknown builtins and options just error on
-	// stderr while the rest of the line still runs. One switch earns
-	// its absence: zsh treats an unknown option to its own `set` builtin
-	// as a parse error and refuses to run the WHOLE line, so no
-	// `set +o history` may appear here - it would silently keep the
-	// prompt marker below from ever installing. Bash needs it even less:
-	// with HISTFILE on /dev/null, PROMPT_COMMAND cleared and histappend
-	// off, its in-memory history has nowhere to go.
-	ptySetupCmd = `unalias -a 2>/dev/null; setopt no_aliases 2>/dev/null; shopt -u expand_aliases 2>/dev/null; ` +
-		`HISTFILE=/dev/null; SAVEHIST=0; shopt -u histappend 2>/dev/null; ` +
-		`unsetopt share_history inc_append_history inc_append_history_time append_history 2>/dev/null; ` +
-		`PROMPT_COMMAND=""; RPS1=""; RPROMPT=""; PS2=""; PS1="$(printf '\033]133;A\007')"`
 )
 
 // sentinel is one session's completion marker: the command that prints
@@ -171,7 +103,7 @@ type sentinel struct {
 	beginRe *regexp.Regexp
 }
 
-func newSentinel() sentinel {
+func newSentinel(d shellDialect) sentinel {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		// A predictable tag still beats no tag: the point is to be
@@ -180,13 +112,13 @@ func newSentinel() sentinel {
 	}
 	tag := hex.EncodeToString(b[:])
 	return sentinel{
-		cmd: fmt.Sprintf(ptySentinelFmt, tag),
+		cmd: fmt.Sprintf(d.sentinelCmd, tag),
 		// The greedy (.*) takes everything up to the final "__" on the
 		// line, so working directories containing underscores parse.
-		parse:   regexp.MustCompile(fmt.Sprintf(ptySentinelReFmt, tag)),
-		loose:   regexp.MustCompile(fmt.Sprintf(ptySentinelLooseFmt, tag)),
-		begin:   fmt.Sprintf(ptyFenceFmt, tag),
-		beginRe: regexp.MustCompile(fmt.Sprintf(ptyFenceReFmt, tag)),
+		parse:   regexp.MustCompile(fmt.Sprintf(d.sentinelRe, tag)),
+		loose:   regexp.MustCompile(fmt.Sprintf(d.sentinelLoose, tag)),
+		begin:   fmt.Sprintf(d.fenceCmd, tag),
+		beginRe: regexp.MustCompile(fmt.Sprintf(d.fenceRe, tag)),
 	}
 }
 
@@ -639,7 +571,8 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	r.session = s
 	r.startedAt = time.Now()
 	r.lastScreen = ""
-	r.sentinel = newSentinel()
+	dialect := dialectFor(term.Shell())
+	r.sentinel = newSentinel(dialect)
 	// Let the shell settle past its startup output so the first
 	// command's output starts clean.
 	_ = s.WaitForQuiet(ctx, ptyStartupMs*time.Millisecond, 5*time.Second)
@@ -648,9 +581,11 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	// Sandbox history before anything else: see ptyHistoryOffCmd. The
 	// short settle lets the assignment land before the setup line is
 	// accepted, so the setup line itself cannot be recorded either.
-	if err := s.Send([]byte(ptyHistoryOffCmd + "\n")); err == nil {
-		_ = s.WaitForQuiet(ctx, 300*time.Millisecond, 2*time.Second)
-		s.Drain()
+	if dialect.historyOffCmd != "" {
+		if err := s.Send([]byte(dialect.historyOffCmd + "\n")); err == nil {
+			_ = s.WaitForQuiet(ctx, 300*time.Millisecond, 2*time.Second)
+			s.Drain()
+		}
 	}
 
 	// Strip aliases and install the prompt marker. If the marker never
@@ -658,7 +593,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	// own PS1 - fall back to the bracketed-paste heuristic rather than
 	// leaving every command waiting for a marker that will never come.
 	r.promptRe = ptyPasteRe
-	if err := s.Send([]byte(ptySetupCmd + "\n")); err == nil {
+	if err := s.Send([]byte(dialect.setupCmd + "\n")); err == nil {
 		if s.WaitForAny(ctx, []*regexp.Regexp{ptyPromptRe}, 5*time.Second) == 0 {
 			r.promptRe = ptyPromptRe
 		} else {

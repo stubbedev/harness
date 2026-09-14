@@ -586,7 +586,7 @@ func zshPromptSp(fill int) string {
 func TestPtyCleanZshStream(t *testing.T) {
 	t.Parallel()
 
-	r := &ptyRunner{sentinel: newSentinel()}
+	r := &ptyRunner{sentinel: newSentinel(posixDialect)}
 
 	cases := []struct {
 		name string
@@ -729,7 +729,7 @@ func TestPtyCredPromptPattern(t *testing.T) {
 func TestPtySentinelParsing(t *testing.T) {
 	t.Parallel()
 
-	s := newSentinel()
+	s := newSentinel(posixDialect)
 	tag := strings.TrimSuffix(strings.TrimPrefix(s.cmd, "printf '__exit_"), `:%d@%s__' "$?" "$PWD"`)
 	require.Len(t, tag, 16)
 
@@ -745,7 +745,7 @@ func TestPtySentinelParsing(t *testing.T) {
 
 	// A marker printed by something else - another session, a log line -
 	// is not this session's answer.
-	other := newSentinel()
+	other := newSentinel(posixDialect)
 	require.False(t, s.parse.MatchString("__exit_deadbeefdeadbeef:0@/tmp__"))
 	require.False(t, s.parse.MatchString(other.cmd))
 	require.NotEqual(t, s.cmd, other.cmd)
@@ -911,7 +911,7 @@ func TestPtyRunner_ResetClearsARunningCommand(t *testing.T) {
 // sentinel, matched the sentinel, and was dropped with it.
 func TestPtyRunner_CleanKeepsUnterminatedOutputWithoutBracketedPaste(t *testing.T) {
 	r := &ptyRunner{cwd: t.TempDir()}
-	r.sentinel = newSentinel()
+	r.sentinel = newSentinel(posixDialect)
 	r.promptRe = ptyPromptRe
 
 	cmd := `printf %s "$PTY_TEST_VAR"`
@@ -927,7 +927,7 @@ func TestPtyRunner_CleanKeepsUnterminatedOutputWithoutBracketedPaste(t *testing.
 
 func TestPtyRunner_CleanDropsPromptAndSentinelLines(t *testing.T) {
 	r := &ptyRunner{cwd: t.TempDir()}
-	r.sentinel = newSentinel()
+	r.sentinel = newSentinel(posixDialect)
 	r.promptRe = ptyPromptRe
 
 	cmd := "echo hello"

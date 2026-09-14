@@ -1,4 +1,4 @@
-Run commands in a persistent `{{ .Shell }}` session — one pseudo-terminal for the whole conversation, not a fresh subshell per call. cd, exports, activated environments and the sudo credential carry across calls, and every result ends with `<cwd>…</cwd>`.
+Run commands in a persistent `{{ .Shell }}` session — one pseudo-terminal for the whole conversation, not a fresh subshell per call. Write for that shell. Its state carries across calls: working directory, variables, activated environments and any credential it is holding. Every result ends with `<cwd>…</cwd>`.
 
 <calling_patterns>
 One call does one thing: `command`, `input`, `keys` and `reset` are alternatives, and a call setting two is rejected rather than guessed at. `description` is optional and is what the user sees.

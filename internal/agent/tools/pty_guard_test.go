@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The session guard (ptySetupCmd, re-asserted by every fence) must keep
+// The session guard (the dialect's setup line, re-asserted by every fence) must keep
 // the agent's commands out of the user's shell config in two ways:
 // aliases defined by the rc files never expand, and nothing typed at
 // the session's prompt ever lands in a history file. These tests drive
@@ -65,7 +65,7 @@ func zshGuardRunner(t *testing.T) *ptyRunner {
 // historyFree asserts no command the runner executed is in the history
 // file, after giving the shell a moment to flush on its way out. The
 // only line allowed in the file is the session's own HISTFILE
-// plumbing (ptyHistoryOffCmd); anything else is a leak.
+// plumbing (the dialect's history-off line); anything else is a leak.
 func historyFree(t *testing.T, histfile string, commands ...string) {
 	t.Helper()
 	time.Sleep(300 * time.Millisecond)
@@ -172,7 +172,7 @@ func TestPtyRunner_CommandsNeverEnterHistoryZsh(t *testing.T) {
 func TestPtyRunner_FenceCarriesGuard(t *testing.T) {
 	t.Parallel()
 
-	mark := newSentinel()
+	mark := newSentinel(posixDialect)
 	require.True(t, strings.HasPrefix(mark.begin, "unalias -a 2>/dev/null; HISTFILE=/dev/null; printf '"),
 		"fence must re-assert the alias and history guard, got %q", mark.begin)
 	tag := regexp.MustCompile(`__begin_([0-9a-f]+):`).FindStringSubmatch(mark.begin)
