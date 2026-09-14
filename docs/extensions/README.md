@@ -1,3 +1,11 @@
+| `harness.http.request(spec)`                | same; `spec` is `{ url, method, headers, body, async }` |
+| `harness.await(handle, ...)`                | one result per handle, in order                      |
+| `harness.jobs.start(name[, args])`          | the job ID                                           |
+| `harness.jobs.status(id)`                   | the job record, or `nil`                             |
+| `harness.jobs.results()`                    | every finished, uncollected job record               |
+| `harness.jobs.cancel(id)`                   | boolean                                              |
+| `harness.register_command(spec)`            | —                                                    |
+| `harness.register_job(spec)`                | —                                                    |
 # Extensions
 
 > [!NOTE]
@@ -25,6 +33,11 @@ Lua 5.1.
 - `require` resolves inside the extension's own directory, so an extension can
   be more than one file
 - One extension failing to load never stops the others
+- I/O can run in parallel (`async = true` plus `harness.await`), and work too
+  slow for a tool call can run as a background **job** whose result waits in a
+  queue until the model collects it
+- `harness extensions types --write` installs lua-language-server definitions,
+  so writing one comes with completion and diagnostics
 
 ## Baby's First Extension
 
@@ -220,6 +233,86 @@ harness.register_command({
 Handler-backed commands receive the same arguments as a table
 (`args.FILE`).
 
+## Doing slow work
+
+A handler blocks its VM while it runs, and a tool call has 30 seconds. Two
+things get around that, for two different problems.
+
+### Parallel I/O inside one call
+
+Every `harness.exec` and `harness.http` call takes `async = true`, which
+returns a handle instead of a result. The work runs on its own goroutine while
+Lua carries on; `harness.await` collects it.
+
+```lua
+local jobs = {}
+for i, url in ipairs(urls) do
+  jobs[i] = harness.http.request({ url = url, async = true })
+end
+
+-- Three requests, one wait: as slow as the slowest, not their sum.
+local a, b, c = harness.await(jobs[1], jobs[2], jobs[3])
+-- or, one at a time: local a = jobs[1]:await()
+```
+
+`harness.await` returns one result per handle, in the order they were passed.
+An async HTTP call that never reached the server reports it in the result
+(`result.ok == false`, `result.error`) rather than as a second return value,
+so every handle contributes exactly one value.
+
+Handles do not outlive the call that made them: when the handler returns, its
+context is cancelled and unawaited work stops. At most 64 async calls may be
+in flight per extension.
+
+### Background jobs, and the queue
+
+Work measured in minutes rather than seconds belongs in a job: a handler
+registered at load time, started by name, that keeps running after the tool
+call that started it has already answered the model.
+
+```lua
+harness.register_job({
+  name = "reindex",
+  description = "Rebuild the search index",
+  timeout = 900,                       -- seconds; default 600, max 3600
+  handler = function(args)
+    local result = harness.exec("./scripts/reindex.sh " .. args.path)
+    return { ok = result.ok, output = result.stdout }
+  end,
+})
+
+harness.register_tool({
+  name = "reindex",
+  description = "Start a reindex. Returns a job ID; collect it with extension_jobs.",
+  parameters = { path = { type = "string", required = true } },
+  handler = function(input)
+    return "Reindexing in the background as " ..
+      harness.jobs.start("reindex", { path = input.path })
+  end,
+})
+```
+
+The tool answers immediately with a job ID. What the job returns waits in the
+queue until something collects it:
+
+- **The model** uses the `extension_jobs` tool, which appears in its tool set
+  as soon as any extension registers a job. `list` shows every job and its
+  state; `result` without an ID hands back every finished result nobody has
+  collected yet; `result` with an `id` (and an optional `wait` in seconds)
+  collects one; `cancel` stops a running job.
+- **Lua** uses `harness.jobs.status(id)`, `harness.jobs.results()` (the same
+  drain) and `harness.jobs.cancel(id)`.
+
+A result is handed out once -- whoever collects it first gets it, and the
+record is then marked collected.
+
+A job runs in a **fresh VM of the same extension**, because the VM that
+started it is busy being the caller. That means `init.lua` runs again for each
+job, so keep `init.lua` to registrations and put the work in handlers. Eight
+jobs run at once across all extensions; further starts wait for a slot. The
+queue keeps the last 100 records, dropping the oldest finished ones, and every
+running job is cancelled when Harness shuts down.
+
 ## The `harness` table
 
 Everything the VM can reach, in one place.
@@ -294,9 +387,12 @@ would mean re-entering a VM that is already running.
 
 - **One call at a time.** Each extension has one VM, and calls into it are
   serialised. Two tools from the same extension never run in parallel; tools
-  from different extensions do.
+  from different extensions do. Only Go-side work parallelises: async I/O runs
+  off the VM, but CPU-bound Lua stays serial however it is started.
 - **30 seconds per call.** A handler that runs longer is cancelled and the
-  model is told so.
+  model is told so. Background jobs get their own, much longer bound.
+- **Jobs re-run `init.lua`.** Each job loads a private VM of the extension, so
+  an `init.lua` that does work rather than registering does it again per job.
 - **Registration is load-time.** See above.
 - **Tool names are global.** The first extension to register a name keeps it;
   a later collision is dropped with a warning. Avoid the built-in tool names.
@@ -304,6 +400,32 @@ would mean re-entering a VM that is already running.
   the process lifetime. To keep anything longer, write it under
   `harness.workspace().data_dir`.
 - **Reloading means restarting.** Extensions load once at startup.
+
+## Editor support
+
+The API ships as lua-language-server definitions, so writing an extension
+comes with completion, signature help and diagnostics:
+
+```bash
+# Install them into ~/.config/harness/extensions/
+harness extensions types --write
+
+# Or next to a project's extensions
+harness extensions types --write --dir .harness/extensions
+
+# Or print them and put them wherever you keep such things
+harness extensions types > ~/.local/share/lua-types/harness.lua
+```
+
+`--write` drops `.types/harness.lua` into the directory along with a
+`.luarc.json` pointing the language server at it, so an editor opened on your
+extensions picks it up with no further setup. The definitions are embedded in
+the binary, so they describe the Harness you are running rather than whatever
+a docs page said at the time.
+
+The stub is hand-written, but it cannot drift: a test walks the `harness`
+table at runtime and fails when a registered function has no definition in it
+(`TestTypeDefinitionsCoverTheAPI`).
 
 ## Diagnostics
 
@@ -337,11 +459,14 @@ extension's name.
 
 ## Examples
 
-Two runnable extensions live in [`examples/`](./examples):
+Three runnable extensions live in [`examples/`](./examples):
 
 - [`no-force-push`](./examples/no-force-push/init.lua) — a `PreToolUse`
   handler that blocks `git push --force` and names the safer flag.
 - [`todos`](./examples/todos/init.lua) — a tool, a command and a hook handler
   in one file, built around `rg`.
+- [`link-check`](./examples/link-check/init.lua) — parallel HTTP with handles
+  and `harness.await`, escalating to a background job when there is too much
+  of it for one tool call.
 
 Copy either directory into `~/.config/harness/extensions/` and restart.

@@ -42,6 +42,9 @@ internal/
     extensions.go                  Directory discovery, name validation, dedup
     runtime.go                     Per-extension LState: sandbox, serialised calls, timeouts
     api.go / api_host.go           The `harness` table: registration, then the gated capabilities
+    async.go                       Handles for parallel I/O inside one call
+    jobs.go / job_tool.go          Background jobs, their result queue, and the tool that drains it
+    types/harness.lua              lua-language-server definitions (embedded; `harness extensions types`)
     host.go                        Host: loads every extension, owns tools/commands/dispatch
   session/session.go               Session CRUD backed by SQLite
   message/                         Message model and content types
@@ -133,6 +136,10 @@ providers. Refresh it with `go generate ./internal/catalog`.
   handlers aggregate with shell hooks. Privileged host functions (fs,
   exec, http) fire a `PreToolUse` hook of their own through a separate
   registry, so a policy still sees them and a VM is never re-entered.
+  Slow work has two escapes from the 30s call bound: async handles
+  (`async.go`) for parallel I/O within a call, and background jobs
+  (`jobs.go`) that run in a private VM, outlive the call, and queue their
+  results for the `extension_jobs` tool to collect.
   See `docs/extensions/README.md` for the user-facing API.
 - **CGO disabled**: builds with `CGO_ENABLED=0` and
   `GOEXPERIMENT=greenteagc`.
