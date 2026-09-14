@@ -985,6 +985,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		MaxRetries:           c.cfg.Config().Options.MaxRetries,
 		Sessions:             c.sessions,
 		Messages:             c.messages,
+		LSPManager:           c.lspManager,
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,

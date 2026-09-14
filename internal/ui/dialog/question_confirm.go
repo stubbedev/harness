@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -52,6 +53,7 @@ type ConfirmComponent struct {
 
 // NewConfirmComponent creates a new confirmation component.
 func NewConfirmComponent(sty *styles.Styles, title, description string, labels []string, requests []question.Question, answers []*question.Answer) *ConfirmComponent {
+	q := dialogKeys().Question
 	if title == "" || title == "Confirm" {
 		title = "Ready to go?"
 	}
@@ -63,14 +65,14 @@ func NewConfirmComponent(sty *styles.Styles, title, description string, labels [
 		QuestionRequests: requests,
 		Answers:          answers,
 		confirmYes:       true,
-		keyLeft:          key.NewBinding(key.WithKeys("left"), key.WithHelp("←/→", "switch")),
-		keyRight:         key.NewBinding(key.WithKeys("right"), key.WithHelp("←/→", "switch")),
-		keyYes:           key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "yes")),
-		keyNo:            key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "no")),
-		keyEnter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
-		keyClose:         CloseKey,
-		keyUp:            key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑", "scroll")),
-		keyDown:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓", "scroll")),
+		keyLeft:          q.Left,
+		keyRight:         q.Right,
+		keyYes:           q.Yes,
+		keyNo:            q.No,
+		keyEnter:         q.Confirm,
+		keyClose:         CloseKey(),
+		keyUp:            keys.WithDesc(q.Up, "scroll"),
+		keyDown:          keys.WithDesc(q.Down, "scroll"),
 	}
 }
 

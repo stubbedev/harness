@@ -1,7 +1,13 @@
-package model
+package keys
 
 import (
+	"maps"
+	"reflect"
+	"slices"
+
 	"testing"
+
+	"charm.land/bubbles/v2/key"
 
 	"github.com/stretchr/testify/require"
 )
@@ -90,4 +96,80 @@ func TestKeyMapApplyKeybinds(t *testing.T) {
 			require.Equal(t, []string{"f13"}, binding.Keys(), "action %s did not rebind", action)
 		}
 	})
+}
+
+// bindingFields walks the keymap and returns every key.Binding field it
+// holds, by address, named for the path that reaches it.
+func bindingFields(t *testing.T, km *KeyMap) map[uintptr]string {
+	t.Helper()
+
+	found := make(map[uintptr]string)
+	var walk func(v reflect.Value, path string)
+	walk = func(v reflect.Value, path string) {
+		typ := v.Type()
+		for i := range typ.NumField() {
+			field := v.Field(i)
+			name := typ.Field(i).Name
+			full := name
+			if path != "" {
+				full = path + "." + name
+			}
+			switch {
+			case field.Type() == reflect.TypeOf(key.Binding{}):
+				found[field.Addr().Pointer()] = full
+			case field.Kind() == reflect.Struct:
+				walk(field, full)
+			}
+		}
+	}
+	walk(reflect.ValueOf(km).Elem(), "")
+	return found
+}
+
+// TestEveryBindingHasAnActionName pins the chokepoint: a binding added to
+// the keymap must also be named in keybindActions, or it silently becomes
+// the one key in the TUI a user cannot rebind.
+func TestEveryBindingHasAnActionName(t *testing.T) {
+	t.Parallel()
+
+	km := DefaultKeyMap()
+	fields := bindingFields(t, &km)
+
+	named := make(map[uintptr]string, len(fields))
+	for action, binding := range km.keybindActions() {
+		addr := reflect.ValueOf(binding).Pointer()
+		if other, dup := named[addr]; dup {
+			t.Errorf("actions %q and %q both rebind the same binding", other, action)
+		}
+		named[addr] = action
+	}
+
+	for addr, path := range fields {
+		if _, ok := named[addr]; !ok {
+			t.Errorf("KeyMap.%s has no name in keybindActions, so options.tui.keybinds cannot rebind it", path)
+		}
+	}
+	require.Len(t, named, len(fields), "every action name must point at a binding in the keymap")
+}
+
+// TestActionNamesMatchTheRegistry pins that the names published to the
+// config schema are exactly the ones overrides are applied against.
+func TestActionNamesMatchTheRegistry(t *testing.T) {
+	t.Parallel()
+
+	km := DefaultKeyMap()
+	require.Equal(t, slices.Sorted(maps.Keys(km.keybindActions())), ActionNames())
+}
+
+// TestInstallIsWhatActiveServes pins the second chokepoint: components
+// that cannot reach the config read their keys from Active, so Install has
+// to be what they see.
+func TestInstallIsWhatActiveServes(t *testing.T) {
+	// Not parallel: this installs the process keymap.
+	t.Cleanup(func() { active.Store(nil) })
+
+	require.Equal(t, DefaultKeyMap().Dialog.Select.Keys(), Active().Dialog.Select.Keys())
+
+	Install(map[string][]string{"dialog.select": {"ctrl+space"}})
+	require.Equal(t, []string{"ctrl+space"}, Active().Dialog.Select.Keys())
 }

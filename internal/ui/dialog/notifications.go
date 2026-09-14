@@ -91,23 +91,12 @@ func NewNotifications(com *common.Common) *Notifications {
 	n.input.SetStyles(com.Styles.TextInput)
 	n.input.Focus()
 
-	n.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "confirm"),
-	)
-	n.keyMap.Next = key.NewBinding(
-		key.WithKeys("down", "ctrl+n"),
-		key.WithHelp("↓", "next item"),
-	)
-	n.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "ctrl+p"),
-		key.WithHelp("↑", "previous item"),
-	)
-	n.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
-	)
-	n.keyMap.Close = CloseKey
+	km := dialogKeys()
+	n.keyMap.Select = km.Select
+	n.keyMap.Next = km.Next
+	n.keyMap.Previous = km.Previous
+	n.keyMap.UpDown = km.UpDown
+	n.keyMap.Close = km.Close
 
 	n.setItems()
 	return n

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -38,15 +39,16 @@ type YesNo struct {
 
 // NewYesNo creates a new inline yes/no question component.
 func NewYesNo(sty *styles.Styles, req question.Question) *YesNo {
+	q := dialogKeys().Question
 	return &YesNo{
 		questionEditor: newQuestionEditor(sty),
 		Request:        req,
 		selectedNo:     true, // Default to "No" for safety.
-		keyLeftRight:   key.NewBinding(key.WithKeys("left", "right", "h", "l"), key.WithHelp("←/→", "switch")),
-		keyEnter:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "confirm")),
-		keyYes:         key.NewBinding(key.WithKeys("y", "Y"), key.WithHelp("y", "yes")),
-		keyNo:          key.NewBinding(key.WithKeys("n", "N"), key.WithHelp("n", "no")),
-		keyClose:       CloseKey,
+		keyLeftRight:   keys.Merge("switch", q.Left, q.Right),
+		keyEnter:       q.Confirm,
+		keyYes:         q.Yes,
+		keyNo:          q.No,
+		keyClose:       CloseKey(),
 	}
 }
 
@@ -62,7 +64,7 @@ func (d *YesNo) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 
 	switch {
-	case key.Matches(msg, CloseKey):
+	case key.Matches(msg, CloseKey()):
 		d.answer(question.Answer{QuestionID: d.Request.ID})
 		return true, nil
 	case key.Matches(msg, d.keyLeftRight):
@@ -104,7 +106,7 @@ func (d *YesNo) GetRequest() question.Question { return d.Request }
 // ShortHelp returns key bindings for the status bar help display.
 func (d *YesNo) ShortHelp() []key.Binding {
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
-		return []key.Binding{d.keyClose, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
+		return []key.Binding{d.keyClose, keys.WithDesc(dialogKeys().Question.Confirm, "save note")}
 	}
 	return []key.Binding{d.keyLeftRight, d.keyEnter, d.keyYes, d.keyNo, d.keyNote}
 }

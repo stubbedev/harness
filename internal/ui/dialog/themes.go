@@ -11,6 +11,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/sahilm/fuzzy"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -86,23 +87,14 @@ func NewThemes(com *common.Common) *Themes {
 	t.input.SetStyles(com.Styles.TextInput)
 	t.input.Focus()
 
-	t.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "confirm"),
-	)
-	t.keyMap.Next = key.NewBinding(
-		key.WithKeys("down", "ctrl+n"),
-		key.WithHelp("↓", "next item"),
-	)
-	t.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "ctrl+p"),
-		key.WithHelp("↑", "previous item"),
-	)
-	t.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "preview"),
-	)
-	t.keyMap.Close = CloseKey
+	km := dialogKeys()
+	t.keyMap.Select = km.Select
+	t.keyMap.Next = km.Next
+	t.keyMap.Previous = km.Previous
+	// Moving through this list applies each theme, so the help says
+	// "preview" where other dialogs say "choose".
+	t.keyMap.UpDown = keys.WithDesc(km.UpDown, "preview")
+	t.keyMap.Close = km.Close
 
 	t.setItems()
 	return t

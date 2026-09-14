@@ -85,6 +85,7 @@ type Models struct {
 		UpDown   key.Binding
 		Select   key.Binding
 		Edit     key.Binding
+		Connect  key.Binding
 		Next     key.Binding
 		Previous key.Binding
 		Close    key.Binding
@@ -117,31 +118,15 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
 
-	m.keyMap.Tab = key.NewBinding(
-		key.WithKeys("tab", "shift+tab"),
-		key.WithHelp("tab", "toggle type"),
-	)
-	m.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "confirm"),
-	)
-	m.keyMap.Edit = key.NewBinding(
-		key.WithKeys("ctrl+e"),
-		key.WithHelp("ctrl+e", "edit"),
-	)
-	m.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
-	)
-	m.keyMap.Next = key.NewBinding(
-		key.WithKeys("down", "ctrl+n"),
-		key.WithHelp("↓", "next item"),
-	)
-	m.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "ctrl+p"),
-		key.WithHelp("↑", "previous item"),
-	)
-	m.keyMap.Close = CloseKey
+	km := dialogKeys()
+	m.keyMap.Tab = km.Models.ToggleType
+	m.keyMap.Select = km.Select
+	m.keyMap.Edit = km.Models.Edit
+	m.keyMap.Connect = km.Models.Connect
+	m.keyMap.UpDown = km.UpDown
+	m.keyMap.Next = km.Next
+	m.keyMap.Previous = km.Previous
+	m.keyMap.Close = km.Close
 
 	// A stale catalog must not keep this dialog from opening: it is the
 	// only way for the user to choose a model.
@@ -208,6 +193,11 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ModelType:      modelItem.SelectedModelType(),
 				ReAuthenticate: isEdit,
 			}
+		case key.Matches(msg, m.keyMap.Connect):
+			if m.isOnboarding {
+				break
+			}
+			return ActionOpenDialog{DialogID: ConnectID}
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.isOnboarding {
 				break
@@ -322,7 +312,7 @@ func (m *Models) ShortHelp() []key.Binding {
 	if m.isSelectedConfigured() {
 		h = append(h, m.keyMap.Edit)
 	}
-	h = append(h, m.keyMap.Close)
+	h = append(h, m.keyMap.Connect, m.keyMap.Close)
 	return h
 }
 
@@ -409,7 +399,7 @@ func (m *Models) setProviderItems() error {
 
 			addedProviders[id] = true
 
-			group := NewModelGroup(t, name, true)
+			group := NewModelGroup(t, name, showUnconfigured)
 			for _, model := range p.Models {
 				item := NewModelItem(t, provider, model, m.modelType, false)
 				group.AppendItems(item)
@@ -472,7 +462,10 @@ func (m *Models) setProviderItems() error {
 
 		name := cmp.Or(displayProvider.Name, providerID)
 
-		group := NewModelGroup(t, name, providerConfigured)
+		// The badge only earns its place while the catalog is on screen
+		// and the list is a mix. Outside that every group is configured,
+		// so the badge says nothing and crowds the provider name.
+		group := NewModelGroup(t, name, providerConfigured && showUnconfigured)
 		for _, model := range displayProvider.Models {
 			item := NewModelItem(t, provider, model, m.modelType, false)
 			group.AppendItems(item)

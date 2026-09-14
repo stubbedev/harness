@@ -13,6 +13,7 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -62,16 +63,11 @@ type ItemKeymap struct {
 // DefaultItemKeymap returns the item bindings matching the built-in keymap
 // defaults, used until the model layer injects its (possibly rebound) ones.
 func DefaultItemKeymap() ItemKeymap {
+	km := keys.Active().Chat
 	return ItemKeymap{
-		Copy: key.NewBinding(
-			key.WithKeys("c", "y", "C", "Y"),
-		),
-		ScrollLeft: key.NewBinding(
-			key.WithKeys("shift+left", "H"),
-		),
-		ScrollRight: key.NewBinding(
-			key.WithKeys("shift+right", "L"),
-		),
+		Copy:        km.Copy,
+		ScrollLeft:  km.ScrollLeft,
+		ScrollRight: km.ScrollRight,
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/clipboard"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/workspace"
@@ -38,6 +39,13 @@ type Common struct {
 	Styles    *styles.Styles
 }
 
+// KeyMap returns the key bindings in force, merged with the user's
+// options.tui.keybinds. It is the process keymap: a [Common] built in a
+// test without going through [DefaultCommon] still sees it.
+func (c *Common) KeyMap() *keys.KeyMap {
+	return keys.Active()
+}
+
 // Config returns the pure-data configuration associated with this [Common] instance.
 func (c *Common) Config() *config.Config {
 	return c.Workspace.Config()
@@ -48,6 +56,13 @@ func (c *Common) Config() *config.Config {
 // from the large model's provider, falling back to the default theme.
 func DefaultCommon(ws workspace.Workspace) *Common {
 	s := ThemeStylesForWorkspace(ws)
+	// The user's key overrides are applied once, here, so every component
+	// built afterwards reads the rebound keys off the same keymap.
+	if ws != nil {
+		if cfg := ws.Config(); cfg != nil && cfg.Options != nil {
+			keys.Install(cfg.Options.TUI.KeybindOverrides())
+		}
+	}
 	return &Common{
 		Workspace: ws,
 		Styles:    &s,

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -59,9 +60,9 @@ func NewFreeText(sty *styles.Styles, req question.Question) *FreeText {
 		Styles:     sty,
 		Request:    req,
 		editor:     ta,
-		keyEnter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "submit")),
-		keyNewline: key.NewBinding(key.WithKeys("shift+enter", "ctrl+j"), key.WithHelp("shift+enter", "newline")),
-		keyClose:   CloseKey,
+		keyEnter:   keys.WithDesc(dialogKeys().Question.Confirm, "submit"),
+		keyNewline: dialogKeys().Question.Newline,
+		keyClose:   CloseKey(),
 	}
 }
 

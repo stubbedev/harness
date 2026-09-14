@@ -205,10 +205,10 @@ func NewViewTool(
 				return fantasy.NewTextErrorResponse("File content is not valid UTF-8"), nil
 			}
 
-			// Reading a file never waits on a language server. Whatever the
-			// servers have already published about this file is reported
-			// below; anything they are still working out shows up on the next
-			// read, or on the edit that actually cares about it.
+			// Reading a file never starts a language server it has to wait
+			// for. Whatever the servers have already published about this
+			// file is reported below; anything they are still working out
+			// shows up in a later report.
 			openInLSPs(ctx, lspManager, filePath)
 			output := "<file>\n"
 			output += addLineNumbers(content, params.Offset+1)
@@ -218,7 +218,7 @@ func NewViewTool(
 					params.Offset+len(strings.Split(content, "\n")))
 			}
 			output += "\n</file>\n"
-			output += getDiagnostics(filePath, lspManager)
+			output += reportDiagnostics(ctx, lspManager, filePath)
 			filetracker.RecordRead(ctx, sessionID, filePath)
 
 			meta := ViewResponseMetadata{

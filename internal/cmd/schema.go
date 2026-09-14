@@ -9,6 +9,7 @@ import (
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/discover"
+	"github.com/stubbedev/harness/internal/ui/keys"
 )
 
 var schemaCmd = &cobra.Command{
@@ -22,6 +23,7 @@ var schemaCmd = &cobra.Command{
 		reflector := new(jsonschema.Reflector)
 		schema := reflector.Reflect(&config.Config{})
 		setProviderTypeEnum(schema)
+		setKeybindActionEnum(schema)
 		bts, err := json.MarshalIndent(schema, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal schema: %w", err)
@@ -57,4 +59,26 @@ func setProviderTypeEnum(schema *jsonschema.Schema) {
 	for i, t := range types {
 		typeProp.Enum[i] = t
 	}
+}
+
+// setKeybindActionEnum restricts options.tui.keybinds to the action names
+// the TUI actually binds, sourced from the keymap itself. An editor then
+// completes the names and flags a typo, and an action added to the keymap
+// shows up here without a second list to maintain.
+func setKeybindActionEnum(schema *jsonschema.Schema) {
+	def, ok := schema.Definitions["TUIOptions"]
+	if !ok || def.Properties == nil {
+		return
+	}
+	keybinds, ok := def.Properties.Get("keybinds")
+	if !ok {
+		return
+	}
+
+	actions := keys.ActionNames()
+	enum := make([]any, len(actions))
+	for i, a := range actions {
+		enum[i] = a
+	}
+	keybinds.PropertyNames = &jsonschema.Schema{Enum: enum}
 }

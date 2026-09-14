@@ -43,6 +43,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/hooks"
+	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/session"
@@ -213,6 +214,12 @@ type sessionAgent struct {
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
 
+	// lspManager is consulted before each step for diagnostics the
+	// language servers have produced since the last one. Writes hand their
+	// file over without waiting, so this is where a slow server finally
+	// gets heard. Nil when no LSP is configured.
+	lspManager *lsp.Manager
+
 	// hooks fires user-configured hook events for this agent's runs.
 	// Sub-agents hold the registry too, but the prompt/turn/compact
 	// events are gated on isSubAgent so only the top-level agent fires
@@ -278,6 +285,9 @@ type SessionAgentOptions struct {
 	MaxRetries           *int
 	Sessions             session.Service
 	Messages             message.Service
+	// LSPManager supplies the diagnostics swept into each step. Nil
+	// disables the sweep.
+	LSPManager *lsp.Manager
 	// Checkpoints snapshots the working tree at each user turn so
 	// the session can be rewound. Nil disables checkpoints. It is
 	// ignored for sub-agents: only the top-level coder agent records
@@ -304,6 +314,7 @@ func NewSessionAgent(
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		lspManager:           opts.LSPManager,
 		checkpoints:          opts.Checkpoints,
 		disableAutoSummarize: opts.DisableAutoSummarize,
 		autoSummarizeRatio:   opts.AutoSummarizeRatio,
@@ -915,8 +926,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		outboundPrompt += "\n\n<hook-context>\n" + strings.Join(promptHookContexts, "\n") + "\n</hook-context>"
 	}
 
-	// Add the user message to the session.
-	_, err = a.createUserMessage(ctx, call)
+	// Add the user message to the session. Its ID is kept so an overflow
+	// recovery can take it back out again: the requeued turn writes the
+	// prompt afresh after the summary, and leaving this copy behind would
+	// show the user their own message twice.
+	userMsg, err := a.createUserMessage(ctx, call)
 	if err != nil {
 		return nil, err
 	}
@@ -1086,6 +1100,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 			}
 
+			// Collect whatever the language servers worked out since the last
+			// step. Edits hand their file over and return without waiting, so
+			// this is where the analysis of the previous step's writes
+			// arrives. Usually there is nothing to say and nothing is added.
+			if report := tools.DiagnosticsSweep(callContext, a.lspManager); report != "" {
+				prepared.Messages = append(prepared.Messages, fantasy.NewUserMessage(fmt.Sprintf(
+					"<system_reminder>\nThe language servers reported this since your last step. "+
+						"It is not from the user; do not mention the reminder itself. Fix what you "+
+						"caused, and ignore what is unrelated to your work.\n%s</system_reminder>",
+					report,
+				)))
+			}
+
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 			prepared.Messages = mergeConsecutiveUserMessages(prepared.Messages)
 
@@ -1113,6 +1140,28 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			stepMessages = cloneFantasyMessages(prepared.Messages)
 			sessionLock.Unlock()
 
+			// Project the request this step is about to send, before any row
+			// is written for it. The reported session counters cannot see the
+			// tool results that landed since the last step, so a request
+			// assembled from them can overflow with no check in between.
+			// Aborting here, before the assistant message is created and
+			// before the provider is called, lets the error path summarize
+			// and requeue while leaving nothing behind for a turn that never
+			// happened.
+			if cw := usableContextWindow(a.largeModel.Get()); cw > 0 && !a.disableAutoSummarize {
+				sessionLock.Lock()
+				projectedRequestTokens = estimateMessageTokens(prepared.Messages)
+				projected := projectedRequestTokens
+				sessionLock.Unlock()
+				threshold := autoSummarizeThreshold(cw, a.autoSummarizeRatio, a.autoSummarizeBuffer)
+				if projected+threshold >= cw {
+					return callContext, prepared, fmt.Errorf(
+						"%w: next request projected at ~%d tokens against a %d-token usable window",
+						errContextWindowExceeded, projected, cw,
+					)
+				}
+			}
+
 			var assistantMsg message.Message
 			// The assistant row must exist for the turn's terminal persistence
 			// even when a CancelTurn raced this step: create it on a detached
@@ -1135,25 +1184,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatalogCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatalogCfg.Name)
 
-			// Project the request this step is about to send. The reported
-			// session counters cannot see the tool results that landed since
-			// the last step, so a request assembled from them can overflow
-			// with no check in between. Aborting here — before the provider
-			// is called — lets the run's error path summarize and requeue
-			// instead of surfacing a guaranteed 400.
-			if cw := usableContextWindow(a.largeModel.Get()); cw > 0 && !a.disableAutoSummarize {
-				sessionLock.Lock()
-				projectedRequestTokens = estimateMessageTokens(prepared.Messages)
-				projected := projectedRequestTokens
-				sessionLock.Unlock()
-				threshold := autoSummarizeThreshold(cw, a.autoSummarizeRatio, a.autoSummarizeBuffer)
-				if projected+threshold >= cw {
-					return callContext, prepared, fmt.Errorf(
-						"%w: next request projected at ~%d tokens against a %d-token usable window",
-						errContextWindowExceeded, projected, cw,
-					)
-				}
-			}
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},
@@ -1420,6 +1450,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			"session_id", call.SessionID, "error", err.Error())
 		err = nil
 		a.activeRequests.Del(call.SessionID)
+		// Clear the wreckage of the turn that did not happen. The failed
+		// assistant carries the overflow as a finish error, which the
+		// transcript would render as a failure the user has to think
+		// about -- but it was recovered from, so there is nothing to
+		// report. The user message goes with it because the requeued turn
+		// writes the prompt again on the far side of the summary; keeping
+		// both would show it twice.
+		if currentAssistant != nil {
+			if delErr := a.messages.Delete(ctx, currentAssistant.ID); delErr != nil {
+				slog.Warn("Failed to remove the overflowed assistant message", "error", delErr)
+			}
+			currentAssistant = nil
+		}
+		if delErr := a.messages.Delete(ctx, userMsg.ID); delErr != nil {
+			slog.Warn("Failed to remove the overflowed user message", "error", delErr)
+		}
 		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", ""); summarizeErr != nil {
 			return nil, summarizeErr
 		}
@@ -1881,6 +1927,11 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 		return err
 	}
 
+	// The transcript those diagnostics were reported into is gone. Start the
+	// record over, or a standing error stays suppressed as already-reported
+	// against a context that no longer mentions it.
+	tools.ForgetReportedDiagnostics(a.lspManager, sessionID)
+
 	// PostCompact is informational, mirroring PreCompact after the fact.
 	if !a.isSubAgent && a.hooks.Has(hooks.EventPostCompact) {
 		if _, hookErr := a.hooks.Run(ctx, hooks.EventContext{
@@ -2128,6 +2179,16 @@ func toolResultsForCalls(m message.Message, toolResultsByCall map[string][]fanta
 // "consecutive role 'user'" errors after an ESC cancel leaves an empty
 // assistant message that is filtered out. File parts and text parts are
 // preserved in order.
+// isSystemReminder reports whether a message is one the harness synthesized
+// rather than something the user wrote.
+func isSystemReminder(m fantasy.Message) bool {
+	if len(m.Content) == 0 {
+		return false
+	}
+	tp, ok := fantasy.AsMessagePart[fantasy.TextPart](m.Content[0])
+	return ok && strings.Contains(tp.Text, "<system_reminder>")
+}
+
 func mergeConsecutiveUserMessages(msgs []fantasy.Message) []fantasy.Message {
 	if len(msgs) == 0 {
 		return msgs
@@ -2135,18 +2196,15 @@ func mergeConsecutiveUserMessages(msgs []fantasy.Message) []fantasy.Message {
 	out := make([]fantasy.Message, 0, len(msgs))
 	for _, m := range msgs {
 		if m.Role == fantasy.MessageRoleUser && len(out) > 0 && out[len(out)-1].Role == fantasy.MessageRoleUser {
-			// Do not merge the synthetic system_reminder (always the first
-			// element when isSubAgent is false) with the first real user
-			// message. The reminder must stay as a separate message for
+			// Do not merge a synthetic system_reminder with a real user
+			// message, in either direction: the todo reminder that leads the
+			// prompt, and the diagnostics sweep that can land behind the
+			// user's own message, both have to stay their own message for
 			// cache control and existing test expectations.
 			prev := &out[len(out)-1]
-			if len(prev.Content) > 0 {
-				if tp, ok := fantasy.AsMessagePart[fantasy.TextPart](prev.Content[0]); ok {
-					if strings.Contains(tp.Text, "<system_reminder>") {
-						out = append(out, m)
-						continue
-					}
-				}
+			if isSystemReminder(*prev) || isSystemReminder(m) {
+				out = append(out, m)
+				continue
 			}
 			prev.Content = append(prev.Content, m.Content...)
 			if m.ProviderOptions != nil {

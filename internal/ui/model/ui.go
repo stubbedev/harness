@@ -471,8 +471,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// The keymap is built before the components that copy bindings out of
 	// it (the textarea's select-all, the chat items' copy/scroll keys), so
 	// user overrides from options.tui.keybinds reach every consumer.
-	keyMap := DefaultKeyMap()
-	keyMap.ApplyKeybinds(com.Config().Options.TUI.KeybindOverrides())
+	keyMap := *com.KeyMap()
 
 	// Editor components
 	ta := textarea.New()
@@ -485,10 +484,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.MaxHeight = TextareaMaxHeight
 	// Keep "ctrl+a" for line-start (the textarea default); bind select-all
 	// to "ctrl+shift+a" instead (line-start is also available via "home").
-	ta.KeyMap.LineStart = key.NewBinding(
-		key.WithKeys("home", "ctrl+a"),
-		key.WithHelp("home", "line start"),
-	)
+	ta.KeyMap.LineStart = keyMap.Editor.LineStart
 	ta.KeyMap.SelectAll = keyMap.Editor.SelectAll
 	// Copying is handled by harness's keymap (Editor.CopySelection) so it can
 	// use harness's clipboard backend and user feedback; disable the
@@ -2377,6 +2373,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	if !isConfigured() || msg.ReAuthenticate {
 		m.dialog.CloseDialog(dialog.ModelsID)
+		m.dialog.CloseDialog(dialog.ConnectID)
 		if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -2422,6 +2419,7 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	m.dialog.CloseDialog(dialog.APIKeyInputID)
 	m.dialog.CloseDialog(dialog.OAuthID)
 	m.dialog.CloseDialog(dialog.ModelsID)
+	m.dialog.CloseDialog(dialog.ConnectID)
 
 	if isOnboarding {
 		m.setState(uiLanding, uiFocusEditor)
@@ -4509,6 +4507,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openReasoningDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ConnectID:
+		if cmd := m.openConnectDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case dialog.ThemesID:
 		if cmd := m.openThemesDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4570,6 +4572,25 @@ func (m *UI) openModelsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(modelsDialog)
 
+	return nil
+}
+
+// openConnectDialog opens the provider connection dialog. An open models
+// dialog gives way to it: the two are the same list seen from either side
+// of having credentials.
+func (m *UI) openConnectDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.ConnectID) {
+		m.dialog.BringToFront(dialog.ConnectID)
+		return nil
+	}
+
+	connectDialog, err := dialog.NewConnect(m.com)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.CloseDialog(dialog.ModelsID)
+	m.dialog.OpenDialog(connectDialog)
 	return nil
 }
 

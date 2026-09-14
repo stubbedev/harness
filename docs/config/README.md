@@ -365,9 +365,13 @@ An unknown action name or an empty key list is warned about in the log and
 ignored; it never blocks startup. Chords (two-key sequences) are not
 supported — every action is a single keypress.
 
-Not rebindable yet: keys inside dialogs (sessions, models,
-command palette, question prompts), the textarea's movement/editing keys
-(word-jump, delete-word, line-start, ...), and bang-mode `!` entry/exit.
+Dialog keys are rebindable too. The five `dialog.*` actions at the top of
+the table are shared by every dialog — rebinding `dialog.next` moves "next
+item" in the model picker, the session list and the command palette at once
+— and the `dialog.<name>.*` actions below them belong to one dialog each.
+
+Not rebindable yet: the textarea's movement and editing keys (word-jump,
+delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 
 | Action | Default key(s) |
 | --- | --- |
@@ -387,7 +391,7 @@ command palette, question prompts), the textarea's movement/editing keys
 | `chat.half_page_up` | `u` |
 | `chat.home` | `g`, `home` |
 | `chat.new_session` | `ctrl+n` |
-| `chat.page_down` | `pgdown`, `space`, `f` |
+| `chat.page_down` | `pgdown`, ` `, `f` |
 | `chat.page_up` | `pgup`, `b` |
 | `chat.scroll_left` | `shift+left`, `H` |
 | `chat.scroll_right` | `shift+right`, `L` |
@@ -398,6 +402,56 @@ command palette, question prompts), the textarea's movement/editing keys
 | `chat.up_down_one_item` | `shift+up`, `shift+down` |
 | `chat.up_one_item` | `shift+up`, `K` |
 | `commands` | `ctrl+p` |
+| `completions.cancel` | `esc`, `alt+esc` |
+| `completions.down` | `down` |
+| `completions.insert_next` | `ctrl+n` |
+| `completions.insert_previous` | `ctrl+p` |
+| `completions.select` | `enter`, `tab`, `ctrl+y` |
+| `completions.up` | `up` |
+| `dialog.arguments.confirm` | `enter` |
+| `dialog.arguments.next` | `down`, `tab` |
+| `dialog.arguments.previous` | `up`, `shift+tab` |
+| `dialog.close` | `esc`, `alt+esc` |
+| `dialog.commands.shift_tab` | `shift+tab` |
+| `dialog.commands.tab` | `tab` |
+| `dialog.file_picker.backward` | `left`, `h` |
+| `dialog.file_picker.down` | `down`, `j` |
+| `dialog.file_picker.forward` | `right`, `l` |
+| `dialog.file_picker.select` | `enter` |
+| `dialog.file_picker.up` | `up`, `k` |
+| `dialog.mcp_auth.copy` | `c`, `u` |
+| `dialog.mcp_auth.skip` | `s` |
+| `dialog.models.connect` | `ctrl+g` |
+| `dialog.models.edit` | `ctrl+e` |
+| `dialog.models.toggle_type` | `tab`, `shift+tab` |
+| `dialog.next` | `down`, `ctrl+n` |
+| `dialog.oauth.copy` | `c` |
+| `dialog.oauth.copy_url` | `u` |
+| `dialog.previous` | `up`, `ctrl+p` |
+| `dialog.question.confirm` | `enter` |
+| `dialog.question.down` | `down`, `j` |
+| `dialog.question.left` | `left` |
+| `dialog.question.newline` | `shift+enter`, `ctrl+j` |
+| `dialog.question.next_tab` | `]`, `ctrl+right` |
+| `dialog.question.no` | `n`, `N` |
+| `dialog.question.note` | `alt+n` |
+| `dialog.question.prev_tab` | `[`, `ctrl+left` |
+| `dialog.question.right` | `right` |
+| `dialog.question.toggle` | ` `, `space` |
+| `dialog.question.up` | `up`, `k` |
+| `dialog.question.yes` | `y`, `Y` |
+| `dialog.rewind.back` | `esc`, `h`, `backspace` |
+| `dialog.rewind.select` | `enter`, `tab`, `ctrl+y` |
+| `dialog.select` | `enter`, `ctrl+y` |
+| `dialog.sessions.cancel_delete` | `n`, `esc` |
+| `dialog.sessions.cancel_rename` | `esc` |
+| `dialog.sessions.confirm_delete` | `y`, `enter` |
+| `dialog.sessions.confirm_rename` | `enter` |
+| `dialog.sessions.delete` | `ctrl+x` |
+| `dialog.sessions.keep_title` | `space` |
+| `dialog.sessions.rename` | `ctrl+r` |
+| `dialog.sessions.select` | `enter`, `tab`, `ctrl+y` |
+| `dialog.up_down` | `up`, `down` |
 | `editor.add_image` | `ctrl+f` |
 | `editor.attachment_delete_mode` | `ctrl+r` |
 | `editor.commands` | `/` |
@@ -407,6 +461,7 @@ command palette, question prompts), the textarea's movement/editing keys
 | `editor.escape` | `esc`, `alt+esc` |
 | `editor.history_next` | `down` |
 | `editor.history_prev` | `up` |
+| `editor.line_start` | `home`, `ctrl+a` |
 | `editor.mention_file` | `@` |
 | `editor.newline` | `shift+enter`, `ctrl+j` |
 | `editor.open_editor` | `ctrl+o` |

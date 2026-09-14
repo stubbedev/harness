@@ -72,19 +72,11 @@ func NewArguments(com *common.Common, title, description string, arguments []com
 	a.help = help.New()
 	a.help.Styles = com.Styles.DialogHelpStyles()
 
-	a.keyMap.Confirm = key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "confirm"),
-	)
-	a.keyMap.Next = key.NewBinding(
-		key.WithKeys("down", "tab"),
-		key.WithHelp("↓/tab", "next"),
-	)
-	a.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "shift+tab"),
-		key.WithHelp("↑/shift+tab", "previous"),
-	)
-	a.keyMap.Close = CloseKey
+	km := dialogKeys()
+	a.keyMap.Confirm = km.Arguments.Confirm
+	a.keyMap.Next = km.Arguments.Next
+	a.keyMap.Previous = km.Arguments.Previous
+	a.keyMap.Close = km.Close
 
 	// Create input fields for each argument.
 	a.inputs = make([]textinput.Model, len(arguments))

@@ -125,11 +125,11 @@ func NewWriteTool(
 
 			filetracker.RecordRead(ctx, sessionID, filePath)
 
-			notifyLSPs(ctx, lspManager, params.FilePath)
+			lspManager.NotifyChangeAsync(ctx, params.FilePath)
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
-			result += getDiagnostics(filePath, lspManager)
+			result += reportDiagnostics(ctx, lspManager, filePath)
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(result),
 				WriteResponseMetadata{

@@ -15,6 +15,7 @@ import (
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/ui/util"
 )
@@ -86,11 +87,9 @@ func NewAPIKeyInput(
 	m.help = help.New()
 	m.help.Styles = t.DialogHelpStyles()
 
-	m.keyMap.Submit = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "submit"),
-	)
-	m.keyMap.Close = CloseKey
+	km := dialogKeys()
+	m.keyMap.Submit = keys.WithDesc(km.Select, "submit")
+	m.keyMap.Close = km.Close
 
 	return &m, nil
 }

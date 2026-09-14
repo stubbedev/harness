@@ -18,6 +18,7 @@ import (
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/ui/common"
 	fimage "github.com/stubbedev/harness/internal/ui/image"
+	"github.com/stubbedev/harness/internal/ui/keys"
 )
 
 // FilePickerID is the identifier for the FilePicker dialog.
@@ -67,34 +68,16 @@ func NewFilePicker(com *common.Common) (*FilePicker, tea.Cmd) {
 
 	f.help = help
 
-	f.km.Select = key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "accept"),
-	)
-	f.km.Down = key.NewBinding(
-		key.WithKeys("down", "j"),
-		key.WithHelp("down/j", "move down"),
-	)
-	f.km.Up = key.NewBinding(
-		key.WithKeys("up", "k"),
-		key.WithHelp("up/k", "move up"),
-	)
-	f.km.Forward = key.NewBinding(
-		key.WithKeys("right", "l"),
-		key.WithHelp("right/l", "move forward"),
-	)
-	f.km.Backward = key.NewBinding(
-		key.WithKeys("left", "h"),
-		key.WithHelp("left/h", "move backward"),
-	)
-	f.km.Navigate = key.NewBinding(
-		key.WithKeys("right", "l", "left", "h", "up", "k", "down", "j"),
-		key.WithHelp("↑↓←→", "navigate"),
-	)
-	f.km.Close = key.NewBinding(
-		key.WithKeys("esc", "alt+esc"),
-		key.WithHelp("esc", "close/exit"),
-	)
+	km := dialogKeys()
+	f.km.Select = km.FilePicker.Select
+	f.km.Down = km.FilePicker.Down
+	f.km.Up = km.FilePicker.Up
+	f.km.Forward = km.FilePicker.Forward
+	f.km.Backward = km.FilePicker.Backward
+	// One help entry stands for all four movement keys, so it follows
+	// whatever they are bound to.
+	f.km.Navigate = km.FilePicker.Navigate()
+	f.km.Close = keys.WithDesc(km.Close, "close/exit")
 
 	fp := filepicker.New()
 	fp.AllowedTypes = common.AllowedImageTypes

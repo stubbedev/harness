@@ -88,9 +88,9 @@ func newChoiceList(sty *styles.Styles, req question.Question) choiceList {
 		hoverY:         -1,
 		fillInTop:      -1,
 		fillInBottom:   -1,
-		keyUp:          key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑", "up")),
-		keyDown:        key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓", "down")),
-		keyClose:       CloseKey,
+		keyUp:          dialogKeys().Question.Up,
+		keyDown:        dialogKeys().Question.Down,
+		keyClose:       CloseKey(),
 	}
 }
 

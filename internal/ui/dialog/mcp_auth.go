@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/browser"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 )
 
 // MCPAuthID is the identifier for the MCP authentication dialog.
@@ -73,19 +74,11 @@ func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authUR
 	m.help = help.New()
 	m.help.Styles = t.DialogHelpStyles()
 
-	m.keyMap.Submit = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "open browser"),
-	)
-	m.keyMap.Copy = key.NewBinding(
-		key.WithKeys("c", "u"),
-		key.WithHelp("c", "copy url"),
-	)
-	m.keyMap.Skip = key.NewBinding(
-		key.WithKeys("s"),
-		key.WithHelp("s", "skip"),
-	)
-	m.keyMap.Close = CloseKey
+	km := dialogKeys()
+	m.keyMap.Submit = keys.WithDesc(km.Select, "open browser")
+	m.keyMap.Copy = km.MCPAuth.Copy
+	m.keyMap.Skip = km.MCPAuth.Skip
+	m.keyMap.Close = km.Close
 
 	return m, m.spinner.Tick
 }
@@ -359,10 +352,7 @@ func (m *MCPAuth) ShortHelp() []key.Binding {
 			label = "next"
 		}
 		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter", "ctrl+y"),
-				key.WithHelp("enter", label),
-			),
+			keys.WithDesc(m.keyMap.Submit, label),
 			m.keyMap.Close,
 		}
 	case MCPAuthStateError:

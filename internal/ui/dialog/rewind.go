@@ -14,6 +14,7 @@ import (
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -132,27 +133,13 @@ func NewRewind(com *common.Common, sessionID string) (*Rewind, error) {
 	r.list = list.NewFilterableList(rewindTurnItems(com.Styles, r.turns)...)
 	r.list.Focus()
 
-	r.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "tab", "ctrl+y"),
-		key.WithHelp("enter", "choose"),
-	)
-	r.keyMap.Back = key.NewBinding(
-		key.WithKeys("esc", "h", "backspace"),
-		key.WithHelp("esc", "back"),
-	)
-	r.keyMap.Next = key.NewBinding(
-		key.WithKeys("down", "ctrl+n"),
-		key.WithHelp("↓", "next"),
-	)
-	r.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "ctrl+p"),
-		key.WithHelp("↑", "previous"),
-	)
-	r.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑↓", "choose"),
-	)
-	r.keyMap.Close = CloseKey
+	km := dialogKeys()
+	r.keyMap.Select = km.Rewind.Select
+	r.keyMap.Back = km.Rewind.Back
+	r.keyMap.Next = keys.WithDesc(km.Next, "next")
+	r.keyMap.Previous = keys.WithDesc(km.Previous, "previous")
+	r.keyMap.UpDown = km.UpDown
+	r.keyMap.Close = km.Close
 
 	return r, nil
 }

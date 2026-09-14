@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 )
 
 // AWSSSOID is the identifier for the AWS SSO auth dialog.
@@ -73,11 +74,9 @@ func NewAWSSSO(com *common.Common, command string) (*AWSSSO, tea.Cmd) {
 	m.help = help.New()
 	m.help.Styles = t.DialogHelpStyles()
 
-	m.keyMap.Open = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "open in browser"),
-	)
-	m.keyMap.Close = CloseKey
+	km := dialogKeys()
+	m.keyMap.Open = keys.WithDesc(km.Select, "open in browser")
+	m.keyMap.Close = km.Close
 
 	return m, m.spinner.Tick
 }
@@ -281,12 +280,7 @@ func (m *AWSSSO) ShortHelp() []key.Binding {
 	case awsSSOStateError:
 		return []key.Binding{m.keyMap.Close}
 	case awsSSOStateSuccess:
-		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter", "ctrl+y", "esc"),
-				key.WithHelp("enter", "close"),
-			),
-		}
+		return []key.Binding{keys.Merge("close", m.keyMap.Open, m.keyMap.Close)}
 	default:
 		if m.url != "" {
 			return []key.Binding{m.keyMap.Open, m.keyMap.Close}

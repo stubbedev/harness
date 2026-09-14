@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/question"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -32,8 +33,8 @@ func NewMultiChoice(sty *styles.Styles, req question.Question) *MultiChoice {
 	return &MultiChoice{
 		choiceList: cl,
 		selected:   make(map[int]bool),
-		keyToggle:  key.NewBinding(key.WithKeys(" ", "space"), key.WithHelp("space", "toggle")),
-		keyDone:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "done")),
+		keyToggle:  dialogKeys().Question.Toggle,
+		keyDone:    keys.WithDesc(dialogKeys().Question.Confirm, "done"),
 	}
 }
 
@@ -150,7 +151,7 @@ func (d *MultiChoice) respond() question.Answer {
 // ShortHelp returns key bindings for the status bar.
 func (d *MultiChoice) ShortHelp() []key.Binding {
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
-		return []key.Binding{d.keyClose, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
+		return []key.Binding{d.keyClose, keys.WithDesc(dialogKeys().Question.Confirm, "save note")}
 	}
 	if d.isFillIn() && d.fillIn.Focused() {
 		return []key.Binding{d.navUp, d.keyDone, d.keyClose}

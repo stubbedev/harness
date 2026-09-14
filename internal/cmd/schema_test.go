@@ -8,6 +8,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/ui/keys"
 )
 
 func TestSchemaNoBrokenRefs(t *testing.T) {
@@ -56,4 +57,29 @@ func TestSchemaProvidersHasAdditionalProperties(t *testing.T) {
 	require.Equal(t, "object", providers.Type)
 	require.True(t, strings.Contains(string(providers.AdditionalProperties), "ProviderConfig"),
 		"providers should use additionalProperties with a ProviderConfig ref, got: %s", string(providers.AdditionalProperties))
+}
+
+// TestSchemaKeybindActionsMatchTheKeymap pins that the published schema
+// enumerates exactly the actions the TUI binds. A key added to the keymap
+// is then offered by the editor without a second list to maintain, and an
+// action removed stops validating.
+func TestSchemaKeybindActionsMatchTheKeymap(t *testing.T) {
+	t.Parallel()
+
+	reflector := new(jsonschema.Reflector)
+	schema := reflector.Reflect(&config.Config{})
+	setKeybindActionEnum(schema)
+
+	def, ok := schema.Definitions["TUIOptions"]
+	require.True(t, ok, "schema should define TUIOptions")
+	keybinds, ok := def.Properties.Get("keybinds")
+	require.True(t, ok, "TUIOptions should have a keybinds property")
+	require.NotNil(t, keybinds.PropertyNames, "keybinds should restrict its action names")
+
+	var got []string
+	for _, v := range keybinds.PropertyNames.Enum {
+		got = append(got, v.(string))
+	}
+	require.Equal(t, keys.ActionNames(), got)
+	require.Contains(t, got, "dialog.models.connect", "dialog keys belong in the schema too")
 }

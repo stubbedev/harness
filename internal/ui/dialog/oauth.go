@@ -16,6 +16,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/util"
 )
 
@@ -102,19 +103,11 @@ func newOAuth(
 	m.help = help.New()
 	m.help.Styles = t.DialogHelpStyles()
 
-	m.keyMap.Copy = key.NewBinding(
-		key.WithKeys("c"),
-		key.WithHelp("c", "copy code"),
-	)
-	m.keyMap.CopyURL = key.NewBinding(
-		key.WithKeys("u"),
-		key.WithHelp("u", "copy url"),
-	)
-	m.keyMap.Submit = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "copy & open"),
-	)
-	m.keyMap.Close = CloseKey
+	km := dialogKeys()
+	m.keyMap.Copy = km.OAuth.Copy
+	m.keyMap.CopyURL = km.OAuth.CopyURL
+	m.keyMap.Submit = keys.WithDesc(km.Select, "copy & open")
+	m.keyMap.Close = km.Close
 
 	return &m, tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)
 }
@@ -394,10 +387,7 @@ func (m *OAuth) ShortHelp() []key.Binding {
 
 	case OAuthStateSuccess:
 		return []key.Binding{
-			key.NewBinding(
-				key.WithKeys("enter", "ctrl+y", "esc"),
-				key.WithHelp("enter", "finish"),
-			),
+			keys.Merge("finish", m.keyMap.Submit, m.keyMap.Close),
 		}
 
 	case OAuthStateSaving:

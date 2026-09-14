@@ -55,14 +55,15 @@ type questionEditor struct {
 // newQuestionEditor creates a questionEditor with configured
 // fill-in and note textareas.
 func newQuestionEditor(sty *styles.Styles) questionEditor {
+	q := dialogKeys().Question
 	return questionEditor{
 		Styles:     sty,
 		fillIn:     newQuestionTextarea(sty, "Something else?", 500),
 		noteEditor: newQuestionTextarea(sty, "Add a note...", 300),
 		notes:      make(map[string]string),
-		keyNote:    key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("alt+n", "note")),
-		navUp:      key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "up")),
-		navDown:    key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "down")),
+		keyNote:    q.Note,
+		navUp:      q.Up,
+		navDown:    q.Down,
 	}
 }
 
@@ -103,7 +104,7 @@ func (e *questionEditor) handleNoteKey(msg tea.KeyPressMsg, closeKey key.Binding
 		onClose()
 		return nil, false
 	default:
-		if key.Matches(msg, key.NewBinding(key.WithKeys("enter"))) {
+		if key.Matches(msg, dialogKeys().Question.Confirm) {
 			onClose()
 			return nil, true
 		}

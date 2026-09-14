@@ -2,50 +2,22 @@ package completions
 
 import (
 	"charm.land/bubbles/v2/key"
+
+	"github.com/stubbedev/harness/internal/ui/keys"
 )
 
-// KeyMap defines the key bindings for the completions component.
-type KeyMap struct {
-	Down,
-	Up,
-	Select,
-	Cancel key.Binding
-	DownInsert,
-	UpInsert key.Binding
-}
+// KeyMap defines the key bindings for the completions component. The
+// bindings live in [keys] with every other key the TUI reads, so they
+// follow the user's options.tui.keybinds.
+type KeyMap = keys.CompletionsKeys
 
-// DefaultKeyMap returns the default key bindings for completions.
+// DefaultKeyMap returns the completions bindings in force.
 func DefaultKeyMap() KeyMap {
-	return KeyMap{
-		Down: key.NewBinding(
-			key.WithKeys("down"),
-			key.WithHelp("down", "move down"),
-		),
-		Up: key.NewBinding(
-			key.WithKeys("up"),
-			key.WithHelp("up", "move up"),
-		),
-		Select: key.NewBinding(
-			key.WithKeys("enter", "tab", "ctrl+y"),
-			key.WithHelp("enter", "select"),
-		),
-		Cancel: key.NewBinding(
-			key.WithKeys("esc", "alt+esc"),
-			key.WithHelp("esc", "cancel"),
-		),
-		DownInsert: key.NewBinding(
-			key.WithKeys("ctrl+n"),
-			key.WithHelp("ctrl+n", "insert next"),
-		),
-		UpInsert: key.NewBinding(
-			key.WithKeys("ctrl+p"),
-			key.WithHelp("ctrl+p", "insert previous"),
-		),
-	}
+	return keys.Active().Completions
 }
 
-// KeyBindings returns all key bindings as a slice.
-func (k KeyMap) KeyBindings() []key.Binding {
+// KeyBindings returns the bindings worth showing in help.
+func KeyBindings(k KeyMap) []key.Binding {
 	return []key.Binding{
 		k.Down,
 		k.Up,
@@ -55,9 +27,9 @@ func (k KeyMap) KeyBindings() []key.Binding {
 }
 
 // FullHelp returns the full help for the key bindings.
-func (k KeyMap) FullHelp() [][]key.Binding {
+func FullHelp(k KeyMap) [][]key.Binding {
 	m := [][]key.Binding{}
-	slice := k.KeyBindings()
+	slice := KeyBindings(k)
 	for i := 0; i < len(slice); i += 4 {
 		end := min(i+4, len(slice))
 		m = append(m, slice[i:end])
@@ -66,9 +38,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 }
 
 // ShortHelp returns the short help for the key bindings.
-func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{
-		k.Up,
-		k.Down,
-	}
+func ShortHelp(k KeyMap) []key.Binding {
+	return []key.Binding{k.Up, k.Down}
 }

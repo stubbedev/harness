@@ -97,51 +97,19 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	s.input.SetStyles(com.Styles.TextInput)
 	s.input.Focus()
 
-	s.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "tab", "ctrl+y"),
-		key.WithHelp("enter", "choose"),
-	)
-	s.keyMap.Next = key.NewBinding(
-		key.WithKeys("down", "ctrl+n"),
-		key.WithHelp("↓", "next item"),
-	)
-	s.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "ctrl+p"),
-		key.WithHelp("↑", "previous item"),
-	)
-	s.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑↓", "choose"),
-	)
-	s.keyMap.Delete = key.NewBinding(
-		key.WithKeys("ctrl+x"),
-		key.WithHelp("ctrl+x", "delete"),
-	)
-	s.keyMap.Rename = key.NewBinding(
-		key.WithKeys("ctrl+r"),
-		key.WithHelp("ctrl+r", "rename"),
-	)
-	s.keyMap.ConfirmRename = key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "confirm"),
-	)
-	s.keyMap.CancelRename = key.NewBinding(
-		key.WithKeys("esc"),
-		key.WithHelp("esc", "cancel"),
-	)
-	s.keyMap.KeepTitle = key.NewBinding(
-		key.WithKeys("space"),
-		key.WithHelp("space", "keep current title"),
-	)
-	s.keyMap.ConfirmDelete = key.NewBinding(
-		key.WithKeys("y", "enter"),
-		key.WithHelp("y", "delete"),
-	)
-	s.keyMap.CancelDelete = key.NewBinding(
-		key.WithKeys("n", "esc"),
-		key.WithHelp("n", "cancel"),
-	)
-	s.keyMap.Close = CloseKey
+	km := dialogKeys()
+	s.keyMap.Select = km.Sessions.Select
+	s.keyMap.Next = km.Next
+	s.keyMap.Previous = km.Previous
+	s.keyMap.UpDown = km.UpDown
+	s.keyMap.Delete = km.Sessions.Delete
+	s.keyMap.Rename = km.Sessions.Rename
+	s.keyMap.ConfirmRename = km.Sessions.ConfirmRename
+	s.keyMap.CancelRename = km.Sessions.CancelRename
+	s.keyMap.KeepTitle = km.Sessions.KeepTitle
+	s.keyMap.ConfirmDelete = km.Sessions.ConfirmDelete
+	s.keyMap.CancelDelete = km.Sessions.CancelDelete
+	s.keyMap.Close = km.Close
 
 	return s, nil
 }

@@ -41,6 +41,13 @@ type Manager struct {
 	callback     func(name string, client *Client)
 	now          func() time.Time
 	lookPath     func(string) (string, error)
+	// ledger tracks which diagnostics each session has already been shown.
+	ledger *Ledger
+	// settleMu guards settlePending, the done channels of the background
+	// waits started by NotifyChangeAsync. A caller that is about to report
+	// diagnostics uses them to give an in-flight wait a moment to land.
+	settleMu      sync.Mutex
+	settlePending []chan struct{}
 }
 
 // NewManager creates a new LSP manager service.
@@ -79,7 +86,17 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 		callback:     func(string, *Client) {}, // default no-op callback
 		now:          time.Now,
 		lookPath:     exec.LookPath,
+		ledger:       NewLedger(),
 	}
+}
+
+// Ledger returns the record of which diagnostics each session has already been
+// shown.
+func (s *Manager) Ledger() *Ledger {
+	if s == nil {
+		return nil
+	}
+	return s.ledger
 }
 
 // Clients returns the map of LSP clients.

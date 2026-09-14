@@ -85,7 +85,10 @@ func NewRenameTool(
 				}
 			}
 
-			notifyLSPs(ctx, lspManager, "")
+			// A rename knows exactly which files it touched, so tell the
+			// servers about those rather than re-sending every open file in
+			// the workspace and asking for a full re-analysis.
+			lspManager.NotifyChangesAsync(ctx, affectedFiles...)
 
 			var b strings.Builder
 			fmt.Fprintf(&b, "Renamed '%s' to '%s' in %d file(s):\n\n", params.Symbol, params.NewName, len(affectedFiles))
@@ -93,10 +96,10 @@ func NewRenameTool(
 				fmt.Fprintf(&b, "  %s\n", f)
 			}
 
-			text := b.String()
-			if len(affectedFiles) > 0 {
-				text += "\n" + getDiagnostics(affectedFiles[0], lspManager)
-			}
+			// Every file the rename touched counts as the file in hand: a
+			// rename that breaks a caller breaks it in one of these, and
+			// burying that under "project diagnostics" reads as unrelated.
+			text := b.String() + "\n" + reportDiagnostics(ctx, lspManager, affectedFiles...)
 
 			return fantasy.NewTextResponse(text), nil
 		},

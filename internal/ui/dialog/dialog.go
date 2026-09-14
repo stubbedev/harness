@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 )
 
 // Dialog sizing constants.
@@ -22,11 +23,18 @@ const (
 	inputContentHeight = 1
 )
 
-// CloseKey is the default key binding to close dialogs.
-var CloseKey = key.NewBinding(
-	key.WithKeys("esc", "alt+esc"),
-	key.WithHelp("esc", "exit"),
-)
+// dialogKeys returns the bindings dialogs consult, already merged with the
+// user's options.tui.keybinds. Dialogs read their keys through this rather
+// than declaring their own, so every dialog key is rebindable and no two
+// dialogs drift apart on what "next item" means.
+func dialogKeys() keys.DialogKeys {
+	return keys.Active().Dialog
+}
+
+// CloseKey is the binding that dismisses a dialog.
+func CloseKey() key.Binding {
+	return dialogKeys().Close
+}
 
 // Action represents an action taken in a dialog after handling a message.
 type Action any

@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/question"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -28,7 +29,7 @@ type SingleChoice struct {
 func NewSingleChoice(sty *styles.Styles, req question.Question) *SingleChoice {
 	return &SingleChoice{
 		choiceList: newChoiceList(sty, req),
-		keyEnter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+		keyEnter:   keys.WithDesc(dialogKeys().Question.Confirm, "select"),
 	}
 }
 
@@ -145,7 +146,7 @@ func numKeyBinding(n int) key.Binding {
 // ShortHelp returns key bindings for the status bar.
 func (d *SingleChoice) ShortHelp() []key.Binding {
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
-		return []key.Binding{d.keyClose, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save note"))}
+		return []key.Binding{d.keyClose, keys.WithDesc(dialogKeys().Question.Confirm, "save note")}
 	}
 	if d.isFillIn() && d.fillIn.Focused() {
 		return []key.Binding{d.navUp, d.keyEnter, d.keyClose}

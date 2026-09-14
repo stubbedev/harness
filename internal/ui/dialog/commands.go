@@ -13,6 +13,7 @@ import (
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -94,33 +95,14 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary, h
 	c.input.SetStyles(com.Styles.TextInput)
 	c.input.Focus()
 
-	c.keyMap.Select = key.NewBinding(
-		key.WithKeys("enter", "ctrl+y"),
-		key.WithHelp("enter", "confirm"),
-	)
-	c.keyMap.UpDown = key.NewBinding(
-		key.WithKeys("up", "down"),
-		key.WithHelp("↑/↓", "choose"),
-	)
-	c.keyMap.Next = key.NewBinding(
-		key.WithKeys("down"),
-		key.WithHelp("↓", "next item"),
-	)
-	c.keyMap.Previous = key.NewBinding(
-		key.WithKeys("up", "ctrl+p"),
-		key.WithHelp("↑", "previous item"),
-	)
-	c.keyMap.Tab = key.NewBinding(
-		key.WithKeys("tab"),
-		key.WithHelp("tab", "switch selection"),
-	)
-	c.keyMap.ShiftTab = key.NewBinding(
-		key.WithKeys("shift+tab"),
-		key.WithHelp("shift+tab", "switch selection prev"),
-	)
-	closeKey := CloseKey
-	closeKey.SetHelp("esc", "cancel")
-	c.keyMap.Close = closeKey
+	km := dialogKeys()
+	c.keyMap.Select = km.Select
+	c.keyMap.UpDown = km.UpDown
+	c.keyMap.Next = km.Next
+	c.keyMap.Previous = km.Previous
+	c.keyMap.Tab = km.Commands.Tab
+	c.keyMap.ShiftTab = km.Commands.ShiftTab
+	c.keyMap.Close = keys.WithDesc(km.Close, "cancel")
 
 	// Set initial commands
 	c.setCommandItems(c.selected)
@@ -414,6 +396,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+		NewCommandItem(c.com.Styles, "connect_provider", "Connect Provider", "", ActionOpenDialog{ConnectID}).WithAliases("provider", "auth", "login"),
 		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", "alt+t", ActionOpenDialog{ThemesID}),
 	}
 

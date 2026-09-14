@@ -227,3 +227,18 @@ func TestShowProviderForAmbiguousModelsIgnoresEmptyNames(t *testing.T) {
 	require.False(t, first.Items[0].showProvider)
 	require.False(t, second.Items[0].showProvider)
 }
+
+// TestModelsDialogDropsConfiguredBadgeWhenEveryGroupIsConfigured pins that
+// the badge only shows while the catalog is on screen: once the list is
+// nothing but configured providers, a badge on every row says nothing.
+func TestModelsDialogDropsConfiguredBadgeWhenEveryGroupIsConfigured(t *testing.T) {
+	t.Parallel()
+
+	m := newModelsDialogForTest(t, configuredTestConfig(t, "openai"), testCatalogProviders(), false)
+	require.Len(t, m.list.groups, 1)
+	assert.False(t, m.list.groups[0].configured, "no badge when there is nothing to tell apart")
+
+	m = newModelsDialogForTest(t, configuredTestConfig(t, "openai"), testCatalogProviders(), true)
+	require.Len(t, m.list.groups, 2)
+	assert.True(t, m.list.groups[0].configured, "onboarding mixes both, so the badge marks the ready one")
+}
