@@ -240,9 +240,10 @@ things get around that, for two different problems.
 
 ### Parallel I/O inside one call
 
-Every `harness.exec` and `harness.http` call takes `async = true`, which
-returns a handle instead of a result. The work runs on its own goroutine while
-Lua carries on; `harness.await` collects it.
+`harness.exec` and `harness.http.request` take `async = true`, which returns a
+handle instead of a result. The work runs on its own goroutine while Lua
+carries on; `harness.await` collects it. (The `get` and `post` shorthands are
+always synchronous -- reach for `request` when you want a handle.)
 
 ```lua
 local jobs = {}
