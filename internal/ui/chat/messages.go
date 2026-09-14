@@ -109,6 +109,23 @@ type HighlightableMessageItem interface {
 	list.Highlightable
 }
 
+// WorkingSpinner is implemented by items that may, depending on how far
+// the turn has got, render nothing but the working animation. Such an
+// item is the turn's "still working" line rather than a message of its
+// own: it holds nothing a reader would select or copy, and it must not
+// come between a run of tool calls and the group they fold into.
+type WorkingSpinner interface {
+	MessageItem
+	SpinnerOnly() bool
+}
+
+// IsWorkingSpinner reports whether the item currently renders nothing
+// but the working animation.
+func IsWorkingSpinner(item list.Item) bool {
+	s, ok := item.(WorkingSpinner)
+	return ok && s.SpinnerOnly()
+}
+
 // FocusableMessageItem is a message item that supports focus.
 type FocusableMessageItem interface {
 	MessageItem

@@ -267,3 +267,32 @@ func TestToolGroupAdvanceBumpsVersion(t *testing.T) {
 	require.False(t, g.Advance())
 	require.Equal(t, settled, g.Version(), "a settled group must not bump")
 }
+
+// TestGroupLiveLineOnlyMovesForward covers the collapsed group's live
+// line: with calls running in parallel the newest one often finishes
+// first, and the preview must not fall back to an older call — that
+// reads as the run reordering itself at random.
+func TestGroupLiveLineOnlyMovesForward(t *testing.T) {
+	t.Parallel()
+
+	first := bashTool("a1", "first", false)
+	g := NewToolGroupMessageItem(groupStyles(), first)
+	second := bashTool("a2", "second", false)
+	third := bashTool("a3", "third", false)
+	g.AddTool(second)
+	g.AddTool(third)
+
+	require.Same(t, third, g.liveTool(), "the newest running call is the live one")
+
+	// The newest call settles first: the line stays on it.
+	third.SetToolCall(message.ToolCall{ID: "a3", Name: "shell", Input: `{"command":"third"}`, Finished: true})
+	third.SetResult(&message.ToolResult{ToolCallID: "a3", Content: "done"})
+	require.False(t, third.(Animatable).Spinning())
+	g.advanceLiveTool()
+	assert.Same(t, third, g.liveTool(), "a finished newest call must not hand the line back to an older one")
+
+	// A call started after it takes the line over.
+	fourth := bashTool("a4", "fourth", false)
+	g.AddTool(fourth)
+	assert.Same(t, fourth, g.liveTool())
+}

@@ -193,7 +193,7 @@ func TestSanitizeResolveError(t *testing.T) {
 		}
 		r := NewShellVariableResolver(env.NewFromMap(nil), WithExpander(fe.Expand))
 
-		_, err := r.ResolveValue("$T")
+		_, err := r.ResolveValue("x$T")
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "BEYOND", "over-budget tail must not leak")
 		require.NotContains(t, err.Error(), "\x00", "non-printables must be scrubbed")
@@ -226,4 +226,134 @@ func TestNewShellVariableResolver(t *testing.T) {
 
 	require.NotNil(t, resolver)
 	require.Implements(t, (*VariableResolver)(nil), resolver)
+}
+
+func TestShellVariableResolver_PureEnvRef(t *testing.T) {
+	t.Parallel()
+
+	// POSIX shells parse `$302AI_API_KEY` as positional parameter `$3`
+	// followed by the literal text `02AI_API_KEY`, so pushing a plain
+	// `$VAR` template (even with a digit-leading name) through the
+	// embedded shell both fabricates a non-empty value and never reads
+	// the intended variable. Pure env references must resolve through
+	// the environment directly.
+	t.Run("digit-leading name is read from the environment, not mangled", func(t *testing.T) {
+		t.Parallel()
+		res := NewShellVariableResolver(env.NewFromMap(map[string]string{
+			"302AI_API_KEY": "sk-secret",
+		}))
+		v, err := res.ResolveValue("$302AI_API_KEY")
+		require.NoError(t, err)
+		require.Equal(t, "sk-secret", v)
+	})
+
+	t.Run("unresolved digit-leading name expands to empty", func(t *testing.T) {
+		t.Parallel()
+		res := NewShellVariableResolver(env.NewFromMap(map[string]string{}))
+		v, err := res.ResolveValue("$302AI_API_KEY")
+		require.NoError(t, err)
+		require.Empty(t, v)
+	})
+
+	t.Run("braced and braced-with-text forms still resolve", func(t *testing.T) {
+		t.Parallel()
+		res := NewShellVariableResolver(env.NewFromMap(map[string]string{
+			"HOME": "/home/u",
+			"FOO":  "bar",
+		}))
+
+		v, err := res.ResolveValue("${FOO}")
+		require.NoError(t, err)
+		require.Equal(t, "bar", v)
+
+		// Text after the variable is not a pure reference: it must reach
+		// shell expansion so existing configs keep working.
+		v, err = res.ResolveValue("$HOME/extra")
+		require.NoError(t, err)
+		require.Equal(t, "/home/u/extra", v)
+	})
+
+	t.Run("defaults and command substitution are untouched", func(t *testing.T) {
+		t.Parallel()
+		res := NewShellVariableResolver(env.NewFromMap(map[string]string{}))
+
+		v, err := res.ResolveValue("${MISSING_VAR:-fallback}")
+		require.NoError(t, err)
+		require.Equal(t, "fallback", v)
+
+		v, err = res.ResolveValue("$(echo out)")
+		require.NoError(t, err)
+		require.Equal(t, "out", v)
+	})
+
+	t.Run("required-unset still errors loudly", func(t *testing.T) {
+		t.Parallel()
+		res := NewShellVariableResolver(env.NewFromMap(map[string]string{}))
+		_, err := res.ResolveValue("${MISSING_VAR:?need it}")
+		require.Error(t, err)
+	})
+}
+
+// TestShellVariableResolver_DigitLeadingNameInContext covers the
+// references a pure-`$VAR` fast path cannot reach: the same
+// digit-leading name embedded in a larger value, or wrapped in a
+// parameter expansion operator. The shell reads `$302AI_API_KEY` as
+// positional parameter `$3` plus the literal `02AI_API_KEY`, so without
+// aliasing these silently resolve to garbage — or fail to parse.
+func TestShellVariableResolver_DigitLeadingNameInContext(t *testing.T) {
+	t.Parallel()
+
+	set := env.NewFromMap(map[string]string{"302AI_API_KEY": "sk-real"})
+	unset := env.NewFromMap(map[string]string{})
+
+	tests := []struct {
+		name  string
+		e     env.Env
+		value string
+		want  string
+	}{
+		{"embedded in a header", set, "Bearer $302AI_API_KEY", "Bearer sk-real"},
+		{"followed by a path", set, "$302AI_API_KEY/v1", "sk-real/v1"},
+		{"braced with a default", set, "${302AI_API_KEY:-fallback}", "sk-real"},
+		{"unset braced falls back", unset, "${302AI_API_KEY:-fallback}", "fallback"},
+		{"unset embedded is empty", unset, "Bearer $302AI_API_KEY", "Bearer "},
+		{"repeated reference", set, "$302AI_API_KEY:$302AI_API_KEY", "sk-real:sk-real"},
+		// Quotes are literal in a config value (it is expanded as a
+		// here-document word, not parsed as a script), so they neither
+		// suppress the reference nor survive as syntax.
+		{"quotes do not suppress the reference", set, `'$302AI_API_KEY'`, "'sk-real'"},
+		// A backslash escape does suppress it, and the escaped text must
+		// come back as the user wrote it rather than as an alias.
+		{"escaped reference stays literal", set, `\$302AI_API_KEY`, "$302AI_API_KEY"},
+		// A bare number is a positional parameter and means what it says;
+		// config values have none, so it expands to nothing. A digit
+		// followed by anything else can only have been a variable name.
+		{"bare positional is left to the shell", set, "x${3}y", "xy"},
+		{"digit then letters reads as a name", set, "x$3y", "x"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := NewShellVariableResolver(tc.e).ResolveValue(tc.value)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestShellVariableResolver_DigitLeadingNameUnsetIsDistinct pins the
+// distinction the alias must preserve: an unset digit-leading name is
+// unset, not empty, so `-` defaults and `:?` still behave.
+func TestShellVariableResolver_DigitLeadingNameUnsetIsDistinct(t *testing.T) {
+	t.Parallel()
+
+	res := NewShellVariableResolver(env.NewFromMap(map[string]string{}))
+
+	got, err := res.ResolveValue("x${302AI_API_KEY-fallback}")
+	require.NoError(t, err)
+	require.Equal(t, "xfallback", got)
+
+	_, err = res.ResolveValue("x${302AI_API_KEY:?need it}")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "302AI_API_KEY", "the error names the template the user wrote")
 }

@@ -83,14 +83,17 @@ func TestLiveFlowBatchFolds(t *testing.T) {
 }
 
 // TestLiveFlowMergeOnRemovedSeparator covers the belt-and-suspenders
-// path: if anything (an emptied assistant text item, a transient info
-// footer) is removed from between two runs, the runs merge.
+// path: if anything is removed from between two runs, the runs merge.
+// The separator carries text, since an empty assistant item is the
+// turn's working spinner and no longer closes a run at all.
 func TestLiveFlowMergeOnRemovedSeparator(t *testing.T) {
 	t.Parallel()
 	u := liveFlowUI()
 
 	separator := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
-		ID: "m-sep", Role: message.Assistant,
+		ID:    "m-sep",
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "between runs"}},
 	})
 	u.chat.AppendMessages(newToolItemForGroup(u, "a1"))
 	u.chat.AppendMessages(separator)
@@ -102,4 +105,52 @@ func TestLiveFlowMergeOnRemovedSeparator(t *testing.T) {
 	groups := groupsIn(u)
 	require.Len(t, groups, 1, "removing the separator merges the runs")
 	assert.Len(t, groups[0].ToolChildren(), 2)
+}
+
+// TestLiveFlowSpinnerStaysLast covers the working spinner: the empty
+// assistant item that stands in for the message being generated must
+// neither split a run of tool calls nor be left buried above the group
+// they folded into.
+func TestLiveFlowSpinnerStaysLast(t *testing.T) {
+	t.Parallel()
+	u := liveFlowUI()
+
+	spinner := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID: "m-spin", Role: message.Assistant,
+	})
+	require.True(t, chat.IsWorkingSpinner(spinner), "an empty assistant item is the spinner")
+
+	u.chat.AppendMessages(newToolItemForGroup(u, "a1"))
+	u.chat.AppendMessages(spinner)
+	u.chat.AppendMessages(newToolItemForGroup(u, "b1"))
+
+	groups := groupsIn(u)
+	require.Len(t, groups, 1, "the spinner must not split a run of calls")
+	assert.Len(t, groups[0].ToolChildren(), 2)
+
+	last := u.chat.list.ItemAt(u.chat.Len() - 1)
+	assert.Same(t, spinner, last, "the spinner belongs at the end of the chat")
+}
+
+// TestSpinnerIsNotSelectable covers the selection walk skipping the
+// working spinner: it animates, it holds nothing to read or copy, and a
+// focus border around it is noise.
+func TestSpinnerIsNotSelectable(t *testing.T) {
+	t.Parallel()
+	u := liveFlowUI()
+
+	text := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID:    "m-text",
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "done"}},
+	})
+	spinner := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID: "m-spin", Role: message.Assistant,
+	})
+	u.chat.AppendMessages(text, spinner)
+
+	require.False(t, u.chat.isSelectable(u.chat.Len()-1))
+	u.chat.SelectLast()
+	assert.Equal(t, u.chat.Len()-2, u.chat.list.Selected(), "selection stops on the last real message")
+	assert.False(t, u.chat.HasManualSelection(), "the spinner is not the newest selectable item")
 }

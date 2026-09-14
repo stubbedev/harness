@@ -2,6 +2,7 @@ package model
 
 import (
 	"image"
+	"slices"
 	"strings"
 	"time"
 
@@ -446,21 +447,54 @@ func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 }
 
 // absorbTool folds a tool call into the trailing open group, skipping
-// back over assistant info footers, or starts a new group when the run
-// was closed by a user or assistant text item.
+// back over assistant info footers and the turn's working spinner, or
+// starts a new group when the run was closed by a user or assistant
+// text item.
+//
+// The spinner is the empty assistant item that stands in for the
+// message still being generated. Treating it as a run boundary would
+// split one run of calls into two groups and strand the animation in
+// the middle of the transcript, so it is skipped here and moved back to
+// the end of the list: while the turn is running it belongs below
+// everything the turn has produced so far.
 func (m *Chat) absorbTool(tool chat.ToolMessageItem) {
+	var spinners []int
 	for idx := m.list.Len() - 1; idx >= 0; idx-- {
 		item := m.list.ItemAt(idx)
 		if _, ok := item.(*chat.AssistantInfoItem); ok {
 			continue
 		}
+		if chat.IsWorkingSpinner(item) {
+			spinners = append(spinners, idx)
+			continue
+		}
 		if group, ok := item.(*chat.ToolGroupMessageItem); ok {
 			group.AddTool(tool)
+			m.moveSpinnersToEnd(spinners)
 			return
 		}
 		break
 	}
 	m.list.AppendItems(chat.NewToolGroupMessageItem(m.com.Styles, tool))
+	m.moveSpinnersToEnd(spinners)
+}
+
+// moveSpinnersToEnd moves the items at the given indices — gathered
+// newest-first, so removing one never shifts the indices still to come
+// — to the end of the list, keeping their relative order. The list
+// selection never sits on a spinner (isSelectable refuses it), so the
+// removals cannot drop it.
+func (m *Chat) moveSpinnersToEnd(idxs []int) {
+	if len(idxs) == 0 {
+		return
+	}
+	items := make([]list.Item, 0, len(idxs))
+	for _, idx := range idxs {
+		items = append(items, m.list.ItemAt(idx))
+		m.list.RemoveItem(idx)
+	}
+	slices.Reverse(items)
+	m.list.AppendItems(items...)
 }
 
 // foldToolGroups folds runs of tool calls into group items. Info footers
@@ -490,6 +524,12 @@ func (m *Chat) foldToolGroups(msgs []chat.MessageItem) []list.Item {
 		if _, ok := msg.(*chat.AssistantInfoItem); ok && group != nil {
 			// Hold the footer back until the run closes so it renders
 			// after the group.
+			pending = append(pending, msg)
+			continue
+		}
+		if chat.IsWorkingSpinner(msg) && group != nil {
+			// Same for the turn's working spinner: it is not a run
+			// boundary, and it belongs below the calls it is waiting on.
 			pending = append(pending, msg)
 			continue
 		}
@@ -827,6 +867,11 @@ func (m *Chat) SelectedItemInView() bool {
 func (m *Chat) isSelectable(index int) bool {
 	item := m.list.ItemAt(index)
 	if item == nil {
+		return false
+	}
+	// The working spinner is an animation, not content: stopping on it
+	// wraps a focus border around a line with nothing to read or copy.
+	if chat.IsWorkingSpinner(item) {
 		return false
 	}
 	_, ok := item.(list.Focusable)

@@ -295,7 +295,6 @@ type Styles struct {
 		ErrorTitle       lipgloss.Style
 		ErrorDetails     lipgloss.Style
 		ToolCallFocused  lipgloss.Style
-		ToolCallSelected lipgloss.Style
 		ToolCallCompact  lipgloss.Style
 		ToolCallBlurred  lipgloss.Style
 

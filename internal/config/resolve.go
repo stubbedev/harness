@@ -1,8 +1,12 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/stubbedev/harness/internal/env"
@@ -12,6 +16,16 @@ import (
 // resolveTimeout bounds how long a single ResolveValue call may spend
 // inside shell expansion (including any command substitution).
 const resolveTimeout = 5 * time.Minute
+
+// pureEnvRefRe matches a value that is nothing but one environment
+// variable reference: `$VAR` or `${VAR}`. Such values must not go
+// through the embedded shell: POSIX parses `$N` (a digit followed by
+// more word characters, as in the catalog template `$302AI_API_KEY`)
+// as positional parameter `$3` followed by literal text, which both
+// fabricates a non-empty value and never reads the intended variable.
+// Handle these directly with the environment so the referenced name —
+// however spelled — is the variable actually consulted.
+var pureEnvRefRe = regexp.MustCompile(`^(?:\$([A-Za-z0-9_]+)|\$\{([A-Za-z0-9_]+)\})$`)
 
 type VariableResolver interface {
 	ResolveValue(value string) (string, error)
@@ -94,11 +108,26 @@ func (r *shellVariableResolver) ResolveValue(value string) (string, error) {
 		return "", fmt.Errorf("invalid value format: %s", value)
 	}
 
+	if m := pureEnvRefRe.FindStringSubmatch(value); m != nil {
+		name := cmp.Or(m[1], m[2])
+		return r.env.Get(name), nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), resolveTimeout)
 	defer cancel()
 
-	out, err := r.expand(ctx, value, r.env.Env())
+	// Digit-leading names survive only as aliases: the shell would read
+	// them as a positional parameter glued to literal text.
+	environ := r.env.Env()
+	expanded, extra := aliasDigitVars(value, environ)
+	if len(extra) > 0 {
+		environ = append(slices.Clip(environ), extra...)
+	}
+
+	out, err := r.expand(ctx, expanded, environ)
 	if err != nil {
+		// The user-written template, not the aliased rewrite, is what
+		// belongs in the error.
 		return "", sanitizeResolveError(value, err)
 	}
 	return out, nil
@@ -171,4 +200,120 @@ func scrubErrorMessage(s string) string {
 		out[i] = '?'
 	}
 	return string(out)
+}
+
+// digitVarAliasPrefix names the placeholders aliasDigitVars substitutes
+// for digit-leading variable names. Underscore-prefixed and uppercase so
+// it cannot collide with a real name a config would reference.
+const digitVarAliasPrefix = "_HARNESS_DIGIT_VAR_"
+
+// aliasDigitVars rewrites every `$NAME` / `${NAME...}` reference whose
+// name starts with a digit but is not a bare number into a legal shell
+// name, and returns the environment entries binding those aliases to
+// the real variables' values.
+//
+// POSIX has no variable name starting with a digit: the shell reads
+// `$302AI_API_KEY` as positional parameter `$3` followed by the literal
+// text `02AI_API_KEY`, so an unset key silently resolves to a non-empty
+// string of garbage, and `${302AI_API_KEY:-x}` fails to parse at all.
+// Config values are not scripts and never have positional parameters,
+// so a digit-leading name can only have been meant as an environment
+// variable — the models.dev catalog ships exactly that in 302.AI's
+// `api_key` template. A bare `$3` is left alone: there is nothing else
+// it could have meant, and it already expands to the empty string.
+//
+// A name that is not present in env is left unbound rather than bound
+// to "", so `${NAME-default}` and `${NAME:?msg}` keep their
+// unset-versus-empty distinction.
+//
+// Quoting is deliberately not tracked: a config value is expanded as a
+// here-document word, where quotes are ordinary characters and do not
+// suppress a reference. A backslash escape does suppress one, so an
+// escaped pair is copied through unrewritten.
+func aliasDigitVars(value string, environ []string) (string, []string) {
+	if !strings.Contains(value, "$") {
+		return value, nil
+	}
+	var (
+		b       strings.Builder
+		extra   []string
+		aliases map[string]string
+	)
+	for i := 0; i < len(value); {
+		c := value[i]
+		switch {
+		case c == '\\' && i+1 < len(value):
+			// An escaped character is literal; neither byte can open a
+			// reference, so copy the pair through untouched.
+			b.WriteString(value[i : i+2])
+			i += 2
+			continue
+		case c == '$':
+			nameStart := i + 1
+			if nameStart < len(value) && value[nameStart] == '{' {
+				nameStart++
+			}
+			nameEnd := nameStart
+			for nameEnd < len(value) && isShellNameByte(value[nameEnd]) {
+				nameEnd++
+			}
+			name := value[nameStart:nameEnd]
+			if !isDigitLeadingName(name) {
+				break
+			}
+			alias, ok := aliases[name]
+			if !ok {
+				alias = fmt.Sprintf("%s%d", digitVarAliasPrefix, len(aliases))
+				if aliases == nil {
+					aliases = make(map[string]string, 1)
+				}
+				aliases[name] = alias
+				if v, found := lookupEnv(environ, name); found {
+					extra = append(extra, alias+"="+v)
+				}
+			}
+			b.WriteString(value[i:nameStart])
+			b.WriteString(alias)
+			i = nameEnd
+			continue
+		}
+		b.WriteByte(c)
+		i++
+	}
+	if aliases == nil {
+		return value, nil
+	}
+	return b.String(), extra
+}
+
+// isShellNameByte reports whether b may appear in a variable name.
+func isShellNameByte(b byte) bool {
+	return b == '_' ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9')
+}
+
+// isDigitLeadingName reports whether name is a variable name the shell
+// cannot express: it starts with a digit and is not a bare number (which
+// is a positional parameter and means what it says).
+func isDigitLeadingName(name string) bool {
+	if name == "" || name[0] < '0' || name[0] > '9' {
+		return false
+	}
+	return strings.IndexFunc(name, func(r rune) bool {
+		return r < '0' || r > '9'
+	}) >= 0
+}
+
+// lookupEnv finds name in a KEY=VALUE environment slice. Later entries
+// win, matching the shell's own last-one-wins reading of environ.
+func lookupEnv(environ []string, name string) (string, bool) {
+	prefix := name + "="
+	for i := len(environ) - 1; i >= 0; i-- {
+		if strings.HasPrefix(environ[i], prefix) {
+			return environ[i][len(prefix):], true
+		}
+	}
+	return "", false
 }

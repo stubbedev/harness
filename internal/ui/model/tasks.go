@@ -695,17 +695,21 @@ func (m *UI) renderTasks(width int) string {
 
 	var rows []string
 	for i, task := range visible {
+		onCursor := focused && start+i == m.taskCursor
+		subCursor := -1
+		if onCursor && task.toolCallID == m.expandedTaskID {
+			subCursor = m.taskSubCursor
+		}
 		prefix := blurredPrefix
-		if focused && start+i == m.taskCursor {
+		// The bar marks one row at a time: once the sub-cursor is down
+		// in the task's own calls it moves there instead of staying on
+		// the task row in a second color.
+		if onCursor && subCursor < 0 {
 			prefix = focusedPrefix
 		}
 		rows = append(rows, prefix+renderRow(task))
 
 		if task.toolCallID == m.expandedTaskID {
-			subCursor := -1
-			if focused && start+i == m.taskCursor {
-				subCursor = m.taskSubCursor
-			}
 			rows = append(rows, m.renderTaskDetails(task, width, subCursor)...)
 		}
 	}
@@ -737,7 +741,7 @@ func (m *UI) renderTaskDetails(task *agentTask, width, subCursor int) []string {
 	for j, nested := range task.nested {
 		indent := "  "
 		if j == subCursor {
-			indent = t.Messages.ToolCallSelected.Render()
+			indent = t.Messages.ToolCallFocused.Render()
 		}
 		if probe, ok := nested.(interface{ IsCompact() bool }); ok && !probe.IsCompact() {
 			// Expanded call: RawRender skips the per-item left prefix so

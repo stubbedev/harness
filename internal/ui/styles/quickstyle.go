@@ -879,12 +879,6 @@ func quickStyle(o quickStyleOpts) Styles {
 		BorderStyle(messageFocussedBorder).
 		BorderLeft(true).
 		BorderForeground(o.successMostSubtle)
-	// The sub-cursor's line inside a focused group or task strip: same
-	// bar shape, warning yellow so it stands out from the muted bars.
-	s.Messages.ToolCallSelected = muted.PaddingLeft(1).
-		BorderStyle(messageFocussedBorder).
-		BorderLeft(true).
-		BorderForeground(o.warning)
 	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
 	s.Messages.ToolCallCompact = muted

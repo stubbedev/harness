@@ -40,6 +40,9 @@ type ToolGroupMessageItem struct {
 	// group is selected, expanded and the list is focused; cleared when
 	// the group loses focus.
 	selectedChild int
+	// liveIdx is the call shown beneath a collapsed group's header
+	// while the run is in flight. See advanceLiveTool.
+	liveIdx int
 }
 
 var (
@@ -169,6 +172,7 @@ func (g *ToolGroupMessageItem) ToggleSelectedChild() bool {
 // AddTool adds a tool call to the group.
 func (g *ToolGroupMessageItem) AddTool(tool ToolMessageItem) {
 	g.tools = append(g.tools, tool)
+	g.advanceLiveTool()
 	g.clearCache()
 	g.Bump()
 }
@@ -206,6 +210,7 @@ func (g *ToolGroupMessageItem) Advance() bool {
 	if !g.Spinning() {
 		return false
 	}
+	g.advanceLiveTool()
 	changed := g.anim.Advance()
 	changed = advanceNested(g.tools) || changed
 	if changed {
@@ -435,7 +440,7 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 	// Collapsed with work in flight: keep the live call visible beneath
 	// the header so the user still sees what is happening right now.
 	if running {
-		if last := g.lastRunningTool(); last != nil {
+		if last := g.liveTool(); last != nil {
 			lines = append(lines, subItemIndentString+g.oneLiner(last, contentWidth-subItemIndent))
 		}
 	}
@@ -455,8 +460,14 @@ func (g *ToolGroupMessageItem) Render(width int) string {
 	prefix := g.sty.Messages.ToolCallBlurred.Render()
 	selectedPrefix := prefix
 	if g.focused {
-		prefix = g.sty.Messages.ToolCallFocused.Render()
-		selectedPrefix = g.sty.Messages.ToolCallSelected.Render()
+		selectedPrefix = g.sty.Messages.ToolCallFocused.Render()
+		// The bar marks one thing at a time. With the sub-cursor down
+		// on a child, only that child carries it, in the same color the
+		// outermost selection uses; the rest of the group goes bare
+		// rather than keeping a second bar in a second color.
+		if g.selectedChild < 0 {
+			prefix = selectedPrefix
+		}
 	}
 	lines, selStart, selEnd := g.renderLines(width)
 	for i, ln := range lines {
@@ -480,13 +491,28 @@ func (g *ToolGroupMessageItem) prefixKey() uint64 {
 	return 0
 }
 
-func (g *ToolGroupMessageItem) lastRunningTool() ToolMessageItem {
-	for t := range slices.Backward(g.tools) {
-		if a, ok := g.tools[t].(Animatable); ok && a.Spinning() {
-			return g.tools[t]
+// liveTool returns the call shown beneath a collapsed group's header
+// while work is in flight, or nil before any call has started.
+func (g *ToolGroupMessageItem) liveTool() ToolMessageItem {
+	if g.liveIdx < 0 || g.liveIdx >= len(g.tools) {
+		return nil
+	}
+	return g.tools[g.liveIdx]
+}
+
+// advanceLiveTool moves the live line forward to the newest call that is
+// still running. It never moves backwards. Picking the newest running
+// call afresh on every frame looks stable only while calls finish in the
+// order they were made: with parallel calls the newest one often settles
+// first, and the line then drops back to an older call, so the preview
+// appears to shuffle through the run at random as each call lands.
+func (g *ToolGroupMessageItem) advanceLiveTool() {
+	for i := range slices.Backward(g.tools) {
+		if a, ok := g.tools[i].(Animatable); ok && a.Spinning() {
+			g.liveIdx = max(g.liveIdx, i)
+			return
 		}
 	}
-	return nil
 }
 
 // oneLiner renders one tool call as a single line: status glyph, tool

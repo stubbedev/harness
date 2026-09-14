@@ -269,7 +269,10 @@ type AssistantMessageItem struct {
 	animLabel string
 }
 
-var _ Expandable = (*AssistantMessageItem)(nil)
+var (
+	_ Expandable     = (*AssistantMessageItem)(nil)
+	_ WorkingSpinner = (*AssistantMessageItem)(nil)
+)
 
 // NewAssistantMessageItem creates a new AssistantMessageItem.
 func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
@@ -707,6 +710,22 @@ func (a *AssistantMessageItem) isSpinning() bool {
 	hasContent := strings.TrimSpace(a.message.Content().Text) != ""
 	hasToolCalls := len(a.message.ToolCalls()) > 0
 	return (isThinking || !isFinished) && !hasContent && !hasToolCalls
+}
+
+// SpinnerOnly implements [WorkingSpinner]. It reports whether this item
+// currently renders nothing but the working animation: no reasoning, no
+// content, no error banner. isSpinning already rules out content and
+// tool calls, and an error banner only renders on a finished message,
+// which never spins — so the reasoning text is all that is left to
+// check.
+func (a *AssistantMessageItem) SpinnerOnly() bool {
+	if !a.isSpinning() {
+		return false
+	}
+	if HideThinking {
+		return true
+	}
+	return strings.TrimSpace(a.message.ReasoningContent().Thinking) == ""
 }
 
 // SetMessage is used to update the underlying message. Only the
