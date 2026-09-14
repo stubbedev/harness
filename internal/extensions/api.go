@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"time"
 
 	"github.com/stubbedev/harness/internal/hooks"
 	"github.com/stubbedev/harness/internal/version"
@@ -62,6 +63,7 @@ func (in *instance) installAPI() {
 	L.SetFuncs(api, map[string]lua.LGFunction{
 		"register_tool":    in.luaRegisterTool,
 		"register_command": in.luaRegisterCommand,
+		"register_job":     in.luaRegisterJob,
 		"on":               in.luaOn,
 		"env":              in.luaEnv,
 		"workspace":        in.luaWorkspace,
@@ -107,6 +109,15 @@ func (in *instance) installAPI() {
 		"post":    in.luaHTTPPost,
 	})
 	api.RawSetString("http", httpTbl)
+
+	jobsTbl := L.NewTable()
+	L.SetFuncs(jobsTbl, map[string]lua.LGFunction{
+		"start":   in.luaJobsStart,
+		"status":  in.luaJobsStatus,
+		"results": in.luaJobsResults,
+		"cancel":  in.luaJobsCancel,
+	})
+	api.RawSetString("jobs", jobsTbl)
 
 	L.SetGlobal("harness", api)
 }
@@ -363,4 +374,102 @@ func buildArguments(value lua.LValue) []Argument {
 		})
 	})
 	return args
+}
+
+// luaRegisterJob implements harness.register_job. A job is work too slow
+// to hold a tool call open: it runs in a VM of its own, outlives the
+// call that started it, and its result waits in the queue until
+// something collects it.
+func (in *instance) luaRegisterJob(L *lua.LState) int {
+	spec := L.CheckTable(1)
+	if !in.loading {
+		L.RaiseError("register_job must be called while the extension loads")
+		return 0
+	}
+
+	name := tableString(spec, "name", "")
+	if name == "" {
+		L.RaiseError("register_job: name is required")
+		return 0
+	}
+	fn := tableFunc(spec, "handler")
+	if fn == nil {
+		L.RaiseError("register_job %q: handler must be a function", name)
+		return 0
+	}
+
+	timeout := DefaultJobTimeout
+	if seconds, ok := spec.RawGetString("timeout").(lua.LNumber); ok && seconds > 0 {
+		timeout = min(time.Duration(float64(seconds)*float64(time.Second)), MaxJobTimeout)
+	}
+
+	in.jobSpecs[name] = &jobSpec{
+		name:        name,
+		description: tableString(spec, "description", ""),
+		timeout:     timeout,
+		fn:          fn,
+	}
+	return 0
+}
+
+// luaJobsStart implements harness.jobs.start. It returns the job's ID
+// straight away; the work carries on in the background.
+func (in *instance) luaJobsStart(L *lua.LState) int {
+	name := L.CheckString(1)
+	spec, ok := in.jobSpecs[name]
+	if !ok {
+		L.RaiseError("jobs.start: extension %q registers no job %q", in.ext.Name, name)
+		return 0
+	}
+
+	var args any
+	if tbl, ok := L.Get(2).(*lua.LTable); ok {
+		args = fromLua(tbl)
+	}
+
+	job := in.host.jobs.start(in.ext, spec.name, args, spec.timeout)
+	L.Push(lua.LString(job.ID))
+	return 1
+}
+
+// luaJobsStatus implements harness.jobs.status.
+func (in *instance) luaJobsStatus(L *lua.LState) int {
+	job, ok := in.host.jobs.get(L.CheckString(1))
+	if !ok {
+		L.Push(lua.LNil)
+		return 1
+	}
+	L.Push(jobToLua(L, job))
+	return 1
+}
+
+// luaJobsResults implements harness.jobs.results: it drains the finished
+// jobs whose results nothing has collected yet.
+func (in *instance) luaJobsResults(L *lua.LState) int {
+	finished := in.host.jobs.drain()
+	tbl := L.CreateTable(len(finished), 0)
+	for _, job := range finished {
+		tbl.Append(jobToLua(L, job))
+	}
+	L.Push(tbl)
+	return 1
+}
+
+// luaJobsCancel implements harness.jobs.cancel.
+func (in *instance) luaJobsCancel(L *lua.LState) int {
+	L.Push(lua.LBool(in.host.jobs.cancel(L.CheckString(1))))
+	return 1
+}
+
+// jobToLua renders a job record for Lua.
+func jobToLua(L *lua.LState, job Job) *lua.LTable {
+	tbl := L.CreateTable(0, 7)
+	tbl.RawSetString("id", lua.LString(job.ID))
+	tbl.RawSetString("extension", lua.LString(job.Extension))
+	tbl.RawSetString("name", lua.LString(job.Name))
+	tbl.RawSetString("state", lua.LString(string(job.State)))
+	tbl.RawSetString("result", lua.LString(job.Result))
+	tbl.RawSetString("error", lua.LString(job.Err))
+	tbl.RawSetString("seconds", lua.LNumber(job.Age().Seconds()))
+	return tbl
 }

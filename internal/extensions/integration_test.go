@@ -140,13 +140,13 @@ func TestDocumentedExamplesLoad(t *testing.T) {
 	t.Parallel()
 
 	host := newHost(t, []string{filepath.Join("..", "..", "docs", "extensions", "examples")})
-	require.Equal(t, []string{"no-force-push", "todos"}, host.Loaded())
+	require.Equal(t, []string{"link-check", "no-force-push", "todos"}, host.Loaded())
 
 	var names []string
 	for _, tool := range host.Tools() {
 		names = append(names, tool.Info().Name)
 	}
-	require.Equal(t, []string{"todo_list"}, names)
+	require.Equal(t, []string{"extension_jobs", "link_check", "todo_list"}, names)
 
 	commands := host.Commands()
 	require.Len(t, commands, 1)

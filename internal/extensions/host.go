@@ -51,6 +51,9 @@ type Options struct {
 	// SessionFromContext extracts the session ID a call belongs to, for
 	// the hook payloads the gate builds. Optional.
 	SessionFromContext func(context.Context) string
+	// MaxConcurrentJobs bounds background jobs running at once across
+	// every extension. Zero means defaultMaxConcurrentJobs.
+	MaxConcurrentJobs int
 }
 
 // Host owns every loaded extension in a workspace: their VMs, and the
@@ -65,6 +68,16 @@ type Host struct {
 
 	httpOnce sync.Once
 	client   *http.Client
+
+	// jobs owns background jobs: the runs, and the queue their results
+	// wait in until something collects them.
+	jobs *jobRunner
+
+	// jobCtx is the lifetime every background job is bound to. It is
+	// detached from the call that starts a job -- outliving that call is
+	// what a job is for -- and cancelled by Close.
+	jobCtx    context.Context
+	jobCancel context.CancelFunc
 }
 
 // New discovers the extensions in opts.Paths and loads each one. Loading
@@ -73,6 +86,8 @@ type Host struct {
 // bad extension never stops the others.
 func New(ctx context.Context, opts Options) *Host {
 	h := &Host{opts: opts}
+	h.jobCtx, h.jobCancel = context.WithCancel(context.WithoutCancel(ctx))
+	h.jobs = newJobRunner(h, opts.MaxConcurrentJobs)
 	if len(opts.Paths) == 0 {
 		return h
 	}
@@ -111,6 +126,12 @@ func New(ctx context.Context, opts Options) *Host {
 func (h *Host) Close() {
 	if h == nil {
 		return
+	}
+	if h.jobs != nil {
+		h.jobs.cancelAll()
+	}
+	if h.jobCancel != nil {
+		h.jobCancel()
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -156,10 +177,12 @@ func (h *Host) Tools() []fantasy.AgentTool {
 	defer h.mu.RUnlock()
 
 	var (
-		out  []fantasy.AgentTool
-		seen = map[string]string{}
+		out      []fantasy.AgentTool
+		seen     = map[string]string{}
+		jobsSeen bool
 	)
 	for _, in := range h.instances {
+		jobsSeen = jobsSeen || len(in.jobSpecs) > 0
 		for _, spec := range in.tools {
 			if owner, taken := seen[spec.name]; taken {
 				slog.Warn(
@@ -173,6 +196,11 @@ func (h *Host) Tools() []fantasy.AgentTool {
 			seen[spec.name] = in.ext.Name
 			out = append(out, &luaTool{spec: spec})
 		}
+	}
+	// The job tool is only worth a slot in the context when something
+	// can actually produce a job.
+	if jobsSeen {
+		out = append(out, &jobTool{host: h})
 	}
 	slices.SortFunc(out, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
@@ -406,4 +434,20 @@ func stateName(state DiscoveryState) string {
 	default:
 		return "loaded"
 	}
+}
+
+// jobContext returns the lifetime background jobs are bound to.
+func (h *Host) jobContext() context.Context {
+	if h.jobCtx == nil {
+		return context.Background()
+	}
+	return h.jobCtx
+}
+
+// Jobs returns a snapshot of every background job, oldest first.
+func (h *Host) Jobs() []Job {
+	if h == nil || h.jobs == nil {
+		return nil
+	}
+	return h.jobs.list()
 }

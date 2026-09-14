@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/notify"
+	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
@@ -135,7 +136,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		),
 		LSPManager: lsp.NewManager(store),
 		Skills:     skillsMgr,
-		Extensions: extensions.New(ctx, extensions.OptionsFromStore(store)),
+		Extensions: extensions.New(ctx, extensionOptions(store)),
 		Subagents:  subagentsMgr,
 
 		// Created eagerly (rather than lazily in initCoderAgent) so
@@ -918,4 +919,14 @@ func (app *App) checkForUpdates(ctx context.Context) {
 		LatestVersion:  info.Latest,
 		IsDevelopment:  info.IsDevelopment(),
 	})
+}
+
+// extensionOptions builds the extension host's options. The session
+// lookup is wired here rather than inside the extensions package: it is
+// the agent's context key, and keeping it out of that package is what
+// lets extensions stay independent of the tool layer.
+func extensionOptions(store *config.ConfigStore) extensions.Options {
+	opts := extensions.OptionsFromStore(store)
+	opts.SessionFromContext = tools.GetSessionFromContext
+	return opts
 }

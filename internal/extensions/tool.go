@@ -3,6 +3,7 @@ package extensions
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"charm.land/fantasy"
 	lua "github.com/yuin/gopher-lua"
@@ -105,4 +106,13 @@ func toolResponse(value lua.LValue) fantasy.ToolResponse {
 	default:
 		return fantasy.NewTextResponse(value.String())
 	}
+}
+
+// unmarshalParams decodes a tool call's arguments, treating empty input
+// as an empty object.
+func unmarshalParams(input string, target any) error {
+	if strings.TrimSpace(input) == "" {
+		return nil
+	}
+	return json.Unmarshal([]byte(input), target)
 }

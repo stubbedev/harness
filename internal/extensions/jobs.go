@@ -312,8 +312,9 @@ func (r *jobRunner) wait(ctx context.Context, id string) (Job, bool) {
 func (r *jobRunner) cancel(id string) bool {
 	r.mu.Lock()
 	job, ok := r.jobs[id]
+	running := ok && job.State == JobRunning
 	r.mu.Unlock()
-	if !ok || job.State != JobRunning {
+	if !running {
 		return false
 	}
 	job.cancel()
@@ -323,16 +324,16 @@ func (r *jobRunner) cancel(id string) bool {
 // cancelAll stops every running job, for host shutdown.
 func (r *jobRunner) cancelAll() {
 	r.mu.Lock()
-	jobs := make([]*Job, 0, len(r.jobs))
+	var running []*Job
 	for _, job := range r.jobs {
-		jobs = append(jobs, job)
+		if job.State == JobRunning {
+			running = append(running, job)
+		}
 	}
 	r.mu.Unlock()
 
-	for _, job := range jobs {
-		if job.State == JobRunning {
-			job.cancel()
-		}
+	for _, job := range running {
+		job.cancel()
 	}
 }
 

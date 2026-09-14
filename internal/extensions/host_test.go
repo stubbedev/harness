@@ -305,3 +305,28 @@ func TestNilHostIsInert(t *testing.T) {
 	require.Error(t, err)
 	host.Close()
 }
+
+// TestNoExtensionsMeansNoTools is the context-cost guarantee: with
+// nothing installed the host contributes no tools at all, so neither the
+// job tool nor its description ever reaches the model.
+func TestNoExtensionsMeansNoTools(t *testing.T) {
+	t.Parallel()
+
+	empty := extensions.New(t.Context(), extensions.Options{WorkingDir: t.TempDir()})
+	t.Cleanup(empty.Close)
+	require.Empty(t, empty.Tools())
+	require.Empty(t, empty.Commands())
+
+	// An extensions directory that exists but holds nothing is the same.
+	host := newHost(t, []string{t.TempDir()})
+	require.Empty(t, host.Tools())
+
+	// So is an extension that registers no jobs: the job tool is only
+	// worth its description when something can produce a job.
+	root := writeExtension(t, "toolonly", `
+harness.register_tool({ name = "toolonly", handler = function() return "" end })
+`)
+	tools := newHost(t, []string{root}).Tools()
+	require.Len(t, tools, 1)
+	require.Equal(t, "toolonly", tools[0].Info().Name)
+}

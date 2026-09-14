@@ -211,21 +211,3 @@ func tableFunc(tbl *lua.LTable, key string) *lua.LFunction {
 	}
 	return nil
 }
-
-// tableStrings reads an array-of-strings field from a table.
-func tableStrings(tbl *lua.LTable, key string) []string {
-	if tbl == nil {
-		return nil
-	}
-	arr, ok := tbl.RawGetString(key).(*lua.LTable)
-	if !ok {
-		return nil
-	}
-	var out []string
-	arr.ForEach(func(_, v lua.LValue) {
-		if s, ok := v.(lua.LString); ok {
-			out = append(out, string(s))
-		}
-	})
-	return out
-}
