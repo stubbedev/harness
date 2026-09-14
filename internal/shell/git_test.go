@@ -60,7 +60,7 @@ func TestGitBuiltinRedirectsOutsideWorktrees(t *testing.T) {
 	repo := initTestGitRepo(t)
 
 	outside := filepath.Join(t.TempDir(), "agent-wt")
-	out, errOut := runShellCommand(t, repo, "git worktree add "+outside+" -b feature-x")
+	out, errOut := runShellCommand(t, repo, "git worktree add -b feature-x \""+outside+"\"")
 
 	redirected := filepath.Join(repo, ".worktrees", "agent-wt")
 	if _, err := os.Stat(filepath.Join(redirected, ".git")); err != nil {
@@ -91,7 +91,7 @@ func TestGitBuiltinKeepsRepoLocalPaths(t *testing.T) {
 	repo := initTestGitRepo(t)
 
 	inRepo := filepath.Join(repo, "local-wt")
-	_, _ = runShellCommand(t, repo, "git worktree add "+inRepo+" -b feature-y")
+	_, _ = runShellCommand(t, repo, "git worktree add \""+inRepo+"\"")
 
 	if _, err := os.Stat(filepath.Join(inRepo, ".git")); err != nil {
 		t.Fatalf("repo-local worktree not created: %v", err)
@@ -109,7 +109,7 @@ func TestGitBuiltinHonorsConfiguredWorktreesDir(t *testing.T) {
 	runShellCommand(t, repo, "git config harness.worktreesDir ../wt-garden")
 
 	outside := filepath.Join(t.TempDir(), "cfg-wt")
-	runShellCommand(t, repo, "git worktree add "+outside+" -b feature-z")
+	runShellCommand(t, repo, "git worktree add -b feature-z \""+outside+"\"")
 
 	want := filepath.Join(filepath.Dir(repo), "wt-garden", "cfg-wt")
 	if _, err := os.Stat(filepath.Join(want, ".git")); err != nil {
