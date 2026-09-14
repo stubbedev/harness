@@ -241,11 +241,14 @@ func DefaultSize() (rows, cols int) {
 }
 
 func envInt(name string, fallback int) int {
-	v, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
+	// Parsed at 16 bits: these are terminal dimensions, they end up in a
+	// 16-bit ioctl struct, and a value that cannot fit one was never a
+	// size. clampDim still narrows what is left to the sane range.
+	v, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(name)), 10, 16)
 	if err != nil {
 		return fallback
 	}
-	return v
+	return int(v)
 }
 
 func clampDim(v, lo, hi int) int {
