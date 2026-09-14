@@ -258,10 +258,17 @@ func clampDim(v, lo, hi int) int {
 // the kernel struct is 16-bit, so a value beyond it would be truncated
 // into a size nobody asked for.
 func winsize(rows, cols int) *pty.Winsize {
-	return &pty.Winsize{
-		Rows: uint16(clampDim(rows, minRows, maxRows)),
-		Cols: uint16(clampDim(cols, minCols, maxCols)),
+	if rows < minRows {
+		rows = minRows
+	} else if rows > maxRows {
+		rows = maxRows
 	}
+	if cols < minCols {
+		cols = minCols
+	} else if cols > maxCols {
+		cols = maxCols
+	}
+	return &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}
 }
 
 func newSession(ptmx *os.File, proc *os.Process, rows, cols int) *Session {

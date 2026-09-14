@@ -21,6 +21,12 @@ carried here until a patch lands there.
   `golang.org/x/sys/unix.IoctlSetWinsize`, which is defined for every
   platform the build tag covers, including Solaris, instead of the raw
   `syscall.SYS_IOCTL` call.
+- `str.go`: colour values parsed out of an escape sequence are bounded
+  before they are converted to the 32-bit `Color` type. `setColorName`
+  already range-checked its index; the two OSC response paths checked
+  only the sign, and the RGB composition shifted unbounded channels into
+  each other. `colorValue` and `rgbColor` are now the only conversions,
+  and both check. Reported by CodeQL as `go/incorrect-integer-conversion`.
 
 Everything else is byte-identical to the upstream pseudo-version.
 

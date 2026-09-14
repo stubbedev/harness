@@ -159,6 +159,25 @@ func (t *State) handleSTR() {
 // every conversion rather than left to truncate into another colour.
 const maxColorValue = 1<<24 - 1
 
+// rgbColor packs three channel values into a Color, bounding each to a
+// byte. The channels are parsed out of an escape sequence, so a value
+// outside the range would otherwise be shifted into a neighbouring
+// channel by the composition below.
+func rgbColor(r, g, b int) Color {
+	return Color(channelValue(r)<<16 | channelValue(g)<<8 | channelValue(b))
+}
+
+// channelValue bounds one colour channel to a byte.
+func channelValue(v int) uint32 {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return uint32(v)
+}
+
 // colorValue converts a colour index parsed out of an escape sequence,
 // reporting whether it was in range at all.
 func colorValue(j int) (Color, bool) {
@@ -183,7 +202,7 @@ func (t *State) setColorName(j int, p *string) error {
 		if err != nil {
 			return err
 		}
-		t.colorOverride[color] = Color(r<<16 | g<<8 | b)
+		t.colorOverride[color] = rgbColor(r, g, b)
 	}
 
 	return nil
