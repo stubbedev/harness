@@ -193,42 +193,23 @@ func runBatch(ctx context.Context, params BatchParams, siblings []fantasy.AgentT
 		registry[t.Info().Name] = t
 	}
 
+	// Everything checkable is checked before the first tool runs. A typo
+	// in the last step's tool name or in `return` used to surface only
+	// after every earlier step had made its calls, so the plan paid for
+	// forty file reads and then threw them away.
+	if msg := preflight(params, registry); msg != "" {
+		return fantasy.NewTextErrorResponse(msg), nil
+	}
+
 	env := &batchEnv{}
 	meta := BatchResponseMetadata{Steps: len(params.Steps), PerStep: map[string]int{}}
-	seen := make(map[string]bool, len(params.Steps))
 	var lastID string
 
-	for i, step := range params.Steps {
-		if step.ID == "" {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("step %d: id is required", i)), nil
-		}
-		if !validStepID(step.ID) {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf(
-				"step %q: id must be a jq-safe identifier (letters, digits, underscore; not starting with a digit)", step.ID)), nil
-		}
-		if seen[step.ID] {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("step %q: duplicate id", step.ID)), nil
-		}
-		seen[step.ID] = true
-
-		// Validate rather than defaulting: silently treating a typo as
-		// "fail" would abort a plan the author meant to be resilient.
-		if step.OnError != "" && step.OnError != onErrorFail && step.OnError != onErrorCollect {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf(
-				"step %q: on_error must be %q or %q, got %q",
-				step.ID, onErrorFail, onErrorCollect, step.OnError)), nil
-		}
-
-		tool, ok := registry[step.Tool]
-		if !ok {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf(
-				"step %q: unknown tool %q. Available: %s",
-				step.ID, step.Tool, strings.Join(availableToolNames(registry), ", "))), nil
-		}
-
+	for _, step := range params.Steps {
+		tool := registry[step.Tool]
 		output, calls, errs, err := runStep(ctx, step, tool, env)
 		if err != nil {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("step %q: %s", step.ID, err)), nil
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("step %q: %s%s", step.ID, err, env.shapeHint())), nil
 		}
 		meta.ToolCalls += calls
 		meta.Errors += errs
@@ -245,7 +226,7 @@ func runBatch(ctx context.Context, params BatchParams, siblings []fantasy.AgentT
 	}
 	values, err := env.eval(returnExpr)
 	if err != nil {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("return: %s", err)), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("return: %s%s", err, env.shapeHint())), nil
 	}
 
 	var result any
@@ -471,4 +452,139 @@ func validStepID(id string) bool {
 
 func availableToolNames(registry map[string]fantasy.AgentTool) []string {
 	return slices.Sorted(maps.Keys(registry))
+}
+
+// preflight checks everything about a plan that can be known before any
+// tool runs: step identity, tool names, on_error spellings, and that
+// every jq expression parses and only references variables that a step
+// earlier in the plan actually binds. It returns the message to hand
+// back, or "" when the plan is sound.
+//
+// Doing this up front is the difference between a typo costing nothing
+// and costing every tool call the plan made before reaching it.
+func preflight(params BatchParams, registry map[string]fantasy.AgentTool) string {
+	seen := make(map[string]bool, len(params.Steps))
+	// bound tracks the variables in scope for the step being checked:
+	// the ids bound so far, plus the two a for_each step binds for its
+	// own expressions.
+	bound := map[string]bool{}
+
+	for i, step := range params.Steps {
+		switch {
+		case step.ID == "":
+			return fmt.Sprintf("step %d: id is required", i)
+		case !validStepID(step.ID):
+			return fmt.Sprintf("step %q: id must be a jq-safe identifier (letters, digits, underscore; not starting with a digit)", step.ID)
+		case seen[step.ID]:
+			return fmt.Sprintf("step %q: duplicate id", step.ID)
+		}
+		seen[step.ID] = true
+
+		// Validate rather than defaulting: silently treating a typo as
+		// "fail" would abort a plan the author meant to be resilient.
+		if step.OnError != "" && step.OnError != onErrorFail && step.OnError != onErrorCollect {
+			return fmt.Sprintf("step %q: on_error must be %q or %q, got %q",
+				step.ID, onErrorFail, onErrorCollect, step.OnError)
+		}
+
+		if _, ok := registry[step.Tool]; !ok {
+			return fmt.Sprintf("step %q: unknown tool %q. Available: %s",
+				step.ID, step.Tool, strings.Join(availableToolNames(registry), ", "))
+		}
+
+		// when and for_each run before the item bindings exist; input_jq
+		// runs once per item and may use them.
+		for _, expr := range []string{step.When, step.ForEach} {
+			if msg := checkExpr(step.ID, expr, bound); msg != "" {
+				return msg
+			}
+		}
+		withItem := maps.Clone(bound)
+		if step.ForEach != "" {
+			withItem["$item"] = true
+			withItem["$index"] = true
+		}
+		if msg := checkExpr(step.ID, step.InputJQ, withItem); msg != "" {
+			return msg
+		}
+
+		bound["$"+step.ID] = true
+	}
+
+	if msg := checkExpr("return", params.Return, bound); msg != "" {
+		return msg
+	}
+	return ""
+}
+
+// checkExpr reports what is wrong with one jq expression, or "" when it
+// parses and every variable it names is in scope. An out-of-scope
+// variable is almost always a step id misspelled or referenced before it
+// runs, so the message names what is actually available.
+func checkExpr(where, expr string, bound map[string]bool) string {
+	if expr == "" {
+		return ""
+	}
+	query, err := gojq.Parse(expr)
+	if err != nil {
+		return fmt.Sprintf("%s: parse %q: %s", where, expr, err)
+	}
+	names := slices.Sorted(maps.Keys(bound))
+	if _, err := gojq.Compile(query, gojq.WithVariables(names)); err != nil {
+		return fmt.Sprintf("%s: %s. In scope here: %s", where, err, inScope(names))
+	}
+	return ""
+}
+
+// inScope renders the variable list for an error message.
+func inScope(names []string) string {
+	if len(names) == 0 {
+		return "(nothing yet - this is the first step)"
+	}
+	return strings.Join(names, ", ")
+}
+
+// shapeHint describes the shape of each bound step output, appended to a
+// jq failure so the next attempt is written against what the tools
+// actually returned rather than against a guess. Without it the only way
+// to learn a tool's response shape is to run it outside a plan first.
+func (e *batchEnv) shapeHint() string {
+	if len(e.names) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(e.names))
+	for i, name := range e.names {
+		parts = append(parts, name+": "+describeShape(e.values[i]))
+	}
+	return "\nStep outputs so far - " + strings.Join(parts, "; ")
+}
+
+// describeShape renders one value as its type and, for the shapes jq
+// expressions trip over, enough structure to fix the expression: an
+// object's keys and an array's length and element shape.
+func describeShape(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return "null"
+	case map[string]any:
+		keys := slices.Sorted(maps.Keys(t))
+		if len(keys) > 12 {
+			keys = append(keys[:12], "…")
+		}
+		return "object{" + strings.Join(keys, ", ") + "}"
+	case []any:
+		if len(t) == 0 {
+			return "array[0]"
+		}
+		return fmt.Sprintf("array[%d] of %s", len(t), describeShape(t[0]))
+	case string:
+		if len(t) > 40 {
+			return fmt.Sprintf("string(%d chars)", len(t))
+		}
+		return fmt.Sprintf("string(%q)", t)
+	case bool:
+		return "boolean"
+	default:
+		return "number"
+	}
 }

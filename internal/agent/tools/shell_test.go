@@ -13,7 +13,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 )
 
-func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
+func TestShellTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	requireTerminalSession(t)
 	workingDir := t.TempDir()
 	tool := newShellToolForTest(workingDir)
@@ -32,7 +32,7 @@ func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	require.Contains(t, meta.Output, "done")
 }
 
-func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
+func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	requireTerminalSession(t)
 	workingDir := t.TempDir()
 	tool := newShellToolForTest(workingDir)
@@ -127,7 +127,7 @@ func TestTruncateOutputEmoji(t *testing.T) {
 // for: a poll carries nothing at all, and keystrokes carry no command.
 // A required parameter here rejects those calls before the tool ever
 // sees them.
-func TestBashTool_SchemaRequiresNothing(t *testing.T) {
+func TestShellTool_SchemaRequiresNothing(t *testing.T) {
 	t.Parallel()
 
 	tool := newShellToolForTest(t.TempDir())
@@ -139,7 +139,7 @@ func TestBashTool_SchemaRequiresNothing(t *testing.T) {
 	}
 }
 
-func TestConflictingBashInputs(t *testing.T) {
+func TestConflictingShellInputs(t *testing.T) {
 	t.Parallel()
 
 	require.Empty(t, conflictingShellInputs(ShellParams{Command: "ls"}))
@@ -154,7 +154,7 @@ func TestConflictingBashInputs(t *testing.T) {
 	require.NotEmpty(t, conflictingShellInputs(ShellParams{Input: "y\n", Reset: true}))
 }
 
-func TestBashTool_RejectsCombinedCall(t *testing.T) {
+func TestShellTool_RejectsCombinedCall(t *testing.T) {
 	requireTerminalSession(t)
 	t.Parallel()
 
@@ -168,10 +168,10 @@ func TestBashTool_RejectsCombinedCall(t *testing.T) {
 	})
 
 	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "Send one of them per call")
+	require.Contains(t, resp.Content, "send one per call")
 }
 
-func TestBashLabel(t *testing.T) {
+func TestShellLabel(t *testing.T) {
 	t.Parallel()
 
 	require.Equal(t, "mine", shellLabel(ShellParams{Description: "mine", Command: "ls"}))

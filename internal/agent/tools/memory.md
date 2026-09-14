@@ -1,25 +1,9 @@
-Save, edit, read, search, list, or delete durable memories that persist across sessions. The index of saved memories is loaded into every future session automatically.
+Save, read, search, list, edit or delete memories that outlive the session. Their index loads into every future session, so a memory is worth its place only if a later session would otherwise rediscover it the hard way.
 
-<actions>
-- save: create or update a memory. Required: title, content. Omit id to upsert by title (re-saving the same title updates it instead of duplicating). Optional: category (user, feedback, project, reference), pinned (protects from reaping).
-- edit: update an existing memory by id or exact title without risk of creating a duplicate. Required: content plus either id or title. Errors and suggests save when no matching memory exists. Optional: category, pinned (omitted values keep what is stored).
-- read: get one memory's full content by id.
-- search: find memories whose title or content matches a query.
-- list: show all memories as a compact index.
-- delete: remove a memory by id.
-</actions>
+- `save` — create or update. Needs title and content; omitting id upserts by title. Optional category and `pinned` (protects it from reaping).
+- `edit` — update by id or exact title without risking a duplicate. Needs content plus one of them; omitted fields keep what is stored.
+- `read`, `delete` — by id. `search` — over title and content. `list` — the whole index, compact.
 
-<when_to_save>
-- user: stable facts about the user - preferences, environment, workflow habits.
-- feedback: corrections or guidance the user gave that should shape future behavior.
-- project: non-obvious codebase facts that took real effort to discover and are not in the context files or easily rediscovered from the repo.
-- reference: pointers to external material - docs, issues, discussions, related repos.
+Categories: `user` for stable facts about them, `feedback` for corrections that should shape how you work, `project` for non-obvious codebase facts that cost real effort to find, `reference` for pointers to external material.
 
-Save when the user states a durable preference, corrects you, or you discover something a future session would otherwise have to rediscover. Save the moment you learn it, during the session — do not batch saves to the end. Update the existing memory instead of saving a near-duplicate; delete memories that became wrong or obsolete.
-</when_to_save>
-
-<when_not_to_save>
-- Anything findable in seconds from the repo or context files.
-- Secrets of any kind; values that look like credentials are redacted on save.
-- Session-specific detail with no future value.
-</when_not_to_save>
+Save the moment you learn it, not in a batch at the end. Update the existing memory rather than saving a near-duplicate, and delete ones that turned out wrong. Do not save what the repo or the context files already answer, session-only detail, or anything secret — credential-shaped values are redacted on save anyway.

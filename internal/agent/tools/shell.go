@@ -206,12 +206,8 @@ func conflictingShellInputs(p ShellParams) string {
 	if len(asked) < 2 {
 		return ""
 	}
-	return fmt.Sprintf(
-		"This call set %s together, and they do different things: a command needs a shell at a prompt, "+
-			"input and keys go to whatever program is running, and reset kills "+
-			"the shell. Send one of them per call - typically %s first, then the next call.",
-		strings.Join(asked, " and "), asked[0],
-	)
+	return fmt.Sprintf("set %s in one call; send one per call, %s first",
+		strings.Join(asked, " and "), asked[0])
 }
 
 // shellLabel is what the call is called in the UI and in the message
@@ -364,7 +360,7 @@ func NewShellTool(workingDir, owner string, attribution *config.Attribution, mod
 					Background:       true,
 					ShellID:          bgShell.ID,
 				}
-				response := fmt.Sprintf("Background shell started with ID: %s\n\nUse job_output tool to view output or job_kill to terminate.", bgShell.ID)
+				response := fmt.Sprintf("[background shell %s]", bgShell.ID)
 				response += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 			}
@@ -418,31 +414,35 @@ func NewShellTool(workingDir, owner string, attribution *config.Attribution, mod
 
 			stdout := TruncateOutput(result.Output)
 
+			// The header names the state the call ended in and nothing
+			// else. What to do about each state belongs to the model,
+			// which knows how terminals work; repeating it on every
+			// call would spend context on advice it did not ask for.
 			var header string
 			switch {
 			case result.Interrupted:
-				header = "Interrupted: the command was stopped with ctrl+c because the call was cancelled."
+				header = "[interrupted]"
 			case result.WhileBusy:
-				header = "A command is still running in this terminal session. Below is its screen as it stands; the command's own output goes to the call waiting on it. Keystrokes you send here reach that command."
+				header = "[another command holds the session; its screen follows]"
 			case result.Waiting:
-				header = "The command has stopped and is waiting for input (no exit code yet). Send input or keys to answer it - below is what it printed before stopping - or ctrl+c (keys) to give up on it."
+				header = "[waiting for input]"
 			case result.AltScreen && result.Unchanged:
-				header = "A full-screen program owns the terminal; its screen is unchanged since the last call. Drive it with keys/input, or send ctrl+c (keys) to stop it. If nothing you send reaches it, reset:true kills this shell and starts a fresh one."
+				header = "[full-screen program; screen unchanged]"
 			case result.AltScreen:
 				rows, cols := session.Size()
-				header = fmt.Sprintf("A full-screen program owns the terminal. Below is its rendered %dx%d screen, not a stream of output; there is no exit code until it quits, which is expected rather than a failure. Drive it with keys/input, poll to see it again. A screen is one screenful - the program redraws instead of scrolling, so what it has scrolled past is gone; page inside it (pageup/pagedown, ctrl+d) or resize bigger. Quit when done: \"q\" for pagers and most TUIs, \"escape, :, q, !, enter\" for vim/nvim, ctrl+c as the fallback.", cols, rows)
+				header = fmt.Sprintf("[full-screen program; %dx%d screen follows]", cols, rows)
 			case result.Running:
-				header = "Still running in the terminal session (no exit code yet) but making no measurable progress - no output, no CPU, no memory change. Send input or keys to interact with it, poll (empty call) to wait for it to finish, or ctrl+c (keys) to stop it. If ctrl+c does not reach it either, reset:true kills this shell and starts a fresh one."
+				header = "[still running, idle]"
 			case result.ExitCode != nil && *result.ExitCode != 0:
-				header = fmt.Sprintf("Exit code %d", *result.ExitCode)
+				header = fmt.Sprintf("[exit %d]", *result.ExitCode)
 			case params.Reset:
-				header = "Terminal session reset: the old shell was killed and a fresh one is running. Its working directory, exported variables, activated environments and sudo credential are gone."
+				header = "[session reset]"
 			case params.Keys != "":
-				header = "Keys sent."
+				header = "[keys sent]"
 			case params.Input != "":
-				header = "Input sent."
+				header = "[input sent]"
 			case result.Output == "" && params.Command == "":
-				header = "No new output."
+				header = "[no new output]"
 			}
 
 			// The best knowledge of where the session is: the last
@@ -459,16 +459,14 @@ func NewShellTool(workingDir, owner string, attribution *config.Attribution, mod
 			}
 
 			var sb strings.Builder
+			// Both of these say the shell state the model was counting
+			// on is not the shell state it got, which it cannot work out
+			// from the output alone. Everything else it can.
 			if session.slot > 0 {
-				fmt.Fprintf(&sb,
-					"Ran in terminal session #%d: session #1 is busy with an interactive program. "+
-						"This is a separate shell - it does not have the other one's cd, exported "+
-						"variables or activated environments.\n", session.slot+1)
+				fmt.Fprintf(&sb, "[session #%d; #1 is busy, and this shell has none of its state]\n", session.slot+1)
 			}
 			if session.tookRestart() {
-				sb.WriteString("The terminal session's shell had exited, so a new one was started: " +
-					"working directory, exported variables, activated environments and the sudo " +
-					"credential from before are gone.\n")
+				sb.WriteString("[shell had exited; a fresh one replaced it and kept none of its state]\n")
 			}
 			if header != "" {
 				sb.WriteString(header + "\n")

@@ -593,3 +593,117 @@ func TestBatch_ForEachRunsSerialToolsOneAtATime(t *testing.T) {
 	require.Equal(t, []any{0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0}, decodeResult(t, resp))
 	require.Equal(t, 1, int(seen.peak.Load()), "a serial tool must never run alongside itself")
 }
+
+// A plan is checked before it runs anything. A typo in a late step used
+// to cost every tool call the earlier steps had already made.
+func TestBatch_PreflightRunsNothing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		steps []BatchStep
+		ret   string
+		wants string
+	}{
+		{
+			name: "unknown tool in a later step",
+			steps: []BatchStep{
+				{ID: "a", Tool: "counter"},
+				{ID: "b", Tool: "nope"},
+			},
+			wants: `unknown tool "nope"`,
+		},
+		{
+			name:  "return references a step that does not exist",
+			steps: []BatchStep{{ID: "a", Tool: "counter"}},
+			ret:   "$typo",
+			wants: "In scope here: $a",
+		},
+		{
+			name:  "a step references a later step's output",
+			steps: []BatchStep{{ID: "a", Tool: "counter", InputJQ: "{n: $b}"}, {ID: "b", Tool: "counter"}},
+			wants: "In scope here: (nothing yet - this is the first step)",
+		},
+		{
+			name:  "an expression that does not parse",
+			steps: []BatchStep{{ID: "a", Tool: "counter", When: "{{"}},
+			wants: "parse",
+		},
+		{
+			name:  "$item outside a for_each",
+			steps: []BatchStep{{ID: "a", Tool: "counter", InputJQ: "{n: $item}"}},
+			wants: "In scope here",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			counter := &fakeTool{name: "counter"}
+			resp, err := runBatch(t.Context(), BatchParams{Steps: tc.steps, Return: tc.ret},
+				[]fantasy.AgentTool{counter})
+			require.NoError(t, err)
+			require.True(t, resp.IsError, "expected a rejection, got: %s", resp.Content)
+			require.Contains(t, resp.Content, tc.wants)
+			require.Empty(t, counter.calls, "preflight must reject before any tool runs")
+		})
+	}
+}
+
+// $item and $index are in scope for the step that fans out over them.
+func TestBatch_PreflightAllowsForEachBindings(t *testing.T) {
+	t.Parallel()
+
+	counter := &fakeTool{name: "counter", respond: func(map[string]any) (fantasy.ToolResponse, error) {
+		return fantasy.NewTextResponse("ok"), nil
+	}}
+	resp, err := runBatch(t.Context(), BatchParams{
+		Steps: []BatchStep{
+			{ID: "items", Tool: "counter", InputJQ: `{n: 1}`},
+			{ID: "each", Tool: "counter", ForEach: `[1, 2]`, InputJQ: `{n: $item, i: $index}`},
+		},
+		Return: "$each | length",
+	}, []fantasy.AgentTool{counter})
+	require.NoError(t, err)
+	require.False(t, resp.IsError, "unexpected error: %s", resp.Content)
+	require.Equal(t, "2", strings.TrimSpace(resp.Content))
+}
+
+// A jq failure carries the shape of what the tools actually returned, so
+// the next attempt is written against the real response instead of a
+// guess about it.
+func TestBatch_JQFailureReportsStepShapes(t *testing.T) {
+	t.Parallel()
+
+	resp, err := runBatch(t.Context(), BatchParams{
+		Steps:  []BatchStep{{ID: "hits", Tool: "shaped"}},
+		Return: `$hits.matches | .nope`,
+	}, []fantasy.AgentTool{&shapedTool{}})
+	require.NoError(t, err)
+	require.True(t, resp.IsError, "expected a failure, got: %s", resp.Content)
+	require.Contains(t, resp.Content, "Step outputs so far")
+	require.Contains(t, resp.Content, "$hits: object{count, matches}")
+}
+
+func TestDescribeShape(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "null", describeShape(nil))
+	require.Equal(t, "boolean", describeShape(true))
+	require.Equal(t, "array[0]", describeShape([]any{}))
+	require.Equal(t, `array[2] of string("a")`, describeShape([]any{"a", "b"}))
+	require.Equal(t, "object{x, y}", describeShape(map[string]any{"y": 1, "x": 2}))
+	require.Equal(t, "string(60 chars)", describeShape(strings.Repeat("x", 60)))
+}
+
+// shapedTool answers with a JSON object, so a plan's variables hold a
+// parsed structure rather than a string.
+type shapedTool struct{}
+
+func (s *shapedTool) Info() fantasy.ToolInfo {
+	return fantasy.ToolInfo{Name: "shaped", Description: "d", Parameters: map[string]any{}}
+}
+func (s *shapedTool) ProviderOptions() fantasy.ProviderOptions        { return nil }
+func (s *shapedTool) SetProviderOptions(opts fantasy.ProviderOptions) {}
+func (s *shapedTool) Run(context.Context, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+	return fantasy.NewTextResponse(`{"count": 2, "matches": [{"path": "a.go"}]}`), nil
+}
