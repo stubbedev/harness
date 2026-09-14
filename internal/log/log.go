@@ -54,7 +54,11 @@ func Setup(logFile string, debug bool, ws ...io.Writer) {
 			}
 		}
 
-		slog.SetDefault(slog.New(slog.NewMultiHandler(handlers...)))
+		handler := slog.NewMultiHandler(handlers...)
+		slog.SetDefault(slog.New(handler))
+		// Everything logged before the log path was known -- provider
+		// resolution warnings, most of all -- goes in now.
+		replay(handler)
 		initialized.Store(true)
 	})
 }

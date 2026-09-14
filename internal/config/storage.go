@@ -16,6 +16,19 @@ import (
 // holds one machine-owned data directory per workspace.
 const workspacesDirName = "workspaces"
 
+// catalogDirName is the directory under the global data root that
+// holds the shared model catalog cache.
+const catalogDirName = "catalog"
+
+// GlobalCatalogDir returns the directory holding the provider and model
+// catalog cache. The catalog describes the outside world, not a
+// project, so it is shared by every workspace on the machine: one
+// download feeds all of them, and `harness update-providers` refreshes
+// the same store a session reads.
+func GlobalCatalogDir() string {
+	return filepath.Join(filepath.Dir(GlobalConfigData()), catalogDirName)
+}
+
 // DefaultWorkspaceDataDirectory returns the machine-owned data
 // directory for the workspace rooted at workingDir: a directory under
 // the global data root, keyed by the workspace's project boundary (the

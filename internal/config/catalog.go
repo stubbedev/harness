@@ -38,9 +38,10 @@ var (
 )
 
 // catalogSync memoizes the provider catalog for the process. The cache
-// lives in the harness SQLite database; when the database has no row
-// (first run) and the live fetch fails, the catalog is empty and only
-// manually configured providers remain.
+// lives in a SQLite database shared by every workspace on the machine;
+// when it has no row (first run) and the live fetch fails, the snapshot
+// bundled in the binary is used, so harness always starts with a
+// catalog.
 type catalogSync struct {
 	once       sync.Once
 	result     []catalog.Provider
@@ -121,6 +122,17 @@ func (s *catalogSync) Get(ctx context.Context) ([]catalog.Provider, error) {
 		if fetchErr == nil {
 			fetchErr = errors.New("catalog sources returned no providers")
 		}
+
+		// Nothing live and nothing cached: fall back to the snapshot
+		// bundled at build time. It ages, but a first run offline with
+		// no providers at all cannot even reach the model picker.
+		if seed := catalog.Seed(); len(seed) > 0 {
+			slog.Warn("Could not fetch catalog; using the catalog bundled with this build", "error", fetchErr)
+			s.result = seed
+			s.err = fetchErr
+			return
+		}
+
 		slog.Warn("Could not fetch catalog; only manually configured providers are available", "error", fetchErr)
 		s.result = nil
 		s.err = fetchErr

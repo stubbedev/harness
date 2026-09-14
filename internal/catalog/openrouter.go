@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // envLookup reads an environment variable. It is a tiny indirection so
@@ -20,8 +21,8 @@ var envLookup = os.Getenv
 // FetchCatalog fetches a fresh catalog from the live sources:
 // models.dev for the general catalog plus OpenRouter's first-party
 // model API for the openrouter provider entry. A partial failure
-// degrades gracefully: any provider whose live source failed keeps its
-// embedded seed model list.
+// degrades gracefully: when the OpenRouter API cannot be reached, its
+// entry keeps the model list models.dev published for it.
 func FetchCatalog(ctx context.Context, client *http.Client) ([]Provider, error) {
 	if client == nil {
 		client = httpClient()
@@ -47,6 +48,7 @@ func FetchCatalog(ctx context.Context, client *http.Client) ([]Provider, error) 
 			continue
 		}
 		providers[i].Models = models
+		setDefaultModels(&providers[i])
 	}
 
 	return providers, nil
@@ -126,6 +128,12 @@ func fetchOpenRouterModels(ctx context.Context, client *http.Client) ([]Model, e
 
 	models := make([]Model, 0, len(parsed.Data))
 	for _, m := range parsed.Data {
+		// OpenRouter lists everything it routes, including models that
+		// cannot call tools. Harness drives tool calls on every turn,
+		// so those entries would only fail at request time.
+		if !slices.Contains(m.SupportedParameters, "tools") {
+			continue
+		}
 		model := Model{
 			ID:                 m.ID,
 			Name:               strings.TrimPrefix(cmpOr(m.Name, m.ID), "OpenRouter: "),
@@ -134,6 +142,7 @@ func fetchOpenRouterModels(ctx context.Context, client *http.Client) ([]Model, e
 			CostPer1MInCached:  openRouterPrice(m.Pricing.InputCacheWrite),
 			CostPer1MOutCached: openRouterPrice(m.Pricing.InputCacheRead),
 			ContextWindow:      m.ContextLength,
+			ReleaseDate:        openRouterReleaseDate(m.Created),
 			DefaultMaxTokens:   cmpI64(m.TopProvider.MaxCompletionTokens, 4096),
 		}
 		if m.Reasoning != nil && len(m.Reasoning.SupportedEfforts) > 0 {
@@ -150,10 +159,21 @@ func fetchOpenRouterModels(ctx context.Context, client *http.Client) ([]Model, e
 		models = append(models, model)
 	}
 
-	slices.SortStableFunc(models, func(a, b Model) int {
-		return strings.Compare(a.ID, b.ID)
-	})
+	if len(models) == 0 {
+		return nil, fmt.Errorf("OpenRouter listed no tool-capable models")
+	}
+	sortModels(models)
 	return models, nil
+}
+
+// openRouterReleaseDate renders OpenRouter's creation timestamp in the
+// same YYYY-MM-DD shape models.dev publishes, so both sources sort the
+// same way.
+func openRouterReleaseDate(created int64) string {
+	if created <= 0 {
+		return ""
+	}
+	return time.Unix(created, 0).UTC().Format(time.DateOnly)
 }
 
 // openRouterPrice converts OpenRouter's per-token price string into a

@@ -25,7 +25,11 @@ const (
 // InferenceProvider represents the inference provider identifier.
 type InferenceProvider string
 
-// All the inference providers supported by the system.
+// All the inference providers supported by the system. The values are
+// models.dev catalog ids: an id that models.dev does not publish cannot
+// be adopted, so a constant here that has no entry upstream is dead
+// weight. See known.go for the ids that changed spelling when the
+// catalog moved off catwalk.
 const (
 	InferenceProviderOpenAI           InferenceProvider = "openai"
 	InferenceProviderAnthropic        InferenceProvider = "anthropic"
@@ -35,15 +39,21 @@ const (
 	InferenceProviderVertexAI         InferenceProvider = "google-vertex"
 	InferenceProviderXAI              InferenceProvider = "xai"
 	InferenceProviderZAI              InferenceProvider = "zai"
+	InferenceProviderZAICoding        InferenceProvider = "zai-coding-plan"
 	InferenceProviderZhipu            InferenceProvider = "zhipuai"
 	InferenceProviderZhipuCoding      InferenceProvider = "zhipuai-coding-plan"
 	InferenceProviderGROQ             InferenceProvider = "groq"
 	InferenceProviderOpenRouter       InferenceProvider = "openrouter"
 	InferenceProviderCerebras         InferenceProvider = "cerebras"
 	InferenceProviderDeepSeek         InferenceProvider = "deepseek"
+	InferenceProviderDeepInfra        InferenceProvider = "deepinfra"
 	InferenceProviderVenice           InferenceProvider = "venice"
 	InferenceProviderChutes           InferenceProvider = "chutes"
 	InferenceProviderHuggingFace      InferenceProvider = "huggingface"
+	InferenceProviderMistral          InferenceProvider = "mistral"
+	InferenceProviderCohere           InferenceProvider = "cohere"
+	InferenceProviderPerplexity       InferenceProvider = "perplexity"
+	InferenceProviderTogetherAI       InferenceProvider = "togetherai"
 	InferenceAIHubMix                 InferenceProvider = "aihubmix"
 	InferenceKimiCoding               InferenceProvider = "kimi-for-coding"
 	InferenceProviderCopilot          InferenceProvider = "github-copilot"
@@ -51,19 +61,16 @@ const (
 	InferenceProviderVercel           InferenceProvider = "vercel"
 	InferenceProviderMiniMax          InferenceProvider = "minimax"
 	InferenceProviderMiniMaxChina     InferenceProvider = "minimax-cn"
-	InferenceProviderIoNet            InferenceProvider = "ionet"
+	InferenceProviderIoNet            InferenceProvider = "io-net"
 	InferenceProviderQiniuCloud       InferenceProvider = "qiniu-ai"
-	InferenceProviderAvian            InferenceProvider = "avian"
 	InferenceProviderNebius           InferenceProvider = "nebius"
 	InferenceProviderNeuralwatt       InferenceProvider = "neuralwatt"
 	InferenceProviderOpenCodeZen      InferenceProvider = "opencode"
 	InferenceProviderOpenCodeGo       InferenceProvider = "opencode-go"
 	InferenceProviderAlibabaSingapore InferenceProvider = "alibaba"
-	InferenceProviderAlibabaUS        InferenceProvider = "alibaba-us"
 	InferenceProviderFireworks        InferenceProvider = "fireworks-ai"
 	InferenceProviderBaseten          InferenceProvider = "baseten"
 	InferenceProviderMoonshot         InferenceProvider = "moonshotai"
-	InferenceProviderAtlasCloud       InferenceProvider = "atlascloud"
 )
 
 // Provider represents an AI provider configuration.
@@ -98,6 +105,7 @@ type Model struct {
 	CostPer1MInCached      float64      `json:"cost_per_1m_in_cached"`
 	CostPer1MOutCached     float64      `json:"cost_per_1m_out_cached"`
 	ContextWindow          int64        `json:"context_window"`
+	ReleaseDate            string       `json:"release_date,omitempty"`
 	DefaultMaxTokens       int64        `json:"default_max_tokens"`
 	CanReason              bool         `json:"can_reason"`
 	ReasoningLevels        []string     `json:"reasoning_levels,omitempty"`

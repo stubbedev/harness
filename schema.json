@@ -415,6 +415,9 @@
         "context_window": {
           "type": "integer"
         },
+        "release_date": {
+          "type": "string"
+        },
         "default_max_tokens": {
           "type": "integer"
         },

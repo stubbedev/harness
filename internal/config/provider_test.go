@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -60,16 +61,17 @@ func TestProviders_AutoUpdateDisabled(t *testing.T) {
 	defer resetProviderState()
 
 	// With auto-update disabled the cached catalog is served at any
-	// age and never fetched.
+	// age and never fetched. The cache is machine-wide, not per
+	// workspace, so it is seeded where GlobalCatalogDir points.
 	cached := []catalog.Provider{
 		{Name: "Cached", ID: "c1", Models: []catalog.Model{{ID: "m1"}}},
 	}
-	seedCatalogDB(t, tmpDir, cached, time.Now().Add(-72*time.Hour))
+	seedCatalogDB(t, GlobalCatalogDir(), cached, time.Now().Add(-72*time.Hour))
 
 	cfg := &Config{
 		Options: &Options{
 			DisableProviderAutoUpdate: true,
-			DataDirectory:             tmpDir,
+			DataDirectory:             filepath.Join(tmpDir, "workspace"),
 		},
 	}
 
@@ -159,7 +161,7 @@ func TestCatalogSync_FetchSuccessStoresInDB(t *testing.T) {
 	require.Equal(t, "Fresh", cached[0].Name)
 }
 
-func TestCatalogSync_EmptyCatalogWhenFetchFailsWithNoCache(t *testing.T) {
+func TestCatalogSync_SeedUsedWhenFetchFailsWithNoCache(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Cleanup(db.ResetPool)
 
@@ -168,8 +170,20 @@ func TestCatalogSync_EmptyCatalogWhenFetchFailsWithNoCache(t *testing.T) {
 	syncer.Init(client, dataDir, true)
 
 	providers, err := syncer.Get(t.Context())
-	require.Error(t, err, "with no cache and no fetch the failure is reported")
-	require.Empty(t, providers, "there is no built-in fallback catalog; config-only providers remain")
+	require.Error(t, err, "with no cache and no fetch the failure is still reported")
+	require.NotEmpty(t, providers, "the snapshot bundled with the build carries the first run")
+
+	_, ok := findProviderByID(providers, catalog.InferenceProviderAnthropic)
+	require.True(t, ok, "the bundled snapshot is a real catalog")
+}
+
+func findProviderByID(providers []catalog.Provider, id catalog.InferenceProvider) (catalog.Provider, bool) {
+	for _, p := range providers {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return catalog.Provider{}, false
 }
 
 // TestProviders_KeepsCatalogWhenDBUnavailable covers a data directory
@@ -177,6 +191,7 @@ func TestCatalogSync_EmptyCatalogWhenFetchFailsWithNoCache(t *testing.T) {
 // returned for this run even though it could not be persisted.
 func TestProviders_KeepsCatalogWhenDBUnavailable(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(tmpDir, "data"))
 	blocked := tmpDir + "/blocked"
 	require.NoError(t, os.WriteFile(blocked, []byte("block"), 0o644))
 
@@ -203,6 +218,44 @@ func TestProviders_UsesMockClientInjectedThroughSyncer(t *testing.T) {
 	providers, err := syncer.Get(t.Context())
 	require.NoError(t, err)
 	require.Len(t, providers, 2)
+}
+
+// TestUpdateProviders_WritesTheStoreProvidersReads pins the contract
+// the CLI depends on: `harness update-providers` must refresh the same
+// catalog a session reads, not a store of its own.
+func TestUpdateProviders_WritesTheStoreProvidersReads(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDir)
+	t.Cleanup(db.ResetPool)
+
+	resetProviderState()
+	defer resetProviderState()
+
+	source := filepath.Join(tmpDir, "providers.json")
+	data, err := json.Marshal([]catalog.Provider{{
+		Name:        "Local",
+		ID:          "local",
+		Type:        catalog.TypeOpenAICompat,
+		APIEndpoint: "https://local.test/v1",
+		Models:      []catalog.Model{{ID: "m1"}},
+	}})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(source, data, 0o600))
+
+	require.NoError(t, UpdateProviders(source))
+
+	// A session reads the catalog through Providers, from a workspace
+	// data directory that has nothing to do with where the refresh ran.
+	cfg := &Config{
+		Options: &Options{
+			DisableProviderAutoUpdate: true,
+			DataDirectory:             filepath.Join(tmpDir, "workspaces", "somewhere"),
+		},
+	}
+	providers, err := Providers(cfg)
+	require.NoError(t, err)
+	require.Len(t, providers, 1)
+	require.Equal(t, "Local", providers[0].Name)
 }
 
 func TestUpdateProviderInList(t *testing.T) {

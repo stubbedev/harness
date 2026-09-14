@@ -28,18 +28,19 @@ var (
 var catalogSyncer = &catalogSync{}
 
 // Providers returns the list of providers, taking into account the
-// database cache and whether or not auto update is enabled.
+// shared catalog cache and whether or not auto update is enabled.
 //
 // It will:
-// 1. load the cached catalog from the SQLite database when it is less
-// than a day old (at any age when auto update is disabled).
+// 1. load the cached catalog from the shared SQLite database when it is
+// less than a day old (at any age when auto update is disabled).
 // 2. otherwise try to get the fresh list from models.dev (plus
 // OpenRouter for the openrouter entry), and return either this new
-// list or the stale cached list if the fetch fails.
+// list, the stale cached list, or finally the snapshot bundled with the
+// build if the fetch fails.
 //
 // A returned error is advisory: it reports that the catalog could not
-// be cached, or that the live sources returned nothing usable and no
-// cache exists. Callers decide whether an empty catalog is fatal.
+// be refreshed or cached. Callers decide whether an empty catalog is
+// fatal.
 func Providers(cfg *Config) ([]catalog.Provider, error) {
 	providerOnce.Do(func() {
 		autoupdate := !cfg.Options.DisableProviderAutoUpdate
@@ -54,7 +55,7 @@ func Providers(cfg *Config) ([]catalog.Provider, error) {
 		}
 
 		client := liveCatalogClient{}
-		catalogSyncer.Init(client, cfg.Options.DataDirectory, autoupdate)
+		catalogSyncer.Init(client, GlobalCatalogDir(), autoupdate)
 
 		// A failure to refresh or cache the catalog is worth reporting
 		// to the caller, which decides whether an empty catalog is
@@ -90,8 +91,9 @@ func UpdateProviderInList(provider catalog.Provider) {
 // UpdateProviders refreshes the stored model catalog. With no argument
 // the catalog is fetched live from models.dev and OpenRouter. A path
 // or URL is read as either a models.dev api.json document or a plain
-// provider list.
-func UpdateProviders(cfg *Config, pathOrURL string) error {
+// provider list. The catalog is written to the machine-wide store every
+// workspace reads, so a refresh here is a refresh everywhere.
+func UpdateProviders(pathOrURL string) error {
 	var providers []catalog.Provider
 	var err error
 
@@ -117,14 +119,12 @@ func UpdateProviders(cfg *Config, pathOrURL string) error {
 		}
 	}
 
-	if cfg == nil || cfg.Options.DataDirectory == "" {
-		return fmt.Errorf("no data directory configured to store the catalog")
-	}
-	conn, err := db.Connect(context.Background(), cfg.Options.DataDirectory)
+	catalogDir := GlobalCatalogDir()
+	conn, err := db.Connect(context.Background(), catalogDir)
 	if err != nil {
 		return fmt.Errorf("failed to open catalog database: %w", err)
 	}
-	defer func() { _ = db.Release(cfg.Options.DataDirectory) }()
+	defer func() { _ = db.Release(catalogDir) }()
 	if err := storeCatalog(context.Background(), conn, providers); err != nil {
 		return err
 	}

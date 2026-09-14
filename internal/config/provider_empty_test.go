@@ -16,8 +16,8 @@ func (m *emptyProviderClient) FetchCatalog(context.Context) ([]catalog.Provider,
 }
 
 // TestCatalogSync_GetEmptyResultFromClient tests that when the live
-// sources return an empty list, the syncer falls back to the embedded
-// seed and reports the failure.
+// sources return an empty list, the syncer falls back to the snapshot
+// bundled with the build and still reports the failure.
 func TestCatalogSync_GetEmptyResultFromClient(t *testing.T) {
 	t.Parallel()
 
@@ -30,9 +30,10 @@ func TestCatalogSync_GetEmptyResultFromClient(t *testing.T) {
 	providers, err := syncer.Get(t.Context())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no providers")
-	require.Empty(t, providers, "there is no built-in fallback catalog")
+	require.Equal(t, catalog.Seed(), providers, "the bundled snapshot stands in")
 
-	// No catalog row is stored for empty results.
+	// No catalog row is stored for empty results: the seed is a
+	// fallback, not something to cache back over the real catalog.
 	conn, connErr := db.Connect(context.Background(), dataDir)
 	require.NoError(t, connErr)
 	_, getErr := db.New(conn).GetModelCatalog(t.Context())

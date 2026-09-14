@@ -545,6 +545,67 @@ func TestConfig_configureProviders(t *testing.T) {
 	require.Equal(t, "$OPENAI_API_KEY", pc.APIKey)
 }
 
+// TestConfig_configureProvidersMigratesRenamedIDs covers a config
+// written against the old catwalk catalog: the provider ids changed
+// when the catalog moved to models.dev, and an entry that matches no
+// known provider would otherwise be dropped for having no base URL.
+func TestConfig_configureProvidersMigratesRenamedIDs(t *testing.T) {
+	knownProviders := []catalog.Provider{
+		{
+			ID:          "opencode",
+			APIKey:      "$OPENCODE_API_KEY",
+			APIEndpoint: "https://opencode.ai/zen/v1",
+			Models:      []catalog.Model{{ID: "test-model"}},
+		},
+	}
+
+	cfg := &Config{Providers: csync.NewMap[string, ProviderConfig]()}
+	cfg.Providers.Set("opencode-zen", ProviderConfig{APIKey: "xyz"})
+	cfg.setDefaults("/tmp", "")
+
+	env := env.NewFromMap(map[string]string{})
+	resolver := NewShellVariableResolver(env)
+	require.NoError(t, cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders))
+
+	_, stale := cfg.Providers.Get("opencode-zen")
+	require.False(t, stale, "the former id does not survive the migration")
+
+	pc, ok := cfg.Providers.Get("opencode")
+	require.True(t, ok, "the entry is applied under the current id")
+	require.Equal(t, "xyz", pc.APIKey)
+	require.Equal(t, "opencode", pc.ID)
+	require.Equal(t, "https://opencode.ai/zen/v1", pc.BaseURL)
+	require.Len(t, pc.Models, 1)
+}
+
+// TestConfig_configureProvidersKeepsCurrentIDOverLegacy covers a config
+// that names both spellings: the current id wins and the stale entry is
+// dropped rather than overwriting it.
+func TestConfig_configureProvidersKeepsCurrentIDOverLegacy(t *testing.T) {
+	knownProviders := []catalog.Provider{
+		{
+			ID:          "opencode",
+			APIKey:      "$OPENCODE_API_KEY",
+			APIEndpoint: "https://opencode.ai/zen/v1",
+			Models:      []catalog.Model{{ID: "test-model"}},
+		},
+	}
+
+	cfg := &Config{Providers: csync.NewMap[string, ProviderConfig]()}
+	cfg.Providers.Set("opencode-zen", ProviderConfig{APIKey: "stale"})
+	cfg.Providers.Set("opencode", ProviderConfig{APIKey: "current"})
+	cfg.setDefaults("/tmp", "")
+
+	env := env.NewFromMap(map[string]string{})
+	resolver := NewShellVariableResolver(env)
+	require.NoError(t, cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, knownProviders))
+
+	require.Equal(t, 1, cfg.Providers.Len())
+	pc, ok := cfg.Providers.Get("opencode")
+	require.True(t, ok)
+	require.Equal(t, "current", pc.APIKey)
+}
+
 func TestConfig_configureProvidersWithOverride(t *testing.T) {
 	knownProviders := []catalog.Provider{
 		{

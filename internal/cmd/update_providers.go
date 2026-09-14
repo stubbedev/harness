@@ -13,12 +13,14 @@ import (
 var updateProvidersCmd = &cobra.Command{
 	Use:   "update-providers [path-or-url]",
 	Short: "Update the model catalog",
-	Long: `Refresh the provider and model catalog stored in the local database.
+	Long: `Refresh the provider and model catalog stored on this machine.
 
 With no argument the catalog is fetched live from models.dev, with the
 OpenRouter provider entry taken from OpenRouter's own model API. A path
 or URL is read as either a models.dev api.json document or a plain
-provider list.`,
+provider list. The catalog is shared by every workspace, so one refresh
+covers them all; sessions already running pick it up on their next
+start.`,
 	Example: `
 # Refresh the catalog from models.dev (default)
 harness update-providers
@@ -38,11 +40,7 @@ harness update-providers /path/to/providers.json
 			pathOrURL = args[0]
 		}
 
-		store, err := config.Init(config.GlobalWorkspaceDir(), "", false)
-		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-		if err := config.UpdateProviders(store.Config(), pathOrURL); err != nil {
+		if err := config.UpdateProviders(pathOrURL); err != nil {
 			return err
 		}
 

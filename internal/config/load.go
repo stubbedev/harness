@@ -240,6 +240,8 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		knownProviders = nil
 	}
 
+	c.migrateLegacyProviderIDs(knownProviders)
+
 	for _, p := range knownProviders {
 		knownProviderNames[string(p.ID)] = true
 		config, configExists := c.Providers.Get(string(p.ID))
@@ -508,6 +510,55 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	}
 
 	return nil
+}
+
+// migrateLegacyProviderIDs rewrites provider entries written against
+// the old catwalk catalog onto the ids models.dev uses. Without it such
+// an entry matches no known provider, falls through to the
+// custom-provider path, and is dropped for having no base URL -- the
+// provider simply disappears, credentials and all.
+//
+// The rewrite is in-memory only: the config file is the user's, and a
+// warning tells them which id to write the next time they edit it.
+func (c *Config) migrateLegacyProviderIDs(knownProviders []catalog.Provider) {
+	if c.Providers == nil || c.Providers.Len() == 0 {
+		return
+	}
+
+	known := make(map[string]bool, len(knownProviders))
+	for _, p := range knownProviders {
+		known[string(p.ID)] = true
+	}
+
+	configured := slices.Sorted(maps.Keys(c.Providers.Copy()))
+	for _, id := range configured {
+		if known[id] {
+			// An id that still exists but no longer points at the same
+			// service cannot be rewritten -- both readings are
+			// legitimate -- so it is only reported.
+			if note, ok := catalog.ProviderMeaningChanged(id); ok {
+				slog.Info("Provider id has changed meaning since catwalk", "provider", id, "note", note)
+			}
+			continue
+		}
+		current, renamed := catalog.LegacyProviderID(id)
+		if !renamed || !known[current] {
+			continue
+		}
+		providerConfig, ok := c.Providers.Get(id)
+		if !ok {
+			continue
+		}
+		if _, taken := c.Providers.Get(current); taken {
+			slog.Warn("Ignoring provider entry under its former id", "provider", id, "renamed_to", current)
+			c.Providers.Del(id)
+			continue
+		}
+		slog.Warn("Provider was renamed; applying its config under the current id", "provider", id, "renamed_to", current)
+		providerConfig.ID = current
+		c.Providers.Del(id)
+		c.Providers.Set(current, providerConfig)
+	}
 }
 
 // applyEnv sets top-level env vars from the config. Keys are sorted for

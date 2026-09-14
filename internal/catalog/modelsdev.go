@@ -120,11 +120,12 @@ func fetchModelsDev(ctx context.Context, client *http.Client) (modelsDev, error)
 // translateModelsDev converts the models.dev catalog into harness
 // providers. Every models.dev entry that carries enough information to
 // be usable becomes a catalog provider: the protocol derives from the
-// AI SDK package the entry targets, the endpoint from its
-// OpenAI-compatible base URL, and the API key template from its
-// declared environment variables. Entries without a mappable protocol
-// or base URL are skipped; a user can always add such a provider by
-// hand through their config.
+// AI SDK package the entry targets or from the known-provider table,
+// the endpoint from its OpenAI-compatible base URL (or, again, the
+// table), and the API key template from its declared environment
+// variables. Entries without a mappable protocol or base URL are
+// skipped; a user can always add such a provider by hand through their
+// config.
 func translateModelsDev(md modelsDev) []Provider {
 	providers := make([]Provider, 0, len(md))
 	for sourceID, src := range md {
@@ -141,6 +142,7 @@ func translateModelsDev(md modelsDev) []Provider {
 		}
 		sortModels(models)
 		adopted.Models = models
+		setDefaultModels(&adopted)
 		providers = append(providers, adopted)
 	}
 
@@ -181,44 +183,120 @@ func ParseProviders(data []byte) ([]Provider, error) {
 	return translateModelsDev(md), nil
 }
 
-// sortModels orders models largest-context-first so the default-model
-// heuristic (which falls back to the first model) lands on a capable
-// model and the model picker surfaces flagship models first.
+// sortModels orders a provider's models most-capable-first, which is
+// both what the model picker should show first and where the default
+// large model is taken from. Capability is not published, so it is
+// approximated: the widest context window, then the highest price
+// (vendors charge for their flagship), then the most recent release.
+// models.dev is a JSON object, so the id breaks the last tie to keep
+// the order stable across fetches.
 func sortModels(models []Model) {
 	slices.SortStableFunc(models, func(a, b Model) int {
 		if a.ContextWindow != b.ContextWindow {
-			if a.ContextWindow > b.ContextWindow {
-				return -1
-			}
-			return 1
+			return descend(a.ContextWindow, b.ContextWindow)
 		}
-		return 0
+		if a.CostPer1MOut != b.CostPer1MOut {
+			return descend(a.CostPer1MOut, b.CostPer1MOut)
+		}
+		if a.CostPer1MIn != b.CostPer1MIn {
+			return descend(a.CostPer1MIn, b.CostPer1MIn)
+		}
+		if a.ReleaseDate != b.ReleaseDate {
+			return strings.Compare(b.ReleaseDate, a.ReleaseDate)
+		}
+		return strings.Compare(a.ID, b.ID)
 	})
 }
 
-// adoptModelsDevProvider derives a harness provider from an uncurated
-// models.dev entry. The second return value reports whether the entry
-// carries enough information to be usable.
-func adoptModelsDevProvider(sourceID string, src modelsDevProvider) (Provider, bool) {
-	name := cmpOr(src.Name, sourceID)
+// descend orders two values largest-first.
+func descend[T int64 | float64](a, b T) int {
+	if a > b {
+		return -1
+	}
+	return 1
+}
 
-	// Map the AI SDK package the entry targets to a harness protocol
-	// type where one exists.
-	providerType, native := npmToType(src.NPM)
-	if !native {
-		// Everything else must speak the OpenAI-compatible wire format
-		// and publish a base URL to be usable.
-		if src.API == "" {
-			return Provider{}, false
+// setDefaultModels picks the pair a provider opens with when the user
+// has not chosen one. models.dev publishes no such recommendation, so
+// they are derived: the large model is the most capable one on offer
+// (the head of the list sortModels produced), and the small model --
+// which runs titles, summaries and other cheap internal calls -- is the
+// cheapest model that is still a general-purpose chat model. Cost is
+// compared output-first because output tokens dominate those calls.
+//
+// A provider whose models are all free (a local runtime, a flat-rate
+// plan) has no cost signal to rank by, so the small model falls back to
+// the narrowest-context model -- the tail of the sorted list, and the
+// cheapest to run.
+func setDefaultModels(p *Provider) {
+	if len(p.Models) == 0 {
+		return
+	}
+	// Models are sorted most-capable-first, so the large model is the
+	// head of the list.
+	p.DefaultLargeModelID = p.Models[0].ID
+
+	smallest := len(p.Models) - 1
+	small := -1
+	for i, m := range p.Models {
+		if m.CostPer1MIn == 0 && m.CostPer1MOut == 0 {
+			continue
 		}
-		providerType = TypeOpenAICompat
+		if small < 0 || cheaper(m, p.Models[small]) {
+			small = i
+		}
+	}
+	if small < 0 {
+		small = smallest
+	}
+	p.DefaultSmallModelID = p.Models[small].ID
+}
+
+// cheaper reports whether a costs less to run than b, comparing output
+// price first and falling back to the id so the choice is stable.
+func cheaper(a, b Model) bool {
+	if a.CostPer1MOut != b.CostPer1MOut {
+		return a.CostPer1MOut < b.CostPer1MOut
+	}
+	if a.CostPer1MIn != b.CostPer1MIn {
+		return a.CostPer1MIn < b.CostPer1MIn
+	}
+	return a.ID < b.ID
+}
+
+// adoptModelsDevProvider derives a harness provider from an uncurated
+// models.dev entry, filled in from the known-provider table where
+// models.dev is silent. The second return value reports whether the
+// entry carries enough information to be usable.
+func adoptModelsDevProvider(sourceID string, src modelsDevProvider) (Provider, bool) {
+	id := InferenceProvider(sourceID)
+	known := knownProviders[id]
+
+	// The protocol comes from the known-provider table first, then from
+	// the AI SDK package the entry targets.
+	providerType := known.Type
+	if providerType == "" {
+		var native bool
+		if providerType, native = npmToType(src.NPM); !native {
+			providerType = TypeOpenAICompat
+		}
+	}
+
+	// An OpenAI-compatible provider is only usable with a base URL.
+	// models.dev publishes one for most of them; the table covers the
+	// entries that name a vendor SDK instead, and native protocols
+	// carry the endpoint in their own client.
+	endpoint := cmpOr(src.API, known.Endpoint)
+	if endpoint == "" && providerType == TypeOpenAICompat {
+		return Provider{}, false
 	}
 
 	p := Provider{
-		ID:          InferenceProvider(sourceID),
-		Name:        name,
-		APIEndpoint: src.API,
-		Type:        providerType,
+		ID:             id,
+		Name:           cmpOr(src.Name, sourceID),
+		APIEndpoint:    endpoint,
+		Type:           providerType,
+		DefaultHeaders: knownHeaders(id),
 	}
 	if len(src.Env) > 0 && src.Env[0] != "" {
 		p.APIKey = "$" + src.Env[0]
@@ -251,20 +329,44 @@ func npmToType(npm string) (Type, bool) {
 	}
 }
 
-// translateModelsDevModels translates a models.dev model map, skipping
-// models the upstream catalog marks deprecated. The second return value
-// counts skipped entries.
+// translateModelsDevModels translates a models.dev model map, keeping
+// only the models harness can actually hold a conversation with. The
+// second return value counts skipped entries.
 func translateModelsDevModels(src modelsDevProvider) ([]Model, int) {
 	models := make([]Model, 0, len(src.Models))
 	skipped := 0
 	for _, m := range src.Models {
-		if m.Status == "deprecated" {
+		if !usableModel(m) {
 			skipped++
 			continue
 		}
 		models = append(models, translateModelsDevModel(m))
 	}
 	return models, skipped
+}
+
+// usableModel reports whether a models.dev entry is a model the agent
+// loop can drive. models.dev catalogues everything a provider serves,
+// embeddings, image generators, speech and moderation endpoints
+// included; harness drives a chat model that can call tools, so
+// anything that cannot take text in, cannot write text back, or cannot
+// call a tool would only ever fail at request time if offered.
+func usableModel(m modelsDevModel) bool {
+	if m.Status == "deprecated" || !m.ToolCall {
+		return false
+	}
+	return acceptsModality(m.Modalities.Input, "text") &&
+		acceptsModality(m.Modalities.Output, "text")
+}
+
+// acceptsModality reports whether a declared modality list contains
+// want. An empty list is treated as text-only: a handful of entries
+// omit the field, and every one of them is a chat model.
+func acceptsModality(modalities []string, want string) bool {
+	if len(modalities) == 0 {
+		return want == "text"
+	}
+	return slices.Contains(modalities, want)
 }
 
 func translateModelsDevModel(m modelsDevModel) Model {
@@ -276,6 +378,7 @@ func translateModelsDevModel(m modelsDevModel) Model {
 		CostPer1MInCached:  m.Cost.CacheWrite,
 		CostPer1MOutCached: m.Cost.CacheRead,
 		ContextWindow:      m.Limit.Context,
+		ReleaseDate:        m.ReleaseDate,
 		DefaultMaxTokens:   cmpI64(m.Limit.Output, 4096),
 		CanReason:          m.Reasoning,
 	}

@@ -16,13 +16,13 @@ func fixtureModelsDev() modelsDev {
 			Env:  []string{"ANTHROPIC_API_KEY"},
 			Models: map[string]modelsDevModel{
 				"claude-x": {
-					ID: "claude-x", Name: "Claude X", Reasoning: true,
+					ID: "claude-x", Name: "Claude X", Reasoning: true, ToolCall: true,
 					Limit:      modelsDevLimit{Context: 200000, Output: 8192},
 					Cost:       modelsDevCost{Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75},
 					Modalities: modelsDevModalities{Input: []string{"text", "image"}, Output: []string{"text"}},
 				},
 				"claude-old": {
-					ID: "claude-old", Name: "Claude Old", Status: "deprecated",
+					ID: "claude-old", Name: "Claude Old", Status: "deprecated", ToolCall: true,
 					Limit: modelsDevLimit{Context: 200000, Output: 8192},
 				},
 			},
@@ -34,7 +34,7 @@ func fixtureModelsDev() modelsDev {
 			API:  "https://api.deepinfra.com/v1/openai",
 			Env:  []string{"DEEPINFRA_API_KEY"},
 			Models: map[string]modelsDevModel{
-				"meta/llama": {ID: "meta/llama", Name: "Llama", Limit: modelsDevLimit{Context: 32000, Output: 4096}},
+				"meta/llama": {ID: "meta/llama", Name: "Llama", ToolCall: true, Limit: modelsDevLimit{Context: 32000, Output: 4096}},
 			},
 		},
 		"zai": {
@@ -44,7 +44,7 @@ func fixtureModelsDev() modelsDev {
 			API:  "https://api.z.ai/api/paas/v4",
 			Env:  []string{"ZHIPU_API_KEY"},
 			Models: map[string]modelsDevModel{
-				"glm-x": {ID: "glm-x", Name: "GLM X", Limit: modelsDevLimit{Context: 128000, Output: 4096}},
+				"glm-x": {ID: "glm-x", Name: "GLM X", ToolCall: true, Limit: modelsDevLimit{Context: 128000, Output: 4096}},
 			},
 		},
 		"sdk-only": {
@@ -52,7 +52,7 @@ func fixtureModelsDev() modelsDev {
 			Name: "SDK Only",
 			NPM:  "@ai-sdk/mistral",
 			Models: map[string]modelsDevModel{
-				"m": {ID: "m", Name: "M"},
+				"m": {ID: "m", Name: "M", ToolCall: true},
 			},
 		},
 		"empty": {
@@ -88,9 +88,10 @@ func TestTranslateModelsDevNativeProtocol(t *testing.T) {
 	require.Equal(t, "claude-x", anthropic.Models[0].ID)
 	require.True(t, anthropic.Models[0].SupportsImages)
 	require.True(t, anthropic.Models[0].CanReason)
-	// Native-protocol entries carry no endpoint; the SDK default
-	// applies and users can override via config.
-	require.Empty(t, anthropic.APIEndpoint)
+	// models.dev publishes no endpoint for a native protocol, so the
+	// known-provider table supplies the template that keeps the
+	// endpoint overridable from the environment.
+	require.Equal(t, "$ANTHROPIC_API_ENDPOINT", anthropic.APIEndpoint)
 }
 
 func TestTranslateModelsDevAdoptsOpenAICompatProviders(t *testing.T) {
@@ -133,7 +134,7 @@ func TestTranslateModelsDevNativeNpmMapping(t *testing.T) {
 			Name: "Bedrock Gateway",
 			NPM:  "@ai-sdk/amazon-bedrock",
 			Models: map[string]modelsDevModel{
-				"b": {ID: "b", Name: "B", Limit: modelsDevLimit{Context: 1000, Output: 100}},
+				"b": {ID: "b", Name: "B", ToolCall: true, Limit: modelsDevLimit{Context: 1000, Output: 100}},
 			},
 		},
 	}

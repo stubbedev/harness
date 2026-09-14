@@ -23,6 +23,12 @@ internal/
     load.go                        YAML config discovery, loading and validation
     yaml.go                        YAML <-> JSON conversion at the file boundary
     provider.go                    Provider configuration and model resolution
+    catalog.go                     Shared catalog cache (SQLite, machine-wide)
+  catalog/                         Provider and model catalog built from models.dev
+    modelsdev.go                   Fetch and translate https://models.dev/api.json
+    openrouter.go                  OpenRouter's own model API, for its entry
+    known.go                       The hand-maintained bits models.dev omits
+    seed.json.gz                   Snapshot bundled in the binary (go generate)
   agent/
     agent.go                       SessionAgent: runs LLM conversations per session
     coordinator.go                 Coordinator: manages named agents ("coder", "task")
@@ -60,8 +66,27 @@ internal/
 - **`charm.land/bubbletea/v2`**: TUI framework powering the interactive UI.
 - **`charm.land/lipgloss/v2`**: Terminal styling.
 - **`charm.land/glamour/v2`**: Markdown rendering in the terminal.
-- **`charm.land/catwalk`**: Upstream catalog of models and providers.
 - **`sqlc`**: Generates Go code from SQL queries in `internal/db/sql/`.
+
+### The Model Catalog
+
+Providers and models come from [models.dev](https://models.dev), fetched
+live and cached in a SQLite database shared by every workspace
+(`$XDG_DATA_HOME/harness/catalog`), with the OpenRouter entry refreshed
+from OpenRouter's own model API. `harness update-providers` refreshes
+that same store.
+
+models.dev does not publish everything harness needs. `internal/catalog/known.go`
+holds the rest, and it is the only hand-maintained surface: the wire
+protocol and base URL for providers whose entry names a vendor SDK
+instead of an OpenAI-compatible endpoint, the `$VAR` endpoint templates
+that keep native providers overridable, per-provider headers, and the
+map from the provider ids catwalk used to the ids models.dev uses (a
+config written against the old catalog is migrated at load time).
+
+`internal/catalog/seed.json.gz` is a snapshot of the translated catalog,
+embedded in the binary so a first run with no network still has
+providers. Refresh it with `go generate ./internal/catalog`.
 
 ### Key Patterns
 

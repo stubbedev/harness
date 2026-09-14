@@ -178,14 +178,14 @@ const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{
 `
 
 func Execute() {
-	// FIXME: config.Load uses slog internally during provider resolution,
-	// but the file-based logger isn't set up until after config is loaded
+	// config.Load uses slog internally during provider resolution, but
+	// the file-based logger isn't set up until after config is loaded
 	// (because the log path depends on the data directory from config).
-	// This creates a window where slog calls in config.Load leak to
-	// stderr. We discard early logs here as a workaround. The proper
-	// fix is to remove slog calls from config.Load and have it return
-	// warnings/diagnostics instead of logging them as a side effect.
-	slog.SetDefault(slog.New(slog.DiscardHandler))
+	// Buffer that window instead of letting it leak to stderr: the
+	// records are replayed into the log file once harnesslog.Setup
+	// installs the real handler, so a provider that was skipped or
+	// migrated at load time is still explained afterwards.
+	slog.SetDefault(slog.New(harnesslog.Early()))
 
 	// NOTE: very hacky: we create a colorprofile writer with STDOUT, then make
 	// it forward to a bytes.Buffer, write the colored logo mark to it, and then
