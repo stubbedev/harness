@@ -117,6 +117,29 @@ func TestGitBuiltinHonorsConfiguredWorktreesDir(t *testing.T) {
 	}
 }
 
+// TestGitBuiltinSymlinkedCwd pins the canonicalization fix: when the
+// shell's cwd reaches the repo through a symlink (TMPDIR on macOS) while
+// git reports the resolved path, a repo-local worktree must still be
+// recognized as repo-local and left alone.
+func TestGitBuiltinSymlinkedCwd(t *testing.T) {
+	t.Parallel()
+	repo := initTestGitRepo(t)
+
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(repo, link); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	inRepo := filepath.Join(link, "local-wt")
+	out, errOut := runShellCommand(t, link, "git worktree add \""+inRepo+"\"")
+
+	if _, err := os.Stat(filepath.Join(inRepo, ".git")); err != nil {
+		t.Fatalf("repo-local worktree not created via symlinked cwd: %v\nstdout: %s\nstderr: %s", err, out, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".worktrees")); !os.IsNotExist(err) {
+		t.Errorf(".worktrees was created even though the path was repo-local")
+	}
+}
+
 // TestGitBuiltinNotARepo passes through outside a repository: the command
 // fails with git's own error rather than ours.
 func TestGitBuiltinNotARepo(t *testing.T) {
