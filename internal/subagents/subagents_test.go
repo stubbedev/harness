@@ -1255,11 +1255,11 @@ func TestValidate_RejectsUnknownToolNames(t *testing.T) {
 		sa := Subagent{
 			Name:        "reviewer",
 			Description: "Reviews things.",
-			Tools:       ToolList{"Grep"},
+			Tools:       ToolList{"View"},
 		}
 		err := sa.Validate()
 		require.Error(t, err)
-		require.ErrorContains(t, err, `did you mean "grep"`)
+		require.ErrorContains(t, err, `did you mean "view"`)
 	})
 
 	t.Run("all_known_names_pass", func(t *testing.T) {
@@ -1268,7 +1268,7 @@ func TestValidate_RejectsUnknownToolNames(t *testing.T) {
 		sa := Subagent{
 			Name:        "reviewer",
 			Description: "Reviews things.",
-			Tools:       ToolList{"view", "grep", "shell"},
+			Tools:       ToolList{"view", "edit", "shell"},
 		}
 		require.NoError(t, sa.Validate())
 	})

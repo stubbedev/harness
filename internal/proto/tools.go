@@ -76,58 +76,6 @@ type FetchParams struct {
 // ResearchToolName is the name of the research tool.
 const ResearchToolName = tools.ResearchToolName
 
-const GlobToolName = "glob"
-
-// GlobParams represents the parameters for the glob tool.
-type GlobParams struct {
-	Pattern string `json:"pattern"`
-	Path    string `json:"path"`
-}
-
-// GlobResponseMetadata represents the metadata for a glob tool response.
-type GlobResponseMetadata struct {
-	NumberOfFiles int  `json:"number_of_files"`
-	Truncated     bool `json:"truncated"`
-}
-
-const GrepToolName = "grep"
-
-// GrepParams represents the parameters for the grep tool.
-type GrepParams struct {
-	Pattern     string `json:"pattern"`
-	Path        string `json:"path"`
-	Include     string `json:"include"`
-	LiteralText bool   `json:"literal_text"`
-}
-
-// GrepResponseMetadata represents the metadata for a grep tool response.
-type GrepResponseMetadata struct {
-	NumberOfMatches int  `json:"number_of_matches"`
-	Truncated       bool `json:"truncated"`
-}
-
-const LSToolName = "ls"
-
-// LSParams represents the parameters for the ls tool.
-type LSParams struct {
-	Path   string   `json:"path"`
-	Ignore []string `json:"ignore"`
-}
-
-// TreeNode represents a node in a directory tree.
-type TreeNode struct {
-	Name     string      `json:"name"`
-	Path     string      `json:"path"`
-	Type     string      `json:"type"`
-	Children []*TreeNode `json:"children,omitempty"`
-}
-
-// LSResponseMetadata represents the metadata for an ls tool response.
-type LSResponseMetadata struct {
-	NumberOfFiles int  `json:"number_of_files"`
-	Truncated     bool `json:"truncated"`
-}
-
 const MultiEditToolName = "multiedit"
 
 // MultiEditOperation represents a single edit operation in a multi-edit.

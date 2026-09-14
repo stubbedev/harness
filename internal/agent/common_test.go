@@ -141,9 +141,6 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
 		tools.NewMultiEditTool(nil, env.history, *env.filetracker, env.workingDir),
 		tools.NewFetchTool(client),
-		tools.NewGlobTool(env.workingDir, cfg.Config().Tools.Glob),
-		tools.NewGrepTool(env.workingDir, cfg.Config().Tools.Grep),
-		tools.NewLsTool(env.workingDir, cfg.Config().Tools.Ls),
 		tools.NewViewTool(nil, *env.filetracker, nil, env.workingDir),
 		tools.NewWriteTool(nil, env.history, *env.filetracker, env.workingDir),
 	}

@@ -293,57 +293,6 @@ func TestCoderAgent(t *testing.T) {
 		require.Contains(t, string(content), "hello bash")
 	})
 
-	t.Run("glob", func(t *testing.T) {
-		t.Parallel()
-
-		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
-			calls: []scriptedCall{{
-				name:  tools.GlobToolName,
-				input: map[string]any{"pattern": "*.go"},
-			}},
-		})
-		res := toolResults(t, runScript(t, agent, env, "find the go files"))
-
-		glob, ok := res[tools.GlobToolName]
-		require.True(t, ok, "expected a glob result")
-		require.False(t, glob.IsError, "glob failed: %s", glob.Content)
-		require.Contains(t, glob.Content, "main.go")
-	})
-
-	t.Run("grep", func(t *testing.T) {
-		t.Parallel()
-
-		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
-			calls: []scriptedCall{{
-				name:  tools.GrepToolName,
-				input: map[string]any{"pattern": "Hello, World"},
-			}},
-		})
-		res := toolResults(t, runScript(t, agent, env, "search for the greeting"))
-
-		grep, ok := res[tools.GrepToolName]
-		require.True(t, ok, "expected a grep result")
-		require.False(t, grep.IsError, "grep failed: %s", grep.Content)
-		require.Contains(t, grep.Content, "main.go")
-	})
-
-	t.Run("ls", func(t *testing.T) {
-		t.Parallel()
-
-		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
-			calls: []scriptedCall{{
-				name:  tools.LSToolName,
-				input: map[string]any{"path": "."},
-			}},
-		})
-		res := toolResults(t, runScript(t, agent, env, "list the directory"))
-
-		ls, ok := res[tools.LSToolName]
-		require.True(t, ok, "expected an ls result")
-		require.False(t, ls.IsError, "ls failed: %s", ls.Content)
-		require.Contains(t, ls.Content, "main.go")
-	})
-
 	// Downloading is a fetch parameter, and the file lands in the
 	// session's scratch directory rather than the working tree.
 	t.Run("fetch with download writes the body to disk", func(t *testing.T) {
@@ -401,11 +350,11 @@ func TestCoderAgent(t *testing.T) {
 
 		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
 			calls: []scriptedCall{
-				{name: tools.GlobToolName, input: map[string]any{"pattern": "*.go"}},
-				{name: tools.LSToolName, input: map[string]any{"path": "."}},
+				{name: tools.ShellToolName, input: map[string]any{"command": "ls *.go"}},
+				{name: tools.ViewToolName, input: map[string]any{"file_path": "main.go"}},
 			},
 		})
-		msgs := runScript(t, agent, env, "glob and ls at once")
+		msgs := runScript(t, agent, env, "list and read at once")
 
 		var withCalls *message.Message
 		for i, msg := range msgs {
@@ -417,15 +366,14 @@ func TestCoderAgent(t *testing.T) {
 		require.Len(t, withCalls.ToolCalls(), 2, "both calls belong to one message")
 
 		res := toolResults(t, msgs)
-		glob, ok := res[tools.GlobToolName]
-		require.True(t, ok, "expected a glob result")
-		require.False(t, glob.IsError, "glob failed: %s", glob.Content)
-		require.Contains(t, glob.Content, "main.go")
+		sh, ok := res[tools.ShellToolName]
+		require.True(t, ok, "expected a shell result")
+		require.False(t, sh.IsError, "shell failed: %s", sh.Content)
+		require.Contains(t, sh.Content, "main.go")
 
-		ls, ok := res[tools.LSToolName]
-		require.True(t, ok, "expected an ls result")
-		require.False(t, ls.IsError, "ls failed: %s", ls.Content)
-		require.Contains(t, ls.Content, "main.go")
+		view, ok := res[tools.ViewToolName]
+		require.True(t, ok, "expected a view result")
+		require.False(t, view.IsError, "view failed: %s", view.Content)
 	})
 
 	// A failing tool must come back as an error result the model can see,
@@ -453,8 +401,8 @@ func TestCoderAgent(t *testing.T) {
 
 		agent, env, model := scriptedAgent(t, nil,
 			scriptedTurn{calls: []scriptedCall{{
-				name:  tools.LSToolName,
-				input: map[string]any{"path": "."},
+				name:  tools.ShellToolName,
+				input: map[string]any{"command": "ls"},
 			}}},
 			scriptedTurn{text: "I looked, and there are two files."},
 		)

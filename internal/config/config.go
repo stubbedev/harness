@@ -784,40 +784,6 @@ type Agent struct {
 	ContextPaths []string `json:"context_paths,omitempty"`
 }
 
-type Tools struct {
-	Ls   ToolLs   `json:"ls,omitzero"`
-	Grep ToolGrep `json:"grep,omitzero"`
-	Glob ToolGlob `json:"glob,omitzero"`
-}
-
-type ToolLs struct {
-	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
-	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
-}
-
-// Limits returns the user-defined max-depth and max-items, or their defaults.
-func (t ToolLs) Limits() (depth, items int) {
-	return ptrValOr(t.MaxDepth, 0), ptrValOr(t.MaxItems, 0)
-}
-
-type ToolGrep struct {
-	Timeout *Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the grep tool call,default=5s,example=10s"`
-}
-
-// GetTimeout returns the user-defined timeout or the default.
-func (t ToolGrep) GetTimeout() time.Duration {
-	return ptrValOr(t.Timeout, Duration(5*time.Second)).Duration()
-}
-
-type ToolGlob struct {
-	Timeout *Duration `json:"timeout,omitempty" jsonschema:"description=Timeout for the glob tool call,default=30s,example=10s"`
-}
-
-// GetTimeout returns the user-defined timeout or the default.
-func (t ToolGlob) GetTimeout() time.Duration {
-	return ptrValOr(t.Timeout, Duration(30*time.Second)).Duration()
-}
-
 // HookConfig defines a user-configured shell command that fires on a hook
 // event (e.g. PreToolUse). This is a pure-data struct: matcher compilation
 // is owned by hooks.Runner so a JSON round-trip, merge, or reload can't
@@ -869,8 +835,6 @@ type Config struct {
 	LSP LSPs `json:"lsp,omitempty" jsonschema:"description=Language Server Protocol configurations"`
 
 	Options *Options `json:"options,omitempty" jsonschema:"description=General application options"`
-
-	Tools Tools `json:"tools,omitzero" jsonschema:"description=Tool configurations"`
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
 
@@ -1109,9 +1073,6 @@ func allToolNames() []string {
 		"lsp_replace_symbol",
 		"fetch",
 		"research",
-		"glob",
-		"grep",
-		"ls",
 		"memory",
 		"question",
 		"web_search",
@@ -1133,11 +1094,12 @@ func resolveAllowedTools(allTools []string, disabledTools []string) []string {
 }
 
 func resolveSubagentTools(tools []string) []string {
-	// The built-in task/fast agents read and edit files but run no
-	// commands: bash is deliberately excluded so a dispatched agent stays
-	// a scoped, cheap worker rather than an arbitrary executor. Specialized
-	// agents are unaffected — they build their own allowlist in frontmatter.
-	subagentTools := []string{"batch", "edit", "glob", "grep", "ls", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "multiedit", "send_message", "view", "web_search", "write"}
+	// A dispatched agent gets the shell too: it is how it finds anything
+	// at all now that the ls/glob/grep tools are gone, and each agent's
+	// shell is its own single session, which it can background but not
+	// share. Specialized agents are unaffected — they build their own
+	// allowlist in frontmatter.
+	subagentTools := []string{"batch", "edit", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "multiedit", "send_message", "shell", "view", "web_search", "write"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, subagentTools, true)
 }

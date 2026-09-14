@@ -9,7 +9,7 @@ Do NOT use it for a couple of unrelated calls; issue those directly. It is also 
 ```json
 {
   "steps": [
-    {"id": "hits", "tool": "grep", "input": {"pattern": "TODO", "path": "internal"}},
+    {"id": "hits", "tool": "shell", "input": {"command": "rg --json TODO internal"}},
     {"id": "files", "tool": "view", "for_each": "$hits.matches | map(.path) | unique",
      "input_jq": "{file_path: $item}"}
   ],

@@ -57,27 +57,3 @@ func TestDurationRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `"1m30s"`, string(out))
 }
-
-// TestToolTimeoutsFromYAML verifies the config path end to end: a duration
-// string in YAML reaches the tool config.
-func TestToolTimeoutsFromYAML(t *testing.T) {
-	t.Parallel()
-
-	jsonBytes, err := decodeConfig([]byte("tools:\n  grep:\n    timeout: 45s\n  glob:\n    timeout: 2m\n"))
-	require.NoError(t, err)
-
-	cfg, err := loadFromBytes([][]byte{jsonBytes})
-	require.NoError(t, err)
-	require.Equal(t, 45*time.Second, cfg.Tools.Grep.GetTimeout())
-	require.Equal(t, 2*time.Minute, cfg.Tools.Glob.GetTimeout())
-}
-
-// TestToolTimeoutDefaults verifies an unset timeout keeps the built-in
-// default rather than collapsing to zero.
-func TestToolTimeoutDefaults(t *testing.T) {
-	t.Parallel()
-
-	var cfg Config
-	require.Equal(t, 5*time.Second, cfg.Tools.Grep.GetTimeout())
-	require.Equal(t, 30*time.Second, cfg.Tools.Glob.GetTimeout())
-}

@@ -550,7 +550,7 @@ func TestBatch_ComposesRealTools(t *testing.T) {
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "batch-session")
 	resp, err := runBatch(ctx, BatchParams{
 		Steps: []BatchStep{
-			{ID: "files", Tool: GlobToolName, Input: map[string]any{"pattern": "*.txt", "path": dir}},
+			{ID: "files", Tool: ShellToolName, Input: map[string]any{"command": "ls -1 *.txt"}},
 			{
 				ID:      "bodies",
 				Tool:    ViewToolName,
@@ -562,7 +562,7 @@ func TestBatch_ComposesRealTools(t *testing.T) {
 		// the bodies themselves into the result.
 		Return: `[$bodies[] | select(test("TODO"))] | length`,
 	}, []fantasy.AgentTool{
-		NewGlobTool(dir, config.ToolGlob{}),
+		NewBashTool(dir, "batch", &config.Attribution{}, "test-model", nil),
 		NewViewTool(nil, mockFileTracker{}, nil, dir),
 	})
 

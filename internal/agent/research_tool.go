@@ -99,7 +99,7 @@ func (c *coordinator) researchTool(_ context.Context, client *http.Client) (fant
 					}
 					tempFile.Close()
 
-					fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s has been saved to: %s\n\nUse the view and grep tools to analyze this file and extract the requested information.", params.Prompt, params.URL, tempFilePath)
+					fullPrompt = fmt.Sprintf("%s\n\nThe web page from %s has been saved to: %s\n\nUse the view and shell tools to analyze this file and extract the requested information.", params.Prompt, params.URL, tempFilePath)
 				} else {
 					fullPrompt = fmt.Sprintf("%s\n\nWeb page URL: %s\n\n<webpage_content>\n%s\n</webpage_content>", params.Prompt, params.URL, content)
 				}
@@ -135,8 +135,7 @@ func (c *coordinator) researchTool(_ context.Context, client *http.Client) (fant
 			fetchTools := []fantasy.AgentTool{
 				tools.NewFetchTool(client),
 				tools.NewWebSearchTool(client),
-				tools.NewGlobTool(tmpDir, c.cfg.Config().Tools.Glob),
-				tools.NewGrepTool(tmpDir, c.cfg.Config().Tools.Grep),
+				tools.NewBashTool(tmpDir, "research", c.cfg.Config().Options.Attribution, small.ModelCfg.Model, c.questions),
 				tools.NewViewTool(c.lspManager, c.filetracker, nil, tmpDir),
 			}
 

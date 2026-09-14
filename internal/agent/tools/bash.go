@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -27,15 +28,14 @@ type BashParams struct {
 	// Nothing here is required: a poll is an empty call, and keys or
 	// input carry no command. A schema that demanded either would
 	// reject the very calls this tool's own description asks for.
-	Description         string `json:"description,omitempty" description:"A brief description of what the command does, try to keep it under 30 characters or so"`
-	Command             string `json:"command,omitempty" description:"The command to run in the persistent terminal session. Leave empty with input set to send keystrokes to a running program, or both empty to poll its output."`
-	Input               string `json:"input,omitempty" description:"Raw keystrokes to send to the terminal (text, answers to prompts, key sequences for the running program). Append \\n to submit a line. Use instead of command when something interactive is already running."`
-	Keys                string `json:"keys,omitempty" description:"Named keys to send instead of raw text, comma separated in order (e.g. \"ctrl+c\" or \"escape, :, w, q, enter\"). Supported: enter, tab, backtab, escape, space, backspace, delete, up, down, left, right, home, end, pageup, pagedown, insert, f1-f12, any ctrl+<letter>, and single characters typed literally."`
-	Resize              string `json:"resize,omitempty" description:"Resize the terminal as COLSxROWS (e.g. \"240x60\") and return the redrawn screen. Use when a full-screen program needs more room; the size sticks for the whole session."`
-	Reset               bool   `json:"reset,omitempty" description:"Set to true (boolean) to kill the terminal session's shell and start a fresh one. Use when the session is wedged - a program that ignores ctrl+c, a shell left in a mode nothing answers in. Everything the old shell held (cd, exported variables, activated environments, the sudo credential) is gone with it."`
-	WorkingDir          string `json:"working_dir,omitempty" description:"The working directory the terminal session was opened in; the session itself tracks cd"`
-	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Set to true (boolean) to run this command in a detached background shell. Use job_output to read the output later. Prefer this only for servers and watchers; everything else belongs in the terminal session."`
-	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to wait once the command goes idle before returning it as still running (default: 60). Output, CPU or memory activity keeps the wait going, so this only ends a call that has genuinely stalled; hard ceiling 15 minutes"`
+	Description         string `json:"description,omitempty" description:"What this call does, under 30 characters; shown to the user"`
+	Command             string `json:"command,omitempty" description:"The command to run in the session. Leave empty to send keystrokes or to poll."`
+	Input               string `json:"input,omitempty" description:"Raw text for the running program; append \\n to submit a line"`
+	Keys                string `json:"keys,omitempty" description:"Named keys for the running program, comma separated in order (e.g. \"ctrl+c\", \"escape, :, w, q, enter\"). An unknown name comes back with the supported list."`
+	Reset               bool   `json:"reset,omitempty" description:"Kill a wedged session and start a fresh one, losing everything the old shell held"`
+	WorkingDir          string `json:"working_dir,omitempty" description:"Directory to open the session in; the session tracks cd from then on"`
+	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Run detached in a background shell; read it later with job_output. Servers and watchers only."`
+	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to hold a command that has gone completely idle before returning it as still running (default 60, ceiling 15 minutes)"`
 }
 
 type BashResponseMetadata struct {
@@ -73,12 +73,12 @@ var bashDescriptionTpl = template.Must(
 )
 
 type bashDescriptionData struct {
-	BannedCommands  string
 	MaxOutputLength int
 	Attribution     config.Attribution
 	ModelID         string
 	RgAvailable     bool
 	GhAvailable     bool
+	IsGitRepo       bool
 	DefaultRows     int
 	DefaultCols     int
 	Shell           string
@@ -157,19 +157,21 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription(attribution *config.Attribution, modelID string) string {
-	bannedCommandsStr := strings.Join(bannedCommands, ", ")
+func bashDescription(workingDir string, attribution *config.Attribution, modelID string) string {
 	descRows, descCols := term.DefaultSize()
 	var out bytes.Buffer
 	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
-		BannedCommands:  bannedCommandsStr,
 		MaxOutputLength: MaxOutputLength,
 		Attribution:     *attribution,
 		ModelID:         modelID,
 		RgAvailable:     getRg() != "",
 		GhAvailable:     ghAvailable,
-		DefaultRows:     descRows,
-		DefaultCols:     descCols,
+		// The commit and pull-request guidance is a third of this
+		// description and is dead weight outside a repository, where
+		// none of it can be acted on.
+		IsGitRepo:   isGitRepo(workingDir),
+		DefaultRows: descRows,
+		DefaultCols: descCols,
 		// The session runs the user's own shell, and they do not agree
 		// on what an unquoted argument means: a glob that matches
 		// nothing is an error in zsh and a literal word in bash, and
@@ -199,9 +201,6 @@ func conflictingBashInputs(p BashParams) string {
 	if p.Keys != "" {
 		asked = append(asked, "keys")
 	}
-	if p.Resize != "" {
-		asked = append(asked, "resize")
-	}
 	if p.Reset {
 		asked = append(asked, "reset")
 	}
@@ -210,7 +209,7 @@ func conflictingBashInputs(p BashParams) string {
 	}
 	return fmt.Sprintf(
 		"This call set %s together, and they do different things: a command needs a shell at a prompt, "+
-			"input and keys go to whatever program is running, resize redraws the screen, and reset kills "+
+			"input and keys go to whatever program is running, and reset kills "+
 			"the shell. Send one of them per call - typically %s first, then the next call.",
 		strings.Join(asked, " and "), asked[0],
 	)
@@ -227,8 +226,6 @@ func bashLabel(p BashParams) string {
 		return p.Description
 	case p.Reset:
 		return "reset terminal session"
-	case p.Resize != "":
-		return "resize terminal to " + p.Resize
 	case p.Keys != "":
 		return "keys: " + p.Keys
 	case p.Input != "":
@@ -297,7 +294,7 @@ func NewBashTool(workingDir, owner string, attribution *config.Attribution, mode
 	_ = ptyRunnerFor(owner, workingDir, questions)
 	return fantasy.NewAgentTool(
 		ShellToolName,
-		string(bashDescription(attribution, modelID)),
+		string(bashDescription(workingDir, attribution, modelID)),
 		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
@@ -390,11 +387,6 @@ func NewBashTool(workingDir, owner string, attribution *config.Attribution, mode
 			switch {
 			case params.Reset:
 				session, err = ptyResetAll(ctx, owner, execWorkingDir, questions)
-			case params.Resize != "":
-				var rows, cols int
-				if rows, cols, err = parseTerminalSize(params.Resize); err == nil {
-					result, err = session.Resize(ctx, rows, cols)
-				}
 			case params.Keys != "":
 				result, err = session.Keys(ctx, params.Keys)
 			case params.Input != "":
@@ -426,19 +418,16 @@ func NewBashTool(workingDir, owner string, attribution *config.Attribution, mode
 			case result.Waiting:
 				header = "The command has stopped and is waiting for input (no exit code yet). Send input or keys to answer it - below is what it printed before stopping - or ctrl+c (keys) to give up on it."
 			case result.AltScreen && result.Unchanged:
-				header = "A full-screen program owns the terminal; its screen is unchanged since the last call. Drive it with keys/input, or send ctrl+c (keys) to stop it."
+				header = "A full-screen program owns the terminal; its screen is unchanged since the last call. Drive it with keys/input, or send ctrl+c (keys) to stop it. If nothing you send reaches it, reset:true kills this shell and starts a fresh one."
 			case result.AltScreen:
 				rows, cols := session.Size()
-				header = fmt.Sprintf("A full-screen program owns the terminal. Below is its rendered %dx%d screen, not a stream of output; there is no exit code until it quits. Drive it with keys/input, poll to see it again, or send ctrl+c (keys) to stop it.", cols, rows)
+				header = fmt.Sprintf("A full-screen program owns the terminal. Below is its rendered %dx%d screen, not a stream of output; there is no exit code until it quits, which is expected rather than a failure. Drive it with keys/input, poll to see it again. A screen is one screenful - the program redraws instead of scrolling, so what it has scrolled past is gone; page inside it (pageup/pagedown, ctrl+d) or resize bigger. Quit when done: \"q\" for pagers and most TUIs, \"escape, :, q, !, enter\" for vim/nvim, ctrl+c as the fallback.", cols, rows)
 			case result.Running:
-				header = "Still running in the terminal session (no exit code yet) but making no measurable progress - no output, no CPU, no memory change. Send input or keys to interact with it, poll (empty call) to wait for it to finish, or ctrl+c (keys) to stop it."
+				header = "Still running in the terminal session (no exit code yet) but making no measurable progress - no output, no CPU, no memory change. Send input or keys to interact with it, poll (empty call) to wait for it to finish, or ctrl+c (keys) to stop it. If ctrl+c does not reach it either, reset:true kills this shell and starts a fresh one."
 			case result.ExitCode != nil && *result.ExitCode != 0:
 				header = fmt.Sprintf("Exit code %d", *result.ExitCode)
 			case params.Reset:
 				header = "Terminal session reset: the old shell was killed and a fresh one is running. Its working directory, exported variables, activated environments and sudo credential are gone."
-			case params.Resize != "":
-				rows, cols := session.Size()
-				header = fmt.Sprintf("Terminal resized to %dx%d.", cols, rows)
 			case params.Keys != "":
 				header = "Keys sent."
 			case params.Input != "":
@@ -550,4 +539,23 @@ func normalizeWorkingDir(path string) string {
 		path = strings.ReplaceAll(path, fsext.WindowsWorkingDirDrive(), "")
 	}
 	return filepath.ToSlash(path)
+}
+
+// isGitRepo reports whether dir is inside a git working tree. Used only
+// to decide whether the commit and pull-request guidance is worth its
+// place in the tool description.
+func isGitRepo(dir string) bool {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }

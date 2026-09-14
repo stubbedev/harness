@@ -339,7 +339,7 @@ func blockHandler(blockFuncs []BlockFunc) execMiddleware {
 			}
 			for _, blockFunc := range blockFuncs {
 				if blockFunc(args) {
-					return fmt.Errorf("command is not allowed for security reasons: %q", args[0])
+					return fmt.Errorf("%q is not allowed in a detached background shell; run it in the terminal session instead (omit run_in_background), where it works", args[0])
 				}
 			}
 			return next(ctx, args)

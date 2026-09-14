@@ -66,7 +66,7 @@ func TestBuildAgent_ProvidedGroupWaitMakesAgentReady(t *testing.T) {
 	require.NoError(t, coord.readyWg.Wait())
 
 	taskCfg := coord.cfg.Config().Agents[config.AgentTask]
-	taskCfg.AllowedTools = []string{"glob"}
+	taskCfg.AllowedTools = []string{"view"}
 
 	taskPr, err := taskPrompt(prompt.WithWorkingDir(coord.cfg.WorkingDir()))
 	require.NoError(t, err)

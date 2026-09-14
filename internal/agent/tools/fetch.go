@@ -124,7 +124,7 @@ func fetchToolResponse(ctx context.Context, client *http.Client, sessionID, url 
 		if err != nil {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to save fetched content: %s", err)), nil
 		}
-		fmt.Fprintf(&b, " (large page, %d bytes)\n\nContent saved to: %s\n\nUse the view and grep tools to read it.", len(res.Content), path)
+		fmt.Fprintf(&b, " (large page, %d bytes)\n\nContent saved to: %s\n\nUse the view and shell tools to read it.", len(res.Content), path)
 		return fantasy.NewTextResponse(b.String()), nil
 	}
 

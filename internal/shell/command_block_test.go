@@ -96,13 +96,13 @@ func TestCommandBlocking(t *testing.T) {
 			if tt.shouldBlock {
 				if err == nil {
 					t.Errorf("Expected command to be blocked, but it was allowed")
-				} else if !strings.Contains(err.Error(), "not allowed for security reasons") {
+				} else if !strings.Contains(err.Error(), "is not allowed in a detached background shell") {
 					t.Errorf("Expected security error, got: %v", err)
 				}
 			} else {
 				// For non-blocked commands, we might get other errors (like command not found)
 				// but we shouldn't get the security error
-				if err != nil && strings.Contains(err.Error(), "not allowed for security reasons") {
+				if err != nil && strings.Contains(err.Error(), "is not allowed in a detached background shell") {
 					t.Errorf("Command was unexpectedly blocked: %v", err)
 				}
 			}

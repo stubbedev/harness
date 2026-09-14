@@ -82,10 +82,6 @@
           "$ref": "#/$defs/Options",
           "description": "General application options"
         },
-        "tools": {
-          "$ref": "#/$defs/Tools",
-          "description": "Tool configurations"
-        },
         "hooks": {
           "additionalProperties": {
             "items": {
@@ -106,19 +102,6 @@
       },
       "additionalProperties": false,
       "type": "object"
-    },
-    "Duration": {
-      "oneOf": [
-        {
-          "type": "string",
-          "pattern": "^-?(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
-          "description": "Duration string, e.g. 30s, 2m, 1h30m"
-        },
-        {
-          "type": "integer",
-          "description": "Duration in nanoseconds"
-        }
-      ]
     },
     "HookConfig": {
       "properties": {
@@ -1003,63 +986,6 @@
         "expires_in",
         "expires_at"
       ]
-    },
-    "ToolGlob": {
-      "properties": {
-        "timeout": {
-          "$ref": "#/$defs/Duration",
-          "description": "Timeout for the glob tool call"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "ToolGrep": {
-      "properties": {
-        "timeout": {
-          "$ref": "#/$defs/Duration",
-          "description": "Timeout for the grep tool call"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "ToolLs": {
-      "properties": {
-        "max_depth": {
-          "type": "integer",
-          "description": "Maximum depth for the ls tool",
-          "default": 0,
-          "examples": [
-            10
-          ]
-        },
-        "max_items": {
-          "type": "integer",
-          "description": "Maximum number of items to return for the ls tool",
-          "default": 1000,
-          "examples": [
-            100
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "Tools": {
-      "properties": {
-        "ls": {
-          "$ref": "#/$defs/ToolLs"
-        },
-        "grep": {
-          "$ref": "#/$defs/ToolGrep"
-        },
-        "glob": {
-          "$ref": "#/$defs/ToolGlob"
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
     }
   }
 }

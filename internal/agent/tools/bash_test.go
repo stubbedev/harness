@@ -134,7 +134,7 @@ func TestBashTool_SchemaRequiresNothing(t *testing.T) {
 	require.Empty(t, tool.Info().Required,
 		"every bash parameter is optional; a poll is an empty call")
 
-	for _, name := range []string{"description", "command", "input", "keys", "resize", "reset"} {
+	for _, name := range []string{"description", "command", "input", "keys", "reset"} {
 		require.Contains(t, tool.Info().Parameters, name)
 	}
 }
@@ -151,7 +151,7 @@ func TestConflictingBashInputs(t *testing.T) {
 	require.Contains(t, conflict, "keys")
 
 	require.NotEmpty(t, conflictingBashInputs(BashParams{Command: "ls", Reset: true}))
-	require.NotEmpty(t, conflictingBashInputs(BashParams{Input: "y\n", Resize: "80x24"}))
+	require.NotEmpty(t, conflictingBashInputs(BashParams{Input: "y\n", Reset: true}))
 }
 
 func TestBashTool_RejectsCombinedCall(t *testing.T) {

@@ -264,12 +264,6 @@ func NewToolMessageItem(
 		item = NewEditToolMessageItem(sty, toolCall, result, canceled)
 	case tools.MultiEditToolName:
 		item = NewMultiEditToolMessageItem(sty, toolCall, result, canceled)
-	case tools.GlobToolName:
-		item = NewGlobToolMessageItem(sty, toolCall, result, canceled)
-	case tools.GrepToolName:
-		item = NewGrepToolMessageItem(sty, toolCall, result, canceled)
-	case tools.LSToolName:
-		item = NewLSToolMessageItem(sty, toolCall, result, canceled)
 	case tools.FetchToolName:
 		item = NewFetchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.DiagnosticsToolName:
@@ -1285,41 +1279,6 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 			}
 			return strings.Join(parts, "\n")
 		}
-	case tools.GrepToolName:
-		var params tools.GrepParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
-			var parts []string
-			parts = append(parts, fmt.Sprintf("**Pattern:** %s", params.Pattern))
-			if params.Path != "" {
-				parts = append(parts, fmt.Sprintf("**Path:** %s", params.Path))
-			}
-			if params.Include != "" {
-				parts = append(parts, fmt.Sprintf("**Include:** %s", params.Include))
-			}
-			if params.LiteralText {
-				parts = append(parts, "**Literal:** true")
-			}
-			return strings.Join(parts, "\n")
-		}
-	case tools.GlobToolName:
-		var params tools.GlobParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
-			var parts []string
-			parts = append(parts, fmt.Sprintf("**Pattern:** %s", params.Pattern))
-			if params.Path != "" {
-				parts = append(parts, fmt.Sprintf("**Path:** %s", params.Path))
-			}
-			return strings.Join(parts, "\n")
-		}
-	case tools.LSToolName:
-		var params tools.LSParams
-		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
-			path := params.Path
-			if path == "" {
-				path = "."
-			}
-			return fmt.Sprintf("**Path:** %s", fsext.PrettyPath(path))
-		}
 	case tools.DiagnosticsToolName:
 		return "**Project:** diagnostics"
 	case agent.AgentToolName:
@@ -1378,7 +1337,7 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return t.formatResearchResultForCopy()
 	case agent.AgentToolName:
 		return t.formatAgentResultForCopy()
-	case tools.GrepToolName, tools.GlobToolName, tools.LSToolName, tools.DiagnosticsToolName, tools.TodosToolName:
+	case tools.DiagnosticsToolName, tools.TodosToolName:
 		return fmt.Sprintf("```\n%s\n```", t.result.Content)
 	default:
 		return t.result.Content
@@ -1693,12 +1652,6 @@ func PrettifyToolName(name string) string {
 		return "Research"
 	case tools.WebSearchToolName:
 		return "Search"
-	case tools.GlobToolName:
-		return "Glob"
-	case tools.GrepToolName:
-		return "Grep"
-	case tools.LSToolName:
-		return "List"
 	case tools.TodosToolName:
 		return "To-Do"
 	case tools.ViewToolName:

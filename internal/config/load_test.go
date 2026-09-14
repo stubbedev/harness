@@ -968,7 +968,7 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"batch", "edit", "multiedit", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "grep", "ls", "web_search", "send_message", "view", "write"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"batch", "shell", "edit", "multiedit", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "web_search", "send_message", "view", "write"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -976,7 +976,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 		Options: &Options{
 			DisabledTools: []string{
 				"edit",
-				"grep",
+				"fetch",
 			},
 		},
 	}
@@ -985,12 +985,12 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "wait", "batch", "shell", "harness_info", "harness_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "fetch", "research", "glob", "ls", "memory", "question", "web_search", "send_message", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "wait", "batch", "shell", "harness_info", "harness_logs", "job_output", "job_kill", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "lsp_rename", "lsp_replace_symbol", "research", "memory", "question", "web_search", "send_message", "todos", "view", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
 	// edit is in the disabled set, so it drops out of the subagent tool set.
-	assert.Equal(t, []string{"batch", "multiedit", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "glob", "ls", "web_search", "send_message", "view", "write"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"batch", "shell", "multiedit", "lsp_symbols", "lsp_definition", "lsp_call_hierarchy", "web_search", "send_message", "view", "write"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
@@ -998,13 +998,11 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 		Options: &Options{
 			DisabledTools: []string{
 				"batch",
-				"glob",
-				"grep",
-				"ls",
 				"lsp_call_hierarchy",
 				"lsp_definition",
 				"lsp_symbols",
 				"send_message",
+				"shell",
 				"view",
 				"web_search",
 			},
@@ -1014,7 +1012,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "wait", "shell", "harness_info", "harness_logs", "job_output", "job_kill", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "research", "memory", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "wait", "harness_info", "harness_logs", "job_output", "job_kill", "edit", "multiedit", "lsp_diagnostics", "lsp_references", "lsp_restart", "lsp_rename", "lsp_replace_symbol", "fetch", "research", "memory", "question", "todos", "write", "list_mcp_resources", "read_mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
