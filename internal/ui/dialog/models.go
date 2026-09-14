@@ -345,6 +345,14 @@ func (m *Models) isSelectedConfigured() bool {
 	return isConfigured
 }
 
+// isConfigOnlyProvider reports whether a catalog provider can only be
+// configured outside the TUI: the API-key dialog's connection test has no
+// verification path for these provider types, so offering them would
+// dead-end. Mirrors the type switch in config.TestConnection.
+func isConfigOnlyProvider(provider catalog.Provider) bool {
+	return provider.Type == catalog.TypeAzure || provider.Type == catalog.TypeVertexAI
+}
+
 // setProviderItems sets the provider items in the list.
 func (m *Models) setProviderItems() error {
 	t := m.com.Styles
@@ -357,6 +365,19 @@ func (m *Models) setProviderItems() error {
 
 	// Track providers already added to avoid duplicates
 	addedProviders := make(map[string]bool)
+
+	// A provider with no credentials cannot serve a request, so outside
+	// onboarding the list only shows configured ones. When nothing is
+	// configured the full catalog stays visible: the dialog is then the
+	// only way to pick (and thereby configure) a first provider.
+	anyConfigured := false
+	for _, p := range cfg.Providers.Seq2() {
+		if !p.Disable {
+			anyConfigured = true
+			break
+		}
+	}
+	showUnconfigured := m.isOnboarding || !anyConfigured
 
 	// Get a list of known providers to compare against
 	knownProviders, err := config.Providers(cfg)
@@ -412,6 +433,17 @@ func (m *Models) setProviderItems() error {
 
 		providerConfig, providerConfigured := cfg.Providers.Get(providerID)
 		if providerConfigured && providerConfig.Disable {
+			continue
+		}
+		if !showUnconfigured && !providerConfigured {
+			continue
+		}
+		// Even when the catalog is shown, skip providers whose
+		// credentials the TUI cannot collect: the API-key dialog has no
+		// verification for them, so selecting one dead-ends at a failed
+		// connection test. They stay reachable via config.yaml, and a
+		// provider already configured there still shows.
+		if !providerConfigured && isConfigOnlyProvider(provider) {
 			continue
 		}
 

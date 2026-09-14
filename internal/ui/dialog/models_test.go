@@ -3,9 +3,14 @@ package dialog
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/catalog"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 func newTestModelGroup(t *testing.T, providerID, providerName string, modelNames ...string) ModelGroup {
@@ -21,6 +26,91 @@ func newTestModelGroup(t *testing.T, providerID, providerName string, modelNames
 		items = append(items, NewModelItem(&s, provider, model, ModelTypeLarge, false))
 	}
 	return NewModelGroup(&s, providerName, true, items...)
+}
+
+// stubWorkspace feeds the models dialog a config without touching a real
+// workspace.
+type stubWorkspace struct {
+	workspace.Workspace
+	cfg *config.Config
+}
+
+func (w *stubWorkspace) Config() *config.Config { return w.cfg }
+
+func newModelsDialogForTest(t *testing.T, cfg *config.Config, providers []catalog.Provider, isOnboarding bool) *Models {
+	t.Helper()
+
+	// Keep setProviderItems off the shared catalog cache: the
+	// default-provider path would hit it (and the network) via
+	// config.Providers.
+	if cfg.Options == nil {
+		cfg.Options = &config.Options{}
+	}
+	cfg.Options.DisableDefaultProviders = true
+
+	s := styles.CharmtonePantera()
+	m := &Models{
+		com:          &common.Common{Workspace: &stubWorkspace{cfg: cfg}, Styles: &s},
+		isOnboarding: isOnboarding,
+		modelType:    ModelTypeLarge,
+		providers:    providers,
+	}
+	m.list = NewModelsList(&s)
+	require.NoError(t, m.setProviderItems())
+	return m
+}
+
+func configuredTestConfig(t *testing.T, providerIDs ...string) *config.Config {
+	t.Helper()
+	providers := map[string]config.ProviderConfig{}
+	for _, id := range providerIDs {
+		providers[id] = config.ProviderConfig{
+			ID:     id,
+			APIKey: "test-key",
+			Models: []catalog.Model{{ID: id + "-model", Name: id + " model"}},
+		}
+	}
+	return &config.Config{
+		Options:   &config.Options{},
+		Providers: csync.NewMapFrom(providers),
+	}
+}
+
+func testCatalogProviders() []catalog.Provider {
+	return []catalog.Provider{
+		{ID: catalog.InferenceProvider("anthropic"), Name: "Anthropic", Type: catalog.TypeAnthropic},
+		{ID: catalog.InferenceProvider("openai"), Name: "OpenAI", Type: catalog.TypeOpenAI},
+		{ID: catalog.InferenceProvider("azure"), Name: "Azure", Type: catalog.TypeAzure},
+		{ID: catalog.InferenceProvider("google-vertex"), Name: "Google Vertex", Type: catalog.TypeVertexAI},
+	}
+}
+
+// TestModelsDialogHidesUnconfiguredProviders pins that once a provider is
+// configured, the dialog stops offering the rest of the catalog: an entry
+// without credentials cannot serve a request.
+func TestModelsDialogHidesUnconfiguredProviders(t *testing.T) {
+	t.Parallel()
+
+	m := newModelsDialogForTest(t, configuredTestConfig(t, "openai"), testCatalogProviders(), false)
+	require.Len(t, m.list.groups, 1)
+	assert.Equal(t, "openai", m.list.groups[0].Title, "the group is named from the config when no display name is set")
+}
+
+// TestModelsDialogShowsCatalogDuringOnboardingAndWhenUnconfigured pins the
+// two cases where the full catalog must stay visible: onboarding (it is
+// the only way to pick a first provider) and a config with nothing set.
+func TestModelsDialogShowsCatalogDuringOnboardingAndWhenUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	m := newModelsDialogForTest(t, configuredTestConfig(t, "openai"), testCatalogProviders(), true)
+	assert.Len(t, m.list.groups, 2, "onboarding shows the whole catalog")
+
+	m = newModelsDialogForTest(t, configuredTestConfig(t), testCatalogProviders(), false)
+	require.Len(t, m.list.groups, 2, "no configured provider falls back to the catalog, minus the config-only providers")
+	for _, g := range m.list.groups {
+		assert.NotContains(t, []string{"Azure", "Google Vertex"}, g.Title,
+			"providers the TUI cannot authenticate never show, even in the fallback")
+	}
 }
 
 // TestModelsListIncrementalFilterMatchesOneShot pins the incremental

@@ -271,7 +271,11 @@ func jobHeader(sty *styles.Styles, status ToolStatus, action, shellID, descripti
 	return prefix + " " + sty.Tool.JobDescription.Render(truncatedDesc)
 }
 
-// joinToolParts joins header and body with a blank line separator.
+// joinToolParts joins header and body directly: the body's own padding
+// provides the visual indent, with no blank separator line.
 func joinToolParts(header, body string) string {
-	return strings.Join([]string{header, "", body}, "\n")
+	if body == "" {
+		return header
+	}
+	return header + "\n" + body
 }
