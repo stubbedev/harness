@@ -1,8 +1,6 @@
 package dialog
 
 import (
-	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -17,6 +15,45 @@ type ModelsList struct {
 	groups []ModelGroup
 	query  string
 	t      *styles.Styles
+
+	// The flat filter index, rebuilt only when the groups change so a
+	// keystroke runs a single fuzzy pass over every model instead of one
+	// pass per provider group.
+	filterItems     []*ModelItem
+	filterNames     []string
+	filterGroup     []int
+	filterPrefixLen []int
+
+	// Incremental match cache. Fuzzy matching is monotone in the query:
+	// a string that matches a longer query also matches any prefix of
+	// it. So when the query only grows (the common typing path), the
+	// next pass can search just the previous pass's matches instead of
+	// the whole catalog. Reset by rebuildFilterIndex and by any query
+	// that is not an extension of the cached one.
+	filterQuery   string
+	filterMatched []int
+}
+
+// rebuildFilterIndex flattens the groups into parallel slices for fuzzy
+// matching: one search string per model (its group title plus the model's
+// filter text), which group the model belongs to, and how long that
+// group's name prefix is so match indexes can be shifted back.
+func (f *ModelsList) rebuildFilterIndex() {
+	f.filterItems = make([]*ModelItem, 0, f.Len())
+	f.filterNames = f.filterNames[:0]
+	f.filterGroup = f.filterGroup[:0]
+	f.filterPrefixLen = f.filterPrefixLen[:0]
+	for gi, g := range f.groups {
+		name := strings.ToLower(g.Title) + " "
+		for _, item := range g.Items {
+			f.filterItems = append(f.filterItems, item)
+			f.filterNames = append(f.filterNames, name+item.Filter())
+			f.filterGroup = append(f.filterGroup, gi)
+			f.filterPrefixLen = append(f.filterPrefixLen, len(name))
+		}
+	}
+	f.filterQuery = ""
+	f.filterMatched = nil
 }
 
 // NewModelsList creates a new list suitable for model items and groups.
@@ -42,6 +79,7 @@ func (f *ModelsList) Len() int {
 // SetGroups sets the model groups and updates the list items.
 func (f *ModelsList) SetGroups(groups ...ModelGroup) {
 	f.groups = groups
+	f.rebuildFilterIndex()
 	items := []list.Item{}
 	for _, g := range f.groups {
 		items = append(items, &g)
@@ -171,7 +209,9 @@ func (f *ModelsList) IsSelectedLast() bool {
 	return isLast
 }
 
-// VisibleItems returns the visible items after filtering.
+// VisibleItems returns the visible items after filtering. The query runs
+// once over the whole flat index; matches are then bucketed back into
+// their groups to rebuild the grouped view.
 func (f *ModelsList) VisibleItems() []list.Item {
 	query := strings.ToLower(strings.ReplaceAll(f.query, " ", ""))
 
@@ -190,63 +230,73 @@ func (f *ModelsList) VisibleItems() []list.Item {
 		return items
 	}
 
-	filterableItems := make([]list.FilterableItem, 0, f.Len())
-	for _, g := range f.groups {
-		for _, item := range g.Items {
-			filterableItems = append(filterableItems, item)
-		}
+	if f.filterItems == nil {
+		f.rebuildFilterIndex()
 	}
 
+	// Narrow the candidate set to the previous pass's matches when the
+	// query only grew; otherwise start from the full index.
+	candidates := f.filterMatched
+	if f.filterQuery == "" || !strings.HasPrefix(query, f.filterQuery) || candidates == nil {
+		candidates = make([]int, len(f.filterItems))
+		for i := range candidates {
+			candidates[i] = i
+		}
+	}
+	names := make([]string, len(candidates))
+	for i, idx := range candidates {
+		names[i] = f.filterNames[idx]
+	}
+
+	matches := fuzzy.Find(query, names)
+
+	// The candidate order preserves flat-index order, so sorting by the
+	// candidate index keeps groups contiguous and order within each
+	// group stable.
+	sort.SliceStable(matches, func(i, j int) bool {
+		return matches[i].Index < matches[j].Index
+	})
+
+	// Cache this pass's matches for the next keystroke.
+	filtered := make([]int, 0, len(matches))
+	for _, match := range matches {
+		filtered = append(filtered, candidates[match.Index])
+	}
+	f.filterQuery = query
+	f.filterMatched = filtered
+
 	items := []list.Item{}
-	visitedGroups := map[int]bool{}
-
-	// Reconstruct groups with matched items
-	// Find which group this item belongs to
-	for gi, g := range f.groups {
-		addedCount := 0
-		name := strings.ToLower(g.Title) + " "
-
-		names := make([]string, len(filterableItems))
-		for i, item := range filterableItems {
-			ms := item.(*ModelItem)
-			names[i] = fmt.Sprintf("%s%s", name, ms.Filter())
-		}
-
-		matches := fuzzy.Find(query, names)
-
-		// Sort by original index to preserve order within the group
-		sort.SliceStable(matches, func(i, j int) bool {
-			return matches[i].Index < matches[j].Index
-		})
-
-		for _, match := range matches {
-			item := filterableItems[match.Index].(*ModelItem)
-			idxs := []int{}
-			for _, idx := range match.MatchedIndexes {
-				// Adjusts removing provider name highlights
-				if idx < len(name) {
-					continue
-				}
-				idxs = append(idxs, idx-len(name))
+	lastGroup := -1
+	for _, match := range matches {
+		idx := candidates[match.Index]
+		gi := f.filterGroup[idx]
+		if gi != lastGroup {
+			if lastGroup != -1 {
+				// A space separator after each provider section
+				items = append(items, list.NewSpacerItem(1))
 			}
+			g := f.groups[gi]
+			items = append(items, &g)
+			lastGroup = gi
+		}
 
-			match.MatchedIndexes = idxs
-			if slices.Contains(g.Items, item) {
-				if !visitedGroups[gi] {
-					// Add section header
-					items = append(items, &g)
-					visitedGroups[gi] = true
-				}
-				// Add the matched item
-				item.SetMatch(match)
-				items = append(items, item)
-				addedCount++
+		idxs := make([]int, 0, len(match.MatchedIndexes))
+		prefix := f.filterPrefixLen[idx]
+		for _, i := range match.MatchedIndexes {
+			// Drop the provider-name highlight offsets
+			if i < prefix {
+				continue
 			}
+			idxs = append(idxs, i-prefix)
 		}
-		if addedCount > 0 {
-			// Add a space separator after each provider section
-			items = append(items, list.NewSpacerItem(1))
-		}
+		match.MatchedIndexes = idxs
+
+		item := f.filterItems[idx]
+		item.SetMatch(match)
+		items = append(items, item)
+	}
+	if lastGroup != -1 {
+		items = append(items, list.NewSpacerItem(1))
 	}
 
 	return items

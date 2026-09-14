@@ -23,6 +23,43 @@ func newTestModelGroup(t *testing.T, providerID, providerName string, modelNames
 	return NewModelGroup(&s, providerName, true, items...)
 }
 
+// TestModelsListIncrementalFilterMatchesOneShot pins the incremental
+// filter cache: typing a query one character at a time must produce the
+// same visible set as entering it whole, and backspacing out of the
+// cached prefix must fall back to a full pass.
+func TestModelsListIncrementalFilterMatchesOneShot(t *testing.T) {
+	t.Parallel()
+
+	s := styles.CharmtonePantera()
+	groups := []ModelGroup{
+		newTestModelGroup(t, "anthropic", "Anthropic", "Claude Opus", "Claude Sonnet", "Claude Haiku"),
+		newTestModelGroup(t, "openai", "OpenAI", "GPT-5", "o4-mini"),
+		newTestModelGroup(t, "google", "Google", "Gemini Flash", "Gemini Pro"),
+	}
+
+	typed := NewModelsList(&s, groups...)
+	typed.SetGroups(groups...)
+	for _, q := range []string{"c", "cl", "cla", "clau", "claude", "claudes"} {
+		typed.SetFilter(q)
+	}
+
+	oneShot := NewModelsList(&s, groups...)
+	oneShot.SetGroups(groups...)
+	oneShot.SetFilter("claudes")
+
+	require.Equal(t, oneShot.VisibleItems(), typed.VisibleItems(),
+		"typing the query incrementally must match entering it whole")
+
+	// Backspace past the cached prefix, then extend again.
+	typed.SetFilter("gpt")
+	typed.SetFilter("gpt5")
+	oneShot2 := NewModelsList(&s, groups...)
+	oneShot2.SetGroups(groups...)
+	oneShot2.SetFilter("gpt5")
+	require.Equal(t, oneShot2.VisibleItems(), typed.VisibleItems(),
+		"retyping after a backtrack must still match a one-shot filter")
+}
+
 // TestShowProviderForAmbiguousModelsAcrossProviders verifies that a model name
 // served by several providers shows the provider on every one of its entries.
 func TestShowProviderForAmbiguousModelsAcrossProviders(t *testing.T) {
