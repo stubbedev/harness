@@ -310,9 +310,9 @@ func isDigitLeadingName(name string) bool {
 // win, matching the shell's own last-one-wins reading of environ.
 func lookupEnv(environ []string, name string) (string, bool) {
 	prefix := name + "="
-	for i := len(environ) - 1; i >= 0; i-- {
-		if strings.HasPrefix(environ[i], prefix) {
-			return environ[i][len(prefix):], true
+	for _, e := range slices.Backward(environ) {
+		if strings.HasPrefix(e, prefix) {
+			return e[len(prefix):], true
 		}
 	}
 	return "", false
