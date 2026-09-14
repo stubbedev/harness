@@ -1084,10 +1084,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewHarnessInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
-		tools.NewHarnessLogsTool(logFile),
-		tools.NewJobOutputTool(),
-		tools.NewJobKillTool(),
+		tools.NewHarnessTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker, logFile),
+		tools.NewJobTool(),
 		tools.NewEditTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(nil),
 		tools.NewWebSearchTool(nil),
@@ -1117,8 +1115,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	if len(c.cfg.Config().MCP) > 0 {
 		allTools = append(
 			allTools,
-			tools.NewListMCPResourcesTool(c.cfg),
-			tools.NewReadMCPResourceTool(c.cfg),
+			tools.NewMCPResourceTool(c.cfg),
 		)
 	}
 

@@ -252,10 +252,12 @@ func NewToolMessageItem(
 	switch toolCall.Name {
 	case tools.ShellToolName:
 		item = NewShellToolMessageItem(sty, toolCall, result, canceled, workingDir)
-	case tools.JobOutputToolName:
-		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
-	case tools.JobKillToolName:
-		item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
+	case tools.JobToolName:
+		if toolAction(toolCall) == "kill" {
+			item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
+		} else {
+			item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
+		}
 	case tools.ViewToolName:
 		item = NewViewToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WriteToolName:
@@ -1580,13 +1582,10 @@ func PrettifyToolName(name string) string {
 	switch name {
 	case agent.AgentToolName:
 		return "Agent"
-	case tools.ShellToolName, "bash":
-		// "bash" is the tool's former name, still on restored calls.
+	case tools.ShellToolName:
 		return "Shell"
-	case tools.JobOutputToolName:
-		return "Job: Output"
-	case tools.JobKillToolName:
-		return "Job: Kill"
+	case tools.JobToolName:
+		return "Job"
 	case tools.EditToolName:
 		return "Edit"
 	case tools.FetchToolName:
@@ -1638,4 +1637,15 @@ func newLSPToolMessageItem(
 	default:
 		return NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
 	}
+}
+
+// toolAction reads the `action` field of a merged tool's call. The tools
+// that fold several operations behind one name still render each one the
+// way it rendered when it was its own tool.
+func toolAction(toolCall message.ToolCall) string {
+	var params struct {
+		Action string `json:"action"`
+	}
+	_ = json.Unmarshal([]byte(toolCall.Input), &params)
+	return params.Action
 }

@@ -80,7 +80,7 @@ type SelectedModel struct {
 	Think bool `json:"think,omitempty" jsonschema:"description=Enable thinking mode for Anthropic models that support reasoning"`
 
 	// Overrides the default model configuration.
-	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum number of tokens for model responses,maximum=200000,example=4096"`
+	MaxTokens        int64    `json:"max_tokens,omitempty" jsonschema:"description=Maximum tokens for model responses; reserved from the same context window as the prompt so a high value shrinks the usable input budget,maximum=200000,example=4096"`
 	Temperature      *float64 `json:"temperature,omitempty" jsonschema:"description=Sampling temperature,minimum=0,maximum=1,example=0.7"`
 	TopP             *float64 `json:"top_p,omitempty" jsonschema:"description=Top-p (nucleus) sampling parameter,minimum=0,maximum=1,example=0.9"`
 	TopK             *int64   `json:"top_k,omitempty" jsonschema:"description=Top-k sampling parameter"`
@@ -1057,10 +1057,8 @@ func allToolNames() []string {
 		"wait",
 		"batch",
 		"shell",
-		"harness_info",
-		"harness_logs",
-		"job_output",
-		"job_kill",
+		"harness",
+		"job",
 		"edit",
 		"lsp",
 		"fetch",
@@ -1072,8 +1070,7 @@ func allToolNames() []string {
 		"todos",
 		"view",
 		"write",
-		"list_mcp_resources",
-		"read_mcp_resource",
+		"mcp_resource",
 	}
 }
 
