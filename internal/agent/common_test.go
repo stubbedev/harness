@@ -139,7 +139,7 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 	allTools := []fantasy.AgentTool{
 		tools.NewBashTool(env.workingDir, "coder", cfg.Config().Options.Attribution, modelName, nil),
 		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
-		tools.NewMultiEditTool(nil, env.history, *env.filetracker, env.workingDir),
+		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
 		tools.NewFetchTool(client),
 		tools.NewViewTool(nil, *env.filetracker, nil, env.workingDir),
 		tools.NewWriteTool(nil, env.history, *env.filetracker, env.workingDir),

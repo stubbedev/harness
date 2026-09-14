@@ -187,11 +187,11 @@ func NewEditToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &EditToolRenderContext{}, canceled)
 }
 
-// EditToolRenderContext renders edit tool messages.
+// EditToolRenderContext renders multi-edit tool messages.
 type EditToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
-func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// Edit tool uses full width for diffs.
 	if opts.IsPending() {
 		return pendingTool(sty, "Edit", opts.Anim, opts.Compact)
@@ -203,7 +203,12 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status, "Edit", width, opts, file)
+	toolParams := []string{file}
+	if len(params.Edits) > 0 {
+		toolParams = append(toolParams, "edits", fmt.Sprintf("%d", len(params.Edits)))
+	}
+
+	header := toolHeader(sty, opts.Status, "Edit", width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -223,81 +228,8 @@ func (e *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return joinToolParts(header, body)
 	}
 
-	diff := toolOutputDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.ExpandedContent)
-
-	// On error (e.g. denied permission), show error above the diff.
-	if opts.Result.IsError {
-		errLine := toolErrorContent(sty, opts.Result, width)
-		return strings.Join([]string{header, "", errLine, "", diff}, "\n")
-	}
-
-	return joinToolParts(header, diff)
-}
-
-// -----------------------------------------------------------------------------
-// MultiEdit Tool
-// -----------------------------------------------------------------------------
-
-// MultiEditToolMessageItem is a message item that represents a multi-edit tool call.
-type MultiEditToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*MultiEditToolMessageItem)(nil)
-
-// NewMultiEditToolMessageItem creates a new [MultiEditToolMessageItem].
-func NewMultiEditToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &MultiEditToolRenderContext{}, canceled)
-}
-
-// MultiEditToolRenderContext renders multi-edit tool messages.
-type MultiEditToolRenderContext struct{}
-
-// RenderTool implements the [ToolRenderer] interface.
-func (m *MultiEditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	// MultiEdit tool uses full width for diffs.
-	if opts.IsPending() {
-		return pendingTool(sty, "Multi-Edit", opts.Anim, opts.Compact)
-	}
-
-	var params tools.MultiEditParams
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
-	}
-
-	file := fsext.PrettyPath(params.FilePath)
-	toolParams := []string{file}
-	if len(params.Edits) > 0 {
-		toolParams = append(toolParams, "edits", fmt.Sprintf("%d", len(params.Edits)))
-	}
-
-	header := toolHeader(sty, opts.Status, "Multi-Edit", width, opts, toolParams...)
-	if opts.Compact {
-		return header
-	}
-
-	if !opts.HasResult() {
-		if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
-			return joinToolParts(header, earlyState)
-		}
-		return header
-	}
-
-	// Get diff content from metadata.
-	var meta tools.MultiEditResponseMetadata
-	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err != nil {
-		bodyWidth := width - toolBodyLeftPaddingTotal
-		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
-		return joinToolParts(header, body)
-	}
-
 	// Render diff with optional failed edits note.
-	diff := toolOutputMultiEditDiffContent(sty, file, meta, len(params.Edits), width, opts.ExpandedContent)
+	diff := toolOutputEditDiffContent(sty, file, meta, len(params.Edits), width, opts.ExpandedContent)
 
 	// On error (e.g. denied permission), show error above the diff.
 	if opts.Result.IsError {

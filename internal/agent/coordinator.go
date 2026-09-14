@@ -1079,7 +1079,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewJobOutputTool(),
 		tools.NewJobKillTool(),
 		tools.NewEditTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
-		tools.NewMultiEditTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(nil),
 		tools.NewWebSearchTool(nil),
 		tools.NewTodosTool(c.sessions),

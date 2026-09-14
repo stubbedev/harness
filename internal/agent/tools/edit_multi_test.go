@@ -60,7 +60,7 @@ func TestApplyEditToContentPartialSuccess(t *testing.T) {
 	content := "line 1\nline 2\nline 3\n"
 
 	// Test successful edit.
-	newContent, _, err := applyEditToContent(content, MultiEditOperation{
+	newContent, _, err := applyEditToContent(content, EditOperation{
 		OldString: "line 1",
 		NewString: "LINE 1",
 	})
@@ -69,7 +69,7 @@ func TestApplyEditToContentPartialSuccess(t *testing.T) {
 	require.Contains(t, newContent, "line 2")
 
 	// Test failed edit (string not found).
-	_, _, err = applyEditToContent(content, MultiEditOperation{
+	_, _, err = applyEditToContent(content, EditOperation{
 		OldString: "line 99",
 		NewString: "LINE 99",
 	})
@@ -82,7 +82,7 @@ func TestApplyEditToContentReplacementModes(t *testing.T) {
 
 	content := "alpha\nbeta\nalpha\n"
 
-	newContent, _, err := applyEditToContent(content, MultiEditOperation{
+	newContent, _, err := applyEditToContent(content, EditOperation{
 		OldString:  "alpha",
 		NewString:  "ALPHA",
 		ReplaceAll: true,
@@ -90,14 +90,14 @@ func TestApplyEditToContentReplacementModes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "ALPHA\nbeta\nALPHA\n", newContent)
 
-	_, _, err = applyEditToContent(content, MultiEditOperation{
+	_, _, err = applyEditToContent(content, EditOperation{
 		OldString: "alpha",
 		NewString: "ALPHA",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "multiple times")
 
-	newContent, _, err = applyEditToContent(content, MultiEditOperation{})
+	newContent, _, err = applyEditToContent(content, EditOperation{})
 	require.NoError(t, err)
 	require.Equal(t, content, newContent)
 }
@@ -117,7 +117,7 @@ func TestMultiEditSequentialApplication(t *testing.T) {
 	currentContent := content
 
 	// Apply edits sequentially, tracking failures.
-	edits := []MultiEditOperation{
+	edits := []EditOperation{
 		{OldString: "line 1", NewString: "LINE 1"},   // Should succeed
 		{OldString: "line 99", NewString: "LINE 99"}, // Should fail - doesn't exist
 		{OldString: "line 3", NewString: "LINE 3"},   // Should succeed
@@ -162,7 +162,7 @@ func TestMultiEditAllEditsSucceed(t *testing.T) {
 
 	content := "line 1\nline 2\nline 3\n"
 
-	edits := []MultiEditOperation{
+	edits := []EditOperation{
 		{OldString: "line 1", NewString: "LINE 1"},
 		{OldString: "line 2", NewString: "LINE 2"},
 		{OldString: "line 3", NewString: "LINE 3"},
@@ -191,7 +191,7 @@ func TestMultiEditAllEditsFail(t *testing.T) {
 
 	content := "line 1\nline 2\n"
 
-	edits := []MultiEditOperation{
+	edits := []EditOperation{
 		{OldString: "line 99", NewString: "LINE 99"},
 		{OldString: "line 100", NewString: "LINE 100"},
 	}
@@ -229,15 +229,15 @@ func TestProcessMultiEditExistingFilePartialFailure(t *testing.T) {
 		filetracker: &mockEditFileTracker{lastRead: time.Now().Add(time.Second)},
 		workingDir:  dir,
 	}
-	params := MultiEditParams{
+	params := EditParams{
 		FilePath: filePath,
-		Edits: []MultiEditOperation{
+		Edits: []EditOperation{
 			{OldString: "two", NewString: "TWO"},
 			{OldString: "missing", NewString: "MISSING"},
 		},
 	}
 
-	resp, err := processMultiEditExistingFile(edit, params, fantasy.ToolCall{ID: "call"})
+	resp, err := processEditExistingFile(edit, params, fantasy.ToolCall{ID: "call"})
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "Applied 1 of 2 edits")
@@ -246,7 +246,7 @@ func TestProcessMultiEditExistingFilePartialFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "one\nTWO\nthree\n", string(content))
 
-	var meta MultiEditResponseMetadata
+	var meta EditResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.Equal(t, 1, meta.EditsApplied)
 	require.Len(t, meta.EditsFailed, 1)
@@ -267,16 +267,16 @@ func TestProcessMultiEditWithCreationPartialFailure(t *testing.T) {
 		filetracker: &mockEditFileTracker{},
 		workingDir:  dir,
 	}
-	params := MultiEditParams{
+	params := EditParams{
 		FilePath: filePath,
-		Edits: []MultiEditOperation{
+		Edits: []EditOperation{
 			{OldString: "", NewString: "one\ntwo\nthree\n"},
 			{OldString: "two", NewString: "TWO"},
 			{OldString: "missing", NewString: "MISSING"},
 		},
 	}
 
-	resp, err := processMultiEditWithCreation(edit, params, fantasy.ToolCall{ID: "call"})
+	resp, err := processEditWithCreation(edit, params, fantasy.ToolCall{ID: "call"})
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "File created with 2 of 3 edits")
@@ -285,7 +285,7 @@ func TestProcessMultiEditWithCreationPartialFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "one\nTWO\nthree\n", string(content))
 
-	var meta MultiEditResponseMetadata
+	var meta EditResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.Equal(t, 2, meta.EditsApplied)
 	require.Len(t, meta.EditsFailed, 1)

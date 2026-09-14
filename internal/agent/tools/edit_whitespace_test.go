@@ -151,7 +151,7 @@ func TestApplyEditToContentReportsWhitespaceCorrection(t *testing.T) {
 	t.Parallel()
 
 	content := "func main() {\n\tfoo()\n}\n"
-	result, corrected, err := applyEditToContent(content, MultiEditOperation{
+	result, corrected, err := applyEditToContent(content, EditOperation{
 		OldString: "    foo()",
 		NewString: "    bar()",
 	})
@@ -159,7 +159,7 @@ func TestApplyEditToContentReportsWhitespaceCorrection(t *testing.T) {
 	require.True(t, corrected)
 	require.Equal(t, "func main() {\n\tbar()\n}\n", result)
 
-	result, corrected, err = applyEditToContent(content, MultiEditOperation{
+	result, corrected, err = applyEditToContent(content, EditOperation{
 		OldString: "\tfoo()",
 		NewString: "\tbar()",
 	})

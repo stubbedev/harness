@@ -46,20 +46,26 @@ type DiagnosticsParams struct {
 
 const EditToolName = "edit"
 
-// EditParams represents the parameters for the edit tool.
-type EditParams struct {
-	FilePath   string `json:"file_path"`
+// EditOperation is one find-and-replace within an edit call.
+type EditOperation struct {
 	OldString  string `json:"old_string"`
 	NewString  string `json:"new_string"`
 	ReplaceAll bool   `json:"replace_all,omitempty"`
 }
 
+// EditParams represents the parameters for the edit tool.
+type EditParams struct {
+	FilePath string          `json:"file_path"`
+	Edits    []EditOperation `json:"edits"`
+}
+
 // EditResponseMetadata represents the metadata for an edit tool response.
 type EditResponseMetadata struct {
-	Additions  int    `json:"additions"`
-	Removals   int    `json:"removals"`
-	OldContent string `json:"old_content,omitempty"`
-	NewContent string `json:"new_content,omitempty"`
+	Additions    int    `json:"additions"`
+	Removals     int    `json:"removals"`
+	OldContent   string `json:"old_content,omitempty"`
+	NewContent   string `json:"new_content,omitempty"`
+	EditsApplied int    `json:"edits_applied"`
 }
 
 const FetchToolName = "fetch"
@@ -75,30 +81,6 @@ type FetchParams struct {
 
 // ResearchToolName is the name of the research tool.
 const ResearchToolName = tools.ResearchToolName
-
-const MultiEditToolName = "multiedit"
-
-// MultiEditOperation represents a single edit operation in a multi-edit.
-type MultiEditOperation struct {
-	OldString  string `json:"old_string"`
-	NewString  string `json:"new_string"`
-	ReplaceAll bool   `json:"replace_all,omitempty"`
-}
-
-// MultiEditParams represents the parameters for the multi-edit tool.
-type MultiEditParams struct {
-	FilePath string               `json:"file_path"`
-	Edits    []MultiEditOperation `json:"edits"`
-}
-
-// MultiEditResponseMetadata represents the metadata for a multi-edit tool response.
-type MultiEditResponseMetadata struct {
-	Additions    int    `json:"additions"`
-	Removals     int    `json:"removals"`
-	OldContent   string `json:"old_content,omitempty"`
-	NewContent   string `json:"new_content,omitempty"`
-	EditsApplied int    `json:"edits_applied"`
-}
 
 const ViewToolName = "view"
 

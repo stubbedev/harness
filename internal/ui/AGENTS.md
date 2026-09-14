@@ -134,7 +134,7 @@ tool names to specific types:
 | File                  | Tools rendered                                 |
 | --------------------- | ---------------------------------------------- |
 | `chat/bash.go`        | Bash, JobOutput, JobKill                       |
-| `chat/file.go`        | View, Write, Edit, MultiEdit                   |
+| `chat/file.go`        | View, Write, Edit                              |
 | `chat/search.go`      | Glob, Grep, LS, Web Search                     |
 | `chat/fetch.go`       | Fetch, WebFetch, WebSearch                     |
 | `chat/toolgroup.go`   | Collapsed groups of consecutive tool calls     |

@@ -1062,7 +1062,6 @@ func allToolNames() []string {
 		"job_output",
 		"job_kill",
 		"edit",
-		"multiedit",
 		"lsp_diagnostics",
 		"lsp_references",
 		"lsp_restart",
@@ -1099,7 +1098,7 @@ func resolveSubagentTools(tools []string) []string {
 	// shell is its own single session, which it can background but not
 	// share. Specialized agents are unaffected — they build their own
 	// allowlist in frontmatter.
-	subagentTools := []string{"batch", "edit", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "multiedit", "send_message", "shell", "view", "web_search", "write"}
+	subagentTools := []string{"batch", "edit", "lsp_call_hierarchy", "lsp_definition", "lsp_symbols", "send_message", "shell", "view", "web_search", "write"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, subagentTools, true)
 }

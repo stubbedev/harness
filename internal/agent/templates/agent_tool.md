@@ -1,7 +1,7 @@
 Dispatch work to one or more sub-agents. Sub-agents run concurrently: issuing several `agent` calls in a single assistant message runs them all at once, and that is the point of this tool. Whenever a task splits into independent pieces — one per file, per package, per symbol, per hypothesis — dispatch one call per piece in one message instead of working through them in sequence yourself.
 
 Built-in types:
-- `fast`: reads, searches and edits files (shell, view, edit, multiedit, write) on the small model — the default when `subagent_type` is omitted. For any well-scoped lookup, survey, or edit piece. It is cheap, so prefer splitting work across several `fast` calls over one `task` call — and over reading every file yourself.
+- `fast`: reads, searches and edits files (shell, view, edit, write) on the small model — the default when `subagent_type` is omitted. For any well-scoped lookup, survey, or edit piece. It is cheap, so prefer splitting work across several `fast` calls over one `task` call — and over reading every file yourself.
 - `task`: the same tools on the large model. An escalation for the genuinely open-ended piece that needs judgment; do not reach for it when a cheap, well-scoped pass would answer the question.
 
 The `subagent_type` parameter also lists the project's specialized agents with the model each runs on. Prefer a specialized agent whose description matches the task over the generic types. A specialized agent marked cheap is, like `fast`, worth fanning out rather than calling once.

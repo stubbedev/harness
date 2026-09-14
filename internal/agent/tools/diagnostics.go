@@ -80,7 +80,7 @@ func openInLSPs(
 }
 
 // notifyLSPs notifies LSP servers that a file has changed and waits for
-// updated diagnostics. Use this after edit/multiedit operations.
+// updated diagnostics. Use this after edit operations.
 // When filepath is empty, refreshes all open files across all LSP clients
 // and sends a workspace-level change notification for full re-analysis.
 func notifyLSPs(

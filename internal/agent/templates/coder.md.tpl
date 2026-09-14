@@ -51,7 +51,7 @@ Ask the user only when the requirement is genuinely ambiguous, when valid approa
 </workflow>
 
 <editing>
-`edit` and `multiedit` match text and tolerate whitespace differences, re-indenting to the file's style; the response tells you when that happened, so check the result. Prefer `lsp_replace_symbol` for whole functions, methods, and types, and `lsp_rename` for renames across files. Use `write` for new files and full rewrites.
+`edit` matches text and tolerates whitespace differences, re-indenting to the file's style; the response tells you when that happened, so check the result. Prefer `lsp_replace_symbol` for whole functions, methods, and types, and `lsp_rename` for renames across files. Use `write` for new files and full rewrites.
 
 Give `edit` enough context to be unique in the file. If a match fails, read the target again and include more surrounding lines; never retry with guessed text. Do not re-read a file to confirm a successful edit; the tool reports failure when it fails.
 </editing>

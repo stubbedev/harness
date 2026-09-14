@@ -192,9 +192,11 @@ func TestCoderAgent(t *testing.T) {
 			scriptedTurn{calls: []scriptedCall{{
 				name: tools.EditToolName,
 				input: map[string]any{
-					"file_path":  "main.go",
-					"old_string": `fmt.Println("Hello, World!")`,
-					"new_string": `fmt.Println("hello from harness")`,
+					"file_path": "main.go",
+					"edits": []map[string]any{{
+						"old_string": `fmt.Println("Hello, World!")`,
+						"new_string": `fmt.Println("hello from harness")`,
+					}},
 				},
 			}}},
 		)
@@ -242,7 +244,7 @@ func TestCoderAgent(t *testing.T) {
 				input: map[string]any{"file_path": "main.go"},
 			}}},
 			scriptedTurn{calls: []scriptedCall{{
-				name: tools.MultiEditToolName,
+				name: tools.EditToolName,
 				input: map[string]any{
 					"file_path": "main.go",
 					"edits": []any{
@@ -260,7 +262,7 @@ func TestCoderAgent(t *testing.T) {
 		)
 		res := toolResults(t, runScript(t, agent, env, "multiedit main.go"))
 
-		multi, ok := res[tools.MultiEditToolName]
+		multi, ok := res[tools.EditToolName]
 		require.True(t, ok, "expected a multiedit result")
 		require.False(t, multi.IsError, "multiedit failed: %s", multi.Content)
 

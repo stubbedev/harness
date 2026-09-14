@@ -119,10 +119,10 @@ func TestFastAgentConfigured(t *testing.T) {
 
 	task := agents[config.AgentTask]
 	require.Equal(t, task.AllowedTools, fast.AllowedTools, "fast is the task agent's tool set on a cheaper model")
-	for _, tool := range []string{"edit", "multiedit", "write"} {
-		require.Contains(t, fast.AllowedTools, tool, "built-in subagents read and edit files")
+	for _, tool := range []string{"edit", "write", "shell"} {
+		require.Contains(t, fast.AllowedTools, tool,
+			"built-in subagents read, edit and run commands in their own shell")
 	}
-	require.NotContains(t, fast.AllowedTools, "bash", "built-in subagents must not run commands")
 	require.NotContains(t, fast.AllowedTools, "memory", "built-in subagents must not write memory")
 }
 
