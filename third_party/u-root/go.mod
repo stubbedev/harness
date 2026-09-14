@@ -17,12 +17,12 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-tpm v0.9.2-0.20240919181259-d96ccf715685
 	github.com/google/uuid v1.6.0
-	github.com/gopacket/gopacket v1.2.0
+	github.com/gopacket/gopacket v1.6.1
 	github.com/hugelgupf/vmtest v0.0.0-20240307030256-5d9f3d34a58d
-	github.com/insomniacslk/dhcp v0.0.0-20231206064809-8c70d406f6d2
+	github.com/insomniacslk/dhcp v0.0.0-20260719225207-c76316d4aa82
 	github.com/ishidawataru/sctp v0.0.0-20230406120618-7ff4192f6ff2
 	github.com/kevinburke/ssh_config v1.2.0
-	github.com/klauspost/compress v1.18.0
+	github.com/klauspost/compress v1.18.7
 	github.com/klauspost/pgzip v1.2.6
 	github.com/knz/bubbline v0.0.0-20230717192058-486954f9953f
 	github.com/mdlayher/vsock v1.2.1
@@ -44,10 +44,10 @@ require (
 	github.com/vtolstov/go-ioctl v0.0.0-20151206205506-6be9cced4810
 	golang.org/x/crypto v0.57.0
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
-	golang.org/x/net v0.47.0
-	golang.org/x/sys v0.38.0
+	golang.org/x/net v0.59.0
+	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.37.0
-	golang.org/x/text v0.31.0
+	golang.org/x/text v0.42.0
 	golang.org/x/tools v0.38.0
 	gopkg.in/yaml.v2 v2.4.0
 	mvdan.cc/sh/v3 v3.11.0
@@ -70,11 +70,11 @@ require (
 	github.com/containerd/stargz-snapshotter/estargz v0.16.3 // indirect
 	github.com/creack/goselect v0.1.2 // indirect
 	github.com/cyphar/filepath-securejoin v0.2.5 // indirect
-	github.com/docker/cli v28.2.2+incompatible // indirect
+	github.com/docker/cli v29.2.0+incompatible // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.3 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
-	github.com/go-git/go-billy/v5 v5.5.1-0.20240514075308-8f1b719cb6a2 // indirect
+	github.com/go-git/go-billy/v5 v5.9.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/google/go-containerregistry v0.20.6 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
@@ -100,7 +100,7 @@ require (
 	github.com/charmbracelet/bubbles v0.15.1-0.20230123181021-a6a12c4a31eb // indirect
 	github.com/charmbracelet/bubbletea v0.24.1 // indirect
 	github.com/charmbracelet/lipgloss v0.7.1 // indirect
-	github.com/cloudflare/circl v1.6.1 // indirect
+	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/containerd/console v1.0.4-0.20230706203907-8f6c4e4faef5 // indirect
 	github.com/hugelgupf/go-shlex v0.0.0-20200702092117-c80c9d0918fa // indirect
 	github.com/josharian/native v1.1.0 // indirect
@@ -123,7 +123,7 @@ require (
 	github.com/therootcompany/xz v1.0.1
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	golang.org/x/arch v0.2.0 // indirect
-	golang.org/x/mod v0.29.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/sync v0.18.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -153,33 +153,50 @@ func (t *State) handleSTR() {
 	}
 }
 
+// maxColorValue is the largest colour an escape sequence may name: a
+// 24-bit RGB triple. Indices arrive from a terminal escape sequence and
+// are converted to the 32-bit Color type, so the bound is checked at
+// every conversion rather than left to truncate into another colour.
+const maxColorValue = 1<<24 - 1
+
+// colorValue converts a colour index parsed out of an escape sequence,
+// reporting whether it was in range at all.
+func colorValue(j int) (Color, bool) {
+	if j < 0 || j > maxColorValue {
+		return 0, false
+	}
+	return Color(j), true
+}
+
 func (t *State) setColorName(j int, p *string) error {
-	if !between(j, 0, 1<<24) {
+	color, ok := colorValue(j)
+	if !ok {
 		return fmt.Errorf("invalid color value %d", j)
 	}
 
 	if p == nil {
 		// restore color
-		delete(t.colorOverride, Color(j))
+		delete(t.colorOverride, color)
 	} else {
 		// set color
 		r, g, b, err := parseColor(*p)
 		if err != nil {
 			return err
 		}
-		t.colorOverride[Color(j)] = Color(r<<16 | g<<8 | b)
+		t.colorOverride[color] = Color(r<<16 | g<<8 | b)
 	}
 
 	return nil
 }
 
 func (t *State) oscColorResponse(j, num int) {
-	if j < 0 {
+	color, valid := colorValue(j)
+	if !valid {
 		t.logf("failed to fetch osc color %d\n", j)
 		return
 	}
 
-	k, ok := t.colorOverride[Color(j)]
+	k, ok := t.colorOverride[color]
 	if ok {
 		j = int(k)
 	}
@@ -189,12 +206,13 @@ func (t *State) oscColorResponse(j, num int) {
 }
 
 func (t *State) osc4ColorResponse(j int) {
-	if j < 0 {
+	color, valid := colorValue(j)
+	if !valid {
 		t.logf("failed to fetch osc4 color %d\n", j)
 		return
 	}
 
-	k, ok := t.colorOverride[Color(j)]
+	k, ok := t.colorOverride[color]
 	if ok {
 		j = int(k)
 	}

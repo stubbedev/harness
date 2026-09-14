@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -14,9 +15,35 @@ import (
 // repository.
 const shadowRepoName = "shadow.git"
 
+// idPattern is the shape of the identifiers that reach git: session and
+// message IDs, which Harness generates. They name a directory under the
+// data directory and a ref in the shadow repository, so anything else --
+// a path separator that would walk out of the data directory, a leading
+// dash git would read as a flag -- is refused here rather than passed
+// on.
+var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
+// commitPattern is the shape of a git object name. Commits come back
+// from git itself, and go back to it in the next command; validating
+// the round trip keeps a stored value that is not one out of an
+// argument list.
+var commitPattern = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
+
+// checkID reports whether an identifier is safe to pass to git or to
+// join into a path.
+func checkID(kind, id string) error {
+	if !idPattern.MatchString(id) {
+		return fmt.Errorf("invalid %s %q", kind, id)
+	}
+	return nil
+}
+
 // shadowDir returns the shadow GIT_DIR for a session. One repository
 // per session keeps concurrent sessions from contending for a shared
 // index while blob storage still dedupes within each session.
+//
+// The session ID is validated by every caller that reaches git (see
+// checkID), so the join cannot be walked out of the data directory.
 func (s *Service) shadowDir(sessionID string) string {
 	return filepath.Join(s.dataDir, "checkpoints", sessionID, shadowRepoName)
 }
@@ -27,6 +54,11 @@ func (s *Service) shadowDir(sessionID string) string {
 // commit behind a ref so the objects stay reachable forever - or until
 // the session is deleted.
 func (s *Service) commitTree(ctx context.Context, sessionID, messageID string) (string, error) {
+	// The message ID becomes a ref name and part of the commit message,
+	// so it is checked before either is built.
+	if err := checkID("message id", messageID); err != nil {
+		return "", err
+	}
 	if err := s.ensureShadow(ctx, sessionID); err != nil {
 		return "", err
 	}
@@ -67,6 +99,9 @@ func (s *Service) commitTree(ctx context.Context, sessionID, messageID string) (
 // ever tracked - ignored files, and untracked files created after the
 // newest snapshot - are left alone.
 func (s *Service) restore(ctx context.Context, sessionID, commit string) error {
+	if !commitPattern.MatchString(commit) {
+		return fmt.Errorf("invalid checkpoint commit %q", commit)
+	}
 	if err := s.ensureShadow(ctx, sessionID); err != nil {
 		return err
 	}
@@ -78,6 +113,9 @@ func (s *Service) restore(ctx context.Context, sessionID, commit string) error {
 
 // ensureShadow creates the session's shadow repository on first use.
 func (s *Service) ensureShadow(ctx context.Context, sessionID string) error {
+	if err := checkID("session id", sessionID); err != nil {
+		return err
+	}
 	dir := s.shadowDir(sessionID)
 	if _, err := os.Stat(filepath.Join(dir, "HEAD")); err == nil {
 		return nil
@@ -110,6 +148,9 @@ func (s *Service) dataDirExclude() string {
 
 // removeShadow deletes a session's shadow repository directory.
 func removeShadow(dataDir, sessionID string) error {
+	if err := checkID("session id", sessionID); err != nil {
+		return err
+	}
 	dir := filepath.Join(dataDir, "checkpoints", sessionID)
 	if _, err := os.Stat(dir); err != nil {
 		if os.IsNotExist(err) {
@@ -123,6 +164,9 @@ func removeShadow(dataDir, sessionID string) error {
 // git runs a git command against the session's shadow repository over
 // the service's working tree and returns its stdout.
 func (s *Service) git(ctx context.Context, sessionID string, args ...string) (string, error) {
+	if err := checkID("session id", sessionID); err != nil {
+		return "", err
+	}
 	full := append([]string{
 		"--git-dir", s.shadowDir(sessionID),
 		"--work-tree", s.workingDir,

@@ -22,10 +22,20 @@ here until a patch lands upstream.
 - `pkg/ls/fileinfo_dragonfly.go`: added, same conversion using DragonFly's
   `Atim`/`Ctim` fields; `BirthTime` stays the zero time since DragonFly's
   `Stat_t` has no birth time.
-- `go.mod`: `golang.org/x/crypto` requirement raised to `v0.57.0` (the
-  version the root module already resolves to) so the vendored `go.mod`
-  does not trip the grype critical-severity gate on the directory scan
-  (GHSA-jppx-rxg9-jmrx, fixed in v0.52.0).
+- `go.mod`: dependency requirements raised off versions carrying
+  published advisories, to the versions the root module already resolves
+  to or to the first patched release. The vendored manifest is scanned on
+  its own, and a stale requirement there is reported as a vulnerability
+  even though the root module's MVS raises it for the build:
+  `golang.org/x/crypto` v0.57.0 (GHSA-jppx-rxg9-jmrx), `golang.org/x/net`
+  v0.59.0, `golang.org/x/sys` v0.48.0, `golang.org/x/text` v0.42.0,
+  `golang.org/x/mod` v0.41.0, `github.com/gopacket/gopacket` v1.6.1,
+  `github.com/go-git/go-billy/v5` v5.9.0, `github.com/docker/cli`
+  v29.2.0+incompatible, `github.com/cloudflare/circl` v1.6.3,
+  `github.com/klauspost/compress` v1.18.7 and
+  `github.com/insomniacslk/dhcp` v0.0.0-20260719225207-c76316d4aa82.
+  None of these are imported by the packages kept here; the bumps keep
+  the manifest honest rather than changing what is built.
 
 Everything else is byte-identical to the upstream pseudo-version (verified
 with `diff -r` against the module cache).

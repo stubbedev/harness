@@ -201,7 +201,7 @@ func Start(cwd string, env ...string) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to start terminal session: %w", err)
 	}
-	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
+	_ = pty.Setsize(ptmx, winsize(rows, cols))
 
 	return newSession(ptmx, cmd.Process, rows, cols), nil
 }
@@ -250,6 +250,18 @@ func envInt(name string, fallback int) int {
 
 func clampDim(v, lo, hi int) int {
 	return min(max(v, lo), hi)
+}
+
+// winsize builds the ioctl window size for a session. The bounds are
+// applied here rather than trusted from the caller: rows and cols reach
+// this from HARNESS_PTY_ROWS/COLS and from terminal resize events, and
+// the kernel struct is 16-bit, so a value beyond it would be truncated
+// into a size nobody asked for.
+func winsize(rows, cols int) *pty.Winsize {
+	return &pty.Winsize{
+		Rows: uint16(clampDim(rows, minRows, maxRows)),
+		Cols: uint16(clampDim(cols, minCols, maxCols)),
+	}
 }
 
 func newSession(ptmx *os.File, proc *os.Process, rows, cols int) *Session {
@@ -779,7 +791,7 @@ func (s *Session) Resize(rows, cols int) error {
 		return errors.New("terminal session has exited")
 	}
 
-	if err := pty.Setsize(s.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}); err != nil {
+	if err := pty.Setsize(s.ptmx, winsize(rows, cols)); err != nil {
 		return fmt.Errorf("resize terminal session: %w", err)
 	}
 	s.emu.Resize(cols, rows)

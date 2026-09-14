@@ -1866,7 +1866,13 @@ func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config
 func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg config.ProviderConfig) error {
 	newAPIKey, err := c.cfg.Resolve(providerCfg.APIKeyTemplate)
 	if err != nil {
-		slog.Error("Failed to re-resolve API key after 401 error", "provider", providerCfg.ID, "error", err)
+		// A resolution error quotes the template the user wrote. That is
+		// usually a reference ($ANTHROPIC_API_KEY, a command
+		// substitution), but nothing stops a config from inlining the
+		// credential itself, and the log outlives the session -- so it
+		// is scrubbed on the way out.
+		scrubbed, _ := memory.Scrub(err.Error())
+		slog.Error("Failed to re-resolve API key after 401 error", "provider", providerCfg.ID, "error", scrubbed)
 		return err
 	}
 
