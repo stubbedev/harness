@@ -183,7 +183,10 @@ func TestShellIdentification(t *testing.T) {
 	require.NotEmpty(t, sh)
 
 	// $SHELL naming something that is not a shell is no answer either.
+	// ComSpec goes with it: on Windows it names cmd.exe, which is a real
+	// identification and would answer for the unrecognised $SHELL.
 	t.Setenv("SHELL", "/usr/bin/python")
+	t.Setenv("ComSpec", "")
 	sh, ok = Shell()
 	if parentShell() == "" {
 		require.False(t, ok, "an unrecognised $SHELL is not an identification")
