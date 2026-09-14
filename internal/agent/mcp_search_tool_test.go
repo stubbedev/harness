@@ -193,3 +193,38 @@ func TestMCPServerToolNames(t *testing.T) {
 	assert.Empty(t, c.mcpToolDescription("forge", "missing"))
 	assert.Empty(t, c.mcpServerToolNames("unknown-server"))
 }
+
+// TestMCPSearchToolInfoNamesTools covers discoverability: with schemas
+// deferred, the names in the search tool's own description are the only
+// way the model learns the server has a capability at all.
+func TestMCPSearchToolInfoNamesTools(t *testing.T) {
+	t.Run("every name is listed", func(t *testing.T) {
+		tool := searchToolWithRegistry(t, "forge", []*mcp.Tool{
+			{Name: "issue_create", Description: "Open a new issue"},
+			{Name: "pr_merge", Description: "Merge a pull request"},
+		})
+
+		desc := tool.Info().Description
+		assert.Contains(t, desc, "Its 2 tools are named below")
+		assert.Contains(t, desc, "Tools on this server: issue_create, pr_merge")
+		// Only the names: the descriptions stay behind the search.
+		assert.NotContains(t, desc, "Open a new issue")
+	})
+
+	t.Run("a huge server is truncated and says so", func(t *testing.T) {
+		many := make([]*mcp.Tool, 0, 400)
+		for i := range cap(many) {
+			many = append(many, &mcp.Tool{Name: fmt.Sprintf("tool_%03d", i)})
+		}
+		tool := searchToolWithRegistry(t, "big", many)
+
+		desc := tool.Info().Description
+		assert.Less(t, len(desc), 3000, "the name list must not undo the saving")
+		assert.Regexp(t, `… and \d+ more \(use query to find them\)`, desc)
+	})
+
+	t.Run("a server with no tools does not render an empty list", func(t *testing.T) {
+		tool := searchToolWithRegistry(t, "empty", nil)
+		assert.Contains(t, tool.Info().Description, "Tools on this server: (none)")
+	})
+}

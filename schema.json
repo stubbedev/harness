@@ -319,7 +319,7 @@
         },
         "tool_search": {
           "type": "boolean",
-          "description": "Defer-load this server's tools behind a search tool (automatic above 40 tools)"
+          "description": "Defer-load this server's tools behind a search tool instead of expanding every schema into context (default true; set false to load eagerly)"
         },
         "sessionless": {
           "type": "boolean",

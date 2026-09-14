@@ -3296,7 +3296,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "tool_search": {
-                    "description": "ToolSearch defer-loads this server's tools behind a search tool\ninstead of expanding every tool schema into the model's context.\nnil means automatic: defer when the server lists more than\nDefaultMCPToolSearchThreshold tools. true always defers, false\nnever does.",
+                    "description": "ToolSearch defer-loads this server's tools behind a search tool\ninstead of expanding every tool schema into the model's context.\nnil means the default, which is to defer; false opts the server\nback into eager loading. See DeferToolSearch.",
                     "type": "boolean"
                 },
                 "type": {

@@ -237,9 +237,8 @@ definitions:
         description: |-
           ToolSearch defer-loads this server's tools behind a search tool
           instead of expanding every tool schema into the model's context.
-          nil means automatic: defer when the server lists more than
-          DefaultMCPToolSearchThreshold tools. true always defers, false
-          never does.
+          nil means the default, which is to defer; false opts the server
+          back into eager loading. See DeferToolSearch.
         type: boolean
       type:
         $ref: '#/definitions/config.MCPType'

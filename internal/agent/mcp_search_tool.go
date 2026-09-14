@@ -29,18 +29,29 @@ type mcpSearchTool struct {
 // hundreds of names defeats it.
 const mcpSearchResultLimit = 20
 
+// mcpSearchNameBudget bounds how many characters of a server's tool-name
+// list the search tool's own description carries. The names are what make
+// a deferred server discoverable at all: a model that cannot see that a
+// capability exists will not think to search for it. They are cheap next
+// to the schemas they stand in for, but a server exposing hundreds of
+// tools must not spend the context the deferral was meant to save.
+const mcpSearchNameBudget = 2000
+
 func (s *mcpSearchTool) Info() fantasy.ToolInfo {
+	names := s.coord.mcpServerToolNames(s.server)
 	return fantasy.ToolInfo{
 		Name: fmt.Sprintf("mcp_%s_tool_search", s.server),
 		Description: fmt.Sprintf(
-			`Search and load tools from the "%s" MCP server, which exposes %d tools that are not listed here to save context.
+			`Search and load tools from the "%s" MCP server. Its %d tools are named below but their input schemas are not loaded, so they stay out of context until you need them.
+
+Tools on this server: %s
 
 Two-step usage:
-1. Run with {"query": "keyword ..."} to list matching tools. Keywords are matched fuzzily against tool names and descriptions; every keyword must match, and name matches rank higher.
+1. Run with {"query": "keyword ..."} to list matching tools with a short description each. Keywords are matched fuzzily against tool names and descriptions; every keyword must match, and name matches rank higher.
 2. Run with {"load": ["tool_name", ...]} to load the ones you need. Loaded tools appear in your tool list from your next step, with their full input schemas.
 
-Both fields may be combined in one call. Prefer loading few tools at a time.`,
-			s.server, s.coord.mcpServerToolCount(s.server),
+Both fields may be combined in one call. A name from the list above can be loaded directly without searching first; search when you know the capability you want but not which tool provides it. Prefer loading few tools at a time.`,
+			s.server, len(names), nameList(names),
 		),
 		Parameters: map[string]any{
 			"query": map[string]any{
@@ -50,10 +61,31 @@ Both fields may be combined in one call. Prefer loading few tools at a time.`,
 			"load": map[string]any{
 				"type":        "array",
 				"items":       map[string]any{"type": "string"},
-				"description": "Exact tool names (as returned by a query) to load into your tool list.",
+				"description": "Exact tool names (as returned by a query, or taken from the list in this tool's description) to load into your tool list.",
 			},
 		},
 	}
+}
+
+// nameList renders the tool names for the description, stopping at
+// mcpSearchNameBudget characters and saying how many it left out so a
+// truncated list never reads as the whole set.
+func nameList(names []string) string {
+	if len(names) == 0 {
+		return "(none)"
+	}
+	var b strings.Builder
+	for i, name := range names {
+		if i > 0 && b.Len()+len(name)+2 > mcpSearchNameBudget {
+			fmt.Fprintf(&b, ", … and %d more (use query to find them)", len(names)-i)
+			break
+		}
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(name)
+	}
+	return b.String()
 }
 
 func (s *mcpSearchTool) ProviderOptions() fantasy.ProviderOptions        { return s.opts }
@@ -212,16 +244,16 @@ func (c *coordinator) mcpToolDescription(server, toolName string) string {
 }
 
 // deferredMCPServers reports which servers have their tools defer-loaded
-// for the top-level agent: a server qualifies when its config asks for it
-// (explicitly or via the automatic threshold) and the agent has no
-// tool-level curation for it — a specific AllowedMCP list is already a
-// hand-picked subset, deferring it would only add a hop.
+// for the top-level agent. Every configured server defers unless its
+// config opts out (tool_search: false) or the agent has curated it with a
+// specific AllowedMCP list — a hand-picked subset is already bounded, so
+// deferring it would only add a hop.
 func (c *coordinator) deferredMCPServers(agent config.Agent) map[string]bool {
 	deferred := make(map[string]bool)
 	cfg := c.cfg.Config()
-	for server, names := range c.mcpServerRegistryCounts() {
+	for server := range mcp.Tools() {
 		mcpCfg, ok := cfg.MCP[server]
-		if !ok || !mcpCfg.DeferToolSearch(names) {
+		if !ok || !mcpCfg.DeferToolSearch() {
 			continue
 		}
 		if allowed, ok := agent.AllowedMCP[server]; ok && len(allowed) > 0 {
@@ -230,15 +262,6 @@ func (c *coordinator) deferredMCPServers(agent config.Agent) map[string]bool {
 		deferred[server] = true
 	}
 	return deferred
-}
-
-// mcpServerRegistryCounts counts registry tools per server.
-func (c *coordinator) mcpServerRegistryCounts() map[string]int {
-	counts := make(map[string]int)
-	for server, tools := range mcp.Tools() {
-		counts[server] = len(tools)
-	}
-	return counts
 }
 
 // mcpToolExpanded reports whether a defer-loaded server tool was already

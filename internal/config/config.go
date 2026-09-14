@@ -213,10 +213,9 @@ type MCPConfig struct {
 
 	// ToolSearch defer-loads this server's tools behind a search tool
 	// instead of expanding every tool schema into the model's context.
-	// nil means automatic: defer when the server lists more than
-	// DefaultMCPToolSearchThreshold tools. true always defers, false
-	// never does.
-	ToolSearch *bool `json:"tool_search,omitempty" jsonschema:"description=Defer-load this server's tools behind a search tool (automatic above 40 tools)"`
+	// nil means the default, which is to defer; false opts the server
+	// back into eager loading. See DeferToolSearch.
+	ToolSearch *bool `json:"tool_search,omitempty" jsonschema:"description=Defer-load this server's tools behind a search tool instead of expanding every schema into context (default true; set false to load eagerly)"`
 
 	// Sessionless marks a server that does not maintain an MCP session (it
 	// never issues a Mcp-Session-Id). When true, Harness omits the
@@ -635,19 +634,25 @@ func (m MCPConfig) IsSessionless() bool {
 	return m.Sessionless != nil && *m.Sessionless
 }
 
-// DefaultMCPToolSearchThreshold is the tool count above which a server
-// with no explicit tool_search setting is defer-loaded behind a search
-// tool instead of expanding every tool schema into the model's context.
-const DefaultMCPToolSearchThreshold = 40
-
 // DeferToolSearch reports whether this server's tools should be
-// defer-loaded given how many tools it exposes: an explicit ToolSearch
-// wins; otherwise defer above DefaultMCPToolSearchThreshold.
-func (m MCPConfig) DeferToolSearch(toolCount int) bool {
+// defer-loaded behind a search tool instead of expanding every tool
+// schema into the model's context.
+//
+// Deferring is the default for every MCP server. A tool's full schema —
+// description, parameter docs, examples — is only needed once the model
+// has decided to call it, but expanding it eagerly spends context on
+// every session whether the server is used or not, and the bill grows
+// with each server connected. The search tool lists the server's tool
+// names instead, which is what the model needs to know a capability
+// exists, and loads the schemas on demand.
+//
+// tool_search: false opts a server back into eager loading, for a server
+// whose tools should be in reach without the extra hop.
+func (m MCPConfig) DeferToolSearch() bool {
 	if m.ToolSearch != nil {
 		return *m.ToolSearch
 	}
-	return toolCount > DefaultMCPToolSearchThreshold
+	return true
 }
 
 // ResolvedHeaders returns m.Headers with every value expanded through
