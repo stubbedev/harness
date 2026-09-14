@@ -11,6 +11,7 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // agentToolCall builds the tool call a parent-session agent dispatch
@@ -241,6 +242,71 @@ func TestStripCountsDispatchesOnly(t *testing.T) {
 	}}
 	_ = u.appendSessionMessage(toolMsg)
 	require.Len(t, u.agentTasks, 1, "plain tool results never reap subagent tasks")
+}
+
+// TestBackgroundDispatchStaysVisible pins that a background dispatch is
+// not settled by its immediate handle tool result: the subagent keeps
+// running, and only the runtime's terminal event (or reconciliation
+// against the running list) removes it from the strip.
+func TestBackgroundDispatchStaysVisible(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.width = 100
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	bg := agentToolCall("a1")
+	bg.Input = `{"subagent_type":"researcher","prompt":"dig","background":true}`
+	_ = u.upsertAgentTask(msg, bg)
+
+	task := u.agentTaskByToolCall("a1")
+	require.NotNil(t, task)
+	require.True(t, task.background)
+
+	// The handle result must not complete the task.
+	assert.True(t, u.resolveAgentTaskResult(message.ToolResult{
+		ToolCallID: "a1", Name: "agent", Content: "Started background agent",
+	}))
+	require.NotNil(t, u.agentTaskByToolCall("a1"), "a background dispatch outlives its handle result")
+	assert.True(t, u.tasksSpinning())
+
+	// The terminal runtime event reaps it.
+	u.applyRunningSubagentInfo(childSessionInfo{
+		ChildSessionID: task.childSessionID,
+		Status:         subagents.StatusCompleted,
+	})
+	assert.Empty(t, u.agentTasks, "a finished background task leaves the strip")
+}
+
+// TestBackgroundDispatchReconcileAgainstRunningList pins the
+// reconciliation path: a running background task whose child session is
+// absent from the authoritative running list is settled, while one still
+// present stays.
+func TestBackgroundDispatchReconcileAgainstRunningList(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	for _, id := range []string{"a1", "a2"} {
+		bg := agentToolCall(id)
+		bg.Input = `{"prompt":"dig","background":true}`
+		_ = u.upsertAgentTask(msg, bg)
+	}
+	t1 := u.agentTaskByToolCall("a1")
+	t2 := u.agentTaskByToolCall("a2")
+	require.NotNil(t, t1)
+	require.NotNil(t, t2)
+	t1.childSessionID = "child-1"
+	t2.childSessionID = "child-2"
+
+	// child-1 is still running; child-2 is not.
+	u.reconcileBackgroundTasks([]workspace.RunningSubagentInfo{
+		{ChildSessionID: "child-1"},
+	})
+	assert.Nil(t, u.agentTaskByToolCall("a2"), "a background task missing from the running list is reaped")
+	assert.NotNil(t, u.agentTaskByToolCall("a1"), "a background task still running stays")
 }
 
 // TestStripDoesNotResurrectFinishedDispatch pins the ordering that ghosts

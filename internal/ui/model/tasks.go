@@ -16,6 +16,7 @@ import (
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
 	"github.com/stubbedev/harness/internal/ui/styles"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // agentTask tracks one subagent run for the background tasks strip.
@@ -32,6 +33,15 @@ type agentTask struct {
 	startedAt        time.Time
 	promptTokens     int64
 	completionTokens int64
+
+	// background marks a dispatch whose tool call already returned a
+	// handle: the child session keeps running past that result, so the
+	// result must not settle the task.
+	background bool
+	// childSessionID is the sub-session behind the dispatch, learned
+	// from runtime events or derived at load, used to reconcile the
+	// strip against the authoritative running list.
+	childSessionID string
 }
 
 // taskRow maps a rendered strip row to its task for click handling.
@@ -74,7 +84,7 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 		m.agentTasks = append(m.agentTasks, task)
 	}
 
-	var params agent.AgentParams
+	var params agent.AgentDispatchParams
 	_ = json.Unmarshal([]byte(tc.Input), &params)
 	task.name = params.SubagentType
 	if task.name == "" {
@@ -84,6 +94,8 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 		task.color = subagents.AutoColor(task.name)
 	}
 	task.prompt = params.Prompt
+	task.background = params.Background
+	task.childSessionID = m.childSessionIDFor(msg.ID, tc.ID)
 
 	if m.tasksSpinning() {
 		m.syncSubagentWaitItem()
@@ -102,6 +114,12 @@ func (m *UI) resolveAgentTaskResult(tr message.ToolResult) bool {
 	task := m.agentTaskByToolCall(tr.ToolCallID)
 	if task == nil {
 		return false
+	}
+	// A background dispatch's tool result is only the start handle — the
+	// subagent has not returned yet. Keep it spinning; a terminal
+	// RuntimeEvent (or reconciliation against the running list) reaps it.
+	if task.background {
+		return true
 	}
 	task.result = &tr
 	task.status = subagents.StatusCompleted
@@ -137,6 +155,16 @@ func (m *UI) reapAgentTask(toolCallID string) {
 // subagentDisplayName is the strip title for a dispatch that did not
 // name a subagent type.
 const subagentDisplayName = "subagent"
+
+// childSessionIDFor derives the sub-session ID behind a dispatch. Empty
+// when no workspace is wired (unit tests); the task then learns the ID
+// from runtime events instead.
+func (m *UI) childSessionIDFor(msgID, toolCallID string) string {
+	if m.com == nil || m.com.Workspace == nil {
+		return ""
+	}
+	return m.com.Workspace.CreateAgentToolSessionID(msgID, toolCallID)
+}
 
 // tasksSpinning reports whether any tracked task is still in flight.
 func (m *UI) tasksSpinning() bool {
@@ -207,22 +235,27 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			if !chat.IsSubagentTool(tc.Name) {
 				continue
 			}
+			var params agent.AgentDispatchParams
+			_ = json.Unmarshal([]byte(tc.Input), &params)
 			_, hasResult := toolResults[tc.ID]
 			canceled := msg.FinishReason() == message.FinishReasonCanceled
 			// A set Finished flag only means the model finished emitting
 			// the call; the subagent runs until a result lands. Skip only
 			// dispatches that settled, or that cannot be running because
-			// the session is idle.
-			if hasResult || canceled || !busy {
+			// the session is idle. A background dispatch is excepted on
+			// both counts: its tool result is just the start handle and it
+			// runs independently of the parent's busy state; the running
+			// list reconciles it instead.
+			if canceled || (!params.Background && (hasResult || !busy)) {
 				continue
 			}
 			task := &agentTask{
-				toolCallID: tc.ID,
-				startedAt:  time.Unix(msg.CreatedAt, 0),
-				status:     subagents.StatusRunning,
+				toolCallID:     tc.ID,
+				startedAt:      time.Unix(msg.CreatedAt, 0),
+				status:         subagents.StatusRunning,
+				background:     params.Background,
+				childSessionID: m.childSessionIDFor(msg.ID, tc.ID),
 			}
-			var params agent.AgentParams
-			_ = json.Unmarshal([]byte(tc.Input), &params)
 			task.name = params.SubagentType
 			if task.name == "" {
 				task.name = subagentDisplayName
@@ -307,6 +340,9 @@ func (m *UI) updateAgentTaskFromChildSession(event message.Message) {
 // status, tokens) into the matching task. A terminal status reaps the
 // task: the strip shows ongoing work only.
 func (m *UI) applyRunningSubagentInfo(info childSessionInfo) {
+	if m.com == nil || m.com.Workspace == nil {
+		return
+	}
 	_, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(info.ChildSessionID)
 	if !ok {
 		return
@@ -314,6 +350,9 @@ func (m *UI) applyRunningSubagentInfo(info childSessionInfo) {
 	task := m.agentTaskByToolCall(toolCallID)
 	if task == nil {
 		return
+	}
+	if task.childSessionID == "" {
+		task.childSessionID = info.ChildSessionID
 	}
 	switch info.Status {
 	case subagents.StatusCompleted, subagents.StatusCancelled, subagents.StatusFailed:
@@ -334,6 +373,24 @@ func (m *UI) applyRunningSubagentInfo(info childSessionInfo) {
 	}
 	task.promptTokens = info.PromptTokens
 	task.completionTokens = info.CompletionTokens
+}
+
+// reconcileBackgroundTasks settles background dispatches the event stream
+// can miss (a Finished RuntimeEvent raced a session switch, or the session
+// was reloaded from history): the fetched running list is authoritative, so
+// a background task whose child session is absent from it is done.
+func (m *UI) reconcileBackgroundTasks(list []workspace.RunningSubagentInfo) {
+	running := make(map[string]bool, len(list))
+	for _, info := range list {
+		running[info.ChildSessionID] = true
+	}
+	tasks := append([]*agentTask(nil), m.agentTasks...)
+	for _, t := range tasks {
+		if t.background && t.status == subagents.StatusRunning &&
+			t.childSessionID != "" && !running[t.childSessionID] {
+			m.reapAgentTask(t.toolCallID)
+		}
+	}
 }
 
 // childSessionInfo is the subset of runtime/running-subagent data the

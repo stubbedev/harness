@@ -1168,6 +1168,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.knownChildSessionIDs[info.ChildSessionID] = true
 			}
+			// The fetched list is authoritative for what is actually
+			// still running: settle background dispatches whose Finished
+			// event was missed (e.g. raced a session switch).
+			m.reconcileBackgroundTasks(msg.list)
 		}
 	case pubsub.Event[subagents.Event]:
 		// Library discovery changed (e.g. a delete) — rebuild the @-mention

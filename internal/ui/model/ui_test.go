@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -123,6 +124,19 @@ func (w *testWorkspace) Config() *config.Config {
 
 func (w *testWorkspace) WorkingDir() string {
 	return "/tmp/harness-test"
+}
+
+func (w *testWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
+	return "agent-tool-" + messageID + "-" + toolCallID
+}
+
+func (w *testWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
+	rest, ok := strings.CutPrefix(sessionID, "agent-tool-")
+	if !ok {
+		return "", "", false
+	}
+	_, toolCallID, found := strings.Cut(rest, "-")
+	return "", toolCallID, found
 }
 
 func (w *testWorkspace) AgentIsReady() bool {
