@@ -11,6 +11,9 @@ One call does one thing: `command`, `input`, `keys` and `reset` are alternatives
 Interactive programs work: editors, TUIs, REPLs, pagers, ssh. One holding the session gets a rendered {{ .DefaultCols }}x{{ .DefaultRows }} screen back instead of a stream, and the response says how to drive and quit it; a `command` sent meanwhile opens a second, separate session. Output over {{ .MaxOutputLength }} characters is truncated to a short head and a long tail. A password prompt is answered by the user through a masked dialog — wait for the command, never type the password yourself.
 
 There are no grep/glob/ls tools; searching and listing are yours. `view` reads a file you already have the path of, with line numbers and bounded output.
+{{- if .ModernTools }}
+Installed here, and a better answer than the POSIX default in each case: {{ .ModernTools }}.
+{{- end }}
 </calling_patterns>
 
 <background_execution>

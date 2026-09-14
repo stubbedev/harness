@@ -76,7 +76,7 @@ type shellDescriptionData struct {
 	MaxOutputLength int
 	Attribution     config.Attribution
 	ModelID         string
-	RgAvailable     bool
+	ModernTools     string
 	GhAvailable     bool
 	IsGitRepo       bool
 	DefaultRows     int
@@ -164,7 +164,7 @@ func shellDescription(shell, workingDir string, attribution *config.Attribution,
 		MaxOutputLength: MaxOutputLength,
 		Attribution:     *attribution,
 		ModelID:         modelID,
-		RgAvailable:     getRg() != "",
+		ModernTools:     availableModernTools(),
 		GhAvailable:     ghAvailable,
 		// The commit and pull-request guidance is a third of this
 		// description and is dead weight outside a repository, where

@@ -112,6 +112,11 @@ type SessionAgentCall struct {
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
 	NonInteractive   bool
+	// OverflowRecovered marks a call that has already been summarized and
+	// requeued once after a context-window overflow, so the recovery path
+	// does not loop on a session that still exceeds the window after
+	// summarizing.
+	OverflowRecovered bool
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -304,7 +309,7 @@ func NewSessionAgent(
 		autoSummarizeRatio:   opts.AutoSummarizeRatio,
 		autoSummarizeBuffer:  opts.AutoSummarizeBuffer,
 		maxRetries:           opts.MaxRetries,
-		tools:                csync.NewSliceFrom(opts.Tools),
+		tools:                csync.NewSliceFrom(withResultCap(opts.Tools)),
 		notify:               opts.Notify,
 		runComplete:          opts.RunComplete,
 		hooks:                opts.Hooks,
@@ -937,6 +942,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// user-visible retry notice can report progress. Fantasy invokes
 	// OnRetry synchronously from its retry loop, so no atomics needed.
 	var retryAttempt int
+	// projectedRequestTokens holds the estimate of the request the most
+	// recent PrepareStep assembled — history plus the tool results that
+	// landed since the last reported usage. The reported counters alone
+	// cannot see those, so the stop condition checks both.
+	var projectedRequestTokens int64
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -2482,7 +2492,7 @@ func (a *sessionAgent) SetModels(large Model, small Model) {
 }
 
 func (a *sessionAgent) SetTools(tools []fantasy.AgentTool) {
-	a.tools.SetSlice(tools)
+	a.tools.SetSlice(withResultCap(tools))
 }
 
 func (a *sessionAgent) SetSystemPrompt(systemPrompt string) {

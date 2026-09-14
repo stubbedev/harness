@@ -272,20 +272,8 @@ func NewToolMessageItem(
 		item = NewTodosToolMessageItem(sty, toolCall, result, canceled)
 	case tools.QuestionToolName:
 		item = NewQuestionToolMessageItem(sty, toolCall, result, canceled)
-	case tools.ReferencesToolName:
-		item = NewReferencesToolMessageItem(sty, toolCall, result, canceled)
-	case tools.DefinitionToolName:
-		item = NewDefinitionToolMessageItem(sty, toolCall, result, canceled)
-	case tools.RenameToolName:
-		item = NewRenameToolMessageItem(sty, toolCall, result, canceled)
-	case tools.ReplaceSymbolToolName:
-		item = NewReplaceSymbolToolMessageItem(sty, toolCall, result, canceled)
-	case tools.CallHierarchyToolName:
-		item = NewCallHierarchyToolMessageItem(sty, toolCall, result, canceled)
-	case tools.SymbolsToolName:
-		item = NewSymbolsToolMessageItem(sty, toolCall, result, canceled)
-	case tools.LSPRestartToolName:
-		item = NewLSPRestartToolMessageItem(sty, toolCall, result, canceled)
+	case tools.LSPToolName:
+		item = newLSPToolMessageItem(sty, toolCall, result, canceled)
 	default:
 		if strings.HasPrefix(toolCall.Name, "mcp_") {
 			item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
@@ -1615,5 +1603,39 @@ func PrettifyToolName(name string) string {
 		return "Write"
 	default:
 		return humanizedToolName(name)
+	}
+}
+
+// newLSPToolMessageItem picks the renderer for an lsp call from its
+// action. The actions were separate tools once and kept their own
+// renderers when they were folded into one; the transcript still shows
+// a rename differently from a diagnostics run.
+func newLSPToolMessageItem(
+	sty *styles.Styles,
+	toolCall message.ToolCall,
+	result *message.ToolResult,
+	canceled bool,
+) ToolMessageItem {
+	var params struct {
+		Action string `json:"action"`
+	}
+	_ = json.Unmarshal([]byte(toolCall.Input), &params)
+	switch params.Action {
+	case "references":
+		return NewReferencesToolMessageItem(sty, toolCall, result, canceled)
+	case "definition":
+		return NewDefinitionToolMessageItem(sty, toolCall, result, canceled)
+	case "rename":
+		return NewRenameToolMessageItem(sty, toolCall, result, canceled)
+	case "replace_symbol":
+		return NewReplaceSymbolToolMessageItem(sty, toolCall, result, canceled)
+	case "call_hierarchy":
+		return NewCallHierarchyToolMessageItem(sty, toolCall, result, canceled)
+	case "symbols":
+		return NewSymbolsToolMessageItem(sty, toolCall, result, canceled)
+	case "restart":
+		return NewLSPRestartToolMessageItem(sty, toolCall, result, canceled)
+	default:
+		return NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
 	}
 }
