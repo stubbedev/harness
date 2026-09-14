@@ -13,7 +13,7 @@ buildGo127Module {
 
   src = lib.cleanSource ./.;
 
-  vendorHash = "sha256-rQjEsHfIvVTNReNLBSqg1HqNI9CXiZ7hfEMFBxaQdv8=";
+  vendorHash = "sha256-6zNdFm57vbgn6Ovl6/qTwjHSKCZysXCoHB8mI4X9W5o=";
 
   # Only the root command. Without this every main package in the tree is
   # installed, which puts internal/ui/logo/example on PATH as `example`.
