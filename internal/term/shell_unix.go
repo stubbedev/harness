@@ -3,12 +3,18 @@
 package term
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// psTimeout bounds the ps fallback. It is asked once, at startup, on
+// the platforms with no /proc, and a hung ps must not hold the launch.
+const psTimeout = 2 * time.Second
 
 // parentProcessName returns the executable name of the process that
 // launched Harness, or "" when it cannot be read. Linux answers from
@@ -22,7 +28,9 @@ func parentProcessName() string {
 	if comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", ppid)); err == nil {
 		return strings.TrimPrefix(strings.TrimSpace(string(comm)), "-")
 	}
-	out, err := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(ppid)).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), psTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ps", "-o", "comm=", "-p", strconv.Itoa(ppid)).Output()
 	if err != nil {
 		return ""
 	}

@@ -34,7 +34,7 @@ func TestDocsKeybindTableMatchesTheKeymap(t *testing.T) {
 	var want []string
 	for _, row := range ActionTable() {
 		var quoted []string
-		for _, k := range strings.Split(row[1], ", ") {
+		for k := range strings.SplitSeq(row[1], ", ") {
 			quoted = append(quoted, "`"+k+"`")
 		}
 		want = append(want, fmt.Sprintf("| `%s` | %s |", row[0], strings.Join(quoted, ", ")))

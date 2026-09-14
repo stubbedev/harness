@@ -114,7 +114,7 @@ func bindingFields(t *testing.T, km *KeyMap) map[uintptr]string {
 				full = path + "." + name
 			}
 			switch {
-			case field.Type() == reflect.TypeOf(key.Binding{}):
+			case field.Type() == reflect.TypeFor[key.Binding]():
 				found[field.Addr().Pointer()] = full
 			case field.Kind() == reflect.Struct:
 				walk(field, full)
