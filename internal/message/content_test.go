@@ -148,7 +148,7 @@ func TestResetStreamedContent(t *testing.T) {
 	msg.AddImageURL("https://example.com/img.png", "high")
 	msg.AppendContent("partial answer")
 	msg.AppendReasoningContent("thinking...")
-	msg.AddToolCall(ToolCall{ID: "1", Name: "bash"})
+	msg.AddToolCall(ToolCall{ID: "1", Name: "shell"})
 	msg.AddToolResult(ToolResult{ToolCallID: "1", Content: "output"})
 	msg.AddFinish(FinishReasonError, "boom", "stream died")
 

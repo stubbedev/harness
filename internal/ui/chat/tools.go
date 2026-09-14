@@ -251,7 +251,7 @@ func NewToolMessageItem(
 	var item ToolMessageItem
 	switch toolCall.Name {
 	case tools.ShellToolName:
-		item = NewBashToolMessageItem(sty, toolCall, result, canceled, workingDir)
+		item = NewShellToolMessageItem(sty, toolCall, result, canceled, workingDir)
 	case tools.JobOutputToolName:
 		item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
 	case tools.JobKillToolName:
@@ -1215,7 +1215,7 @@ func (t *baseToolMessageItem) formatToolForCopy() string {
 func (t *baseToolMessageItem) formatParametersForCopy() string {
 	switch t.toolCall.Name {
 	case tools.ShellToolName:
-		var params tools.BashParams
+		var params tools.ShellParams
 		if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil {
 			cmd := strings.ReplaceAll(params.Command, "\n", " ")
 			cmd = strings.ReplaceAll(cmd, "\t", "    ")
@@ -1315,7 +1315,7 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 
 	switch t.toolCall.Name {
 	case tools.ShellToolName:
-		return t.formatBashResultForCopy()
+		return t.formatShellResultForCopy()
 	case tools.ViewToolName:
 		return t.formatViewResultForCopy()
 	case tools.EditToolName:
@@ -1335,19 +1335,19 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 	}
 }
 
-// formatBashResultForCopy formats bash tool results for clipboard.
-func (t *baseToolMessageItem) formatBashResultForCopy() string {
+// formatShellResultForCopy formats shell tool results for clipboard.
+func (t *baseToolMessageItem) formatShellResultForCopy() string {
 	if t.result == nil {
 		return ""
 	}
 
-	var meta tools.BashResponseMetadata
+	var meta tools.ShellResponseMetadata
 	if t.result.Metadata != "" {
 		json.Unmarshal([]byte(t.result.Metadata), &meta)
 	}
 
 	output := meta.Output
-	if output == "" && t.result.Content != tools.BashNoOutput {
+	if output == "" && t.result.Content != tools.ShellNoOutput {
 		output = t.result.Content
 	}
 

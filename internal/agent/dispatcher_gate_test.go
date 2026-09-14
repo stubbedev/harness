@@ -17,25 +17,25 @@ func TestShouldExposeDispatcher(t *testing.T) {
 	}{
 		{
 			name:       "top_level_with_agent_in_allowed",
-			allowed:    []string{"bash", AgentToolName},
+			allowed:    []string{"shell", AgentToolName},
 			isSubAgent: false,
 			want:       true,
 		},
 		{
 			name:       "top_level_without_agent_in_allowed",
-			allowed:    []string{"bash", "grep"},
+			allowed:    []string{"shell", "view"},
 			isSubAgent: false,
 			want:       false,
 		},
 		{
 			name:       "subagent_with_agent_in_allowed_still_excluded",
-			allowed:    []string{"bash", AgentToolName},
+			allowed:    []string{"shell", AgentToolName},
 			isSubAgent: true,
 			want:       false,
 		},
 		{
 			name:       "subagent_without_agent_excluded",
-			allowed:    []string{"bash"},
+			allowed:    []string{"shell"},
 			isSubAgent: true,
 			want:       false,
 		},

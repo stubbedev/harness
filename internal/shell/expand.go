@@ -35,7 +35,7 @@ var NoUnset atomic.Bool
 
 // ExpandValue expands shell-style substitutions in a single config value.
 //
-// Supported constructs match the bash tool:
+// Supported constructs match the shell tool:
 //
 //   - $VAR and ${VAR}.
 //   - ${VAR:-default} / ${VAR:+alt} / ${VAR:?msg}.

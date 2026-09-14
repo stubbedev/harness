@@ -27,7 +27,7 @@ type RunOptions struct {
 	Command string
 	// Cwd is the working directory for the execution. Required: callers
 	// must supply a non-empty value. Run does not silently fall back to
-	// the Harness process cwd — hooks and the bash tool have different
+	// the Harness process cwd — hooks and the shell tool have different
 	// notions of "default" and each owns that decision.
 	Cwd string
 	// Env is the full environment visible to the command. The caller is
@@ -259,7 +259,7 @@ func withNonInteractiveEnv(env []string) []string {
 // must not inherit these: a child process that calls herdr.Init()
 // would attach to the parent's pane and, on exit, release its agent
 // authority — making the status vanish. Stripping them here closes
-// that gap for every command the bash tool runs.
+// that gap for every command the shell tool runs.
 var herdrEnvVars = []string{
 	"HERDR_ENV",
 	"HERDR_SOCKET_PATH",

@@ -82,7 +82,7 @@ func NewJobOutputTool() fantasy.AgentTool {
 			}
 
 			if output == "" {
-				output = BashNoOutput
+				output = ShellNoOutput
 			}
 
 			result := fmt.Sprintf("Status: %s\n\n%s", status, output)

@@ -16,16 +16,16 @@ import (
 func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	requireTerminalSession(t)
 	workingDir := t.TempDir()
-	tool := newBashToolForTest(workingDir)
+	tool := newShellToolForTest(workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
-	resp := runBashTool(t, tool, ctx, BashParams{
+	resp := runShellTool(t, tool, ctx, ShellParams{
 		Description: "default threshold",
 		Command:     "echo done",
 	})
 
 	require.False(t, resp.IsError)
-	var meta BashResponseMetadata
+	var meta ShellResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.False(t, meta.Background)
 	require.Empty(t, meta.ShellID)
@@ -35,20 +35,20 @@ func TestBashTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	requireTerminalSession(t)
 	workingDir := t.TempDir()
-	tool := newBashToolForTest(workingDir)
+	tool := newShellToolForTest(workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	// auto_background_after is the wait budget: when it expires the
 	// command stays alive in the persistent terminal session instead
 	// of being moved to a background shell.
-	resp := runBashTool(t, tool, ctx, BashParams{
+	resp := runShellTool(t, tool, ctx, ShellParams{
 		Description:         "custom threshold",
 		Command:             "sleep 1.5 && echo done",
 		AutoBackgroundAfter: 1,
 	})
 
 	require.False(t, resp.IsError)
-	var meta BashResponseMetadata
+	var meta ShellResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.False(t, meta.Background)
 	require.Empty(t, meta.ShellID)
@@ -56,7 +56,7 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 
 	// A follow-up call in the same session observes later commands
 	// finishing normally.
-	resp = runBashTool(t, tool, ctx, BashParams{
+	resp = runShellTool(t, tool, ctx, ShellParams{
 		Description: "follow up",
 		Command:     "echo after",
 	})
@@ -64,9 +64,9 @@ func TestBashTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.Contains(t, resp.Content, "after")
 }
 
-func newBashToolForTest(workingDir string) fantasy.AgentTool {
+func newShellToolForTest(workingDir string) fantasy.AgentTool {
 	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewBashTool(workingDir, "test", attribution, "test-model", nil)
+	return NewShellTool(workingDir, "test", attribution, "test-model", nil)
 }
 
 // requireTerminalSession skips tests that execute commands through the
@@ -79,7 +79,7 @@ func requireTerminalSession(t *testing.T) {
 	}
 }
 
-func runBashTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params BashParams) fantasy.ToolResponse {
+func runShellTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params ShellParams) fantasy.ToolResponse {
 	t.Helper()
 
 	input, err := json.Marshal(params)
@@ -130,7 +130,7 @@ func TestTruncateOutputEmoji(t *testing.T) {
 func TestBashTool_SchemaRequiresNothing(t *testing.T) {
 	t.Parallel()
 
-	tool := newBashToolForTest(t.TempDir())
+	tool := newShellToolForTest(t.TempDir())
 	require.Empty(t, tool.Info().Required,
 		"every bash parameter is optional; a poll is an empty call")
 
@@ -142,26 +142,26 @@ func TestBashTool_SchemaRequiresNothing(t *testing.T) {
 func TestConflictingBashInputs(t *testing.T) {
 	t.Parallel()
 
-	require.Empty(t, conflictingBashInputs(BashParams{Command: "ls"}))
-	require.Empty(t, conflictingBashInputs(BashParams{Keys: "ctrl+c"}))
-	require.Empty(t, conflictingBashInputs(BashParams{}), "a poll asks for nothing and is fine")
+	require.Empty(t, conflictingShellInputs(ShellParams{Command: "ls"}))
+	require.Empty(t, conflictingShellInputs(ShellParams{Keys: "ctrl+c"}))
+	require.Empty(t, conflictingShellInputs(ShellParams{}), "a poll asks for nothing and is fine")
 
-	conflict := conflictingBashInputs(BashParams{Command: "ls", Keys: "ctrl+c"})
+	conflict := conflictingShellInputs(ShellParams{Command: "ls", Keys: "ctrl+c"})
 	require.Contains(t, conflict, "command")
 	require.Contains(t, conflict, "keys")
 
-	require.NotEmpty(t, conflictingBashInputs(BashParams{Command: "ls", Reset: true}))
-	require.NotEmpty(t, conflictingBashInputs(BashParams{Input: "y\n", Reset: true}))
+	require.NotEmpty(t, conflictingShellInputs(ShellParams{Command: "ls", Reset: true}))
+	require.NotEmpty(t, conflictingShellInputs(ShellParams{Input: "y\n", Reset: true}))
 }
 
 func TestBashTool_RejectsCombinedCall(t *testing.T) {
 	requireTerminalSession(t)
 	t.Parallel()
 
-	tool := newBashToolForTest(t.TempDir())
+	tool := newShellToolForTest(t.TempDir())
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
-	resp := runBashTool(t, tool, ctx, BashParams{
+	resp := runShellTool(t, tool, ctx, ShellParams{
 		Description: "two things at once",
 		Command:     "echo hi",
 		Keys:        "ctrl+c",
@@ -174,13 +174,13 @@ func TestBashTool_RejectsCombinedCall(t *testing.T) {
 func TestBashLabel(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, "mine", bashLabel(BashParams{Description: "mine", Command: "ls"}))
-	require.Equal(t, "poll terminal session", bashLabel(BashParams{}))
-	require.Equal(t, "keys: ctrl+c", bashLabel(BashParams{Keys: "ctrl+c"}))
-	require.Equal(t, "reset terminal session", bashLabel(BashParams{Reset: true}))
-	require.Equal(t, "input to running program", bashLabel(BashParams{Input: "y\n"}))
-	require.Equal(t, "git status", bashLabel(BashParams{Command: "git status\ngit log"}),
+	require.Equal(t, "mine", shellLabel(ShellParams{Description: "mine", Command: "ls"}))
+	require.Equal(t, "poll terminal session", shellLabel(ShellParams{}))
+	require.Equal(t, "keys: ctrl+c", shellLabel(ShellParams{Keys: "ctrl+c"}))
+	require.Equal(t, "reset terminal session", shellLabel(ShellParams{Reset: true}))
+	require.Equal(t, "input to running program", shellLabel(ShellParams{Input: "y\n"}))
+	require.Equal(t, "git status", shellLabel(ShellParams{Command: "git status\ngit log"}),
 		"a command with no description labels itself with its first line")
-	require.LessOrEqual(t, utf8.RuneCountInString(bashLabel(BashParams{Command: strings.Repeat("x", 200)})), 60,
+	require.LessOrEqual(t, utf8.RuneCountInString(shellLabel(ShellParams{Command: strings.Repeat("x", 200)})), 60,
 		"a runaway command line is shortened to something that fits a label")
 }

@@ -130,14 +130,14 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 		return nil, err
 	}
 
-	// Get the model name for the bash tool
+	// Get the model name for the shell tool
 	modelName := large.Model() // fallback to ID if Name not available
 	if model := cfg.Config().GetModel(large.Provider(), large.Model()); model != nil {
 		modelName = model.Name
 	}
 
 	allTools := []fantasy.AgentTool{
-		tools.NewBashTool(env.workingDir, "coder", cfg.Config().Options.Attribution, modelName, nil),
+		tools.NewShellTool(env.workingDir, "coder", cfg.Config().Options.Attribution, modelName, nil),
 		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
 		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
 		tools.NewFetchTool(client),

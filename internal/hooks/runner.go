@@ -174,7 +174,7 @@ func (r *Runner) matchingHooks(subject string) []config.HookConfig {
 //
 // Execution goes through Harness's embedded POSIX shell (shell.Run) so the
 // same interpreter, builtins, and coreutils are visible to hooks as to
-// the bash tool. BlockFuncs are intentionally omitted: hooks are
+// the shell tool. BlockFuncs are intentionally omitted: hooks are
 // user-authored config that carry the same trust as a shell alias.
 //
 // A hook that fails to yield after its deadline has passed is abandoned

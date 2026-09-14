@@ -15,46 +15,46 @@ import (
 )
 
 // -----------------------------------------------------------------------------
-// Bash Tool
+// Shell Tool
 // -----------------------------------------------------------------------------
 
-// BashToolMessageItem is a message item that represents a bash tool call.
-type BashToolMessageItem struct {
+// ShellToolMessageItem is a message item that represents a shell tool call.
+type ShellToolMessageItem struct {
 	*baseToolMessageItem
 }
 
-var _ ToolMessageItem = (*BashToolMessageItem)(nil)
+var _ ToolMessageItem = (*ShellToolMessageItem)(nil)
 
-// NewBashToolMessageItem creates a new [BashToolMessageItem].
-func NewBashToolMessageItem(
+// NewShellToolMessageItem creates a new [ShellToolMessageItem].
+func NewShellToolMessageItem(
 	sty *styles.Styles,
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
 	workingDir string,
 ) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &BashToolRenderContext{workingDir: workingDir}, canceled)
+	return newBaseToolMessageItem(sty, toolCall, result, &ShellToolRenderContext{workingDir: workingDir}, canceled)
 }
 
-// BashToolRenderContext renders bash tool messages.
-type BashToolRenderContext struct {
+// ShellToolRenderContext renders shell tool messages.
+type ShellToolRenderContext struct {
 	workingDir string
 }
 
 // RenderTool implements the [ToolRenderer] interface.
-func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingTool(sty, "Shell", opts.Anim, opts.Compact)
 	}
 
-	var params tools.BashParams
+	var params tools.ShellParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 		params.Command = "failed to parse command"
 	}
 
 	// Check if this is a background job.
-	var meta tools.BashResponseMetadata
+	var meta tools.ShellResponseMetadata
 	if opts.HasResult() {
 		_ = json.Unmarshal([]byte(opts.Result.Metadata), &meta)
 	}
@@ -78,7 +78,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		cmd = strings.ReplaceAll(cmd, "\n", " ")
 	}
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
-	cmd = common.StripBashDisplayPrefix(cmd, b.workingDir)
+	cmd = common.StripShellDisplayPrefix(cmd, b.workingDir)
 	if label == "" {
 		if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
 			cmd = highlighted
@@ -112,7 +112,7 @@ func (b *BashToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	output := meta.Output
-	if output == "" && opts.Result.Content != tools.BashNoOutput {
+	if output == "" && opts.Result.Content != tools.ShellNoOutput {
 		output = opts.Result.Content
 	}
 	if output == "" {

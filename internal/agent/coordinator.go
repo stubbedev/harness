@@ -1040,7 +1040,7 @@ func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
 
 // buildTools assembles the agent's tool set. modelID is the catalog id of the
 // model the agent actually runs on (the resolved primary), used for
-// model-specific tool guidance such as the bash tool description.
+// model-specific tool guidance such as the shell tool description.
 func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, modelID string) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	if shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
@@ -1071,9 +1071,19 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	logFile := filepath.Join(c.cfg.Config().Options.DataDirectory, "logs", "harness.log")
 
+	// The shell tool is only offered when a shell was actually
+	// identified to run. Advertising one that cannot open would have the
+	// agent reach for a terminal it does not have, and its description
+	// could not name the shell to write for.
+	if tools.ShellAvailable() {
+		allTools = append(allTools,
+			tools.NewShellTool(c.cfg.WorkingDir(), agent.ID, c.cfg.Config().Options.Attribution, modelID, c.questions))
+	} else {
+		slog.Warn("No shell could be identified; the shell tool is not available this session")
+	}
+
 	allTools = append(
 		allTools,
-		tools.NewBashTool(c.cfg.WorkingDir(), agent.ID, c.cfg.Config().Options.Attribution, modelID, c.questions),
 		tools.NewHarnessInfoTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker),
 		tools.NewHarnessLogsTool(logFile),
 		tools.NewJobOutputTool(),

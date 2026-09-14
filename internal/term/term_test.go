@@ -173,11 +173,22 @@ func TestSession_SendAfterExitFails(t *testing.T) {
 	require.Error(t, s.Send([]byte("echo late\n")))
 }
 
-func TestShellFallback(t *testing.T) {
-	t.Setenv("SHELL", "")
-	require.Equal(t, "/bin/sh", Shell())
+// Nothing is guessed: with no shell to be found, Shell says so instead
+// of naming one, and the caller drops the tool rather than opening a
+// session against a path that may not exist.
+func TestShellIdentification(t *testing.T) {
 	t.Setenv("SHELL", "/usr/bin/zsh")
-	require.Equal(t, "/usr/bin/zsh", Shell())
+	sh, ok := Shell()
+	require.True(t, ok)
+	require.NotEmpty(t, sh)
+
+	// $SHELL naming something that is not a shell is no answer either.
+	t.Setenv("SHELL", "/usr/bin/python")
+	sh, ok = Shell()
+	if parentShell() == "" {
+		require.False(t, ok, "an unrecognised $SHELL is not an identification")
+		require.Empty(t, sh)
+	}
 }
 
 func TestSession_LongOutputTailPreserved(t *testing.T) {

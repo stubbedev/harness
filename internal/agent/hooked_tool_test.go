@@ -46,13 +46,13 @@ func newTestRegistry(t *testing.T, byEvent map[string][]config.HookConfig) *hook
 func TestHookedTool_DenySkipsInnerTool(t *testing.T) {
 	t.Parallel()
 
-	inner := &fakeTool{name: "bash"}
+	inner := &fakeTool{name: "shell"}
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPreToolUse: {{Command: `echo "blocked" >&2; exit 2`}},
 	})
 	tool := newHookedTool(inner, registry)
 
-	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-3", Name: "bash"})
+	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-3", Name: "shell"})
 	require.NoError(t, err)
 	require.False(t, inner.called, "denied call must not reach the inner tool")
 	require.True(t, resp.IsError)
@@ -62,13 +62,13 @@ func TestHookedTool_DenySkipsInnerTool(t *testing.T) {
 func TestHookedTool_PreToolUseRewritesInput(t *testing.T) {
 	t.Parallel()
 
-	inner := &fakeTool{name: "bash"}
+	inner := &fakeTool{name: "shell"}
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPreToolUse: {{Command: `echo '{"updated_input":{"command":"deno test"}}'`}},
 	})
 	tool := newHookedTool(inner, registry)
 
-	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "bash", Input: `{"command":"npm test","timeout":60000}`})
+	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell", Input: `{"command":"npm test","timeout":60000}`})
 	require.NoError(t, err)
 	require.True(t, inner.called)
 	require.JSONEq(t, `{"command":"deno test","timeout":60000}`, inner.input)
@@ -77,13 +77,13 @@ func TestHookedTool_PreToolUseRewritesInput(t *testing.T) {
 func TestHookedTool_PostToolUseContext(t *testing.T) {
 	t.Parallel()
 
-	inner := &fakeTool{name: "bash", resp: fantasy.NewTextResponse("ran fine")}
+	inner := &fakeTool{name: "shell", resp: fantasy.NewTextResponse("ran fine")}
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPostToolUse: {{Command: `echo '{"context":"remember gofumpt"}'`}},
 	})
 	tool := newHookedTool(inner, registry)
 
-	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "bash"})
+	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell"})
 	require.NoError(t, err)
 	require.True(t, inner.called)
 	require.Contains(t, resp.Content, "ran fine")
@@ -112,13 +112,13 @@ func TestHookedTool_PostToolUseDenyAppendsFeedback(t *testing.T) {
 func TestHookedTool_PostToolUseHaltStopsTurn(t *testing.T) {
 	t.Parallel()
 
-	inner := &fakeTool{name: "bash", resp: fantasy.NewTextResponse("done")}
+	inner := &fakeTool{name: "shell", resp: fantasy.NewTextResponse("done")}
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPostToolUse: {{Command: `echo '{"halt":true,"reason":"enough for today"}'`}},
 	})
 	tool := newHookedTool(inner, registry)
 
-	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "bash"})
+	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell"})
 	require.NoError(t, err)
 	require.True(t, resp.StopTurn)
 	require.Contains(t, resp.Content, "enough for today")
@@ -200,7 +200,7 @@ func TestHookedTool_ToolInputArrivesAsObject(t *testing.T) {
 
 	preLog := filepath.Join(t.TempDir(), "pre.log")
 	postLog := filepath.Join(t.TempDir(), "post.log")
-	inner := &fakeTool{name: "bash", resp: fantasy.NewTextResponse("ran fine")}
+	inner := &fakeTool{name: "shell", resp: fantasy.NewTextResponse("ran fine")}
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPreToolUse: {{
 			Command: captureHookCmd(preLog, `printf '%s' '{"updated_input":{"command":"deno test"}}'`),
@@ -211,7 +211,7 @@ func TestHookedTool_ToolInputArrivesAsObject(t *testing.T) {
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{
 		ID:    "c1",
-		Name:  "bash",
+		Name:  "shell",
 		Input: `{"command":"npm test","timeout":60000}`,
 	})
 	require.NoError(t, err)
@@ -221,7 +221,7 @@ func TestHookedTool_ToolInputArrivesAsObject(t *testing.T) {
 	pre := readHookPayloads(t, preLog)
 	require.Len(t, pre, 1)
 	require.Equal(t, hooks.EventPreToolUse, pre[0]["event"])
-	require.Equal(t, "bash", pre[0]["tool_name"])
+	require.Equal(t, "shell", pre[0]["tool_name"])
 	require.JSONEq(t, `{"command":"npm test","timeout":60000}`,
 		string(mustJSON(t, pre[0]["tool_input"])),
 		"PreToolUse must see the input as the model sent it, as an object")
@@ -251,7 +251,7 @@ func TestHookedTool_MatcherFiltersByToolName(t *testing.T) {
 	inner := &fakeTool{name: "edit", resp: fantasy.NewTextResponse("edited")}
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPreToolUse: {{
-			Matcher: "^bash$",
+			Matcher: "^shell$",
 			Command: captureHookCmd(logPath, ""),
 		}},
 	})
@@ -279,22 +279,22 @@ func mustJSON(t *testing.T, v any) []byte {
 func TestHookedTool_PreToolUseHaltEndsTurn(t *testing.T) {
 	t.Parallel()
 
-	halting := &fakeTool{name: "bash"}
+	halting := &fakeTool{name: "shell"}
 	haltRegistry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPreToolUse: {{Command: `echo '{"halt":true,"reason":"enough"}'`}},
 	})
-	haltResp, err := newHookedTool(halting, haltRegistry).Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "bash"})
+	haltResp, err := newHookedTool(halting, haltRegistry).Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell"})
 	require.NoError(t, err)
 	require.False(t, halting.called)
 	require.True(t, haltResp.StopTurn, "a PreToolUse halt must end the turn")
 	require.True(t, haltResp.IsError)
 	require.Contains(t, haltResp.Content, "enough")
 
-	denying := &fakeTool{name: "bash"}
+	denying := &fakeTool{name: "shell"}
 	denyRegistry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPreToolUse: {{Command: `echo "blocked" >&2; exit 2`}},
 	})
-	denyResp, err := newHookedTool(denying, denyRegistry).Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "bash"})
+	denyResp, err := newHookedTool(denying, denyRegistry).Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell"})
 	require.NoError(t, err)
 	require.False(t, denying.called)
 	require.False(t, denyResp.StopTurn, "a plain PreToolUse deny blocks only this call")

@@ -20,7 +20,7 @@ import (
 	"github.com/stubbedev/harness/internal/term"
 )
 
-// The bash tool's synchronous execution runs inside one persistent
+// The shell tool's synchronous execution runs inside one persistent
 // interactive terminal per Harness process: the user's real shell in a
 // pseudo-terminal (internal/term), kept alive for the whole session.
 // Working directory, environment, virtualenvs and the sudo timestamp
@@ -571,7 +571,8 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	r.session = s
 	r.startedAt = time.Now()
 	r.lastScreen = ""
-	dialect := dialectFor(term.Shell())
+	shellPath, _ := term.Shell()
+	dialect := dialectFor(shellPath)
 	r.sentinel = newSentinel(dialect)
 	// Let the shell settle past its startup output so the first
 	// command's output starts clean.

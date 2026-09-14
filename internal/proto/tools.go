@@ -23,16 +23,16 @@ type ToolResponse struct {
 	IsError  bool             `json:"is_error"`
 }
 
-const BashToolName = "bash"
+const ShellToolName = "bash"
 
-// BashParams represents the parameters for the bash tool.
-type BashParams struct {
+// ShellParams represents the parameters for the shell tool.
+type ShellParams struct {
 	Command string `json:"command"`
 	Timeout int    `json:"timeout"`
 }
 
-// BashResponseMetadata represents the metadata for a bash tool response.
-type BashResponseMetadata struct {
+// ShellResponseMetadata represents the metadata for a shell tool response.
+type ShellResponseMetadata struct {
 	StartTime        int64  `json:"start_time"`
 	EndTime          int64  `json:"end_time"`
 	Output           string `json:"output"`

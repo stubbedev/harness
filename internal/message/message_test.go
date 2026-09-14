@@ -712,7 +712,7 @@ func TestPendingStateDoesNotRetainPayload(t *testing.T) {
 	require.NoError(t, err)
 
 	msg.AppendReasoningContent(strings.Repeat("x", 64*1024))
-	msg.AddToolCall(ToolCall{ID: "tc-1", Name: "bash", Finished: true})
+	msg.AddToolCall(ToolCall{ID: "tc-1", Name: "shell", Finished: true})
 	msg.AddFinish(FinishReasonEndTurn, "", "")
 	require.NoError(t, svc.Update(t.Context(), msg))
 	require.NoError(t, svc.Flush(t.Context(), msg.ID))
@@ -788,7 +788,7 @@ func TestShouldFlushNow_AgainstCompactBaseline(t *testing.T) {
 		t.Parallel()
 		svc, msg := setup(t)
 
-		msg.AddToolCall(ToolCall{ID: "tc2", Name: "bash", Finished: false})
+		msg.AddToolCall(ToolCall{ID: "tc2", Name: "shell", Finished: false})
 		require.NoError(t, svc.Update(t.Context(), msg))
 
 		got, err := svc.Get(t.Context(), msg.ID)

@@ -27,7 +27,7 @@ import (
 func TestMain(m *testing.M) {
 	slog.SetLogLoggerLevel(slog.LevelError)
 	// The persistent terminal session runs a plain sh: deterministic
-	// startup (no rc files) keeps the bash tool results stable.
+	// startup (no rc files) keeps the shell tool results stable.
 	os.Setenv("SHELL", "/bin/sh")
 	os.Exit(m.Run())
 }
@@ -272,27 +272,27 @@ func TestCoderAgent(t *testing.T) {
 		require.Contains(t, string(content), "// Greeting")
 	})
 
-	t.Run("bash", func(t *testing.T) {
+	t.Run("shell", func(t *testing.T) {
 		t.Parallel()
 
 		agent, env, _ := scriptedAgent(t, nil, scriptedTurn{
 			calls: []scriptedCall{{
 				name: tools.ShellToolName,
 				input: map[string]any{
-					"command":     "printf 'hello bash' > test.txt",
+					"command":     "printf 'hello shell' > test.txt",
 					"description": "create test.txt",
 				},
 			}},
 		})
 		res := toolResults(t, runScript(t, agent, env, "create test.txt"))
 
-		bash, ok := res[tools.ShellToolName]
-		require.True(t, ok, "expected a bash result")
-		require.False(t, bash.IsError, "bash failed: %s", bash.Content)
+		sh, ok := res[tools.ShellToolName]
+		require.True(t, ok, "expected a shell result")
+		require.False(t, sh.IsError, "shell failed: %s", sh.Content)
 
 		content, err := os.ReadFile(filepath.Join(env.workingDir, "test.txt"))
 		require.NoError(t, err)
-		require.Contains(t, string(content), "hello bash")
+		require.Contains(t, string(content), "hello shell")
 	})
 
 	// Downloading is a fetch parameter, and the file lands in the
@@ -848,13 +848,13 @@ func TestPreparePrompt_NonAdjacentToolResults(t *testing.T) {
 		Parts: []message.ContentPart{
 			message.ToolCall{
 				ID:       "call_A",
-				Name:     "bash",
+				Name:     "shell",
 				Input:    `{"command":"date"}`,
 				Finished: true,
 			},
 			message.ToolCall{
 				ID:       "call_B",
-				Name:     "bash",
+				Name:     "shell",
 				Input:    `{"command":"uptime"}`,
 				Finished: true,
 			},
@@ -877,7 +877,7 @@ func TestPreparePrompt_NonAdjacentToolResults(t *testing.T) {
 		Parts: []message.ContentPart{
 			message.ToolResult{
 				ToolCallID: "call_A",
-				Name:       "bash",
+				Name:       "shell",
 				Content:    "Fri May 2 21:00:00 UTC 2026",
 			},
 		},
@@ -889,7 +889,7 @@ func TestPreparePrompt_NonAdjacentToolResults(t *testing.T) {
 		Parts: []message.ContentPart{
 			message.ToolResult{
 				ToolCallID: "call_B",
-				Name:       "bash",
+				Name:       "shell",
 				Content:    "21:00  up 3 days",
 			},
 		},
@@ -935,7 +935,7 @@ func TestPreparePrompt_ResultBeforeAssistant(t *testing.T) {
 	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
 		Role: message.Tool,
 		Parts: []message.ContentPart{
-			message.ToolResult{ToolCallID: "call_X", Name: "bash", Content: "result"},
+			message.ToolResult{ToolCallID: "call_X", Name: "shell", Content: "result"},
 		},
 	})
 	require.NoError(t, err)
@@ -943,7 +943,7 @@ func TestPreparePrompt_ResultBeforeAssistant(t *testing.T) {
 	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
 		Role: message.Assistant,
 		Parts: []message.ContentPart{
-			message.ToolCall{ID: "call_X", Name: "bash", Input: `{}`, Finished: true},
+			message.ToolCall{ID: "call_X", Name: "shell", Input: `{}`, Finished: true},
 		},
 	})
 	require.NoError(t, err)
@@ -984,7 +984,7 @@ func TestPreparePrompt_BundledResultsAcrossAssistants(t *testing.T) {
 	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
 		Role: message.Assistant,
 		Parts: []message.ContentPart{
-			message.ToolCall{ID: "call_1", Name: "bash", Input: `{}`, Finished: true},
+			message.ToolCall{ID: "call_1", Name: "shell", Input: `{}`, Finished: true},
 		},
 	})
 	require.NoError(t, err)
@@ -1010,7 +1010,7 @@ func TestPreparePrompt_BundledResultsAcrossAssistants(t *testing.T) {
 		Role: message.Tool,
 		Parts: []message.ContentPart{
 			message.ToolResult{ToolCallID: "call_2", Name: "view", Content: "file contents"},
-			message.ToolResult{ToolCallID: "call_1", Name: "bash", Content: "output"},
+			message.ToolResult{ToolCallID: "call_1", Name: "shell", Content: "output"},
 		},
 	})
 	require.NoError(t, err)
@@ -1052,7 +1052,7 @@ func TestPreparePrompt_DropsOrphanedToolResults(t *testing.T) {
 	_, err = env.messages.Create(ctx, sess.ID, message.CreateMessageParams{
 		Role: message.Tool,
 		Parts: []message.ContentPart{
-			message.ToolResult{ToolCallID: "call_gone", Name: "bash", Content: "output"},
+			message.ToolResult{ToolCallID: "call_gone", Name: "shell", Content: "output"},
 		},
 	})
 	require.NoError(t, err)

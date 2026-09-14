@@ -572,7 +572,7 @@
           "items": {
             "type": "string",
             "examples": [
-              "bash",
+              "shell",
               "web_search"
             ]
           },

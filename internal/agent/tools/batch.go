@@ -319,7 +319,7 @@ func runStep(ctx context.Context, step BatchStep, tool fantasy.AgentTool, env *b
 	results := make([]any, len(items))
 	failures := make([]bool, len(items))
 	g, gctx := errgroup.WithContext(ctx)
-	// Tools that own a shared, stateful resource run one at a time. bash
+	// Tools that own a shared, stateful resource run one at a time. The shell
 	// is the one that matters: every call goes to the same persistent
 	// terminal session, so a fan-out either queues behind itself or
 	// spills into sibling shells that have none of the first one's cd

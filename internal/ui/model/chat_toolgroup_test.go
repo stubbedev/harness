@@ -12,7 +12,7 @@ import (
 	"github.com/stubbedev/harness/internal/ui/chat"
 )
 
-// newToolItemForGroup builds a finished bash tool item for grouping tests.
+// newToolItemForGroup builds a finished shell tool item for grouping tests.
 func newToolItemForGroup(u *UI, id string) chat.MessageItem {
 	return chat.NewToolMessageItem(
 		u.com.Styles,

@@ -54,13 +54,3 @@ func parentProcessName() string {
 		}
 	}
 }
-
-// defaultShell is the last resort when the parent process does not name
-// a shell this package can drive: ComSpec when it is set (cmd.exe on a
-// stock install), else PowerShell.
-func defaultShell() string {
-	if c := os.Getenv("ComSpec"); c != "" {
-		return c
-	}
-	return "powershell.exe"
-}

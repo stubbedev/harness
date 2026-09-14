@@ -16,7 +16,7 @@ import (
 // the agent's commands out of the user's shell config in two ways:
 // aliases defined by the rc files never expand, and nothing typed at
 // the session's prompt ever lands in a history file. These tests drive
-// real shells in a real pty, the way the bash tool does, with rc files
+// real shells in a real pty, the way the shell tool does, with rc files
 // that define an alias and turn on every history mechanism the shell
 // has - the exact setup a user machine has.
 

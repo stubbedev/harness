@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Named keys for the bash tool's terminal session. Raw text covers most
+// Named keys for the shell tool's terminal session. Raw text covers most
 // interaction, but the keys that actually drive a program - escape,
 // arrows, ctrl-c, function keys - are escape sequences that are easy to
 // get subtly wrong when written by hand, so they get names instead.

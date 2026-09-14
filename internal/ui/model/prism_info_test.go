@@ -40,7 +40,7 @@ func newPrismTestUI() *UI {
 
 func prismToolTurn(finished bool, prismName string) message.Message {
 	parts := []message.ContentPart{
-		message.ToolCall{ID: "tc1", Name: "bash", Input: "{}", Finished: true},
+		message.ToolCall{ID: "tc1", Name: "shell", Input: "{}", Finished: true},
 	}
 	if finished {
 		parts = append(parts, message.Finish{Reason: message.FinishReasonToolUse, Time: 1735689600})

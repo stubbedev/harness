@@ -147,7 +147,7 @@ func TestFallbackStepUsageSkipsClientToolResultsAsOutput(t *testing.T) {
 		Content: fantasy.ResponseContent{
 			fantasy.ToolResultContent{
 				ToolCallID: "tool-call-1",
-				ToolName:   "bash",
+				ToolName:   "shell",
 				Result: fantasy.ToolResultOutputContentText{
 					Text: "large client-executed payload that should not count as model output tokens",
 				},

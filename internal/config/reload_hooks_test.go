@@ -13,7 +13,7 @@ import (
 
 // TestReloadFromDisk_CompilesHookMatchers is a regression test for a bug
 // where ReloadFromDisk dropped the compiled matcher regex on every hook,
-// causing a matcher like "^bash$" to match every tool call after any
+// causing a matcher like "^shell$" to match every tool call after any
 // SetConfigField-triggered reload.
 //
 // The assertion is phrased in terms of observable Runner behavior (not
@@ -33,7 +33,7 @@ func TestReloadFromDisk_CompilesHookMatchers(t *testing.T) {
 	cfgJSON := `{
         "hooks": {
             "PreToolUse": [
-                {"matcher": "^bash$", "command": "exit 0"}
+                {"matcher": "^shell$", "command": "exit 0"}
             ]
         }
     }`
@@ -53,8 +53,8 @@ func TestReloadFromDisk_CompilesHookMatchers(t *testing.T) {
 }
 
 // assertHookFilters builds a Runner from the store's current hooks and
-// verifies the "^bash$" matcher rejects a non-bash tool while accepting
-// bash.
+// verifies the "^shell$" matcher rejects a non-shell tool while
+// accepting the shell.
 func assertHookFilters(t *testing.T, store *config.ConfigStore) {
 	t.Helper()
 	preHooks := store.Config().Hooks[hooks.EventPreToolUse]
@@ -64,11 +64,11 @@ func assertHookFilters(t *testing.T, store *config.ConfigStore) {
 
 	nonMatch, err := runner.Run(context.Background(), hooks.EventPreToolUse, "sess", "view", `{}`)
 	require.NoError(t, err)
-	require.Equal(t, 0, nonMatch.HookCount, "view must not match ^bash$ matcher")
+	require.Equal(t, 0, nonMatch.HookCount, "view must not match ^shell$ matcher")
 
-	match, err := runner.Run(context.Background(), hooks.EventPreToolUse, "sess", "bash", `{}`)
+	match, err := runner.Run(context.Background(), hooks.EventPreToolUse, "sess", "shell", `{}`)
 	require.NoError(t, err)
-	require.Equal(t, 1, match.HookCount, "bash must match ^bash$ matcher")
+	require.Equal(t, 1, match.HookCount, "the shell must match ^shell$ matcher")
 }
 
 // TestSetConfigField_AutoReload_PreservesHookMatcherFiltering verifies the
@@ -86,7 +86,7 @@ func TestSetConfigField_AutoReload_PreservesHookMatcherFiltering(t *testing.T) {
 	cfgJSON := `{
         "hooks": {
             "PreToolUse": [
-                {"matcher": "^bash$", "command": "exit 0"}
+                {"matcher": "^shell$", "command": "exit 0"}
             ]
         }
     }`

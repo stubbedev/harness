@@ -24,7 +24,7 @@ import (
 	"github.com/stubbedev/harness/internal/term"
 )
 
-type BashParams struct {
+type ShellParams struct {
 	// Nothing here is required: a poll is an empty call, and keys or
 	// input carry no command. A schema that demanded either would
 	// reject the very calls this tool's own description asks for.
@@ -38,7 +38,7 @@ type BashParams struct {
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to hold a command that has gone completely idle before returning it as still running (default 60, ceiling 15 minutes)"`
 }
 
-type BashResponseMetadata struct {
+type ShellResponseMetadata struct {
 	StartTime        int64  `json:"start_time"`
 	EndTime          int64  `json:"end_time"`
 	Output           string `json:"output"`
@@ -55,7 +55,7 @@ const (
 
 	DefaultAutoBackgroundAfter = 60 // Commands taking longer automatically become background jobs
 	MaxOutputLength            = 30000
-	BashNoOutput               = "no output"
+	ShellNoOutput              = "no output"
 
 	// backgroundStartGrace is how long a command started in the background is
 	// given to fail fast before the tool reports it as running. It is a
@@ -64,15 +64,15 @@ const (
 	backgroundStartGrace = time.Second
 )
 
-//go:embed bash.md.tpl
-var bashDescriptionTmpl []byte
+//go:embed shell.md.tpl
+var shellDescriptionTmpl []byte
 
-var bashDescriptionTpl = template.Must(
-	template.New("bashDescription").
-		Parse(string(bashDescriptionTmpl)),
+var shellDescriptionTpl = template.Must(
+	template.New("shellDescription").
+		Parse(string(shellDescriptionTmpl)),
 )
 
-type bashDescriptionData struct {
+type shellDescriptionData struct {
 	MaxOutputLength int
 	Attribution     config.Attribution
 	ModelID         string
@@ -157,10 +157,10 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func bashDescription(workingDir string, attribution *config.Attribution, modelID string) string {
+func shellDescription(shell, workingDir string, attribution *config.Attribution, modelID string) string {
 	descRows, descCols := term.DefaultSize()
 	var out bytes.Buffer
-	if err := bashDescriptionTpl.Execute(&out, bashDescriptionData{
+	if err := shellDescriptionTpl.Execute(&out, shellDescriptionData{
 		MaxOutputLength: MaxOutputLength,
 		Attribution:     *attribution,
 		ModelID:         modelID,
@@ -172,25 +172,24 @@ func bashDescription(workingDir string, attribution *config.Attribution, modelID
 		IsGitRepo:   isGitRepo(workingDir),
 		DefaultRows: descRows,
 		DefaultCols: descCols,
-		// The session runs the user's own shell, and they do not agree
-		// on what an unquoted argument means: a glob that matches
-		// nothing is an error in zsh and a literal word in bash, and
-		// what a bare = or ! does differs too. Naming the shell lets the
-		// model quote for the one it is actually talking to.
-		Shell: filepath.Base(term.Shell()),
+		// Naming the shell is most of what the model needs from this
+		// description: it already knows how to write for bash, zsh or
+		// PowerShell, but not which one it has. The tool is only built
+		// when one was identified, so there is always an answer here.
+		Shell: filepath.Base(shell),
 	}); err != nil {
 		// this should never happen.
-		panic("failed to execute bash description template: " + err.Error())
+		panic("failed to execute shell description template: " + err.Error())
 	}
 	return out.String()
 }
 
-// conflictingBashInputs reports, as a message for the model, when one
+// conflictingShellInputs reports, as a message for the model, when one
 // call asks for two different things at once. Each of command, input,
 // keys, resize and reset goes to a different place in the session, so
 // there is no order in which honouring both is what the caller meant.
 // It returns the empty string when the call is unambiguous.
-func conflictingBashInputs(p BashParams) string {
+func conflictingShellInputs(p ShellParams) string {
 	var asked []string
 	if p.Command != "" {
 		asked = append(asked, "command")
@@ -215,12 +214,12 @@ func conflictingBashInputs(p BashParams) string {
 	)
 }
 
-// bashLabel is what the call is called in the UI and in the message
+// shellLabel is what the call is called in the UI and in the message
 // metadata. The model's own description is used whenever it sent one;
 // the rest is for the calls that carry no command to describe - a
 // keystroke, a poll - where demanding a description would be a schema
 // requirement standing between the agent and a working call.
-func bashLabel(p BashParams) string {
+func shellLabel(p ShellParams) string {
 	switch {
 	case p.Description != "":
 		return p.Description
@@ -282,7 +281,17 @@ func blockFuncs() []shell.BlockFunc {
 	}
 }
 
-func NewBashTool(workingDir, owner string, attribution *config.Attribution, modelID string, questions question.Service) fantasy.AgentTool {
+// NewShellTool builds the shell tool, or returns nil when no shell
+// could be identified to run. A terminal nobody can name is not a
+// terminal the model should be told it has: the description would have
+// to lie about which shell it is writing for, and the session would open
+// against a guess or not at all. ShellAvailable answers the same
+// question without building anything.
+func NewShellTool(workingDir, owner string, attribution *config.Attribution, modelID string, questions question.Service) fantasy.AgentTool {
+	shellPath, ok := term.Shell()
+	if !ok {
+		return nil
+	}
 	// The synchronous execution path runs in persistent terminal
 	// sessions (see pty.go): a real PTY whose shell state and sudo
 	// credential survive across calls, with a second session opened on
@@ -294,8 +303,8 @@ func NewBashTool(workingDir, owner string, attribution *config.Attribution, mode
 	_ = ptyRunnerFor(owner, workingDir, questions)
 	return fantasy.NewAgentTool(
 		ShellToolName,
-		string(bashDescription(workingDir, attribution, modelID)),
-		func(ctx context.Context, params BashParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		string(shellDescription(shellPath, workingDir, attribution, modelID)),
+		func(ctx context.Context, params ShellParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
 
@@ -331,26 +340,26 @@ func NewBashTool(workingDir, owner string, attribution *config.Attribution, mode
 
 					stdout = formatOutput(stdout, stderr, execErr)
 
-					metadata := BashResponseMetadata{
+					metadata := ShellResponseMetadata{
 						StartTime:        startTime.UnixMilli(),
 						EndTime:          time.Now().UnixMilli(),
 						Output:           stdout,
-						Description:      bashLabel(params),
+						Description:      shellLabel(params),
 						Background:       params.RunInBackground,
 						WorkingDirectory: bgShell.WorkingDir,
 					}
 					if stdout == "" {
-						stdout = BashNoOutput
+						stdout = ShellNoOutput
 					}
 					stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
 					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
 				}
 
 				// Still running after fast-failure check - return as background job
-				metadata := BashResponseMetadata{
+				metadata := ShellResponseMetadata{
 					StartTime:        startTime.UnixMilli(),
 					EndTime:          time.Now().UnixMilli(),
-					Description:      bashLabel(params),
+					Description:      shellLabel(params),
 					WorkingDirectory: bgShell.WorkingDir,
 					Background:       true,
 					ShellID:          bgShell.ID,
@@ -370,7 +379,7 @@ func NewBashTool(workingDir, owner string, attribution *config.Attribution, mode
 			// and silently picking one of them is how a call that looked
 			// like it worked turns out to have typed a command into an
 			// editor.
-			if conflict := conflictingBashInputs(params); conflict != "" {
+			if conflict := conflictingShellInputs(params); conflict != "" {
 				return fantasy.NewTextErrorResponse(conflict), nil
 			}
 
@@ -441,11 +450,11 @@ func NewBashTool(workingDir, owner string, attribution *config.Attribution, mode
 			// this session, else the directory it was opened in.
 			cwd := cmp.Or(result.Cwd, session.knownCwd(), execWorkingDir)
 
-			metadata := BashResponseMetadata{
+			metadata := ShellResponseMetadata{
 				StartTime:        startTime.UnixMilli(),
 				EndTime:          time.Now().UnixMilli(),
 				Output:           stdout,
-				Description:      bashLabel(params),
+				Description:      shellLabel(params),
 				WorkingDirectory: cwd,
 			}
 
@@ -467,7 +476,7 @@ func NewBashTool(workingDir, owner string, attribution *config.Attribution, mode
 			if stdout != "" {
 				sb.WriteString(stdout)
 			} else if header == "" {
-				sb.WriteString(BashNoOutput)
+				sb.WriteString(ShellNoOutput)
 			}
 			fmt.Fprintf(&sb, "\n\n<cwd>%s</cwd>", normalizeWorkingDir(cwd))
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(sb.String()), metadata), nil
@@ -558,4 +567,12 @@ func isGitRepo(dir string) bool {
 		}
 		dir = parent
 	}
+}
+
+// ShellAvailable reports whether a shell could be identified to run a
+// terminal session in. Callers assembling a tool set use it to leave the
+// shell tool out rather than advertising one that cannot open.
+func ShellAvailable() bool {
+	_, ok := term.Shell()
+	return ok
 }

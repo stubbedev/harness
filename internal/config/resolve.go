@@ -69,7 +69,7 @@ type shellVariableResolver struct {
 }
 
 // NewShellVariableResolver returns a VariableResolver that delegates to
-// the embedded shell (the same interpreter used by the bash tool and
+// the embedded shell (the same interpreter used by the shell tool and
 // hooks). Supported constructs match shell.ExpandValue: $VAR, ${VAR},
 // ${VAR:-default}, $(command), quoting, and escapes. Unset variables
 // expand to the empty string by default, matching bash; use

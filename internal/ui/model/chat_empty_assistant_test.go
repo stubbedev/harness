@@ -34,7 +34,7 @@ func TestHiddenThinkingToolRunDropsEmptyAssistant(t *testing.T) {
 	require.NotNil(t, u.chat.MessageItem("m1"), "stream placeholder should exist")
 
 	// Interleaved thinking streams, then the tool call lands. This is
-	// the message state while the bash tool executes: reasoning block
+	// the message state while the shell tool executes: reasoning block
 	// done, tool call present, no Finish part yet.
 	running := message.Message{ID: "m1", Role: message.Assistant, Parts: []message.ContentPart{
 		message.ReasoningContent{
@@ -51,7 +51,7 @@ func TestHiddenThinkingToolRunDropsEmptyAssistant(t *testing.T) {
 	}}
 	_ = u.updateSessionMessage(running)
 
-	require.NotNil(t, u.chat.ToolItem("toolu_1"), "the running bash tool item must exist")
+	require.NotNil(t, u.chat.ToolItem("toolu_1"), "the running shell tool item must exist")
 	_, isAssistant := u.chat.MessageItem("m1").(*chat.AssistantMessageItem)
 	assert.False(t, isAssistant,
 		"the empty assistant item must be dropped while the tool runs, not linger until the result arrives")

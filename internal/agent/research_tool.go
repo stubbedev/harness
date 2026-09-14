@@ -135,8 +135,13 @@ func (c *coordinator) researchTool(_ context.Context, client *http.Client) (fant
 			fetchTools := []fantasy.AgentTool{
 				tools.NewFetchTool(client),
 				tools.NewWebSearchTool(client),
-				tools.NewBashTool(tmpDir, "research", c.cfg.Config().Options.Attribution, small.ModelCfg.Model, c.questions),
 				tools.NewViewTool(c.lspManager, c.filetracker, nil, tmpDir),
+			}
+			// Searching the saved pages is the shell's job, but only
+			// when there is a shell to give it.
+			if tools.ShellAvailable() {
+				fetchTools = append(fetchTools,
+					tools.NewShellTool(tmpDir, "research", c.cfg.Config().Options.Attribution, small.ModelCfg.Model, c.questions))
 			}
 
 			// Sub-agent tool calls fire the same Pre/PostToolUse hooks as the

@@ -7,7 +7,7 @@
 //
 // The session is intentionally low-level: it deals in bytes, quiet
 // windows and regex waits. Command/exit-code semantics live one layer up
-// (the bash tool), which uses a printed sentinel to recover exit codes
+// (the shell tool), which uses a printed sentinel to recover exit codes
 // from the shell.
 package term
 
@@ -91,24 +91,28 @@ type Session struct {
 	modeCarry      []byte
 }
 
-// Shell returns the shell the terminal session should run: the shell
-// Harness itself was launched from when the parent process can be
-// identified as one, then the platform's usual answer for "the user's
-// shell" -- $SHELL on Unix, ComSpec or PowerShell on Windows.
+// Shell returns the shell the terminal session should run and whether
+// one was identified at all: the shell Harness itself was launched from
+// when the parent process is one, otherwise $SHELL or ComSpec when that
+// names a shell this package knows how to drive.
 //
-// Every shell it can name is driven directly, PowerShell and cmd
-// included. The session protocol has a dialect per Kind rather than a
-// POSIX-only path with an interpreter standing in for the real thing
-// elsewhere: the model is told which shell it is talking to and writes
-// for that shell, which is the whole point of handing it a real one.
-func Shell() string {
+// Nothing is guessed. A guess here is a terminal that silently fails to
+// open or, worse, one driven with a protocol it does not speak, and the
+// caller has a better answer for that than a wrong shell: not offering
+// the tool. Every shell it can name is driven directly, PowerShell and
+// cmd included -- the session protocol has a dialect per Kind, so the
+// model is told which shell it has and writes for that one, which is
+// the point of handing it a real shell rather than an interpreter.
+func Shell() (string, bool) {
 	if sh := parentShell(); sh != "" {
-		return sh
+		return sh, true
 	}
-	if sh := os.Getenv("SHELL"); sh != "" && KindOf(sh) != KindUnknown {
-		return sh
+	for _, name := range []string{"SHELL", "ComSpec"} {
+		if sh := os.Getenv(name); sh != "" && KindOf(sh) != KindUnknown {
+			return sh, true
+		}
 	}
-	return defaultShell()
+	return "", false
 }
 
 // Kind is the dialect a shell speaks, which decides how the session
@@ -178,8 +182,15 @@ func parentShell() string {
 // instead of the terminal, so the window size stays authoritative.
 // The shell is deliberately not bound to a caller context: the session
 // outlives the request that opened it and is torn down by Close.
+//
+// It fails rather than guessing when no shell can be identified; callers
+// that can avoid offering a terminal at all should check Shell first.
 func Start(cwd string, env ...string) (*Session, error) {
-	cmd := exec.CommandContext(context.Background(), Shell())
+	shell, ok := Shell()
+	if !ok {
+		return nil, errors.New("no shell could be identified for a terminal session")
+	}
+	cmd := exec.CommandContext(context.Background(), shell)
 	cmd.Dir = cwd
 	cmd.Env = append(withoutSizeEnv(os.Environ()), withoutSizeEnv(env)...)
 	cmd.Env = append(cmd.Env, "TERM="+termValue())

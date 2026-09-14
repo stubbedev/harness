@@ -9,7 +9,7 @@ import (
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
-// MCPToolMessageItem is a message item that represents a bash tool call.
+// MCPToolMessageItem is a message item that represents an MCP tool call.
 type MCPToolMessageItem struct {
 	*baseToolMessageItem
 }
@@ -26,7 +26,7 @@ func NewMCPToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &MCPToolRenderContext{}, canceled)
 }
 
-// MCPToolRenderContext renders bash tool messages.
+// MCPToolRenderContext renders MCP tool messages.
 type MCPToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.

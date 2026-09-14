@@ -562,7 +562,7 @@ func TestBatch_ComposesRealTools(t *testing.T) {
 		// the bodies themselves into the result.
 		Return: `[$bodies[] | select(test("TODO"))] | length`,
 	}, []fantasy.AgentTool{
-		NewBashTool(dir, "batch", &config.Attribution{}, "test-model", nil),
+		NewShellTool(dir, "batch", &config.Attribution{}, "test-model", nil),
 		NewViewTool(nil, mockFileTracker{}, nil, dir),
 	})
 
@@ -572,12 +572,12 @@ func TestBatch_ComposesRealTools(t *testing.T) {
 }
 
 // A tool that owns one shared session must not be fanned out into
-// itself: bash has a single terminal per working directory, so
+// itself: the shell has a single terminal per working directory, so
 // concurrent calls interleave rather than parallelise.
 func TestBatch_ForEachRunsSerialToolsOneAtATime(t *testing.T) {
 	t.Parallel()
 
-	require.True(t, serialTools[ShellToolName], "bash must be registered as serial")
+	require.True(t, serialTools[ShellToolName], "the shell must be registered as serial")
 
 	seen := jsonTool(ShellToolName, func(input map[string]any) any {
 		return map[string]any{"v": input["v"]}

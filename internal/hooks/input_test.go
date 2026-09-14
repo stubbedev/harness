@@ -37,14 +37,14 @@ func TestBuildEventPayloadPerEvent(t *testing.T) {
 				Event:     EventPreToolUse,
 				SessionID: "s1",
 				CWD:       "/w",
-				ToolName:  "bash",
+				ToolName:  "shell",
 				ToolInput: `{"command":"ls"}`,
 			},
 			want: `{
 				"event": "PreToolUse",
 				"session_id": "s1",
 				"cwd": "/w",
-				"tool_name": "bash",
+				"tool_name": "shell",
 				"tool_input": {"command": "ls"}
 			}`,
 		},
@@ -54,7 +54,7 @@ func TestBuildEventPayloadPerEvent(t *testing.T) {
 				Event:     EventPostToolUse,
 				SessionID: "s1",
 				CWD:       "/w",
-				ToolName:  "bash",
+				ToolName:  "shell",
 				ToolInput: `{"command":"ls"}`,
 				ToolResponse: &ToolResponse{
 					Content: "all tests passed",
@@ -65,7 +65,7 @@ func TestBuildEventPayloadPerEvent(t *testing.T) {
 				"event": "PostToolUse",
 				"session_id": "s1",
 				"cwd": "/w",
-				"tool_name": "bash",
+				"tool_name": "shell",
 				"tool_input": {"command": "ls"},
 				"tool_response": {"content": "all tests passed", "is_error": false}
 			}`,
@@ -213,7 +213,7 @@ func TestBuildEventPayloadToolInputIsObject(t *testing.T) {
 	payload := BuildEventPayload(EventContext{
 		Event:     EventPreToolUse,
 		SessionID: "s1",
-		ToolName:  "bash",
+		ToolName:  "shell",
 		ToolInput: `{"command":"ls"}`,
 	})
 
@@ -246,7 +246,7 @@ func TestBuildEventEnvPerEvent(t *testing.T) {
 		Event:     EventStop,
 		SessionID: "s1",
 		CWD:       "/w",
-		ToolName:  "bash",
+		ToolName:  "shell",
 		ToolInput: `{"command":"ls","file_path":"/tmp/f.txt"}`,
 	}
 
@@ -254,7 +254,7 @@ func TestBuildEventEnvPerEvent(t *testing.T) {
 		t.Parallel()
 		m := envMap(BuildEventEnv(common, "/project"))
 		require.Equal(t, EventStop, m["HARNESS_EVENT"])
-		require.Equal(t, "bash", m["HARNESS_TOOL_NAME"])
+		require.Equal(t, "shell", m["HARNESS_TOOL_NAME"])
 		require.Equal(t, "s1", m["HARNESS_SESSION_ID"])
 		require.Equal(t, "/w", m["HARNESS_CWD"])
 		require.Equal(t, "/project", m["HARNESS_PROJECT_DIR"])
@@ -352,7 +352,7 @@ func TestRunEventDeliversPayloadAndEnv(t *testing.T) {
 	result, err := r.RunEvent(context.Background(), EventContext{
 		Event:     EventPostToolUse,
 		SessionID: "s1",
-		ToolName:  "bash",
+		ToolName:  "shell",
 		ToolInput: `{"command":"ls"}`,
 		ToolResponse: &ToolResponse{
 			Content: "ok",
@@ -368,7 +368,7 @@ func TestRunEventDeliversPayloadAndEnv(t *testing.T) {
 		"event": "PostToolUse",
 		"session_id": "s1",
 		"cwd": "`+filepath.ToSlash(dir)+`",
-		"tool_name": "bash",
+		"tool_name": "shell",
 		"tool_input": {"command": "ls"},
 		"tool_response": {"content": "ok", "is_error": false}
 	}`, string(payload))
@@ -381,7 +381,7 @@ func TestRunEventDeliversPayloadAndEnv(t *testing.T) {
 		"harness",
 		"harness",
 		EventPostToolUse,
-		"bash",
+		"shell",
 		"s1",
 		dir,
 		dir,

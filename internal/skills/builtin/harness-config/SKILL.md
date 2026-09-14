@@ -164,7 +164,7 @@ permissions:
   allowed_tools: [view, ls, grep, edit]
 
 options:
-  disabled_tools: [bash] # hidden from the agent entirely, not just prompted
+  disabled_tools: [shell] # hidden from the agent entirely, not just prompted
 
 tools:
   ls:
@@ -185,7 +185,7 @@ removes a tool from the agent's toolbox.
 hooks:
   PreToolUse:
     - name: no-haskell
-      matcher: ^bash$ # regex against the tool name; omit to match every tool
+      matcher: ^shell$ # regex against the tool name; omit to match every tool
       command: .harness/hooks/no-haskell.sh
       timeout: 10 # seconds, default 30
 ```
@@ -302,7 +302,7 @@ Event names are case-insensitive and accept snake_case: `PreToolUse`,
   "event": "PreToolUse",
   "session_id": "abc-123",
   "cwd": "/path/to/project",
-  "tool_name": "bash",
+  "tool_name": "shell",
   "tool_input": { "command": "ls -la" }
 }
 ```
