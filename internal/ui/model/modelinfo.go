@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 
+	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 )
 
@@ -39,9 +40,11 @@ func (m *UI) modelInfo(width int) string {
 	var modelContext *common.ModelContextInfo
 	if model != nil && m.session != nil {
 		modelContext = &common.ModelContextInfo{
-			ContextUsed:    m.session.CompletionTokens + m.session.PromptTokens,
-			Cost:           m.session.Cost,
-			ModelContext:   model.CatalogCfg.ContextWindow,
+			ContextUsed: m.session.CompletionTokens + m.session.PromptTokens,
+			Cost:        m.session.Cost,
+			// The usable window, not the raw one: the meter should read
+			// as a share of what the provider will actually accept.
+			ModelContext:   config.UsableContextWindow(model.CatalogCfg, model.ModelCfg),
 			EstimatedUsage: m.session.EstimatedUsage,
 		}
 	}

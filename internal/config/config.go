@@ -1277,3 +1277,49 @@ func ptrValOr[T any](t *T, el T) T {
 	}
 	return *t
 }
+
+// UsableContextWindow returns the part of a model's context window that a
+// request's input may occupy: the window minus the output reservation.
+//
+// Providers that enforce prompt + max_tokens <= context_window spend the
+// output budget from the same window as the prompt, so planning against
+// the raw number overstates what will actually be accepted — and the
+// overstatement grows with max_tokens, which is the opposite of what
+// raising it looks like it should do. Everything that measures how full
+// the context is, in the agent and in the UI alike, measures against this.
+//
+// A window of 0 means unknown and stays 0, so callers can tell "no budget
+// information" from "no budget left". A max_tokens at or above the whole
+// window is a misconfiguration rather than an instruction to leave no room
+// for input, and is ignored.
+func UsableContextWindow(catalogCfg catalog.Model, modelCfg SelectedModel) int64 {
+	cw := catalogCfg.ContextWindow
+	if cw <= 0 {
+		return 0
+	}
+	maxTokens := catalogCfg.DefaultMaxTokens
+	if modelCfg.MaxTokens != 0 {
+		maxTokens = modelCfg.MaxTokens
+	}
+	if maxTokens <= 0 || maxTokens >= cw {
+		return cw
+	}
+	return cw - maxTokens
+}
+
+// UsableContextWindowFor resolves the model selected for modelType and
+// returns its usable input budget, or 0 when the model or its window is
+// unknown. The UI's context meter uses it so "70% full" means 70% of what
+// the provider will accept rather than 70% of a number no request can
+// reach.
+func (c *Config) UsableContextWindowFor(modelType SelectedModelType) int64 {
+	modelCfg, ok := c.Models[modelType]
+	if !ok {
+		return 0
+	}
+	catalogCfg := c.GetModel(modelCfg.Provider, modelCfg.Model)
+	if catalogCfg == nil {
+		return 0
+	}
+	return UsableContextWindow(*catalogCfg, modelCfg)
+}

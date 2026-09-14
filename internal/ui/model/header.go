@@ -137,8 +137,12 @@ func renderHeaderDetails(
 
 	agentCfg := com.Config().Agents[config.AgentCoder]
 	model := com.Config().GetModelByType(agentCfg.Model)
-	if model != nil && model.ContextWindow > 0 {
-		percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(model.ContextWindow)) * 100
+	// Measured against the usable window, not the raw one: max_tokens is
+	// reserved from the same window, so a percentage of the raw number
+	// reads lower than the share of the budget actually spent.
+	usable := com.Config().UsableContextWindowFor(agentCfg.Model)
+	if model != nil && usable > 0 {
+		percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(usable)) * 100
 		// The model ID rides beside the context percentage so the
 		// header shows what is answering, not just how full it is.
 		percentageText := fmt.Sprintf("%d%% %s", int(percentage), model.ID)

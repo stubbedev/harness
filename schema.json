@@ -825,7 +825,7 @@
         "max_tokens": {
           "type": "integer",
           "maximum": 200000,
-          "description": "Maximum number of tokens for model responses",
+          "description": "Maximum tokens for model responses; reserved from the same context window as the prompt so a high value shrinks the usable input budget",
           "examples": [
             4096
           ]

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/stubbedev/harness/internal/config"
 )
 
 // errContextWindowExceeded is returned by the run's PrepareStep when the
@@ -17,26 +18,15 @@ import (
 var errContextWindowExceeded = errors.New("context window exceeded")
 
 // usableContextWindow returns the portion of the model's context window
-// available for input. Providers that enforce prompt + max_tokens <=
-// context window reserve the output budget from the same window the agent
-// plans against, so max_tokens has to be subtracted; without it the
-// auto-summarize threshold can sit above the input ceiling and never fire.
-// A window of 0 (unknown) stays 0, and a max_tokens at or above the window
-// is treated as a misconfiguration and ignored rather than collapsing the
-// budget to zero.
+// available for input: the window minus the output reservation. Without
+// subtracting it the auto-summarize threshold can sit above an input
+// ceiling the provider enforces, and never fire.
+//
+// The arithmetic lives in config so the UI's context meter measures
+// against the same budget the agent plans against; see
+// [config.UsableContextWindow].
 func usableContextWindow(model Model) int64 {
-	cw := int64(model.CatalogCfg.ContextWindow)
-	if cw <= 0 {
-		return 0
-	}
-	maxTokens := model.CatalogCfg.DefaultMaxTokens
-	if model.ModelCfg.MaxTokens != 0 {
-		maxTokens = model.ModelCfg.MaxTokens
-	}
-	if maxTokens <= 0 || maxTokens >= cw {
-		return cw
-	}
-	return cw - maxTokens
+	return config.UsableContextWindow(model.CatalogCfg, model.ModelCfg)
 }
 
 // contextLengthErrorMarkers are lowercase substrings that identify a

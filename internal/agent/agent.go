@@ -1134,6 +1134,26 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
 			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatalogCfg.SupportsImages)
 			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatalogCfg.Name)
+
+			// Project the request this step is about to send. The reported
+			// session counters cannot see the tool results that landed since
+			// the last step, so a request assembled from them can overflow
+			// with no check in between. Aborting here — before the provider
+			// is called — lets the run's error path summarize and requeue
+			// instead of surfacing a guaranteed 400.
+			if cw := usableContextWindow(a.largeModel.Get()); cw > 0 && !a.disableAutoSummarize {
+				sessionLock.Lock()
+				projectedRequestTokens = estimateMessageTokens(prepared.Messages)
+				projected := projectedRequestTokens
+				sessionLock.Unlock()
+				threshold := autoSummarizeThreshold(cw, a.autoSummarizeRatio, a.autoSummarizeBuffer)
+				if projected+threshold >= cw {
+					return callContext, prepared, fmt.Errorf(
+						"%w: next request projected at ~%d tokens against a %d-token usable window",
+						errContextWindowExceeded, projected, cw,
+					)
+				}
+			}
 			currentAssistant = &assistantMsg
 			return callContext, prepared, err
 		},
@@ -1314,13 +1334,21 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		},
 		StopWhen: []fantasy.StopCondition{
 			func(_ []fantasy.StepResult) bool {
-				cw := int64(largeModel.CatalogCfg.ContextWindow)
-				// If context window is unknown (0), skip auto-summarize
+				// The usable window is the context window minus the reserved
+				// output budget: providers that enforce prompt + max_tokens <=
+				// window would reject a request the raw window says fits.
+				cw := usableContextWindow(a.largeModel.Get())
+				// If the usable window is unknown (0), skip auto-summarize
 				// to avoid immediately truncating custom/local models.
 				if cw == 0 {
 					return false
 				}
 				tokens := currentSession.CompletionTokens + currentSession.PromptTokens
+				sessionLock.Lock()
+				if projectedRequestTokens > tokens {
+					tokens = projectedRequestTokens
+				}
+				sessionLock.Unlock()
 				remaining := cw - tokens
 				threshold := autoSummarizeThreshold(cw, a.autoSummarizeRatio, a.autoSummarizeBuffer)
 				if (remaining <= threshold) && !a.disableAutoSummarize {
@@ -1337,8 +1365,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
+	// recoverOverflow records that this turn died on a context-window
+	// overflow — ours (PrepareStep projection) or the provider's
+	// (context-length rejection) — the one failure the session can
+	// self-heal: summarize and requeue the prompt once instead of leaving
+	// it stuck in the state that broke it.
+	var recoverOverflow bool
 	if err != nil {
 		isCancelErr := errors.Is(err, context.Canceled)
+		recoverOverflow = !isCancelErr && !call.OverflowRecovered &&
+			(errors.Is(err, errContextWindowExceeded) || isContextLengthError(err))
 		slog.Info("Agent stream returned error",
 			"error", err.Error(),
 			"error_type", fmt.Sprintf("%T", err),
@@ -1356,7 +1392,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					return nil, persistErr
 				}
 			}
-			if !isCancelErr {
+			if !isCancelErr && !recoverOverflow {
 				return result, err
 			}
 			// Canceled with no assistant message: fall through to the
@@ -1365,7 +1401,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// assistant state to persist.
 		} else if persistErr := a.persistFailedTurn(ctx, call.SessionID, currentSession.Title, currentAssistant, largeModel, err, retryAttempt); persistErr != nil {
 			return nil, persistErr
-		} else if !isCancelErr {
+		} else if !isCancelErr && !recoverOverflow {
 			return nil, err
 		}
 		// A canceled turn falls through to the queue handoff below
@@ -1373,6 +1409,30 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// cancel (CancelTurn), and its prompts run as follow-up turns —
 		// the interrupt-and-steer flow. A full Cancel drops the queue
 		// itself, so the handoff sees an empty queue and returns.
+	}
+
+	// Recover from a context-window overflow: summarize the session and
+	// requeue the prompt (marked OverflowRecovered) so it resumes against
+	// the compacted history. The queue handoff below runs it as its own
+	// turn, mirroring the shouldSummarize continuation path.
+	if recoverOverflow {
+		slog.Warn("Context window exceeded; summarizing and requeueing the prompt",
+			"session_id", call.SessionID, "error", err.Error())
+		err = nil
+		a.activeRequests.Del(call.SessionID)
+		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", ""); summarizeErr != nil {
+			return nil, summarizeErr
+		}
+		requeued := call
+		requeued.OverflowRecovered = true
+		if currentAssistant != nil && len(currentAssistant.ToolCalls()) > 0 {
+			requeued.Prompt = fmt.Sprintf("The previous session was interrupted because it exceeded the context window and the history was summarized. The initial user request was: `%s`", requeued.Prompt)
+		}
+		existing, ok := a.messageQueue.Get(call.SessionID)
+		if !ok {
+			existing = []SessionAgentCall{}
+		}
+		a.messageQueue.Set(call.SessionID, append(existing, requeued))
 	}
 
 	if err == nil && shouldSummarize {
