@@ -537,9 +537,14 @@ func normalizeWorkingDir(path string) string {
 }
 
 // ShellAvailable reports whether a shell could be identified to run a
-// terminal session in. Callers assembling a tool set use it to leave the
-// shell tool out rather than advertising one that cannot open.
+// terminal session in, on a platform that can open one. Callers
+// assembling a tool set use it to leave the shell tool out rather than
+// advertising one that cannot open: Windows has no pty implementation,
+// so a session there fails however the shell is found.
 func ShellAvailable() bool {
+	if !term.SessionsSupported {
+		return false
+	}
 	_, ok := term.Shell()
 	return ok
 }

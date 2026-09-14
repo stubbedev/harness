@@ -540,6 +540,9 @@ func TestBatch_RejectsUnknownOnError(t *testing.T) {
 // against the shapes real tools actually return.
 func TestBatch_ComposesRealTools(t *testing.T) {
 	t.Parallel()
+	// The plan drives the real shell tool, which needs a terminal
+	// session and a POSIX `ls`.
+	requireTerminalSession(t)
 
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("alpha\nTODO: one\n"), 0o644))
