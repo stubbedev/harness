@@ -11,6 +11,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/skills"
 )
@@ -28,17 +29,18 @@ func NewHarnessInfoTool(
 	allSkills []*skills.Skill,
 	activeSkills []*skills.Skill,
 	skillTracker *skills.Tracker,
+	host *extensions.Host,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		HarnessInfoToolName,
 		harnessInfoDescription,
 		func(ctx context.Context, _ HarnessInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			return fantasy.NewTextResponse(buildHarnessInfo(cfg, lspManager, allSkills, activeSkills, skillTracker)), nil
+			return fantasy.NewTextResponse(buildHarnessInfo(cfg, lspManager, allSkills, activeSkills, skillTracker, host)), nil
 		},
 	)
 }
 
-func buildHarnessInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker) string {
+func buildHarnessInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker, host *extensions.Host) string {
 	var b strings.Builder
 
 	writeConfigFiles(&b, cfg)
@@ -49,9 +51,9 @@ func buildHarnessInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkill
 	writeMCP(&b, mcp.GetStates(), cfg)
 	writeSkills(&b, allSkills, activeSkills, skillTracker, cfg)
 	writeHooks(&b, cfg)
+	writeExtensions(&b, host)
 	writeDisabledTools(&b, cfg)
 	writeOptions(&b, cfg)
-	writeAttribution(&b, cfg)
 
 	return b.String()
 }
@@ -400,21 +402,6 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("\n")
 }
 
-func writeAttribution(b *strings.Builder, cfg *config.ConfigStore) {
-	c := cfg.Config()
-	if c.Options == nil || c.Options.Attribution == nil {
-		return
-	}
-	b.WriteString("[attribution]\n")
-	trailerStyle := c.Options.Attribution.TrailerStyle
-	if trailerStyle == "" {
-		trailerStyle = config.TrailerStyleCoAuthoredBy
-	}
-	fmt.Fprintf(b, "trailer_style = %s\n", trailerStyle)
-	fmt.Fprintf(b, "generated_with = %v\n", c.Options.Attribution.GeneratedWith)
-	b.WriteString("\n")
-}
-
 func writeHooks(b *strings.Builder, cfg *config.ConfigStore) {
 	c := cfg.Config()
 	if len(c.Hooks) == 0 {
@@ -477,4 +464,35 @@ func lspStateString(state lsp.ServerState) string {
 	default:
 		return "unknown"
 	}
+}
+
+// writeExtensions lists the Lua extensions the workspace loaded, what
+// each one registered, and the ones that failed or are disabled. An
+// extension that did not load is the likeliest reason a tool the user
+// expects is missing, so failures are reported with their error.
+func writeExtensions(b *strings.Builder, host *extensions.Host) {
+	infos := host.Describe()
+	if len(infos) == 0 {
+		return
+	}
+
+	b.WriteString("[extensions]\n")
+	for _, info := range infos {
+		name := cmp.Or(info.Name, info.Path)
+		fmt.Fprintf(b, "%s: %s", name, info.State)
+		if len(info.Tools) > 0 {
+			fmt.Fprintf(b, " tools=%s", strings.Join(info.Tools, ","))
+		}
+		if len(info.Commands) > 0 {
+			fmt.Fprintf(b, " commands=%s", strings.Join(info.Commands, ","))
+		}
+		if len(info.Events) > 0 {
+			fmt.Fprintf(b, " hooks=%s", strings.Join(info.Events, ","))
+		}
+		if info.Error != "" {
+			fmt.Fprintf(b, " error=%q", info.Error)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 }

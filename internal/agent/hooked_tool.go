@@ -51,6 +51,18 @@ func (h *hookedTool) ProviderOptions() fantasy.ProviderOptions {
 	return h.inner.ProviderOptions()
 }
 
+// MCP forwards the wrapped tool's server name, or "" when the tool does not
+// come from an MCP server. Callers that group a built tool list by server --
+// the system prompt's instruction gating -- see only the wrapper, so without
+// this every tool looks non-MCP the moment a PreToolUse or PostToolUse hook
+// is configured.
+func (h *hookedTool) MCP() string {
+	if inner, ok := h.inner.(interface{ MCP() string }); ok {
+		return inner.MCP()
+	}
+	return ""
+}
+
 func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 	h.inner.SetProviderOptions(opts)
 }

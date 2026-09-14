@@ -4,7 +4,6 @@ import (
 	"maps"
 	"reflect"
 	"slices"
-
 	"testing"
 
 	"charm.land/bubbles/v2/key"

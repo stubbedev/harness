@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/sahilm/fuzzy"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
 )
@@ -42,50 +41,25 @@ func (s *mcpSearchTool) Info() fantasy.ToolInfo {
 	return fantasy.ToolInfo{
 		Name: fmt.Sprintf("mcp_%s_tool_search", s.server),
 		Description: fmt.Sprintf(
-			`Search and load tools from the "%s" MCP server. Its %d tools are named below but their input schemas are not loaded, so they stay out of context until you need them.
+			`Tools from the "%s" MCP server. Its %d tools are named below; their input schemas load on demand.
 
-Tools on this server: %s
+Tools: %s
 
-Two-step usage:
-1. Run with {"query": "keyword ..."} to list matching tools with a short description each. Keywords are matched fuzzily against tool names and descriptions; every keyword must match, and name matches rank higher.
-2. Run with {"load": ["tool_name", ...]} to load the ones you need. Loaded tools appear in your tool list from your next step, with their full input schemas.
-
-Both fields may be combined in one call. A name from the list above can be loaded directly without searching first; search when you know the capability you want but not which tool provides it. Prefer loading few tools at a time.`,
-			s.server, len(names), nameList(names),
+`+"`query`"+` lists matching tools with a short description each (keywords fuzzy-matched against names and descriptions, all must match). `+"`load`"+` puts the named tools in your tool list from the next step, with schemas and the server's usage instructions. Both fields may be combined; a name above can be loaded without searching first. Load few at a time.`,
+			s.server, len(names), nameList(names, mcpSearchNameBudget),
 		),
 		Parameters: map[string]any{
 			"query": map[string]any{
 				"type":        "string",
-				"description": "Keywords, space-separated. Every keyword must fuzzy-match the tool's name or description; name matches rank higher. Empty matches nothing.",
+				"description": "Keywords, space-separated; all must fuzzy-match a name or description.",
 			},
 			"load": map[string]any{
 				"type":        "array",
 				"items":       map[string]any{"type": "string"},
-				"description": "Exact tool names (as returned by a query, or taken from the list in this tool's description) to load into your tool list.",
+				"description": "Exact tool names to load into your tool list.",
 			},
 		},
 	}
-}
-
-// nameList renders the tool names for the description, stopping at
-// mcpSearchNameBudget characters and saying how many it left out so a
-// truncated list never reads as the whole set.
-func nameList(names []string) string {
-	if len(names) == 0 {
-		return "(none)"
-	}
-	var b strings.Builder
-	for i, name := range names {
-		if i > 0 && b.Len()+len(name)+2 > mcpSearchNameBudget {
-			fmt.Fprintf(&b, ", … and %d more (use query to find them)", len(names)-i)
-			break
-		}
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString(name)
-	}
-	return b.String()
 }
 
 func (s *mcpSearchTool) ProviderOptions() fantasy.ProviderOptions        { return s.opts }
@@ -134,7 +108,11 @@ func (s *mcpSearchTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 		if err := s.coord.expandMCPServerTools(ctx, s.server, params.Load); err != nil {
 			return fantasy.NewTextErrorResponse("failed to load tools: " + err.Error()), nil
 		}
-		fmt.Fprintf(&b, "Loaded %d tool(s) from %q. They appear in your tool list from your next step: %s\n",
+		// The loaded tools join the tool list for the next step, which is
+		// also when the system prompt starts carrying this server's usage
+		// instructions: the gate there keys off the server having tools in
+		// the request, so nothing needs to be repeated here.
+		fmt.Fprintf(&b, "Loaded %d tool(s) from %q. They appear in your tool list from your next step, with this server's usage instructions: %s\n",
 			len(params.Load), s.server, strings.Join(params.Load, ", "))
 	}
 
@@ -153,56 +131,34 @@ func (s *mcpSearchTool) writeMatches(b *strings.Builder, names []string) {
 	}
 }
 
-// search scores the server's tools with the fzf algorithm and returns the
-// top mcpSearchResultLimit names plus how many matched in total. The query
-// is split on whitespace and every term must match somewhere, the way fzf's
-// extended search AND's its terms. Each term scores against the name and
-// the description — a name match counts double — and a tool's score is the
-// sum over terms; ties break alphabetically.
+// search ranks the server's tools against the query and returns the top
+// mcpSearchResultLimit names plus how many matched in total. Names are
+// already sorted alphabetically, which is what breaks score ties.
 func (s *mcpSearchTool) search(query string) ([]string, int) {
-	terms := strings.Fields(strings.ToLower(query))
-	type scored struct {
-		name  string
-		score int
+	names := s.coord.mcpServerToolNames(s.server)
+	candidates := make([]searchCandidate, len(names))
+	for i, name := range names {
+		candidates[i] = searchCandidate{name: name, desc: s.coord.mcpToolDescription(s.server, name)}
 	}
-	var matches []scored
-	for _, name := range s.coord.mcpServerToolNames(s.server) {
-		desc := strings.ToLower(s.coord.mcpToolDescription(s.server, name))
-		lower := strings.ToLower(name)
-		total := 0
-		allTerms := true
-		for _, term := range terms {
-			best, found := 0, false
-			for _, m := range fuzzy.Find(term, []string{lower}) {
-				if !found || m.Score*2 > best {
-					best, found = m.Score*2, true
-				}
-			}
-			for _, m := range fuzzy.Find(term, []string{desc}) {
-				if !found || m.Score > best {
-					best, found = m.Score, true
-				}
-			}
-			if !found {
-				allTerms = false
-				break
-			}
-			total += best
+	return rankCandidates(query, candidates, mcpSearchResultLimit)
+}
+
+// liveMCPServers reports which MCP servers have at least one of their own
+// tools in a built tool list. A server standing behind its tool_search stub
+// has none: the stub is not one of its tools, it is the placeholder for all
+// of them.
+func liveMCPServers(agentTools []fantasy.AgentTool) map[string]bool {
+	live := make(map[string]bool)
+	for _, tool := range agentTools {
+		mcpTool, ok := tool.(interface{ MCP() string })
+		if !ok {
+			continue
 		}
-		if allTerms {
-			matches = append(matches, scored{name: name, score: total})
+		if server := mcpTool.MCP(); server != "" {
+			live[server] = true
 		}
 	}
-	slices.SortStableFunc(matches, func(a, b scored) int { return b.score - a.score })
-	total := len(matches)
-	if total > mcpSearchResultLimit {
-		matches = matches[:mcpSearchResultLimit]
-	}
-	names := make([]string, len(matches))
-	for i, m := range matches {
-		names[i] = m.name
-	}
-	return names, total
+	return live
 }
 
 // mcpServerToolCount returns how many tools the named server exposes in

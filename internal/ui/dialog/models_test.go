@@ -96,21 +96,29 @@ func TestModelsDialogHidesUnconfiguredProviders(t *testing.T) {
 	assert.Equal(t, "openai", m.list.groups[0].Title, "the group is named from the config when no display name is set")
 }
 
-// TestModelsDialogShowsCatalogDuringOnboardingAndWhenUnconfigured pins the
-// two cases where the full catalog must stay visible: onboarding (it is
-// the only way to pick a first provider) and a config with nothing set.
-func TestModelsDialogShowsCatalogDuringOnboardingAndWhenUnconfigured(t *testing.T) {
+// TestModelsDialogShowsCatalogDuringOnboarding pins the one case where the
+// full catalog must stay visible: onboarding, which is the only way to pick
+// a first provider before the connect dialog is reachable.
+func TestModelsDialogShowsCatalogDuringOnboarding(t *testing.T) {
 	t.Parallel()
 
 	m := newModelsDialogForTest(t, configuredTestConfig(t, "openai"), testCatalogProviders(), true)
 	assert.Len(t, m.list.groups, 2, "onboarding shows the whole catalog")
-
-	m = newModelsDialogForTest(t, configuredTestConfig(t), testCatalogProviders(), false)
-	require.Len(t, m.list.groups, 2, "no configured provider falls back to the catalog, minus the config-only providers")
 	for _, g := range m.list.groups {
 		assert.NotContains(t, []string{"Azure", "Google Vertex"}, g.Title,
-			"providers the TUI cannot authenticate never show, even in the fallback")
+			"providers the TUI cannot authenticate never show")
 	}
+}
+
+// TestModelsDialogWithoutConfiguredProvidersIsEmpty pins that the dialog no
+// longer falls back to the catalog when nothing is connected: connecting a
+// provider is the connect dialog's job, and an unconnected entry here would
+// only dead-end.
+func TestModelsDialogWithoutConfiguredProvidersIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	m := newModelsDialogForTest(t, configuredTestConfig(t), testCatalogProviders(), false)
+	assert.Empty(t, m.list.groups, "an unconnected provider never shows outside onboarding")
 }
 
 // TestModelsListIncrementalFilterMatchesOneShot pins the incremental

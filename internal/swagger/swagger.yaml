@@ -28,6 +28,8 @@ definitions:
         items:
           type: string
         type: array
+      release_date:
+        type: string
       supports_attachments:
         type: boolean
     type: object
@@ -47,15 +49,6 @@ definitions:
       top_p:
         type: number
     type: object
-  config.Attribution:
-    properties:
-      co_authored_by:
-        type: boolean
-      generated_with:
-        type: boolean
-      trailer_style:
-        $ref: '#/definitions/config.TrailerStyle'
-    type: object
   config.Completions:
     properties:
       max_depth:
@@ -63,33 +56,6 @@ definitions:
       max_items:
         type: integer
     type: object
-  config.Duration:
-    enum:
-    - -9223372036854775808
-    - 9223372036854775807
-    - 1
-    - 1000
-    - 1000000
-    - 1000000000
-    - 60000000000
-    - 3600000000000
-    - 300000000000
-    - 86400000000000
-    - 5000000000
-    - 45000000000
-    - 10000000000
-    - 60000000000
-    - 2000000000
-    format: int64
-    type: integer
-    x-enum-varnames:
-    - resolveTimeout
-    - catalogRefreshInterval
-    - configLockDeadline
-    - refreshLockDeadline
-    - credentialWriteLockDeadline
-    - DefaultRequestTimeout
-    - renameRetryBudget
   config.ExitBanner:
     enum:
     - default
@@ -355,42 +321,6 @@ definitions:
       transparent:
         type: boolean
     type: object
-  config.ToolGlob:
-    properties:
-      timeout:
-        $ref: '#/definitions/config.Duration'
-    type: object
-  config.ToolGrep:
-    properties:
-      timeout:
-        $ref: '#/definitions/config.Duration'
-    type: object
-  config.ToolLs:
-    properties:
-      max_depth:
-        type: integer
-      max_items:
-        type: integer
-    type: object
-  config.Tools:
-    properties:
-      glob:
-        $ref: '#/definitions/config.ToolGlob'
-      grep:
-        $ref: '#/definitions/config.ToolGrep'
-      ls:
-        $ref: '#/definitions/config.ToolLs'
-    type: object
-  config.TrailerStyle:
-    enum:
-    - none
-    - co-authored-by
-    - assisted-by
-    type: string
-    x-enum-varnames:
-    - TrailerStyleNone
-    - TrailerStyleCoAuthoredBy
-    - TrailerStyleAssistedBy
   csync.Map-string-config_ProviderConfig:
     type: object
   github_com_stubbedev_harness_internal_config.Config:
@@ -440,13 +370,9 @@ definitions:
           type: array
         description: Recently used models stored in the data directory config.
         type: object
-      tools:
-        $ref: '#/definitions/config.Tools'
     type: object
   github_com_stubbedev_harness_internal_config.Options:
     properties:
-      attribution:
-        $ref: '#/definitions/config.Attribution'
       auto_lsp:
         type: boolean
       auto_summarize_buffer:
@@ -489,6 +415,10 @@ definitions:
         type: boolean
       disable_update_check:
         type: boolean
+      disabled_extensions:
+        items:
+          type: string
+        type: array
       disabled_skills:
         items:
           type: string
@@ -498,6 +428,10 @@ definitions:
           type: string
         type: array
       disabled_tools:
+        items:
+          type: string
+        type: array
+      extensions_paths:
         items:
           type: string
         type: array
@@ -763,6 +697,32 @@ definitions:
       message:
         type: string
     type: object
+  proto.ExtensionCommandArgument:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      required:
+        type: boolean
+      title:
+        type: string
+    type: object
+  proto.ExtensionCommandInfo:
+    properties:
+      arguments:
+        items:
+          $ref: '#/definitions/proto.ExtensionCommandArgument'
+        type: array
+      description:
+        type: string
+      extension:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+    type: object
   proto.File:
     properties:
       content:
@@ -978,6 +938,20 @@ definitions:
       message_id:
         type: string
       mode:
+        type: string
+    type: object
+  proto.RunExtensionCommandRequest:
+    properties:
+      arguments:
+        additionalProperties:
+          type: string
+        type: object
+      command_id:
+        type: string
+    type: object
+  proto.RunExtensionCommandResponse:
+    properties:
+      prompt:
         type: string
     type: object
   proto.ServerControl:
@@ -2020,6 +1994,72 @@ paths:
       summary: Stream workspace events (SSE)
       tags:
       - workspaces
+  /workspaces/{id}/extensions/commands:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/proto.ExtensionCommandInfo'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: List extension commands
+      tags:
+      - extensions
+  /workspaces/{id}/extensions/commands/run:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run extension command request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.RunExtensionCommandRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.RunExtensionCommandResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Run an extension command
+      tags:
+      - extensions
   /workspaces/{id}/filetracker/lastread:
     get:
       parameters:

@@ -3,6 +3,7 @@
 package hooks
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"strings"
@@ -238,3 +239,34 @@ func shallowMerge(base, patch string) (string, error) {
 type errNotObject string
 
 func (e errNotObject) Error() string { return string(e) + " is not a JSON object" }
+
+// Dispatcher runs in-process hook handlers for an event, alongside the
+// shell commands the config declares. It is what lets Lua extensions
+// answer the same events without spawning a process.
+//
+// A dispatcher that does not handle an event returns false from Has, so
+// the registry can skip building a payload for it.
+type Dispatcher interface {
+	Has(event string) bool
+	Dispatch(ctx context.Context, ec EventContext) []DispatchResult
+}
+
+// DispatchResult is one in-process handler's outcome, named for the
+// hook indicator the UI draws.
+type DispatchResult struct {
+	Name    string
+	Matcher string
+	Result  HookResult
+}
+
+// info renders a dispatch result the way runner results are rendered.
+func (d DispatchResult) info() HookInfo {
+	return HookInfo{
+		Name:         d.Name,
+		Matcher:      d.Matcher,
+		Decision:     d.Result.Decision.String(),
+		Halt:         d.Result.Halt,
+		Reason:       d.Result.Reason,
+		InputRewrite: d.Result.UpdatedInput != "",
+	}
+}

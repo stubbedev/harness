@@ -54,19 +54,19 @@ var serialTools = map[string]bool{
 // BatchStep is one tool call, or one fan-out of the same tool call over a
 // list of items.
 type BatchStep struct {
-	ID      string         `json:"id" description:"Identifier for this step. Later steps reference its output as $<id> in jq expressions."`
-	Tool    string         `json:"tool" description:"Name of the tool to call."`
-	Input   map[string]any `json:"input,omitempty" description:"Literal JSON input for the tool."`
-	InputJQ string         `json:"input_jq,omitempty" description:"jq expression producing the tool input object. Merges over 'input'. Use it to build input from earlier steps, e.g. '{id: $item}'."`
-	ForEach string         `json:"for_each,omitempty" description:"jq expression producing the items to fan out over. The step runs once per item with $item and $index bound, and its output is the array of results in item order."`
-	When    string         `json:"when,omitempty" description:"jq expression gating this step. The step is skipped, with output null, unless this is truthy."`
+	ID      string         `json:"id" description:"Step id; its output binds to $<id>."`
+	Tool    string         `json:"tool" description:"Tool to call."`
+	Input   map[string]any `json:"input,omitempty" description:"Literal JSON input."`
+	InputJQ string         `json:"input_jq,omitempty" description:"jq producing the input object; merges over input."`
+	ForEach string         `json:"for_each,omitempty" description:"jq listing items to fan out over; $item and $index bound."`
+	When    string         `json:"when,omitempty" description:"jq gate; falsy skips the step."`
 	OnError string         `json:"on_error,omitempty" description:"'fail' (default) aborts the batch on a tool error. 'collect' records {\"error\": \"...\"} as the result and keeps going."`
 }
 
 // BatchParams is the batch tool's input.
 type BatchParams struct {
 	Steps  []BatchStep `json:"steps" description:"Steps to run in order."`
-	Return string      `json:"return,omitempty" description:"jq expression over the step outputs producing the tool result. Defaults to the last step's output. This is the only thing that enters the conversation, so filter here."`
+	Return string      `json:"return,omitempty" description:"jq over the step outputs; the only thing that enters the conversation."`
 }
 
 // BatchResponseMetadata reports what the plan actually did, for the UI and

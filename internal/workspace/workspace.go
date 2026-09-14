@@ -15,6 +15,7 @@ import (
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
@@ -213,6 +214,8 @@ type Workspace interface {
 	InitializePrompt() (string, error)
 	ListSkills(ctx context.Context) ([]skills.CatalogEntry, error)
 	ReadSkill(ctx context.Context, skillID string) ([]byte, skills.SkillReadResult, error)
+	ListExtensionCommands(ctx context.Context) ([]extensions.Command, error)
+	RunExtensionCommand(ctx context.Context, commandID string, args map[string]string) (string, error)
 	ActiveSubagents() []SubagentInfo
 	RunningSubagents(parentSessionID string) []RunningSubagentInfo
 	CancelSubagent(childSessionID string)

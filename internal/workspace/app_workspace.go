@@ -18,6 +18,7 @@ import (
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
@@ -734,4 +735,16 @@ func (w *AppWorkspace) Rewind(ctx context.Context, sessionID, messageID string, 
 		return errors.New("cannot rewind while the agent is running")
 	}
 	return w.app.Checkpoints.Rewind(ctx, sessionID, messageID, mode)
+}
+
+// ListExtensionCommands returns the slash commands the workspace's Lua
+// extensions registered.
+func (w *AppWorkspace) ListExtensionCommands(_ context.Context) ([]extensions.Command, error) {
+	return w.app.Extensions.Commands(), nil
+}
+
+// RunExtensionCommand expands an extension command into the prompt it
+// stands for.
+func (w *AppWorkspace) RunExtensionCommand(ctx context.Context, commandID string, args map[string]string) (string, error) {
+	return w.app.Extensions.RunCommand(ctx, commandID, args)
 }

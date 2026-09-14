@@ -162,8 +162,7 @@ func (s *ShellItem) HandleMouseClick(btn ansi.MouseButton, x, y int) bool {
 // HandleKeyEvent implements KeyEventHandler for copy and horizontal scrolling.
 func (s *ShellItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (bool, tea.Cmd) {
 	if keys.MatchesCopy(msg) {
-		text := "$ " + s.command + "\n" + ansi.Strip(s.output.String())
-		return true, common.CopyToClipboard(text, "Shell output copied to clipboard")
+		return true, common.CopyToClipboard(s.copyText(), copyToastMessage)
 	}
 	if keys.MatchesScrollLeft(msg) {
 		if s.xOffset > 0 {
@@ -344,4 +343,17 @@ func lastLines(s string, count int) string {
 		start = previous
 	}
 	return s[start+1:]
+}
+
+// copyText is the clipboard form of a bang command: one shell
+// interaction, so one fenced block holding the prompt line and the
+// output as it ran, with the terminal's styling stripped.
+func (s *ShellItem) copyText() string {
+	header := "$ " + s.command
+	// The exit code is on screen next to the command, so it belongs in
+	// the copy too: a failing run is the one worth pasting somewhere.
+	if !s.pending && s.exitCode != 0 {
+		header += fmt.Sprintf(" (exit %d)", s.exitCode)
+	}
+	return copyFence("console", header+"\n"+ansi.Strip(s.output.String()))
 }

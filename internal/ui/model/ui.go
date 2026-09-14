@@ -771,6 +771,13 @@ func (m *UI) loadCustomCommands() tea.Cmd {
 			slog.Error("Failed to load skill commands", "error", err)
 		}
 		customCommands = append(customCommands, commands.FromSkillCatalog(skillEntries)...)
+		// Commands registered by Lua extensions. Their content is
+		// produced by the extension when the command runs.
+		extensionCommands, err := m.com.Workspace.ListExtensionCommands(context.Background())
+		if err != nil {
+			slog.Error("Failed to load extension commands", "error", err)
+		}
+		customCommands = append(customCommands, commands.FromExtensions(extensionCommands)...)
 		return userCommandsLoadedMsg{Commands: customCommands}
 	}
 }
@@ -950,6 +957,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sendMessageMsg:
 		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
 
+	case extensionCommandExpandedMsg:
+		cmds = append(cmds, m.sendMessage(msg.Prompt))
 	case userCommandsLoadedMsg:
 		m.customCommands = msg.Commands
 		dia := m.dialog.Dialog(dialog.CommandsID)
@@ -2235,6 +2244,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 				msg, // Pass the action as the result
 			)
 			m.dialog.OpenDialog(argsDialog)
+			break
+		}
+		if msg.ExtensionID != "" {
+			// An extension command has no content until the extension
+			// produces it, which may touch the filesystem or the network,
+			// so the expansion happens off the UI loop.
+			cmds = append(cmds, m.runExtensionCommand(msg.ExtensionID, msg.Args))
+			m.dialog.CloseFrontDialog()
 			break
 		}
 		content := msg.Content
@@ -5351,4 +5368,27 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 			return nil
 		},
 	)
+}
+
+// runExtensionCommand expands a Lua extension's command into a prompt
+// and sends it. The handler runs in the extension's VM, so it is done in
+// a command rather than inline in Update.
+func (m *UI) runExtensionCommand(commandID string, args map[string]string) tea.Cmd {
+	return func() tea.Msg {
+		prompt, err := m.com.Workspace.RunExtensionCommand(context.Background(), commandID, args)
+		if err != nil {
+			slog.Error("Failed to run extension command", "command", commandID, "error", err)
+			return util.ReportError(err)()
+		}
+		if strings.TrimSpace(prompt) == "" {
+			return nil
+		}
+		return extensionCommandExpandedMsg{Prompt: prompt}
+	}
+}
+
+// extensionCommandExpandedMsg carries the prompt an extension command
+// produced back to the UI loop, which sends it as the user's message.
+type extensionCommandExpandedMsg struct {
+	Prompt string
 }

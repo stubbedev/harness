@@ -3,6 +3,7 @@ package chat
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
@@ -120,4 +121,13 @@ func (q *QueuedMessageItem) Render(width int) string {
 	out := strings.Join(lines, "\n")
 	q.setCachedPrefixedRender(out, width, key)
 	return out
+}
+
+// HandleKeyEvent implements [KeyEventHandler]: a queued prompt copies
+// as its own text, the same as the user message it becomes.
+func (q *QueuedMessageItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (bool, tea.Cmd) {
+	if keys.MatchesCopy(msg) {
+		return true, common.CopyToClipboard(q.text, copyToastMessage)
+	}
+	return false, nil
 }

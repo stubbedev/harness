@@ -28,6 +28,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/discover"
+	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/hooks"
@@ -236,6 +237,11 @@ type coordinator struct {
 	memoryInPrompt      bool
 	subagentPromptXMLMu sync.Mutex
 
+	// extensions hosts the loaded Lua extensions: their tools join the
+	// tool set, their hook handlers fire through the registry, and their
+	// commands reach the palette. Nil when none are configured.
+	extensions *extensions.Host
+
 	// memory is the durable cross-session memory service, or nil when the
 	// caller wired no database (some tests). A nil service disables the
 	// feature regardless of config.
@@ -269,7 +275,10 @@ type CoordinatorOptions struct {
 	RunComplete  pubsub.Publisher[notify.RunComplete]
 	Skills       *skills.Manager
 	SubagentsMgr *subagents.Manager
-	Runtime      *subagents.Runtime
+	// Extensions hosts the loaded Lua extensions. Optional: a nil host
+	// contributes no tools, commands or hook handlers.
+	Extensions *extensions.Host
+	Runtime    *subagents.Runtime
 	// Memory is the durable cross-session memory service. Optional: nil
 	// disables the memory tool and prompt injection.
 	Memory memory.Service
@@ -310,7 +319,8 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills:       activeSkills,
 		skillTracker:       skillTracker,
 		interactive:        opts.Interactive,
-		hooks:              hooks.NewRegistry(opts.Config, opts.Config.WorkingDir(), opts.Config.WorkingDir()),
+		hooks:              hooks.NewRegistry(opts.Config, opts.Config.WorkingDir(), opts.Config.WorkingDir()).WithDispatchers(opts.Extensions),
+		extensions:         opts.Extensions,
 		expandedMCPTools:   csync.NewMap[string, map[string]bool](),
 		subagentMessages:   newSubagentInbox(),
 		liveInbox:          newLiveInbox(),
@@ -342,6 +352,9 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	promptOpts := []prompt.Option{
 		prompt.WithWorkingDir(c.cfg.WorkingDir()),
 		prompt.WithAvailableSubagentsXML(subagentXML),
+	}
+	if c.modelInvocableSkillCount() > 0 {
+		promptOpts = append(promptOpts, prompt.WithSkillSearch(true))
 	}
 	if memEnabled {
 		promptOpts = append(promptOpts, prompt.WithMemoryEnabled(true))
@@ -852,6 +865,20 @@ func (c *coordinator) activeSkillsList() []*skills.Skill {
 	return c.activeSkills
 }
 
+// modelInvocableSkillCount reports how many active skills the model may
+// reach. Skills marked disable-model-invocation are the user's alone, so a
+// workspace holding only those gets no skill_search tool and no skills
+// section in the prompt.
+func (c *coordinator) modelInvocableSkillCount() int {
+	n := 0
+	for _, s := range c.activeSkillsList() {
+		if !s.DisableModelInvocation {
+			n++
+		}
+	}
+	return n
+}
+
 // findModelProvider returns the provider config and catalog model for the
 // provider that offers modelID. When providerOverride is non-empty only that
 // provider is searched. ok is false when no matching provider/model is found.
@@ -1078,14 +1105,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// could not name the shell to write for.
 	if tools.ShellAvailable() {
 		allTools = append(allTools,
-			tools.NewShellTool(c.cfg.WorkingDir(), agent.ID, c.cfg.Config().Options.Attribution, modelID, c.questions))
+			tools.NewShellTool(c.cfg.WorkingDir(), agent.ID, c.questions))
 	} else {
 		slog.Warn("No shell could be identified; the shell tool is not available this session")
 	}
 
 	allTools = append(
 		allTools,
-		tools.NewHarnessTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker, logFile),
+		tools.NewHarnessTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker, c.extensions, logFile),
 		tools.NewJobTool(),
 		tools.NewEditTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(nil),
@@ -1165,6 +1192,21 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 	for _, server := range slices.Sorted(maps.Keys(deferredServers)) {
 		filteredTools = append(filteredTools, &mcpSearchTool{server: server, coord: c})
+	}
+
+	// Extension tools bypass AllowedTools the same way MCP tools do:
+	// their names are not knowable when an agent's allow list is
+	// written, and an extension is user-authored config, so installing
+	// one is the opt-in.
+	filteredTools = append(filteredTools, c.extensions.Tools()...)
+
+	// Skills defer the same way: only their names ride in the context,
+	// behind a search that hands over a trigger and then the SKILL.md
+	// itself. Sub-agents keep the inline <available_skills> list -- a
+	// dispatch is one short run, usually pinned to its own skills, so a
+	// search hop there would cost more than the list does.
+	if !isSubAgent && c.modelInvocableSkillCount() > 0 {
+		filteredTools = append(filteredTools, &skillSearchTool{coord: c})
 	}
 
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
@@ -1628,6 +1670,9 @@ func (c *coordinator) refreshCoderSystemPrompt(ctx context.Context, model Model)
 	promptOpts := []prompt.Option{
 		prompt.WithWorkingDir(c.cfg.WorkingDir()),
 		prompt.WithAvailableSubagentsXML(xml),
+	}
+	if c.modelInvocableSkillCount() > 0 {
+		promptOpts = append(promptOpts, prompt.WithSkillSearch(true))
 	}
 	if memEnabled {
 		promptOpts = append(promptOpts, prompt.WithMemoryEnabled(true))

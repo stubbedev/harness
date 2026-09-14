@@ -97,10 +97,11 @@ type (
 	}
 	// ActionRunCustomCommand is a message to run a custom command.
 	ActionRunCustomCommand struct {
-		Content   string
-		Arguments []commands.Argument
-		Args      map[string]string // Actual argument values
-		Skill     *skills.Skill     // Set when this is a skill command
+		Content     string
+		Arguments   []commands.Argument
+		Args        map[string]string // Actual argument values
+		Skill       *skills.Skill     // Set when this is a skill command
+		ExtensionID string            // Set when this command comes from a Lua extension
 	}
 	// ActionAttachSkill is sent when a skill is selected from the commands
 	// dialog to be attached to the conversation as a markdown attachment.

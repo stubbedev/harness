@@ -271,3 +271,43 @@ func (b *Backend) GetWorkingDir(workspaceID string) (string, error) {
 	}
 	return ws.Cfg.WorkingDir(), nil
 }
+
+// ListExtensionCommands returns the slash commands the workspace's Lua
+// extensions registered.
+func (b *Backend) ListExtensionCommands(workspaceID string) ([]proto.ExtensionCommandInfo, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	commands := ws.Extensions.Commands()
+	result := make([]proto.ExtensionCommandInfo, len(commands))
+	for i, cmd := range commands {
+		args := make([]proto.ExtensionCommandArgument, len(cmd.Arguments))
+		for j, arg := range cmd.Arguments {
+			args[j] = proto.ExtensionCommandArgument{
+				ID:          arg.ID,
+				Title:       arg.Title,
+				Description: arg.Description,
+				Required:    arg.Required,
+			}
+		}
+		result[i] = proto.ExtensionCommandInfo{
+			ID:          cmd.ID,
+			Extension:   cmd.Extension,
+			Name:        cmd.Name,
+			Description: cmd.Description,
+			Arguments:   args,
+		}
+	}
+	return result, nil
+}
+
+// RunExtensionCommand expands an extension command into the prompt it
+// stands for.
+func (b *Backend) RunExtensionCommand(ctx context.Context, workspaceID, commandID string, args map[string]string) (string, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return ws.Extensions.RunCommand(ctx, commandID, args)
+}

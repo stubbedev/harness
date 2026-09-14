@@ -13,7 +13,6 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
-	"github.com/stubbedev/harness/internal/config"
 )
 
 // fakeTool records the inputs it is called with and answers with
@@ -562,7 +561,7 @@ func TestBatch_ComposesRealTools(t *testing.T) {
 		// the bodies themselves into the result.
 		Return: `[$bodies[] | select(test("TODO"))] | length`,
 	}, []fantasy.AgentTool{
-		NewShellTool(dir, "batch", &config.Attribution{}, "test-model", nil),
+		NewShellTool(dir, "batch", nil),
 		NewViewTool(nil, mockFileTracker{}, nil, dir),
 	})
 

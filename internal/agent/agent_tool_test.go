@@ -446,8 +446,9 @@ func TestBuildAgentDispatchInfo_FastType(t *testing.T) {
 
 	require.Contains(t, enum, config.AgentTask)
 	require.Contains(t, enum, config.AgentFast)
+	// The enum names the default and its cost; the fast-vs-task tradeoff
+	// itself lives in the tool description, not repeated per parameter.
 	require.Contains(t, desc, "small model")
-	require.Contains(t, desc, "large model")
 }
 
 // TestBuildAgentDispatchInfo_SurfacesModel verifies each subagent line carries

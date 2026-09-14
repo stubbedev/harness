@@ -11,6 +11,7 @@ import (
 
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/skills"
 )
@@ -48,6 +49,12 @@ type CustomCommand struct {
 	Arguments []Argument
 	// Skill is set when this command represents a user-invocable skill
 	Skill *skills.Skill
+	// ExtensionID is set when this command comes from a Lua extension.
+	// The content is produced by the extension when the command runs,
+	// not read from a file, so it is the ID that travels here.
+	ExtensionID string
+	// Description is shown under the command in the palette.
+	Description string
 }
 
 type commandSource struct {
@@ -236,4 +243,34 @@ func GetMCPPrompt(cfg *config.ConfigStore, clientID, promptID string, args map[s
 		return "", err
 	}
 	return strings.Join(result, " "), nil
+}
+
+// FromExtensions converts the commands Lua extensions registered into
+// command-palette entries. Their content is produced on demand by the
+// extension, so the entry carries the command ID rather than a body.
+func FromExtensions(cmds []extensions.Command) []CustomCommand {
+	result := make([]CustomCommand, 0, len(cmds))
+	for _, cmd := range cmds {
+		args := make([]Argument, 0, len(cmd.Arguments))
+		for _, arg := range cmd.Arguments {
+			title := arg.Title
+			if title == "" {
+				title = arg.ID
+			}
+			args = append(args, Argument{
+				ID:          arg.ID,
+				Title:       title,
+				Description: arg.Description,
+				Required:    arg.Required,
+			})
+		}
+		result = append(result, CustomCommand{
+			ID:          cmd.ID,
+			Name:        cmd.ID,
+			Description: cmd.Description,
+			Arguments:   args,
+			ExtensionID: cmd.ID,
+		})
+	}
+	return result
 }

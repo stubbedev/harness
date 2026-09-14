@@ -1,6 +1,4 @@
-Run several tool calls as one composed plan, passing each step's output into the next with jq, and return only the filtered result.
-
-Reach for it when you would otherwise make the same call over every item of a list, or chain calls whose arguments come from the last one's output: a plan that reads forty records and reports the three that are wrong costs one entry in the conversation instead of forty-one. Not for a couple of unrelated calls, and not when you need to read each intermediate result yourself — you never see them.
+Run several tool calls as one plan, piping each step's output into the next with jq, and return only the filtered result. For fanning one call out over a list, or chaining calls whose arguments come from the previous output: forty reads reporting three bad records cost one conversation entry instead of forty-one. Not for a couple of unrelated calls, and not when you need to read the intermediate results — you never see them.
 
 ```json
 {
@@ -13,14 +11,13 @@ Reach for it when you would otherwise make the same call over every item of a li
 }
 ```
 
-Steps run in order, each binding its output to a jq variable named after its `id` — `$hits`, `$files`. A step's output is its tool's response, parsed as JSON when the tool answers in JSON and the raw string otherwise.
+Each step binds its output to `$<id>`, parsed as JSON when the tool answers in JSON, else the raw string.
 
-- `id` — unique, and a valid jq identifier.
-- `tool` — any tool you can call directly, except `batch`.
-- `input` / `input_jq` — literal JSON, or a jq expression producing it; `input_jq` shallow-merges over `input`.
-- `for_each` — a jq expression of items to fan out over. Runs once per item with `$item` and `$index` bound, 8 at a time, and outputs the results in item order.
-- `when` — a jq expression gating the step; falsy skips it and its output is `null`.
-- `on_error` — `fail` (default) aborts the plan; `collect` records `{"error": "..."}` and continues, which is what you want inside a `for_each` where one bad item should not lose the other thirty-nine.
-- `return` — a jq expression over those variables, and **the only thing that enters the conversation**, so filter, count or project here. It defaults to the last step's output, which is rarely right for a wide fan-out.
+- `id` — unique, valid jq identifier. `tool` — any tool but `batch`.
+- `input` / `input_jq` — literal JSON, or jq producing it; `input_jq` shallow-merges over `input`.
+- `for_each` — jq listing items to fan out over. Runs once per item with `$item`/`$index`, 8 at a time, output in item order.
+- `when` — jq gate; falsy skips the step, output `null`.
+- `on_error` — `fail` (default) aborts; `collect` records `{"error": "..."}` and continues, which is what a `for_each` wants.
+- `return` — jq over those variables, and **the only thing that enters the conversation**. Defaults to the last step's output, rarely right for a fan-out.
 
-Every expression evaluates against a `null` input: everything reachable arrives through `$variables`, so `.` is never the previous step. The plan is checked before it runs anything, and a failure reports the shape of each step output so far.
+Every expression evaluates against `null` input: everything arrives through `$variables`, so `.` is never the previous step. The plan is validated before anything runs.

@@ -440,6 +440,16 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	return common.Section(a.sty, assistant, width)
 }
 
+// HandleKeyEvent implements KeyEventHandler. The footer's whole content
+// is the line it renders, so copy hands back that line unstyled rather
+// than leaving the item silently uncopyable.
+func (a *AssistantInfoItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (bool, tea.Cmd) {
+	if keys.MatchesCopy(msg) {
+		return true, common.CopyToClipboard(copyPlainRender(a, maxTextWidth), copyToastMessage)
+	}
+	return false, nil
+}
+
 // cappedMessageWidth returns the maximum width for message content for readability.
 func cappedMessageWidth(availableWidth int) int {
 	return min(availableWidth-MessageLeftPaddingTotal, maxTextWidth)

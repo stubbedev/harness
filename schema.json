@@ -3,32 +3,6 @@
   "$id": "https://github.com/stubbedev/harness/internal/config/config",
   "$ref": "#/$defs/Config",
   "$defs": {
-    "Attribution": {
-      "properties": {
-        "trailer_style": {
-          "type": "string",
-          "enum": [
-            "none",
-            "co-authored-by",
-            "assisted-by"
-          ],
-          "description": "Style of attribution trailer to add to commits",
-          "default": "assisted-by"
-        },
-        "co_authored_by": {
-          "type": "boolean",
-          "description": "Deprecated: use trailer_style instead",
-          "deprecated": true
-        },
-        "generated_with": {
-          "type": "boolean",
-          "description": "Add Generated with Harness line to commit messages and issues and PRs",
-          "default": true
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
     "Completions": {
       "properties": {
         "max_depth": {
@@ -518,6 +492,17 @@
           "type": "array",
           "description": "Paths to directories containing Agent Skills (folders with SKILL.md files)"
         },
+        "extensions_paths": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "~/.config/harness/extensions",
+              "./.harness/extensions"
+            ]
+          },
+          "type": "array",
+          "description": "Paths to directories containing Lua extensions (folders with an init.lua)"
+        },
         "tui": {
           "$ref": "#/$defs/TUIOptions",
           "description": "Terminal user interface options"
@@ -589,10 +574,6 @@
           "description": "Ignore all default/embedded providers. When enabled, providers must be fully specified in the config file with base_url, models, and api_key - no merging with defaults occurs",
           "default": false
         },
-        "attribution": {
-          "$ref": "#/$defs/Attribution",
-          "description": "Attribution settings for generated content"
-        },
         "disable_metrics": {
           "type": "boolean",
           "description": "Disable sending metrics",
@@ -640,6 +621,16 @@
           },
           "type": "array",
           "description": "List of skill names to disable and hide from the agent"
+        },
+        "disabled_extensions": {
+          "items": {
+            "type": "string",
+            "examples": [
+              "jira"
+            ]
+          },
+          "type": "array",
+          "description": "List of Lua extension names to disable"
         },
         "disable_update_check": {
           "type": "boolean",

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/invopop/jsonschema"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/oauth"
@@ -434,33 +433,11 @@ const (
 	ExitBannerNone ExitBanner = "none"
 )
 
-type TrailerStyle string
-
-const (
-	TrailerStyleNone         TrailerStyle = "none"
-	TrailerStyleCoAuthoredBy TrailerStyle = "co-authored-by"
-	TrailerStyleAssistedBy   TrailerStyle = "assisted-by"
-)
-
-type Attribution struct {
-	TrailerStyle  TrailerStyle `json:"trailer_style,omitempty" jsonschema:"description=Style of attribution trailer to add to commits,enum=none,enum=co-authored-by,enum=assisted-by,default=assisted-by"`
-	CoAuthoredBy  *bool        `json:"co_authored_by,omitempty" jsonschema:"description=Deprecated: use trailer_style instead"`
-	GeneratedWith bool         `json:"generated_with,omitempty" jsonschema:"description=Add Generated with Harness line to commit messages and issues and PRs,default=true"`
-}
-
-// JSONSchemaExtend marks the co_authored_by field as deprecated in the schema.
-func (Attribution) JSONSchemaExtend(schema *jsonschema.Schema) {
-	if schema.Properties != nil {
-		if prop, ok := schema.Properties.Get("co_authored_by"); ok {
-			prop.Deprecated = true
-		}
-	}
-}
-
 type Options struct {
 	ContextPaths         []string       `json:"context_paths,omitempty" jsonschema:"description=Paths to files containing context information for the AI,example=.cursorrules,example=HARNESS.md"`
 	GlobalContextPaths   []string       `json:"global_context_paths,omitempty" jsonschema:"description=Paths to files containing global context information for the AI,default=~/.config/harness/HARNESS.md,default=~/.config/AGENTS.md"`
 	SkillsPaths          []string       `json:"skills_paths,omitempty" jsonschema:"description=Paths to directories containing Agent Skills (folders with SKILL.md files),example=~/.config/harness/skills,example=./skills"`
+	ExtensionsPaths      []string       `json:"extensions_paths,omitempty" jsonschema:"description=Paths to directories containing Lua extensions (folders with an init.lua),example=~/.config/harness/extensions,example=./.harness/extensions"`
 	TUI                  *TUIOptions    `json:"tui,omitempty" jsonschema:"description=Terminal user interface options"`
 	Memory               *MemoryOptions `json:"memory,omitempty" jsonschema:"description=Durable agent memory options"`
 	Debug                bool           `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
@@ -482,21 +459,21 @@ type Options struct {
 	// Relative paths are resolved against the working directory;
 	// absolute paths are used verbatim. After defaulting the stored
 	// value is always absolute.
-	DataDirectory             string       `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Defaults to a per-workspace directory under the global data root. Relative paths are resolved against the working directory; absolute paths are used as-is."`
-	DisabledTools             []string     `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=shell,example=web_search"`
-	DisableProviderAutoUpdate bool         `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
-	DisableDefaultProviders   bool         `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
-	Attribution               *Attribution `json:"attribution,omitempty" jsonschema:"description=Attribution settings for generated content"`
-	DisableMetrics            bool         `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
-	InitializeAs              string       `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=HARNESS.md,example=CLAUDE.md,example=docs/LLMs.md"`
-	AutoLSP                   *bool        `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
-	Progress                  *bool        `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
-	Notifications             string       `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
-	DisabledSkills            []string     `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=harness-config"`
-	DisableUpdateCheck        bool         `json:"disable_update_check,omitempty" jsonschema:"description=Disable the startup check for Harness updates - useful when the binary is managed externally (nix\\, package manager),default=false"`
-	RequestTimeout            *int         `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
-	SubagentsPaths            []string     `json:"subagents_paths,omitempty" jsonschema:"description=Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"`
-	DisabledSubagents         []string     `json:"disabled_subagents,omitempty" jsonschema:"description=List of subagent names to disable and hide from the agent"`
+	DataDirectory             string   `json:"data_directory,omitempty" jsonschema:"description=Directory for storing application data. Defaults to a per-workspace directory under the global data root. Relative paths are resolved against the working directory; absolute paths are used as-is."`
+	DisabledTools             []string `json:"disabled_tools,omitempty" jsonschema:"description=List of built-in tools to disable and hide from the agent,example=shell,example=web_search"`
+	DisableProviderAutoUpdate bool     `json:"disable_provider_auto_update,omitempty" jsonschema:"description=Disable providers auto-update,default=false"`
+	DisableDefaultProviders   bool     `json:"disable_default_providers,omitempty" jsonschema:"description=Ignore all default/embedded providers. When enabled\\, providers must be fully specified in the config file with base_url\\, models\\, and api_key - no merging with defaults occurs,default=false"`
+	DisableMetrics            bool     `json:"disable_metrics,omitempty" jsonschema:"description=Disable sending metrics,default=false"`
+	InitializeAs              string   `json:"initialize_as,omitempty" jsonschema:"description=Name of the context file to create/update during project initialization,default=AGENTS.md,example=AGENTS.md,example=HARNESS.md,example=CLAUDE.md,example=docs/LLMs.md"`
+	AutoLSP                   *bool    `json:"auto_lsp,omitempty" jsonschema:"description=Automatically setup LSPs based on root markers,default=true"`
+	Progress                  *bool    `json:"progress,omitempty" jsonschema:"description=Show indeterminate progress updates during long operations,default=true"`
+	Notifications             string   `json:"notifications,omitempty" jsonschema:"description=Notification style to use. Options: auto (default)\\, native\\, osc\\, bell\\, disabled. Auto selects based on environment: native for local sessions\\, osc for SSH (with automatic OSC 99/777 detection).,enum=auto,enum=native,enum=osc,enum=bell,enum=disabled,default=auto"`
+	DisabledSkills            []string `json:"disabled_skills,omitempty" jsonschema:"description=List of skill names to disable and hide from the agent,example=harness-config"`
+	DisabledExtensions        []string `json:"disabled_extensions,omitempty" jsonschema:"description=List of Lua extension names to disable,example=jira"`
+	DisableUpdateCheck        bool     `json:"disable_update_check,omitempty" jsonschema:"description=Disable the startup check for Harness updates - useful when the binary is managed externally (nix\\, package manager),default=false"`
+	RequestTimeout            *int     `json:"request_timeout,omitempty" jsonschema:"description=Timeout in seconds for each LLM API request. Streaming responses are aborted only after this much inactivity\\, so slow but active streams are never killed. 0 disables it\\, negative values are invalid.,default=60,example=120,example=300,example=0"`
+	SubagentsPaths            []string `json:"subagents_paths,omitempty" jsonschema:"description=Paths to directories containing subagent definition files (*.md files with YAML frontmatter)"`
+	DisabledSubagents         []string `json:"disabled_subagents,omitempty" jsonschema:"description=List of subagent names to disable and hide from the agent"`
 	// MaxConcurrentSubagents bounds how many dispatched sub-agents run at
 	// once. Dispatches beyond the limit wait for a slot instead of failing.
 	MaxConcurrentSubagents *int `json:"max_concurrent_subagents,omitempty" jsonschema:"description=Maximum sub-agents running at once. Dispatches beyond the limit wait for a free slot rather than failing. Values below 1 are clamped to 1.,minimum=1,default=24,example=8,example=48"`

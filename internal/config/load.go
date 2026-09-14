@@ -361,7 +361,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			prepared.BaseURL = endpoint
 			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
 		case catalog.InferenceProviderBedrock:
-			if p.APIKey == "" && !hasAWSCredentials(env) {
+			// The catalog carries "$AWS_ACCESS_KEY_ID" as the key, so the
+			// template is never empty: resolve it before deciding, or
+			// Bedrock configures itself on every machine, credentials or
+			// not, and then shows up as a connected provider.
+			key, err := resolver.ResolveValue(p.APIKey)
+			if (key == "" || err != nil) && !hasAWSCredentials(env) {
 				if configExists {
 					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
 					c.Providers.Del(string(p.ID))
@@ -682,30 +687,19 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 
+	// Extension directories, global then project, guarded the same way.
+	for _, dir := range append(GlobalExtensionsDirs(), ProjectExtensionsDir(workingDir)...) {
+		if !slices.Contains(c.Options.ExtensionsPaths, dir) {
+			c.Options.ExtensionsPaths = append(c.Options.ExtensionsPaths, dir)
+		}
+	}
+
 	if str, ok := os.LookupEnv("HARNESS_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}
 
 	if str, ok := os.LookupEnv("HARNESS_DISABLE_DEFAULT_PROVIDERS"); ok {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
-	}
-
-	if c.Options.Attribution == nil {
-		c.Options.Attribution = &Attribution{
-			TrailerStyle:  TrailerStyleAssistedBy,
-			GeneratedWith: true,
-		}
-	} else if c.Options.Attribution.TrailerStyle == "" {
-		// Migrate deprecated co_authored_by or apply default
-		if c.Options.Attribution.CoAuthoredBy != nil {
-			if *c.Options.Attribution.CoAuthoredBy {
-				c.Options.Attribution.TrailerStyle = TrailerStyleCoAuthoredBy
-			} else {
-				c.Options.Attribution.TrailerStyle = TrailerStyleNone
-			}
-		} else {
-			c.Options.Attribution.TrailerStyle = TrailerStyleAssistedBy
-		}
 	}
 
 	c.Options.InitializeAs = cmp.Or(c.Options.InitializeAs, defaultInitializeAs)
@@ -1525,4 +1519,58 @@ func (c *Config) ValidateHooks() error {
 		}
 	}
 	return nil
+}
+
+// GlobalExtensionsDirs returns the default global directories for Lua
+// extensions. The HARNESS_EXTENSIONS_DIR environment variable, when set
+// to a non-empty value, overrides the default list entirely.
+func GlobalExtensionsDirs() []string {
+	if dir := os.Getenv("HARNESS_EXTENSIONS_DIR"); dir != "" {
+		return []string{dir}
+	}
+
+	paths := []string{
+		filepath.Join(home.Config(), appName, "extensions"),
+		filepath.Join(home.Config(), "agents", "extensions"),
+	}
+	if runtime.GOOS == "windows" {
+		appData := cmp.Or(
+			os.Getenv("LOCALAPPDATA"),
+			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
+		)
+		paths = append(
+			paths,
+			filepath.Join(appData, appName, "extensions"),
+			filepath.Join(appData, "agents", "extensions"),
+		)
+	}
+	return paths
+}
+
+// projectExtensionSubdirs lists the conventional subdirectories where
+// project-level extensions are discovered.
+var projectExtensionSubdirs = []string{
+	".harness/extensions",
+	".agents/extensions",
+}
+
+// ProjectExtensionsDir returns the default project directories in which
+// Harness looks for extensions. Repository-root paths come first and
+// working-directory paths last: extensions.Discover keeps the last
+// occurrence of a name, so a working-directory extension overrides a
+// monorepo-root one with the same name.
+func ProjectExtensionsDir(workingDir string) []string {
+	dirs := make([]string, 0, len(projectExtensionSubdirs)*2)
+
+	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
+		for _, sub := range projectExtensionSubdirs {
+			dirs = append(dirs, filepath.Join(root, sub))
+		}
+	}
+
+	for _, sub := range projectExtensionSubdirs {
+		dirs = append(dirs, filepath.Join(workingDir, sub))
+	}
+
+	return dirs
 }

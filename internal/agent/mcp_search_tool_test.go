@@ -206,7 +206,7 @@ func TestMCPSearchToolInfoNamesTools(t *testing.T) {
 
 		desc := tool.Info().Description
 		assert.Contains(t, desc, "Its 2 tools are named below")
-		assert.Contains(t, desc, "Tools on this server: issue_create, pr_merge")
+		assert.Contains(t, desc, "Tools: issue_create, pr_merge")
 		// Only the names: the descriptions stay behind the search.
 		assert.NotContains(t, desc, "Open a new issue")
 	})
@@ -225,6 +225,6 @@ func TestMCPSearchToolInfoNamesTools(t *testing.T) {
 
 	t.Run("a server with no tools does not render an empty list", func(t *testing.T) {
 		tool := searchToolWithRegistry(t, "empty", nil)
-		assert.Contains(t, tool.Info().Description, "Tools on this server: (none)")
+		assert.Contains(t, tool.Info().Description, "Tools: (none)")
 	})
 }

@@ -45,6 +45,11 @@ type Prompt struct {
 	// for subagents that pin an explicit skills set, so the preloaded skills are
 	// their only skill exposure.
 	suppressAvailableSkills bool
+	// skillSearch replaces the <available_skills> discovery list with the
+	// steering for the skill_search tool, which carries the names itself and
+	// hands over a trigger or a whole SKILL.md on demand. Set by callers that
+	// actually put that tool in the tool set.
+	skillSearch bool
 }
 
 type PromptDat struct {
@@ -59,6 +64,7 @@ type PromptDat struct {
 	ContextFiles       []ContextFile
 	GlobalContextFiles []ContextFile
 	AvailSkillXML      string
+	SkillSearch        bool
 	AvailSubagentXML   string
 	SubagentBody       string
 	PreloadedSkillsXML string
@@ -93,6 +99,14 @@ func WithWorkingDir(workingDir string) Option {
 
 func WithSuppressAvailableSkills(suppress bool) Option {
 	return func(p *Prompt) { p.suppressAvailableSkills = suppress }
+}
+
+// WithSkillSearch defers skill discovery to the skill_search tool: the
+// <available_skills> list is left out of the prompt (names, triggers and
+// locations all live in that tool instead) and the skills steering points at
+// it. Only pass it when the tool is actually in the agent's tool set.
+func WithSkillSearch(enabled bool) Option {
+	return func(p *Prompt) { p.skillSearch = enabled }
 }
 
 func WithSubagentBody(body string) Option {
@@ -254,6 +268,10 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	var availSkillXML string
 	switch {
 	case p.suppressAvailableSkills:
+	case p.skillSearch:
+		// The skill_search tool carries the names, so rendering the list
+		// here as well would be paying for discovery twice. The discovery
+		// walk is skipped with it.
 	case p.availSkillXMLSet:
 		availSkillXML = p.availSkillXML
 	default:
@@ -299,6 +317,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		Platform:           platform,
 		Date:               p.now().Format("1/2/2006"),
 		AvailSkillXML:      availSkillXML,
+		SkillSearch:        p.skillSearch,
 		AvailSubagentXML:   p.availSubagentXML,
 		SubagentBody:       p.subagentBody,
 		PreloadedSkillsXML: p.preloadedSkillsXML,

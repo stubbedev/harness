@@ -251,9 +251,14 @@ type ptyRunner struct {
 	// no command (poll, keys, input) have no sentinel to read, so they
 	// report this instead of the directory the shell started in.
 	lastCwd string
-	slot    int
-	ask     question.Service
-	session ptyTerminal
+	// announcedCwd is the directory the model was last told about. It
+	// starts as the directory the shell opened in, which the system
+	// prompt already states, so a session that never leaves it never
+	// spends a line saying so.
+	announcedCwd string
+	slot         int
+	ask          question.Service
+	session      ptyTerminal
 
 	startedAt time.Time
 	lastUsed  time.Time
@@ -560,6 +565,10 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 		r.restarted = true
 		r.orphan = false
 		r.lastCwd = ""
+		// The replacement shell opens in the session directory again, so
+		// that is what the model should be told about next -- and only if
+		// something moves away from it.
+		r.announcedCwd = r.cwd
 		if time.Since(r.startedAt) < ptyRestartDelay {
 			time.Sleep(ptyRestartDelay)
 		}
@@ -662,6 +671,7 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 	r.lastEcho = nil
 	r.lastScreen = ""
 	r.lastCwd = ""
+	r.announcedCwd = r.cwd
 	r.mu.Unlock()
 
 	if old != nil {
@@ -1663,4 +1673,27 @@ func (r *ptyRunner) Close() {
 		r.session.Close()
 		r.session = nil
 	}
+}
+
+// cwdIfMoved returns cwd when it differs from the directory the model was
+// last told about, and the empty string when it has not moved. The session
+// is persistent, so its working directory is conversation state the model
+// already holds: repeating it on every call restates what it knows and
+// buries the one case that matters, a command that left the shell
+// somewhere new.
+//
+// The baseline is the directory the session opened in -- the same one the
+// system prompt names -- so the tag first appears on the call that actually
+// moves away from it.
+func (r *ptyRunner) cwdIfMoved(cwd string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.announcedCwd == "" {
+		r.announcedCwd = r.cwd
+	}
+	if cwd == "" || cwd == r.announcedCwd {
+		return ""
+	}
+	r.announcedCwd = cwd
+	return cwd
 }

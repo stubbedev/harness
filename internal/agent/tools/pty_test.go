@@ -937,3 +937,19 @@ func TestPtyRunner_CleanDropsPromptAndSentinelLines(t *testing.T) {
 	require.Equal(t, "hello", r.clean(raw, []string{cmd}),
 		"prompt markers, the exit sentinel and the fence are bookkeeping, not output")
 }
+
+// TestPtyRunner_CwdIfMoved pins the rule the shell response relies on: the
+// working directory is announced when it changes and stays silent when it
+// does not, so a persistent session does not restate its own state on every
+// call.
+func TestPtyRunner_CwdIfMoved(t *testing.T) {
+	t.Parallel()
+
+	r := &ptyRunner{cwd: "/repo"}
+
+	require.Empty(t, r.cwdIfMoved("/repo"), "the directory the session opened in is already known")
+	require.Empty(t, r.cwdIfMoved(""), "a call with no sentinel announces nothing")
+	require.Equal(t, "/repo/sub", r.cwdIfMoved("/repo/sub"), "a move is announced")
+	require.Empty(t, r.cwdIfMoved("/repo/sub"), "staying put is not announced again")
+	require.Equal(t, "/repo", r.cwdIfMoved("/repo"), "moving back is a move too")
+}

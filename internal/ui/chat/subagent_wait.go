@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/stubbedev/harness/internal/ui/anim"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -117,4 +118,19 @@ func (w *SubagentWaitItem) Render(width int) string {
 		lines[i] = prefix + ln
 	}
 	return strings.Join(lines, "\n")
+}
+
+// HandleKeyEvent implements [KeyEventHandler]. The entry is one live
+// status line; copy hands back that line with the spinner and styling
+// stripped, so the item is not a dead spot for the copy binding.
+func (w *SubagentWaitItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (bool, tea.Cmd) {
+	if keys.MatchesCopy(msg) {
+		label := "subagent"
+		if w.count != 1 {
+			label = "subagents"
+		}
+		text := fmt.Sprintf("Waiting for %d %s...", w.count, label)
+		return true, common.CopyToClipboard(text, copyToastMessage)
+	}
+	return false, nil
 }

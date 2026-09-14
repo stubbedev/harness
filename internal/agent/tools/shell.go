@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"charm.land/fantasy"
-	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/shell"
@@ -34,7 +32,7 @@ type ShellParams struct {
 	Keys                string `json:"keys,omitempty" description:"Named keys for the running program, comma separated in order (e.g. \"ctrl+c\", \"escape, :, w, q, enter\"). An unknown name comes back with the supported list."`
 	Reset               bool   `json:"reset,omitempty" description:"Kill a wedged session and start a fresh one, losing everything the old shell held"`
 	WorkingDir          string `json:"working_dir,omitempty" description:"Directory to open the session in; the session tracks cd from then on"`
-	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Run detached in a background shell; read it later with job_output. Servers and watchers only."`
+	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Run detached in a background shell; read it later with the job tool. Servers and watchers only."`
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to hold a command that has gone completely idle before returning it as still running (default 60, ceiling 15 minutes)"`
 }
 
@@ -74,11 +72,7 @@ var shellDescriptionTpl = template.Must(
 
 type shellDescriptionData struct {
 	MaxOutputLength int
-	Attribution     config.Attribution
-	ModelID         string
 	ModernTools     string
-	GhAvailable     bool
-	IsGitRepo       bool
 	DefaultRows     int
 	DefaultCols     int
 	Shell           string
@@ -157,21 +151,14 @@ var bannedCommands = []string{
 	"ufw",
 }
 
-func shellDescription(shell, workingDir string, attribution *config.Attribution, modelID string) string {
+func shellDescription(shell string) string {
 	descRows, descCols := term.DefaultSize()
 	var out bytes.Buffer
 	if err := shellDescriptionTpl.Execute(&out, shellDescriptionData{
 		MaxOutputLength: MaxOutputLength,
-		Attribution:     *attribution,
-		ModelID:         modelID,
 		ModernTools:     availableModernTools(),
-		GhAvailable:     ghAvailable,
-		// The commit and pull-request guidance is a third of this
-		// description and is dead weight outside a repository, where
-		// none of it can be acted on.
-		IsGitRepo:   isGitRepo(workingDir),
-		DefaultRows: descRows,
-		DefaultCols: descCols,
+		DefaultRows:     descRows,
+		DefaultCols:     descCols,
 		// Naming the shell is most of what the model needs from this
 		// description: it already knows how to write for bash, zsh or
 		// PowerShell, but not which one it has. The tool is only built
@@ -283,7 +270,7 @@ func blockFuncs() []shell.BlockFunc {
 // to lie about which shell it is writing for, and the session would open
 // against a guess or not at all. ShellAvailable answers the same
 // question without building anything.
-func NewShellTool(workingDir, owner string, attribution *config.Attribution, modelID string, questions question.Service) fantasy.AgentTool {
+func NewShellTool(workingDir, owner string, questions question.Service) fantasy.AgentTool {
 	shellPath, ok := term.Shell()
 	if !ok {
 		return nil
@@ -299,7 +286,7 @@ func NewShellTool(workingDir, owner string, attribution *config.Attribution, mod
 	_ = ptyRunnerFor(owner, workingDir, questions)
 	return fantasy.NewAgentTool(
 		ShellToolName,
-		string(shellDescription(shellPath, workingDir, attribution, modelID)),
+		string(shellDescription(shellPath)),
 		func(ctx context.Context, params ShellParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
@@ -347,7 +334,6 @@ func NewShellTool(workingDir, owner string, attribution *config.Attribution, mod
 					if stdout == "" {
 						stdout = ShellNoOutput
 					}
-					stdout += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
 					return fantasy.WithResponseMetadata(fantasy.NewTextResponse(stdout), metadata), nil
 				}
 
@@ -361,7 +347,6 @@ func NewShellTool(workingDir, owner string, attribution *config.Attribution, mod
 					ShellID:          bgShell.ID,
 				}
 				response := fmt.Sprintf("[background shell %s]", bgShell.ID)
-				response += fmt.Sprintf("\n\n<cwd>%s</cwd>", normalizeWorkingDir(bgShell.WorkingDir))
 				return fantasy.WithResponseMetadata(fantasy.NewTextResponse(response), metadata), nil
 			}
 
@@ -476,7 +461,10 @@ func NewShellTool(workingDir, owner string, attribution *config.Attribution, mod
 			} else if header == "" {
 				sb.WriteString(ShellNoOutput)
 			}
-			fmt.Fprintf(&sb, "\n\n<cwd>%s</cwd>", normalizeWorkingDir(cwd))
+			// Only when the shell actually moved: see ptyRunner.cwdIfMoved.
+			if moved := session.cwdIfMoved(cwd); moved != "" {
+				fmt.Fprintf(&sb, "\n\n<cwd>%s</cwd>", normalizeWorkingDir(moved))
+			}
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(sb.String()), metadata), nil
 		},
 	)
@@ -546,25 +534,6 @@ func normalizeWorkingDir(path string) string {
 		path = strings.ReplaceAll(path, fsext.WindowsWorkingDirDrive(), "")
 	}
 	return filepath.ToSlash(path)
-}
-
-// isGitRepo reports whether dir is inside a git working tree. Used only
-// to decide whether the commit and pull-request guidance is worth its
-// place in the tool description.
-func isGitRepo(dir string) bool {
-	if abs, err := filepath.Abs(dir); err == nil {
-		dir = abs
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return false
-		}
-		dir = parent
-	}
 }
 
 // ShellAvailable reports whether a shell could be identified to run a

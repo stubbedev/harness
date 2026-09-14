@@ -102,12 +102,33 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 // tested against the context's subject (tool name, or sub-agent type for
 // SubagentStop).
 func (r *Runner) RunEvent(ctx context.Context, ec EventContext) (AggregateResult, error) {
+	results, infos := r.results(ctx, ec)
+	if len(results) == 0 {
+		return AggregateResult{Decision: DecisionNone}, nil
+	}
+	agg := aggregate(results, ec.ToolInput)
+	agg.Hooks = infos
+	slog.Info(
+		"Hook completed",
+		"event", ec.Event,
+		"tool", ec.ToolName,
+		"hooks", len(results),
+		"decision", agg.Decision.String(),
+	)
+	return agg, nil
+}
+
+// results runs every hook matching the event and returns the raw
+// results alongside the per-hook info, in config order. The registry
+// merges these with the results of any in-process dispatchers before
+// aggregating, so a Lua handler and a shell hook are weighed together.
+func (r *Runner) results(ctx context.Context, ec EventContext) ([]HookResult, []HookInfo) {
 	if ec.CWD == "" {
 		ec.CWD = r.cwd
 	}
 	matching := r.matchingHooks(ec.Subject())
 	if len(matching) == 0 {
-		return AggregateResult{Decision: DecisionNone}, nil
+		return nil, nil
 	}
 
 	// Deduplicate by command string.
@@ -136,10 +157,9 @@ func (r *Runner) RunEvent(ctx context.Context, ec EventContext) (AggregateResult
 	}
 	wg.Wait()
 
-	agg := aggregate(results, ec.ToolInput)
-	agg.Hooks = make([]HookInfo, len(deduped))
+	infos := make([]HookInfo, len(deduped))
 	for i, h := range deduped {
-		agg.Hooks[i] = HookInfo{
+		infos[i] = HookInfo{
 			Name:         h.DisplayName(),
 			Matcher:      h.Matcher,
 			Decision:     results[i].Decision.String(),
@@ -148,14 +168,7 @@ func (r *Runner) RunEvent(ctx context.Context, ec EventContext) (AggregateResult
 			InputRewrite: results[i].UpdatedInput != "",
 		}
 	}
-	slog.Info(
-		"Hook completed",
-		"event", ec.Event,
-		"tool", ec.ToolName,
-		"hooks", len(deduped),
-		"decision", agg.Decision.String(),
-	)
-	return agg, nil
+	return results, infos
 }
 
 // matchingHooks returns hooks whose matcher matches the subject (or has

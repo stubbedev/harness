@@ -211,6 +211,8 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("GET /v1/workspaces/{id}/project/init-prompt", c.handleGetWorkspaceProjectInitPrompt)
 	mux.HandleFunc("GET /v1/workspaces/{id}/skills", c.handleGetWorkspaceSkills)
 	mux.HandleFunc("POST /v1/workspaces/{id}/skills/read", c.handlePostWorkspaceSkillRead)
+	mux.HandleFunc("GET /v1/workspaces/{id}/extensions/commands", c.handleGetWorkspaceExtensionCommands)
+	mux.HandleFunc("POST /v1/workspaces/{id}/extensions/commands/run", c.handlePostWorkspaceExtensionCommandRun)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/refresh-tools", c.handlePostWorkspaceMCPRefreshTools)
 	mux.HandleFunc("POST /v1/workspaces/{id}/mcp/read-resource", c.handlePostWorkspaceMCPReadResource)
 	mux.HandleFunc("GET /v1/workspaces/{id}/mcp/prompts", c.handleGetWorkspaceMCPPrompts)

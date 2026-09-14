@@ -299,3 +299,40 @@ func (c *Client) GetMCPPrompt(ctx context.Context, id, clientID, promptID string
 	}
 	return result.Prompt, nil
 }
+
+// ListExtensionCommands retrieves the extension commands for a workspace.
+func (c *Client) ListExtensionCommands(ctx context.Context, id string) ([]proto.ExtensionCommandInfo, error) {
+	rsp, err := c.get(ctx, fmt.Sprintf("/workspaces/%s/extensions/commands", id), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list extension commands: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list extension commands: status code %d", rsp.StatusCode)
+	}
+	var commands []proto.ExtensionCommandInfo
+	if err := json.NewDecoder(rsp.Body).Decode(&commands); err != nil {
+		return nil, fmt.Errorf("failed to decode extension commands: %w", err)
+	}
+	return commands, nil
+}
+
+// RunExtensionCommand expands an extension command into its prompt.
+func (c *Client) RunExtensionCommand(ctx context.Context, id, commandID string, args map[string]string) (string, error) {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/extensions/commands/run", id), nil, jsonBody(proto.RunExtensionCommandRequest{
+		CommandID: commandID,
+		Arguments: args,
+	}), http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return "", fmt.Errorf("failed to run extension command: %w", err)
+	}
+	defer rsp.Body.Close()
+	if rsp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to run extension command: status code %d", rsp.StatusCode)
+	}
+	var result proto.RunExtensionCommandResponse
+	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode extension command response: %w", err)
+	}
+	return result.Prompt, nil
+}

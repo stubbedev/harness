@@ -1,3 +1,3 @@
-Edit a file by exact find-and-replace. `edits` is a list applied in order, so several changes to one file belong in a single call; a single-element list is an ordinary one-off edit. An empty `old_string` on the first edit creates the file.
+Edit a file by exact find-and-replace. `edits` applies in order, so several changes to one file belong in one call. An empty `old_string` on the first edit creates the file.
 
-If an `old_string` differs from the file only in whitespace, the matching lines are still edited and `new_string` is re-indented to the file's style; the response says when that happened, so check the result. Prefer `lsp_replace_symbol` for whole functions, methods and types, `lsp_rename` for renames across files, and `write` for new files and full rewrites.
+An `old_string` that differs only in whitespace still matches, and `new_string` is re-indented to the file's style; the response says when that happened. For a whole function, method or type use `lsp` action `replace_symbol`; for a rename across files, action `rename`; for a new file or full rewrite, `write`.

@@ -577,6 +577,11 @@ Hooks aren't limited to shell scripts: any executable works. Here's the same
 
 `{"matcher": "^bash$", "command": "lua ./hooks/no-rm-rf.lua"}`
 
+> [!TIP]
+> This one needs a `lua` binary on PATH. Harness also embeds a Lua VM:
+> written as an [extension](../extensions/README.md), the same guard runs
+> in-process with no interpreter to install.
+
 ```lua
 local input = io.read("*a")
 local tool_input = input:match('"command":"(.-)"') or ""

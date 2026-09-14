@@ -14,7 +14,7 @@ Harness is a terminal-based AI coding assistant, forked from
 - **Flexible:** switch LLMs mid-session while preserving context
 - **Session-Based:** maintain multiple work sessions and contexts per project
 - **LSP-Enhanced:** Harness uses LSPs for additional context, just like you do
-- **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`)
+- **Extensible:** add capabilities via MCPs (`http`, `stdio`, and `sse`), or in-process with Lua extensions
 - **Works Everywhere:** first-class support in every terminal on macOS, Linux, Windows (PowerShell and WSL), Android, FreeBSD, OpenBSD, and NetBSD
 
 ## Installation
@@ -342,6 +342,14 @@ tool/prompt/resource list-changed notifications.
 Harness has preliminary support for hooks. For details, see
 [the hook guide](./docs/hooks/).
 
+### Extensions
+
+Extensions are Lua programs that run inside Harness, registering agent tools,
+hook handlers and slash commands. They live in
+`~/.config/harness/extensions/<name>/init.lua` (or `.harness/extensions/` in a
+project), run in a sandboxed VM with no ambient I/O, and need no interpreter
+installed. For details, see [the extension guide](./docs/extensions/).
+
 ### Sharing a workspace across clients
 
 When Harness is run against a shared backend (for example two TUIs talking to
@@ -551,26 +559,6 @@ This is useful if you prefer a different naming convention or want to place the
 file in a specific directory (e.g., `HARNESS.md` or `docs/LLMs.md`). Harness will
 fill the file with project-specific context like build commands, code patterns,
 and conventions it discovered during initialization.
-
-### Attribution Settings
-
-By default, Harness adds attribution information to Git commits and pull requests
-it creates. You can customize this behavior with `option` commands:
-
-```yaml
-options:
-  attribution:
-    trailer_style: co-authored-by
-    generated_with: true
-```
-
-- `trailer_style`: Controls the attribution trailer added to commit messages
-  (default: `assisted-by`)
-  - `assisted-by`: Adds `Assisted-by: Harness:[ModelID]` as specified in [the convention](https://docs.kernel.org/process/coding-assistants.html#attribution)
-  - `co-authored-by`: Adds `Co-Authored-By: Harness <noreply@github.com>`
-  - `none`: No attribution trailer
-- `generated_with`: When true (default), adds `💘 Generated with Harness` line to
-  commit messages and PR descriptions
 
 ### Custom Providers
 

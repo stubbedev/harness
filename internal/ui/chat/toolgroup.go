@@ -84,6 +84,10 @@ func NewToolGroupMessageItem(sty *styles.Styles, first ToolMessageItem) *ToolGro
 		sty:                  sty,
 		id:                   "toolgroup-" + first.ID(),
 		tools:                []ToolMessageItem{first},
+		// The sub-cursor starts on the group row. Without this the
+		// zero value reads as "on the first child", which the render
+		// path only got away with because it also checks focus.
+		selectedChild: -1,
 	}
 	g.anim = anim.New(anim.Settings{
 		ID:         g.id,
@@ -336,19 +340,11 @@ func (g *ToolGroupMessageItem) HandleMouseClick(btn ansi.MouseButton, x, y int) 
 }
 
 // HandleKeyEvent implements [KeyEventHandler]: the copy binding copies
-// every call in the group to the clipboard.
+// the sub-cursor's child, or the whole run when the cursor is on the
+// group row. See [ToolGroupMessageItem.formatGroupForCopy].
 func (g *ToolGroupMessageItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (bool, tea.Cmd) {
 	if keys.MatchesCopy(msg) {
-		var b strings.Builder
-		for i, t := range g.tools {
-			if i > 0 {
-				b.WriteString("\n\n")
-			}
-			if base, ok := t.(interface{ formatToolForCopy() string }); ok {
-				b.WriteString(base.formatToolForCopy())
-			}
-		}
-		return true, common.CopyToClipboard(b.String(), "Tool content copied to clipboard")
+		return true, common.CopyToClipboard(g.formatGroupForCopy(), copyToastMessage)
 	}
 	return false, nil
 }

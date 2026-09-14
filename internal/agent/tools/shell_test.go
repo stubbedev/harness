@@ -10,7 +10,6 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
-	"github.com/stubbedev/harness/internal/config"
 )
 
 func TestShellTool_DefaultAutoBackgroundThreshold(t *testing.T) {
@@ -65,8 +64,7 @@ func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 }
 
 func newShellToolForTest(workingDir string) fantasy.AgentTool {
-	attribution := &config.Attribution{TrailerStyle: config.TrailerStyleNone}
-	return NewShellTool(workingDir, "test", attribution, "test-model", nil)
+	return NewShellTool(workingDir, "test", nil)
 }
 
 // requireTerminalSession skips tests that execute commands through the

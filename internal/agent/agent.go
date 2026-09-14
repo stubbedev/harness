@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -818,8 +819,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
 
-	for _, server := range mcp.GetStates() {
+	live := liveMCPServers(agentTools)
+	states := mcp.GetStates()
+	for _, name := range slices.Sorted(maps.Keys(states)) {
+		server := states[name]
 		if server.State != mcp.StateConnected {
+			continue
+		}
+		// A server whose tools are deferred behind a tool_search stub has
+		// nothing callable in this request, so its instructions describe
+		// tools the model cannot reach -- the largest of them here ran to
+		// 4.5KB of "use these tools, do NOT shell out" for a server with
+		// zero tools in the tool list. They are withheld until the tools
+		// are loaded, which is when mcpSearchTool hands them over. Servers
+		// exposing resources or prompts still count as reachable: those
+		// are served by the shared mcp_resource tool, not by a tool of
+		// their own.
+		if !live[name] && server.Counts.Resources == 0 && server.Counts.Prompts == 0 {
 			continue
 		}
 		if s := server.Client.InitializeResult().Instructions; s != "" {

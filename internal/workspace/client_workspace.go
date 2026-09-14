@@ -20,6 +20,7 @@ import (
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/herdr"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/log"
@@ -1394,4 +1395,38 @@ func (w *ClientWorkspace) ListCheckpoints(ctx context.Context, sessionID string)
 
 func (w *ClientWorkspace) Rewind(ctx context.Context, sessionID, messageID string, mode checkpoints.Mode) error {
 	return w.client.RewindSession(ctx, w.workspaceID(), sessionID, messageID, string(mode))
+}
+
+// ListExtensionCommands returns the extension commands the server
+// reports for this workspace.
+func (w *ClientWorkspace) ListExtensionCommands(ctx context.Context) ([]extensions.Command, error) {
+	infos, err := w.client.ListExtensionCommands(ctx, w.workspaceID())
+	if err != nil {
+		return nil, err
+	}
+	result := make([]extensions.Command, len(infos))
+	for i, info := range infos {
+		args := make([]extensions.Argument, len(info.Arguments))
+		for j, arg := range info.Arguments {
+			args[j] = extensions.Argument{
+				ID:          arg.ID,
+				Title:       arg.Title,
+				Description: arg.Description,
+				Required:    arg.Required,
+			}
+		}
+		result[i] = extensions.Command{
+			ID:          info.ID,
+			Extension:   info.Extension,
+			Name:        info.Name,
+			Description: info.Description,
+			Arguments:   args,
+		}
+	}
+	return result, nil
+}
+
+// RunExtensionCommand asks the server to expand an extension command.
+func (w *ClientWorkspace) RunExtensionCommand(ctx context.Context, commandID string, args map[string]string) (string, error) {
+	return w.client.RunExtensionCommand(ctx, w.workspaceID(), commandID, args)
 }

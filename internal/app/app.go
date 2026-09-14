@@ -27,6 +27,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/event"
+	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/format"
 	"github.com/stubbedev/harness/internal/herdr"
@@ -71,6 +72,7 @@ type App struct {
 	LSPManager *lsp.Manager
 
 	Skills          *skills.Manager
+	Extensions      *extensions.Host
 	Subagents       *subagents.Manager
 	SubagentRuntime *subagents.Runtime
 
@@ -133,6 +135,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		),
 		LSPManager: lsp.NewManager(store),
 		Skills:     skillsMgr,
+		Extensions: extensions.New(ctx, extensions.OptionsFromStore(store)),
 		Subagents:  subagentsMgr,
 
 		// Created eagerly (rather than lazily in initCoderAgent) so
@@ -192,6 +195,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		app.cleanupFuncs,
 		func(context.Context) error { return db.Release(dataDir) },
 		func(ctx context.Context) error { return mcp.Close(ctx) },
+		func(context.Context) error { app.Extensions.Close(); return nil },
 	)
 
 	// TODO: remove the concept of agent config, most likely.
@@ -770,6 +774,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		Notify:       app.agentNotifications,
 		RunComplete:  app.runCompletions,
 		Skills:       app.Skills,
+		Extensions:   app.Extensions,
 		SubagentsMgr: app.Subagents,
 		Runtime:      app.SubagentRuntime,
 		Memory:       app.Memory,

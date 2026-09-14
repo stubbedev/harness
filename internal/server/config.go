@@ -553,3 +553,53 @@ func (c *controllerV1) handlePostWorkspaceMCPRefreshResources(w http.ResponseWri
 	c.backend.MCPRefreshResources(r.Context(), id, req.Name)
 	w.WriteHeader(http.StatusOK)
 }
+
+// handleGetWorkspaceExtensionCommands returns the slash commands the
+// workspace's Lua extensions registered.
+//
+//	@Summary		List extension commands
+//	@Tags			extensions
+//	@Produce		json
+//	@Param			id	path		string	true	"Workspace ID"
+//	@Success		200	{array}		proto.ExtensionCommandInfo
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/extensions/commands [get]
+func (c *controllerV1) handleGetWorkspaceExtensionCommands(w http.ResponseWriter, r *http.Request) {
+	commands, err := c.backend.ListExtensionCommands(r.PathValue("id"))
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, commands)
+}
+
+// handlePostWorkspaceExtensionCommandRun expands an extension command
+// into the prompt it stands for.
+//
+//	@Summary		Run an extension command
+//	@Tags			extensions
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string								true	"Workspace ID"
+//	@Param			request	body		proto.RunExtensionCommandRequest	true	"Run extension command request"
+//	@Success		200		{object}	proto.RunExtensionCommandResponse
+//	@Failure		400		{object}	proto.Error
+//	@Failure		404		{object}	proto.Error
+//	@Failure		500		{object}	proto.Error
+//	@Router			/workspaces/{id}/extensions/commands/run [post]
+func (c *controllerV1) handlePostWorkspaceExtensionCommandRun(w http.ResponseWriter, r *http.Request) {
+	var req proto.RunExtensionCommandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	prompt, err := c.backend.RunExtensionCommand(r.Context(), r.PathValue("id"), req.CommandID, req.Arguments)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.RunExtensionCommandResponse{Prompt: prompt})
+}

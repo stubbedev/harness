@@ -8,6 +8,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/skills"
 )
@@ -34,9 +35,10 @@ func NewHarnessTool(
 	allSkills []*skills.Skill,
 	activeSkills []*skills.Skill,
 	skillTracker *skills.Tracker,
+	host *extensions.Host,
 	logFile string,
 ) fantasy.AgentTool {
-	info, logs := NewHarnessInfoTool(cfg, lspManager, allSkills, activeSkills, skillTracker), NewHarnessLogsTool(logFile)
+	info, logs := NewHarnessInfoTool(cfg, lspManager, allSkills, activeSkills, skillTracker, host), NewHarnessLogsTool(logFile)
 	return fantasy.NewAgentTool(
 		HarnessToolName,
 		harnessDescription,

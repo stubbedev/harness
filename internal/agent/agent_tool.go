@@ -106,15 +106,13 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 		enumValues = append(enumValues, sa.Name)
 	}
 
-	typeDesc := `The type of agent to use. Lean light: the default is the small model, and the large model is an escalation you opt into.
-- "fast": the same read-and-edit tools on the small model, and the default when subagent_type is omitted. Use for any well-scoped lookup, survey, or edit piece, and dispatch many in the same message — it is cheap enough that splitting work across several of them beats doing it yourself.
-- "task": the same read-and-edit tools on the large model. Reserve for the genuinely open-ended piece that needs judgment — when a cheap pass would likely come back wrong or useless. Reaching for it by habit defeats its cost.`
+	typeDesc := `Which agent runs the prompt. Defaults to "fast" (small model).`
 	if len(reachable) > 0 {
 		lines := make([]string, 0, len(reachable))
 		for _, sa := range reachable {
 			lines = append(lines, "- "+describeSubagentForEnum(sa))
 		}
-		typeDesc += "\n\nAvailable specialized agents:\n" + strings.Join(lines, "\n")
+		typeDesc += "\n\nSpecialized agents:\n" + strings.Join(lines, "\n")
 	}
 
 	return fantasy.ToolInfo{
@@ -132,7 +130,7 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			},
 			"background": map[string]any{
 				"type":        "boolean",
-				"description": "Start the agent in the background and return immediately with a handle instead of waiting for its result. Messages it sends you arrive as new user messages between your steps while it runs; collect its result with the wait tool using the handle. Default false: the call blocks and returns the agent's final output.",
+				"description": "Return a handle immediately instead of the result; collect it with `wait`. Default false, which blocks.",
 			},
 		},
 		Required: []string{"prompt"},

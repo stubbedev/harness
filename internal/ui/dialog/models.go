@@ -274,9 +274,18 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	inputView := t.Dialog.InputPrompt.Render(m.input.View())
 	rc.AddPart(inputView)
 
-	listView := t.Dialog.List.Height(m.list.Height()).Render(m.list.Render())
-	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, m.list.Offset())
-	rc.AddPart(listView)
+	if m.list.Len() == 0 && !m.isOnboarding {
+		// Nothing is connected, so the list has nothing to offer. Say
+		// where the models come from instead of showing an empty box.
+		rc.AddPart(t.Dialog.SecondaryText.Render(fmt.Sprintf(
+			"No providers connected. Press %s to connect one.",
+			m.keyMap.Connect.Help().Key,
+		)))
+	} else {
+		listView := t.Dialog.List.Height(m.list.Height()).Render(m.list.Render())
+		listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, m.list.Offset())
+		rc.AddPart(listView)
+	}
 
 	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
@@ -357,17 +366,11 @@ func (m *Models) setProviderItems() error {
 	addedProviders := make(map[string]bool)
 
 	// A provider with no credentials cannot serve a request, so outside
-	// onboarding the list only shows configured ones. When nothing is
-	// configured the full catalog stays visible: the dialog is then the
-	// only way to pick (and thereby configure) a first provider.
-	anyConfigured := false
-	for _, p := range cfg.Providers.Seq2() {
-		if !p.Disable {
-			anyConfigured = true
-			break
-		}
-	}
-	showUnconfigured := m.isOnboarding || !anyConfigured
+	// onboarding the list only shows connected ones. Connecting a new
+	// provider is the Connect dialog's job now, so nothing here has to
+	// fall back to the catalog: an unconnected entry would only
+	// dead-end at a failed request.
+	showUnconfigured := m.isOnboarding
 
 	// Get a list of known providers to compare against
 	knownProviders, err := config.Providers(cfg)

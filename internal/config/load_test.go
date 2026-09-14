@@ -750,6 +750,43 @@ func TestConfig_configureProvidersBedrockWithoutCredentials(t *testing.T) {
 	require.Equal(t, cfg.Providers.Len(), 0)
 }
 
+// TestConfig_configureProvidersBedrockUnresolvedAPIKeyTemplate pins the
+// shape the real catalog ships: the Bedrock entry carries
+// "$AWS_ACCESS_KEY_ID" as its key, so an unresolved template is never
+// empty and must not be mistaken for a credential.
+func TestConfig_configureProvidersBedrockUnresolvedAPIKeyTemplate(t *testing.T) {
+	knownProviders := []catalog.Provider{
+		{
+			ID:     catalog.InferenceProviderBedrock,
+			APIKey: "$AWS_ACCESS_KEY_ID",
+			Models: []catalog.Model{{
+				ID: "anthropic.claude-sonnet-4-20250514-v1:0",
+			}},
+		},
+	}
+
+	cfg := &Config{}
+	cfg.setDefaults("/tmp", "")
+	bare := env.NewFromMap(map[string]string{})
+	resolver := NewShellVariableResolver(bare)
+	err := cfg.configureProviders(context.Background(), testStore(cfg), bare, resolver, knownProviders)
+	require.NoError(t, err)
+	require.Equal(t, 0, cfg.Providers.Len(), "a template that resolves to nothing is not a credential")
+
+	// The same template with the variable set does configure it.
+	cfg = &Config{}
+	cfg.setDefaults("/tmp", "")
+	withKey := env.NewFromMap(map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-key-id",
+		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
+	})
+	resolver = NewShellVariableResolver(withKey)
+	err = cfg.configureProviders(context.Background(), testStore(cfg), withKey, resolver, knownProviders)
+	require.NoError(t, err)
+	_, ok := cfg.Providers.Get(string(catalog.InferenceProviderBedrock))
+	require.True(t, ok, "Bedrock is configured once the key resolves")
+}
+
 func TestConfig_configureProvidersVertexAIWithCredentials(t *testing.T) {
 	knownProviders := []catalog.Provider{
 		{

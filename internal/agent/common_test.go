@@ -109,14 +109,6 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 		return nil, err
 	}
 
-	// Pin the config so a developer.s own
-	// `$HOME/.config/harness/harness.yaml` cannot change what these tests
-	// assert.
-	cfg.Config().Options.Attribution = &config.Attribution{
-		TrailerStyle:  "co-authored-by",
-		GeneratedWith: true,
-	}
-
 	// Clear the fields that would otherwise pull in machine-specific state
 	// (skills on disk, context files, language servers).
 	cfg.Config().Options.SkillsPaths = nil
@@ -130,14 +122,8 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 		return nil, err
 	}
 
-	// Get the model name for the shell tool
-	modelName := large.Model() // fallback to ID if Name not available
-	if model := cfg.Config().GetModel(large.Provider(), large.Model()); model != nil {
-		modelName = model.Name
-	}
-
 	allTools := []fantasy.AgentTool{
-		tools.NewShellTool(env.workingDir, "coder", cfg.Config().Options.Attribution, modelName, nil),
+		tools.NewShellTool(env.workingDir, "coder", nil),
 		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
 		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
 		tools.NewFetchTool(client),

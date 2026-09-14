@@ -246,3 +246,47 @@ through all components that need access to app state or styles.
 - Dialog messages are intercepted first in `Update` before other routing.
 - Focus state determines key event routing: `uiFocusEditor` sends keys to
   the textarea, `uiFocusMain` sends them to the chat list.
+
+## Styling System
+
+The styling system lives in `internal/ui/styles/` and is organized into
+three layers:
+
+- **`quickstyle.go`**: The stable base theme builder. `quickStyle(opts)`
+  constructs a `Styles` struct from `quickStyleOpts` — a palette of
+  design tokens (primary, secondary, fgBase, bgBase, success, error, etc.).
+  `quickStyle` must be fully token-driven: never hardcode specific
+  `charmtone.*` colors here (except Chroma syntax highlighting, which is
+  pending tokenization). This lets any theme reuse the base without
+  inheriting Charmtone-specific colors.
+- **`themes.go`**: Defines concrete themes. Each theme function (e.g.
+  `CharmtonePantera`) calls `quickStyle` with its palette, then applies
+  theme-specific overrides as needed.
+- **`styles.go`**: Defines the `Styles` struct and its documentation —
+  the shape of what `quickStyle` produces.
+
+**Adding theme-specific overrides**: When a style genuinely needs a
+color that doesn't fit the token model (e.g. the bang prompt uses
+Salt/Hazy/Larple), keep `quickStyle` on the closest semantic token and
+override only the differing colors in the theme function:
+
+```go
+func CharmtonePantera() Styles {
+	s := quickStyle(quickStyleOpts{ /* palette */ })
+
+	// Override only the colors that differ from the token defaults.
+	s.Editor.PromptBangIconFocused = s.Editor.PromptBangIconFocused.
+		Foreground(charmtone.Salt).
+		Background(charmtone.Hazy)
+
+	return s
+}
+```
+
+**Adding a new theme**: Add a palette function in `themes.go` that
+returns a `quickStyleOpts` (plus an overrides function when the theme
+needs colors outside the token model), then register both in the
+`builtinThemes` / `builtinThemeOverrides` maps. Users select the theme
+via `options.tui.theme`, or the theme picker (alt+t) which writes it; a
+configured theme wins over the provider-based `ThemeForProvider`
+mapping.

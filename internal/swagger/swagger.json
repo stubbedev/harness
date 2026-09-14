@@ -1343,6 +1343,107 @@
                 }
             }
         },
+        "/workspaces/{id}/extensions/commands": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "extensions"
+                ],
+                "summary": "List extension commands",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.ExtensionCommandInfo"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/extensions/commands/run": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "extensions"
+                ],
+                "summary": "Run an extension command",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Run extension command request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.RunExtensionCommandRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.RunExtensionCommandResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/filetracker/lastread": {
             "get": {
                 "produces": [
@@ -3047,6 +3148,9 @@
                         "type": "string"
                     }
                 },
+                "release_date": {
+                    "type": "string"
+                },
                 "supports_attachments": {
                     "type": "boolean"
                 }
@@ -3076,20 +3180,6 @@
                 }
             }
         },
-        "config.Attribution": {
-            "type": "object",
-            "properties": {
-                "co_authored_by": {
-                    "type": "boolean"
-                },
-                "generated_with": {
-                    "type": "boolean"
-                },
-                "trailer_style": {
-                    "$ref": "#/definitions/config.TrailerStyle"
-                }
-            }
-        },
         "config.Completions": {
             "type": "object",
             "properties": {
@@ -3100,36 +3190,6 @@
                     "type": "integer"
                 }
             }
-        },
-        "config.Duration": {
-            "type": "integer",
-            "format": "int64",
-            "enum": [
-                -9223372036854775808,
-                9223372036854775807,
-                1,
-                1000,
-                1000000,
-                1000000000,
-                60000000000,
-                3600000000000,
-                300000000000,
-                86400000000000,
-                5000000000,
-                45000000000,
-                10000000000,
-                60000000000,
-                2000000000
-            ],
-            "x-enum-varnames": [
-                "resolveTimeout",
-                "catalogRefreshInterval",
-                "configLockDeadline",
-                "refreshLockDeadline",
-                "credentialWriteLockDeadline",
-                "DefaultRequestTimeout",
-                "renameRetryBudget"
-            ]
         },
         "config.ExitBanner": {
             "type": "string",
@@ -3439,60 +3499,6 @@
                 }
             }
         },
-        "config.ToolGlob": {
-            "type": "object",
-            "properties": {
-                "timeout": {
-                    "$ref": "#/definitions/config.Duration"
-                }
-            }
-        },
-        "config.ToolGrep": {
-            "type": "object",
-            "properties": {
-                "timeout": {
-                    "$ref": "#/definitions/config.Duration"
-                }
-            }
-        },
-        "config.ToolLs": {
-            "type": "object",
-            "properties": {
-                "max_depth": {
-                    "type": "integer"
-                },
-                "max_items": {
-                    "type": "integer"
-                }
-            }
-        },
-        "config.Tools": {
-            "type": "object",
-            "properties": {
-                "glob": {
-                    "$ref": "#/definitions/config.ToolGlob"
-                },
-                "grep": {
-                    "$ref": "#/definitions/config.ToolGrep"
-                },
-                "ls": {
-                    "$ref": "#/definitions/config.ToolLs"
-                }
-            }
-        },
-        "config.TrailerStyle": {
-            "type": "string",
-            "enum": [
-                "none",
-                "co-authored-by",
-                "assisted-by"
-            ],
-            "x-enum-varnames": [
-                "TrailerStyleNone",
-                "TrailerStyleCoAuthoredBy",
-                "TrailerStyleAssistedBy"
-            ]
-        },
         "csync.Map-string-config_ProviderConfig": {
             "type": "object"
         },
@@ -3563,18 +3569,12 @@
                             "$ref": "#/definitions/config.SelectedModel"
                         }
                     }
-                },
-                "tools": {
-                    "$ref": "#/definitions/config.Tools"
                 }
             }
         },
         "github_com_stubbedev_harness_internal_config.Options": {
             "type": "object",
             "properties": {
-                "attribution": {
-                    "$ref": "#/definitions/config.Attribution"
-                },
                 "auto_lsp": {
                     "type": "boolean"
                 },
@@ -3617,6 +3617,12 @@
                 "disable_update_check": {
                     "type": "boolean"
                 },
+                "disabled_extensions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "disabled_skills": {
                     "type": "array",
                     "items": {
@@ -3630,6 +3636,12 @@
                     }
                 },
                 "disabled_tools": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "extensions_paths": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -4025,6 +4037,46 @@
                 }
             }
         },
+        "proto.ExtensionCommandArgument": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.ExtensionCommandInfo": {
+            "type": "object",
+            "properties": {
+                "arguments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/proto.ExtensionCommandArgument"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "extension": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "proto.File": {
             "type": "object",
             "properties": {
@@ -4345,6 +4397,28 @@
                     "type": "string"
                 },
                 "mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.RunExtensionCommandRequest": {
+            "type": "object",
+            "properties": {
+                "arguments": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "command_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.RunExtensionCommandResponse": {
+            "type": "object",
+            "properties": {
+                "prompt": {
                     "type": "string"
                 }
             }
