@@ -372,11 +372,16 @@ func TestPrepareStepFoldsLiveInboxMessages(t *testing.T) {
 	require.NoError(t, err)
 
 	model := newScriptedModel(scriptedTurn{text: "ack"})
+	// Titles go to the small model, and the title prompt quotes the user
+	// prompt -- so sharing one model here made "the call mentioning
+	// orchestrate" ambiguous, and which one came last depended on when a
+	// background goroutine happened to finish. A separate title model
+	// leaves the conversation as the only call on this one.
 	inbox := &fakeSubagentInbox{msgs: []SubagentInboxMessage{{AgentName: "fast", Handle: "bg-abc", Text: "found the bug"}}}
 
 	sa := NewSessionAgent(SessionAgentOptions{
 		LargeModel:    Model{Model: model},
-		SmallModel:    Model{Model: model},
+		SmallModel:    Model{Model: textModel("title")},
 		SystemPrompt:  "test",
 		Sessions:      env.sessions,
 		Messages:      env.messages,
@@ -386,18 +391,12 @@ func TestPrepareStepFoldsLiveInboxMessages(t *testing.T) {
 	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "orchestrate"})
 	require.NoError(t, err)
 
-	// The scripted model is also the title model, so filter for the
-	// conversation call: the one carrying the dispatched prompt.
 	calls := model.sentCalls()
-	require.NotEmpty(t, calls)
-	var conversation string
-	for _, c := range calls {
-		data, err := json.Marshal(c.Prompt)
-		require.NoError(t, err)
-		if strings.Contains(string(data), "orchestrate") {
-			conversation = string(data)
-		}
-	}
+	require.Len(t, calls, 1, "the conversation is the only call on the large model")
+	data, err := json.Marshal(calls[0].Prompt)
+	require.NoError(t, err)
+	conversation := string(data)
+	require.Contains(t, conversation, "orchestrate")
 	assert.Contains(t, conversation, "found the bug")
 	assert.Contains(t, conversation, "Message from background agent")
 	assert.Contains(t, conversation, "handle bg-abc")
