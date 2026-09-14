@@ -16,6 +16,7 @@ import (
 
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
+	"github.com/stubbedev/harness/internal/term"
 )
 
 // newTestRunner opens a runner over a real /bin/sh session in a temp
@@ -347,29 +348,19 @@ func TestPtyRunner_PlainQuestionIsNotMasked(t *testing.T) {
 // again for the retry - and the user is told the previous attempt was
 // rejected. Neither attempt leaks into the output: echo was off.
 func TestPtyRunner_WrongPasswordReopensMaskedDialog(t *testing.T) {
-	if os.Getenv("CI") == "true" && runtime.GOOS == "linux" {
-		// Stable locally and on the macOS runners, but the answer
-		// delivery races the echo-off window on GitHub's loaded Linux
-		// runners and the recovery interrupt kills the shell (exit
-		// 130) in ways no assertion tweak fixes.
-		t.Skip("password-dialog timing is unstable on hosted Linux runners")
-	}
 	r, ask := newAskRunner(t, "wrong-one", "open-sesame")
 
-	// The prompt string is assembled at runtime so the tty echo of the
-	// command line itself never contains the literal "Password: ": on a
-	// slow machine that echo is still in flight when the real prompts
-	// appear, and a stale match re-opens the dialog after the answers
-	// were consumed (and the run ends up interrupted).
+	// The command line spells out both prompts and the rejection, so
+	// the tty echo of it carries text the prompt hint matches before
+	// anything has asked for anything: the two dialogs here are the two
+	// real reads, not the echo of the command that does them.
 	res, err := r.Run(t.Context(),
-		`/bin/sh -c 'stty -echo; w=word; printf "Pass%s: " "$w"; read a; `+
-			`printf "\nSorry, try again.\n"; printf "Pass%s: " "$w"; read b; stty echo; `+
+		`/bin/sh -c 'stty -echo; printf "Password: "; read a; `+
+			`printf "\nSorry, try again.\n"; printf "Password: "; read b; stty echo; `+
 			`[ "$b" = open-sesame ] && printf ok || printf bad'`, 30)
 	require.NoError(t, err)
 	asks := ask.asks()
-	// At least the initial ask and the rejected-retry ask: the exact
-	// count is not part of the contract on a loaded runner.
-	require.GreaterOrEqual(t, len(asks), 2)
+	require.Len(t, asks, 2)
 	require.Contains(t, asks[1].Questions[0].Text, "previous attempt was rejected")
 	require.NotNil(t, res.ExitCode)
 	require.Equal(t, 0, *res.ExitCode)
@@ -377,6 +368,111 @@ func TestPtyRunner_WrongPasswordReopensMaskedDialog(t *testing.T) {
 	require.NotContains(t, res.Output, "wrong-one")
 	require.NotContains(t, res.Output, "open-sesame")
 }
+
+// An answer that the reader has not consumed yet does not re-open the
+// dialog. The terminal looks exactly as it did when it asked - the job
+// is still parked in a hidden-line read, still with echo off - until the
+// reader is scheduled, which on a loaded machine can outlast the quiet
+// window. Asking again there would ask the user for the same password a
+// second time and call the first attempt rejected, and cancelling that
+// second dialog kills the command.
+func TestPtyRunner_UnconsumedAnswerDoesNotReopenDialog(t *testing.T) {
+	r, ask := newAskRunner(t, "open-sesame")
+	// Give the runner its sentinel; the fake terminal below stands in
+	// for the session only for the wait.
+	_, err := r.Run(t.Context(), "true", 10)
+	require.NoError(t, err)
+
+	stuck := &stuckReaderTerm{}
+	res, err := r.awaitCompletion(t.Context(), stuck, nil, 2)
+	require.NoError(t, err)
+	require.True(t, res.Running)
+
+	require.Len(t, ask.asks(), 1, "the unanswered read is the same prompt, not a retry")
+	require.Equal(t, [][]byte{[]byte("open-sesame\n")}, stuck.writes(),
+		"the answer went out once and nothing cancelled the reader")
+}
+
+// stuckReaderTerm is a terminal whose foreground job sits in a
+// hidden-line read and never says anything: output is quiet from the
+// start, and what is written to it is never read back. Ctrl-c is the
+// one thing it reacts to - the reader it stands for would die - so a
+// runner that cancels its way out of the wait ends the test instead of
+// spinning in it.
+type stuckReaderTerm struct {
+	mu     sync.Mutex
+	sent   [][]byte
+	killed bool
+}
+
+func (s *stuckReaderTerm) Send(b []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(b) == 1 && b[0] == 0x03 {
+		s.killed = true
+		return nil
+	}
+	s.sent = append(s.sent, append([]byte(nil), b...))
+	return nil
+}
+
+func (s *stuckReaderTerm) writes() [][]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([][]byte{}, s.sent...)
+}
+
+func (s *stuckReaderTerm) reading() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.killed
+}
+
+func (s *stuckReaderTerm) WaitForAny(context.Context, []*regexp.Regexp, time.Duration) int {
+	return -1
+}
+
+func (s *stuckReaderTerm) WaitForAnyOrQuiet(context.Context, []*regexp.Regexp, time.Duration, time.Duration) (int, bool) {
+	return -1, true
+}
+
+func (s *stuckReaderTerm) WaitForOutput(context.Context, time.Duration) bool { return false }
+
+func (s *stuckReaderTerm) WaitForQuiet(context.Context, time.Duration, time.Duration) bool {
+	return true
+}
+
+func (s *stuckReaderTerm) Drain() []byte          { return nil }
+func (s *stuckReaderTerm) Pending() []byte        { return nil }
+func (s *stuckReaderTerm) PendingLen() int        { return 0 }
+func (s *stuckReaderTerm) Alive() bool            { return true }
+func (s *stuckReaderTerm) AltScreen() bool        { return false }
+func (s *stuckReaderTerm) Screen() string         { return "" }
+func (s *stuckReaderTerm) BracketedPaste() bool   { return false }
+func (s *stuckReaderTerm) Paste(string) error     { return nil }
+func (s *stuckReaderTerm) Resize(int, int) error  { return nil }
+func (s *stuckReaderTerm) Size() (int, int)       { return term.DefaultSize() }
+func (s *stuckReaderTerm) IdleFor() time.Duration { return time.Minute }
+
+func (s *stuckReaderTerm) SampleJob() term.JobActivity {
+	return term.JobActivity{
+		Observed:      s.reading(),
+		Asleep:        true,
+		InputWait:     true,
+		WchanReadable: true,
+	}
+}
+
+func (s *stuckReaderTerm) SecretRead() term.SecretReadState {
+	if !s.reading() {
+		return term.SecretReadNo
+	}
+	return term.SecretReadYes
+}
+
+func (s *stuckReaderTerm) ResetWaitSample() {}
+func (s *stuckReaderTerm) RescanFromStart() {}
+func (s *stuckReaderTerm) Close()           {}
 
 func TestPtyRunner_MultilineCommand(t *testing.T) {
 	r := newTestRunner(t)
@@ -435,6 +531,38 @@ func TestEchoDebris(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			require.Equal(t, tc.want, echoDebris(tc.line, tc.echo))
+		})
+	}
+}
+
+// The echo of a command line arrives a piece at a time, and a piece of
+// it that says "password:" is not a program asking for one - so the
+// half-arrived echo has to be recognised as the command it is, prompt
+// and all, well before the whole line is on the wire.
+func TestEchoStarted(t *testing.T) {
+	t.Parallel()
+
+	const cmd = `/bin/sh -c 'stty -echo; printf "Password: "; read a'`
+
+	cases := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{"whole command", cmd, true},
+		{"half arrived", `/bin/sh -c 'stty -echo; printf "Passw`, true},
+		{"behind the prompt", "sh-5.3$ " + cmd, true},
+		{"behind the prompt, half arrived", `sh-5.3$ /bin/sh -c 'stty -echo; printf "Password: `, true},
+		// What a program prints is output, however much of the
+		// command's own vocabulary it repeats.
+		{"the prompt the command prints", "Password: ", false},
+		{"output quoting the command", `read a' failed`, false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, echoStarted(tc.line, []string{cmd}))
 		})
 	}
 }
@@ -576,7 +704,6 @@ func TestPtyCredPromptPattern(t *testing.T) {
 		"Current password: ",
 		"Enter passphrase for key '/home/u/.ssh/id_ed25519': ",
 		"PIN: ",
-		"Sorry, try again.",
 	}
 	for _, s := range match {
 		require.True(t, credPromptRe.MatchString(s), "should match %q", s)
@@ -585,6 +712,10 @@ func TestPtyCredPromptPattern(t *testing.T) {
 		"the password is hunter2", // a value, not a prompt
 		"passwordless login enabled",
 		"pinning: true",
+		// A rejection is not a question: the reader prints it before it
+		// re-prompts, and the prompt it prints next is what opens the
+		// dialog (see TestPtyRunner_WrongPasswordReopensMaskedDialog).
+		"Sorry, try again.",
 	}
 	for _, s := range noMatch {
 		require.False(t, credPromptRe.MatchString(s), "should not match %q", s)

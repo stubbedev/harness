@@ -1213,7 +1213,7 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	return large, small, nil
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string, disableHTTP2 bool) (fantasy.Provider, error) {
 	var opts []anthropic.Option
 
 	switch {
@@ -1238,16 +1238,16 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	opts = append(opts, anthropic.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug)))
+	opts = append(opts, anthropic.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)))
 	return anthropic.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, disableHTTP2 bool) (fantasy.Provider, error) {
 	opts := []openai.Option{
 		openai.WithAPIKey(apiKey),
 		openai.WithUseResponsesAPI(),
 	}
-	opts = append(opts, openai.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug)))
+	opts = append(opts, openai.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)))
 	if len(headers) > 0 {
 		opts = append(opts, openai.WithHeaders(headers))
 	}
@@ -1257,29 +1257,29 @@ func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[st
 	return openai.New(opts...)
 }
 
-func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenrouterProvider(_, apiKey string, headers map[string]string, disableHTTP2 bool) (fantasy.Provider, error) {
 	opts := []openrouter.Option{
 		openrouter.WithAPIKey(apiKey),
 	}
-	opts = append(opts, openrouter.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug)))
+	opts = append(opts, openrouter.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)))
 	if len(headers) > 0 {
 		opts = append(opts, openrouter.WithHeaders(headers))
 	}
 	return openrouter.New(opts...)
 }
 
-func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]string, disableHTTP2 bool) (fantasy.Provider, error) {
 	opts := []vercel.Option{
 		vercel.WithAPIKey(apiKey),
 	}
-	opts = append(opts, vercel.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug)))
+	opts = append(opts, vercel.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)))
 	if len(headers) > 0 {
 		opts = append(opts, vercel.WithHeaders(headers))
 	}
 	return vercel.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent bool) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent, disableHTTP2 bool) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -1306,7 +1306,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		)
 	}
 	if httpClient == nil {
-		httpClient = log.NewProviderHTTPClient(c.cfg.Config().Options.Debug)
+		httpClient = log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)
 	}
 	opts = append(opts, openaicompat.WithHTTPClient(httpClient))
 
@@ -1321,13 +1321,13 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	return openaicompat.New(opts...)
 }
 
-func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string) (fantasy.Provider, error) {
+func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[string]string, options map[string]string, disableHTTP2 bool) (fantasy.Provider, error) {
 	opts := []azure.Option{
 		azure.WithBaseURL(baseURL),
 		azure.WithAPIKey(apiKey),
 		azure.WithUseResponsesAPI(),
 	}
-	opts = append(opts, azure.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug)))
+	opts = append(opts, azure.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)))
 	if options == nil {
 		options = make(map[string]string)
 	}
@@ -1456,21 +1456,21 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case string(catalog.InferenceProviderOpenCodeGo), string(catalog.InferenceProviderOpenCodeZen):
 		if isOpenCodeMessagesModel(providerCfg.ID, model.Model) {
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
-			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.DisableHTTP2)
 		}
 	}
 
 	switch providerCfg.Type {
 	case openai.Name:
-		return c.buildOpenaiProvider(baseURL, apiKey, headers)
+		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.DisableHTTP2)
 	case anthropic.Name:
-		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID)
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.DisableHTTP2)
 	case openrouter.Name:
-		return c.buildOpenrouterProvider(baseURL, apiKey, headers)
+		return c.buildOpenrouterProvider(baseURL, apiKey, headers, providerCfg.DisableHTTP2)
 	case vercel.Name:
-		return c.buildVercelProvider(baseURL, apiKey, headers)
+		return c.buildVercelProvider(baseURL, apiKey, headers, providerCfg.DisableHTTP2)
 	case azure.Name:
-		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams)
+		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams, providerCfg.DisableHTTP2)
 	case bedrock.Name:
 		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID)
 	case google.Name:
@@ -1484,12 +1484,12 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			}
 			providerCfg.ExtraBody["tool_stream"] = true
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.DisableHTTP2)
 	default:
 		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
 		// omlx) are openai-compat under the hood.
 		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
-			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent)
+			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.DisableHTTP2)
 		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

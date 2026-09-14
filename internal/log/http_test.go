@@ -92,7 +92,7 @@ func TestProviderHTTPClientTimesOutOnSilentServer(t *testing.T) {
 				server.Close()
 			})
 
-			client := NewProviderHTTPClient(debug)
+			client := NewProviderHTTPClient(debug, false)
 			// Swap in a short timeout so the test does not wait the full
 			// ResponseHeaderTimeout; the wiring under test is the same.
 			transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -149,12 +149,12 @@ func TestProviderTransportIsSharedAndIsolated(t *testing.T) {
 
 	// Both provider clients must actually reach that transport, in debug mode
 	// through the logger and otherwise directly.
-	if got := NewProviderHTTPClient(false).Transport; got != ProviderTransport() {
+	if got := NewProviderHTTPClient(false, false).Transport; got != ProviderTransport() {
 		t.Fatalf("quiet client transport = %T, want the shared provider transport", got)
 	}
-	logged, ok := NewProviderHTTPClient(true).Transport.(*HTTPRoundTripLogger)
+	logged, ok := NewProviderHTTPClient(true, false).Transport.(*HTTPRoundTripLogger)
 	if !ok {
-		t.Fatalf("debug client transport = %T, want *HTTPRoundTripLogger", NewProviderHTTPClient(true).Transport)
+		t.Fatalf("debug client transport = %T, want *HTTPRoundTripLogger", NewProviderHTTPClient(true, false).Transport)
 	}
 	if logged.Transport != ProviderTransport() {
 		t.Fatal("debug client logs over a transport other than the shared provider transport")
@@ -162,9 +162,73 @@ func TestProviderTransportIsSharedAndIsolated(t *testing.T) {
 
 	// An http.Client.Timeout would cap the streamed body too, cutting long
 	// generations off mid-answer; the bound belongs on the headers alone.
-	for _, c := range []*http.Client{NewProviderHTTPClient(false), NewProviderHTTPClient(true), NewHTTPClient()} {
+	for _, c := range []*http.Client{NewProviderHTTPClient(false, false), NewProviderHTTPClient(true, false), NewProviderHTTPClient(false, true), NewHTTPClient()} {
 		if c.Timeout != 0 {
 			t.Fatalf("client has Client.Timeout = %v, which would truncate streams", c.Timeout)
 		}
+	}
+}
+
+// Corti's gateway 413s bodies over ~64KB on HTTP/2 but serves them over
+// HTTP/1.1, so a provider must be able to opt out of h2. net/http only skips
+// the ALPN upgrade when TLSNextProto is non-nil, which is easy to get wrong.
+func TestHTTP1OnlyProviderTransport(t *testing.T) {
+	t.Parallel()
+
+	h1 := ProviderTransportFor(true).(*http.Transport)
+	if h1.TLSNextProto == nil {
+		t.Fatal("TLSNextProto must be non-nil empty to disable HTTP/2, got nil")
+	}
+	if len(h1.TLSNextProto) != 0 {
+		t.Fatalf("TLSNextProto must be empty, got %d entries", len(h1.TLSNextProto))
+	}
+	if h1.ForceAttemptHTTP2 {
+		t.Fatal("ForceAttemptHTTP2 must be false when HTTP/2 is disabled")
+	}
+	if h1.ResponseHeaderTimeout != ResponseHeaderTimeout {
+		t.Fatalf("ResponseHeaderTimeout = %v, want %v", h1.ResponseHeaderTimeout, ResponseHeaderTimeout)
+	}
+
+	// The one that actually matters: without this the server still negotiates
+	// h2 over ALPN, finds no handler behind the emptied TLSNextProto, and drops
+	// the connection -- every request dies with a bare "EOF".
+	if h1.TLSClientConfig == nil {
+		t.Fatal("TLSClientConfig must be set so ALPN advertises only http/1.1")
+	}
+	if got := h1.TLSClientConfig.NextProtos; len(got) != 1 || got[0] != "http/1.1" {
+		t.Fatalf("ALPN NextProtos = %v, want [http/1.1]", got)
+	}
+
+	// The h2-capable transport must be left alone, and the two must be
+	// distinct shared instances so each keeps its own connection pool.
+	// Its TLSNextProto is deliberately not asserted on: net/http fills in the
+	// "h2" hook lazily on first use, so its contents depend on whether some
+	// other test has already dialled through it.
+	h2 := ProviderTransportFor(false).(*http.Transport)
+	if !h2.ForceAttemptHTTP2 {
+		t.Fatal("default provider transport must still attempt HTTP/2")
+	}
+	if h2.TLSClientConfig != nil && len(h2.TLSClientConfig.NextProtos) == 1 &&
+		h2.TLSClientConfig.NextProtos[0] == "http/1.1" {
+		t.Fatal("default provider transport must not be pinned to http/1.1")
+	}
+	if h1 == h2 {
+		t.Fatal("HTTP/1.1-only and default transports must be distinct")
+	}
+	if ProviderTransportFor(true) != ProviderTransportFor(true) {
+		t.Fatal("HTTP/1.1-only transport must be shared, not rebuilt per call")
+	}
+
+	// The debug client must honour the flag too, not silently fall back to
+	// the h2 transport via NewHTTPClient.
+	logged, ok := NewProviderHTTPClient(true, true).Transport.(*HTTPRoundTripLogger)
+	if !ok {
+		t.Fatalf("debug client transport = %T, want *HTTPRoundTripLogger", NewProviderHTTPClient(true, true).Transport)
+	}
+	if logged.Transport != ProviderTransportFor(true) {
+		t.Fatal("debug client with disableHTTP2 must log over the HTTP/1.1-only transport")
+	}
+	if got := NewProviderHTTPClient(false, true).Transport; got != ProviderTransportFor(true) {
+		t.Fatal("quiet client with disableHTTP2 must use the HTTP/1.1-only transport")
 	}
 }

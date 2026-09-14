@@ -193,17 +193,24 @@ func newSentinel() sentinel {
 var (
 	// credPromptRe matches output that looks like a credential prompt:
 	// sudo's in any locale (the "[sudo] ... :" shape survives
-	// translation), a generic password/passphrase/passcode/PIN request,
-	// or sudo's wrong-password line. It is only a fast-path hint: a
-	// match is confirmed against the terminal's input discipline (a
-	// hidden-line read, term.SecretRead) before the masked prompt
-	// opens, so a program that merely prints one of these words - with
-	// echo left on - is not intercepted. Prompts the hint cannot read
-	// (other languages, escape sequences interleaved with the text) are
-	// still caught by the discipline check on the quiet window.
+	// translation), or a generic password/passphrase/passcode/PIN
+	// request. It is only a fast-path hint: a match is confirmed
+	// against the terminal's input discipline (a hidden-line read,
+	// term.SecretRead) before the masked prompt opens, so a program
+	// that merely prints one of these words - with echo left on - is
+	// not intercepted. Prompts the hint cannot read (other languages,
+	// escape sequences interleaved with the text) are still caught by
+	// the discipline check on the quiet window.
+	//
+	// A rejection line ("Sorry, try again.") is deliberately not in
+	// here. It is printed before the reader re-prompts, so a dialog
+	// opened on it collects an answer the reader is not asking for yet,
+	// and the prompt that follows then reads as another question - two
+	// dialogs, and a third when the answers run out. The retry is
+	// caught where it belongs: by the prompt the reader prints next, or
+	// by the hidden-line read it blocks in.
 	credPromptRe = regexp.MustCompile(`(?i)(?:\[sudo\][^:\n]{0,60}:|` +
-		`\b(?:password|passphrase|passcode|passwort|pass phrase|mot de passe|contraseña|pin)\b[^:\n]{0,64}:|` +
-		`sorry, try again)`)
+		`\b(?:password|passphrase|passcode|passwort|pass phrase|mot de passe|contraseña|pin)\b[^:\n]{0,64}:)`)
 	// ptyPromptRe matches the OSC 133 prompt marker installed by
 	// ptySetupCmd. Seeing it after a command means the shell - not some
 	// program the command started - has control back.
@@ -271,6 +278,8 @@ type ptyTerminal interface {
 	WaitForOutput(ctx context.Context, timeout time.Duration) bool
 	WaitForQuiet(ctx context.Context, quiet, timeout time.Duration) bool
 	Drain() []byte
+	Pending() []byte
+	PendingLen() int
 	Alive() bool
 	AltScreen() bool
 	Screen() string
@@ -850,8 +859,11 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 	hardDeadline := time.Now().Add(ptyMaxWait)
 	// asked records that a masked credential prompt was already answered
 	// in this wait; the next one means the reader refused the answer, and
-	// the user is told so.
+	// the user is told so. answeredLen is how much undrained output there
+	// was when that answer went out, so anything past it is the reader
+	// responding rather than the same prompt still standing.
 	asked := false
+	answeredLen := 0
 
 	for {
 		if ctx.Err() != nil {
@@ -873,6 +885,21 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 				matched = m
 			} else if jobWaitingForInput(s.SampleJob()) {
 				if s.SecretRead() == term.SecretReadYes {
+					if asked && s.PendingLen() <= answeredLen {
+						// A hidden-line read with nothing back from the
+						// reader since the last answer: the line is on
+						// the wire but the reader has not been
+						// scheduled to consume it, so the terminal
+						// still looks exactly as it did when it asked.
+						// A second dialog here would ask for the same
+						// password again and call the first attempt
+						// rejected; wait for the reader to say
+						// something instead.
+						if !s.WaitForOutput(ctx, time.Until(deadline)) {
+							break // the silence outlasted the budget
+						}
+						continue
+					}
 					// The foreground job is blocked reading the terminal
 					// with echo off in line mode: a hidden-line reader
 					// asking for a credential, whatever language its
@@ -880,10 +907,11 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 					// at all). Answer it masked rather than reporting
 					// it as a question the model could answer in the
 					// clear.
-					if err := r.answerCredentialPrompt(ctx, s, asked); err != nil {
+					mark, err := r.answerCredentialPrompt(ctx, s, asked)
+					if err != nil {
 						return PTYResult{}, err
 					}
-					asked = true
+					asked, answeredLen = true, mark
 					// User think time is not the command's budget.
 					deadline = deadline.Add(2 * time.Minute)
 					continue
@@ -912,6 +940,14 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 		}
 		switch matched {
 		case 1: // credential-shaped prompt text
+			if r.credPromptIsEcho(s, echo) {
+				// The terminal echoing the command line back, not a
+				// program asking anything: the command's own text says
+				// "password:", or prints the rejection a reader would.
+				// The scan has consumed the match, so a prompt that
+				// arrives after the echo is still seen.
+				continue
+			}
 			// Text is only a hint; the input discipline decides. A real
 			// credential reader has switched the terminal to a hidden
 			// line by the time its prompt is on the wire (sudo, su and
@@ -924,10 +960,11 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 				// on cannot loop here.
 				continue
 			default:
-				if err := r.answerCredentialPrompt(ctx, s, asked); err != nil {
+				mark, err := r.answerCredentialPrompt(ctx, s, asked)
+				if err != nil {
 					return PTYResult{}, err
 				}
-				asked = true
+				asked, answeredLen = true, mark
 			}
 			// User think time is not the command's budget.
 			deadline = deadline.Add(2 * time.Minute)
@@ -1211,7 +1248,12 @@ func (r *ptyRunner) knownCwd() string {
 // the secret through a masked TUI prompt, and submits it to the
 // terminal. rejected tells the user the reader turned down the answer
 // that came before (sudo's "Sorry, try again." and kin).
-func (r *ptyRunner) answerCredentialPrompt(ctx context.Context, s ptyTerminal, rejected bool) error {
+//
+// It returns the amount of undrained output at the moment the answer
+// went out: output past that mark is the reader responding, which is
+// what tells a real retry from a terminal that has not read the answer
+// yet.
+func (r *ptyRunner) answerCredentialPrompt(ctx context.Context, s ptyTerminal, rejected bool) (int, error) {
 	// Drain through the prompt so the answer is not blended into
 	// stale output; the prompt itself is re-shown by the TUI.
 	_ = s.Drain()
@@ -1219,8 +1261,9 @@ func (r *ptyRunner) answerCredentialPrompt(ctx context.Context, s ptyTerminal, r
 	if r.ask == nil {
 		// No question service (e.g. headless run): send ctrl-c so the
 		// reader fails fast instead of hanging the whole wait budget.
+		mark := s.PendingLen()
 		_ = s.Send([]byte{0x03})
-		return nil
+		return mark, nil
 	}
 
 	text := "A program in the terminal session is asking for a password"
@@ -1236,14 +1279,65 @@ func (r *ptyRunner) answerCredentialPrompt(ctx context.Context, s ptyTerminal, r
 			Secret:      true,
 		}},
 	})
+	mark := s.PendingLen()
 	if err != nil {
 		// Cancel the prompt so the reader gives up and the shell returns
 		// to a prompt.
 		_ = s.Send([]byte{0x03})
-		return nil
+		return mark, nil
 	}
 	_ = s.Send([]byte(answers[0].FillInText + "\n"))
-	return nil
+	return mark, nil
+}
+
+// credPromptIsEcho reports whether the credential-shaped text on the
+// wire is nothing but the terminal echoing the command line back. A
+// command whose own text says "password:" - or prints the rejection a
+// reader would, "Sorry, try again." - has that text echoed before it
+// has run, and a dialog opened on it asks the user for a password
+// nothing is waiting for; worse, the answer it collects is refused by
+// the reader that asks later, and the user is told their password was
+// rejected. Echo the shell has finished printing is dropped by clean;
+// an echo still arriving can only be the last line, and is matched
+// against the command directly.
+func (r *ptyRunner) credPromptIsEcho(s ptyTerminal, echo []string) bool {
+	lines := strings.Split(r.clean(string(s.Pending()), echo), "\n")
+	for i, line := range lines {
+		if !credPromptRe.MatchString(line) {
+			continue
+		}
+		if i == len(lines)-1 && echoStarted(line, echo) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// echoStarted reports whether a line is the beginning of the command
+// the terminal is echoing back: as much of it as has arrived, on its
+// own or after the prompt the shell printed in front of it (which ends
+// in whitespace, as in echoedLine).
+func echoStarted(line string, echo []string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+	for _, sent := range echo {
+		sent = strings.TrimSpace(sent)
+		if sent == "" {
+			continue
+		}
+		for i := range len(line) {
+			if i > 0 && line[i-1] != ' ' {
+				continue
+			}
+			if strings.HasPrefix(sent, line[i:]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // secretReadSettled samples the terminal's input discipline until it

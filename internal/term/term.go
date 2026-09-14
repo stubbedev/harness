@@ -782,6 +782,15 @@ func (s *Session) Close() {
 	}
 }
 
+// Pending returns a copy of the undrained output without consuming it,
+// for a caller that has to look at what is on the wire before deciding
+// what it is.
+func (s *Session) Pending() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]byte(nil), s.pending...)
+}
+
 // PendingLen reports the size of undrained output.
 func (s *Session) PendingLen() int {
 	s.mu.Lock()

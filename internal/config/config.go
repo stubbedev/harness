@@ -129,6 +129,12 @@ type ProviderConfig struct {
 	// expand.
 	ExtraBody map[string]any `json:"extra_body,omitempty" jsonschema:"description=Additional fields to include in request bodies\\, only works with openai-compatible providers"`
 
+	// DisableHTTP2 forces HTTP/1.1 for this provider. Needed for gateways
+	// that are broken only on their HTTP/2 path -- ai.eu.corti.app answers
+	// 413 to any body over ~64KB over HTTP/2 while serving the same body
+	// fine over HTTP/1.1, which makes it reject every Harness turn.
+	DisableHTTP2 bool `json:"disable_http2,omitempty" jsonschema:"description=Force HTTP/1.1 for this provider - for gateways that mishandle HTTP/2 request bodies,default=false"`
+
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for this provider"`
 
 	// Used to pass extra parameters to the provider.

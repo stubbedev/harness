@@ -777,6 +777,11 @@
           "type": "object",
           "description": "Additional fields to include in request bodies, only works with openai-compatible providers"
         },
+        "disable_http2": {
+          "type": "boolean",
+          "description": "Force HTTP/1.1 for this provider - for gateways that mishandle HTTP/2 request bodies",
+          "default": false
+        },
         "provider_options": {
           "type": "object",
           "description": "Additional provider-specific options for this provider"
