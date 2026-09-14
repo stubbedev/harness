@@ -70,3 +70,4 @@ inline or delegates to a helper function.
 | Command | File | Description |
 |---------|------|-------------|
 | `jq` | `jq.go` | JSON processor using `github.com/itchyny/gojq` |
+| `git` | `git.go` | Passthrough to git, except `git worktree add <path>` with a path outside the repository is redirected into the repo's worktree directory (`<root>/.worktrees`, or `harness.worktreesDir` from git config; the default dir is added to `.git/info/exclude`) |

@@ -18,6 +18,7 @@ var builtins = make(map[string]BuiltinHandler)
 
 func init() {
 	RegisterBuiltin("jq", handleJQ)
+	RegisterBuiltin("git", handleGit)
 }
 
 // RegisterBuiltin registers a builtin command handler. Must be called during
