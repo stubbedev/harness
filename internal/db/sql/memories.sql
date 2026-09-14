@@ -12,13 +12,17 @@ SELECT * FROM memories WHERE id = ? LIMIT 1;
 SELECT * FROM memories WHERE lower(title) = lower(?) LIMIT 1;
 
 -- name: ListMemories :many
+-- The id tie-breaks: updated_at has whole-second resolution, so
+-- memories saved in the same second would otherwise come back in
+-- whatever order SQLite chose, and the index the model reads would
+-- reshuffle between runs.
 SELECT * FROM memories
-ORDER BY pinned DESC, updated_at DESC;
+ORDER BY pinned DESC, updated_at DESC, id ASC;
 
 -- name: SearchMemories :many
 SELECT * FROM memories
 WHERE title LIKE '%' || ? || '%' OR content LIKE '%' || ? || '%'
-ORDER BY pinned DESC, updated_at DESC;
+ORDER BY pinned DESC, updated_at DESC, id ASC;
 
 -- name: UpdateMemory :one
 UPDATE memories SET
@@ -45,6 +49,6 @@ DELETE FROM memories
 WHERE pinned = 0 AND id NOT IN (
     SELECT id FROM memories
     ORDER BY pinned DESC, use_count DESC, last_used_at DESC,
-             updated_at DESC, rowid DESC
+             updated_at DESC, rowid DESC, id ASC
     LIMIT ?
 );

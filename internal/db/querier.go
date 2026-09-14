@@ -51,6 +51,10 @@ type Querier interface {
 	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListFilesBySessionWithChildren(ctx context.Context, arg ListFilesBySessionWithChildrenParams) ([]File, error)
 	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
+	// The id tie-breaks: updated_at has whole-second resolution, so
+	// memories saved in the same second would otherwise come back in
+	// whatever order SQLite chose, and the index the model reads would
+	// reshuffle between runs.
 	ListMemories(ctx context.Context) ([]Memory, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListNewFiles(ctx context.Context) ([]File, error)

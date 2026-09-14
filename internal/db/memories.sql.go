@@ -116,9 +116,13 @@ func (q *Queries) GetMemoryByTitle(ctx context.Context, lower string) (Memory, e
 
 const listMemories = `-- name: ListMemories :many
 SELECT id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at FROM memories
-ORDER BY pinned DESC, updated_at DESC
+ORDER BY pinned DESC, updated_at DESC, id ASC
 `
 
+// The id tie-breaks: updated_at has whole-second resolution, so
+// memories saved in the same second would otherwise come back in
+// whatever order SQLite chose, and the index the model reads would
+// reshuffle between runs.
 func (q *Queries) ListMemories(ctx context.Context) ([]Memory, error) {
 	rows, err := q.query(ctx, q.listMemoriesStmt, listMemories)
 	if err != nil {
@@ -157,7 +161,7 @@ DELETE FROM memories
 WHERE pinned = 0 AND id NOT IN (
     SELECT id FROM memories
     ORDER BY pinned DESC, use_count DESC, last_used_at DESC,
-             updated_at DESC, rowid DESC
+             updated_at DESC, rowid DESC, id ASC
     LIMIT ?
 )
 `
@@ -173,7 +177,7 @@ func (q *Queries) ReapMemories(ctx context.Context, limit int64) (int64, error) 
 const searchMemories = `-- name: SearchMemories :many
 SELECT id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at FROM memories
 WHERE title LIKE '%' || ? || '%' OR content LIKE '%' || ? || '%'
-ORDER BY pinned DESC, updated_at DESC
+ORDER BY pinned DESC, updated_at DESC, id ASC
 `
 
 type SearchMemoriesParams struct {
