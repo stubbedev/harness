@@ -1047,6 +1047,7 @@
               "parent_session",
               "quit",
               "sessions",
+              "shift_tab",
               "suspend",
               "tab",
               "themes"
