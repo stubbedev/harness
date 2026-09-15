@@ -58,6 +58,17 @@ unfree. The flake allows it for its own nixpkgs instance, so nothing is
 required on your side; pulling the package into a configuration that builds it
 against your own nixpkgs may need `allowUnfree`.
 
+### Homebrew
+
+On macOS or Linux (Homebrew on Linux x86_64/arm64):
+
+```bash
+brew install stubbedev/tap/harness
+```
+
+The formula installs the prebuilt release binary for your platform and is
+updated automatically on every release.
+
 ### Go
 
 ```bash
