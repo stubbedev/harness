@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
@@ -158,23 +157,7 @@ func (d *FreeText) Height(width int) int {
 	if w <= 0 {
 		w = choiceListMaxWidth
 	}
-	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	h := sectionHeight(d.Request.Text, w-lipgloss.Width(iconPrompt)) // question
-	h++                                                              // blank
-	if d.Request.Description != "" {
-		r := common.MarkdownRenderer(d.Styles, w)
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		out, err := r.Render(d.Request.Description)
-		mu.Unlock()
-		if err == nil {
-			out = strings.TrimSuffix(out, "\n")
-			h += strings.Count(out, "\n") + 1
-		} else {
-			h += sectionHeight(d.Request.Description, w)
-		}
-		h++ // blank
-	}
+	h := len(questionHeaderLines(d.Styles, d.focused, d.Request.Text, d.Request.Description, w))
 	h += freeTextMinEditorHeight // textarea (minimum; grows to fill at draw time)
 	if d.Request.Secret {
 		h = h - freeTextMinEditorHeight + 1 // single masked line
@@ -201,8 +184,6 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		bar = barActive
 	}
 	prefixWidth := lipgloss.Width(bar)
-	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	iconWidth := lipgloss.Width(iconPrompt)
 
 	// ftLine is a single buffer row. cursorX >= 0 marks the row
 	// carrying the textarea cursor and its column (incl. prefix).
@@ -218,28 +199,8 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		var lines []ftLine
 		cursorRow := -1
 
-		header := iconPrompt + d.Styles.Editor.QuestionUnselected.Render(
-			ansi.Wrap(d.Request.Text, contentWidth-iconWidth, ""),
-		)
-		for l := range strings.SplitSeq(header, "\n") {
+		for _, l := range questionHeaderLines(d.Styles, d.focused, d.Request.Text, d.Request.Description, contentWidth) {
 			lines = append(lines, ftLine{text: l, cursorX: -1})
-		}
-		lines = append(lines, ftLine{cursorX: -1}) // blank
-
-		if d.Request.Description != "" {
-			r := common.MarkdownRenderer(d.Styles, contentWidth)
-			mu := common.LockMarkdownRenderer(r)
-			mu.Lock()
-			desc, err := r.Render(d.Request.Description)
-			mu.Unlock()
-			if err != nil {
-				desc = d.Request.Description
-			}
-			desc = strings.TrimSuffix(desc, "\n")
-			for l := range strings.SplitSeq(desc, "\n") {
-				lines = append(lines, ftLine{text: l, cursorX: -1})
-			}
-			lines = append(lines, ftLine{cursorX: -1}) // blank
 		}
 
 		// Grow the textarea to fill the form height, bounded by the

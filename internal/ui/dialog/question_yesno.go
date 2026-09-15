@@ -3,13 +3,11 @@ package dialog
 import (
 	"image"
 	"maps"
-	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
@@ -133,23 +131,7 @@ func (d *YesNo) Height(width int) int {
 	if w <= 0 {
 		w = choiceListMaxWidth
 	}
-	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	h := sectionHeight(d.Request.Text, w-lipgloss.Width(iconPrompt)) // question
-	h++                                                              // blank
-	if d.Request.Description != "" {
-		r := common.MarkdownRenderer(d.Styles, w)
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		out, err := r.Render(d.Request.Description)
-		mu.Unlock()
-		if err == nil {
-			out = strings.TrimSuffix(out, "\n")
-			h += strings.Count(out, "\n") + 1
-		} else {
-			h += sectionHeight(d.Request.Description, w)
-		}
-		h++ // blank
-	}
+	h := len(questionHeaderLines(d.Styles, d.focused, d.Request.Text, d.Request.Description, w))
 	h++ // buttons
 	// Note height if present.
 	if d.activeNoteKey != "" && d.noteEditor.Focused() {
@@ -167,31 +149,7 @@ func (d *YesNo) Height(width int) int {
 // Returns the cursor position when the note editor is active, or nil.
 func (d *YesNo) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	d.lastWidth = area.Dx()
-	y := area.Min.Y
-
-	// Draw question header.
-	iconPrompt := questionIconPrompt(d.Styles, d.focused)
-	qText := iconPrompt + d.Styles.Editor.QuestionUnselected.Render(
-		ansi.Wrap(d.Request.Text, area.Dx()-lipgloss.Width(iconPrompt), ""),
-	)
-	y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), qText)
-	y++ // blank
-
-	// Draw optional description.
-	if d.Request.Description != "" {
-		r := common.MarkdownRenderer(d.Styles, area.Dx())
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		desc, err := r.Render(d.Request.Description)
-		mu.Unlock()
-		if err == nil {
-			desc = strings.TrimSuffix(desc, "\n")
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), desc)
-		} else {
-			y += drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y), d.Request.Description)
-		}
-		y++ // blank
-	}
+	y := drawStringLines(scr, area, area.Min.Y, questionHeaderLines(d.Styles, d.focused, d.Request.Text, d.Request.Description, area.Dx()))
 
 	// Draw buttons. Build compositor first so hover uses current geometry.
 	buttonOptsList := []common.ButtonOpts{

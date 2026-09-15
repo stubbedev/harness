@@ -28,8 +28,37 @@ func NewQuestionToolMessageItem(
 	return newBaseToolMessageItem(sty, toolCall, result, &QuestionToolRenderContext{}, canceled)
 }
 
-// QuestionToolRenderContext renders question tool messages.
-type QuestionToolRenderContext struct{}
+// QuestionToolRenderContext renders question tool messages. Parsed
+// input and result are cached because chat items re-render on every
+// resize and animation frame while visible, but the tool call input
+// and result are immutable once set.
+type QuestionToolRenderContext struct {
+	paramsInput string
+	params      tools.QuestionParams
+	paramsErr   bool
+
+	blocksContent string
+	blocks        []questionBlock
+}
+
+// parseParams parses the tool call input, caching by input string.
+func (q *QuestionToolRenderContext) parseParams(input string) (tools.QuestionParams, bool) {
+	if q.paramsInput != input {
+		q.params = tools.QuestionParams{}
+		q.paramsErr = json.Unmarshal([]byte(input), &q.params) != nil
+		q.paramsInput = input
+	}
+	return q.params, !q.paramsErr
+}
+
+// parseBlocks parses the tool result content, caching by content string.
+func (q *QuestionToolRenderContext) parseBlocks(content string) []questionBlock {
+	if q.blocksContent != content {
+		q.blocks = parseQuestionBlocks(content)
+		q.blocksContent = content
+	}
+	return q.blocks
+}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
@@ -38,8 +67,8 @@ func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return pendingTool(sty, "Question", opts.Anim, opts.Compact)
 	}
 
-	var params tools.QuestionParams
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
+	params, ok := q.parseParams(opts.ToolCall.Input)
+	if !ok {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
 	}
 
@@ -57,7 +86,7 @@ func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return header
 	}
 
-	body := formatQuestionAnswers(sty, opts.Result.Content, cappedWidth-toolBodyLeftPaddingTotal)
+	body := formatQuestionAnswers(sty, q.parseBlocks(opts.Result.Content), cappedWidth-toolBodyLeftPaddingTotal)
 	if body == "" {
 		return header
 	}
@@ -162,14 +191,9 @@ func parseQuestionBlocks(content string) []questionBlock {
 	return blocks
 }
 
-// formatQuestionAnswers parses the tool result and formats answers with
-// styling for display in the chat body.
-func formatQuestionAnswers(sty *styles.Styles, content string, width int) string {
-	if content == "" {
-		return ""
-	}
-
-	blocks := parseQuestionBlocks(content)
+// formatQuestionAnswers formats parsed answer blocks with styling
+// for display in the chat body.
+func formatQuestionAnswers(sty *styles.Styles, blocks []questionBlock, width int) string {
 	if len(blocks) == 0 {
 		return ""
 	}

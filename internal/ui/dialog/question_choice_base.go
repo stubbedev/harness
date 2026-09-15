@@ -274,6 +274,40 @@ func drawStyledText(scr uv.Screen, area uv.Rectangle, text string) int {
 	return strings.Count(text, "\n") + 1
 }
 
+// drawStringLines blits one pre-rendered line per row into area,
+// starting at y. Returns the y past the last drawn line.
+func drawStringLines(scr uv.Screen, area uv.Rectangle, y int, lines []string) int {
+	for _, ln := range lines {
+		if ln != "" {
+			uv.NewStyledString(ln).Draw(scr, image.Rect(area.Min.X, y, area.Max.X, area.Max.Y))
+		}
+		y++
+	}
+	return y
+}
+
+// questionHeaderLines renders the shared question header: the icon
+// prompt plus wrapped question text, then the optional markdown
+// description, each section followed by a blank separator line.
+// Continuation lines are indented under the first line's content.
+// All question components build their header from this single
+// layout so Height and Draw can never disagree.
+func questionHeaderLines(sty *styles.Styles, focused bool, text, description string, width int) []string {
+	var lines []string
+	if text != "" {
+		icon := questionIconPrompt(sty, focused)
+		iconWidth := lipgloss.Width(icon)
+		indent := strings.Repeat(" ", iconWidth)
+		lines = append(lines, icon+sty.Editor.QuestionUnselected.Render(wrapIndent(text, width-iconWidth, indent)))
+		lines = append(lines, "")
+	}
+	if description != "" {
+		lines = append(lines, strings.Split(renderQuestionDescription(sty, description, width), "\n")...)
+		lines = append(lines, "")
+	}
+	return lines
+}
+
 // buildLines renders the entire choice list into a flat slice of
 // rows. This is the single source of truth: height is len(lines),
 // scrolling is index math over the slice, and drawing blits a
@@ -303,17 +337,9 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 		}
 	}
 
-	// Question header + blank separator.
-	icon := c.iconPrompt()
-	iconWidth := lipgloss.Width(icon)
-	qIndent := strings.Repeat(" ", iconWidth)
-	push(icon + c.Styles.Editor.QuestionUnselected.Render(wrapIndent(c.Request.Text, innerWidth-iconWidth, qIndent)))
-	push("")
-
-	// Optional markdown description + blank separator.
-	if c.Request.Description != "" {
-		push(c.renderDescription(innerWidth))
-		push("")
+	// Question header + markdown description, shared layout.
+	for _, ln := range questionHeaderLines(c.Styles, c.focused, c.Request.Text, c.Request.Description, innerWidth) {
+		lines = append(lines, newContentLine(ln))
 	}
 
 	// Choices: label row(s), optional wrapped description, note, blank.
@@ -393,15 +419,7 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 
 // renderDescription renders the markdown description at width.
 func (c *choiceList) renderDescription(width int) string {
-	r := common.MarkdownRenderer(c.Styles, width)
-	mu := common.LockMarkdownRenderer(r)
-	mu.Lock()
-	out, err := r.Render(c.Request.Description)
-	mu.Unlock()
-	if err != nil {
-		return c.Request.Description
-	}
-	return strings.TrimSuffix(out, "\n")
+	return renderQuestionDescription(c.Styles, c.Request.Description, width)
 }
 
 // choiceItemRenderer renders a choice's label content as a string.
@@ -494,6 +512,7 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 	c.clampScroll(lines, viewport)
 
 	// Blit the visible window.
+	fillPrefix := c.Styles.Editor.QuestionBody.Render("> ")
 	var cur *tea.Cursor
 	for screenRow := range viewport {
 		idx := c.scrollOffset + screenRow
@@ -506,7 +525,6 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 			uv.NewStyledString(ln.text).Draw(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1))
 		}
 		if ln.fillInRow {
-			fillPrefix := c.Styles.Editor.QuestionBody.Render("> ")
 			if tc := c.fillInCursor(screenRow, area.Min.X, lipgloss.Width(fillPrefix)); tc != nil {
 				cur = tc
 			}

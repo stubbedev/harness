@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
@@ -149,23 +148,7 @@ func (c *ConfirmComponent) Height(width int) int {
 	if w <= 0 {
 		w = choiceListMaxWidth
 	}
-	iconPrompt := questionIconPrompt(c.Styles, c.focused)
-	h := sectionHeight(c.Title, w-lipgloss.Width(iconPrompt)) // title
-	h++                                                       // blank
-	if c.Description != "" {
-		r := common.MarkdownRenderer(c.Styles, w)
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		out, err := r.Render(c.Description)
-		mu.Unlock()
-		if err == nil {
-			out = strings.TrimSuffix(out, "\n")
-			h += strings.Count(out, "\n") + 1
-		} else {
-			h += sectionHeight(c.Description, w)
-		}
-		h++ // blank
-	}
+	h := len(questionHeaderLines(c.Styles, c.focused, c.Title, c.Description, w))
 	h += len(c.QuestionLabels) // one bullet per question
 	h++                        // blank
 	if c.unansweredCount() > 0 {
@@ -189,34 +172,9 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	var lines []line
 
-	iconPrompt := questionIconPrompt(c.Styles, c.focused)
-	iconWidth := lipgloss.Width(iconPrompt)
-
-	// Title.
-	titleWrapped := ansi.Wrap(c.Title, area.Dx()-iconWidth, "")
-	for l := range strings.SplitSeq(titleWrapped, "\n") {
-		lines = append(lines, line{text: iconPrompt + c.Styles.Editor.QuestionUnselected.Render(l)})
-	}
-	lines = append(lines, line{}) // blank
-
-	// Description.
-	if c.Description != "" {
-		r := common.MarkdownRenderer(c.Styles, area.Dx())
-		mu := common.LockMarkdownRenderer(r)
-		mu.Lock()
-		desc, err := r.Render(c.Description)
-		mu.Unlock()
-		if err == nil {
-			desc = strings.TrimSuffix(desc, "\n")
-			for l := range strings.SplitSeq(desc, "\n") {
-				lines = append(lines, line{text: l})
-			}
-		} else {
-			for l := range strings.SplitSeq(c.Description, "\n") {
-				lines = append(lines, line{text: l})
-			}
-		}
-		lines = append(lines, line{}) // blank
+	// Title and description, shared header layout.
+	for _, l := range questionHeaderLines(c.Styles, c.focused, c.Title, c.Description, area.Dx()) {
+		lines = append(lines, line{text: l})
 	}
 
 	// Answer summary bullets.
