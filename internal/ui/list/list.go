@@ -746,6 +746,50 @@ func (l *List) ScrollToBottom() {
 	l.offsetLine = lastOffsetLine
 }
 
+// ScrollItemIntoView scrolls the minimum distance needed to make the
+// item at the given index fully visible. An item taller than the viewport
+// is top-aligned rather than bottom-aligned, so its start stays where the
+// user invoked the expansion. No-op when the item is already fully
+// visible.
+func (l *List) ScrollItemIntoView(idx int) {
+	if idx < 0 || idx >= len(l.items) || l.height <= 0 {
+		return
+	}
+
+	if idx < l.offsetIdx {
+		l.offsetIdx = idx
+		l.offsetLine = 0
+		return
+	}
+
+	// Distance from the top of the viewport to the top of the item,
+	// counting the partially scrolled first item as negative.
+	top := -l.offsetLine
+	for i := l.offsetIdx; i < idx; i++ {
+		top += l.getItem(i).height
+		if l.gap > 0 {
+			top += l.gap
+		}
+	}
+	if top < 0 {
+		l.offsetIdx = idx
+		l.offsetLine = 0
+		return
+	}
+
+	height := l.getItem(idx).height
+	overhang := top + height - l.height
+	if overhang <= 0 {
+		return
+	}
+	if height >= l.height {
+		l.offsetIdx = idx
+		l.offsetLine = 0
+		return
+	}
+	l.ScrollBy(overhang)
+}
+
 // ScrollToSelected scrolls the list to the selected item.
 func (l *List) ScrollToSelected() {
 	if l.selectedIdx < 0 || l.selectedIdx >= len(l.items) {

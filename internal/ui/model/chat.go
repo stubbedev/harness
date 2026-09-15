@@ -242,12 +242,21 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 
 	rendered := m.list.Render()
-	// If we're in follow mode but the render revealed we're no longer at
-	// the bottom (e.g. streaming content grew an item), re-anchor and
-	// re-render so the view stays pinned to the end.
-	if m.follow && !m.list.AtBottom() {
+	// While following, re-anchor to the bottom whenever the current
+	// offset is not the bottom anchor. AtBottom() alone is not enough:
+	// when content shrinks (a streaming item rewraps shorter, a
+	// placeholder item is removed) the stale offset can still report
+	// "at bottom" while the newest content floats above a blank region —
+	// or, worse, offsetLine points past the end of a shrunk item and the
+	// render comes out empty. Nothing corrects that until the next
+	// append; re-anchoring every followed frame closes the window.
+	if m.follow {
+		beforeIdx, beforeLine := m.list.ScrollPosition()
 		m.list.ScrollToBottom()
-		rendered = m.list.Render()
+		afterIdx, afterLine := m.list.ScrollPosition()
+		if afterIdx != beforeIdx || afterLine != beforeLine {
+			rendered = m.list.Render()
+		}
 	}
 	method, ok := scr.WidthMethod().(ansi.Method)
 	if !ok {
@@ -828,6 +837,28 @@ func (m *Chat) ScrollToIndex(index int) tea.Cmd {
 	return m.showScrollbar()
 }
 
+// ScrollItemIntoView scrolls the chat view the minimum distance needed to
+// make the item at the given index fully visible, without disturbing the
+// viewport when the item already fits.
+func (m *Chat) ScrollItemIntoView(index int) tea.Cmd {
+	m.list.ScrollItemIntoView(index)
+	m.follow = m.AtBottom()
+	return m.showScrollbar()
+}
+
+// reanchorAfterExpand restores the view after an item's rendered height
+// changed: while following, stay pinned to the bottom; otherwise scroll
+// just enough to bring the changed item back into view. An item taller
+// than the viewport top-aligns so the expansion is readable from its
+// start.
+func (m *Chat) reanchorAfterExpand() {
+	if m.follow {
+		m.ScrollToBottom()
+		return
+	}
+	m.ScrollItemIntoView(m.list.Selected())
+}
+
 // showScrollbar makes the scrollbar visible and returns a command to hide it after timeout.
 func (m *Chat) showScrollbar() tea.Cmd {
 	// Only start timer for "default" mode
@@ -1097,16 +1128,12 @@ func (m *Chat) ToggleExpandedSelectedItem() {
 	// With the sub-cursor on a child line, toggle that one call
 	// between its one-liner and full view.
 	if g, ok := selected.(*chat.ToolGroupMessageItem); ok && g.ToggleSelectedChild() {
+		m.reanchorAfterExpand()
 		return
 	}
 	if expandable, ok := selected.(chat.Expandable); ok {
-		wasFollowing := m.follow
-		if !expandable.ToggleExpanded() {
-			m.ScrollToIndex(m.list.Selected())
-		}
-		if wasFollowing {
-			m.ScrollToBottom()
-		}
+		_ = expandable.ToggleExpanded()
+		m.reanchorAfterExpand()
 	}
 }
 
@@ -1117,6 +1144,7 @@ func (m *Chat) ToggleExpandedSelectedItem() {
 func (m *Chat) EnterSelectedItem() {
 	if g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem); ok {
 		g.DigIn()
+		m.reanchorAfterExpand()
 		return
 	}
 	m.ToggleExpandedSelectedItem()
@@ -1291,13 +1319,8 @@ func (m *Chat) HandleDelayedClick(msg DelayedClickMsg) bool {
 		// toggling expansion for clicks outside the clickable area.
 		if handled {
 			if expandable, ok := selectedItem.(chat.Expandable); ok {
-				wasFollowing := m.follow
-				if !expandable.ToggleExpanded() {
-					m.ScrollToIndex(m.list.Selected())
-				}
-				if wasFollowing {
-					m.ScrollToBottom()
-				}
+				_ = expandable.ToggleExpanded()
+				m.reanchorAfterExpand()
 			}
 		}
 		return handled
