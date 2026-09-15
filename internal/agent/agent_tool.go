@@ -35,7 +35,11 @@ type AgentParams struct {
 type AgentDispatchParams struct {
 	SubagentType string `json:"subagent_type,omitempty"`
 	Prompt       string `json:"prompt"`
-	Background   bool   `json:"background,omitempty"`
+	// Blocking opts into waiting for the child: the tool call returns its
+	// result inline once the run finishes. The default (omitted or false)
+	// dispatches in the background — the call returns a handle immediately
+	// and the orchestrator keeps working while the child runs.
+	Blocking bool `json:"blocking,omitempty"`
 }
 
 const (
@@ -128,9 +132,9 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 				"type":        "string",
 				"description": "The task for the agent to perform",
 			},
-			"background": map[string]any{
+			"blocking": map[string]any{
 				"type":        "boolean",
-				"description": "Return a handle immediately instead of the result; collect it with `wait`. Default false, which blocks.",
+				"description": "Wait for this sub-agent and return its result in this call. Default false: the call returns a handle immediately while the sub-agent runs, its `send_message` output reaches you between your steps, and `wait` collects its result. Set true only when no further step is possible without the result.",
 			},
 		},
 		Required: []string{"prompt"},
@@ -253,16 +257,17 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 			// concurrency slot is taken here — before any build work — and
 			// held for the run. Over the limit this blocks rather than
 			// failing, so a wide fan-out completes in waves. A background
-			// dispatch transfers the slot to the run instead of holding it
-			// for the tool call: the child holds it until it finishes.
+			// dispatch (the default) transfers the slot to the run instead of
+			// holding it for the tool call: the child holds it until it
+			// finishes.
 			release, slotErr := c.acquireDispatchSlot(ctx)
 			if slotErr != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("acquire dispatch slot: %v", slotErr)), nil
 			}
 
 			// dispatchRun runs the resolved agent as this call's dispatch.
-			// Both blocking and background forms share it; only the slot
-			// ownership differs.
+			// Blocking and background forms share it; only the slot ownership
+			// differs.
 			handedOff := false
 			dispatchRun := func(agent SessionAgent, title, name, color, model string) (fantasy.ToolResponse, error) {
 				runParams := subAgentParams{
@@ -275,15 +280,15 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 					AgentName:      name,
 					AgentColor:     color,
 					AgentModel:     model,
-					Background:     params.Background,
 				}
-				if params.Background {
+				if !params.Blocking {
+					runParams.Background = true
 					runParams.ReleaseSlot = release
 					handedOff = true
 				}
 				return c.runSubAgent(ctx, runParams)
 			}
-			if params.Background {
+			if !params.Blocking {
 				defer func() {
 					// Once dispatchRun hands the slot to the run, the
 					// background goroutine owns releasing it. If dispatch

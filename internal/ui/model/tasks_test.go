@@ -15,12 +15,13 @@ import (
 )
 
 // agentToolCall builds the tool call a parent-session agent dispatch
-// produces.
+// produces. Blocking keeps the inline-result semantics these strip tests
+// were written against: the tool result is the sub-agent's final output.
 func agentToolCall(id string) message.ToolCall {
 	return message.ToolCall{
 		ID:       id,
 		Name:     "agent",
-		Input:    `{"subagent_type":"researcher","prompt":"dig into the git history"}`,
+		Input:    `{"subagent_type":"researcher","prompt":"dig into the git history","blocking":true}`,
 		Finished: false,
 	}
 }
@@ -229,7 +230,7 @@ func TestStripCountsDispatchesOnly(t *testing.T) {
 	require.Len(t, u.agentTasks, 0, "plain tool calls never count as subagents")
 	require.Nil(t, u.chat.MessageItem(chat.SubagentWaitID))
 
-	msg.Parts = append(msg.Parts, message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"dig"}`})
+	msg.Parts = append(msg.Parts, message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"dig","blocking":true}`})
 	_ = u.updateSessionMessage(msg)
 	require.Len(t, u.agentTasks, 1)
 	wait := u.chat.MessageItem(chat.SubagentWaitID).(*chat.SubagentWaitItem)
@@ -257,7 +258,7 @@ func TestBackgroundDispatchStaysVisible(t *testing.T) {
 
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	bg := agentToolCall("a1")
-	bg.Input = `{"subagent_type":"researcher","prompt":"dig","background":true}`
+	bg.Input = `{"subagent_type":"researcher","prompt":"dig"}`
 	_ = u.upsertAgentTask(msg, bg)
 
 	task := u.agentTaskByToolCall("a1")
@@ -291,7 +292,7 @@ func TestBackgroundDispatchReconcileAgainstRunningList(t *testing.T) {
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	for _, id := range []string{"a1", "a2"} {
 		bg := agentToolCall(id)
-		bg.Input = `{"prompt":"dig","background":true}`
+		bg.Input = `{"prompt":"dig"}`
 		_ = u.upsertAgentTask(msg, bg)
 	}
 	t1 := u.agentTaskByToolCall("a1")
@@ -321,7 +322,7 @@ func TestStripDoesNotResurrectFinishedDispatch(t *testing.T) {
 	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
 
 	msg := message.Message{ID: "m1", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
-		message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"dig"}`, Finished: true},
+		message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"dig","blocking":true}`, Finished: true},
 	}}
 	_ = u.updateSessionMessage(msg)
 	require.Len(t, u.agentTasks, 1)

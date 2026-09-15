@@ -94,7 +94,7 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 		task.color = subagents.AutoColor(task.name)
 	}
 	task.prompt = params.Prompt
-	task.background = params.Background
+	task.background = !params.Blocking
 	task.childSessionID = m.childSessionIDFor(msg.ID, tc.ID)
 
 	if m.tasksSpinning() {
@@ -241,19 +241,19 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			canceled := msg.FinishReason() == message.FinishReasonCanceled
 			// A set Finished flag only means the model finished emitting
 			// the call; the subagent runs until a result lands. Skip only
-			// dispatches that settled, or that cannot be running because
-			// the session is idle. A background dispatch is excepted on
-			// both counts: its tool result is just the start handle and it
-			// runs independently of the parent's busy state; the running
-			// list reconciles it instead.
-			if canceled || (!params.Background && (hasResult || !busy)) {
+			// blocking dispatches that settled, or that cannot be running
+			// because the session is idle. A background dispatch (the
+			// default) is excepted on both counts: its tool result is just
+			// the start handle and it runs independently of the parent's
+			// busy state; the running list reconciles it instead.
+			if canceled || (params.Blocking && (hasResult || !busy)) {
 				continue
 			}
 			task := &agentTask{
 				toolCallID:     tc.ID,
 				startedAt:      time.Unix(msg.CreatedAt, 0),
 				status:         subagents.StatusRunning,
-				background:     params.Background,
+				background:     !params.Blocking,
 				childSessionID: m.childSessionIDFor(msg.ID, tc.ID),
 			}
 			task.name = params.SubagentType

@@ -324,7 +324,9 @@ func TestAgentTool_TaskDispatch_BuildsOnLocalGroup(t *testing.T) {
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
 
 	// The type is explicit: an omitted type now defaults to the fast agent.
-	input, err := json.Marshal(AgentDispatchParams{SubagentType: config.AgentTask, Prompt: "find something"})
+	// So is blocking: the default returns a handle, and this test asserts the
+	// inline run failure only the blocking form reports.
+	input, err := json.Marshal(AgentDispatchParams{SubagentType: config.AgentTask, Prompt: "find something", Blocking: true})
 	require.NoError(t, err)
 
 	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
@@ -354,7 +356,9 @@ func TestAgentTool_TaskBuildFailureIsRetryable(t *testing.T) {
 	dt := tool.(*dispatcherTool)
 
 	// The type is explicit: an omitted type now defaults to the fast agent.
-	input, err := json.Marshal(AgentDispatchParams{SubagentType: config.AgentTask, Prompt: "find something"})
+	// Blocking keeps the run inline so the retried dispatch reports the run
+	// failure itself rather than a handle.
+	input, err := json.Marshal(AgentDispatchParams{SubagentType: config.AgentTask, Prompt: "find something", Blocking: true})
 	require.NoError(t, err)
 
 	// Break the task build: no small model selected.
@@ -384,6 +388,57 @@ func TestAgentTool_TaskBuildFailureIsRetryable(t *testing.T) {
 	require.NotContains(t, resp.Content, "build task agent",
 		"the task build must be retried after a failure, not replay the cached error")
 	require.Contains(t, resp.Content, "Failed to generate response")
+}
+
+// TestAgentTool_DefaultDispatchRunsInBackground pins the async-first
+// default: with no `blocking` flag the dispatch returns a handle
+// immediately, while the child is still running, instead of holding the
+// tool call until the child finishes.
+func TestAgentTool_DefaultDispatchRunsInBackground(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newOfflineCoordinator(t, env)
+	require.NoError(t, coord.readyWg.Wait())
+
+	rt := subagents.NewRuntime()
+	t.Cleanup(rt.Shutdown)
+	coord.runtime = rt
+
+	parentSession, err := env.sessions.Create(t.Context(), "Parent")
+	require.NoError(t, err)
+
+	tool, err := coord.agentTool(t.Context())
+	require.NoError(t, err)
+	dt := tool.(*dispatcherTool)
+
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, parentSession.ID)
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, "msg-1")
+
+	// No blocking flag: the default must not wait for the child.
+	input, err := json.Marshal(AgentDispatchParams{Prompt: "find something"})
+	require.NoError(t, err)
+
+	resp, err := dt.Run(ctx, fantasy.ToolCall{ID: "call-1", Input: string(input)})
+
+	require.NoError(t, err)
+	require.False(t, resp.IsError, resp.Content)
+	require.Contains(t, resp.Content, WaitToolName)
+
+	handle := backgroundHandleFromResponse(t, resp)
+	run, ok := coord.backgroundRunFor(parentSession.ID, handle)
+	require.True(t, ok, "a default dispatch must register a background run")
+	require.False(t, run.isFinished(), "the handle must arrive while the child is still running")
+
+	// Cancel the child through the registry, as Cancel would: the offline
+	// provider retries with backoff, so without this the run lingers past
+	// the test.
+	if cancel, ok := coord.subagentCancels.Get(run.childSession); ok {
+		cancel()
+	}
+	finished := waitForRunFinished(t, coord, handle)
+	_, status, _, _ := finished.snapshot()
+	require.Equal(t, subagents.StatusCancelled, status)
 }
 
 // TestAgentTool_EmptySubagentType_RoutesToFast pins the lean-light default:

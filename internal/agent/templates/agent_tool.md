@@ -6,4 +6,4 @@ Dispatch work to sub-agents. Several `agent` calls in one message run concurrent
 
 A sub-agent sees none of this conversation and returns only its final message — its tool output never reaches you. State the whole question, the paths to start from, and the answer shape you want. It cannot dispatch further sub-agents. Concurrency is capped; a wider fan-out runs in waves.
 
-`background: true` returns a handle immediately instead of the result. Messages the agent sends with `send_message` arrive between your steps; `wait` on the handles collects the results, repeatedly if needed. A background agent outlives your turn. Use the blocking form when you cannot proceed without the result.
+A dispatch returns a handle immediately and the sub-agent runs while you keep working — do not idle waiting for it. Messages it sends with `send_message` arrive between your steps; `wait` on the handles collects the results, repeatedly if needed, and a dispatched agent outlives your turn. `blocking: true` instead waits and returns the result in this call; use it only when no further step is possible without the result.
