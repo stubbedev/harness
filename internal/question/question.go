@@ -84,6 +84,14 @@ func (r Request) Validate() error {
 	if len(r.Questions) > MaxQuestions {
 		return fmt.Errorf("questions exceed maximum of %d (got %d)", MaxQuestions, len(r.Questions))
 	}
+	if len(r.Questions) > 1 {
+		if r.ConfirmTitle == "" {
+			return fmt.Errorf("confirm_title is required for multi-question batches")
+		}
+		if r.ConfirmDescription == "" {
+			return fmt.Errorf("confirm_description is required for multi-question batches")
+		}
+	}
 	for i, q := range r.Questions {
 		if err := q.Validate(); err != nil {
 			return fmt.Errorf("question %d: %w", i+1, err)
@@ -96,6 +104,9 @@ func (r Request) Validate() error {
 // are written for LLM consumption: specific and actionable.
 func (q Question) Validate() error {
 	label := q.identifier()
+	if len(q.Label) > MaxLabelLength {
+		return fmt.Errorf("%s: label exceeds %d characters (got %d)", label, MaxLabelLength, len(q.Label))
+	}
 	if q.Text == "" {
 		return fmt.Errorf("%s: question text is required", label)
 	}
@@ -166,6 +177,7 @@ const (
 	MaxChoiceDescriptionLength = 200
 	MaxChoices                 = 10
 	MaxQuestions               = 5
+	MaxLabelLength             = 60
 )
 
 // Notification is published when a question batch is resolved so

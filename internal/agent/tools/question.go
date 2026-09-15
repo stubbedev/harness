@@ -56,11 +56,11 @@ func (p *QuestionParams) UnmarshalJSON(data []byte) error {
 
 // QuestionItem is a single question from the tool input.
 type QuestionItem struct {
-	Label       string           `json:"label,omitempty" description:"Short tab header label (3 words max)."`
+	Label       string           `json:"label,omitempty" description:"Short tab header label (max 60 characters)."`
 	Type        string           `json:"type" description:"The type of question: yes_no, single_choice, multi_choice, or free_text"`
-	Question    string           `json:"question" description:"The question text"`
-	Description string           `json:"description" description:"Required markdown description shown below the question"`
-	Choices     []QuestionChoice `json:"choices,omitempty" description:"List of choices"`
+	Question    string           `json:"question" description:"The question text (max 240 characters)"`
+	Description string           `json:"description" description:"Required markdown description shown below the question (1-600 characters)"`
+	Choices     []QuestionChoice `json:"choices,omitempty" description:"List of choices (2-10 for choice questions)"`
 	Options     []QuestionChoice `json:"options,omitempty"` // alias for Choices
 }
 
@@ -75,8 +75,8 @@ func (q QuestionItem) GetChoices() []QuestionChoice {
 // QuestionChoice represents a selectable option.
 type QuestionChoice struct {
 	ID          string `json:"id" description:"Unique identifier for this choice"`
-	Label       string `json:"label" description:"Display text for this choice"`
-	Description string `json:"description,omitempty" description:"Optional description for this choice"`
+	Label       string `json:"label" description:"Display text for this choice (max 200 characters)"`
+	Description string `json:"description,omitempty" description:"Optional description for this choice (max 200 characters)"`
 }
 
 // NewQuestionTool creates a new question tool.
@@ -87,31 +87,20 @@ func NewQuestionTool(svc question.Service) fantasy.AgentTool {
 		func(ctx context.Context, params QuestionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessionID := GetSessionFromContext(ctx)
 
-			if len(params.Questions) == 0 {
-				return fantasy.NewTextErrorResponse("at least one question is required"), nil
-			}
-			if len(params.Questions) > question.MaxQuestions {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("exceeds maximum of %d questions per batch (got %d). Split into multiple batches and tell the user there will be follow-up questions", question.MaxQuestions, len(params.Questions))), nil
-			}
+		if len(params.Questions) == 0 {
+			return fantasy.NewTextErrorResponse("at least one question is required"), nil
+		}
 
-			questions := make([]question.Question, len(params.Questions))
-			for i, item := range params.Questions {
-				qType := question.Type(item.Type)
-				if qType != question.TypeYesNo && qType != question.TypeSingleChoice && qType != question.TypeMultiChoice && qType != question.TypeFreeText {
-					label := item.Label
-					if label == "" {
-						label = item.Question
-					}
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("question %d [%s]: invalid type %q (must be yes_no, single_choice, multi_choice, or free_text)", i+1, label, item.Type)), nil
-				}
-				questions[i] = question.Question{
-					Type:        qType,
-					Label:       item.Label,
-					Text:        item.Question,
-					Description: item.Description,
-					Choices:     convertChoices(item.GetChoices()),
-				}
+		questions := make([]question.Question, len(params.Questions))
+		for i, item := range params.Questions {
+			questions[i] = question.Question{
+				Type:        question.Type(item.Type),
+				Label:       item.Label,
+				Text:        item.Question,
+				Description: item.Description,
+				Choices:     convertChoices(item.GetChoices()),
 			}
+		}
 
 			req := question.Request{
 				SessionID:          sessionID,
