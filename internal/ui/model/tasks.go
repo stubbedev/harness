@@ -637,6 +637,9 @@ func (m *UI) handleTaskKey(msg tea.KeyPressMsg) bool {
 	case key.Matches(msg, m.keyMap.Tab):
 		m.focusEditorFromTasks()
 		return true
+	case key.Matches(msg, m.keyMap.ShiftTab):
+		m.focusChatFromTasks()
+		return true
 	}
 	return false
 }
@@ -644,6 +647,12 @@ func (m *UI) handleTaskKey(msg tea.KeyPressMsg) bool {
 func (m *UI) focusEditorFromTasks() {
 	m.focus = uiFocusEditor
 	_ = m.textarea.Focus()
+}
+
+func (m *UI) focusChatFromTasks() {
+	m.focus = uiFocusMain
+	m.chat.Focus()
+	m.chat.SetSelected(m.chat.Len() - 1)
 }
 
 // renderTasks renders the background tasks strip and records the row

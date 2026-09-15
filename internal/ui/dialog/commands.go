@@ -398,7 +398,7 @@ var compactArguments = []commands.Argument{{
 func (c *Commands) defaultCommands() []*CommandItem {
 	commands := []*CommandItem{
 		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
-		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}),
+		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}).WithAliases("resume", "switch"),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
 		NewCommandItem(c.com.Styles, "connect_provider", "Connect Provider", "", ActionOpenDialog{ConnectID}).WithAliases("provider", "auth", "login"),
 		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", "alt+t", ActionOpenDialog{ThemesID}),
@@ -416,7 +416,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	// Only show the export command when there is a conversation to export
 	if c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "export_conversation", "Export Conversation", "ctrl+shift+e", ActionExportConversation{SessionID: c.sessionID}).WithAliases("export", "transcript"))
+		commands = append(commands, NewCommandItem(c.com.Styles, "export_conversation", "Export Conversation", "ctrl+shift+e", ActionExportConversation{SessionID: c.sessionID}).WithAliases("export", "transcript", "copy"))
 	}
 
 	// Only show the save summary command if the session already has one

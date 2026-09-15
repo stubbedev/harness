@@ -475,6 +475,7 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `parent_session` | `ctrl+up` |
 | `quit` | `ctrl+c` |
 | `sessions` | `ctrl+s` |
+| `shift_tab` | `shift+tab` |
 | `suspend` | `ctrl+z` |
 | `tab` | `tab` |
 | `themes` | `alt+t` |

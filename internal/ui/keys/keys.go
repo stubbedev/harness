@@ -94,6 +94,7 @@ type KeyMap struct {
 	Suspend       key.Binding
 	Sessions      key.Binding
 	Tab           key.Binding
+	ShiftTab      key.Binding
 	ParentSession key.Binding
 	// ExportConversation writes the current session transcript to a
 	// markdown file and copies it to the clipboard.
@@ -247,6 +248,10 @@ func DefaultKeyMap() KeyMap {
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "change focus"),
+		),
+		ShiftTab: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "change focus"),
 		),
 		ParentSession: key.NewBinding(
 			key.WithKeys("ctrl+up"),
@@ -697,6 +702,7 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"suspend":                       &km.Suspend,
 		"sessions":                      &km.Sessions,
 		"tab":                           &km.Tab,
+		"shift_tab":                     &km.ShiftTab,
 		"parent_session":                &km.ParentSession,
 		"export_conversation":           &km.ExportConversation,
 		"themes":                        &km.Themes,

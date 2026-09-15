@@ -2727,6 +2727,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.chat.Focus()
 					m.chat.SetSelected(m.chat.Len() - 1)
 				}
+			case key.Matches(msg, m.keyMap.ShiftTab):
+				if m.state == uiChat && len(m.agentTasks) > 0 {
+					m.focusTasks()
+				} else if m.state != uiLanding {
+					m.setState(m.state, uiFocusMain)
+					m.textarea.Blur()
+					m.chat.Focus()
+					m.chat.SetSelected(m.chat.Len() - 1)
+				}
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
 				if m.isAgentBusy() {
 					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
@@ -2891,6 +2900,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, m.textarea.Focus())
 					m.chat.Blur()
 				}
+			case key.Matches(msg, m.keyMap.ShiftTab):
+				m.focus = uiFocusEditor
+				cmds = append(cmds, m.textarea.Focus())
+				m.chat.Blur()
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
