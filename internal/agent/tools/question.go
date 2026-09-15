@@ -87,20 +87,20 @@ func NewQuestionTool(svc question.Service) fantasy.AgentTool {
 		func(ctx context.Context, params QuestionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			sessionID := GetSessionFromContext(ctx)
 
-		if len(params.Questions) == 0 {
-			return fantasy.NewTextErrorResponse("at least one question is required"), nil
-		}
-
-		questions := make([]question.Question, len(params.Questions))
-		for i, item := range params.Questions {
-			questions[i] = question.Question{
-				Type:        question.Type(item.Type),
-				Label:       item.Label,
-				Text:        item.Question,
-				Description: item.Description,
-				Choices:     convertChoices(item.GetChoices()),
+			if len(params.Questions) == 0 {
+				return fantasy.NewTextErrorResponse("at least one question is required"), nil
 			}
-		}
+
+			questions := make([]question.Question, len(params.Questions))
+			for i, item := range params.Questions {
+				questions[i] = question.Question{
+					Type:        question.Type(item.Type),
+					Label:       item.Label,
+					Text:        item.Question,
+					Description: item.Description,
+					Choices:     convertChoices(item.GetChoices()),
+				}
+			}
 
 			req := question.Request{
 				SessionID:          sessionID,
