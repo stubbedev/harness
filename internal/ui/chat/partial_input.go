@@ -55,7 +55,7 @@ func partialStringField(input, key string) (string, bool) {
 				if j+4 >= len(rest) {
 					return sb.String(), true
 				}
-				if r, err := strconv.ParseUint(rest[j+1:j+5], 16, 32); err == nil {
+				if r, err := strconv.ParseUint(rest[j+1:j+5], 16, 32); err == nil && r <= 0x7fffffff {
 					sb.WriteRune(rune(r))
 				}
 				j += 4
