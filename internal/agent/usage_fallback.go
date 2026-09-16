@@ -2,8 +2,11 @@ package agent
 
 import (
 	"fmt"
+	"hash/fnv"
+	"sync"
 
 	"charm.land/fantasy"
+	"github.com/tiktoken-go/tokenizer"
 )
 
 func usageIsZero(usage fantasy.Usage) bool {
@@ -168,9 +171,77 @@ func estimateSourceTokens(source fantasy.SourceContent) int64 {
 		approxTokenCount(source.Filename)
 }
 
+// tokenCodec is the tokenizer every estimate goes through: cl100k_base,
+// the BPE behind GPT-4 and a close proxy for the rest. No provider
+// publishes its exact tokenizer for every model, but a real BPE is
+// within a few percent on code and non-Latin text where the old
+// characters-over-four rule was off by half, and the compaction
+// thresholds are only as sharp as this count.
+var tokenCodec = sync.OnceValues(func() (tokenizer.Codec, error) {
+	return tokenizer.Get(tokenizer.Cl100kBase)
+})
+
+// tokenCountCache remembers counts for strings large enough to be worth
+// the tokenizer's time. The same history is estimated on every step, so
+// nearly every string seen is one that was seen before; without this
+// the estimate would re-tokenize the whole session each time.
+var tokenCountCache = struct {
+	sync.Mutex
+	counts map[uint64]int64
+}{counts: map[uint64]int64{}}
+
+const (
+	// tokenCacheMinBytes is the size below which counting is cheaper
+	// than hashing and caching.
+	tokenCacheMinBytes = 128
+	// tokenCacheMaxEntries bounds the cache; past it the map is dropped
+	// and rebuilt from the strings still in use.
+	tokenCacheMaxEntries = 16384
+)
+
+// approxTokenCount counts the tokens in s with the BPE tokenizer,
+// falling back to the four-characters rule if the tokenizer is
+// unavailable.
 func approxTokenCount(s string) int64 {
 	if s == "" {
 		return 0
 	}
-	return int64((len(s) + 3) / 4)
+	codec, err := tokenCodec()
+	if err != nil {
+		return int64((len(s) + 3) / 4)
+	}
+	if len(s) < tokenCacheMinBytes {
+		return countTokens(codec, s)
+	}
+	key := fnvHash(s)
+	tokenCountCache.Lock()
+	n, ok := tokenCountCache.counts[key]
+	tokenCountCache.Unlock()
+	if ok {
+		return n
+	}
+	n = countTokens(codec, s)
+	tokenCountCache.Lock()
+	if len(tokenCountCache.counts) >= tokenCacheMaxEntries {
+		tokenCountCache.counts = map[uint64]int64{}
+	}
+	tokenCountCache.counts[key] = n
+	tokenCountCache.Unlock()
+	return n
+}
+
+func countTokens(codec tokenizer.Codec, s string) int64 {
+	n, err := codec.Count(s)
+	if err != nil {
+		return int64((len(s) + 3) / 4)
+	}
+	return int64(n)
+}
+
+// fnvHash keys the count cache. Collisions cost an estimate that is off
+// for one string, never anything worse, so a 64-bit hash is plenty.
+func fnvHash(s string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum64()
 }

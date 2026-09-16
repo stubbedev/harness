@@ -54,3 +54,6 @@ manpages/
 completions/harness.*sh
 .prettierignore
 .task
+
+# Worktrees the agent tooling creates for parallel work.
+.claude/worktrees/

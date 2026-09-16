@@ -45,7 +45,7 @@ func (c *gatedCoordinator) RunAccepted(ctx context.Context, accept *agent.Accept
 // before any model call, so no network I/O happens.
 func newRealCoordinator(t *testing.T) (*gatedCoordinator, session.Service, message.Service) {
 	t.Helper()
-	conn, err := db.Connect(t.Context(), t.TempDir())
+	conn, err := db.Connect(t.Context(), tempDataDir(t))
 	require.NoError(t, err)
 	t.Cleanup(func() { conn.Close() })
 

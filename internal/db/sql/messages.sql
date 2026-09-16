@@ -64,3 +64,10 @@ FROM messages
 WHERE session_id = ? AND role = 'assistant' AND is_summary_message = 0
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: ListMessagesBySessionFrom :many
+SELECT m.*
+FROM messages m
+WHERE m.session_id = ?
+  AND m.created_at >= (SELECT b.created_at FROM messages b WHERE b.id = ?)
+ORDER BY m.created_at ASC;

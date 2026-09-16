@@ -57,12 +57,32 @@ const (
 // the boundary existed carry their summary as a message the transcript
 // hides; those resume from that message, as they always did.
 func (a *sessionAgent) sessionHistory(ctx context.Context, s session.Session) (msgs []message.Message, summary string, err error) {
-	all, err := a.messages.List(ctx, s.ID)
+	all, err := a.loadForCompaction(ctx, s)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to list messages: %w", err)
+		return nil, "", err
 	}
 	tail, agedIdx := compactedTail(s, all)
-	return stubAgedResults(tail, agedIdx), s.CompactionSummary, nil
+	return dedupToolResults(ageMessages(tail, agedIdx)), s.CompactionSummary, nil
+}
+
+// loadForCompaction loads the messages compactedTail needs: only those
+// from the boundary on when the session has one, since everything
+// before it is never sent again. A long session's folded history stays
+// in the database for the transcript, but it is not read on every turn.
+func (a *sessionAgent) loadForCompaction(ctx context.Context, s session.Session) ([]message.Message, error) {
+	var (
+		msgs []message.Message
+		err  error
+	)
+	if s.CompactionBoundaryID != "" {
+		msgs, err = a.messages.ListFrom(ctx, s.ID, s.CompactionBoundaryID)
+	} else {
+		msgs, err = a.messages.List(ctx, s.ID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to list messages: %w", err)
+	}
+	return msgs, nil
 }
 
 // compactedTail slices the session's messages down to the ones sent
@@ -99,45 +119,143 @@ func indexOfMessage(msgs []message.Message, id string) int {
 	return -1
 }
 
-// stubAgedResults replaces the text of every tool result up to and
-// including index agedIdx with a stub naming what was there. The
-// messages are copied; the stored rows are untouched. Media results and
-// results already short enough to be their own stub are left alone.
-func stubAgedResults(msgs []message.Message, agedIdx int) []message.Message {
+// ageMessages rewrites every message up to and including index agedIdx
+// into its aged form, which is what the model is sent for turns that
+// are over. The messages are copied; the stored rows are untouched.
+//
+//   - Tool results lose their text for a stub naming what was there.
+//     Results already short enough to be their own stub stay.
+//   - Media results and image attachments lose their bytes for a line
+//     saying an image was there: an image costs more than a page of text
+//     on every request, and a finished turn never looks at it again.
+//   - Long assistant answers are cut to their opening: the decisions in
+//     them are restated by later turns, or land in the summary when the
+//     turn is folded.
+func ageMessages(msgs []message.Message, agedIdx int) []message.Message {
 	if agedIdx < 0 {
 		return msgs
 	}
 	out := make([]message.Message, len(msgs))
 	copy(out, msgs)
 	for i := 0; i <= agedIdx && i < len(out); i++ {
-		if out[i].Role != message.Tool {
+		switch out[i].Role {
+		case message.Tool, message.User, message.Assistant:
+		default:
 			continue
 		}
-		parts := make([]message.ContentPart, len(out[i].Parts))
-		for j, part := range out[i].Parts {
-			tr, ok := part.(message.ToolResult)
-			if !ok || tr.Data != "" || len(tr.Content) <= compactionStubMaxChars {
-				parts[j] = part
-				continue
+		parts := make([]message.ContentPart, 0, len(out[i].Parts))
+		for _, part := range out[i].Parts {
+			switch p := part.(type) {
+			case message.ToolResult:
+				switch {
+				case p.Data != "":
+					p.Data, p.MIMEType = "", ""
+					p.Content = fmt.Sprintf("[%s image output from earlier in the session omitted to save context]", toolLabel(p.Name))
+				case len(p.Content) > compactionStubMaxChars:
+					p.Content = toolResultStub(p)
+				}
+				parts = append(parts, p)
+			case message.BinaryContent:
+				if strings.HasPrefix(p.MIMEType, "text/") {
+					parts = append(parts, p)
+					continue
+				}
+				parts = append(parts, message.TextContent{Text: fmt.Sprintf("[attached image %s from an earlier turn omitted to save context]", filepathBase(p.Path))})
+			case message.TextContent:
+				if out[i].Role == message.Assistant && len(p.Text) > compactionAnswerMaxChars {
+					p.Text = cutAnswer(p.Text)
+				}
+				parts = append(parts, p)
+			default:
+				parts = append(parts, part)
 			}
-			tr.Content = toolResultStub(tr)
-			parts[j] = tr
 		}
 		out[i].Parts = parts
 	}
 	return out
 }
 
+// compactionAnswerMaxChars is the length past which an assistant answer
+// from a finished turn is cut to its opening compactionAnswerKeepChars.
+const (
+	compactionAnswerMaxChars  = 6000
+	compactionAnswerKeepChars = 2000
+)
+
+// cutAnswer keeps the opening of a long answer, cut at a line break.
+func cutAnswer(text string) string {
+	head := text[:compactionAnswerKeepChars]
+	if i := strings.LastIndexByte(head, '\n'); i > compactionAnswerKeepChars/2 {
+		head = head[:i]
+	}
+	return head + fmt.Sprintf("\n[… %d more characters of this earlier answer elided to save context]", len(text)-len(head))
+}
+
+func toolLabel(name string) string {
+	if name == "" {
+		return "tool"
+	}
+	return name
+}
+
+func filepathBase(path string) string {
+	if i := strings.LastIndexAny(path, `/\`); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
+
 // toolResultStub is what an aged tool result is sent as: enough to know
 // there was output and how to get it back, and nothing of the output.
 func toolResultStub(tr message.ToolResult) string {
-	name := tr.Name
-	if name == "" {
-		name = "tool"
-	}
 	lines := strings.Count(tr.Content, "\n") + 1
 	return fmt.Sprintf("[%s output from earlier in the session elided to save context: %d lines, %d characters; run it again if you need it]",
-		name, lines, len(tr.Content))
+		toolLabel(tr.Name), lines, len(tr.Content))
+}
+
+// dedupToolResults sends an identical tool result once: when the same
+// output appears more than once in the history - a file read twice, a
+// command re-run to the same effect - every copy but the latest is
+// replaced with a stub pointing at the one that stays. The latest is
+// kept because it is the one the model most recently acted on.
+func dedupToolResults(msgs []message.Message) []message.Message {
+	seen := map[string]bool{}
+	var out []message.Message
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role != message.Tool {
+			continue
+		}
+		var parts []message.ContentPart
+		for j, part := range m.Parts {
+			tr, ok := part.(message.ToolResult)
+			if !ok || tr.Data != "" || len(tr.Content) <= compactionStubMaxChars {
+				continue
+			}
+			key := tr.Name + "\x00" + tr.Content
+			if !seen[key] {
+				seen[key] = true
+				continue
+			}
+			if parts == nil {
+				parts = append([]message.ContentPart(nil), m.Parts...)
+				if out == nil {
+					out = make([]message.Message, len(msgs))
+					copy(out, msgs)
+				}
+			}
+			tr.Content = fmt.Sprintf("[%s output identical to a later result in this conversation: %d lines, %d characters; see that one]",
+				toolLabel(tr.Name), strings.Count(tr.Content, "\n")+1, len(tr.Content))
+			parts[j] = tr
+		}
+		if parts != nil {
+			out[i].Parts = parts
+		}
+	}
+	if out == nil {
+		return msgs
+	}
+	return out
 }
 
 // summaryMessage is how the hidden summary enters the request: a user
@@ -245,9 +363,9 @@ func (a *sessionAgent) maintainContext(
 	if err != nil {
 		return false, fmt.Errorf("failed to get session: %w", err)
 	}
-	all, err := a.messages.List(ctx, sessionID)
+	all, err := a.loadForCompaction(ctx, sess)
 	if err != nil {
-		return false, fmt.Errorf("failed to list messages: %w", err)
+		return false, err
 	}
 	if len(all) == 0 {
 		return false, nil
@@ -264,7 +382,7 @@ func (a *sessionAgent) maintainContext(
 	if len(tail) == 0 {
 		return false, nil
 	}
-	projected := a.projectRequest(sess.CompactionSummary, stubAgedResults(tail, agedIdx), supportsImages)
+	projected := a.projectRequest(sess.CompactionSummary, dedupToolResults(ageMessages(tail, agedIdx)), supportsImages)
 	over := func(ratio float64) bool { return cw > 0 && float64(projected) > ratio*float64(cw) }
 	changed := false
 
@@ -273,7 +391,7 @@ func (a *sessionAgent) maintainContext(
 		if start := lastUserTurnStart(tail); start > 0 && tail[start-1].ID != sess.CompactionAgedID {
 			sess.CompactionAgedID = tail[start-1].ID
 			agedIdx = start - 1
-			projected = a.projectRequest(sess.CompactionSummary, stubAgedResults(tail, agedIdx), supportsImages)
+			projected = a.projectRequest(sess.CompactionSummary, dedupToolResults(ageMessages(tail, agedIdx)), supportsImages)
 			changed = true
 		}
 	}

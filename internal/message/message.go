@@ -49,6 +49,11 @@ type Service interface {
 	Update(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
+	// ListFrom lists the session's messages from the one with fromID on,
+	// that message included, in order. A fromID the session does not
+	// hold lists everything, so a caller that lost its anchor degrades to
+	// List rather than to nothing.
+	ListFrom(ctx context.Context, sessionID, fromID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	GetLastAssistantMessage(ctx context.Context, sessionID string) (Message, error)
@@ -511,6 +516,41 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 	if err != nil {
 		return nil, err
 	}
+	messages := make([]Message, len(dbMessages))
+	for i, dbMessage := range dbMessages {
+		messages[i], err = s.fromDBItem(dbMessage)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
+}
+
+func (s *service) ListFrom(ctx context.Context, sessionID, fromID string) ([]Message, error) {
+	// The query keys on the anchor's timestamp, which is whole seconds:
+	// rows written in the same second as the anchor come back with it,
+	// so the anchor itself is found by id and everything before it is
+	// dropped here.
+	dbMessages, err := s.q.ListMessagesBySessionFrom(ctx, db.ListMessagesBySessionFromParams{
+		SessionID: sessionID,
+		ID:        fromID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	start := -1
+	for i, m := range dbMessages {
+		if m.ID == fromID {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		// Anchor gone (or its created_at unreadable): the query returned
+		// nothing useful, list everything instead.
+		return s.List(ctx, sessionID)
+	}
+	dbMessages = dbMessages[start:]
 	messages := make([]Message, len(dbMessages))
 	for i, dbMessage := range dbMessages {
 		messages[i], err = s.fromDBItem(dbMessage)

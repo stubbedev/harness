@@ -38,7 +38,7 @@ type fakeEnv struct {
 func testEnv(t *testing.T) fakeEnv {
 	workingDir := t.TempDir()
 
-	conn, err := db.Connect(t.Context(), t.TempDir())
+	conn, err := db.Connect(t.Context(), tempDBDir(t))
 	require.NoError(t, err)
 
 	q := db.New(conn)
@@ -165,4 +165,30 @@ func main() {
 `
 	err = os.WriteFile(dir+"/main.go", []byte(mainGo), 0o644)
 	require.NoError(t, err)
+}
+
+// tempDBDir returns a temporary directory for a test's SQLite database.
+// Unlike t.TempDir, its cleanup retries removal for a while:
+// database/sql releases an in-use connection asynchronously after Close,
+// and on Windows an open file cannot be unlinked, so a single-shot
+// RemoveAll is flaky there.
+func tempDBDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "harness-agent-db-")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			err := os.RemoveAll(dir)
+			if err == nil {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Logf("Failed to remove db dir %s: %v", dir, err)
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+	return dir
 }
