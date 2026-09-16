@@ -58,13 +58,14 @@ type Session struct {
 	notify chan struct{} // signalled (cap 1) whenever output arrives
 	closed chan struct{}
 
-	pty      pty.Pty
-	proc     *os.Process
-	pending  []byte    // output not yet drained
-	scanFrom int       // where WaitFor pattern scanning continues from
-	lastData time.Time // last time output arrived
-	exited   bool
-	err      error
+	pty       pty.Pty
+	proc      *os.Process
+	pending   []byte    // output not yet drained
+	scanFrom  int       // where WaitFor pattern scanning continues from
+	lastData  time.Time // last time output arrived
+	exited    bool
+	err       error
+	closeOnce sync.Once
 
 	// emu is a headless terminal emulator fed the same bytes as pending.
 	// The raw stream is the right view of a normal command (it keeps
@@ -808,17 +809,23 @@ func (s *Session) Err() error {
 	return s.err
 }
 
-// Close terminates the session process and releases the PTY.
+// Close terminates the session process and releases the PTY. It is
+// safe to call more than once and from more than one goroutine: the
+// wait goroutine releases the PTY when the shell exits on its own
+// (onExit), and a runner being torn down closes the session it holds,
+// so the same session can arrive here twice.
 func (s *Session) Close() {
-	s.mu.Lock()
-	exited := s.exited
-	s.mu.Unlock()
-	if !exited {
-		_ = s.proc.Kill()
-	}
-	_ = s.pty.Close()
-	// Ends the reply-forwarding goroutine.
-	s.replies.close()
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		exited := s.exited
+		s.mu.Unlock()
+		if !exited {
+			_ = s.proc.Kill()
+		}
+		_ = s.pty.Close()
+		// Ends the reply-forwarding goroutine.
+		s.replies.close()
+	})
 	select {
 	case <-s.closed:
 	case <-time.After(5 * time.Second):
