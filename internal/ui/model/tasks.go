@@ -98,7 +98,6 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 	task.childSessionID = m.childSessionIDFor(msg.ID, tc.ID)
 
 	if m.tasksSpinning() {
-		m.syncSubagentWaitItem()
 		m.updateLayoutAndSize()
 		return m.taskSpinner.Tick
 	}
@@ -149,7 +148,6 @@ func (m *UI) reapAgentTask(toolCallID string) {
 		m.taskSubCursor = -1
 	}
 	m.clampTaskCursor()
-	m.syncSubagentWaitItem()
 }
 
 // subagentDisplayName is the strip title for a dispatch that did not
@@ -181,42 +179,6 @@ func (m *UI) resetAgentTasks() {
 	m.agentTasks = nil
 	m.expandedTaskID = ""
 	m.taskRows = nil
-	m.syncSubagentWaitItem()
-}
-
-// syncSubagentWaitItem keeps the transcript's "Waiting for N
-// subagents" entry in step with the running set: appended and animated
-// while dispatches are in flight, removed once they all settle. The
-// timer counts from the oldest running dispatch.
-func (m *UI) syncSubagentWaitItem() {
-	if m.state != uiChat || m.chat == nil {
-		return
-	}
-	if !m.tasksSpinning() {
-		if m.chat != nil && m.chat.MessageItem(chat.SubagentWaitID) != nil {
-			m.chat.RemoveMessage(chat.SubagentWaitID)
-		}
-		return
-	}
-	oldest := time.Now()
-	for _, t := range m.agentTasks {
-		if t.status == subagents.StatusRunning || t.status == subagents.StatusRetrying {
-			if t.startedAt.Before(oldest) {
-				oldest = t.startedAt
-			}
-		}
-	}
-	if item, ok := m.chat.MessageItem(chat.SubagentWaitID).(*chat.SubagentWaitItem); ok {
-		item.Update(len(m.agentTasks), oldest)
-		return
-	}
-	m.chat.AppendMessages(chat.NewSubagentWaitItem(m.com.Styles, len(m.agentTasks), oldest))
-	// Subagent waits can outlive the parent's own streaming traffic;
-	// keep the animation clock allowed so the spinner stays live.
-	m.chat.SetAnimationsAllowed(true)
-	if m.chat.Follow() {
-		m.chat.ScrollToBottom()
-	}
 }
 
 // loadAgentTasks rebuilds the task list from a session's persisted
@@ -268,7 +230,6 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 		}
 	}
 	m.clampTaskCursor()
-	m.syncSubagentWaitItem()
 }
 
 // loadTaskNestedTools fetches a finished subagent's own tool calls from

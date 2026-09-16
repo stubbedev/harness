@@ -174,40 +174,35 @@ func TestBackgroundTasksKeyboardNavigation(t *testing.T) {
 	require.Equal(t, uiFocusEditor, u.focus)
 }
 
-// TestSubagentWaitEntry covers the transcript's live wait entry: it
-// appears with the running count while subagents are in flight, survives
-// the assistant message flipping its tool calls to Finished (that only
-// means the model finished emitting them), updates the count, and leaves
-// once the last result lands.
-func TestSubagentWaitEntry(t *testing.T) {
+// TestRunningDispatchesLiveOnlyInTheStrip pins that a dispatch shows up
+// as a strip row and nowhere else: no companion entry is appended to the
+// transcript, so the only thing to look at while subagents run is the
+// list of the subagents themselves, each expandable to its tool calls.
+func TestRunningDispatchesLiveOnlyInTheStrip(t *testing.T) {
 	t.Parallel()
 	u := newTestUI()
 	u.state = uiChat
 	u.width = 100
 
+	before := u.chat.Len()
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
-	require.NotNil(t, u.chat.MessageItem(chat.SubagentWaitID), "a running dispatch adds the wait entry")
-	wait := u.chat.MessageItem(chat.SubagentWaitID).(*chat.SubagentWaitItem)
-	assert.Contains(t, ansi.Strip(wait.Render(80)), "Waiting for 1 subagent")
+	_ = u.upsertAgentTask(msg, agentToolCall("a2"))
+	require.Len(t, u.agentTasks, 2, "each dispatch is a strip row")
+	require.True(t, u.tasksSpinning())
+	assert.Equal(t, before, u.chat.Len(), "dispatches add nothing to the transcript")
 
 	// The emitted flag flipping must not reap the running subagent.
 	finished := agentToolCall("a1")
 	finished.Finished = true
 	_ = u.upsertAgentTask(msg, finished)
 	require.NotNil(t, u.agentTaskByToolCall("a1"), "an emitted-but-unresolved dispatch keeps running")
-	require.NotNil(t, u.chat.MessageItem(chat.SubagentWaitID))
 
-	// A second dispatch updates the count in place.
-	_ = u.upsertAgentTask(msg, agentToolCall("a2"))
-	assert.Contains(t, ansi.Strip(wait.Render(80)), "Waiting for 2 subagents")
-
-	// Results reap both; the wait entry leaves with the last one.
 	_ = u.resolveAgentTaskResult(message.ToolResult{ToolCallID: "a1", Name: "agent", Content: "ok"})
-	require.NotNil(t, u.chat.MessageItem(chat.SubagentWaitID), "one subagent still running")
-	assert.Contains(t, ansi.Strip(wait.Render(80)), "Waiting for 1 subagent")
 	_ = u.resolveAgentTaskResult(message.ToolResult{ToolCallID: "a2", Name: "agent", Content: "ok"})
-	assert.Nil(t, u.chat.MessageItem(chat.SubagentWaitID), "the wait entry leaves when all settle")
+	assert.Empty(t, u.agentTasks)
+	assert.False(t, u.tasksSpinning())
+	assert.Equal(t, before, u.chat.Len())
 }
 
 // TestStripCountsDispatchesOnly pins that the strip and the wait entry
@@ -228,13 +223,10 @@ func TestStripCountsDispatchesOnly(t *testing.T) {
 	}}
 	_ = u.updateSessionMessage(msg)
 	require.Len(t, u.agentTasks, 0, "plain tool calls never count as subagents")
-	require.Nil(t, u.chat.MessageItem(chat.SubagentWaitID))
 
 	msg.Parts = append(msg.Parts, message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"dig","blocking":true}`})
 	_ = u.updateSessionMessage(msg)
 	require.Len(t, u.agentTasks, 1)
-	wait := u.chat.MessageItem(chat.SubagentWaitID).(*chat.SubagentWaitItem)
-	assert.Contains(t, ansi.Strip(wait.Render(80)), "Waiting for 1 subagent")
 
 	// Results for the plain tools must not reap the dispatch's task.
 	toolMsg := message.Message{ID: "tm1", SessionID: "s1", Role: message.Tool, Parts: []message.ContentPart{
@@ -332,7 +324,6 @@ func TestStripDoesNotResurrectFinishedDispatch(t *testing.T) {
 	}}
 	_ = u.appendSessionMessage(resultMsg)
 	require.Empty(t, u.agentTasks, "the dispatch's result reaps its task")
-	require.Nil(t, u.chat.MessageItem(chat.SubagentWaitID))
 
 	// The step-finish update re-delivers the same assistant message,
 	// finish part included, after the result landed.
@@ -340,7 +331,6 @@ func TestStripDoesNotResurrectFinishedDispatch(t *testing.T) {
 	_ = u.updateSessionMessage(msg)
 	assert.Empty(t, u.agentTasks, "a post-result update must not resurrect the task")
 	assert.False(t, u.tasksSpinning())
-	assert.Nil(t, u.chat.MessageItem(chat.SubagentWaitID))
 
 	// The same guard holds when the reap came from a terminal runtime
 	// status instead of the tool result.
