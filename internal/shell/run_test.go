@@ -213,7 +213,7 @@ func TestRun_ParseError(t *testing.T) {
 }
 
 func TestRun_BlockFuncs(t *testing.T) {
-	block := CommandsBlocker([]string{"forbidden"})
+	block := func(args []string) bool { return len(args) > 0 && args[0] == "forbidden" }
 	var stderr bytes.Buffer
 	err := Run(t.Context(), RunOptions{
 		Command:    "forbidden",

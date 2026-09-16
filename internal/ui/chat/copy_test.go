@@ -10,7 +10,6 @@ import (
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/session"
 )
 
 // copyItem builds a finished tool item and hands back its copy text.
@@ -142,22 +141,6 @@ func TestToolCopy(t *testing.T) {
 				"### Parameters:\n\n" +
 				"**URL:** https://example.com\n**Format:** markdown\n**Timeout:** 30s\n\n" +
 				"### Result:\n\n```markdown\n# Title\n```",
-		},
-		{
-			name:  "todos copy as markdown task items",
-			tool:  tools.TodosToolName,
-			input: tools.TodosParams{Todos: []tools.TodoItem{{Content: "a", Status: "completed"}}},
-			result: &message.ToolResult{
-				Content: "Todos updated",
-				Metadata: mustJSON(t, tools.TodosResponseMetadata{Todos: []session.Todo{
-					{Content: "Write it", Status: "completed"},
-					{Content: "Test it", Status: "in_progress"},
-					{Content: "Ship it", Status: "pending"},
-				}}),
-			},
-			want: "## To-Do Tool Call\n\n" +
-				"### Result:\n\n" +
-				"- [x] Write it\n- [ ] Test it (in progress)\n- [ ] Ship it",
 		},
 		{
 			name:   "an unknown tool's parameters are sorted, indented JSON",

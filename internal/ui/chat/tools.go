@@ -249,12 +249,6 @@ func NewToolMessageItem(
 	switch toolCall.Name {
 	case tools.ShellToolName:
 		item = NewShellToolMessageItem(sty, toolCall, result, canceled, workingDir)
-	case tools.JobToolName:
-		if toolAction(toolCall) == "kill" {
-			item = NewJobKillToolMessageItem(sty, toolCall, result, canceled)
-		} else {
-			item = NewJobOutputToolMessageItem(sty, toolCall, result, canceled)
-		}
 	case tools.ViewToolName:
 		item = NewViewToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WriteToolName:
@@ -267,8 +261,6 @@ func NewToolMessageItem(
 		item = NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
 	case tools.WebSearchToolName:
 		item = NewWebSearchToolMessageItem(sty, toolCall, result, canceled)
-	case tools.TodosToolName:
-		item = NewTodosToolMessageItem(sty, toolCall, result, canceled)
 	case tools.QuestionToolName:
 		item = NewQuestionToolMessageItem(sty, toolCall, result, canceled)
 	case tools.LSPToolName:
@@ -1167,8 +1159,6 @@ func PrettifyToolName(name string) string {
 		return "Agent"
 	case tools.ShellToolName:
 		return "Shell"
-	case tools.JobToolName:
-		return "Job"
 	case tools.EditToolName:
 		return "Edit"
 	case tools.FetchToolName:
@@ -1177,8 +1167,6 @@ func PrettifyToolName(name string) string {
 		return "Research"
 	case tools.WebSearchToolName:
 		return "Search"
-	case tools.TodosToolName:
-		return "To-Do"
 	case tools.ViewToolName:
 		return "View"
 	case tools.WriteToolName:
@@ -1220,15 +1208,4 @@ func newLSPToolMessageItem(
 	default:
 		return NewDiagnosticsToolMessageItem(sty, toolCall, result, canceled)
 	}
-}
-
-// toolAction reads the `action` field of a merged tool's call. The tools
-// that fold several operations behind one name still render each one the
-// way it rendered when it was its own tool.
-func toolAction(toolCall message.ToolCall) string {
-	var params struct {
-		Action string `json:"action"`
-	}
-	_ = json.Unmarshal([]byte(toolCall.Input), &params)
-	return params.Action
 }

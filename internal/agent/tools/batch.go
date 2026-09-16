@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/itchyny/gojq"
@@ -65,8 +66,9 @@ type BatchStep struct {
 
 // BatchParams is the batch tool's input.
 type BatchParams struct {
-	Steps  []BatchStep `json:"steps" description:"Steps to run in order."`
-	Return string      `json:"return,omitempty" description:"jq over the step outputs; the only thing that enters the conversation."`
+	Steps          []BatchStep `json:"steps" description:"Steps to run in order."`
+	Return         string      `json:"return,omitempty" description:"jq over the step outputs; the only thing that enters the conversation."`
+	TimeoutSeconds int         `json:"timeout_seconds,omitempty" description:"Deadline for the whole plan, in seconds (default 600, maximum 3600). A plan still running at the deadline fails with what it had done so far."`
 }
 
 // BatchResponseMetadata reports what the plan actually did, for the UI and
@@ -82,6 +84,12 @@ type BatchResponseMetadata struct {
 const (
 	onErrorFail    = "fail"
 	onErrorCollect = "collect"
+
+	// defaultBatchTimeout bounds a plan that names no deadline, and
+	// maxBatchTimeout caps one that does: a plan is many tool calls in
+	// one, and one hung step must not hang the turn behind it.
+	defaultBatchTimeout = 10 * time.Minute
+	maxBatchTimeout     = time.Hour
 )
 
 // NewBatchTool returns the batch tool. The tools it may call are resolved
@@ -201,6 +209,15 @@ func runBatch(ctx context.Context, params BatchParams, siblings []fantasy.AgentT
 		return fantasy.NewTextErrorResponse(msg), nil
 	}
 
+	// The whole plan runs under one deadline. Every step inherits it, so
+	// a tool that never answers ends the plan instead of the turn.
+	timeout := defaultBatchTimeout
+	if params.TimeoutSeconds > 0 {
+		timeout = min(time.Duration(params.TimeoutSeconds)*time.Second, maxBatchTimeout)
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	env := &batchEnv{}
 	meta := BatchResponseMetadata{Steps: len(params.Steps), PerStep: map[string]int{}}
 	var lastID string
@@ -209,6 +226,11 @@ func runBatch(ctx context.Context, params BatchParams, siblings []fantasy.AgentT
 		tool := registry[step.Tool]
 		output, calls, errs, err := runStep(ctx, step, tool, env)
 		if err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf(
+					"step %q: the plan ran past its %s deadline (%d tool calls made); split it up or raise timeout_seconds",
+					step.ID, timeout, meta.ToolCalls+calls)), nil
+			}
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("step %q: %s%s", step.ID, err, env.shapeHint())), nil
 		}
 		meta.ToolCalls += calls

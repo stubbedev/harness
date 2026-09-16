@@ -31,15 +31,22 @@ type AgentParams struct {
 	Prompt       string `json:"prompt" description:"The task for the agent to perform"`
 }
 
-// AgentDispatchParams is the input to the dispatcher agent tool.
+// AgentDispatchParams is the input to the dispatcher agent tool. With a
+// prompt it dispatches; without one it waits for background agents
+// already dispatched (see coordinator.waitForSubagents).
 type AgentDispatchParams struct {
 	SubagentType string `json:"subagent_type,omitempty"`
-	Prompt       string `json:"prompt"`
+	Prompt       string `json:"prompt,omitempty"`
 	// Blocking opts into waiting for the child: the tool call returns its
 	// result inline once the run finishes. The default (omitted or false)
 	// dispatches in the background — the call returns a handle immediately
 	// and the orchestrator keeps working while the child runs.
 	Blocking bool `json:"blocking,omitempty"`
+	// Handles and TimeoutSeconds belong to the waiting form: which
+	// background agents to wait for (all of this session's when empty)
+	// and for how long.
+	Handles        []string `json:"handles,omitempty"`
+	TimeoutSeconds *int     `json:"timeout_seconds,omitempty"`
 }
 
 const (
@@ -130,14 +137,22 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			},
 			"prompt": map[string]any{
 				"type":        "string",
-				"description": "The task for the agent to perform",
+				"description": "The task for the agent to perform. Leave empty to wait for background agents instead of dispatching one.",
 			},
 			"blocking": map[string]any{
 				"type":        "boolean",
-				"description": "Wait for this sub-agent and return its result in this call. Default false: the call returns a handle immediately while the sub-agent runs, its `send_message` output reaches you between your steps, and `wait` collects its result. Set true only when no further step is possible without the result.",
+				"description": "Wait for this sub-agent and return its result in this call. Default false: the call returns a handle immediately while the sub-agent runs, its `send_message` output reaches you between your steps, and a later `agent` call with no prompt collects its result. Set true only when no further step is possible without the result.",
+			},
+			"handles": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Waiting only: handles returned by earlier calls. Empty waits for every background agent this session dispatched.",
+			},
+			"timeout_seconds": map[string]any{
+				"type":        "integer",
+				"description": fmt.Sprintf("Waiting only: how long to wait, in seconds. Default %d, maximum %d. 0 never blocks: it returns the current snapshot immediately.", defaultWaitTimeoutSeconds, maxWaitTimeoutSeconds),
 			},
 		},
-		Required: []string{"prompt"},
 		Parallel: true,
 	}
 }
@@ -235,10 +250,6 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 	return &dispatcherTool{
 		info: info,
 		dispatch: func(ctx context.Context, params AgentDispatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.Prompt == "" {
-				return fantasy.NewTextErrorResponse("prompt is required"), nil
-			}
-
 			sessionID := tools.GetSessionFromContext(ctx)
 			if sessionID == "" {
 				// Tool-error responses, never bare errors: a bare error from
@@ -247,6 +258,11 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				// turn. As a tool error the model sees the failure, the
 				// batch completes, and the turn continues.
 				return fantasy.NewTextErrorResponse("session id missing from context"), nil
+			}
+			// No task means "wait for the ones already running": the same
+			// tool is the sync point for what it dispatched.
+			if params.Prompt == "" {
+				return c.waitForSubagents(ctx, sessionID, params.Handles, params.TimeoutSeconds), nil
 			}
 			agentMessageID := tools.GetMessageFromContext(ctx)
 			if agentMessageID == "" {

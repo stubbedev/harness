@@ -15,7 +15,7 @@ import (
 func TestShellTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	requireTerminalSession(t)
 	workingDir := t.TempDir()
-	tool := newShellToolForTest(workingDir)
+	tool := newShellToolForTest(t, workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp := runShellTool(t, tool, ctx, ShellParams{
@@ -25,15 +25,13 @@ func TestShellTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	require.False(t, resp.IsError)
 	var meta ShellResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
-	require.False(t, meta.Background)
-	require.Empty(t, meta.ShellID)
 	require.Contains(t, meta.Output, "done")
 }
 
 func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	requireTerminalSession(t)
 	workingDir := t.TempDir()
-	tool := newShellToolForTest(workingDir)
+	tool := newShellToolForTest(t, workingDir)
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	// auto_background_after is the wait budget: when it expires the
@@ -47,8 +45,6 @@ func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.False(t, resp.IsError)
 	var meta ShellResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
-	require.False(t, meta.Background)
-	require.Empty(t, meta.ShellID)
 	require.NotContains(t, resp.Content, "moved to background")
 
 	// A follow-up call in the same session observes later commands
@@ -60,8 +56,13 @@ func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.Contains(t, resp.Content, "after")
 }
 
-func newShellToolForTest(workingDir string) fantasy.AgentTool {
-	return NewShellTool(workingDir, "test", nil)
+// newShellToolForTest builds a shell tool owned by the test, and closes
+// the sessions it opened when the test ends: a shell that outlives the
+// test holds the temp directory open, which Windows refuses to remove.
+func newShellToolForTest(t *testing.T, workingDir string) fantasy.AgentTool {
+	t.Helper()
+	t.Cleanup(func() { closeOwnerSessions(t.Name()) })
+	return NewShellTool(workingDir, t.Name(), nil)
 }
 
 // requireTerminalSession skips tests that execute commands through the
@@ -125,7 +126,7 @@ func TestTruncateOutputEmoji(t *testing.T) {
 func TestShellTool_SchemaRequiresNothing(t *testing.T) {
 	t.Parallel()
 
-	tool := newShellToolForTest(t.TempDir())
+	tool := newShellToolForTest(t, t.TempDir())
 	require.Empty(t, tool.Info().Required,
 		"every bash parameter is optional; a poll is an empty call")
 
@@ -149,7 +150,7 @@ func TestShellTool_RejectsCombinedCall(t *testing.T) {
 	requireTerminalSession(t)
 	t.Parallel()
 
-	tool := newShellToolForTest(t.TempDir())
+	tool := newShellToolForTest(t, t.TempDir())
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp := runShellTool(t, tool, ctx, ShellParams{

@@ -678,10 +678,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.JobIconPending = base.Foreground(o.successMostSubtle)
 	s.Tool.JobIconError = base.Foreground(o.error)
 	s.Tool.JobIconSuccess = base.Foreground(o.success)
-	s.Tool.JobToolName = base.Foreground(o.info)
-	s.Tool.JobAction = base.Foreground(o.infoMostSubtle)
-	s.Tool.JobPID = muted
-	s.Tool.JobDescription = subtle
 
 	// Agent task styles
 	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.infoMoreSubtle).Foreground(o.onPrimary)

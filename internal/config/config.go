@@ -1031,11 +1031,9 @@ func AllToolNames() []string {
 func allToolNames() []string {
 	return []string{
 		"agent",
-		"wait",
 		"batch",
 		"shell",
 		"harness",
-		"job",
 		"edit",
 		"lsp",
 		"fetch",
@@ -1044,7 +1042,6 @@ func allToolNames() []string {
 		"question",
 		"web_search",
 		"send_message",
-		"todos",
 		"view",
 		"write",
 		"mcp_resource",

@@ -324,12 +324,6 @@ func (t *baseToolMessageItem) formatParametersForCopy() string {
 			}
 			return strings.Join(lines, "\n")
 		}
-	case tools.TodosToolName:
-		var params tools.TodosParams
-		if json.Unmarshal([]byte(input), &params) == nil {
-			// The list itself is the result, not a parameter echo.
-			return ""
-		}
 	case tools.DiagnosticsToolName:
 		return copyField("Project", "diagnostics")
 	case agent.AgentToolName:
@@ -375,8 +369,6 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return t.formatFetchResultForCopy()
 	case tools.ResearchToolName:
 		return copyFence("markdown", t.result.Content)
-	case tools.TodosToolName:
-		return t.formatTodosResultForCopy()
 	case agent.AgentToolName:
 		return copyFence("markdown", t.result.Content)
 	case tools.DiagnosticsToolName:
@@ -490,45 +482,6 @@ func (t *baseToolMessageItem) formatFetchResultForCopy() string {
 		lang = "html"
 	}
 	return copyFence(lang, t.result.Content)
-}
-
-// formatTodosResultForCopy renders the list as Markdown task items,
-// which is both what the transcript shows and something a paste target
-// can render. The raw result content is a prose acknowledgement.
-func (t *baseToolMessageItem) formatTodosResultForCopy() string {
-	var meta tools.TodosResponseMetadata
-	if t.result.Metadata != "" && json.Unmarshal([]byte(t.result.Metadata), &meta) == nil && len(meta.Todos) > 0 {
-		lines := make([]string, 0, len(meta.Todos))
-		for _, todo := range meta.Todos {
-			lines = append(lines, copyTodoLine(string(todo.Status), todo.Content))
-		}
-		return strings.Join(lines, "\n")
-	}
-
-	var params tools.TodosParams
-	if json.Unmarshal([]byte(t.toolCall.Input), &params) == nil && len(params.Todos) > 0 {
-		lines := make([]string, 0, len(params.Todos))
-		for _, todo := range params.Todos {
-			lines = append(lines, copyTodoLine(todo.Status, todo.Content))
-		}
-		return strings.Join(lines, "\n")
-	}
-
-	return copyFence("", t.result.Content)
-}
-
-// copyTodoLine renders one todo as a Markdown checkbox. Markdown has no
-// third box state, so an in-progress item is an unchecked box with the
-// state spelled out after it.
-func copyTodoLine(status, content string) string {
-	switch status {
-	case "completed":
-		return "- [x] " + content
-	case "in_progress":
-		return "- [ ] " + content + " (in progress)"
-	default:
-		return "- [ ] " + content
-	}
 }
 
 // -----------------------------------------------------------------------------

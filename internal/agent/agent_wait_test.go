@@ -38,12 +38,22 @@ func waitInput(t *testing.T, handles []string, timeoutSeconds *int) fantasy.Tool
 	return fantasy.ToolCall{Input: string(data)}
 }
 
+// runWait drives the waiting form of the agent tool: a call with no prompt.
 func runWait(t *testing.T, coord *coordinator, ctx context.Context, sessionID string, call fantasy.ToolCall) fantasy.ToolResponse {
 	t.Helper()
-	tool := newWaitTool(coord)
+	tool := waitTool(t, coord)
 	resp, err := tool.Run(sessionCtx(ctx, sessionID), call)
 	require.NoError(t, err)
 	return resp
+}
+
+// waitTool is the agent dispatcher, which doubles as the sync point for
+// background dispatches when called without a prompt.
+func waitTool(t *testing.T, coord *coordinator) fantasy.AgentTool {
+	t.Helper()
+	tool, err := coord.agentTool(t.Context())
+	require.NoError(t, err)
+	return tool
 }
 
 func TestWaitTool_FinishedRunReturnsResult(t *testing.T) {
@@ -134,7 +144,7 @@ func TestWaitTool_WakesWhenRunFinishes(t *testing.T) {
 	done := make(chan result, 1)
 	sixty := 60
 	go func() {
-		tool := newWaitTool(coord)
+		tool := waitTool(t, coord)
 		resp, err := tool.Run(sessionCtx(context.Background(), "parent-1"), waitInput(t, []string{run.handle}, &sixty))
 		done <- result{resp, err}
 	}()
@@ -212,7 +222,7 @@ func TestWaitTool_Rejections(t *testing.T) {
 	coord := newTestCoordinator(t, testEnv(t), "p", providerCfgP)
 
 	t.Run("no session in context", func(t *testing.T) {
-		tool := newWaitTool(coord)
+		tool := waitTool(t, coord)
 		resp, err := tool.Run(t.Context(), waitInput(t, []string{"bg-x"}, nil))
 		require.NoError(t, err)
 		assert.True(t, resp.IsError)
@@ -225,10 +235,10 @@ func TestWaitTool_Rejections(t *testing.T) {
 		assert.Contains(t, resp.Content, "invalid parameters")
 	})
 
-	t.Run("empty handles", func(t *testing.T) {
+	t.Run("no handles and nothing dispatched", func(t *testing.T) {
 		resp := runWait(t, coord, t.Context(), "parent-1", waitInput(t, nil, nil))
 		assert.True(t, resp.IsError)
-		assert.Contains(t, resp.Content, `"handles" must not be empty`)
+		assert.Contains(t, resp.Content, "nothing to wait for")
 	})
 }
 

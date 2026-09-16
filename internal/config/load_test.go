@@ -1022,7 +1022,7 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "wait", "batch", "shell", "harness", "job", "lsp", "research", "memory", "question", "web_search", "send_message", "todos", "view", "write", "mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "batch", "shell", "harness", "lsp", "research", "memory", "question", "web_search", "send_message", "view", "write", "mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
@@ -1047,7 +1047,7 @@ func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg.SetupAgents()
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
-	assert.Equal(t, []string{"agent", "wait", "harness", "job", "edit", "fetch", "research", "memory", "question", "todos", "write", "mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "harness", "edit", "fetch", "research", "memory", "question", "write", "mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)

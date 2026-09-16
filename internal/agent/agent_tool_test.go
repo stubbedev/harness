@@ -23,7 +23,6 @@ func TestBuildAgentDispatchInfo_NoSubagents(t *testing.T) {
 
 	require.Equal(t, "agent", info.Name)
 	require.True(t, info.Parallel)
-	require.Contains(t, info.Required, "prompt")
 
 	subagentTypeParam, ok := info.Parameters["subagent_type"]
 	require.True(t, ok, "Parameters should have a subagent_type key")
@@ -73,12 +72,14 @@ func TestBuildAgentDispatchInfo_WithSubagents(t *testing.T) {
 	require.Contains(t, descStr, "Writes tests")
 }
 
-func TestBuildAgentDispatchInfo_PromptRequired(t *testing.T) {
+func TestBuildAgentDispatchInfo_NothingRequired(t *testing.T) {
 	t.Parallel()
 
 	info := buildAgentDispatchInfo(nil)
 
-	require.Contains(t, info.Required, "prompt")
+	// A call with no prompt waits for background agents, so the schema
+	// cannot demand one.
+	require.NotContains(t, info.Required, "prompt")
 
 	// subagent_type is optional — should NOT appear in Required
 	for _, r := range info.Required {
@@ -423,7 +424,7 @@ func TestAgentTool_DefaultDispatchRunsInBackground(t *testing.T) {
 
 	require.NoError(t, err)
 	require.False(t, resp.IsError, resp.Content)
-	require.Contains(t, resp.Content, WaitToolName)
+	require.Contains(t, resp.Content, AgentToolName)
 
 	handle := backgroundHandleFromResponse(t, resp)
 	run, ok := coord.backgroundRunFor(parentSession.ID, handle)

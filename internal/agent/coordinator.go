@@ -1079,7 +1079,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		allTools = append(allTools, agentTool)
 		// The wait tool is the sync point for background dispatches; it is
 		// useless without the dispatcher, so they share a gate.
-		allTools = append(allTools, newWaitTool(c))
 	}
 
 	if slices.Contains(agent.AllowedTools, tools.ResearchToolName) {
@@ -1113,11 +1112,9 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	allTools = append(
 		allTools,
 		tools.NewHarnessTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker, c.extensions, logFile),
-		tools.NewJobTool(),
 		tools.NewEditTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
 		tools.NewFetchTool(nil),
 		tools.NewWebSearchTool(nil),
-		tools.NewTodosTool(c.sessions),
 		tools.NewViewTool(c.lspManager, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
@@ -2198,8 +2195,8 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 	}()
 
 	return fantasy.NewTextResponse(fmt.Sprintf(
-		"Started background agent %q with handle %s. It runs independently of this tool call: messages it sends you arrive as new user messages between your steps, and its result is collected with the %s tool using this handle.",
-		params.AgentName, handle, WaitToolName)), nil
+		"Started background agent %q with handle %s. It runs independently of this tool call: messages it sends you arrive as new user messages between your steps, and its result is collected by calling %s with no prompt (handles: [%s]).",
+		params.AgentName, handle, AgentToolName, handle)), nil
 }
 
 // newBackgroundHandle mints a handle unused by any tracked run.

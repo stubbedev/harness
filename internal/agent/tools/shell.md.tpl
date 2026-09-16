@@ -6,7 +6,3 @@ cwd, variables, activated environments and held credentials carry across calls; 
 {{- if .ModernTools }}
 Installed here and preferred over the POSIX default: {{ .ModernTools }}.
 {{- end }}
-
-<background_execution>
-`run_in_background` only for detached work — servers, watchers, `tail -f`. Returns a shell ID for `job`. Network, package-manager and privileged commands are refused. Builds, tests and git stay in the session, where you can answer them if they pause.
-</background_execution>

@@ -545,6 +545,7 @@ func TestBatch_ComposesRealTools(t *testing.T) {
 	requireTerminalSession(t)
 
 	dir := t.TempDir()
+	t.Cleanup(func() { closeOwnerSessions(t.Name()) })
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.txt"), []byte("alpha\nTODO: one\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.txt"), []byte("beta\nnothing here\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "c.txt"), []byte("gamma\nTODO: two\n"), 0o644))
@@ -564,7 +565,7 @@ func TestBatch_ComposesRealTools(t *testing.T) {
 		// the bodies themselves into the result.
 		Return: `[$bodies[] | select(test("TODO"))] | length`,
 	}, []fantasy.AgentTool{
-		NewShellTool(dir, "batch", nil),
+		NewShellTool(dir, t.Name(), nil),
 		NewViewTool(nil, mockFileTracker{}, nil, dir),
 	})
 

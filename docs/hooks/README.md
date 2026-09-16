@@ -249,7 +249,7 @@ The payload carries the sub-agent type and final status. Informational, but
 returned `context` is appended to the sub-agent's report so the orchestrating
 model sees it — for a background dispatch (any `agent` call without
 `blocking: true`) the report is the result the orchestrator collects with
-the `wait` tool.
+an `agent` call with no prompt.
 
 **Matched against**: the sub-agent type (`task`, `fast`, or a custom agent
 name).

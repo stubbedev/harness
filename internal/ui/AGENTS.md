@@ -133,7 +133,7 @@ tool names to specific types:
 
 | File                  | Tools rendered                                 |
 | --------------------- | ---------------------------------------------- |
-| `chat/shell_tool.go`  | Shell, JobOutput, JobKill                      |
+| `chat/shell_tool.go`  | Shell                                          |
 | `chat/file.go`        | View, Write, Edit                              |
 | `chat/search.go`      | Glob, Grep, LS, Web Search                     |
 | `chat/fetch.go`       | Fetch, WebFetch, WebSearch                     |
@@ -141,7 +141,6 @@ tool names to specific types:
 | `chat/diagnostics.go` | Diagnostics                                    |
 | `chat/references.go`  | References                                     |
 | `chat/lsp_restart.go` | LSPRestart                                     |
-| `chat/todos.go`       | Todos                                          |
 | `chat/mcp.go`         | MCP tools (`mcp_` prefix)                      |
 | `chat/generic.go`     | Fallback for unrecognized tools                |
 | `chat/assistant.go`   | Assistant messages (thinking, content, errors) |

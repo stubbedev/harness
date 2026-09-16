@@ -80,7 +80,7 @@ func TestRunSubAgentBackground_ReturnsImmediately(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, resp.IsError, resp.Content)
 	assert.Contains(t, resp.Content, `"fast"`)
-	assert.Contains(t, resp.Content, WaitToolName)
+	assert.Contains(t, resp.Content, AgentToolName)
 
 	handle := backgroundHandleFromResponse(t, resp)
 	childSession := <-childRunning

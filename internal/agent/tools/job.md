@@ -1,1 +1,0 @@
-Read or stop a background shell, by the ID `run_in_background` returned. `action` is `output` for what it has printed — add `wait` to block until it finishes rather than taking a snapshot — or `kill` to terminate it, after which the ID is dead.
