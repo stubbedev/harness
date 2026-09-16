@@ -68,12 +68,19 @@ func newPty() (ConPty, error) {
 	}, nil
 }
 
-// Close implements Pty.
+// Close implements Pty. The pseudo console handle is released exactly
+// once: reap and session teardown can both reach this, and Windows
+// recycles handle values, so a second ClosePseudoConsole would close
+// whatever object now owns the recycled handle.
 func (p *conPty) Close() error {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
-
-	windows.ClosePseudoConsole(p.handle)
+	if p.handle == 0 {
+		return errClosedConPty
+	}
+	handle := p.handle
+	p.handle = 0
+	windows.ClosePseudoConsole(handle)
 	return errors.Join(p.inPipe.Close(), p.outPipe.Close())
 }
 
@@ -114,6 +121,9 @@ func (p *conPty) Read(b []byte) (n int, err error) {
 func (p *conPty) Resize(width int, height int) error {
 	p.mtx.RLock()
 	defer p.mtx.RUnlock()
+	if p.handle == 0 {
+		return errClosedConPty
+	}
 	if err := windows.ResizePseudoConsole(p.handle, windows.Coord{X: int16(width), Y: int16(height)}); err != nil {
 		return fmt.Errorf("failed to resize pseudo console: %w", err)
 	}
