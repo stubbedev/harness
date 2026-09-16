@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -350,6 +351,52 @@ func ptyReap() {
 			go r.Close()
 		}
 	}
+}
+
+// CloseTerminalSessions closes every terminal session this process holds
+// and waits for their shells to be gone. It runs at shutdown: a shell
+// left behind keeps its working directory open, which on Windows means
+// the directory cannot be removed while the shell lives - the way a
+// test's temp dir, or a workspace being torn down, finds out a session
+// was still there.
+func CloseTerminalSessions() {
+	closeTerminalSessions(func(*ptyRunner) bool { return true })
+}
+
+// closeOwnerSessions closes the sessions one owner holds.
+func closeOwnerSessions(owner string) {
+	prefix := owner + "\x00"
+	closeTerminalSessions(func(r *ptyRunner) bool { return strings.HasPrefix(r.key, prefix) })
+}
+
+// CloseTerminalSessionsUnder closes every session whose shell was opened
+// in dir or below it. Tests that hand an agent a temporary directory
+// call it before that directory is removed.
+func CloseTerminalSessionsUnder(dir string) {
+	dir = filepath.Clean(dir)
+	closeTerminalSessions(func(r *ptyRunner) bool {
+		rel, err := filepath.Rel(dir, r.cwd)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	})
+}
+
+// closeTerminalSessions removes the runners keep selects from the
+// registry and closes them, off the registry lock, waiting for each.
+func closeTerminalSessions(keep func(*ptyRunner) bool) {
+	ptyRunnersMu.Lock()
+	var victims []*ptyRunner
+	for key, r := range ptyRunners {
+		if keep(r) {
+			victims = append(victims, r)
+			delete(ptyRunners, key)
+		}
+	}
+	ptyRunnersMu.Unlock()
+	var wg sync.WaitGroup
+	for _, r := range victims {
+		wg.Go(r.Close)
+	}
+	wg.Wait()
 }
 
 // ptyReaperStart launches the background sweeper once per process.

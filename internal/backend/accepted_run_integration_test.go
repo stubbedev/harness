@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/agenttest"
+	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
@@ -52,7 +53,11 @@ func newRealCoordinator(t *testing.T) (*gatedCoordinator, session.Service, messa
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 
-	coord, err := agenttest.NewCoordinator(t.Context(), t.TempDir(), sessions, messages)
+	workingDir := t.TempDir()
+	// The coordinator opens the coder agent's shell in the working
+	// directory; close it before the directory goes, or Windows keeps it.
+	t.Cleanup(func() { tools.CloseTerminalSessionsUnder(workingDir) })
+	coord, err := agenttest.NewCoordinator(t.Context(), workingDir, sessions, messages)
 	require.NoError(t, err)
 
 	return &gatedCoordinator{

@@ -50,6 +50,9 @@ func testEnv(t *testing.T) fakeEnv {
 	lspClients := csync.NewMap[string, *lsp.Client]()
 
 	t.Cleanup(func() {
+		// The coder agent's shell holds the working directory open until
+		// it exits; Windows will not remove the temp dir while it does.
+		tools.CloseTerminalSessionsUnder(workingDir)
 		conn.Close()
 	})
 

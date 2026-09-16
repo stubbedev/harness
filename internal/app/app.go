@@ -40,7 +40,6 @@ import (
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
-	"github.com/stubbedev/harness/internal/shell"
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/anim"
@@ -872,10 +871,9 @@ func (app *App) Shutdown() {
 		event.AppExited()
 	})
 
-	// Kill all background shells.
-	wg.Go(func() {
-		shell.GetBackgroundShellManager().KillAll(shutdownCtx)
-	})
+	// The agents' terminal sessions: real shells, each holding its
+	// working directory open until it exits.
+	wg.Go(tools.CloseTerminalSessions)
 
 	// Close herdr client to stop its background writer.
 	app.herdrClient.Close()
