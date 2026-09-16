@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -26,13 +25,13 @@ func TestPtyRunner_EditorIsDrivenNotMistakenForAPrompt(t *testing.T) {
 	requireProgram(t, "nvim")
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "nvim -u NONE", 15)
+	res, err := r.Type(t.Context(), "nvim -u NONE", 15)
 	require.NoError(t, err)
 	require.True(t, res.AltScreen, "editor should own the screen")
 	require.True(t, res.Running)
 	require.Nil(t, res.ExitCode, "a running editor has no exit code")
 
-	res, err = r.Input(t.Context(), "ihello from the harness")
+	res, err = r.Type(t.Context(), "ihello from the harness", 10)
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "hello from the harness", "typed text should appear on the rendered screen")
 
@@ -43,11 +42,11 @@ func TestPtyRunner_EditorIsDrivenNotMistakenForAPrompt(t *testing.T) {
 	require.True(t, poll.Unchanged)
 	require.Empty(t, poll.Output)
 
-	res, err = r.Keys(t.Context(), "escape, :, q, !, enter")
+	res, err = r.Type(t.Context(), "<escape>:q!<enter>", 10)
 	require.NoError(t, err)
 	require.False(t, res.AltScreen, "editor should have quit")
 
-	done, err := r.Run(t.Context(), "echo back", 10)
+	done, err := r.Type(t.Context(), "echo back", 10)
 	require.NoError(t, err)
 	require.NotNil(t, done.ExitCode)
 	require.Equal(t, "back", done.Output, "the shell is back at a prompt with clean output")
@@ -57,16 +56,16 @@ func TestPtyRunner_PagerRendersAndQuits(t *testing.T) {
 	requireProgram(t, "less")
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "seq 1 500 | less", 10)
+	res, err := r.Type(t.Context(), "seq 1 500 | less", 10)
 	require.NoError(t, err)
 	require.True(t, res.AltScreen)
 	require.Contains(t, res.Output, "1\n2\n3")
 
-	res, err = r.Keys(t.Context(), "q")
+	res, err = r.Type(t.Context(), "q", 10)
 	require.NoError(t, err)
 	require.False(t, res.AltScreen)
 
-	done, err := r.Run(t.Context(), "echo back", 10)
+	done, err := r.Type(t.Context(), "echo back", 10)
 	require.NoError(t, err)
 	require.Equal(t, "back", done.Output)
 }
@@ -76,67 +75,63 @@ func TestPtyRunner_PagerRendersAndQuits(t *testing.T) {
 func TestPtyRunner_NestedInteractiveShell(t *testing.T) {
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "sh -i", 5)
+	res, err := r.Type(t.Context(), "sh -i", 5)
 	require.NoError(t, err)
 	require.True(t, res.Running)
 	require.Nil(t, res.ExitCode)
 
-	res, err = r.Input(t.Context(), "echo nested\n")
+	res, err = r.Type(t.Context(), "echo nested\n", 10)
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "nested")
 
-	_, err = r.Keys(t.Context(), "ctrl+d")
+	_, err = r.Type(t.Context(), "<ctrl+d>", 10)
 	require.NoError(t, err)
 
-	done, err := r.Run(t.Context(), "echo back", 10)
+	done, err := r.Type(t.Context(), "echo back", 10)
 	require.NoError(t, err)
 	require.Equal(t, "back", done.Output)
 }
 
-func TestPtyRunner_Resize(t *testing.T) {
+// The session opens at the configured size; a program reads it once,
+// on startup, and there is no resizing after that.
+func TestPtyRunner_OpensAtConfiguredSize(t *testing.T) {
+	t.Setenv("HARNESS_PTY_ROWS", "30")
+	t.Setenv("HARNESS_PTY_COLS", "100")
 	r := newTestRunner(t)
 
-	_, err := r.Resize(t.Context(), 30, 100)
-	require.NoError(t, err)
 	rows, cols := r.Size()
 	require.Equal(t, 30, rows)
 	require.Equal(t, 100, cols)
 
 	// stty size reads the window size straight from the terminal; tput
 	// would consult terminfo and any inherited LINES/COLUMNS instead.
-	res, err := r.Run(t.Context(), "stty size", 10)
+	res, err := r.Type(t.Context(), "stty size", 10)
 	require.NoError(t, err)
 	require.Equal(t, "30 100", strings.TrimSpace(res.Output))
 }
 
-func TestParseKeys(t *testing.T) {
+func TestParseInput(t *testing.T) {
 	t.Parallel()
 
-	keys, err := parseKeys("escape, :, q, enter")
-	require.NoError(t, err)
-	require.Equal(t, [][]byte{[]byte("\x1b"), []byte(":"), []byte("q"), []byte("\r")}, keys)
+	// Keys by name between text, the way a person would say them.
+	require.Equal(t, []inputSegment{
+		{key: []byte("\x1b")}, {text: ":wq"}, {key: []byte("\r")},
+	}, parseInput("<escape>:wq<enter>"))
 
-	keys, err = parseKeys("CTRL+C")
-	require.NoError(t, err)
-	require.Equal(t, [][]byte{{0x03}}, keys)
+	// Names are case-insensitive; ctrl+<letter> is generic.
+	require.Equal(t, []inputSegment{{key: []byte{0x03}}}, parseInput("<CTRL+C>"))
 
-	_, err = parseKeys("banana")
-	require.Error(t, err)
+	// A bracketed word that is not a key is text, so shell redirections
+	// and the like need no escaping.
+	require.Equal(t, []inputSegment{{text: "cat <file >out\n"}}, parseInput("cat <file >out\n"))
+	require.Equal(t, []inputSegment{{text: "echo <banana>"}}, parseInput("echo <banana>"))
 
-	_, err = parseKeys("  ")
-	require.Error(t, err)
-}
+	// Plain text is one segment, so a multi-line block stays a paste.
+	require.Equal(t, []inputSegment{{text: "a\nb\n"}}, parseInput("a\nb\n"))
+	require.False(t, hasKeys(parseInput("a\nb\n")))
+	require.True(t, hasKeys(parseInput("y<enter>")))
 
-func TestParseTerminalSize(t *testing.T) {
-	t.Parallel()
-
-	rows, cols, err := parseTerminalSize("240x60")
-	require.NoError(t, err)
-	require.Equal(t, 60, rows)
-	require.Equal(t, 240, cols)
-
-	_, _, err = parseTerminalSize("wide")
-	require.Error(t, err)
+	require.Empty(t, parseInput(""))
 }
 
 func TestEchoedLine(t *testing.T) {
@@ -161,60 +156,47 @@ func TestTruncateOutputKeepsMoreTailThanHead(t *testing.T) {
 	require.Contains(t, out, "lines truncated")
 }
 
-// An editor holding one session must not stop the next command: it runs
-// in a second shell for the same directory, and keystrokes still reach
-// the editor.
-func TestPtySessions_CommandRunsBesideAnInteractiveProgram(t *testing.T) {
+// One session, used like a person's terminal: what is typed while an
+// editor is open goes to the editor, whatever it looks like, and the
+// shell is back the moment the editor is gone. The caller never says
+// which of the two it means.
+func TestPtyRunner_TypingGoesToWhateverIsRunning(t *testing.T) {
 	requireProgram(t, "nvim")
-	if _, err := os.Stat("/bin/sh"); err != nil {
-		t.Skip("no /bin/sh on this platform")
-	}
-	t.Setenv("SHELL", "/bin/sh")
+	r := newTestRunner(t)
 
-	dir := t.TempDir()
-	ptyRunnersMu.Lock()
-	saved := ptyRunners
-	ptyRunners = map[string]*ptyRunner{}
-	ptyRunnersMu.Unlock()
-	t.Cleanup(func() {
-		ptyRunnersMu.Lock()
-		for _, r := range ptyRunners {
-			r.Close()
-		}
-		ptyRunners = saved
-		ptyRunnersMu.Unlock()
-	})
-
-	// Open an editor in the primary session.
-	primary, err := ptyCommandRunner(t.Context(), "test", dir, nil)
-	require.NoError(t, err)
-	require.Equal(t, 0, primary.slot)
-	res, err := primary.Run(t.Context(), "nvim -u NONE", 15)
+	res, err := r.Type(t.Context(), "nvim -u NONE", 15)
 	require.NoError(t, err)
 	require.True(t, res.AltScreen)
 
-	// A command now goes to a second session rather than being typed
-	// into the editor.
-	second, err := ptyCommandRunner(t.Context(), "test", dir, nil)
+	// Looks like a command; is keystrokes for the editor.
+	res, err = r.Type(t.Context(), "iecho beside", 10)
 	require.NoError(t, err)
-	require.Equal(t, 1, second.slot)
-	done, err := second.Run(t.Context(), "echo beside", 10)
+	require.True(t, res.AltScreen, "the editor still has the terminal")
+	require.Contains(t, res.Output, "echo beside", "the text went into the buffer")
+
+	// Quitting hands the terminal back, and the same text now runs.
+	res, err = r.Type(t.Context(), "<escape>:q!<enter>", 10)
+	require.NoError(t, err)
+	require.False(t, res.AltScreen)
+	done, err := r.Type(t.Context(), "echo beside", 10)
 	require.NoError(t, err)
 	require.NotNil(t, done.ExitCode)
 	require.Equal(t, "beside", done.Output)
+}
 
-	// Keystrokes still find the editor, not the free shell.
-	require.Same(t, primary, ptyInteractiveRunner("test", dir, nil))
-	res, err = ptyInteractiveRunner("test", dir, nil).Input(t.Context(), "ibeside too")
-	require.NoError(t, err)
-	require.Contains(t, res.Output, "beside too")
+// Enter is implied at the prompt, so a command line needs no newline;
+// one that carries its own is not run twice.
+func TestPtyRunner_EnterImpliedAtPrompt(t *testing.T) {
+	r := newTestRunner(t)
 
-	// With the editor gone, commands go back to the primary session.
-	_, err = primary.Keys(t.Context(), "escape, :, q, !, enter")
+	res, err := r.Type(t.Context(), "echo one", 10)
 	require.NoError(t, err)
-	back, err := ptyCommandRunner(t.Context(), "test", dir, nil)
+	require.Equal(t, "one", res.Output)
+
+	res, err = r.Type(t.Context(), "echo two\n", 10)
 	require.NoError(t, err)
-	require.Equal(t, 0, back.slot)
+	require.Equal(t, "two", res.Output)
+	require.NotNil(t, res.ExitCode)
 }
 
 // A command that stops to ask something must be answerable while it is
@@ -228,14 +210,14 @@ func TestPtyRunner_AnswerAPromptWhileTheCommandIsRunning(t *testing.T) {
 		// Give the command a moment to reach its prompt, then answer it
 		// from a second call while the first is still waiting.
 		time.Sleep(750 * time.Millisecond)
-		res, err := r.Input(t.Context(), "42\n")
+		res, err := r.Type(t.Context(), "42\n", 10)
 		if err != nil {
 			t.Error(err)
 		}
 		answered <- res
 	}()
 
-	res, err := r.Run(t.Context(), `printf 'how many? '; read n; echo "answer:$n"`, 20)
+	res, err := r.Type(t.Context(), `printf 'how many? '; read n; echo "answer:$n"`, 20)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode, "the command completed once it was answered")
 	require.Contains(t, res.Output, "answer:42")
@@ -266,7 +248,7 @@ func TestPtyRunner_PollDoesNotStealARunningCommandsOutput(t *testing.T) {
 		polled <- res
 	}()
 
-	res, err := r.Run(t.Context(), "echo first; sleep 1; echo second", 20)
+	res, err := r.Type(t.Context(), "echo first; sleep 1; echo second", 20)
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "first")
 	require.Contains(t, res.Output, "second", "the poll must not have drained this")
@@ -287,7 +269,7 @@ func TestPtyRunner_MultilineInputIsPasted(t *testing.T) {
 	// Bracketed paste is on at the prompt of an interactive shell.
 	require.True(t, r.session.BracketedPaste(), "the shell should have bracketed paste on")
 
-	res, err := r.Input(t.Context(), "printf 'a\\n'\nprintf 'b\\n'\n")
+	res, err := r.Type(t.Context(), "printf 'a\\n'\nprintf 'b\\n'\n", 10)
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "a")
 	require.Contains(t, res.Output, "b")
@@ -296,10 +278,10 @@ func TestPtyRunner_MultilineInputIsPasted(t *testing.T) {
 func TestPtyRunner_SinglelineInputIsNotPasted(t *testing.T) {
 	r := newTestRunner(t)
 
-	_, err := r.Run(t.Context(), "read answer; echo \"got:$answer\"", 1)
+	_, err := r.Type(t.Context(), "read answer; echo \"got:$answer\"", 1)
 	require.NoError(t, err)
 
-	res, err := r.Input(t.Context(), "plain\n")
+	res, err := r.Type(t.Context(), "plain\n", 10)
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "got:plain")
 	require.NotContains(t, res.Output, "200~", "paste markers must not reach a program that did not ask for them")
@@ -311,7 +293,7 @@ func TestPtyRunner_ReadsDoNotWaitForARunningCommand(t *testing.T) {
 	r := newTestRunner(t)
 
 	go func() {
-		if _, err := r.Run(t.Context(), "sleep 8; echo done", 20); err != nil {
+		if _, err := r.Type(t.Context(), "sleep 8; echo done", 20); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -324,6 +306,6 @@ func TestPtyRunner_ReadsDoNotWaitForARunningCommand(t *testing.T) {
 	require.True(t, res.WhileBusy)
 
 	// Stop the sleeper so the session is clean for teardown.
-	_, err = r.Keys(t.Context(), "ctrl+c")
+	_, err = r.Type(t.Context(), "<ctrl+c>", 10)
 	require.NoError(t, err)
 }

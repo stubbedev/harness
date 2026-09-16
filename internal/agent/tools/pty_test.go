@@ -76,7 +76,7 @@ func newRunnerWithShell(t *testing.T, shell string) *ptyRunner {
 	})
 	// Open synchronously so tests observe the session directly. Go through
 	// terminal() rather than ensureSessionLocked: the latter needs r.mu,
-	// which the warm-start goroutine in ptyRunnerSlot also takes.
+	// which the warm-start goroutine in ptyRunnerFor also takes.
 	_, err := r.terminal(t.Context())
 	require.NoError(t, err)
 	return r
@@ -85,7 +85,7 @@ func newRunnerWithShell(t *testing.T, shell string) *ptyRunner {
 func TestPtyRunner_RunEcho(t *testing.T) {
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "echo hello", 10)
+	res, err := r.Type(t.Context(), "echo hello", 10)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode)
 	require.Equal(t, 0, *res.ExitCode)
@@ -97,7 +97,7 @@ func TestPtyRunner_RunEcho(t *testing.T) {
 func TestPtyRunner_RunNonzeroExit(t *testing.T) {
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "false", 10)
+	res, err := r.Type(t.Context(), "false", 10)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode)
 	require.Equal(t, 1, *res.ExitCode)
@@ -106,10 +106,10 @@ func TestPtyRunner_RunNonzeroExit(t *testing.T) {
 func TestPtyRunner_StatePersistsAcrossCalls(t *testing.T) {
 	r := newTestRunner(t)
 
-	_, err := r.Run(t.Context(), "export PTY_TEST_VAR=persisted", 10)
+	_, err := r.Type(t.Context(), "export PTY_TEST_VAR=persisted", 10)
 	require.NoError(t, err)
 
-	res, err := r.Run(t.Context(), "printf %s \"$PTY_TEST_VAR\"", 10)
+	res, err := r.Type(t.Context(), "printf %s \"$PTY_TEST_VAR\"", 10)
 	require.NoError(t, err)
 	require.Equal(t, "persisted", res.Output)
 }
@@ -120,7 +120,7 @@ func TestPtyRunner_CwdTracks(t *testing.T) {
 	sub := filepath.Join(r.cwd, "sub")
 	require.NoError(t, os.MkdirAll(sub, 0o755))
 
-	res, err := r.Run(t.Context(), "cd sub", 10)
+	res, err := r.Type(t.Context(), "cd sub", 10)
 	require.NoError(t, err)
 	// The shell reports the directory it is actually in, which is the
 	// resolved one: on macOS the temp directory lives under /var, a
@@ -141,13 +141,13 @@ func resolved(t *testing.T, path string) string {
 func TestPtyRunner_StillRunning(t *testing.T) {
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "sleep 5", 1)
+	res, err := r.Type(t.Context(), "sleep 5", 1)
 	require.NoError(t, err)
 	require.True(t, res.Running)
 	require.Nil(t, res.ExitCode)
 
 	// Interrupt the sleeper so the session is clean for teardown.
-	_, err = r.Input(t.Context(), "\x03")
+	_, err = r.Type(t.Context(), "\x03", 10)
 	require.NoError(t, err)
 }
 
@@ -165,26 +165,26 @@ func TestPtyRunner_RunReturnsWhenInputNeeded(t *testing.T) {
 	r := newTestRunner(t)
 
 	if runtime.GOOS != "linux" {
-		res, err := r.Run(t.Context(), "read answer; echo \"got:$answer\"", 2)
+		res, err := r.Type(t.Context(), "read answer; echo \"got:$answer\"", 2)
 		require.NoError(t, err)
 		require.True(t, res.Running)
 		require.Nil(t, res.ExitCode)
 
-		done, err := r.Input(t.Context(), "hello\n")
+		done, err := r.Type(t.Context(), "hello\n", 10)
 		require.NoError(t, err)
 		require.Contains(t, done.Output, "got:hello")
 		return
 	}
 
 	start := time.Now()
-	res, err := r.Run(t.Context(), "read answer; echo \"got:$answer\"", 60)
+	res, err := r.Type(t.Context(), "read answer; echo \"got:$answer\"", 60)
 	require.NoError(t, err)
 	require.Less(t, time.Since(start), 20*time.Second, "the call should return on the quiet window, not the budget")
 	require.True(t, res.Running)
 	require.True(t, res.Waiting)
 	require.Nil(t, res.ExitCode)
 
-	done, err := r.Input(t.Context(), "hello\n")
+	done, err := r.Type(t.Context(), "hello\n", 10)
 	require.NoError(t, err)
 	require.Contains(t, done.Output, "got:hello")
 }
@@ -195,7 +195,7 @@ func TestPtyRunner_RunReturnsWhenInputNeeded(t *testing.T) {
 func TestPtyRunner_PollWaitsForOrphanedCommand(t *testing.T) {
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "sleep 3; echo late", 1)
+	res, err := r.Type(t.Context(), "sleep 3; echo late", 1)
 	require.NoError(t, err)
 	require.True(t, res.Running)
 
@@ -213,7 +213,7 @@ func TestPtyRunner_PollWaitsForOrphanedCommand(t *testing.T) {
 func TestPtyRunner_StreamingCommandLeasesPastBudget(t *testing.T) {
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "for i in 1 2 3 4 5 6; do echo tick $i; sleep 0.4; done", 2)
+	res, err := r.Type(t.Context(), "for i in 1 2 3 4 5 6; do echo tick $i; sleep 0.4; done", 2)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode, "the lease should have carried the call to completion")
 	require.Equal(t, 0, *res.ExitCode)
@@ -226,15 +226,15 @@ func TestPtyRunner_InputAnswersPrompt(t *testing.T) {
 
 	// A program reading stdin hangs a pipe-based runner; in the
 	// terminal it just waits until Input feeds it.
-	_, err := r.Run(t.Context(), "read answer; echo \"got:$answer\"", 1)
+	_, err := r.Type(t.Context(), "read answer; echo \"got:$answer\"", 1)
 	require.NoError(t, err) // returns as still running
 
-	res, err := r.Input(t.Context(), "hello\n")
+	res, err := r.Type(t.Context(), "hello\n", 10)
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "got:hello")
 
 	// Verify the session is back at a prompt.
-	done, err := r.Run(t.Context(), "true", 10)
+	done, err := r.Type(t.Context(), "true", 10)
 	require.NoError(t, err)
 	require.NotNil(t, done.ExitCode)
 }
@@ -293,7 +293,7 @@ func newAskRunner(t *testing.T, answers ...string) (*ptyRunner, *fakeAsk) {
 func TestPtyRunner_LocalizedSudoPromptOpensMaskedDialog(t *testing.T) {
 	r, ask := newAskRunner(t, "hunter2")
 
-	res, err := r.Run(t.Context(),
+	res, err := r.Type(t.Context(),
 		`/bin/sh -c 'stty -echo; printf "[sudo] Passwort für stubbe: "; read pw; stty echo; printf ok'`, 30)
 	require.NoError(t, err)
 	require.Len(t, ask.asks(), 1)
@@ -303,6 +303,84 @@ func TestPtyRunner_LocalizedSudoPromptOpensMaskedDialog(t *testing.T) {
 	require.Equal(t, "ok", res.Output)
 	require.NotContains(t, res.Output, "hunter2")
 }
+
+// sudo since 1.9 reads the password itself, keystroke by keystroke: echo
+// off and canonical mode off together, which is also how every line
+// editor reads. The prompt text is what settles it, so this opens the
+// masked dialog like the canonical readers do.
+func TestPtyRunner_RawModeSudoPromptOpensMaskedDialog(t *testing.T) {
+	r, ask := newAskRunner(t, "hunter2")
+
+	res, err := r.Type(t.Context(),
+		`/bin/sh -c 'stty -echo -icanon; printf "[sudo] password for stubbe: "; read pw; stty echo icanon; printf ok'`, 30)
+	require.NoError(t, err)
+	require.Len(t, ask.asks(), 1)
+	require.True(t, ask.asks()[0].Questions[0].Secret)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	require.Equal(t, "ok", res.Output)
+	require.NotContains(t, res.Output, "hunter2")
+}
+
+// A command that merely prints the word and exits must not open the
+// dialog, even under a shell whose line editor leaves the idle terminal
+// in the same raw, no-echo state sudo reads in: the shell's prompt
+// marker says the command is over and nothing is asking.
+func TestPtyRunner_PrintedPasswordUnderLineEditorIsNotMasked(t *testing.T) {
+	r := newBracketedPasteRunner(t)
+	ask := &fakeAsk{}
+	r.setState(func() { r.ask = ask })
+
+	res, err := r.Type(t.Context(), `printf 'db password: hunter2\n'`, 30)
+	require.NoError(t, err)
+	require.Empty(t, ask.asks())
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	require.Equal(t, "db password: hunter2", res.Output)
+}
+
+// A setuid job hides its wait point from this user, so once it goes
+// quiet nothing says whether it is reading the terminal or sitting in
+// PAM's fail delay after a rejected password. The runner holds the
+// "waiting for input" verdict past that delay rather than handing the
+// model a question that is about to answer itself.
+func TestPtyRunner_BlindQuietJobIsNotWaitingRightAway(t *testing.T) {
+	r, _ := newAskRunner(t)
+	_, err := r.Type(t.Context(), "true", 10)
+	require.NoError(t, err)
+
+	blind := &blindSleeperTerm{since: time.Now()}
+	start := time.Now()
+	res, err := r.awaitCompletion(t.Context(), blind, nil, 2)
+	require.NoError(t, err)
+	require.True(t, res.Running)
+	require.False(t, res.Waiting, "a silent job with no visible wait point is not a question yet")
+	require.GreaterOrEqual(t, time.Since(start), 1500*time.Millisecond, "the wait ran the budget out rather than deciding early")
+}
+
+// blindSleeperTerm is a terminal whose foreground job is asleep with
+// echo on and an unreadable wait point - a setuid program between two
+// password prompts - and never prints anything.
+type blindSleeperTerm struct {
+	stuckReaderTerm
+	since time.Time
+}
+
+func (b *blindSleeperTerm) IdleFor() time.Duration { return time.Since(b.since) }
+
+func (b *blindSleeperTerm) WaitForOutput(ctx context.Context, timeout time.Duration) bool {
+	select {
+	case <-ctx.Done():
+	case <-time.After(timeout):
+	}
+	return false
+}
+
+func (b *blindSleeperTerm) SampleJob() term.JobActivity {
+	return term.JobActivity{Observed: true, Asleep: true}
+}
+
+func (b *blindSleeperTerm) SecretRead() term.SecretReadState { return term.SecretReadNo }
 
 // A generic Password: prompt - su, docker login and friends - opens the
 // masked dialog even when nothing in the output says "password" in a
@@ -315,7 +393,7 @@ func TestPtyRunner_HiddenLineReadWithoutKnownPromptOpensMaskedDialog(t *testing.
 	}
 	r, ask := newAskRunner(t, "hunter2")
 
-	res, err := r.Run(t.Context(),
+	res, err := r.Type(t.Context(),
 		`/bin/sh -c 'stty -echo; printf "Passord: "; read pw; stty echo; printf ok'`, 30)
 	require.NoError(t, err)
 	require.Len(t, ask.asks(), 1)
@@ -330,7 +408,7 @@ func TestPtyRunner_HiddenLineReadWithoutKnownPromptOpensMaskedDialog(t *testing.
 func TestPtyRunner_PlainQuestionIsNotMasked(t *testing.T) {
 	r, ask := newAskRunner(t)
 
-	res, err := r.Run(t.Context(),
+	res, err := r.Type(t.Context(),
 		`/bin/sh -c 'printf "Choose a password policy name: "; read name; printf "got:%s" "$name"'`, 30)
 	require.NoError(t, err)
 	require.Empty(t, ask.asks())
@@ -339,7 +417,7 @@ func TestPtyRunner_PlainQuestionIsNotMasked(t *testing.T) {
 		require.True(t, res.Waiting, "an ordinary question waits for input from the model")
 	}
 
-	done, err := r.Input(t.Context(), "alpha\n")
+	done, err := r.Type(t.Context(), "alpha\n", 10)
 	require.NoError(t, err)
 	require.Contains(t, done.Output, "got:alpha")
 }
@@ -354,7 +432,7 @@ func TestPtyRunner_WrongPasswordReopensMaskedDialog(t *testing.T) {
 	// the tty echo of it carries text the prompt hint matches before
 	// anything has asked for anything: the two dialogs here are the two
 	// real reads, not the echo of the command that does them.
-	res, err := r.Run(t.Context(),
+	res, err := r.Type(t.Context(),
 		`/bin/sh -c 'stty -echo; printf "Password: "; read a; `+
 			`printf "\nSorry, try again.\n"; printf "Password: "; read b; stty echo; `+
 			`[ "$b" = open-sesame ] && printf ok || printf bad'`, 30)
@@ -380,7 +458,7 @@ func TestPtyRunner_UnconsumedAnswerDoesNotReopenDialog(t *testing.T) {
 	r, ask := newAskRunner(t, "open-sesame")
 	// Give the runner its sentinel; the fake terminal below stands in
 	// for the session only for the wait.
-	_, err := r.Run(t.Context(), "true", 10)
+	_, err := r.Type(t.Context(), "true", 10)
 	require.NoError(t, err)
 
 	stuck := &stuckReaderTerm{}
@@ -450,7 +528,6 @@ func (s *stuckReaderTerm) AltScreen() bool        { return false }
 func (s *stuckReaderTerm) Screen() string         { return "" }
 func (s *stuckReaderTerm) BracketedPaste() bool   { return false }
 func (s *stuckReaderTerm) Paste(string) error     { return nil }
-func (s *stuckReaderTerm) Resize(int, int) error  { return nil }
 func (s *stuckReaderTerm) Size() (int, int)       { return term.DefaultSize() }
 func (s *stuckReaderTerm) IdleFor() time.Duration { return time.Minute }
 
@@ -477,7 +554,7 @@ func (s *stuckReaderTerm) Close()           {}
 func TestPtyRunner_MultilineCommand(t *testing.T) {
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "for i in 1 2 3\ndo echo $i\ndone", 10)
+	res, err := r.Type(t.Context(), "for i in 1 2 3\ndo echo $i\ndone", 10)
 	require.NoError(t, err)
 	// Multiline commands work like any other: the prompt marker comes
 	// back when the whole thing has run.
@@ -488,7 +565,7 @@ func TestPtyRunner_MultilineCommand(t *testing.T) {
 func TestPtyRunner_LongOutputKeepsTail(t *testing.T) {
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "seq 1 500", 15)
+	res, err := r.Type(t.Context(), "seq 1 500", 15)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode)
 	require.Contains(t, res.Output, "499")
@@ -498,7 +575,7 @@ func TestPtyRunner_LongOutputKeepsTail(t *testing.T) {
 func TestPtyRunner_EchoStripped(t *testing.T) {
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "echo distinctivestring", 10)
+	res, err := r.Type(t.Context(), "echo distinctivestring", 10)
 	require.NoError(t, err)
 	// The echoed command line is stripped; only the output remains.
 	require.Equal(t, "distinctivestring", res.Output)
@@ -643,13 +720,13 @@ func TestPtyRunner_ZshUserShell(t *testing.T) {
 	_, err := r.terminal(t.Context())
 	require.NoError(t, err)
 
-	res, err := r.Run(t.Context(), "echo hello-zsh", 15)
+	res, err := r.Type(t.Context(), "echo hello-zsh", 15)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode)
 	require.Equal(t, 0, *res.ExitCode)
 	require.Equal(t, "hello-zsh", res.Output)
 
-	res, err = r.Run(t.Context(), "printf %s partial-zsh", 15)
+	res, err = r.Type(t.Context(), "printf %s partial-zsh", 15)
 	require.NoError(t, err)
 	require.Equal(t, "partial-zsh", res.Output)
 }
@@ -671,7 +748,7 @@ func TestPtyRunner_ZshUserShellHeredoc(t *testing.T) {
 	require.NoError(t, err)
 
 	cmd := "cat > file.txt <<'EOF'\npackage main\n\nfunc main() {}\nEOF\ncat file.txt"
-	res, err := r.Run(t.Context(), cmd, 15)
+	res, err := r.Type(t.Context(), cmd, 15)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode)
 	require.Equal(t, 0, *res.ExitCode)
@@ -813,7 +890,7 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 	ptyRunnersMu.Lock()
 	defer ptyRunnersMu.Unlock()
 	require.Len(t, ptyRunners, ptyMaxRunners-1)
-	_, stillThere := ptyRunners[slotKey("test", r.cwd, 0)]
+	_, stillThere := ptyRunners[runnerKey("test", r.cwd)]
 	require.True(t, stillThere, "the just-used runner must survive the reap")
 }
 
@@ -824,14 +901,14 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 func TestPtyRunner_EarlierOutputStaysOutOfTheNextCall(t *testing.T) {
 	r := newTestRunner(t)
 
-	_, err := r.Run(t.Context(), "(sleep 1; echo LATE) &", 10)
+	_, err := r.Type(t.Context(), "(sleep 1; echo LATE) &", 10)
 	require.NoError(t, err)
 
 	// Let the backgrounded job print into the session while no call is
 	// waiting on it.
 	time.Sleep(1500 * time.Millisecond)
 
-	res, err := r.Run(t.Context(), "echo second", 10)
+	res, err := r.Type(t.Context(), "echo second", 10)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode)
 	require.Equal(t, 0, *res.ExitCode)
@@ -870,16 +947,16 @@ func TestPtyRunner_OwnersGetSeparateSessions(t *testing.T) {
 // old one held is gone and commands work again.
 func TestPtyRunner_ResetStartsAFreshShell(t *testing.T) {
 	r := newTestRunner(t)
-	_, err := r.Run(t.Context(), "export PTY_RESET_VAR=before", 10)
+	_, err := r.Type(t.Context(), "export PTY_RESET_VAR=before", 10)
 	require.NoError(t, err)
 
 	require.NoError(t, r.Reset(t.Context()))
 
-	res, err := r.Run(t.Context(), "printf %s \"$PTY_RESET_VAR\"", 10)
+	res, err := r.Type(t.Context(), "printf %s \"$PTY_RESET_VAR\"", 10)
 	require.NoError(t, err)
 	require.Equal(t, "", res.Output, "the new shell has none of the old one's state")
 
-	alive, err := r.Run(t.Context(), "echo alive", 10)
+	alive, err := r.Type(t.Context(), "echo alive", 10)
 	require.NoError(t, err)
 	require.Equal(t, "alive", alive.Output)
 	require.NotNil(t, alive.ExitCode)
@@ -891,14 +968,14 @@ func TestPtyRunner_ResetStartsAFreshShell(t *testing.T) {
 func TestPtyRunner_ResetClearsARunningCommand(t *testing.T) {
 	r := newTestRunner(t)
 
-	res, err := r.Run(t.Context(), "sleep 30", 1)
+	res, err := r.Type(t.Context(), "sleep 30", 1)
 	require.NoError(t, err)
 	require.True(t, res.Running)
 
 	require.NoError(t, r.Reset(t.Context()))
-	require.False(t, r.occupied(), "a reset session is free")
+	require.True(t, r.shellIdle(r.session), "a reset session is free")
 
-	done, err := r.Run(t.Context(), "echo back", 10)
+	done, err := r.Type(t.Context(), "echo back", 10)
 	require.NoError(t, err)
 	require.Equal(t, "back", done.Output)
 }

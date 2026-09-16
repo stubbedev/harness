@@ -130,10 +130,12 @@ func residentKB(pid string) int64 {
 // foregroundPgrp returns the process group currently reading the
 // terminal, or 0 when it cannot be determined.
 func (s *Session) foregroundPgrp() int {
-	pgrp, err := unix.IoctlGetInt(int(s.ptmx.Fd()), unix.TIOCGPGRP)
-	if err != nil {
-		return 0
-	}
+	pgrp := 0
+	_ = s.masterControl(func(fd int) {
+		if g, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP); err == nil {
+			pgrp = g
+		}
+	})
 	return pgrp
 }
 

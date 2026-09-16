@@ -65,13 +65,9 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return renderJobTool(sty, opts, cappedWidth, "Start", meta.ShellID, description, content)
 	}
 
-	// Regular bash command, raw input, or poll.
+	// Whatever was typed at the session, or a poll.
 	cmd := params.Command
-	label := ""
-	if cmd == "" && params.Input != "" {
-		cmd = params.Input
-		label = "input"
-	} else if cmd == "" {
+	if cmd == "" {
 		cmd = "(poll session)"
 	}
 	if !opts.ExpandedContent {
@@ -79,15 +75,10 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	cmd = common.StripShellDisplayPrefix(cmd, b.workingDir)
-	if label == "" {
-		if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
-			cmd = highlighted
-		}
+	if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
+		cmd = highlighted
 	}
 	toolParams := []string{cmd}
-	if label != "" {
-		toolParams = append(toolParams, label)
-	}
 	if params.RunInBackground {
 		toolParams = append(toolParams, "background", "true")
 	}

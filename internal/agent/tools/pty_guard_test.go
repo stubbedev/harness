@@ -93,7 +93,7 @@ func historyFree(t *testing.T, histfile string, commands ...string) {
 func TestPtyRunner_AliasesNeverExpandBash(t *testing.T) {
 	r := bashGuardRunner(t)
 
-	res, err := r.Run(t.Context(), "zzhijack", 15)
+	res, err := r.Type(t.Context(), "zzhijack", 15)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode)
 	require.Equal(t, 127, *res.ExitCode, "the alias must not run; got output %q", res.Output)
@@ -101,9 +101,9 @@ func TestPtyRunner_AliasesNeverExpandBash(t *testing.T) {
 
 	// Re-sourcing the rc files brings the alias definition back; it
 	// must still not expand.
-	res, err = r.Run(t.Context(), "source ~/.bashrc", 15)
+	res, err = r.Type(t.Context(), "source ~/.bashrc", 15)
 	require.NoError(t, err)
-	res, err = r.Run(t.Context(), "zzhijack", 15)
+	res, err = r.Type(t.Context(), "zzhijack", 15)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode)
 	require.Equal(t, 127, *res.ExitCode, "alias re-added by a re-source must not run; got output %q", res.Output)
@@ -114,15 +114,15 @@ func TestPtyRunner_AliasesNeverExpandBash(t *testing.T) {
 func TestPtyRunner_AliasesNeverExpandZsh(t *testing.T) {
 	r := zshGuardRunner(t)
 
-	res, err := r.Run(t.Context(), "zzhijack", 15)
+	res, err := r.Type(t.Context(), "zzhijack", 15)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode)
 	require.Equal(t, 127, *res.ExitCode, "the alias must not run; got output %q", res.Output)
 	require.NotContains(t, res.Output, "HIJACKED")
 
-	res, err = r.Run(t.Context(), "source ~/.zshrc", 15)
+	res, err = r.Type(t.Context(), "source ~/.zshrc", 15)
 	require.NoError(t, err)
-	res, err = r.Run(t.Context(), "zzhijack", 15)
+	res, err = r.Type(t.Context(), "zzhijack", 15)
 	require.NoError(t, err)
 	require.NotNil(t, res.ExitCode)
 	require.Equal(t, 127, *res.ExitCode, "alias re-added by a re-source must not run; got output %q", res.Output)
@@ -136,9 +136,9 @@ func TestPtyRunner_AliasesNeverExpandZsh(t *testing.T) {
 func TestPtyRunner_CommandsNeverEnterHistoryBash(t *testing.T) {
 	r := bashGuardRunner(t)
 
-	_, err := r.Run(t.Context(), "echo agent-secret-one", 15)
+	_, err := r.Type(t.Context(), "echo agent-secret-one", 15)
 	require.NoError(t, err)
-	_, err = r.Run(t.Context(), "printf %s agent-secret-two", 15)
+	_, err = r.Type(t.Context(), "printf %s agent-secret-two", 15)
 	require.NoError(t, err)
 
 	home, ok := os.LookupEnv("HOME")
@@ -154,9 +154,9 @@ func TestPtyRunner_CommandsNeverEnterHistoryBash(t *testing.T) {
 func TestPtyRunner_CommandsNeverEnterHistoryZsh(t *testing.T) {
 	r := zshGuardRunner(t)
 
-	_, err := r.Run(t.Context(), "echo agent-secret-one", 15)
+	_, err := r.Type(t.Context(), "echo agent-secret-one", 15)
 	require.NoError(t, err)
-	_, err = r.Run(t.Context(), "printf %s agent-secret-two", 15)
+	_, err = r.Type(t.Context(), "printf %s agent-secret-two", 15)
 	require.NoError(t, err)
 
 	zdot, ok := os.LookupEnv("ZDOTDIR")

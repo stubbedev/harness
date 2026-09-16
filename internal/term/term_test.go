@@ -123,10 +123,11 @@ func TestSession_SecretRead(t *testing.T) {
 	// At an idle prompt the terminal is either echoing (shells without
 	// a line editor) or raw (readline, zle - which echo in software);
 	// neither is a hidden-line read.
-	require.Equal(t, SecretReadNo, s.SecretRead())
+	idle := s.SecretRead()
+	require.Contains(t, []SecretReadState{SecretReadNo, SecretReadRaw}, idle)
 
-	// A hidden-line reader in a child process: the termios shape sudo,
-	// su, ssh and getpass all leave the terminal in while they wait.
+	// A hidden-line reader in a child process: the termios shape su,
+	// ssh and getpass all leave the terminal in while they wait.
 	require.NoError(t, s.Send([]byte("/bin/sh -c 'stty -echo; read x; stty echo'\n")))
 	require.True(t, s.WaitForQuiet(t.Context(), 300*time.Millisecond, testTimeout(5*time.Second)))
 	s.Drain()
@@ -135,7 +136,21 @@ func TestSession_SecretRead(t *testing.T) {
 	require.NoError(t, s.Send([]byte("secret\n")))
 	require.True(t, s.WaitForQuiet(t.Context(), 300*time.Millisecond, testTimeout(5*time.Second)))
 	s.Drain()
-	require.Equal(t, SecretReadNo, s.SecretRead())
+	require.Equal(t, idle, s.SecretRead())
+
+	// A reader that takes the keystrokes itself - sudo since 1.9 - turns
+	// echo off and canonical mode off together. That is the raw state,
+	// not a plain "no": the caller has the prompt text to tell it from
+	// a line editor.
+	require.NoError(t, s.Send([]byte("/bin/sh -c 'stty -echo -icanon; read x; stty echo icanon'\n")))
+	require.True(t, s.WaitForQuiet(t.Context(), 300*time.Millisecond, testTimeout(5*time.Second)))
+	s.Drain()
+	require.Equal(t, SecretReadRaw, s.SecretRead())
+
+	require.NoError(t, s.Send([]byte("secret\n")))
+	require.True(t, s.WaitForQuiet(t.Context(), 300*time.Millisecond, testTimeout(5*time.Second)))
+	s.Drain()
+	require.Equal(t, idle, s.SecretRead())
 }
 
 func TestSession_WaitForPatternTimeout(t *testing.T) {
@@ -234,25 +249,6 @@ func TestSessionScreenAndAltScreen(t *testing.T) {
 
 	require.NoError(t, s.Send([]byte("printf '\\033[?1049l'\n")))
 	require.Eventually(t, func() bool { return !s.AltScreen() }, testTimeout(5*time.Second), 50*time.Millisecond)
-}
-
-func TestSessionResize(t *testing.T) {
-	s := startTestSession(t)
-	waitReady(t, s)
-
-	require.NoError(t, s.Resize(24, 80))
-	rows, cols := s.Size()
-	require.Equal(t, 24, rows)
-	require.Equal(t, 80, cols)
-
-	require.NoError(t, s.Send([]byte("printf '%s %s' \"$(tput lines)\" \"$(tput cols)\"\n")))
-	require.True(t, waitOutput(t, s, regexp.MustCompile(`24 80`), testTimeout(5*time.Second)))
-
-	// Out-of-range dimensions are clamped, never applied verbatim.
-	require.NoError(t, s.Resize(1, 5))
-	rows, cols = s.Size()
-	require.Equal(t, minRows, rows)
-	require.Equal(t, minCols, cols)
 }
 
 func TestDefaultSizeEnvOverride(t *testing.T) {

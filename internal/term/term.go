@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/creack/pty"
+	"github.com/aymanbagabas/go-pty"
 	"github.com/hinshun/vt10x"
 )
 
@@ -39,9 +39,9 @@ const (
 	DefaultRows = 80
 	DefaultCols = 280
 
-	// minRows/minCols/maxRows/maxCols bound the size an override or a
-	// Resize call can ask for; a degenerate grid breaks the emulator and
-	// an enormous one turns every screen read into a wall of blanks.
+	// minRows/minCols/maxRows/maxCols bound the size an override can
+	// ask for; a degenerate grid breaks the emulator and an enormous one
+	// turns every screen read into a wall of blanks.
 	minRows, minCols = 4, 20
 	maxRows, maxCols = 400, 1000
 
@@ -58,7 +58,7 @@ type Session struct {
 	notify chan struct{} // signalled (cap 1) whenever output arrives
 	closed chan struct{}
 
-	ptmx     *os.File
+	pty      pty.Pty
 	proc     *os.Process
 	pending  []byte    // output not yet drained
 	scanFrom int       // where WaitFor pattern scanning continues from
@@ -177,11 +177,15 @@ func parentShell() string {
 // Start spawns the user's shell in a new pseudo-terminal with the given
 // working directory. The environment is the current process environment
 // plus TERM; env entries of the form KEY=VALUE are appended last so they
-// win. LINES and COLUMNS are dropped: a size exported here survives every
-// later resize as a lie told to any program that consults the environment
-// instead of the terminal, so the window size stays authoritative.
+// win. LINES and COLUMNS are dropped: a size exported there would be a
+// lie told to any program that consults the environment instead of the
+// terminal, so the window size stays authoritative.
 // The shell is deliberately not bound to a caller context: the session
 // outlives the request that opened it and is torn down by Close.
+//
+// The pseudo-terminal is a Unix PTY or, on Windows, a ConPTY; the
+// session is the same either way - bytes in, bytes out, one shell
+// process to wait on.
 //
 // It fails rather than guessing when no shell can be identified; callers
 // that can avoid offering a terminal at all should check Shell first.
@@ -190,20 +194,45 @@ func Start(cwd string, env ...string) (*Session, error) {
 	if !ok {
 		return nil, errors.New("no shell could be identified for a terminal session")
 	}
-	cmd := exec.CommandContext(context.Background(), shell)
+	rows, cols := DefaultSize()
+
+	p, err := pty.New()
+	if err != nil {
+		return nil, fmt.Errorf("failed to open a pseudo-terminal: %w", err)
+	}
+	// Sized before the shell starts: a program reads the terminal size
+	// once, on startup, and the shell's first prompt is laid out for it.
+	_ = p.Resize(cols, rows)
+
+	cmd := p.Command(shell)
 	cmd.Dir = cwd
 	cmd.Env = append(withoutSizeEnv(os.Environ()), withoutSizeEnv(env)...)
 	cmd.Env = append(cmd.Env, "TERM="+termValue())
-
-	rows, cols := DefaultSize()
-
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
+	if err := cmd.Start(); err != nil {
+		_ = p.Close()
 		return nil, fmt.Errorf("failed to start terminal session: %w", err)
 	}
-	_ = pty.Setsize(ptmx, winsize(rows, cols))
+	afterStart(p)
 
-	return newSession(ptmx, cmd.Process, rows, cols), nil
+	s := newSession(p, cmd.Process, rows, cols)
+	go s.reap(cmd)
+	return s, nil
+}
+
+// reap waits for the shell process so it is not left a zombie, and
+// records its exit. Where the read loop can see the exit on its own -
+// on Unix the master reads EIO once the last slave descriptor closes -
+// it stays the authority, so the shell's final output is drained before
+// the session is declared over; the grace here covers the shell whose
+// tty is still held open by a background child it left behind.
+func (s *Session) reap(cmd *pty.Cmd) {
+	err := cmd.Wait()
+	onExit(s.pty)
+	select {
+	case <-s.closed:
+	case <-time.After(time.Second):
+		s.finish(err)
+	}
 }
 
 // withoutSizeEnv drops LINES and COLUMNS entries so nothing in the
@@ -255,30 +284,11 @@ func clampDim(v, lo, hi int) int {
 	return min(max(v, lo), hi)
 }
 
-// winsize builds the ioctl window size for a session. The bounds are
-// applied here rather than trusted from the caller: rows and cols reach
-// this from HARNESS_PTY_ROWS/COLS and from terminal resize events, and
-// the kernel struct is 16-bit, so a value beyond it would be truncated
-// into a size nobody asked for.
-func winsize(rows, cols int) *pty.Winsize {
-	if rows < minRows {
-		rows = minRows
-	} else if rows > maxRows {
-		rows = maxRows
-	}
-	if cols < minCols {
-		cols = minCols
-	} else if cols > maxCols {
-		cols = maxCols
-	}
-	return &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}
-}
-
-func newSession(ptmx *os.File, proc *os.Process, rows, cols int) *Session {
+func newSession(p pty.Pty, proc *os.Process, rows, cols int) *Session {
 	replies := newReplyWriter()
 	emu := vt10x.New(vt10x.WithSize(cols, rows), vt10x.WithWriter(replies))
 	s := &Session{
-		ptmx:     ptmx,
+		pty:      p,
 		proc:     proc,
 		notify:   make(chan struct{}, 1),
 		closed:   make(chan struct{}),
@@ -339,7 +349,7 @@ func (w *replyWriter) close() {
 func (s *Session) readLoop() {
 	buf := make([]byte, 32*1024)
 	for {
-		n, err := s.ptmx.Read(buf)
+		n, err := s.pty.Read(buf)
 		if n > 0 {
 			s.append(buf[:n])
 		}
@@ -438,7 +448,7 @@ func (s *Session) Send(b []byte) error {
 	if exited {
 		return errors.New("terminal session has exited")
 	}
-	_, err := s.ptmx.Write(b)
+	_, err := s.pty.Write(b)
 	return err
 }
 
@@ -784,30 +794,6 @@ func (s *Session) Size() (rows, cols int) {
 	return s.rows, s.cols
 }
 
-// Resize changes the terminal size, signalling SIGWINCH to whatever is
-// running so it redraws at the new size. Dimensions are clamped to the
-// supported range.
-func (s *Session) Resize(rows, cols int) error {
-	rows = clampDim(rows, minRows, maxRows)
-	cols = clampDim(cols, minCols, maxCols)
-
-	s.mu.Lock()
-	exited := s.exited
-	if !exited {
-		s.rows, s.cols = rows, cols
-	}
-	s.mu.Unlock()
-	if exited {
-		return errors.New("terminal session has exited")
-	}
-
-	if err := pty.Setsize(s.ptmx, winsize(rows, cols)); err != nil {
-		return fmt.Errorf("resize terminal session: %w", err)
-	}
-	s.emu.Resize(cols, rows)
-	return nil
-}
-
 // Alive reports whether the session process is still running.
 func (s *Session) Alive() bool {
 	s.mu.Lock()
@@ -830,7 +816,7 @@ func (s *Session) Close() {
 	if !exited {
 		_ = s.proc.Kill()
 	}
-	_ = s.ptmx.Close()
+	_ = s.pty.Close()
 	// Ends the reply-forwarding goroutine.
 	s.replies.close()
 	select {

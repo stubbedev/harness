@@ -19,8 +19,7 @@ func TestShellTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp := runShellTool(t, tool, ctx, ShellParams{
-		Description: "default threshold",
-		Command:     "echo done",
+		Command: "echo done",
 	})
 
 	require.False(t, resp.IsError)
@@ -41,7 +40,6 @@ func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	// command stays alive in the persistent terminal session instead
 	// of being moved to a background shell.
 	resp := runShellTool(t, tool, ctx, ShellParams{
-		Description:         "custom threshold",
 		Command:             "sleep 1.5 && echo done",
 		AutoBackgroundAfter: 1,
 	})
@@ -56,8 +54,7 @@ func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	// A follow-up call in the same session observes later commands
 	// finishing normally.
 	resp = runShellTool(t, tool, ctx, ShellParams{
-		Description: "follow up",
-		Command:     "echo after",
+		Command: "echo after",
 	})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "after")
@@ -132,7 +129,7 @@ func TestShellTool_SchemaRequiresNothing(t *testing.T) {
 	require.Empty(t, tool.Info().Required,
 		"every bash parameter is optional; a poll is an empty call")
 
-	for _, name := range []string{"description", "command", "input", "keys", "reset"} {
+	for _, name := range []string{"command", "reset"} {
 		require.Contains(t, tool.Info().Parameters, name)
 	}
 }
@@ -141,15 +138,11 @@ func TestConflictingShellInputs(t *testing.T) {
 	t.Parallel()
 
 	require.Empty(t, conflictingShellInputs(ShellParams{Command: "ls"}))
-	require.Empty(t, conflictingShellInputs(ShellParams{Keys: "ctrl+c"}))
 	require.Empty(t, conflictingShellInputs(ShellParams{}), "a poll asks for nothing and is fine")
 
-	conflict := conflictingShellInputs(ShellParams{Command: "ls", Keys: "ctrl+c"})
+	conflict := conflictingShellInputs(ShellParams{Command: "ls", Reset: true})
 	require.Contains(t, conflict, "command")
-	require.Contains(t, conflict, "keys")
-
-	require.NotEmpty(t, conflictingShellInputs(ShellParams{Command: "ls", Reset: true}))
-	require.NotEmpty(t, conflictingShellInputs(ShellParams{Input: "y\n", Reset: true}))
+	require.Contains(t, conflict, "reset")
 }
 
 func TestShellTool_RejectsCombinedCall(t *testing.T) {
@@ -160,9 +153,8 @@ func TestShellTool_RejectsCombinedCall(t *testing.T) {
 	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
 
 	resp := runShellTool(t, tool, ctx, ShellParams{
-		Description: "two things at once",
-		Command:     "echo hi",
-		Keys:        "ctrl+c",
+		Command: "echo hi",
+		Reset:   true,
 	})
 
 	require.True(t, resp.IsError)
@@ -172,11 +164,8 @@ func TestShellTool_RejectsCombinedCall(t *testing.T) {
 func TestShellLabel(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, "mine", shellLabel(ShellParams{Description: "mine", Command: "ls"}))
 	require.Equal(t, "poll terminal session", shellLabel(ShellParams{}))
-	require.Equal(t, "keys: ctrl+c", shellLabel(ShellParams{Keys: "ctrl+c"}))
 	require.Equal(t, "reset terminal session", shellLabel(ShellParams{Reset: true}))
-	require.Equal(t, "input to running program", shellLabel(ShellParams{Input: "y\n"}))
 	require.Equal(t, "git status", shellLabel(ShellParams{Command: "git status\ngit log"}),
 		"a command with no description labels itself with its first line")
 	require.LessOrEqual(t, utf8.RuneCountInString(shellLabel(ShellParams{Command: strings.Repeat("x", 200)})), 60,

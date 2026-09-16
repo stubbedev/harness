@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
 	"html/template"
 	"path/filepath"
@@ -23,13 +22,10 @@ import (
 )
 
 type ShellParams struct {
-	// Nothing here is required: a poll is an empty call, and keys or
-	// input carry no command. A schema that demanded either would
-	// reject the very calls this tool's own description asks for.
-	Description         string `json:"description,omitempty" description:"What this call does, under 30 characters; shown to the user"`
-	Command             string `json:"command,omitempty" description:"The command to run in the session. Leave empty to send keystrokes or to poll."`
-	Input               string `json:"input,omitempty" description:"Raw text for the running program; append \\n to submit a line"`
-	Keys                string `json:"keys,omitempty" description:"Named keys for the running program, comma separated in order (e.g. \"ctrl+c\", \"escape, :, w, q, enter\"). An unknown name comes back with the supported list."`
+	// Nothing here is required: a poll is an empty call. A schema that
+	// demanded a command would reject the very call this tool's own
+	// description asks for.
+	Command             string `json:"command,omitempty" description:"What to type into the terminal: a command line at the prompt, or text and keys for the program that is running. Named keys go in angle brackets (<enter>, <escape>, <ctrl+c>). Leave empty to wait for the running command's next event."`
 	Reset               bool   `json:"reset,omitempty" description:"Kill a wedged session and start a fresh one, losing everything the old shell held"`
 	WorkingDir          string `json:"working_dir,omitempty" description:"Directory to open the session in; the session tracks cd from then on"`
 	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Run detached in a background shell; read it later with the job tool. Servers and watchers only."`
@@ -172,20 +168,14 @@ func shellDescription(shell string) string {
 }
 
 // conflictingShellInputs reports, as a message for the model, when one
-// call asks for two different things at once. Each of command, input,
-// keys, resize and reset goes to a different place in the session, so
-// there is no order in which honouring both is what the caller meant.
-// It returns the empty string when the call is unambiguous.
+// call asks for two different things at once: a command to type and a
+// session to kill. There is no order in which honouring both is what
+// the caller meant. It returns the empty string when the call is
+// unambiguous.
 func conflictingShellInputs(p ShellParams) string {
 	var asked []string
 	if p.Command != "" {
 		asked = append(asked, "command")
-	}
-	if p.Input != "" {
-		asked = append(asked, "input")
-	}
-	if p.Keys != "" {
-		asked = append(asked, "keys")
 	}
 	if p.Reset {
 		asked = append(asked, "reset")
@@ -198,20 +188,13 @@ func conflictingShellInputs(p ShellParams) string {
 }
 
 // shellLabel is what the call is called in the UI and in the message
-// metadata. The model's own description is used whenever it sent one;
-// the rest is for the calls that carry no command to describe - a
-// keystroke, a poll - where demanding a description would be a schema
-// requirement standing between the agent and a working call.
+// metadata: the first line of what was typed, or a name for the calls
+// that type nothing - a poll, a reset. The model is not asked to
+// describe a call; the command line describes itself.
 func shellLabel(p ShellParams) string {
 	switch {
-	case p.Description != "":
-		return p.Description
 	case p.Reset:
 		return "reset terminal session"
-	case p.Keys != "":
-		return "keys: " + p.Keys
-	case p.Input != "":
-		return "input to running program"
 	case p.Command != "":
 		return firstLine(p.Command)
 	default:
@@ -297,7 +280,7 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 				bgManager := shell.GetBackgroundShellManager()
 				bgManager.Cleanup()
 				// Use background context so it continues after tool returns
-				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, params.Description)
+				bgShell, err := bgManager.Start(context.Background(), execWorkingDir, blockFuncs(), params.Command, shellLabel(params))
 				if err != nil {
 					return fantasy.ToolResponse{}, fmt.Errorf("error starting background shell: %w", err)
 				}
@@ -351,15 +334,11 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			}
 
 			// Everything synchronous goes through the persistent terminal
-			// session: a command runs and reports its exit code, input
-			// drives whatever is running, and an empty call polls.
-			//
-			// One call does one of those things. A command sent
-			// alongside keystrokes is ambiguous - the keystrokes belong
-			// to whatever is running, the command needs a free shell -
-			// and silently picking one of them is how a call that looked
-			// like it worked turns out to have typed a command into an
-			// editor.
+			// session, used the way a person uses one: whatever is in
+			// command is typed at it - a command line when the shell is
+			// at its prompt, text and keys for the program when one is
+			// running - and an empty call waits for the next thing to
+			// happen. The session decides which of those it is.
 			if conflict := conflictingShellInputs(params); conflict != "" {
 				return fantasy.NewTextErrorResponse(conflict), nil
 			}
@@ -367,33 +346,18 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			startTime := time.Now()
 			waitSeconds := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
 
-			// Which terminal session serves this call: keystrokes go to
-			// the one with a program in it, commands to one that is free
-			// - a second shell is opened when an editor or TUI is still
-			// holding the first.
 			var result PTYResult
 			var err error
-			session := ptyInteractiveRunner(owner, execWorkingDir, questions)
+			session := ptyRunnerFor(owner, execWorkingDir, questions)
 			switch {
 			case params.Reset:
-				session, err = ptyResetAll(ctx, owner, execWorkingDir, questions)
-			case params.Keys != "":
-				result, err = session.Keys(ctx, params.Keys)
-			case params.Input != "":
-				result, err = session.Input(ctx, params.Input)
+				err = session.Reset(ctx)
 			case params.Command != "":
-				if session, err = ptyCommandRunner(ctx, owner, execWorkingDir, questions); err == nil {
-					result, err = session.Run(ctx, params.Command, waitSeconds)
-				}
+				result, err = session.Type(ctx, params.Command, waitSeconds)
 			default:
 				result, err = session.Poll(ctx)
 			}
-			switch {
-			case errors.Is(err, errAltScreenBusy), errors.Is(err, errAllSessionsBusy):
-				// The model's mistake, not a tool failure: tell it what
-				// is in the way and how to get past it.
-				return fantasy.NewTextErrorResponse(err.Error()), nil
-			case err != nil:
+			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("terminal session: %w", err)
 			}
 
@@ -422,10 +386,6 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 				header = fmt.Sprintf("[exit %d]", *result.ExitCode)
 			case params.Reset:
 				header = "[session reset]"
-			case params.Keys != "":
-				header = "[keys sent]"
-			case params.Input != "":
-				header = "[input sent]"
 			case result.Output == "" && params.Command == "":
 				header = "[no new output]"
 			}
@@ -444,12 +404,9 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			}
 
 			var sb strings.Builder
-			// Both of these say the shell state the model was counting
-			// on is not the shell state it got, which it cannot work out
-			// from the output alone. Everything else it can.
-			if session.slot > 0 {
-				fmt.Fprintf(&sb, "[session #%d; #1 is busy, and this shell has none of its state]\n", session.slot+1)
-			}
+			// This says the shell state the model was counting on is
+			// not the shell state it got, which it cannot work out from
+			// the output alone. Everything else it can.
 			if session.tookRestart() {
 				sb.WriteString("[shell had exited; a fresh one replaced it and kept none of its state]\n")
 			}
@@ -537,14 +494,9 @@ func normalizeWorkingDir(path string) string {
 }
 
 // ShellAvailable reports whether a shell could be identified to run a
-// terminal session in, on a platform that can open one. Callers
-// assembling a tool set use it to leave the shell tool out rather than
-// advertising one that cannot open: Windows has no pty implementation,
-// so a session there fails however the shell is found.
+// terminal session in. Callers assembling a tool set use it to leave
+// the shell tool out rather than advertising one that cannot open.
 func ShellAvailable() bool {
-	if !term.SessionsSupported {
-		return false
-	}
 	_, ok := term.Shell()
 	return ok
 }

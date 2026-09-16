@@ -1,14 +1,8 @@
-Run commands in a persistent `{{ .Shell }}` PTY shared by the whole conversation: cwd, variables, activated environments and held credentials carry across calls. A result ends with `<cwd>…</cwd>` only when the shell moved; otherwise it is where it was.
+A persistent `{{ .Shell }}` terminal shared by the whole conversation, used the way a person uses one. `command` is what you type: at the prompt it is a command line and runs (Enter implied); while a program is running it goes to that program - an answer, keystrokes, a block of lines - so write `\n` or `<enter>` where a person would press it. Named keys go in angle brackets: `<escape>`, `<tab>`, `<backspace>`, `<delete>`, `<up>`/`<down>`/`<left>`/`<right>`, `<home>`, `<end>`, `<pageup>`, `<pagedown>`, `<f1>`–`<f12>`, `<ctrl+c>` or any `<ctrl+letter>`; anything else in brackets is typed literally.
 
-`command`, `input`, `keys` and `reset` are mutually exclusive; setting two is rejected. `description` is optional and shown to the user.
+A call returns when the process exits (with its exit code), stops for input, takes over the screen (a rendered {{ .DefaultCols }}x{{ .DefaultRows }} frame instead of a stream), or goes idle. An empty call waits for the next of those. `reset` kills a wedged session and opens a fresh one, losing its state; last resort.
 
-- `command` — returns when the process exits, stops for input, takes over the screen, or goes idle. Tracked from the process, so never poll on a timer.
-- `input` — raw text to the running program ("y\n"). Multiple lines arrive as a paste, surviving auto-indent.
-- `keys` — named keys in order ("ctrl+c", "escape, :, w, q, enter").
-- empty call — block until the running command's next event.
-- `reset` — kill a wedged session and start a fresh one. Last resort.
-
-A program that takes the screen returns a rendered {{ .DefaultCols }}x{{ .DefaultRows }} frame plus how to drive and quit it; a `command` sent while it holds the session opens a second session. Output over {{ .MaxOutputLength }} characters keeps a head and a long tail. Password prompts are answered by the user in a masked dialog — wait, never type one.
+cwd, variables, activated environments and held credentials carry across calls; a result ends with `<cwd>…</cwd>` only when the shell moved. Output over {{ .MaxOutputLength }} characters keeps a head and a long tail.
 {{- if .ModernTools }}
 Installed here and preferred over the POSIX default: {{ .ModernTools }}.
 {{- end }}

@@ -4,17 +4,18 @@ package term
 
 import "golang.org/x/sys/unix"
 
-// secretReadFromLflag reads the local flags the secret-read detector
-// turns on: ECHO cleared (the typed line is not printed) while ICANON
-// stays set (the tty still buffers the line). Line editors clear
-// ICANON to edit keystroke by keystroke, and ordinary questions leave
-// ECHO alone, so neither is mistaken for a hidden-line read.
+// secretReadFromLflag reads the local flags into a SecretReadState:
+// echo on is an ordinary terminal whatever else is set; echo off with
+// the line discipline still canonical is a hidden-line read; echo off
+// in raw mode is either a cbreak credential reader or a program doing
+// its own echo, which the caller settles with the prompt text.
 func secretReadFromLflag(lflag uint32) SecretReadState {
-	const hiddenLine = unix.ECHO | unix.ICANON
-	switch lflag & hiddenLine {
-	case unix.ICANON:
+	switch {
+	case lflag&unix.ECHO != 0:
+		return SecretReadNo
+	case lflag&unix.ICANON != 0:
 		return SecretReadYes
 	default:
-		return SecretReadNo
+		return SecretReadRaw
 	}
 }

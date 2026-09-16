@@ -8,9 +8,11 @@ import "golang.org/x/sys/unix"
 // master and the slave share one line discipline, so TIOCGETA here
 // observes exactly what the foreground program set.
 func (s *Session) secretRead() SecretReadState {
-	t, err := unix.IoctlGetTermios(int(s.ptmx.Fd()), unix.TIOCGETA)
-	if err != nil {
-		return SecretReadUnknown
-	}
-	return secretReadFromLflag(uint32(t.Lflag))
+	state := SecretReadUnknown
+	_ = s.masterControl(func(fd int) {
+		if t, err := unix.IoctlGetTermios(fd, unix.TIOCGETA); err == nil {
+			state = secretReadFromLflag(uint32(t.Lflag))
+		}
+	})
+	return state
 }

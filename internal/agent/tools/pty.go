@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -31,10 +30,12 @@ import (
 // the shell prints after each single-line command. Credential
 // prompts (sudo, su, ssh passphrases, docker login, any hidden-line
 // reader) are detected in the output stream and in the terminal's
-// input discipline, and answered through a masked TUI prompt, so the
-// password goes from the user straight to the terminal and never
-// enters the model's context; after the first authentication a sudo
-// credential stays valid on the session's tty.
+// input discipline, and answered through a masked TUI prompt while the
+// tool call is still blocked, so the password goes from the user
+// straight to the terminal and never enters the model's context - the
+// model sees only the command's result, as if nothing had been asked.
+// After the first authentication a sudo credential stays valid on the
+// session's tty.
 
 const (
 	// ptyStartupMs is the quiet window that ends shell startup output
@@ -53,9 +54,6 @@ const (
 	// ptyKeyGap paces named keys: sent as one burst, a leading escape
 	// reads as a meta prefix and fast programs drop the tail.
 	ptyKeyGap = 25 * time.Millisecond
-	// ptyAltExitWait is how long a full-screen program gets to finish
-	// quitting before its screen is reported as still current.
-	ptyAltExitWait = 900 * time.Millisecond
 
 	// ptyQuietMs is the silence window after which the runner stops
 	// waiting blindly and looks at what the foreground job is doing:
@@ -65,7 +63,17 @@ const (
 	// credential prompt gets for the line discipline to confirm it:
 	// hidden-line readers clear echo before printing their prompt, but
 	// a slow one may still be mid-switch when its text is on the wire.
+	// It is also how long a raw-mode read gets to turn out to be the
+	// shell's own line editor - the prompt marker arriving behind text
+	// a finished command printed.
 	ptyEchoSettleMs = 400
+	// ptyBlindQuietMs is the silence a job has to keep before it is
+	// reported as waiting for input when the kernel will not say where
+	// it sleeps (a setuid program: sudo, su). Such a job could as well
+	// be a credential reader sitting in PAM's fail delay, about to
+	// reject the answer and ask again; a couple of seconds tells the two
+	// apart, where the ordinary quiet window would call it a question.
+	ptyBlindQuietMs = 4000
 	// ptySettleForPromptMs is the grace given to a just-finished
 	// command's prompt to land after the quiet window trips, before the
 	// silence is read as anything else.
@@ -157,9 +165,6 @@ var (
 	// shells emit before a prompt. It over-matches (TUIs and REPLs send
 	// it too), so it is only used together with the alt-screen guard.
 	ptyPasteRe = regexp.MustCompile(`\x1b\[\?2004h`)
-	// ptyAltExitRe matches a program restoring the main screen: the
-	// editor or pager it was is gone and the shell has the terminal back.
-	ptyAltExitRe = regexp.MustCompile(`\x1b\[\?(?:1049|1047|47)l`)
 	// ptyAltScreenRe matches a program switching to the alternate
 	// screen: an editor, pager or TUI has taken over the terminal.
 	ptyAltScreenRe = regexp.MustCompile(`\x1b\[\?(?:1049|1047|47)h`)
@@ -217,7 +222,6 @@ type ptyTerminal interface {
 	Screen() string
 	BracketedPaste() bool
 	Paste(text string) error
-	Resize(rows, cols int) error
 	Size() (rows, cols int)
 	IdleFor() time.Duration
 	SampleJob() term.JobActivity
@@ -234,16 +238,14 @@ type ptyRunner struct {
 	// mu guards the runner's own state; it is held only for as long as
 	// that takes. cmdMu is the one long-held lock: it serialises whole
 	// commands, so a second command waits while the first is running -
-	// but keystrokes, polls and resizes do not, which is what lets a
-	// prompt be answered while the command that asked is still going.
+	// but keystrokes and polls do not, which is what lets a prompt be
+	// answered while the command that asked is still going.
 	// sendMu keeps two writers from interleaving bytes on the wire.
 	mu     sync.Mutex
 	cmdMu  sync.Mutex
 	sendMu sync.Mutex
-	// key is the registry key (owner and directory), cwd the directory
-	// the shell started in, and slot tells apart the sessions sharing
-	// that pair: slot 0 is the primary one, higher slots are opened
-	// when it is busy driving an interactive program.
+	// key is the registry key (owner and directory) and cwd the
+	// directory the shell started in.
 	key string
 	cwd string
 	// lastCwd is the working directory the last completed command's
@@ -256,7 +258,6 @@ type ptyRunner struct {
 	// prompt already states, so a session that never leaves it never
 	// spends a line saying so.
 	announcedCwd string
-	slot         int
 	ask          question.Service
 	session      ptyTerminal
 
@@ -272,18 +273,14 @@ type ptyRunner struct {
 	lastScreen string
 	// sentinel is this session's completion marker.
 	sentinel sentinel
-	// lastRunning records that the previous call left something running
-	// here, so input and keys know which session to go to.
-	lastRunning bool
-	// inFlight is set while a command is running here and its output
-	// belongs to the call waiting for it.
+	// running records that the last call left a program in the session
+	// - a command still going, a REPL, a full-screen program - so the
+	// next text typed goes to that program rather than being run as a
+	// command, and a poll waits for it rather than snapshotting it.
+	running bool
+	// inFlight is set while a call is waiting on the session and owns
+	// its output; a call typing meanwhile answers, it does not report.
 	inFlight bool
-	// orphan is set when a command is still running here and no call is
-	// waiting for it - the previous one returned without it finishing.
-	// Its completion deserves to be waited for, so a poll picks it up
-	// instead of snapshotting, and a new command goes to a sibling
-	// session rather than being typed into it.
-	orphan bool
 	// restarted records that the shell had exited and a fresh one was
 	// opened to serve the current call, so the caller can be told that
 	// the state it built up (cd, exports, venv) is gone.
@@ -312,108 +309,30 @@ const (
 	ptyReapInterval = time.Minute
 )
 
-// ptyMaxSlots bounds how many terminal sessions one working directory
-// can hold. A second one appears when the first is busy driving an
-// interactive program and a command needs to run anyway - an editor
-// open in one terminal and a build running in another, the way a person
-// would use two tabs.
-const ptyMaxSlots = 4
-
-// errAllSessionsBusy is returned when every session for a directory is
-// occupied by a full-screen program.
-var errAllSessionsBusy = errors.New(
-	"every terminal session for this directory is running a full-screen program: " +
-		"quit one (keys \"q\", or \"escape, :, q, !, enter\" in vim/nvim, or \"ctrl+c\") " +
-		"before running another command",
-)
-
-// occupied reports whether a command sent here would go somewhere other
-// than a waiting shell: a full-screen program has the terminal, another
-// command is still running and owns the output, or a command this call
-// abandoned is still going and would eat the keystrokes.
-func (r *ptyRunner) occupied() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.session == nil || !r.session.Alive() {
+// shellIdle reports whether the shell itself is waiting at its prompt,
+// so that text typed now is a command line. It is not idle while the
+// last call left a program running - unless that program has since
+// finished on its own, which the shell announces with its prompt marker
+// in the output nobody has drained yet - and not while a full-screen
+// program has the terminal.
+func (r *ptyRunner) shellIdle(s ptyTerminal) bool {
+	if s.AltScreen() {
 		return false
 	}
-	return r.inFlight || r.orphan || r.session.AltScreen()
-}
-
-// hasAltScreen reports whether a full-screen program owns this session.
-func (r *ptyRunner) hasAltScreen() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.session != nil && r.session.Alive() && r.session.AltScreen()
-}
-
-// leftSomethingRunning reports whether something here is waiting to be
-// typed at: a command still in flight, or a REPL or prompt the last
-// call left behind. Input and keys belong to that session.
-func (r *ptyRunner) leftSomethingRunning() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.session == nil || !r.session.Alive() {
-		return false
-	}
-	return r.inFlight || r.lastRunning
-}
-
-// freeAfterGrace waits briefly for a full-screen program to finish
-// quitting. Programs take a moment to tear down, and a session that is
-// about to be free is better than a second shell that starts with none
-// of this one's state.
-func (r *ptyRunner) freeAfterGrace(ctx context.Context) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.session == nil || !r.session.AltScreen() {
+	if !r.running {
 		return true
 	}
-	_ = r.session.WaitForAny(ctx, []*regexp.Regexp{ptyAltExitRe}, ptyAltExitWait)
-	return !r.session.AltScreen()
-}
-
-// ptyCommandRunner picks a session that can take a command now: the
-// owner's primary one, or - while that is busy with an editor, pager
-// or TUI - the first sibling that is free, opening one if needed.
-// Sibling sessions are separate shells: they do not share the cd,
-// exports or virtualenv of the busy one.
-func ptyCommandRunner(ctx context.Context, owner, cwd string, ask question.Service) (*ptyRunner, error) {
-	for slot := range ptyMaxSlots {
-		r := ptyRunnerSlot(owner, cwd, slot, ask)
-		if !r.occupied() || r.freeAfterGrace(ctx) {
-			return r, nil
-		}
+	if r.promptRe != nil && r.promptRe.Match(s.Pending()) {
+		r.running = false
+		return true
 	}
-	return nil, errAllSessionsBusy
+	return false
 }
 
-// ptyInteractiveRunner picks the session that input, keys and polls are
-// meant for: the owner's one with a program in it. Nothing is opened
-// here - a keystroke for a program that is not running belongs in the
-// primary session, where the agent last was.
-func ptyInteractiveRunner(owner, cwd string, ask question.Service) *ptyRunner {
-	// A full-screen program is the strongest claim on a keystroke, so
-	// look for one of those before settling for a session that merely
-	// has something running.
-	for _, claims := range []func(*ptyRunner) bool{
-		(*ptyRunner).hasAltScreen,
-		(*ptyRunner).leftSomethingRunning,
-	} {
-		for slot := range ptyMaxSlots {
-			ptyRunnersMu.Lock()
-			r, ok := ptyRunners[slotKey(owner, cwd, slot)]
-			ptyRunnersMu.Unlock()
-			if ok && claims(r) {
-				return r
-			}
-		}
-	}
-	return ptyRunnerSlot(owner, cwd, 0, ask)
-}
-
-// touch refreshes the runner's idle clock (called from Run/Input/Poll
-// under r.mu).
+// touch refreshes the runner's idle clock (called from Type/Poll under
+// r.mu).
 func (r *ptyRunner) touch() {
 	r.lastUsed = time.Now()
 }
@@ -446,33 +365,21 @@ func ptyReaperStart() {
 	})
 }
 
-// ptyRunnerFor returns the primary runner for one owner's workingDir;
-// siblings for the same directory live in higher slots (see
-// ptySessionFor).
+// runnerKey names a runner in the registry: each owner (agent) gets its
+// own session per working directory, the way a person has one terminal
+// tab per project they are in.
+func runnerKey(owner, cwd string) string {
+	return owner + "\x00" + cwd
+}
+
+// ptyRunnerFor returns the runner for one owner's workingDir, creating
+// (and warm-starting) it on first use. The ask service collects sudo
+// passwords from the user; nil disables prompting. Runners are reused
+// until they idle out (ptyIdleTimeout) or are evicted at the cap, so
+// shell state survives across calls without leaking one PTY per agent
+// and working directory forever.
 func ptyRunnerFor(owner, cwd string, ask question.Service) *ptyRunner {
-	return ptyRunnerSlot(owner, cwd, 0, ask)
-}
-
-// slotKey names a runner in the registry. Two dimensions share it:
-// each owner (agent) gets its own set of sessions, and one owner can
-// hold several sessions per directory - slot 0 is the primary, higher
-// slots are opened when it is busy driving an interactive program.
-func slotKey(owner, cwd string, slot int) string {
-	key := owner + "\x00" + cwd
-	if slot != 0 {
-		key += fmt.Sprintf("\x00#%d", slot)
-	}
-	return key
-}
-
-// ptyRunnerSlot returns the runner in one slot of owner's workingDir,
-// creating (and warm-starting) it on first use. The ask service
-// collects sudo passwords from the user; nil disables prompting.
-// Runners are reused until they idle out (ptyIdleTimeout) or are
-// evicted at the cap, so shell state survives across calls without
-// leaking one PTY per agent and working directory forever.
-func ptyRunnerSlot(owner, cwd string, slot int, ask question.Service) *ptyRunner {
-	key := slotKey(owner, cwd, slot)
+	key := runnerKey(owner, cwd)
 
 	ptyRunnersMu.Lock()
 	defer ptyRunnersMu.Unlock()
@@ -499,7 +406,7 @@ func ptyRunnerSlot(owner, cwd string, slot int, ask question.Service) *ptyRunner
 			go victim.Close()
 		}
 	}
-	r := &ptyRunner{key: key, cwd: cwd, slot: slot, ask: ask, lastUsed: time.Now()}
+	r := &ptyRunner{key: key, cwd: cwd, ask: ask, lastUsed: time.Now()}
 	ptyRunners[key] = r
 	ptyReaperStart()
 	// Warm start in the background: interactive shells (nix,
@@ -563,7 +470,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	// the state the last one had.
 	if r.session != nil {
 		r.restarted = true
-		r.orphan = false
+		r.running = false
 		r.lastCwd = ""
 		// The replacement shell opens in the session directory again, so
 		// that is what the model should be told about next -- and only if
@@ -592,7 +499,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	// short settle lets the assignment land before the setup line is
 	// accepted, so the setup line itself cannot be recorded either.
 	if dialect.historyOffCmd != "" {
-		if err := s.Send([]byte(dialect.historyOffCmd + "\n")); err == nil {
+		if err := s.Send([]byte(dialect.historyOffCmd + term.Enter)); err == nil {
 			_ = s.WaitForQuiet(ctx, 300*time.Millisecond, 2*time.Second)
 			s.Drain()
 		}
@@ -603,7 +510,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	// own PS1 - fall back to the bracketed-paste heuristic rather than
 	// leaving every command waiting for a marker that will never come.
 	r.promptRe = ptyPasteRe
-	if err := s.Send([]byte(dialect.setupCmd + "\n")); err == nil {
+	if err := s.Send([]byte(dialect.setupCmd + term.Enter)); err == nil {
 		if s.WaitForAny(ctx, []*regexp.Regexp{ptyPromptRe}, 5*time.Second) == 0 {
 			r.promptRe = ptyPromptRe
 		} else {
@@ -634,7 +541,7 @@ func (r *ptyRunner) fence(ctx context.Context, s ptyTerminal) {
 	if mark.beginRe == nil || promptRe == nil {
 		return
 	}
-	if err := r.send(s, []byte(mark.begin+"\n")); err != nil {
+	if err := r.send(s, []byte(mark.begin+term.Enter)); err != nil {
 		return
 	}
 	if s.WaitForAny(ctx, []*regexp.Regexp{mark.beginRe}, ptyFenceWait) != 0 {
@@ -665,8 +572,7 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 	old := r.session
 	r.session = nil
 	r.inFlight = false
-	r.orphan = false
-	r.lastRunning = false
+	r.running = false
 	r.restarted = false
 	r.lastEcho = nil
 	r.lastScreen = ""
@@ -686,94 +592,134 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 	// out looking busy.
 	r.setState(func() {
 		r.inFlight = false
-		r.orphan = false
-		r.lastRunning = false
+		r.running = false
 		r.restarted = false
 	})
 	return nil
 }
 
-// ptyResetAll closes every terminal session open for a working
-// directory - the primary one and any sibling opened while it was busy
-// - and returns the primary, running a fresh shell.
-func ptyResetAll(ctx context.Context, owner, cwd string, ask question.Service) (*ptyRunner, error) {
-	for slot := 1; slot < ptyMaxSlots; slot++ {
-		ptyRunnersMu.Lock()
-		sibling, ok := ptyRunners[slotKey(owner, cwd, slot)]
-		if ok {
-			delete(ptyRunners, sibling.key)
-		}
-		ptyRunnersMu.Unlock()
-		if ok {
-			sibling.Close()
-		}
-	}
-	primary := ptyRunnerSlot(owner, cwd, 0, ask)
-	if err := primary.Reset(ctx); err != nil {
-		return nil, err
-	}
-	return primary, nil
-}
-
-// Run sends a command and waits for it to reach a state the caller can
-// act on, driven by events rather than a fixed timer: the shell's prompt
-// returning (the command finished, and the completion sentinel recovers
-// its exit code and working directory), a sudo password prompt, a
-// full-screen takeover, output going quiet while the foreground job is
-// blocked reading the terminal (the command stopped to ask something),
-// or the wait budget running out. Sudo password prompts are answered via
-// the masked TUI prompt along the way.
-func (r *ptyRunner) Run(ctx context.Context, command string, waitSeconds int) (res PTYResult, err error) {
-	// One command at a time in a session; everything else - keystrokes,
-	// polls, resizes - stays free while this one waits.
-	r.cmdMu.Lock()
-	defer r.cmdMu.Unlock()
-
+// Type is the one way into the terminal: it writes what a person would
+// type and waits for the terminal to reach a state worth reporting.
+// What the text means is decided by the session's state, not by the
+// caller. With the shell at its prompt it is a command line - Enter is
+// implied, and the completion sentinel recovers its exit code and
+// working directory. With a program running it goes to that program -
+// an answer, keystrokes, a block of lines for a REPL - and the call
+// waits for whatever that leads to: the program finishing (exit code),
+// asking again (waiting), redrawing (screen), or going idle. Typing at a
+// command another call is still waiting on answers that call's question
+// without queuing behind it or taking its output.
+func (r *ptyRunner) Type(ctx context.Context, text string, waitSeconds int) (res PTYResult, err error) {
 	s, err := r.terminal(ctx)
 	if err != nil {
 		return PTYResult{}, err
 	}
-
-	// A command sent while an editor or TUI owns the terminal is not a
-	// command at all - it is keystrokes for that program, which is how
-	// ":wq" ends up in a buffer and the shell never sees the command.
-	// Refuse instead, and say what to do about it.
-	if s.AltScreen() {
-		return PTYResult{}, errAltScreenBusy
+	if r.commandInFlight() {
+		return r.typeWhileBusy(ctx, s, text)
 	}
 
+	// One waiter at a time on a session; a call typing while this one
+	// waits takes the path above, not this lock.
+	r.cmdMu.Lock()
+	defer r.cmdMu.Unlock()
+
+	segs := parseInput(text)
+	defer r.setState(func() {
+		r.inFlight = false
+		// Remember whether this session still has something in it, so
+		// the next text goes to it and the next poll waits for it.
+		r.running = (res.Running || res.AltScreen) && s.Alive()
+	})
+	if r.shellIdle(s) {
+		return r.runCommand(ctx, s, text, segs, waitSeconds)
+	}
+	return r.driveProgram(ctx, s, text, segs, waitSeconds)
+}
+
+// runCommand types a command line at the shell's prompt and waits for
+// it, driven by events rather than a fixed timer: the shell's prompt
+// returning (the command finished), a credential prompt (answered
+// masked along the way), a full-screen takeover, output going quiet
+// while the foreground job is blocked reading the terminal (the command
+// stopped to ask something), or the wait budget running out.
+func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, segs []inputSegment, waitSeconds int) (PTYResult, error) {
 	// Start this command from a known point: everything the previous
 	// call left behind is drained first, so nothing it printed can end
 	// up in this call's output and its prompt cannot be mistaken for
 	// this command finishing.
 	r.fence(ctx, s)
 
-	echo := strings.Split(command, "\n")
+	// Enter is implied: at a prompt, a line nobody presses Enter on
+	// does nothing. Text that ends in a newline or a named key (a tab,
+	// asking for completion) is typed as it is.
+	body := strings.TrimSuffix(text, "\n")
+	var echo []string
+	if !hasKeys(segs) {
+		echo = strings.Split(body, "\n")
+	} else if last := segs[len(segs)-1]; last.key == nil && !strings.HasSuffix(last.text, "\n") {
+		segs[len(segs)-1].text += "\n"
+	}
 	r.setState(func() {
 		r.lastEcho = echo
 		r.inFlight = true
-		r.orphan = false
-	})
-	defer r.setState(func() {
-		r.inFlight = false
-		// Remember whether this session still has something in it, so a
-		// later keystroke goes to the right terminal. A command this call
-		// left running is an orphan: nothing is waiting for its
-		// completion, so the next poll waits for it instead of
-		// snapshotting it over and over.
-		r.lastRunning = res.Running || res.AltScreen
-		r.orphan = res.Running && !res.AltScreen && s.Alive()
+		r.running = false
 	})
 
-	if err := r.pasteCommand(ctx, s, command); err != nil {
+	var err error
+	if echo != nil {
+		err = r.pasteCommand(ctx, s, body)
+	} else {
+		err = r.typeInput(s, segs)
+	}
+	if err != nil {
 		return PTYResult{}, err
 	}
-
 	return r.awaitCompletion(ctx, s, echo, waitSeconds)
 }
 
-// awaitCompletion is the event loop behind Run (and behind a poll that
-// picks up an orphaned command). It returns as soon as the terminal
+// driveProgram types into the program the session has running and
+// waits for what follows, on the same events as a command: the shell's
+// prompt marker when the program quit on the keystroke (its exit code
+// is recovered), output going quiet when it has redrawn (its screen) or
+// stopped to ask (waiting), or the budget running out. Nothing here
+// guesses how long a program takes to quit: the shell says when it has.
+func (r *ptyRunner) driveProgram(ctx context.Context, s ptyTerminal, text string, segs []inputSegment, waitSeconds int) (PTYResult, error) {
+	var echo []string
+	if !hasKeys(segs) {
+		// Echo stripping is for typed lines. A sequence with keys in it
+		// leaves no line to strip, and a guess would eat real output.
+		echo = strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	}
+	r.setState(func() {
+		r.lastEcho = echo
+		r.inFlight = true
+	})
+	if err := r.typeInput(s, segs); err != nil {
+		return PTYResult{}, err
+	}
+	// The program may have finished on the keystroke before this wait
+	// begins; its prompt can already be sitting in the undrained output.
+	s.RescanFromStart()
+	return r.awaitCompletion(ctx, s, echo, waitSeconds)
+}
+
+// typeWhileBusy types at a command another call is waiting on - the
+// answer to its question - and reports the screen as it stands. That
+// call owns the output stream, so nothing is drained here.
+func (r *ptyRunner) typeWhileBusy(ctx context.Context, s ptyTerminal, text string) (PTYResult, error) {
+	segs := parseInput(text)
+	if !hasKeys(segs) {
+		r.setState(func() { r.lastEcho = strings.Split(strings.TrimSuffix(text, "\n"), "\n") })
+	}
+	if err := r.typeInput(s, segs); err != nil {
+		return PTYResult{}, err
+	}
+	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 5*time.Second)
+	return r.collectBusy(ctx, s, true), nil
+}
+
+// awaitCompletion is the event loop behind Type (and behind a poll that
+// picks up a command left running). It returns as soon as the terminal
 // reaches a state worth the caller's attention:
 //
 //   - the shell's prompt marker: the command finished, and
@@ -829,8 +775,14 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 			// land before reading anything into the silence.
 			if m := s.WaitForAny(ctx, pats, ptySettleForPromptMs*time.Millisecond); m >= 0 {
 				matched = m
-			} else if jobWaitingForInput(s.SampleJob()) {
-				if s.SecretRead() == term.SecretReadYes {
+			} else if s.AltScreen() {
+				// A full-screen program gone quiet is showing its
+				// screen, whatever its processes are blocked in; the
+				// raw stream is a redraw log and says nothing.
+				s.Drain()
+				return r.screenResult(s), nil
+			} else if act := s.SampleJob(); jobWaitingForInput(act) {
+				if r.credentialRead(s) {
 					if asked && s.PendingLen() <= answeredLen {
 						// A hidden-line read with nothing back from the
 						// reader since the last answer: the line is on
@@ -847,12 +799,11 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 						continue
 					}
 					// The foreground job is blocked reading the terminal
-					// with echo off in line mode: a hidden-line reader
-					// asking for a credential, whatever language its
-					// prompt was printed in (or whether it printed one
-					// at all). Answer it masked rather than reporting
-					// it as a question the model could answer in the
-					// clear.
+					// with echo off: a reader asking for a credential,
+					// whatever language its prompt was printed in (or
+					// whether it printed one at all). Answer it masked
+					// rather than reporting it as a question the model
+					// could answer in the clear.
 					mark, err := r.answerCredentialPrompt(ctx, s, asked)
 					if err != nil {
 						return PTYResult{}, err
@@ -861,6 +812,20 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 					// User think time is not the command's budget.
 					deadline = deadline.Add(2 * time.Minute)
 					continue
+				}
+				if !act.WchanReadable && s.IdleFor() < ptyBlindQuietMs*time.Millisecond {
+					// Where the job sleeps cannot be seen - a setuid
+					// program, whose wait point the kernel hides from
+					// this user. Asleep and silent, it could be a
+					// credential reader in PAM's fail delay as easily as
+					// a program waiting to be answered; the first will
+					// speak again within a few seconds, so hold the
+					// verdict until the silence outlasts that.
+					if s.WaitForOutput(ctx, min(ptyBlindQuietMs*time.Millisecond-s.IdleFor(), time.Until(deadline))) ||
+						time.Now().Before(deadline) {
+						continue
+					}
+					break
 				}
 				// The foreground job is blocked reading the terminal:
 				// the command has asked its question and gone quiet.
@@ -886,6 +851,11 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 		}
 		switch matched {
 		case 1: // credential-shaped prompt text
+			if s.AltScreen() {
+				// A full-screen program's redraw log is not a prompt
+				// to answer blind: the word is a label on its screen.
+				continue
+			}
 			if r.credPromptIsEcho(s, echo) {
 				// The terminal echoing the command line back, not a
 				// program asking anything: the command's own text says
@@ -895,23 +865,22 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 				continue
 			}
 			// Text is only a hint; the input discipline decides. A real
-			// credential reader has switched the terminal to a hidden
-			// line by the time its prompt is on the wire (sudo, su and
-			// ssh all clear echo first), but give a slower one a moment
-			// to flip the bit before dismissing the hint.
-			switch secretReadSettled(s, ptyEchoSettleMs*time.Millisecond) {
-			case term.SecretReadNo:
-				// Echo is on: ordinary output that happens to look like
-				// a prompt. The scan has consumed the match, so waiting
-				// on cannot loop here.
+			// credential reader has turned echo off by the time its
+			// prompt is on the wire (sudo, su and ssh all do that
+			// first), but give a slower one a moment to flip the bit
+			// before dismissing the hint.
+			if !r.confirmCredentialPrompt(s, ptyEchoSettleMs*time.Millisecond) {
+				// Echo is on, or the shell is back at its prompt:
+				// ordinary output that happens to look like a prompt.
+				// The scan has consumed the match, so waiting on cannot
+				// loop here.
 				continue
-			default:
-				mark, err := r.answerCredentialPrompt(ctx, s, asked)
-				if err != nil {
-					return PTYResult{}, err
-				}
-				asked, answeredLen = true, mark
 			}
+			mark, err := r.answerCredentialPrompt(ctx, s, asked)
+			if err != nil {
+				return PTYResult{}, err
+			}
+			asked, answeredLen = true, mark
 			// User think time is not the command's budget.
 			deadline = deadline.Add(2 * time.Minute)
 			continue
@@ -1079,32 +1048,6 @@ func resolveBackspaces(s string) string {
 	return string(b)
 }
 
-// parseTerminalSize parses a "COLSxROWS" size ("240x60"). Columns come
-// first, the way terminal sizes are always written.
-func parseTerminalSize(s string) (rows, cols int, err error) {
-	colsStr, rowsStr, ok := strings.Cut(strings.ToLower(strings.TrimSpace(s)), "x")
-	if !ok {
-		return 0, 0, fmt.Errorf("resize must be COLSxROWS (e.g. 240x60), got %q", s)
-	}
-	cols, err = strconv.Atoi(strings.TrimSpace(colsStr))
-	if err != nil {
-		return 0, 0, fmt.Errorf("resize columns: %w", err)
-	}
-	rows, err = strconv.Atoi(strings.TrimSpace(rowsStr))
-	if err != nil {
-		return 0, 0, fmt.Errorf("resize rows: %w", err)
-	}
-	return rows, cols, nil
-}
-
-// errAltScreenBusy is returned when a command is sent while a
-// full-screen program still owns the terminal.
-var errAltScreenBusy = errors.New(
-	"a full-screen program (editor, pager, TUI) owns the terminal session: " +
-		"quit it first (keys \"q\", or \"escape, :, q, !, enter\" in vim/nvim, " +
-		"or \"ctrl+c\"), or drive it with keys/input instead of a command",
-)
-
 // interrupt stops whatever is running with ctrl-c and reports the
 // terminal afterwards. The caller's context is already done at this
 // point, so the waits here use a fresh short-lived one.
@@ -1147,7 +1090,7 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 	var echo []string
 	r.setState(func() { mark, echo = r.sentinel, r.lastEcho })
 
-	if err := r.send(s, []byte(mark.cmd+"\n")); err != nil {
+	if err := r.send(s, []byte(mark.cmd+term.Enter)); err != nil {
 		return PTYResult{}, err
 	}
 	if s.WaitForAny(ctx, []*regexp.Regexp{mark.loose}, 10*time.Second) != 0 {
@@ -1232,7 +1175,7 @@ func (r *ptyRunner) answerCredentialPrompt(ctx context.Context, s ptyTerminal, r
 		_ = s.Send([]byte{0x03})
 		return mark, nil
 	}
-	_ = s.Send([]byte(answers[0].FillInText + "\n"))
+	_ = s.Send([]byte(answers[0].FillInText + term.Enter))
 	return mark, nil
 }
 
@@ -1286,41 +1229,93 @@ func echoStarted(line string, echo []string) bool {
 	return false
 }
 
-// secretReadSettled samples the terminal's input discipline until it
-// says something other than an echoing terminal, or the window closes.
-// A credential reader that just printed its prompt may not have
-// cleared echo yet; a terminal whose echo stays on for the whole window
-// is not reading a secret, whatever its output looked like.
-func secretReadSettled(s ptyTerminal, window time.Duration) term.SecretReadState {
+// confirmCredentialPrompt decides whether prompt-shaped text on the
+// wire is a credential reader waiting, by sampling the terminal's input
+// discipline over the window. A hidden-line read settles it at once. A
+// terminal whose echo stays on for the whole window is not reading a
+// secret, whatever its output looked like; a reader that just printed
+// its prompt may not have cleared echo yet, hence the window. A raw
+// read with echo off is sudo - or the shell's own line editor, back at
+// its prompt after a command that merely printed the word: the prompt
+// marker in the undrained output is what tells those apart, and the
+// window is what gives that marker time to land.
+func (r *ptyRunner) confirmCredentialPrompt(s ptyTerminal, window time.Duration) bool {
+	var promptRe *regexp.Regexp
+	r.setState(func() { promptRe = r.promptRe })
+	shellBack := func() bool { return promptRe != nil && promptRe.Match(s.Pending()) }
 	deadline := time.Now().Add(window)
 	for {
-		if state := s.SecretRead(); state != term.SecretReadNo {
-			return state
+		switch s.SecretRead() {
+		case term.SecretReadYes, term.SecretReadUnknown:
+			return true
+		case term.SecretReadRaw:
+			if shellBack() {
+				return false
+			}
 		}
 		if !time.Now().Before(deadline) {
-			return term.SecretReadNo
+			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	return s.SecretRead() == term.SecretReadRaw && !shellBack()
 }
 
-// Input sends raw text to the terminal without a sentinel: answers to
-// prompts, keystrokes for TUIs, or multiline scripts. Returns the
-// terminal after output settles.
-func (r *ptyRunner) Input(ctx context.Context, text string) (res PTYResult, err error) {
-	s, err := r.terminal(ctx)
-	if err != nil {
-		return PTYResult{}, err
+// credentialRead reports whether the foreground job, found blocked
+// reading the terminal after output went quiet, is reading a secret. A
+// hidden line (echo off, canonical) is proof by itself: nothing else
+// reads that way. A raw read with echo off is how sudo reads, but also
+// how every line editor and full-screen program does, so it counts only
+// when the last thing printed is shaped like a credential prompt.
+func (r *ptyRunner) credentialRead(s ptyTerminal) bool {
+	switch s.SecretRead() {
+	case term.SecretReadYes:
+		return true
+	case term.SecretReadRaw:
+		return credPromptRe.MatchString(lastLine(r.clean(string(s.Pending()), nil)))
+	default:
+		return false
 	}
-	defer r.setState(func() { r.lastRunning = res.Running || res.AltScreen })
+}
 
-	r.setState(func() { r.lastEcho = strings.Split(strings.TrimSuffix(text, "\n"), "\n") })
-	busy := r.commandInFlight()
-	if err := r.paste(s, text); err != nil {
-		return PTYResult{}, err
+// lastLine is the last non-blank line of s, or the empty string.
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, " \t\n"), "\n")
+	return lines[len(lines)-1]
+}
+
+// keystrokes turns the newlines in typed text into the terminal's Enter:
+// the same byte on Unix, a carriage return under ConPTY (see term.Enter).
+func keystrokes(text string) string {
+	return strings.ReplaceAll(text, "\n", term.Enter)
+}
+
+// typeInput writes the parsed input to the terminal. Plain text takes
+// the paste path, so a multi-line block still arrives as one paste. A
+// sequence with keys in it goes out one segment per write, with a gap
+// between them, all under the write lock so nothing lands in the middle
+// of it. Sent as a single burst, a leading escape is read as the meta
+// prefix of whatever follows (ESC : is Alt-:, not "escape then colon"),
+// and programs that poll their input can miss the tail of the burst.
+func (r *ptyRunner) typeInput(s ptyTerminal, segs []inputSegment) error {
+	if len(segs) == 1 && segs[0].key == nil {
+		return r.paste(s, segs[0].text)
 	}
-	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 5*time.Second)
-	return r.collectBusy(ctx, s, busy), nil
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+	for i, seg := range segs {
+		b := seg.key
+		if b == nil {
+			b = []byte(keystrokes(seg.text))
+		}
+		if err := s.Send(b); err != nil {
+			return fmt.Errorf("terminal session: %w", err)
+		}
+		if i < len(segs)-1 {
+			time.Sleep(ptyKeyGap)
+		}
+	}
+	return nil
 }
 
 // paste delivers text the way a terminal would. Several lines written
@@ -1333,11 +1328,11 @@ func (r *ptyRunner) Input(ctx context.Context, text string) (res PTYResult, err 
 func (r *ptyRunner) paste(s ptyTerminal, text string) error {
 	body, submit := strings.CutSuffix(text, "\n")
 	if !strings.Contains(body, "\n") || !s.BracketedPaste() {
-		return r.send(s, []byte(text))
+		return r.send(s, []byte(keystrokes(text)))
 	}
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
-	if err := s.Paste(body); err != nil {
+	if err := s.Paste(keystrokes(body)); err != nil {
 		return fmt.Errorf("terminal session: %w", err)
 	}
 	if submit {
@@ -1362,11 +1357,11 @@ func (r *ptyRunner) paste(s ptyTerminal, text string) error {
 func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command string) error {
 	body := strings.TrimSuffix(command, "\n")
 	if !strings.Contains(body, "\n") || !s.BracketedPaste() {
-		return r.send(s, []byte(command+"\n"))
+		return r.send(s, []byte(keystrokes(body)+term.Enter))
 	}
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
-	if err := s.Paste(body); err != nil {
+	if err := s.Paste(keystrokes(body)); err != nil {
 		return fmt.Errorf("terminal session: %w", err)
 	}
 	// Everything on the wire between the paste and this drain is the
@@ -1384,99 +1379,53 @@ func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command str
 	return nil
 }
 
-// Keys sends named keys (escape, arrows, ctrl+c, f1-f12) to whatever is
-// running, for the keystrokes that are awkward or error-prone to spell
-// out as raw text.
-func (r *ptyRunner) Keys(ctx context.Context, list string) (res PTYResult, err error) {
-	keys, err := parseKeys(list)
-	if err != nil {
-		return PTYResult{}, err
-	}
-
-	s, err := r.terminal(ctx)
-	if err != nil {
-		return PTYResult{}, err
-	}
-	defer r.setState(func() { r.lastRunning = res.Running || res.AltScreen })
-
-	busy := r.commandInFlight()
-	// One key per write, with a gap between them, and the whole sequence
-	// under the write lock so nothing lands in the middle of it. Sent as
-	// a single burst, a leading escape is read as the meta prefix of
-	// whatever follows (ESC : is Alt-:, not "escape then colon"), and
-	// programs that poll their input can miss the tail of the burst.
-	if err := func() error {
-		r.sendMu.Lock()
-		defer r.sendMu.Unlock()
-		for i, k := range keys {
-			if err := s.Send(k); err != nil {
-				return fmt.Errorf("terminal session: %w", err)
-			}
-			if i < len(keys)-1 {
-				time.Sleep(ptyKeyGap)
-			}
-		}
-		return nil
-	}(); err != nil {
-		return PTYResult{}, err
-	}
-	r.setState(func() { r.lastEcho = nil })
-	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 5*time.Second)
-	return r.collectBusy(ctx, s, busy), nil
-}
-
-// Poll reads the current terminal state without sending anything. A
-// session idle or showing a full-screen program returns what is on it
-// right away. A command an earlier call left running is different: its
-// completion has no waiter, so instead of an instant snapshot the agent
-// would have to keep re-taking, the poll waits for it like a fresh
-// command - its exit code once it finishes, its question once it stops
-// to ask - so one poll is one event rather than a busy-loop of them.
+// Poll reads the terminal without typing anything. An idle session
+// returns what is on it right away. A program an earlier call left
+// running is different: its completion has no waiter, so instead of an
+// instant snapshot the agent would have to keep re-taking, the poll
+// waits for it like a fresh command - its exit code once it finishes,
+// its question once it stops to ask, its screen once it has redrawn -
+// so one poll is one event rather than a busy-loop of them.
 func (r *ptyRunner) Poll(ctx context.Context) (PTYResult, error) {
 	s, err := r.terminal(ctx)
 	if err != nil {
 		return PTYResult{}, err
 	}
-	if r.beginOrphanWait() {
-		defer r.endOrphanWait()
-		// The orphan may have finished while nobody watched: its prompt
-		// can already be sitting in the undrained output.
+	if r.beginRunningWait() {
+		defer r.endRunningWait()
+		// The program may have finished while nobody watched: its
+		// prompt can already be sitting in the undrained output.
 		s.RescanFromStart()
 		var echo []string
 		r.setState(func() { echo = r.lastEcho })
 		res, err := r.awaitCompletion(ctx, s, echo, DefaultPollWaitSeconds)
-		r.setState(func() {
-			if res.Running {
-				// Still unobserved: a later poll can pick it up again.
-				r.orphan = true
-			}
-		})
+		r.setState(func() { r.running = (res.Running || res.AltScreen) && s.Alive() })
 		return res, err
 	}
 	return r.collect(ctx, s), nil
 }
 
-// DefaultPollWaitSeconds is the budget a poll gives an orphaned command
-// it picks up: long enough for a build to land, short enough that a
-// command that never finishes still comes back to the caller.
+// DefaultPollWaitSeconds is the budget a poll gives a program it picks
+// up: long enough for a build to land, short enough that a command that
+// never finishes still comes back to the caller.
 const DefaultPollWaitSeconds = 60
 
-// beginOrphanWait claims the wait for an orphaned command. The cheap
-// state check comes first: a poll arriving while a command is in flight
-// must not queue behind the command lock - it reports the screen right
-// away instead. Only with an orphan on the books is the command lock
-// taken (re-checked under it, since a Run may have started meanwhile),
-// so the wait is the only one on the session.
-func (r *ptyRunner) beginOrphanWait() bool {
+// beginRunningWait claims the wait for a program left running. The
+// cheap state check comes first: a poll arriving while a call is in
+// flight must not queue behind the command lock - it reports the screen
+// right away instead. Only with something running and unwatched is the
+// lock taken (re-checked under it, since a Type may have started
+// meanwhile), so the wait is the only one on the session.
+func (r *ptyRunner) beginRunningWait() bool {
 	r.mu.Lock()
-	ok := r.orphan && !r.inFlight
+	ok := r.running && !r.inFlight
 	r.mu.Unlock()
 	if !ok {
 		return false
 	}
 	r.cmdMu.Lock()
 	r.mu.Lock()
-	ok = r.orphan && !r.inFlight
+	ok = r.running && !r.inFlight
 	r.mu.Unlock()
 	if !ok {
 		r.cmdMu.Unlock()
@@ -1485,27 +1434,10 @@ func (r *ptyRunner) beginOrphanWait() bool {
 	return true
 }
 
-// endOrphanWait releases the command lock taken by a successful
-// beginOrphanWait.
-func (r *ptyRunner) endOrphanWait() {
+// endRunningWait releases the command lock taken by a successful
+// beginRunningWait.
+func (r *ptyRunner) endRunningWait() {
 	r.cmdMu.Unlock()
-}
-
-// Resize changes the terminal size for the whole session. A program
-// already running redraws at the new size (SIGWINCH).
-func (r *ptyRunner) Resize(ctx context.Context, rows, cols int) (PTYResult, error) {
-	s, err := r.terminal(ctx)
-	if err != nil {
-		return PTYResult{}, err
-	}
-	if err := s.Resize(rows, cols); err != nil {
-		return PTYResult{}, err
-	}
-	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 5*time.Second)
-	// The redraw invalidates the dedup baseline: the same UI at a new
-	// size is new information.
-	r.setState(func() { r.lastScreen = "" })
-	return r.collect(ctx, s), nil
 }
 
 // tookRestart reports - once - that the session's shell had exited and
@@ -1550,13 +1482,6 @@ func (r *ptyRunner) collectBusy(ctx context.Context, s ptyTerminal, busy bool) P
 		return res
 	}
 
-	// Quitting a full-screen program takes longer than the settle
-	// window: it goes quiet while it tears down, then restores the main
-	// screen. Give it that moment, or the call after ":q" still reports
-	// an editor that is already gone.
-	if s.AltScreen() {
-		_ = s.WaitForAny(ctx, []*regexp.Regexp{ptyAltExitRe}, ptyAltExitWait)
-	}
 	if s.AltScreen() {
 		s.Drain()
 		return r.screenResult(s)
@@ -1568,12 +1493,12 @@ func (r *ptyRunner) collectBusy(ctx context.Context, s ptyTerminal, busy bool) P
 		echo = r.lastEcho
 		// Draining a session whose command was not in flight observes
 		// whatever became of it. A prompt in the drained bytes means the
-		// shell - not some program - has the terminal back, so an
-		// orphaned command has finished and been seen: there is nothing
-		// left for a poll to wait for. Without a prompt it may still be
-		// running, and the orphan flag stands.
-		if r.orphan && r.promptRe.MatchString(raw) {
-			r.orphan = false
+		// shell - not some program - has the terminal back, so the
+		// program left running has finished and been seen: there is
+		// nothing left for a poll to wait for. Without a prompt it may
+		// still be running, and the flag stands.
+		if r.running && r.promptRe.MatchString(raw) {
+			r.running = false
 		}
 	})
 	return PTYResult{Output: r.clean(raw, echo), Running: s.Alive()}
