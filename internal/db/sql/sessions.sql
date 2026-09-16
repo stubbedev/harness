@@ -54,7 +54,10 @@ SET
     completion_tokens = ?,
     summary_message_id = ?,
     cost = ?,
-    todos = ?
+    todos = ?,
+    compaction_summary = ?,
+    compaction_boundary_id = ?,
+    compaction_aged_id = ?
 WHERE id = ?
 RETURNING *;
 

@@ -483,6 +483,12 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		)
 		return []MessageItem{NewUserMessageItem(sty, msg, r)}
 	case message.Assistant:
+		// A summary written by an older compaction is bookkeeping, not
+		// conversation: the session resumes from it, the reader never
+		// sees it. Newer compactions keep their summary on the session.
+		if msg.IsSummaryMessage {
+			return nil
+		}
 		var items []MessageItem
 		if ShouldRenderAssistantMessage(msg) {
 			items = append(items, NewAssistantMessageItem(sty, msg))

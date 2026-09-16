@@ -871,7 +871,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
-	msgs, err := a.getSessionMessages(ctx, currentSession)
+	msgs, hiddenSummary, err := a.sessionHistory(ctx, currentSession)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
@@ -1026,6 +1026,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}()
 
 	history, files := a.preparePrompt(msgs, largeModel.CatalogCfg.SupportsImages, call.Attachments...)
+	// Everything compaction folded away rides in as one hidden summary
+	// ahead of the verbatim history; see compaction.go.
+	history = withSummary(hiddenSummary, history)
 
 	startTime := time.Now()
 	a.eventPromptSent(call.SessionID)
@@ -1482,8 +1485,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if delErr := a.messages.Delete(ctx, userMsg.ID); delErr != nil {
 			slog.Warn("Failed to remove the overflowed user message", "error", delErr)
 		}
-		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", ""); summarizeErr != nil {
-			return nil, summarizeErr
+		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", "", true); compactErr != nil {
+			return nil, compactErr
 		}
 		requeued := call
 		requeued.OverflowRecovered = true
@@ -1498,9 +1501,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 
 	if err == nil && shouldSummarize {
-		a.activeRequests.Del(call.SessionID)
-		if summarizeErr := a.summarize(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", ""); summarizeErr != nil {
-			return nil, summarizeErr
+		// The stop condition ended the turn with the window nearly full:
+		// fold everything, then let the turn carry on if it was not done.
+		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", "", true); compactErr != nil {
+			return nil, compactErr
 		}
 		// If the agent wasn't done...
 		if len(currentAssistant.ToolCalls()) > 0 {
@@ -1511,6 +1515,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
 			existing = append(existing, call)
 			a.messageQueue.Set(call.SessionID, existing)
+		}
+	} else if err == nil && !a.disableAutoSummarize {
+		// The turn is over and the session is still ours: this is the
+		// moment to keep the next request in bounds, so the user never
+		// waits on a compaction in the middle of an answer. Usually there
+		// is nothing to do; when there is, nothing shows in the
+		// transcript. A failure here is not the turn's failure.
+		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", "", false); compactErr != nil &&
+			!errors.Is(compactErr, context.Canceled) {
+			slog.Warn("Context maintenance failed", "session_id", call.SessionID, "error", compactErr)
 		}
 	}
 
@@ -1793,43 +1807,14 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	return a.summarize(ctx, sessionID, opts, onAuthRefresh, "manual", instructions)
 }
 
-// summarize compacts the session. trigger is "manual" (user-invoked) or
-// "auto" (context window threshold) and is passed to Pre/PostCompact
-// hooks; instructions optionally steers the summary's focus.
+// summarize compacts the session on request: everything sent verbatim so
+// far is folded into the hidden summary (see compaction.go). trigger is
+// "manual" (user-invoked) or "auto" and is passed to the Pre/PostCompact
+// hooks; instructions optionally steer the summary's focus. Prompts that
+// arrive while it runs are queued and run afterwards.
 func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, trigger, instructions string) error {
 	if a.IsSessionBusy(sessionID) {
 		return ErrSessionBusy
-	}
-
-	// Copy mutable fields under lock to avoid races with SetModels.
-	largeModel := a.largeModel.Get()
-	systemPromptPrefix := a.systemPromptPrefix.Get()
-
-	currentSession, err := a.sessions.Get(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("failed to get session: %w", err)
-	}
-	msgs, err := a.getSessionMessages(ctx, currentSession)
-	if err != nil {
-		return err
-	}
-	if len(msgs) == 0 {
-		// Nothing to summarize.
-		return nil
-	}
-
-	aiMsgs, _ := a.preparePrompt(msgs, largeModel.CatalogCfg.SupportsImages)
-
-	// PreCompact is informational: it observes the imminent compaction
-	// (with its trigger) but cannot veto or steer it.
-	if !a.isSubAgent && a.hooks.Has(hooks.EventPreCompact) {
-		if _, hookErr := a.hooks.Run(ctx, hooks.EventContext{
-			Event:     hooks.EventPreCompact,
-			SessionID: sessionID,
-			Trigger:   trigger,
-		}); hookErr != nil {
-			slog.Warn("PreCompact hook error", "error", hookErr)
-		}
 	}
 
 	genCtx, cancel := context.WithCancel(ctx)
@@ -1837,126 +1822,9 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	a.activeRequests.Set(sessionID, ac)
 	defer a.activeRequests.CompareAndDelete(sessionID, ac)
 	defer cancel()
-	defer func() {
-		if flushErr := a.messages.FlushAll(ctx); flushErr != nil {
-			slog.Error("Failed to flush pending message updates after summarize", "error", flushErr)
-		}
-	}()
 
-	agent := fantasy.NewAgent(
-		largeModel.Model,
-		fantasy.WithSystemPrompt(string(summaryPrompt)),
-		a.retryOption(),
-		fantasy.WithUserAgent(userAgent),
-	)
-	summaryMessage, err := a.messages.Create(ctx, sessionID, message.CreateMessageParams{
-		Role:             message.Assistant,
-		Model:            largeModel.ModelCfg.Model,
-		Provider:         largeModel.ModelCfg.Provider,
-		IsSummaryMessage: true,
-	})
-	if err != nil {
+	if _, err := a.maintainContext(genCtx, sessionID, opts, onAuthRefresh, trigger, instructions, true); err != nil {
 		return err
-	}
-
-	summaryPromptText := buildSummaryPrompt(currentSession.Todos, instructions)
-
-	resp, err := agent.Stream(genCtx, fantasy.AgentStreamCall{
-		Prompt:          summaryPromptText,
-		Messages:        aiMsgs,
-		Headers:         sessionHeaders(sessionID),
-		ProviderOptions: opts,
-		OnAuthRefresh:   onAuthRefresh,
-		ModelProvider: func() fantasy.LanguageModel {
-			return a.largeModel.Get().Model
-		},
-		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			if systemPromptPrefix != "" {
-				prepared.Messages = append([]fantasy.Message{fantasy.NewSystemMessage(systemPromptPrefix)}, prepared.Messages...)
-			}
-			return callContext, prepared, nil
-		},
-		OnReasoningDelta: func(id string, text string) error {
-			summaryMessage.AppendReasoningContent(text)
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-		OnReasoningEnd: func(id string, reasoning fantasy.ReasoningContent) error {
-			// Handle anthropic signature.
-			if anthropicData, ok := reasoning.ProviderMetadata["anthropic"]; ok {
-				if signature, ok := anthropicData.(*anthropic.ReasoningOptionMetadata); ok && signature.Signature != "" {
-					summaryMessage.AppendReasoningSignature(signature.Signature)
-				}
-			}
-			summaryMessage.FinishThinking()
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-		OnTextDelta: func(id, text string) error {
-			summaryMessage.AppendContent(text)
-			return a.messages.Update(genCtx, summaryMessage)
-		},
-	})
-	if err != nil {
-		isCancelErr := errors.Is(err, context.Canceled)
-		if isCancelErr {
-			// User cancelled summarize we need to remove the summary message.
-			deleteErr := a.messages.Delete(ctx, summaryMessage.ID)
-			return deleteErr
-		}
-		// Mark the summary message as finished with an error so the UI
-		// stops spinning.
-		summaryMessage.AddFinish(message.FinishReasonError, "Summarization Error", err.Error())
-		if updateErr := a.messages.Update(ctx, summaryMessage); updateErr != nil {
-			return updateErr
-		}
-		return err
-	}
-
-	summaryMessage.AddFinish(message.FinishReasonEndTurn, "", "")
-	err = a.messages.Update(genCtx, summaryMessage)
-	if err != nil {
-		return err
-	}
-
-	var openrouterCost *float64
-	for _, step := range resp.Steps {
-		stepCost := a.openrouterCost(step.ProviderMetadata)
-		if stepCost != nil {
-			newCost := *stepCost
-			if openrouterCost != nil {
-				newCost += *openrouterCost
-			}
-			openrouterCost = &newCost
-		}
-	}
-
-	a.updateSessionUsage(largeModel, &currentSession, resp.TotalUsage, openrouterCost, false)
-
-	// Just in case, get just the last usage info.
-	usage := resp.Response.Usage
-	currentSession.SummaryMessageID = summaryMessage.ID
-	currentSession.CompletionTokens = summaryCompletionTokens(usage, summaryMessage)
-	currentSession.PromptTokens = 0
-	currentSession.EstimatedUsage = usageIsZero(usage)
-	_, err = a.sessions.Save(genCtx, currentSession)
-	if err != nil {
-		return err
-	}
-
-	// The transcript those diagnostics were reported into is gone. Start the
-	// record over, or a standing error stays suppressed as already-reported
-	// against a context that no longer mentions it.
-	tools.ForgetReportedDiagnostics(a.lspManager, sessionID)
-
-	// PostCompact is informational, mirroring PreCompact after the fact.
-	if !a.isSubAgent && a.hooks.Has(hooks.EventPostCompact) {
-		if _, hookErr := a.hooks.Run(ctx, hooks.EventContext{
-			Event:     hooks.EventPostCompact,
-			SessionID: sessionID,
-			Trigger:   trigger,
-		}); hookErr != nil {
-			slog.Warn("PostCompact hook error", "error", hookErr)
-		}
 	}
 
 	// Release the active request before processing queued messages so that
@@ -2034,16 +1902,6 @@ func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentC
 
 func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool, attachments ...message.Attachment) ([]fantasy.Message, []fantasy.FilePart) {
 	var history []fantasy.Message
-	if !a.isSubAgent {
-		history = append(history, fantasy.NewUserMessage(
-			fmt.Sprintf(
-				"<system_reminder>%s</system_reminder>",
-				`This is a reminder that your todo list is currently empty. DO NOT mention this to the user explicitly because they are already aware.
-If you are working on tasks that would benefit from a todo list please use the "todos" tool to create one.
-If not, please feel free to ignore. Again do not mention this message to the user.`,
-			),
-		))
-	}
 	// Collect all tool call IDs present in assistant messages, then index
 	// every tool result by its call ID. Tool results are re-emitted right
 	// after the assistant message that requested them instead of at their
@@ -2091,7 +1949,15 @@ If not, please feel free to ignore. Again do not mention this message to the use
 		}
 	}
 
-	for _, m := range msgs {
+	// Reasoning is re-sent only for the current turn. A model's thinking
+	// from an earlier turn is the largest thing in a reasoning model's
+	// history and the least useful: the answer it led to is right there.
+	// Anthropic drops it server-side anyway; OpenAI-compatible gateways
+	// (vLLM and kin) take it as reasoning_content and bill every token of
+	// it on every request, which is how a modest session on a reasoning
+	// model runs out of window in an afternoon.
+	currentTurn := lastUserTurnStart(msgs)
+	for i, m := range msgs {
 		if len(m.Parts) == 0 {
 			continue
 		}
@@ -2105,6 +1971,14 @@ If not, please feel free to ignore. Again do not mention this message to the use
 			continue
 		}
 		aiMsgs := m.ToAIMessage()
+		if m.Role == message.Assistant && i < currentTurn {
+			for j := range aiMsgs {
+				aiMsgs[j].Content = withoutReasoning(aiMsgs[j].Content)
+			}
+			// An assistant message that was nothing but reasoning has
+			// nothing left to say.
+			aiMsgs = slices.DeleteFunc(aiMsgs, func(msg fantasy.Message) bool { return len(msg.Content) == 0 })
+		}
 		if !supportsImages {
 			for i := range aiMsgs {
 				if aiMsgs[i].Role == fantasy.MessageRoleUser {
@@ -2137,6 +2011,19 @@ If not, please feel free to ignore. Again do not mention this message to the use
 	history = mergeConsecutiveUserMessages(history)
 
 	return history, files
+}
+
+// withoutReasoning drops the reasoning parts from an assistant message's
+// content, for turns whose thinking is over.
+func withoutReasoning(parts []fantasy.MessagePart) []fantasy.MessagePart {
+	kept := make([]fantasy.MessagePart, 0, len(parts))
+	for _, part := range parts {
+		if _, ok := fantasy.AsMessagePart[fantasy.ReasoningPart](part); ok {
+			continue
+		}
+		kept = append(kept, part)
+	}
+	return kept
 }
 
 // filterFileParts removes fantasy.FilePart entries from a slice of message
@@ -2231,28 +2118,6 @@ func mergeConsecutiveUserMessages(msgs []fantasy.Message) []fantasy.Message {
 		out = append(out, m)
 	}
 	return out
-}
-
-func (a *sessionAgent) getSessionMessages(ctx context.Context, session session.Session) ([]message.Message, error) {
-	msgs, err := a.messages.List(ctx, session.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list messages: %w", err)
-	}
-
-	if session.SummaryMessageID != "" {
-		summaryMsgIndex := -1
-		for i, msg := range msgs {
-			if msg.ID == session.SummaryMessageID {
-				summaryMsgIndex = i
-				break
-			}
-		}
-		if summaryMsgIndex != -1 {
-			msgs = msgs[summaryMsgIndex:]
-			msgs[0].Role = message.User
-		}
-	}
-	return msgs, nil
 }
 
 // hasUserTextMessage reports whether any user message in msgs contains
@@ -2477,13 +2342,6 @@ func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {
 	if promptTokens := usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens; promptTokens != 0 {
 		session.PromptTokens = promptTokens
 	}
-}
-
-func summaryCompletionTokens(usage fantasy.Usage, summaryMessage message.Message) int64 {
-	if usage.OutputTokens != 0 {
-		return usage.OutputTokens
-	}
-	return approxTokenCount(summaryMessage.Content().Text) + approxTokenCount(summaryMessage.ReasoningContent().String())
 }
 
 func (a *sessionAgent) CancelTurn(sessionID string) {
@@ -2810,25 +2668,6 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 
 // buildSummaryPrompt constructs the prompt text for session summarization.
 // instructions, when non-empty, steers what the summary focuses on.
-func buildSummaryPrompt(todos []session.Todo, instructions string) string {
-	var sb strings.Builder
-	sb.WriteString("Provide a detailed summary of our conversation above.")
-	if instructions = strings.TrimSpace(instructions); instructions != "" {
-		sb.WriteString("\n\n## Focus\n\n")
-		sb.WriteString(instructions)
-		sb.WriteString("\n")
-	}
-	if len(todos) > 0 {
-		sb.WriteString("\n\n## Current Todo List\n\n")
-		for _, t := range todos {
-			fmt.Fprintf(&sb, "- [%s] %s\n", t.Status, t.Content)
-		}
-		sb.WriteString("\nInclude these tasks and their statuses in your summary. ")
-		sb.WriteString("Instruct the resuming assistant to use the `todos` tool to continue tracking progress on these tasks.")
-	}
-	return sb.String()
-}
-
 func providerRetryLogFields(err *fantasy.ProviderError, delay time.Duration) []any {
 	fields := []any{
 		"retry_delay", delay.String(),

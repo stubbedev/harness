@@ -294,7 +294,11 @@ options:
   request_timeout: 60 # seconds of inactivity per model request; 0 disables it
   max_retries: 3 # retries for a failing request
 
-  disable_auto_summarize: false # summarize a session when context fills up
+  # Context is kept in bounds between turns and never shows in the
+  # transcript: old tool results are stubbed past half the window, the
+  # oldest history is folded into a hidden rolling summary past three
+  # quarters. The two thresholds below are the safety net inside a turn.
+  disable_auto_summarize: false # turn all automatic compaction off
   auto_summarize_ratio: 0.2 # share of a <=200k window kept free (default 0.2)
   auto_summarize_buffer: 20000 # tokens kept free in a >200k window
 

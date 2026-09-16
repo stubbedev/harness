@@ -62,47 +62,40 @@ func TestSwitchingToASmallerModelCompactsFirst(t *testing.T) {
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
-	var summary *message.Message
-	for i, m := range msgs {
-		if m.IsSummaryMessage {
-			summary = &msgs[i]
-		}
-	}
-	require.NotNil(t, summary, "the oversized history must have been compacted")
 
 	// The turn that never happened leaves nothing behind: no second copy
-	// of the prompt, and no errored assistant shell for a failure that was
-	// recovered from.
+	// of the prompt, no errored assistant shell for a failure that was
+	// recovered from, and no summary message either - compaction lives on
+	// the session, not in the transcript.
 	var prompts, errored int
 	for _, m := range msgs {
+		assert.False(t, m.IsSummaryMessage, "compaction must not write into the transcript")
 		if m.Role == message.User && strings.Contains(m.Content().Text, "carry on") {
 			prompts++
 		}
-		if m.Role == message.Assistant && !m.IsSummaryMessage && m.IsErrorLike() {
+		if m.Role == message.Assistant && m.IsErrorLike() {
 			errored++
 		}
 	}
-	assert.Equal(t, 1, prompts, "the prompt is written once, after the summary")
+	assert.Equal(t, 1, prompts, "the prompt is written once, after the compaction")
 	assert.Zero(t, errored, "a recovered overflow is not reported as a failed turn")
 
-	// The summary is written by the model that is about to answer, not by
-	// the small model, so it is the new model's own reading of the history
-	// that the conversation restarts from.
-	assert.Equal(t, "small-window", summary.Model)
-
-	// And the session now resumes from the summary rather than from the
-	// history, so the prompt that triggered all this was answered against
-	// the compacted conversation.
+	// The session now carries the summary and resumes from the boundary,
+	// so the prompt that triggered all this was answered against the
+	// compacted conversation. The summary is the small model's work.
 	updated, err := env.sessions.Get(t.Context(), sess.ID)
 	require.NoError(t, err)
-	assert.Equal(t, summary.ID, updated.SummaryMessageID)
+	assert.Equal(t, "title", updated.CompactionSummary, "the small model writes the summary")
+	assert.NotEmpty(t, updated.CompactionBoundaryID)
+	assert.Empty(t, updated.SummaryMessageID, "no summary message to resume from")
 
-	kept, err := (&sessionAgent{messages: env.messages}).getSessionMessages(t.Context(), updated)
+	kept, summary, err := (&sessionAgent{messages: env.messages}).sessionHistory(t.Context(), updated)
 	require.NoError(t, err)
-	require.NotEmpty(t, kept)
-	assert.Equal(t, summary.ID, kept[0].ID, "the summary is the new root of the conversation")
-	assert.NotContains(t, kept[0].Content().Text, "some earlier conversation",
-		"the history it replaced is no longer sent")
+	assert.Equal(t, updated.CompactionSummary, summary)
+	for _, m := range kept {
+		assert.NotContains(t, m.Content().Text, "some earlier conversation",
+			"the history the summary replaced is no longer sent")
+	}
 }
 
 // A history that still fits the model must not be compacted: the trigger
@@ -129,4 +122,9 @@ func TestFittingHistoryIsNotCompacted(t *testing.T) {
 	for _, m := range msgs {
 		assert.False(t, m.IsSummaryMessage, "a history that fits must be left alone")
 	}
+	updated, err := env.sessions.Get(t.Context(), sess.ID)
+	require.NoError(t, err)
+	assert.Empty(t, updated.CompactionSummary)
+	assert.Empty(t, updated.CompactionBoundaryID)
+	assert.Empty(t, updated.CompactionAgedID)
 }

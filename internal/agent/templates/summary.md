@@ -1,6 +1,6 @@
 You are summarizing a conversation to preserve context for continuing work later.
 
-**Critical**: This summary will be the ONLY context available when the conversation resumes. Assume all previous messages will be lost. Be thorough.
+**Critical**: This summary replaces the messages above when the conversation continues; only the most recent messages after them stay visible. Assume everything above will be lost. Be thorough. If a summary of even earlier conversation is included, carry its content forward: nothing it holds is available anywhere else.
 
 **Required sections**:
 

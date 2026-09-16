@@ -7,7 +7,6 @@ import (
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/catalog"
-	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/session"
 )
 
@@ -314,21 +313,6 @@ func TestUpdateSessionUsageKeepsCountersForEstimatedZeroUsage(t *testing.T) {
 	require.Equal(t, 1.25, currentSession.Cost)
 	require.Equal(t, int64(123), currentSession.PromptTokens)
 	require.Equal(t, int64(456), currentSession.CompletionTokens)
-}
-
-func TestSummaryCompletionTokens(t *testing.T) {
-	t.Parallel()
-
-	summaryMessage := message.Message{
-		Parts: []message.ContentPart{
-			message.TextContent{Text: "summary text"},
-			message.ReasoningContent{Thinking: "reasoning text"},
-		},
-	}
-
-	require.Equal(t, int64(42), summaryCompletionTokens(fantasy.Usage{OutputTokens: 42}, summaryMessage))
-	require.Equal(t, approxTokenCount("summary text")+approxTokenCount("reasoning text"), summaryCompletionTokens(fantasy.Usage{}, summaryMessage))
-	require.Zero(t, summaryCompletionTokens(fantasy.Usage{}, message.Message{}))
 }
 
 func TestUpdateSessionUsageAddsProviderCost(t *testing.T) {

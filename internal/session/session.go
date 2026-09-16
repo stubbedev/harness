@@ -56,10 +56,18 @@ type Session struct {
 	CompletionTokens int64
 	EstimatedUsage   bool
 	SummaryMessageID string
-	Cost             float64
-	Todos            []Todo
-	CreatedAt        int64
-	UpdatedAt        int64
+	// CompactionSummary stands in for every message up to and including
+	// CompactionBoundaryID when the session is sent to the model; the
+	// messages after it go verbatim. CompactionAgedID marks the message up
+	// to which tool results are sent as stubs rather than in full. None of
+	// this shows in the transcript: the rows stay, only the request changes.
+	CompactionSummary    string
+	CompactionBoundaryID string
+	CompactionAgedID     string
+	Cost                 float64
+	Todos                []Todo
+	CreatedAt            int64
+	UpdatedAt            int64
 }
 
 type Service interface {
@@ -217,6 +225,9 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 			String: todosJSON,
 			Valid:  todosJSON != "",
 		},
+		CompactionSummary:    sql.NullString{String: session.CompactionSummary, Valid: session.CompactionSummary != ""},
+		CompactionBoundaryID: sql.NullString{String: session.CompactionBoundaryID, Valid: session.CompactionBoundaryID != ""},
+		CompactionAgedID:     sql.NullString{String: session.CompactionAgedID, Valid: session.CompactionAgedID != ""},
 	})
 	if err != nil {
 		return Session{}, err
@@ -344,17 +355,20 @@ func (s *service) fromDBItem(item db.Session) Session {
 		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
 	return Session{
-		ID:               item.ID,
-		ParentSessionID:  item.ParentSessionID.String,
-		Title:            item.Title,
-		MessageCount:     item.MessageCount,
-		PromptTokens:     item.PromptTokens,
-		CompletionTokens: item.CompletionTokens,
-		SummaryMessageID: item.SummaryMessageID.String,
-		Cost:             item.Cost,
-		Todos:            todos,
-		CreatedAt:        item.CreatedAt,
-		UpdatedAt:        item.UpdatedAt,
+		ID:                   item.ID,
+		ParentSessionID:      item.ParentSessionID.String,
+		Title:                item.Title,
+		MessageCount:         item.MessageCount,
+		PromptTokens:         item.PromptTokens,
+		CompletionTokens:     item.CompletionTokens,
+		SummaryMessageID:     item.SummaryMessageID.String,
+		CompactionSummary:    item.CompactionSummary.String,
+		CompactionBoundaryID: item.CompactionBoundaryID.String,
+		CompactionAgedID:     item.CompactionAgedID.String,
+		Cost:                 item.Cost,
+		Todos:                todos,
+		CreatedAt:            item.CreatedAt,
+		UpdatedAt:            item.UpdatedAt,
 	}
 }
 

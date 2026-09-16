@@ -470,6 +470,10 @@ func TestCompactHooks(t *testing.T) {
 			scriptedTurn{text: "some work"},
 		)
 		sessionID := newHookSession(t, env)
+		// Summaries are the small model's job; give it a scripted one so
+		// the summary request can be inspected.
+		small := textModel("the summary")
+		sa.smallModel.Set(Model{Model: small})
 
 		_, err := runHookTurn(t, sa, sessionID, "do some work")
 		require.NoError(t, err)
@@ -485,10 +489,14 @@ func TestCompactHooks(t *testing.T) {
 		require.Equal(t, hooks.EventPostCompact, payloads[1]["event"])
 		require.Equal(t, "manual", payloads[1]["trigger"])
 
-		calls := large.sentCalls()
-		require.Len(t, calls, 2, "the summarize call is the model's second call")
-		require.Contains(t, lastUserText(t, calls[1]), "## Focus")
-		require.Contains(t, lastUserText(t, calls[1]), "Focus on the API changes",
+		require.Len(t, large.sentCalls(), 1, "the large model only answered the turn")
+		// The small model also titles the session, so the summary is its
+		// latest call.
+		calls := small.sentCalls()
+		require.NotEmpty(t, calls)
+		summaryCall := calls[len(calls)-1]
+		require.Contains(t, lastUserText(t, summaryCall), "## Focus")
+		require.Contains(t, lastUserText(t, summaryCall), "Focus on the API changes",
 			"the /compact focus instructions must steer the summary prompt")
 	})
 
