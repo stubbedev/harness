@@ -556,6 +556,24 @@ func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) 
 	return fmt.Sprintf("%s %s %s", icon, toolName, animView)
 }
 
+// pendingToolDetail is pendingTool with what is known of the call so
+// far beside the name: the command or path as the model is typing it.
+func pendingToolDetail(sty *styles.Styles, name, detail string, anim *anim.Anim, nested bool) string {
+	if detail == "" {
+		return pendingTool(sty, name, anim, nested)
+	}
+	icon := sty.Tool.IconPending.Render()
+	nameStyle := sty.Tool.NameNormal
+	if nested {
+		nameStyle = sty.Tool.NameNested
+	}
+	var animView string
+	if anim != nil {
+		animView = anim.Render()
+	}
+	return fmt.Sprintf("%s %s %s %s", icon, nameStyle.Render(name), sty.Tool.ParamMain.Render(detail), animView)
+}
+
 // waitingForToolMessage builds the "Waiting for tool response..." label,
 // including how long the tool has been running and, when a turn is
 // active, the total elapsed turn time.

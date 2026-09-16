@@ -338,6 +338,11 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	for _, files := range globalContextFiles {
 		data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
 	}
+	// Both sets share one budget: the project files first, since they are
+	// the ones about the code at hand.
+	capped := capContextFiles(append(data.ContextFiles, data.GlobalContextFiles...), maxContextFileBytes, maxContextTotalBytes)
+	data.ContextFiles = capped[:len(data.ContextFiles)]
+	data.GlobalContextFiles = capped[len(data.ContextFiles):]
 	return data, nil
 }
 

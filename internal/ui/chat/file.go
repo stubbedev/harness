@@ -125,6 +125,9 @@ type WriteToolRenderContext struct{}
 func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
+		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
+			return pendingToolDetail(sty, "Write", pendingDetail(fsext.PrettyPath(path), cappedWidth-24), opts.Anim, opts.Compact)
+		}
 		return pendingTool(sty, "Write", opts.Anim, opts.Compact)
 	}
 
@@ -194,6 +197,9 @@ type EditToolRenderContext struct{}
 func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	// Edit tool uses full width for diffs.
 	if opts.IsPending() {
+		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
+			return pendingToolDetail(sty, "Edit", pendingDetail(fsext.PrettyPath(path), width-24), opts.Anim, opts.Compact)
+		}
 		return pendingTool(sty, "Edit", opts.Anim, opts.Compact)
 	}
 

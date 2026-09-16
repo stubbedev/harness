@@ -1275,6 +1275,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// even if the request is canceled mid-stream
 			return a.messages.Update(ctx, *currentAssistant)
 		},
+		// The input arrives in pieces; each one lands on the stored call
+		// so the transcript can show the command or path as it is typed,
+		// the way it shows the answer's text as it streams. The message
+		// service debounces these writes like text deltas.
+		OnToolInputDelta: func(id, delta string) error {
+			currentAssistant.AppendToolCallInput(id, delta)
+			return a.messages.Update(genCtx, *currentAssistant)
+		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
 			retryAttempt++

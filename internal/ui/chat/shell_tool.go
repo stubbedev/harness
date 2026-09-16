@@ -41,6 +41,10 @@ type ShellToolRenderContext struct {
 func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
+		// The command shows as the model types it.
+		if cmd, ok := partialStringField(opts.ToolCall.Input, "command"); ok && strings.TrimSpace(cmd) != "" {
+			return pendingToolDetail(sty, "Shell", pendingDetail(cmd, cappedWidth-24), opts.Anim, opts.Compact)
+		}
 		return pendingTool(sty, "Shell", opts.Anim, opts.Compact)
 	}
 

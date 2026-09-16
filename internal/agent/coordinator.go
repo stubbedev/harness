@@ -205,6 +205,11 @@ type coordinator struct {
 	// turn; entries never expire until the process does.
 	expandedMCPTools *csync.Map[string, map[string]bool]
 
+	// expandedBuiltins records which deferred built-in tools (see
+	// deferredBuiltinTools) the model has loaded through tool_search;
+	// same lifetime and role as expandedMCPTools.
+	expandedBuiltins *csync.Map[string, bool]
+
 	// runtime tracks which sub-agents are currently running.
 	runtime *subagents.Runtime
 
@@ -322,6 +327,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		hooks:              hooks.NewRegistry(opts.Config, opts.Config.WorkingDir(), opts.Config.WorkingDir()).WithDispatchers(opts.Extensions),
 		extensions:         opts.Extensions,
 		expandedMCPTools:   csync.NewMap[string, map[string]bool](),
+		expandedBuiltins:   csync.NewMap[string, bool](),
 		subagentMessages:   newSubagentInbox(),
 		liveInbox:          newLiveInbox(),
 		backgroundRuns:     csync.NewMap[string, *backgroundRun](),
@@ -1229,6 +1235,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			return callable
 		}))
 	}
+
+	// The long tail of built-in tools waits behind tool_search until the
+	// model asks for it; see deferredBuiltinTools. Batch keeps closing
+	// over the full list above, so a plan can call a deferred tool
+	// without loading it first.
+	filteredTools = c.deferBuiltinTools(filteredTools, isSubAgent)
 
 	return filteredTools, nil
 }
