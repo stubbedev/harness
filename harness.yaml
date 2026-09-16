@@ -1,11 +1,4 @@
 # yaml-language-server: $schema=./schema.json
-hooks:
-  PreToolUse:
-    # Safety net against runaway tool-call floods: deny a tool after too
-    # many calls of it within a short window (60 calls / 60s by default;
-    # override with HARNESS_SPAM_GUARD_MAX / HARNESS_SPAM_GUARD_WINDOW).
-    - command: ./scripts/tool-spam-guard.sh
-      timeout: 10
 lsp:
   gopls:
     options:
