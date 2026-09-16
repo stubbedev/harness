@@ -1041,7 +1041,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if call.MaxOutputTokens > 0 {
 		maxOutputTokens = &call.MaxOutputTokens
 	}
-	result, err = agent.Stream(genCtx, fantasy.AgentStreamCall{
+	// continuing is set for the step that resumes an answer cut off at
+	// max_tokens: PrepareStep then keeps writing into the assistant
+	// message the cut happened in instead of opening a new one.
+	var continuing bool
+	streamCall := fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(outboundPrompt, call.Attachments),
 		Files:            files,
 		Messages:         history,
@@ -1179,6 +1183,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 						errContextWindowExceeded, projected, cw,
 					)
 				}
+			}
+
+			if continuing && currentAssistant != nil {
+				// Resuming a cut-off answer: keep the assistant message it
+				// was cut in, minus the max_tokens finish it was closed
+				// with, so the continuation reads as one answer.
+				currentAssistant.Parts = slices.DeleteFunc(currentAssistant.Parts, func(p message.ContentPart) bool {
+					_, ok := p.(message.Finish)
+					return ok
+				})
+				callContext = context.WithValue(callContext, tools.MessageIDContextKey, currentAssistant.ID)
+				callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatalogCfg.SupportsImages)
+				callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatalogCfg.Name)
+				return callContext, prepared, nil
 			}
 
 			var assistantMsg message.Message
@@ -1410,7 +1428,27 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return hasRepeatedToolCalls(steps, loopDetectionWindowSize, loopDetectionMaxRepeats)
 			},
 		},
-	})
+	}
+	result, err = agent.Stream(genCtx, streamCall)
+
+	// An answer cut off at max_tokens is resumed in place: the same
+	// history, the partial answer, and an unpersisted nudge to carry on.
+	// The transcript sees one assistant message growing, never the nudge.
+	for continued := 0; err == nil && continued < maxAnswerContinuations && answerTruncated(result); continued++ {
+		slog.Info("Answer hit max_tokens; continuing", "session_id", call.SessionID, "continuation", continued+1)
+		continuing = true
+		follow := streamCall
+		follow.Prompt = continuePrompt
+		follow.Files = nil
+		follow.Messages = continuationHistory(history, streamCall.Prompt, result)
+		var cont *fantasy.AgentResult
+		cont, err = agent.Stream(genCtx, follow)
+		continuing = false
+		if err != nil {
+			break
+		}
+		result = mergeContinuation(result, cont)
+	}
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 

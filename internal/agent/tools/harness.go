@@ -39,7 +39,7 @@ func NewHarnessTool(
 	logFile string,
 ) fantasy.AgentTool {
 	info, logs := NewHarnessInfoTool(cfg, lspManager, allSkills, activeSkills, skillTracker, host), NewHarnessLogsTool(logFile)
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		HarnessToolName,
 		harnessDescription,
 		func(ctx context.Context, params HarnessParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

@@ -49,6 +49,10 @@ type scriptedModel struct {
 type scriptedTurn struct {
 	text  string
 	calls []scriptedCall
+	// finish overrides the finish reason the turn ends with; empty means
+	// stop for a text turn and tool-calls for a turn with calls. Tests of
+	// the max_tokens continuation set it to fantasy.FinishReasonLength.
+	finish fantasy.FinishReason
 }
 
 // scriptedCall is one tool call in a turn. Input is marshalled to JSON,
@@ -145,6 +149,9 @@ func (m *scriptedModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.
 		reason := fantasy.FinishReasonStop
 		if len(turn.calls) > 0 {
 			reason = fantasy.FinishReasonToolCalls
+		}
+		if turn.finish != "" {
+			reason = turn.finish
 		}
 		yield(fantasy.StreamPart{
 			Type:         fantasy.StreamPartTypeFinish,

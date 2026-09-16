@@ -27,7 +27,7 @@ type MCPResourceParams struct {
 // tool, forwarding to the implementation each action had on its own.
 func NewMCPResourceTool(cfg *config.ConfigStore) fantasy.AgentTool {
 	list, read := NewListMCPResourcesTool(cfg), NewReadMCPResourceTool(cfg)
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		MCPResourceToolName,
 		mcpResourceDescription,
 		func(ctx context.Context, params MCPResourceParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
