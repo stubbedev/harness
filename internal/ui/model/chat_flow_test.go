@@ -132,6 +132,35 @@ func TestLiveFlowSpinnerStaysLast(t *testing.T) {
 	assert.Same(t, spinner, last, "the spinner belongs at the end of the chat")
 }
 
+// TestLiveFlowSpinnerStaysLastAcrossAppends covers the mid-turn
+// append path: an info footer or text appended after the turn's
+// working spinner must not bury the indicator mid-transcript. The
+// thinking indicator anchors below everything the turn produced until
+// it settles.
+func TestLiveFlowSpinnerStaysLastAcrossAppends(t *testing.T) {
+	t.Parallel()
+	u := liveFlowUI()
+
+	spinning := &message.Message{ID: "m-done", Role: message.Assistant, Parts: []message.ContentPart{
+		message.Finish{Reason: message.FinishReasonEndTurn},
+	}}
+	spinner := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID: "m-spin", Role: message.Assistant,
+	})
+	require.True(t, chat.IsWorkingSpinner(spinner), "an empty assistant item is the spinner")
+	u.chat.AppendMessages(spinner)
+
+	footer := chat.NewAssistantInfoItem(u.com.Styles, spinning, &config.Config{}, time.Time{})
+	u.chat.AppendMessages(footer)
+	last := u.chat.list.ItemAt(u.chat.Len() - 1)
+	assert.Same(t, spinner, last, "a footer appended mid-turn must not land below the spinner")
+
+	u.chat.AppendMessages(newToolItemForGroup(u, "a1"))
+	last = u.chat.list.ItemAt(u.chat.Len() - 1)
+	assert.Same(t, spinner, last, "a tool group absorbed mid-turn must not land below the spinner")
+	require.Len(t, groupsIn(u), 1)
+}
+
 // TestSpinnerIsNotSelectable covers the selection walk skipping the
 // working spinner: it animates, it holds nothing to read or copy, and a
 // focus border around it is noise.

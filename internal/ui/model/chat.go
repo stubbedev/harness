@@ -452,6 +452,7 @@ func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 		}
 		m.list.AppendItems(msg)
 	}
+	m.sweepSpinnersToEnd()
 	m.rebuildIndices()
 }
 
@@ -463,42 +464,49 @@ func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 // The spinner is the empty assistant item that stands in for the
 // message still being generated. Treating it as a run boundary would
 // split one run of calls into two groups and strand the animation in
-// the middle of the transcript, so it is skipped here and moved back to
-// the end of the list: while the turn is running it belongs below
+// the middle of the transcript, so it is skipped here and swept back
+// to the end of the list: while the turn is running it belongs below
 // everything the turn has produced so far.
 func (m *Chat) absorbTool(tool chat.ToolMessageItem) {
-	var spinners []int
 	for idx := m.list.Len() - 1; idx >= 0; idx-- {
 		item := m.list.ItemAt(idx)
 		if _, ok := item.(*chat.AssistantInfoItem); ok {
 			continue
 		}
 		if chat.IsWorkingSpinner(item) {
-			spinners = append(spinners, idx)
 			continue
 		}
 		if group, ok := item.(*chat.ToolGroupMessageItem); ok {
 			group.AddTool(tool)
-			m.moveSpinnersToEnd(spinners)
+			m.sweepSpinnersToEnd()
 			return
 		}
 		break
 	}
 	m.list.AppendItems(chat.NewToolGroupMessageItem(m.com.Styles, tool))
-	m.moveSpinnersToEnd(spinners)
+	m.sweepSpinnersToEnd()
 }
 
-// moveSpinnersToEnd moves the items at the given indices — gathered
-// newest-first, so removing one never shifts the indices still to come
-// — to the end of the list, keeping their relative order. The list
-// selection never sits on a spinner (isSelectable refuses it), so the
-// removals cannot drop it.
-func (m *Chat) moveSpinnersToEnd(idxs []int) {
-	if len(idxs) == 0 {
+// sweepSpinnersToEnd moves every working-spinner item to the end of
+// the list, keeping their relative order. Mid-turn appends — footers,
+// assistant text, tool groups — land after the spinner otherwise, and
+// the thinking indicator must anchor below all of them until the turn
+// settles. Indices are gathered newest-first, so removing one never
+// shifts the indices still to come. The list selection never sits on a
+// spinner (isSelectable refuses it), so the removals cannot drop it.
+func (m *Chat) sweepSpinnersToEnd() {
+	var spinners []int
+	for idx := m.list.Len() - 1; idx >= 0; idx-- {
+		if chat.IsWorkingSpinner(m.list.ItemAt(idx)) {
+			spinners = append(spinners, idx)
+		}
+	}
+	// Already the tail of the list: nothing to move.
+	if len(spinners) == 0 || spinners[len(spinners)-1] == m.list.Len()-len(spinners) {
 		return
 	}
-	items := make([]list.Item, 0, len(idxs))
-	for _, idx := range idxs {
+	items := make([]list.Item, 0, len(spinners))
+	for _, idx := range spinners {
 		items = append(items, m.list.ItemAt(idx))
 		m.list.RemoveItem(idx)
 	}
