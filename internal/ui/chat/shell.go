@@ -84,12 +84,12 @@ func NewPendingShellItem(sty *styles.Styles, command string) *ShellItem {
 		pending:                  true,
 	}
 	s.anim = anim.New(anim.Settings{
-		ID:         id,
-		Label:      "Running",
-		LabelColor: sty.WorkingLabelColor,
-		GradColorA: sty.WorkingGradFromColor,
-		GradColorB: sty.WorkingGradToColor,
-		NoScramble: true,
+		ID:          id,
+		Label:       "Running",
+		PulseGlyphs: anim.DefaultPulseGlyphs,
+		GradColorA:  sty.WorkingGradFromColor,
+		GradColorB:  sty.WorkingGradToColor,
+		LabelColor:  sty.WorkingLabelColor,
 	})
 	return s
 }

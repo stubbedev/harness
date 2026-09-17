@@ -212,11 +212,10 @@ func newBaseToolMessageItem(
 	}
 	t.anim = anim.New(anim.Settings{
 		ID:          toolCall.ID,
-		Size:        15,
+		PulseGlyphs: anim.DefaultPulseGlyphs,
 		GradColorA:  sty.WorkingGradFromColor,
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
-		CycleColors: true,
 		// Per-tool elapsed time on the pending spinner, so long-running
 		// tools (e.g. bash) show a timer from the moment they appear.
 		// Reads startedAt lazily: it is cleared for restored items.

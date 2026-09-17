@@ -245,10 +245,10 @@ func TestToolGroupChildResolution(t *testing.T) {
 }
 
 // TestToolGroupAdvanceBumpsVersion is the spinner regression test for
-// groups: one clock frame must advance the group spinner and every
-// spinning child and bump the group, because the list only checks the
-// group's version — children are not list entries of their own. A
-// settled group must not bump.
+// groups: clock frames must advance the group spinner and every
+// spinning child and bump the group on every glyph change, because the
+// list only checks the group's version — children are not list entries
+// of their own. A settled group must not bump.
 func TestToolGroupAdvanceBumpsVersion(t *testing.T) {
 	t.Parallel()
 	sty := groupStyles()
@@ -256,7 +256,13 @@ func TestToolGroupAdvanceBumpsVersion(t *testing.T) {
 	g := NewToolGroupMessageItem(sty, bashTool("t1", "ls", true))
 	require.True(t, g.Spinning())
 	before := g.Version()
-	require.True(t, g.Advance())
+	bumped := false
+	for range pulseTestFrames {
+		if g.Advance() {
+			bumped = true
+		}
+	}
+	require.True(t, bumped, "a spinning group must request re-renders on glyph changes")
 	require.Greater(t, g.Version(), before, "a spinning group must bump so the list cache re-renders")
 
 	// Settling every child freezes the group: no more frames, no bumps.

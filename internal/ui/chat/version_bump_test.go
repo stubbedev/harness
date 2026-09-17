@@ -32,6 +32,11 @@ func requireBump(t *testing.T, name string, item versionedItem, mutate func()) {
 	require.Greaterf(t, after, before, "%s must bump Version() (before=%d, after=%d)", name, before, after)
 }
 
+// pulseTestFrames is enough clock frames to cross at least one pulse
+// glyph change: the minimal spinner only changes its glyph every few
+// frames, so Advance bumps the version on those frames alone.
+const pulseTestFrames = 10
+
 // TestAssistantMessageItem_MutatorsBumpVersion enumerates every
 // documented mutator on AssistantMessageItem and asserts each one
 // advances Version().
@@ -169,11 +174,11 @@ func TestBaseToolMessageItem_MutatorsBumpVersion(t *testing.T) {
 }
 
 // TestAssistantMessageItem_AdvanceBumpsVersion covers the spinner
-// regression: while the assistant message is spinning, every clock
-// frame fed through Advance must bump Version() so the list-level
-// cache invalidates and the next draw re-renders the advanced spinner
-// frame. Without this bump the cached entry's version stays put and
-// the spinner appears frozen.
+// regression: while the assistant message is spinning, clock frames
+// fed through Advance must bump Version() on every glyph change so
+// the list-level cache invalidates and the next draw re-renders the
+// advanced spinner frame. Without this bump the cached entry's
+// version stays put and the spinner appears frozen.
 func TestAssistantMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	t.Parallel()
 
@@ -189,7 +194,9 @@ func TestAssistantMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	require.True(t, item.Spinning())
 
 	requireBump(t, "Advance", item, func() {
-		item.Advance()
+		for range pulseTestFrames {
+			item.Advance()
+		}
 	})
 
 	// A non-spinning item must not bump on Advance: the bump only
@@ -281,10 +288,11 @@ func requireNoBump(t *testing.T, name string, item versionedItem, mutate func())
 
 // TestBaseToolMessageItem_AdvanceBumpsVersion is the spinner
 // regression test for non-agent tools: while the tool is spinning,
-// every clock frame must bump Version() so the list-level cache
-// invalidates and the next draw re-renders the advanced spinner
-// frame. A finished tool must not bump (the entry is frozen and stays
-// frozen) and must report that it no longer needs frames.
+// clock frames must bump Version() on every glyph change so the
+// list-level cache invalidates and the next draw re-renders the
+// advanced spinner frame. A finished tool must not bump (the entry is
+// frozen and stays frozen) and must report that it no longer needs
+// frames.
 func TestBaseToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	t.Parallel()
 
@@ -297,7 +305,9 @@ func TestBaseToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 	require.True(t, a.Spinning())
 
 	requireBump(t, "Advance[spinning]", v, func() {
-		a.Advance()
+		for range pulseTestFrames {
+			a.Advance()
+		}
 	})
 
 	// Finished → no bump. The entry is frozen; a stray bump would

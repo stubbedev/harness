@@ -297,11 +297,10 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 
 	a.anim = anim.New(anim.Settings{
 		ID:          a.ID(),
-		Size:        15,
+		PulseGlyphs: anim.DefaultPulseGlyphs,
 		GradColorA:  sty.WorkingGradFromColor,
 		GradColorB:  sty.WorkingGradToColor,
 		LabelColor:  sty.WorkingLabelColor,
-		CycleColors: true,
 		Suffix:      suffix,
 		SuffixColor: sty.WorkingTimerColor,
 	})

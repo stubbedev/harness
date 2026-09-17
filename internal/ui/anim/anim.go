@@ -29,6 +29,10 @@ const (
 	// change every 8 frames (400 milliseconds).
 	ellipsisAnimSpeed = 8
 
+	// Frames each pulse glyph stays on screen before the next one, so
+	// the pulse breathes instead of strobing at the full frame rate.
+	pulseAnimSpeed = 8
+
 	// The maximum number of animation steps that can pass before a
 	// character appears. With fps == 20 this is ~1s of staggered
 	// entrance, identical to the previous wall-clock-driven value.
@@ -56,6 +60,11 @@ var (
 var (
 	availableRunes = []rune("0123456789abcdefABCDEF~!@#$£€%^&*()+=_")
 	ellipsisFrames = []string{".", "..", "...", ""}
+
+	// DefaultPulseGlyphs is the default frame set for the minimal
+	// single-glyph pulse animation: a half disc rotating through its
+	// four orientations.
+	DefaultPulseGlyphs = []string{"◐", "◓", "◑", "◒"}
 )
 
 // Internal ID management. The ID seeds the deterministic birth schedule so
@@ -81,8 +90,8 @@ var animCacheMap = csync.NewMap[string, *animCache]()
 // settingsHash creates a hash key for the settings to use for caching
 func settingsHash(opts Settings) string {
 	h := xxh3.New()
-	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t-%v",
-		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.SuffixColor)
+	fmt.Fprintf(h, "%d-%s-%v-%v-%v-%t-%v-%v",
+		opts.Size, opts.Label, opts.LabelColor, opts.GradColorA, opts.GradColorB, opts.CycleColors, opts.SuffixColor, opts.PulseGlyphs)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -109,6 +118,12 @@ type Settings struct {
 	// scrambled glyphs imply "thinking" rather than "running".
 	NoScramble bool
 
+	// PulseGlyphs replaces the scrambled rune animation with a minimal
+	// single-glyph pulse: one cell cycling through the given glyphs,
+	// colored along a ramp that brightens and dims. When set, Size and
+	// CycleColors are ignored and there is no staggered birth animation.
+	PulseGlyphs []string
+
 	// Suffix is an optional function that returns a dynamic suffix string
 	// to render after the label and ellipsis. Called on every Render().
 	Suffix func() string
@@ -125,6 +140,7 @@ const ()
 type Anim struct {
 	width            int
 	cyclingCharWidth int
+	pulse            bool
 	label            *csync.Slice[string]
 	labelWidth       int
 	labelColor       color.Color
@@ -163,9 +179,13 @@ func New(opts Settings) *Anim {
 	} else {
 		a.id = fmt.Sprintf("%d", nextID())
 	}
-	if opts.NoScramble {
+	a.pulse = len(opts.PulseGlyphs) > 0
+	switch {
+	case opts.NoScramble:
 		a.cyclingCharWidth = 0
-	} else {
+	case a.pulse:
+		a.cyclingCharWidth = 1
+	default:
 		a.cyclingCharWidth = opts.Size
 	}
 	a.labelColor = opts.LabelColor
@@ -180,9 +200,11 @@ func New(opts Settings) *Anim {
 		a.suffixColor = opts.LabelColor
 	}
 
-	// NoScramble means no cycling chars and no birth animation. Mark as
-	// initialized immediately so the label renders without a fade-in.
-	if opts.NoScramble {
+	// NoScramble means no cycling chars and no birth animation, and the
+	// pulse is a single glyph with nothing to stagger. Mark as
+	// initialized immediately in both cases so the label renders
+	// without a fade-in.
+	if opts.NoScramble || a.pulse {
 		a.initialized.Store(true)
 	}
 
@@ -215,69 +237,82 @@ func New(opts Settings) *Anim {
 		// Render the label
 		a.renderLabel(opts.Label)
 
-		// Pre-generate gradient.
-		var ramp []color.Color
-		numFrames := prerenderedFrames
-		if opts.CycleColors {
-			ramp = makeGradientRamp(a.width*3, opts.GradColorA, opts.GradColorB, opts.GradColorA, opts.GradColorB)
-			numFrames = a.width * 2
+		if a.pulse {
+			// Minimal pulse: one cell, glyph frames colored along a ramp
+			// that rises and falls so the glyph appears to breathe.
+			ramp := makeGradientRamp(len(opts.PulseGlyphs), opts.GradColorA, opts.GradColorB, opts.GradColorA)
+			a.cyclingFrames = make([][]string, len(opts.PulseGlyphs))
+			for i := range a.cyclingFrames {
+				a.cyclingFrames[i] = []string{lipgloss.NewStyle().
+					Foreground(ramp[i]).
+					Render(opts.PulseGlyphs[i])}
+			}
+			a.initialFrames = make([][]string, len(opts.PulseGlyphs))
 		} else {
-			ramp = makeGradientRamp(a.width, opts.GradColorA, opts.GradColorB)
-		}
-
-		// Pre-render initial characters.
-		a.initialFrames = make([][]string, numFrames)
-		offset := 0
-		for i := range a.initialFrames {
-			a.initialFrames[i] = make([]string, a.width+labelGapWidth+a.labelWidth)
-			for j := range a.initialFrames[i] {
-				if j+offset >= len(ramp) {
-					continue // skip if we run out of colors
-				}
-
-				var c color.Color
-				if j <= a.cyclingCharWidth {
-					c = ramp[j+offset]
-				} else {
-					c = opts.LabelColor
-				}
-
-				// Also prerender the initial character with Lip Gloss to avoid
-				// processing in the render loop.
-				a.initialFrames[i][j] = lipgloss.NewStyle().
-					Foreground(c).
-					Render(string(initialChar))
-			}
+			// Pre-generate gradient.
+			var ramp []color.Color
+			numFrames := prerenderedFrames
 			if opts.CycleColors {
-				offset++
+				ramp = makeGradientRamp(a.width*3, opts.GradColorA, opts.GradColorB, opts.GradColorA, opts.GradColorB)
+				numFrames = a.width * 2
+			} else {
+				ramp = makeGradientRamp(a.width, opts.GradColorA, opts.GradColorB)
 			}
-		}
 
-		// Prerender scrambled rune frames for the animation. Seed
-		// the rune picker off the settings hash so cyclingFrames is
-		// a pure function of Settings: two processes with identical
-		// Settings populate the cache with the same glyphs, which
-		// keeps any cross-process golden-file comparison stable.
-		seed := xxh3.HashString(cacheKey)
-		rng := rand.New(rand.NewPCG(seed, ^seed))
-		a.cyclingFrames = make([][]string, numFrames)
-		offset = 0
-		for i := range a.cyclingFrames {
-			a.cyclingFrames[i] = make([]string, a.width)
-			for j := range a.cyclingFrames[i] {
-				if j+offset >= len(ramp) {
-					continue // skip if we run out of colors
+			// Pre-render initial characters.
+			a.initialFrames = make([][]string, numFrames)
+			offset := 0
+			for i := range a.initialFrames {
+				a.initialFrames[i] = make([]string, a.width+labelGapWidth+a.labelWidth)
+				for j := range a.initialFrames[i] {
+					if j+offset >= len(ramp) {
+						continue // skip if we run out of colors
+					}
+
+					var c color.Color
+					if j <= a.cyclingCharWidth {
+						c = ramp[j+offset]
+					} else {
+						c = opts.LabelColor
+					}
+
+					// Also prerender the initial character with Lip Gloss to avoid
+					// processing in the render loop.
+					a.initialFrames[i][j] = lipgloss.NewStyle().
+						Foreground(c).
+						Render(string(initialChar))
 				}
-
-				// Also prerender the color with Lip Gloss here to avoid processing
-				// in the render loop.
-				r := availableRunes[rng.IntN(len(availableRunes))]
-				a.cyclingFrames[i][j] = lipgloss.NewStyle().
-					Foreground(ramp[j+offset]).
-					Render(string(r))
+				if opts.CycleColors {
+					offset++
+				}
 			}
-			if opts.CycleColors {
-				offset++
+
+			// Prerender scrambled rune frames for the animation. Seed
+			// the rune picker off the settings hash so cyclingFrames is
+			// a pure function of Settings: two processes with identical
+			// Settings populate the cache with the same glyphs, which
+			// keeps any cross-process golden-file comparison stable.
+			seed := xxh3.HashString(cacheKey)
+			rng := rand.New(rand.NewPCG(seed, ^seed))
+			a.cyclingFrames = make([][]string, numFrames)
+			offset = 0
+			for i := range a.cyclingFrames {
+				a.cyclingFrames[i] = make([]string, a.width)
+				for j := range a.cyclingFrames[i] {
+					if j+offset >= len(ramp) {
+						continue // skip if we run out of colors
+					}
+
+					// Also prerender the color with Lip Gloss here to avoid processing
+					// in the render loop.
+					r := availableRunes[rng.IntN(len(availableRunes))]
+					a.cyclingFrames[i][j] = lipgloss.NewStyle().
+						Foreground(ramp[j+offset]).
+						Render(string(r))
+				}
+				if opts.CycleColors {
+					offset++
+				}
 			}
 		}
 
@@ -386,6 +421,17 @@ func (a *Anim) Width() (w int) {
 // UI's shared animation clock for every visible spinner; the Anim itself
 // never schedules ticks.
 func (a *Anim) Advance() bool {
+	if a.pulse {
+		// The pulse changes glyph only every pulseAnimSpeed frames so it
+		// breathes; frames in between change nothing on screen.
+		if a.framesSinceStart.Add(1)%pulseAnimSpeed != 0 {
+			return false
+		}
+		if step := a.step.Add(1); int(step) >= len(a.cyclingFrames) {
+			a.step.Store(0)
+		}
+		return true
+	}
 	step := a.step.Add(1)
 	if int(step) >= len(a.cyclingFrames) {
 		a.step.Store(0)

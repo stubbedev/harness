@@ -90,11 +90,11 @@ func NewToolGroupMessageItem(sty *styles.Styles, first ToolMessageItem) *ToolGro
 		selectedChild: -1,
 	}
 	g.anim = anim.New(anim.Settings{
-		ID:         g.id,
-		Size:       15,
-		GradColorA: sty.WorkingGradFromColor,
-		GradColorB: sty.WorkingGradToColor,
-		LabelColor: sty.WorkingLabelColor,
+		ID:          g.id,
+		PulseGlyphs: anim.DefaultPulseGlyphs,
+		GradColorA:  sty.WorkingGradFromColor,
+		GradColorB:  sty.WorkingGradToColor,
+		LabelColor:  sty.WorkingLabelColor,
 	})
 	return g
 }
