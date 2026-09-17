@@ -54,7 +54,7 @@ func TestWithPromptCacheKey(t *testing.T) {
 		opts := fantasy.ProviderOptions{
 			anthropic.Name: &anthropic.ProviderCacheControlOptions{},
 		}
-	require.Equal(t, opts, withPromptCacheKey("s1", opts))
+		require.Equal(t, opts, withPromptCacheKey("s1", opts))
 		_, hasOpenAI := opts[openai.Name]
 		require.False(t, hasOpenAI)
 	})
