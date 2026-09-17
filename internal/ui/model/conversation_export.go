@@ -102,12 +102,6 @@ func renderMessageMarkdown(msg message.Message, results map[string]message.ToolR
 		}
 	}
 
-	if thinking := strings.TrimSpace(msg.ReasoningContent().Thinking); thinking != "" {
-		body.WriteString("<details><summary>Thinking</summary>\n\n")
-		body.WriteString(thinking)
-		body.WriteString("\n\n</details>\n\n")
-	}
-
 	if text := strings.TrimSpace(msg.Content().Text); text != "" {
 		body.WriteString(text)
 		body.WriteString("\n\n")

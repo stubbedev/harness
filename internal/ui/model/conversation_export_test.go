@@ -74,8 +74,10 @@ func TestRenderConversationMarkdown(t *testing.T) {
 		require.Contains(t, out, "## User")
 		require.Contains(t, out, "why is the parser slow?")
 		require.Contains(t, out, "## Assistant · claude-opus-5")
-		require.Contains(t, out, "<details><summary>Thinking</summary>")
-		require.Contains(t, out, "check the hot loop")
+		// Model reasoning is scratch space, not part of the visible
+		// conversation, so it never appears in the export.
+		require.NotContains(t, out, "<details><summary>Thinking</summary>")
+		require.NotContains(t, out, "check the hot loop")
 		require.Contains(t, out, "#### Tool: view")
 		require.Contains(t, out, `"file_path": "parser.go"`)
 		require.Contains(t, out, "package parser")
