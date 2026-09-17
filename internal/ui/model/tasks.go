@@ -79,6 +79,13 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 	if m.reapedAgentTasks[tc.ID] {
 		return nil
 	}
+
+	var params agent.AgentDispatchParams
+	_ = json.Unmarshal([]byte(tc.Input), &params)
+	if isAgentWaitCall(tc.Name, params) {
+		return nil
+	}
+
 	task := m.agentTaskByToolCall(tc.ID)
 	if task == nil {
 		task = &agentTask{
@@ -89,8 +96,6 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 		m.agentTasks = append(m.agentTasks, task)
 	}
 
-	var params agent.AgentDispatchParams
-	_ = json.Unmarshal([]byte(tc.Input), &params)
 	task.name = params.SubagentType
 	if task.name == "" {
 		task.name = subagentDisplayName
@@ -159,6 +164,19 @@ func (m *UI) reapAgentTask(toolCallID string) {
 // name a subagent type.
 const subagentDisplayName = "subagent"
 
+// isAgentWaitCall reports whether an agent tool call is the waiting form
+// rather than a dispatch. The agent tool doubles as both: with a prompt
+// it starts a subagent, without one it blocks until the background
+// subagents already running report back (see coordinator.waitForSubagents).
+// A wait starts nothing, so it gets no strip row -- the rows it is waiting
+// on are already there, and a second spinner named "subagent" (the
+// fallback title, since a wait names no subagent_type) only doubles them.
+// A call still streaming its input looks the same until its prompt
+// arrives, which is also when there is a subagent worth showing a row for.
+func isAgentWaitCall(name string, params agent.AgentDispatchParams) bool {
+	return name == agent.AgentToolName && params.Prompt == ""
+}
+
 // childSessionIDFor derives the sub-session ID behind a dispatch. Empty
 // when no workspace is wired (unit tests); the task then learns the ID
 // from runtime events instead.
@@ -215,6 +233,9 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			// the start handle and it runs independently of the parent's
 			// busy state; the running list reconciles it instead.
 			if canceled || (params.Blocking && (hasResult || !busy)) {
+				continue
+			}
+			if isAgentWaitCall(tc.Name, params) {
 				continue
 			}
 			task := &agentTask{

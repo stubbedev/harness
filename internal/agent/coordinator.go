@@ -1205,6 +1205,12 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		filteredTools = append(filteredTools, &skillSearchTool{coord: c})
 	}
 
+	// The list is complete here, and everything below it -- the sort, the
+	// hook wrap, batch closing over its siblings, the deferral -- should
+	// see only tools the provider will accept. MCP and extension names
+	// are the ones that can be unusable; see validateToolNames.
+	filteredTools = validateToolNames(filteredTools)
+
 	slices.SortFunc(filteredTools, func(a, b fantasy.AgentTool) int {
 		return strings.Compare(a.Info().Name, b.Info().Name)
 	})

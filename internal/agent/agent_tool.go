@@ -153,6 +153,12 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 				"description": fmt.Sprintf("Waiting only: how long to wait, in seconds. Default %d, maximum %d. 0 never blocks: it returns the current snapshot immediately.", defaultWaitTimeoutSeconds, maxWaitTimeoutSeconds),
 			},
 		},
+		// Every field is optional -- the dispatching form needs a prompt,
+		// the waiting form needs nothing -- but the empty slice has to be
+		// explicit: a nil Required marshals to JSON null, and the OpenAI
+		// Responses API rejects the whole request with "Invalid schema for
+		// function 'agent': None is not of type 'array'".
+		Required: []string{},
 		Parallel: true,
 	}
 }

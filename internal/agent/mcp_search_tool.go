@@ -59,6 +59,10 @@ Tools: %s
 				"description": "Exact tool names to load into your tool list.",
 			},
 		},
+		// Both fields are optional, but the empty slice has to be
+		// explicit: a nil Required marshals to JSON null, which the
+		// OpenAI Responses API rejects as not an array.
+		Required: []string{},
 	}
 }
 

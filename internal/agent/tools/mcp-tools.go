@@ -79,8 +79,9 @@ func (m *Tool) Info() fantasy.ToolInfo {
 					required = append(required, s)
 				}
 			}
-		} else if reqStr, ok := input["required"].([]string); ok {
-			// Handle case where it's already []string
+		} else if reqStr, ok := input["required"].([]string); ok && reqStr != nil {
+			// Handle case where it's already []string. A nil one is left
+			// alone: Required must marshal as an array, never as null.
 			required = reqStr
 		}
 

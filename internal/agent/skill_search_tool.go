@@ -59,6 +59,10 @@ Search before starting a task and load any skill whose trigger matches, before y
 				"description": "Exact skill names to read in full.",
 			},
 		},
+		// Both fields are optional, but the empty slice has to be
+		// explicit: a nil Required marshals to JSON null, which the
+		// OpenAI Responses API rejects as not an array.
+		Required: []string{},
 	}
 }
 

@@ -423,3 +423,58 @@ func TestStripDoesNotResurrectFinishedDispatch(t *testing.T) {
 	}})
 	assert.Len(t, u.agentTasks, 1, "unrelated later dispatches still register")
 }
+
+// TestAgentWaitCallGetsNoStripRow pins that the waiting form of the
+// agent tool -- a call with no prompt, which dispatches nothing and
+// blocks until the background subagents already running report back --
+// never gets a strip row of its own. It used to raise a second spinner
+// titled "subagent" (the fallback title, since a wait names no
+// subagent_type) alongside the row for the agent it was waiting on.
+func TestAgentWaitCallGetsNoStripRow(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.width = 100
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+
+	// A background dispatch takes its row.
+	_ = u.upsertAgentTask(msg, message.ToolCall{
+		ID: "a1", Name: "agent",
+		Input: `{"subagent_type":"fast","prompt":"read the diff"}`,
+	})
+	// The wait that collects it does not.
+	_ = u.upsertAgentTask(msg, message.ToolCall{
+		ID: "a2", Name: "agent", Input: `{}`, Finished: true,
+	})
+
+	require.Len(t, u.agentTasks, 1)
+	assert.Equal(t, "fast", u.agentTasks[0].name)
+	assert.Nil(t, u.agentTaskByToolCall("a2"))
+
+	u.tasksAreaHeight()
+	assert.NotContains(t, ansi.Strip(u.tasksView), subagentDisplayName)
+}
+
+// TestLoadAgentTasksSkipsWaitCalls pins the same policy on the reload
+// path: a session restored from history must not resurrect the ghost row
+// for a wait call that was in flight.
+func TestLoadAgentTasksSkipsWaitCalls(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+
+	msgs := []*message.Message{{
+		ID:   "m1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "a1", Name: "agent", Input: `{"subagent_type":"fast","prompt":"read the diff"}`},
+			message.ToolCall{ID: "a2", Name: "agent", Input: `{"timeout_seconds":60}`},
+		},
+	}}
+	u.loadAgentTasks(msgs, map[string]message.ToolResult{})
+
+	require.Len(t, u.agentTasks, 1)
+	assert.Equal(t, "a1", u.agentTasks[0].toolCallID)
+}
