@@ -417,6 +417,11 @@ type UI struct {
 	// in-flight fetch captures it at dispatch and its result is discarded
 	// if the generation has moved on (see workspace_cache.go).
 	promptQueueGen uint64
+	// pendingModelAction holds a model or reasoning-effort selection made
+	// while the agent was mid-turn. The in-flight turn keeps the model it
+	// started with; the queued action is re-dispatched when the turn
+	// finishes, so the choice applies at the next turn.
+	pendingModelAction tea.Msg
 	// queuedPromptItem is the single transcript placeholder for prompts
 	// queued behind the running turn (see queued_prompts.go), joining
 	// every queued prompt into one entry. It is UI-local: nothing
@@ -904,6 +909,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// arrive (or never, if nothing is dispatched under the new session).
 		m.runningSubagents = nil
 		m.resetAgentTasks()
+		m.pendingModelAction = nil
 		cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
@@ -2171,50 +2177,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.ActionSelectReasoningEffort:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
-			break
+		if cmd := m.handleSelectReasoningEffort(msg); cmd != nil {
+			cmds = append(cmds, cmd)
 		}
-
-		cfg := m.com.Config()
-		if cfg == nil {
-			cmds = append(cmds, util.ReportError(errors.New("configuration not found")))
-			break
-		}
-
-		agentCfg, ok := cfg.Agents[config.AgentCoder]
-		if !ok {
-			cmds = append(cmds, util.ReportError(errors.New("agent configuration not found")))
-			break
-		}
-
-		currentModel := cfg.Models[agentCfg.Model]
-		currentModel.ReasoningEffort = msg.Effort
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
-		}
-
-		// Remember the choice per model so switching models and back
-		// restores it instead of leaking the current model's effort. The
-		// whole map is written in one field: model IDs contain dots, which
-		// the dot-separated field paths cannot express.
-		if currentModel.Provider != "" && currentModel.Model != "" {
-			efforts := maps.Clone(cfg.ReasoningEfforts)
-			if efforts == nil {
-				efforts = make(map[string]string)
-			}
-			efforts[config.ModelReasoningKey(currentModel.Provider, currentModel.Model)] = msg.Effort
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "reasoning_efforts", efforts); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			}
-		}
-
-		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-			m.com.Workspace.UpdateAgentModel(context.TODO())
-			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
-		}))
-		m.dialog.CloseDialog(dialog.ReasoningID)
 	case dialog.ActionPreviewTheme:
 		m.previewTheme(msg.Name)
 		if msg.Cmd != nil {
@@ -2381,6 +2346,71 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 	})
 }
 
+// handleSelectReasoningEffort applies a reasoning effort selection.
+// While the agent is mid-turn the choice is queued and applied when
+// the turn finishes, so the in-flight request is untouched.
+func (m *UI) handleSelectReasoningEffort(msg dialog.ActionSelectReasoningEffort) tea.Cmd {
+	if m.isAgentBusy() {
+		m.pendingModelAction = msg
+		m.dialog.CloseDialog(dialog.ReasoningID)
+		return func() tea.Msg {
+			return util.NewInfoMsg("Reasoning effort applies after the current turn")
+		}
+	}
+
+	cfg := m.com.Config()
+	if cfg == nil {
+		return util.ReportError(errors.New("configuration not found"))
+	}
+
+	agentCfg, ok := cfg.Agents[config.AgentCoder]
+	if !ok {
+		return util.ReportError(errors.New("agent configuration not found"))
+	}
+
+	currentModel := cfg.Models[agentCfg.Model]
+	currentModel.ReasoningEffort = msg.Effort
+	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
+		return util.ReportError(err)
+	}
+
+	// Remember the choice per model so switching models and back
+	// restores it instead of leaking the current model's effort. The
+	// whole map is written in one field: model IDs contain dots, which
+	// the dot-separated field paths cannot express.
+	if currentModel.Provider != "" && currentModel.Model != "" {
+		efforts := maps.Clone(cfg.ReasoningEfforts)
+		if efforts == nil {
+			efforts = make(map[string]string)
+		}
+		efforts[config.ModelReasoningKey(currentModel.Provider, currentModel.Model)] = msg.Effort
+		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "reasoning_efforts", efforts); err != nil {
+			return util.ReportError(err)
+		}
+	}
+
+	m.dialog.CloseDialog(dialog.ReasoningID)
+	return m.updateAgentModelCmd(func() tea.Msg {
+		m.com.Workspace.UpdateAgentModel(context.TODO())
+		return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
+	})
+}
+
+// applyPendingModelAction applies a model or effort selection queued
+// while the agent was mid-turn. Called on the busy-to-idle edge so the
+// choice lands between turns.
+func (m *UI) applyPendingModelAction() tea.Cmd {
+	pending := m.pendingModelAction
+	m.pendingModelAction = nil
+	switch action := pending.(type) {
+	case dialog.ActionSelectModel:
+		return m.handleSelectModel(action)
+	case dialog.ActionSelectReasoningEffort:
+		return m.handleSelectReasoningEffort(action)
+	}
+	return nil
+}
+
 // handleSelectModel performs the model selection after any provider
 // pre-checks have completed.
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
@@ -2388,7 +2418,13 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 
 	// we ignore dialogs with the oauth id as they need to be able to be dismissed
 	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
-		return util.ReportWarn("Agent is busy, please wait...")
+		// The in-flight turn keeps the model it started with; the
+		// choice is queued and applied when the turn finishes.
+		m.pendingModelAction = msg
+		m.dialog.CloseDialog(dialog.ModelsID)
+		return func() tea.Msg {
+			return util.NewInfoMsg("Model change applies after the current turn")
+		}
 	}
 
 	cfg := m.com.Config()

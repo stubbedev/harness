@@ -194,6 +194,14 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	if prevBusy != busy {
 		m.renderPills()
 	}
+	// A model or effort selection queued while the turn was running
+	// applies now that the agent is idle, so the next turn starts with
+	// the user's choice.
+	if prevBusy && !busy && m.pendingModelAction != nil {
+		if cmd := m.applyPendingModelAction(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
 	return cmds
 }
 
