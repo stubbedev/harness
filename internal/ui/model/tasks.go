@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -178,6 +179,7 @@ func (m *UI) tasksSpinning() bool {
 func (m *UI) resetAgentTasks() {
 	m.agentTasks = nil
 	m.expandedTaskID = ""
+	m.lastTaskFocusID = ""
 	m.taskRows = nil
 }
 
@@ -412,11 +414,29 @@ func (m *UI) clampTaskCursor() {
 	}
 }
 
-// focusTasks moves focus to the strip, parking the cursor on the most
-// recent task when it had none.
+// noteTaskFocus records the task under the strip cursor so focus can
+// return to it later. Reaps shift indices, so an index alone can drift
+// onto a different task between visits.
+func (m *UI) noteTaskFocus() {
+	if m.focus == uiFocusTasks && len(m.agentTasks) > 0 {
+		m.lastTaskFocusID = m.agentTasks[m.taskCursor].toolCallID
+	}
+}
+
+// focusTasks moves focus to the strip, returning the cursor to the task
+// the user last focused when it is still tracked, and leaving it where
+// clampTaskCursor parks it otherwise.
 func (m *UI) focusTasks() {
 	if len(m.agentTasks) == 0 {
 		return
+	}
+	if m.lastTaskFocusID != "" {
+		if i := slices.IndexFunc(m.agentTasks, func(t *agentTask) bool {
+			return t.toolCallID == m.lastTaskFocusID
+		}); i >= 0 {
+			m.taskCursor = i
+			m.taskSubCursor = -1
+		}
 	}
 	m.focus = uiFocusTasks
 	m.textarea.Blur()
@@ -434,11 +454,13 @@ func (m *UI) taskCursorDown() {
 	task := m.agentTasks[m.taskCursor]
 	if task.toolCallID == m.expandedTaskID && m.taskSubCursor < len(task.nested)-1 {
 		m.taskSubCursor++
+		m.noteTaskFocus()
 		return
 	}
 	if m.taskCursor < len(m.agentTasks)-1 {
 		m.taskCursor++
 		m.taskSubCursor = -1
+		m.noteTaskFocus()
 	}
 }
 
@@ -450,6 +472,7 @@ func (m *UI) taskCursorUp() {
 	m.clampTaskCursor()
 	if m.taskSubCursor > 0 {
 		m.taskSubCursor--
+		m.noteTaskFocus()
 		return
 	}
 	if m.taskSubCursor == 0 {
@@ -464,6 +487,7 @@ func (m *UI) taskCursorUp() {
 		} else {
 			m.taskSubCursor = -1
 		}
+		m.noteTaskFocus()
 	}
 }
 
@@ -578,42 +602,39 @@ func (m *UI) ascendTaskAtCursor() {
 // handleTaskKey processes a keypress while the strip is focused. Arrows
 // (plain or shifted) move the cursor within the current level, enter
 // goes in, escape goes out, tab leaves for the editor.
-func (m *UI) handleTaskKey(msg tea.KeyPressMsg) bool {
+func (m *UI) handleTaskKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keyMap.Chat.Up), key.Matches(msg, m.keyMap.Chat.UpOneItem):
 		m.taskCursorUp()
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.Chat.Down), key.Matches(msg, m.keyMap.Chat.DownOneItem):
 		m.taskCursorDown()
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.Chat.DigIn):
 		m.enterTaskAtCursor()
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.Chat.Expand):
 		m.toggleTaskAtCursor()
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.Chat.ClearHighlight):
 		m.ascendTaskAtCursor()
-		return true
+		return true, nil
 	case key.Matches(msg, m.keyMap.Tab):
-		m.focusEditorFromTasks()
-		return true
+		return true, m.focusEditorFromTasks()
 	case key.Matches(msg, m.keyMap.ShiftTab):
-		m.focusChatFromTasks()
-		return true
+		return true, m.focusChatFromTasks()
 	}
-	return false
+	return false, nil
 }
 
-func (m *UI) focusEditorFromTasks() {
+func (m *UI) focusEditorFromTasks() tea.Cmd {
 	m.focus = uiFocusEditor
-	_ = m.textarea.Focus()
+	return m.textarea.Focus()
 }
 
-func (m *UI) focusChatFromTasks() {
+func (m *UI) focusChatFromTasks() tea.Cmd {
 	m.focus = uiFocusMain
-	m.chat.Focus()
-	m.chat.SetSelected(m.chat.Len() - 1)
+	return m.chat.FocusRestoringSelection()
 }
 
 // renderTasks renders the background tasks strip and records the row
@@ -767,6 +788,7 @@ func (m *UI) handleTaskClick(x, y int) bool {
 				if task.toolCallID == row.toolCallID {
 					m.taskCursor = i
 					m.taskSubCursor = -1
+					m.lastTaskFocusID = row.toolCallID
 					break
 				}
 			}

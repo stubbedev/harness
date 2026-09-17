@@ -400,6 +400,10 @@ type UI struct {
 	// cursor task's nested calls (-1 = on the task row itself).
 	taskCursor    int
 	taskSubCursor int
+	// lastTaskFocusID is the task the cursor last rested on while the
+	// strip was focused, so focus can return to it after reaps shift
+	// the indices.
+	lastTaskFocusID string
 	// promptQueue / promptQueueItems mirror the session's queued prompts.
 	// They are event-driven with a TTL backstop, fetched off-thread by
 	// dispatchPromptQueueRefresh (see workspace_cache.go); promptQueue is
@@ -2577,8 +2581,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		if m.focus == uiFocusEditor {
 			m.focus = uiFocusMain
 			m.activeInline.SetFocused(false)
-			m.chat.Focus()
-			m.chat.SetSelected(m.chat.Len() - 1)
+			cmds = append(cmds, m.chat.FocusRestoringSelection())
 		} else {
 			m.focus = uiFocusEditor
 			m.activeInline.SetFocused(true)
@@ -2724,8 +2727,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if m.state != uiLanding {
 					m.setState(m.state, uiFocusMain)
 					m.textarea.Blur()
-					m.chat.Focus()
-					m.chat.SetSelected(m.chat.Len() - 1)
+					cmds = append(cmds, m.chat.FocusRestoringSelection())
 				}
 			case key.Matches(msg, m.keyMap.ShiftTab):
 				if m.state == uiChat && len(m.agentTasks) > 0 {
@@ -2733,8 +2735,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				} else if m.state != uiLanding {
 					m.setState(m.state, uiFocusMain)
 					m.textarea.Blur()
-					m.chat.Focus()
-					m.chat.SetSelected(m.chat.Len() - 1)
+					cmds = append(cmds, m.chat.FocusRestoringSelection())
 				}
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
 				if m.isAgentBusy() {
@@ -2992,7 +2993,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.focusEditorFromTasks()
 				break
 			}
-			if m.handleTaskKey(msg) {
+			if consumed, cmd := m.handleTaskKey(msg); consumed {
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 				break
 			}
 			handleGlobalKeys(msg)
