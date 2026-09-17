@@ -151,6 +151,25 @@ type ShellCommand struct {
 
 func (ShellCommand) isPart() {}
 
+// SubagentNote is a message a running background sub-agent pushed to its
+// orchestrator through the send_message tool. It is stored as a user
+// message so the orchestrator's next step reads it, but it is
+// LLM-to-LLM communication rather than conversation the user wrote or
+// saw: renderers skip it, and the background tasks strip is where the
+// report-back surfaces.
+type SubagentNote struct {
+	AgentName      string `json:"agent_name"`
+	Handle         string `json:"handle,omitempty"`
+	ChildSessionID string `json:"child_session_id,omitempty"`
+	Text           string `json:"text"`
+}
+
+func (sn SubagentNote) String() string {
+	return fmt.Sprintf("[Message from background agent %q (handle %s)]\n%s", sn.AgentName, sn.Handle, sn.Text)
+}
+
+func (SubagentNote) isPart() {}
+
 // HasShellCommand reports whether the message contains any ShellCommand parts.
 func (m *Message) HasShellCommand() bool {
 	for _, part := range m.Parts {
@@ -170,6 +189,17 @@ func (m *Message) ShellCommands() []ShellCommand {
 		}
 	}
 	return cmds
+}
+
+// SubagentNotes returns all SubagentNote parts from the message.
+func (m *Message) SubagentNotes() []SubagentNote {
+	var notes []SubagentNote
+	for _, part := range m.Parts {
+		if sn, ok := part.(SubagentNote); ok {
+			notes = append(notes, sn)
+		}
+	}
+	return notes
 }
 
 type Message struct {
@@ -609,6 +639,14 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			} else {
 				text = shellText
 			}
+		}
+		// Sub-agent report-backs reach the model as user text even though
+		// they never render for the user.
+		for _, note := range m.SubagentNotes() {
+			if text != "" {
+				text += "\n\n"
+			}
+			text += note.String()
 		}
 		if text != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})

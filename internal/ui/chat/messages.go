@@ -463,6 +463,11 @@ func cappedMessageWidth(availableWidth int) int {
 func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult, workingDir string) []MessageItem {
 	switch msg.Role {
 	case message.User:
+		// A background sub-agent's report-back is LLM-to-LLM context:
+		// it surfaces as a count on its task strip entry, never here.
+		if len(msg.Parts) > 0 && len(msg.SubagentNotes()) == len(msg.Parts) {
+			return nil
+		}
 		// Reconstruct shell command items from ShellCommand parts.
 		var items []MessageItem
 		for _, part := range msg.Parts {

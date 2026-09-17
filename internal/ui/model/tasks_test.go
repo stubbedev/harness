@@ -46,12 +46,13 @@ func TestBackgroundTasksStrip(t *testing.T) {
 	assert.Contains(t, ansi.Strip(u.tasksView), "researcher")
 	require.Len(t, u.taskRows, 1)
 
-	// Expanding via the recorded row shows the prompt; clicking again
-	// collapses it.
+	// Expanding via the recorded row shows the task's detail but not the
+	// dispatch prompt — that is context for the model, not the
+	// transcript; clicking again collapses it.
 	assert.True(t, u.handleTaskClick(2, 0))
 	assert.Equal(t, "a1", u.expandedTaskID)
 	u.tasksAreaHeight()
-	assert.Contains(t, ansi.Strip(u.tasksView), "dig into the git history")
+	assert.NotContains(t, ansi.Strip(u.tasksView), "dig into the git history")
 	assert.True(t, u.handleTaskClick(2, 0))
 	assert.Empty(t, u.expandedTaskID)
 
@@ -68,6 +69,76 @@ func TestBackgroundTasksStrip(t *testing.T) {
 	u.resetAgentTasks()
 	assert.Empty(t, u.agentTasks)
 	assert.Equal(t, 0, u.tasksAreaHeight())
+}
+
+// TestSubagentNoteBumpsTaskCount pins the report-back path: a
+// background sub-agent's send_message content never renders in the
+// transcript; it counts up on its task's strip row instead.
+func TestSubagentNoteBumpsTaskCount(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.width = 100
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	bg := agentToolCall("a1")
+	bg.Input = `{"subagent_type":"researcher","prompt":"dig"}`
+	_ = u.upsertAgentTask(msg, bg)
+	task := u.agentTaskByToolCall("a1")
+	require.NotNil(t, task)
+	task.childSessionID = "child-1"
+
+	before := u.chat.Len()
+	note := message.Message{ID: "n1", SessionID: "s1", Role: message.User, Parts: []message.ContentPart{
+		message.SubagentNote{AgentName: "researcher", Handle: "bg-1", ChildSessionID: "child-1", Text: "halfway there"},
+	}}
+	_ = u.appendSessionMessage(note)
+	assert.Equal(t, 1, task.messages, "the report-back counts on its task")
+	assert.Equal(t, before, u.chat.Len(), "the note renders nowhere in the transcript")
+
+	// A second note for another child bumps only that child's task.
+	otherCall := agentToolCall("a2")
+	otherCall.Input = `{"prompt":"more"}`
+	_ = u.upsertAgentTask(msg, otherCall)
+	other := u.agentTaskByToolCall("a2")
+	require.NotNil(t, other)
+	other.childSessionID = "child-2"
+	_ = u.appendSessionMessage(message.Message{ID: "n2", SessionID: "s1", Role: message.User, Parts: []message.ContentPart{
+		message.SubagentNote{AgentName: "researcher", Handle: "bg-2", ChildSessionID: "child-2", Text: "done"},
+	}})
+	assert.Equal(t, 1, other.messages)
+	assert.Equal(t, 1, task.messages)
+
+	u.tasksAreaHeight()
+	assert.Contains(t, ansi.Strip(u.tasksView), "1 msg")
+}
+
+// TestLoadAgentTasksCountsNotes pins the reload path: report-backs
+// persisted before the reload count onto the rebuilt tasks.
+func TestLoadAgentTasksCountsNotes(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+
+	child := u.childSessionIDFor("m1", "a1")
+	require.NotEmpty(t, child)
+	msgs := []*message.Message{
+		{ID: "m1", Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"dig"}`, Finished: true},
+		}},
+		{ID: "n1", Role: message.User, Parts: []message.ContentPart{
+			message.SubagentNote{AgentName: "researcher", Handle: "bg-1", ChildSessionID: child, Text: "halfway there"},
+		}},
+		{ID: "n2", Role: message.User, Parts: []message.ContentPart{
+			message.SubagentNote{AgentName: "researcher", Handle: "bg-1", ChildSessionID: child, Text: "done digging"},
+		}},
+	}
+	u.loadAgentTasks(msgs, nil)
+
+	task := u.agentTaskByToolCall("a1")
+	require.NotNil(t, task)
+	assert.Equal(t, 2, task.messages)
 }
 
 func TestBackgroundTasksWindowScrolls(t *testing.T) {

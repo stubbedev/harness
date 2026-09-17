@@ -34,6 +34,10 @@ type agentTask struct {
 	startedAt        time.Time
 	promptTokens     int64
 	completionTokens int64
+	// messages counts report-backs the sub-agent sent mid-run via
+	// send_message; the row shows the count instead of the messages,
+	// which are LLM-to-LLM context.
+	messages int
 
 	// background marks a dispatch whose tool call already returned a
 	// handle: the child session keeps running past that result, so the
@@ -231,7 +235,55 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			m.loadTaskNestedTools(msg, tc, task)
 		}
 	}
+	// Count the report-backs each running task already received.
+	noteCounts := subagentNoteCounts(msgs)
+	for _, t := range m.agentTasks {
+		if t.childSessionID != "" {
+			t.messages = noteCounts[t.childSessionID]
+		}
+	}
 	m.clampTaskCursor()
+}
+
+// subagentNoteCounts counts report-backs per child session across a
+// session's messages, keyed the way tasks are (by child session ID).
+func subagentNoteCounts(msgs []*message.Message) map[string]int {
+	var counts map[string]int
+	for _, msg := range msgs {
+		for _, note := range msg.SubagentNotes() {
+			if note.ChildSessionID == "" {
+				continue
+			}
+			if counts == nil {
+				counts = make(map[string]int)
+			}
+			counts[note.ChildSessionID]++
+		}
+	}
+	return counts
+}
+
+// countSubagentNote bumps the report-back count on the task running the
+// note's child session. The note itself never renders: the count is the
+// user-facing trace that a background agent reported back.
+func (m *UI) countSubagentNote(note message.SubagentNote) {
+	if note.ChildSessionID == "" {
+		return
+	}
+	if task := m.agentTaskByChildSession(note.ChildSessionID); task != nil {
+		task.messages++
+	}
+}
+
+// agentTaskByChildSession returns the task running the given child
+// session, or nil.
+func (m *UI) agentTaskByChildSession(childSessionID string) *agentTask {
+	for _, t := range m.agentTasks {
+		if t.childSessionID == childSessionID {
+			return t
+		}
+	}
+	return nil
 }
 
 // loadTaskNestedTools fetches a finished subagent's own tool calls from
@@ -683,6 +735,9 @@ func (m *UI) renderTasks(width int) string {
 			}
 			line += " " + t.Resource.AdditionalText.Render(meta)
 		}
+		if task.messages > 0 {
+			line += " " + t.Resource.AdditionalText.Render(fmt.Sprintf("%d msg", task.messages))
+		}
 		if len(task.nested) > 0 {
 			line += " " + t.Resource.AdditionalText.Render(fmtToolCalls(len(task.nested)))
 		}
@@ -726,14 +781,13 @@ func (m *UI) renderTasks(width int) string {
 }
 
 // renderTaskDetails renders the expanded block under a task row: the
-// prompt, the subagent's own tool calls as one-liners, and its result.
+// subagent's own tool calls as one-liners and its result. The dispatch
+// prompt and any send_message content stay out — they are context for
+// the model, not the transcript; the row's msg count covers report-backs.
 func (m *UI) renderTaskDetails(task *agentTask, width, subCursor int) []string {
 	t := m.com.Styles
 	inner := max(width-6, 1)
 	var lines []string
-	if task.prompt != "" {
-		lines = append(lines, "  "+ansi.Truncate("Prompt: "+task.prompt, inner, "…"))
-	}
 	for j, nested := range task.nested {
 		indent := "  "
 		if j == subCursor {

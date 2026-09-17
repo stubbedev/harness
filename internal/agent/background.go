@@ -22,7 +22,10 @@ const maxLiveInboxMessages = 50
 type SubagentInboxMessage struct {
 	AgentName string
 	Handle    string
-	Text      string
+	// ChildSessionID identifies the sender's session so the frontend can
+	// attribute the report-back to its background task.
+	ChildSessionID string
+	Text           string
 }
 
 // SubagentInboxSource supplies the messages background sub-agents sent to a
@@ -184,10 +187,4 @@ func newSubagentHandle() string {
 		return fmt.Sprintf("bg-%x", time.Now().UnixNano())
 	}
 	return "bg-" + hex.EncodeToString(b[:])
-}
-
-// formatSubagentInboxMessage renders one drained inbox message as the user
-// message the dispatcher reads — in its transcript as well as its context.
-func formatSubagentInboxMessage(msg SubagentInboxMessage) string {
-	return fmt.Sprintf("[Message from background agent %q (handle %s)]\n%s", msg.AgentName, msg.Handle, msg.Text)
 }

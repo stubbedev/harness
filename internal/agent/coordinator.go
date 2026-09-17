@@ -2230,9 +2230,10 @@ func (c *coordinator) recordLiveSubagentMessage(run *backgroundRun, text string)
 		return nil
 	}
 	if err := c.liveInbox.record(run.parentSession, SubagentInboxMessage{
-		AgentName: run.agentName,
-		Handle:    run.handle,
-		Text:      text,
+		AgentName:      run.agentName,
+		Handle:         run.handle,
+		ChildSessionID: run.childSession,
+		Text:           text,
 	}); err != nil {
 		return err
 	}

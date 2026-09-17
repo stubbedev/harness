@@ -1272,6 +1272,13 @@ func protoToMessage(m proto.Message) message.Message {
 				Output:   v.Output,
 				ExitCode: v.ExitCode,
 			})
+		case proto.SubagentNote:
+			msg.Parts = append(msg.Parts, message.SubagentNote{
+				AgentName:      v.AgentName,
+				Handle:         v.Handle,
+				ChildSessionID: v.ChildSessionID,
+				Text:           v.Text,
+			})
 		}
 	}
 

@@ -91,6 +91,12 @@ func toolResultsByCallID(msgs []message.Message) map[string]message.ToolResult {
 // renderMessageMarkdown renders a single message, or an empty string when
 // the message has nothing worth exporting.
 func renderMessageMarkdown(msg message.Message, results map[string]message.ToolResult) string {
+	// A background sub-agent's report-back is LLM-to-LLM context that
+	// never rendered on screen; it stays out of the minutes too.
+	if len(msg.Parts) > 0 && len(msg.SubagentNotes()) == len(msg.Parts) {
+		return ""
+	}
+
 	var body strings.Builder
 
 	for _, sc := range msg.ShellCommands() {
@@ -120,8 +126,14 @@ func renderMessageMarkdown(msg message.Message, results map[string]message.ToolR
 	}
 
 	for _, tc := range msg.ToolCalls() {
-		// Context plumbing (skill_search, tool_search) never shows on
-		// screen, so it never shows in the export either.
+		// Subagent dispatches live in the background tasks strip on
+		// screen, so their prompts, results, and drained send_message
+		// blocks stay out of the export.
+		if chat.IsSubagentTool(tc.Name) {
+			continue
+		}
+		// Context plumbing (skill_search, tool_search, send_message)
+		// never shows on screen, so it never shows in the export either.
 		if chat.IsInternalContextTool(tc.Name) {
 			continue
 		}

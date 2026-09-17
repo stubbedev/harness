@@ -401,13 +401,20 @@ func TestPrepareStepFoldsLiveInboxMessages(t *testing.T) {
 	assert.Contains(t, conversation, "Message from background agent")
 	assert.Contains(t, conversation, "handle bg-abc")
 
-	// The fold is persisted to the transcript as a user message.
+	// The fold is persisted to the transcript as a user message carrying
+	// a SubagentNote part: the model reads it as text, the transcript
+	// never renders it.
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
 	var found bool
 	for _, m := range msgs {
-		if m.Role == message.User && strings.Contains(m.Content().Text, "found the bug") {
-			found = true
+		if m.Role != message.User {
+			continue
+		}
+		for _, note := range m.SubagentNotes() {
+			if note.AgentName == "fast" && note.Handle == "bg-abc" && strings.Contains(note.Text, "found the bug") {
+				found = true
+			}
 		}
 	}
 	assert.True(t, found, "folded inbox message must appear in the transcript")

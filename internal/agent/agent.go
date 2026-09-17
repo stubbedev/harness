@@ -1106,15 +1106,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			// Fold in messages background sub-agents sent this session since
 			// the last step. This is the live half of a background dispatch:
-			// the message reaches the dispatcher's context — and transcript,
-			// via createUserMessage — without the child having finished. A
+			// the message reaches the dispatcher's context — without the
+			// child having finished — via a SubagentNote part, which the
+			// model reads as user text but the transcript never renders; the
+			// background tasks strip is where the report-back surfaces. A
 			// canceled step leaves the inbox alone: the messages drain on
 			// the next live step instead of failing to persist here.
 			if a.subagentInbox != nil && callContext.Err() == nil {
 				for _, msg := range a.subagentInbox.DrainSubagentInbox(call.SessionID) {
-					userMessage, createErr := a.createUserMessage(callContext, SessionAgentCall{
-						SessionID: call.SessionID,
-						Prompt:    formatSubagentInboxMessage(msg),
+					userMessage, createErr := a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
+						Role: message.User,
+						Parts: []message.ContentPart{message.SubagentNote{
+							AgentName:      msg.AgentName,
+							Handle:         msg.Handle,
+							ChildSessionID: msg.ChildSessionID,
+							Text:           msg.Text,
+						}},
 					})
 					if createErr != nil {
 						return callContext, prepared, createErr

@@ -632,6 +632,7 @@ const (
 	toolResultType   partType = "tool_result"
 	finishType       partType = "finish"
 	shellCommandType partType = "shell_command"
+	subagentNoteType partType = "subagent_note"
 )
 
 type partWrapper struct {
@@ -662,6 +663,8 @@ func marshalParts(parts []ContentPart) ([]byte, error) {
 			typ = finishType
 		case ShellCommand:
 			typ = shellCommandType
+		case SubagentNote:
+			typ = subagentNoteType
 		default:
 			return nil, fmt.Errorf("unknown part type: %T", part)
 		}
@@ -738,6 +741,12 @@ func unmarshalParts(data []byte) ([]ContentPart, error) {
 			parts = append(parts, part)
 		case shellCommandType:
 			part := ShellCommand{}
+			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+				return nil, err
+			}
+			parts = append(parts, part)
+		case subagentNoteType:
+			part := SubagentNote{}
 			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}

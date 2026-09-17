@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/workspace"
 )
@@ -141,4 +143,8 @@ func (w *testWorkspace) ParseAgentToolSessionID(sessionID string) (string, strin
 
 func (w *testWorkspace) AgentIsReady() bool {
 	return false
+}
+
+func (w *testWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
+	return nil, nil
 }

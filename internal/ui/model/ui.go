@@ -1775,6 +1775,15 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 
 	switch msg.Role {
 	case message.User:
+		// A background sub-agent's report-back bumps its task strip
+		// entry instead of rendering in the transcript.
+		if len(msg.Parts) > 0 && len(msg.SubagentNotes()) == len(msg.Parts) {
+			for _, note := range msg.SubagentNotes() {
+				m.countSubagentNote(note)
+			}
+			m.updateLayoutAndSize()
+			return nil
+		}
 		// Shell commands are rendered live via shellResultMsg; skip
 		// the persisted duplicate.
 		hasShellCmd := false

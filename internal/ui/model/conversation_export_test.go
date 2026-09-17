@@ -90,6 +90,42 @@ func TestRenderConversationMarkdown(t *testing.T) {
 		require.NotContains(t, out, "## tool")
 	})
 
+	t.Run("drops subagent dispatches and report-backs", func(t *testing.T) {
+		t.Parallel()
+		sess, _ := testConversation()
+		msgs := []message.Message{
+			{
+				ID: "m1", SessionID: "sess-123", Role: message.Assistant,
+				Parts: []message.ContentPart{
+					message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"go dig","blocking":true}`},
+				},
+			},
+			{
+				ID: "m2", SessionID: "sess-123", Role: message.Tool,
+				Parts: []message.ContentPart{
+					message.ToolResult{
+						ToolCallID: "a1", Name: "agent",
+						Content: "found it\n\n## Messages sent during this run\n1. halfway there\n",
+					},
+				},
+			},
+			{
+				ID: "m3", SessionID: "sess-123", Role: message.User,
+				Parts: []message.ContentPart{
+					message.SubagentNote{AgentName: "researcher", Handle: "bg-1", ChildSessionID: "c1", Text: "halfway there"},
+				},
+			},
+		}
+
+		out, err := renderConversationMarkdown(sess, msgs, exportedAt)
+		require.NoError(t, err)
+		require.NotContains(t, out, "#### Tool: agent")
+		require.NotContains(t, out, "go dig")
+		require.NotContains(t, out, "## Messages sent during this run")
+		require.NotContains(t, out, "halfway there")
+		require.NotContains(t, out, "## Assistant", "a dispatch-only message yields no section")
+	})
+
 	t.Run("falls back to a generic title", func(t *testing.T) {
 		t.Parallel()
 		sess, msgs := testConversation()

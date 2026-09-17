@@ -23,6 +23,25 @@ func makeTestAttachments(n int, contentSize int) []Attachment {
 	return attachments
 }
 
+func TestToAIMessage_SubagentNoteReadsAsUserText(t *testing.T) {
+	t.Parallel()
+
+	note := SubagentNote{AgentName: "researcher", Handle: "bg-1", ChildSessionID: "c1", Text: "halfway there"}
+	require.Equal(t, "[Message from background agent \"researcher\" (handle bg-1)]\nhalfway there", note.String())
+
+	msg := &Message{
+		Role:  User,
+		Parts: []ContentPart{note},
+	}
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].Content, 1)
+	text, ok := messages[0].Content[0].(fantasy.TextPart)
+	require.True(t, ok)
+	require.Equal(t, note.String(), text.Text)
+	require.Len(t, msg.SubagentNotes(), 1)
+}
+
 func TestToAIMessage_CorruptedMediaData(t *testing.T) {
 	t.Parallel()
 

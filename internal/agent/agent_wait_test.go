@@ -127,7 +127,7 @@ func TestWaitTool_ReturnsEarlyOnMessage(t *testing.T) {
 	// Delivered exactly once: the message is gone from the inbox, and the
 	// other handle's message was untouched.
 	assert.Empty(t, coord.drainLiveInboxFrom("parent-1", map[string]bool{run.handle: true}))
-	assert.Equal(t, []SubagentInboxMessage{{AgentName: "task", Handle: other.handle, Text: "not for you"}}, coord.DrainSubagentInbox("parent-1"))
+	assert.Equal(t, []SubagentInboxMessage{{AgentName: "task", Handle: other.handle, ChildSessionID: other.childSession, Text: "not for you"}}, coord.DrainSubagentInbox("parent-1"))
 }
 
 // TestWaitTool_WakesWhenRunFinishes covers the blocking path: wait parks on

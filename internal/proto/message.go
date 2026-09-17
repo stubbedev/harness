@@ -187,6 +187,18 @@ type ShellCommand struct {
 
 func (ShellCommand) isPart() {}
 
+// SubagentNote is a message a running background sub-agent pushed to its
+// orchestrator. It renders as user text for the model but never in the
+// frontend transcript.
+type SubagentNote struct {
+	AgentName      string `json:"agent_name"`
+	Handle         string `json:"handle,omitempty"`
+	ChildSessionID string `json:"child_session_id,omitempty"`
+	Text           string `json:"text"`
+}
+
+func (SubagentNote) isPart() {}
+
 // MarshalJSON implements the [json.Marshaler] interface.
 func (m Message) MarshalJSON() ([]byte, error) {
 	parts, err := MarshalParts(m.Parts)
@@ -518,6 +530,7 @@ const (
 	toolResultType   partType = "tool_result"
 	finishType       partType = "finish"
 	shellCommandType partType = "shell_command"
+	subagentNoteType partType = "subagent_note"
 )
 
 type partWrapper struct {
@@ -549,6 +562,8 @@ func MarshalParts(parts []ContentPart) ([]byte, error) {
 			typ = finishType
 		case ShellCommand:
 			typ = shellCommandType
+		case SubagentNote:
+			typ = subagentNoteType
 		default:
 			return nil, fmt.Errorf("unknown part type: %T", part)
 		}
@@ -626,6 +641,12 @@ func UnmarshalParts(data []byte) ([]ContentPart, error) {
 			parts = append(parts, part)
 		case shellCommandType:
 			part := ShellCommand{}
+			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
+				return nil, err
+			}
+			parts = append(parts, part)
+		case subagentNoteType:
+			part := SubagentNote{}
 			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
 				return nil, err
 			}
