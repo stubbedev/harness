@@ -1390,20 +1390,52 @@ func (r *ptyRunner) paste(s ptyTerminal, text string) error {
 	return nil
 }
 
+// ptyWrapMargin is subtracted from the terminal's column count when
+// deciding whether a single-line command is long enough to soft-wrap.
+// The shell's own prompt occupies some of that width before the
+// command text starts, so the true wrap point sits earlier than the
+// raw column count suggests; erring low and taking the paste path for
+// a line that would not actually have wrapped costs nothing.
+const ptyWrapMargin = 20
+
+// ptySizer is the one method needsPasteMarkers needs from a terminal
+// session; every ptyTerminal satisfies it, and the narrower interface
+// keeps the function easy to test without a full fake session.
+type ptySizer interface {
+	Size() (rows, cols int)
+}
+
+// needsPasteMarkers reports whether command must go through the
+// bracketed-paste-and-drain path rather than a plain typed send: either
+// it spans several lines, or a single line is long enough that the
+// terminal will soft-wrap its echo across rows.
+func needsPasteMarkers(s ptySizer, body string) bool {
+	if strings.Contains(body, "\n") {
+		return true
+	}
+	_, cols := s.Size()
+	return cols > 0 && len(body) >= max(1, cols-ptyWrapMargin)
+}
+
 // pasteCommand delivers a command as a terminal delivers a paste, and
 // submits it only after the line editor's echo of the block has settled
 // and been drained. A multiline command written straight in is read as
 // many typed lines: the line editor echoes each one, redraws it with
 // syntax highlighting, and toggles bracketed paste around every prompt -
 // debris that survives cleaning as blank lines, bells and doubled
-// fragments. Wrapped in the paste markers it is one block with one echo,
-// and that echo is dropped whole before the return that runs the
-// command, so the command's own output starts from a clean slate.
-// Single-line commands and programs without bracketed paste keep the
-// plain send path: its one-line echo the cleaner already strips.
+// fragments. A single line long enough to soft-wrap has the same
+// problem in miniature: the terminal reflows its echo across rows with
+// no newline at the wrap point for clean's echo stripping to key off,
+// so the wrapped continuation is mistaken for the command's own output
+// (see needsPasteMarkers). Wrapped in the paste markers it is one block
+// with one echo, and that echo is dropped whole before the return that
+// runs the command, so the command's own output starts from a clean
+// slate. Short single-line commands and programs without bracketed
+// paste keep the plain send path: its one-line echo the cleaner already
+// strips.
 func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command string) error {
 	body := strings.TrimSuffix(command, "\n")
-	if !strings.Contains(body, "\n") || !s.BracketedPaste() {
+	if !needsPasteMarkers(s, body) || !s.BracketedPaste() {
 		return r.send(s, []byte(keystrokes(body)+term.Enter))
 	}
 	r.sendMu.Lock()
