@@ -1050,7 +1050,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		Files:            files,
 		Messages:         history,
 		Headers:          sessionHeaders(call.SessionID),
-		ProviderOptions:  call.ProviderOptions,
+		ProviderOptions:  withPromptCacheKey(call.SessionID, call.ProviderOptions),
 		MaxOutputTokens:  maxOutputTokens,
 		TopP:             call.TopP,
 		Temperature:      call.Temperature,
@@ -1919,6 +1919,32 @@ func sessionHeaders(sessionID string) map[string]string {
 	}
 }
 
+// withPromptCacheKey stamps OpenAI's prompt_cache_key onto the request
+// options, keyed on the same opaque session hash as sessionHeaders.
+// OpenAI's prompt caching is automatic but routing-dependent; the key
+// keeps a conversation's requests on the same cache. Only sets the
+// field when the options are OpenAI ones (chat completions or
+// Responses) and the user has not configured a key of their own.
+// Disable with HARNESS_DISABLE_PROMPT_CACHE_KEY.
+func withPromptCacheKey(sessionID string, opts fantasy.ProviderOptions) fantasy.ProviderOptions {
+	if t, _ := strconv.ParseBool(os.Getenv("HARNESS_DISABLE_PROMPT_CACHE_KEY")); t {
+		return opts
+	}
+	switch o := opts[openai.Name].(type) {
+	case *openai.ProviderOptions:
+		if o.PromptCacheKey == nil {
+			key := session.HashID(sessionID)
+			o.PromptCacheKey = &key
+		}
+	case *openai.ResponsesProviderOptions:
+		if o.PromptCacheKey == nil {
+			key := session.HashID(sessionID)
+			o.PromptCacheKey = &key
+		}
+	}
+	return opts
+}
+
 func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall) (message.Message, error) {
 	parts := []message.ContentPart{message.TextContent{Text: call.Prompt}}
 	var attachmentParts []message.ContentPart
@@ -2252,7 +2278,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		call := streamCall
 		if a.cfg != nil {
 			providerCfg, _ := a.cfg.Config().Providers.Get(attempt.model.ModelCfg.Provider)
-			call.ProviderOptions = getProviderOptions(attempt.model, providerCfg)
+			call.ProviderOptions = withPromptCacheKey(sessionID, getProviderOptions(attempt.model, providerCfg))
 		}
 		resp, err = agent.Stream(ctx, call)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {

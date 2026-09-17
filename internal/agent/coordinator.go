@@ -1750,7 +1750,7 @@ func (c *coordinator) Summarize(ctx context.Context, sessionID, instructions str
 
 	// Auth failures during summarize flow through fantasy's OnAuthRefresh,
 	// the same path used by regular turns.
-	return c.currentAgent.Summarize(ctx, sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg), c.makeAuthRefreshCallback(providerCfg), instructions)
+	return c.currentAgent.Summarize(ctx, sessionID, withPromptCacheKey(sessionID, getProviderOptions(c.currentAgent.Model(), providerCfg)), c.makeAuthRefreshCallback(providerCfg), instructions)
 }
 
 // GenerateTitle generates a session title using the current agent.
