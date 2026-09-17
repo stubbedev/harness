@@ -73,6 +73,22 @@ func TestAwaitSettledStopsOnCanceledContext(t *testing.T) {
 	}
 }
 
+func TestAwaitSettledZeroBudgetNeverWaits(t *testing.T) {
+	t.Parallel()
+	s := &Manager{}
+	stuck := make(chan struct{})
+	s.settleMu.Lock()
+	s.settlePending = append(s.settlePending, stuck)
+	s.settleMu.Unlock()
+	defer close(stuck)
+
+	start := time.Now()
+	s.AwaitSettled(t.Context(), 0)
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("zero budget waited %s with a settle in flight", elapsed)
+	}
+}
+
 func TestSettlingTracksInFlightWaits(t *testing.T) {
 	t.Parallel()
 	s := &Manager{}

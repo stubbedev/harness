@@ -100,7 +100,7 @@ func NewEditTool(
 			lspManager.NotifyChangeAsync(ctx, params.FilePath)
 
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
-			text += reportDiagnostics(ctx, lspManager, params.FilePath)
+			text += reportDiagnostics(ctx, lspManager, settleGrace, params.FilePath)
 			response.Content = text
 			return response, nil
 		},

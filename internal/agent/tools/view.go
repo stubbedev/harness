@@ -218,7 +218,7 @@ func NewViewTool(
 					params.Offset+len(strings.Split(content, "\n")))
 			}
 			output += "\n</file>\n"
-			output += reportDiagnostics(ctx, lspManager, filePath)
+			output += reportDiagnosticsNow(ctx, lspManager, filePath)
 			filetracker.RecordRead(ctx, sessionID, filePath)
 
 			meta := ViewResponseMetadata{

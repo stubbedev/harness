@@ -129,7 +129,7 @@ func NewWriteTool(
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
-			result += reportDiagnostics(ctx, lspManager, filePath)
+			result += reportDiagnostics(ctx, lspManager, settleGrace, filePath)
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(result),
 				WriteResponseMetadata{

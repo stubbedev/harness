@@ -269,13 +269,17 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		return
 	}
 	// Only store non-nil clients. If another goroutine raced us,
-	// prefer the already-stored client.
+	// prefer the already-stored client; if the stored one is in a dead
+	// state (error or stopped), replace it — after shutting it down, so
+	// a restart never orphans the old server's process.
 	if existing, ok := s.clients.Get(name); ok {
 		switch existing.GetServerState() {
 		case StateReady, StateStarting, StateDisabled:
 			client.Shutdown()
 			s.callback(name, existing)
 			return
+		default:
+			existing.Shutdown()
 		}
 	}
 	s.clients.Set(name, client)

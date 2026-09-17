@@ -69,7 +69,7 @@ func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 // ready, without any edit having waited for it. It returns "" when there is
 // nothing new to say, which is the usual case.
 func DiagnosticsSweep(ctx context.Context, manager *lsp.Manager) string {
-	return reportDiagnostics(ctx, manager)
+	return reportDiagnostics(ctx, manager, settleGrace)
 }
 
 // ForgetReportedDiagnostics drops the record of what a session has been shown,
@@ -82,6 +82,13 @@ func ForgetReportedDiagnostics(manager *lsp.Manager, sessionID string) {
 		return
 	}
 	manager.Ledger().Forget(sessionID)
+}
+
+// reportDiagnosticsNow is reportDiagnostics with no wait at all: it describes
+// what the servers already hold and returns. Use it from read paths where
+// diagnostics are a bonus, never the point.
+func reportDiagnosticsNow(ctx context.Context, manager *lsp.Manager, focus ...string) string {
+	return reportDiagnostics(ctx, manager, 0, focus...)
 }
 
 // openInLSPs makes the LSP servers aware of the file without blocking on any
@@ -148,13 +155,16 @@ func diagnosticLines(manager *lsp.Manager) (lines map[string]string, paths map[s
 // already been told about is not repeated; one that has gone away is named
 // once, so the model can see that the fix landed.
 //
-// It never waits for a server beyond [settleGrace]: anything still being
-// worked out shows up in the next report.
-func reportDiagnostics(ctx context.Context, manager *lsp.Manager, focus ...string) string {
+// It never waits for a server beyond grace: anything still being worked out
+// shows up in the next report. A grace of zero never waits at all — use it
+// from paths that must return immediately (a file read); the answer the
+// servers are still computing reaches the model through the sweep before its
+// next step instead.
+func reportDiagnostics(ctx context.Context, manager *lsp.Manager, grace time.Duration, focus ...string) string {
 	if manager == nil {
 		return ""
 	}
-	manager.AwaitSettled(ctx, settleGrace)
+	manager.AwaitSettled(ctx, grace)
 	if manager.Settling() {
 		// A server is still answering. Reporting now would describe a file
 		// mid-republish — problems it is about to restate read as resolved,
