@@ -286,6 +286,6 @@ func CharmtonePantera() Styles {
 returns a `quickStyleOpts` (plus an overrides function when the theme
 needs colors outside the token model), then register both in the
 `builtinThemes` / `builtinThemeOverrides` maps. Users select the theme
-via `options.tui.theme`, or the theme picker (alt+t) which writes it; a
+via `options.tui.theme`, or the theme picker (ctrl+shift+t) which writes it; a
 configured theme wins over the provider-based `ThemeForProvider`
 mapping.

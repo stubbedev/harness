@@ -437,7 +437,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}).WithAliases("resume", "switch"),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
 		NewCommandItem(c.com.Styles, "connect_provider", "Connect Provider", "", ActionOpenDialog{ConnectID}).WithAliases("provider", "auth", "login"),
-		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", "alt+t", ActionOpenDialog{ThemesID}),
+		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", "ctrl+shift+t", ActionOpenDialog{ThemesID}),
 	}
 
 	// Only show compact command if there's an active session

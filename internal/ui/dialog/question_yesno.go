@@ -15,7 +15,7 @@ import (
 )
 
 // YesNo is an inline yes/no confirmation component. For open-ended
-// responses, use FreeText instead. Notes can be added via alt+n.
+// responses, use FreeText instead. Notes can be added via ctrl+n.
 type YesNo struct {
 	questionEditor
 	Request    question.Question

@@ -4,6 +4,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -95,6 +96,36 @@ func TestKeyMapApplyKeybinds(t *testing.T) {
 			require.Equal(t, []string{"f13"}, binding.Keys(), "action %s did not rebind", action)
 		}
 	})
+}
+
+// TestDefaultKeyMap_HasNoAltBindings pins the portability rule: Alt
+// chords are unreliable across terminal setups, so the defaults never
+// use them. Users can still bind them via options.tui.keybinds.
+func TestDefaultKeyMap_HasNoAltBindings(t *testing.T) {
+	t.Parallel()
+
+	km := DefaultKeyMap()
+	var walk func(v reflect.Value, path string)
+	walk = func(v reflect.Value, path string) {
+		typ := v.Type()
+		for i := range typ.NumField() {
+			field := v.Field(i)
+			full := typ.Field(i).Name
+			if path != "" {
+				full = path + "." + full
+			}
+			switch {
+			case field.Type() == reflect.TypeFor[key.Binding]():
+				for _, k := range field.Interface().(key.Binding).Keys() {
+					require.False(t, strings.HasPrefix(k, "alt+"),
+						"KeyMap.%s defaults to %q; Alt chords are not portable", full, k)
+				}
+			case field.Kind() == reflect.Struct:
+				walk(field, full)
+			}
+		}
+	}
+	walk(reflect.ValueOf(&km).Elem(), "")
 }
 
 // bindingFields walks the keymap and returns every key.Binding field it

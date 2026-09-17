@@ -350,7 +350,7 @@ options:
       max_items: 500
 ```
 
-The theme picker (`alt+t`) and the command palette's "Disable Background Color"
+The theme picker (`ctrl+shift+t`) and the command palette's "Disable Background Color"
 and "Disable Mouse" toggles write to the **global state file**. If a project
 config also sets `theme`, `transparent`, or `mouse`, the project wins on the
 next launch (see [Where config lives](#where-config-lives)), so a toggle can
@@ -360,7 +360,7 @@ look like it silently reverted.
 
 `options.tui.keybinds` rebinds TUI keys. Each entry maps a stable action name
 to one key or a list of keys, using the same key spellings the help footer
-shows (`ctrl+x`, `alt+t`, `shift+enter`, `pgup`, `f1`, `@`, ...). Overrides
+shows (`ctrl+x`, `ctrl+shift+t`, `shift+enter`, `pgup`, `f1`, `@`, ...). Overrides
 **merge over the defaults**: only the actions you list change, everything
 else keeps its built-in binding. Changes apply at startup — restart the TUI
 after editing.
@@ -381,8 +381,8 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | --- | --- |
 | `chat.add_attachment` | `ctrl+f` |
 | `chat.background_tasks` | `ctrl+b` |
-| `chat.cancel` | `esc`, `alt+esc` |
-| `chat.clear_highlight` | `esc`, `alt+esc` |
+| `chat.cancel` | `esc` |
+| `chat.clear_highlight` | `esc` |
 | `chat.copy` | `c`, `y`, `C`, `Y` |
 | `chat.details` | `ctrl+d` |
 | `chat.dig_in` | `enter` |
@@ -406,7 +406,7 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `chat.up_down_one_item` | `shift+up`, `shift+down` |
 | `chat.up_one_item` | `shift+up`, `K` |
 | `commands` | `ctrl+p` |
-| `completions.cancel` | `esc`, `alt+esc` |
+| `completions.cancel` | `esc` |
 | `completions.down` | `down` |
 | `completions.insert_next` | `ctrl+n` |
 | `completions.insert_previous` | `ctrl+p` |
@@ -415,7 +415,7 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `dialog.arguments.confirm` | `enter` |
 | `dialog.arguments.next` | `down`, `tab` |
 | `dialog.arguments.previous` | `up`, `shift+tab` |
-| `dialog.close` | `esc`, `alt+esc` |
+| `dialog.close` | `esc` |
 | `dialog.commands.shift_tab` | `shift+tab` |
 | `dialog.commands.tab` | `tab` |
 | `dialog.file_picker.backward` | `left`, `h` |
@@ -438,7 +438,7 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `dialog.question.newline` | `shift+enter`, `ctrl+j` |
 | `dialog.question.next_tab` | `]`, `ctrl+right` |
 | `dialog.question.no` | `n`, `N` |
-| `dialog.question.note` | `alt+n` |
+| `dialog.question.note` | `ctrl+n` |
 | `dialog.question.prev_tab` | `[`, `ctrl+left` |
 | `dialog.question.right` | `right` |
 | `dialog.question.toggle` | ` `, `space` |
@@ -462,7 +462,7 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `editor.copy_selection` | `ctrl+shift+c` |
 | `editor.cut_selection` | `ctrl+shift+x` |
 | `editor.delete_all_attachments` | `r` |
-| `editor.escape` | `esc`, `alt+esc` |
+| `editor.escape` | `esc` |
 | `editor.history_next` | `down` |
 | `editor.history_prev` | `up` |
 | `editor.line_start` | `home`, `ctrl+a` |
@@ -483,7 +483,7 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `shift_tab` | `shift+tab` |
 | `suspend` | `ctrl+z` |
 | `tab` | `tab` |
-| `themes` | `alt+t` |
+| `themes` | `ctrl+shift+t` |
 
 > [!NOTE]
 > Several keys are intentionally shared across scopes (e.g. `enter` sends in

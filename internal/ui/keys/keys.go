@@ -264,10 +264,11 @@ func DefaultKeyMap() KeyMap {
 		),
 		// The ctrl+ space is crowded (ctrl+t already toggles tasks) and the
 		// textarea claims most of what is left, so the theme picker sits on
-		// alt+t.
+		// ctrl+shift+t. Alt chords are avoided in the defaults because they
+		// are unreliable across terminal setups.
 		Themes: key.NewBinding(
-			key.WithKeys("alt+t"),
-			key.WithHelp("alt+t", "themes"),
+			key.WithKeys("ctrl+shift+t"),
+			key.WithHelp("ctrl+shift+t", "themes"),
 		),
 	}
 
@@ -315,7 +316,7 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("ctrl+r+{i}", "delete attachment at index i"),
 	)
 	km.Editor.Escape = key.NewBinding(
-		key.WithKeys("esc", "alt+esc"),
+		key.WithKeys("esc"),
 		key.WithHelp("esc", "cancel delete mode"),
 	)
 	km.Editor.DeleteAllAttachments = key.NewBinding(
@@ -354,7 +355,7 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("ctrl+f", "add attachment"),
 	)
 	km.Chat.Cancel = key.NewBinding(
-		key.WithKeys("esc", "alt+esc"),
+		key.WithKeys("esc"),
 		key.WithHelp("esc", "cancel"),
 	)
 	km.Chat.Tab = key.NewBinding(
@@ -426,7 +427,7 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("c/y", "copy"),
 	)
 	km.Chat.ClearHighlight = key.NewBinding(
-		key.WithKeys("esc", "alt+esc"),
+		key.WithKeys("esc"),
 		key.WithHelp("esc", "clear selection"),
 	)
 	km.Chat.Expand = key.NewBinding(
@@ -467,7 +468,7 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("↑/↓", "choose"),
 	)
 	km.Dialog.Close = key.NewBinding(
-		key.WithKeys("esc", "alt+esc"),
+		key.WithKeys("esc"),
 		key.WithHelp("esc", "exit"),
 	)
 
@@ -616,8 +617,8 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("n", "no"),
 	)
 	km.Dialog.Question.Note = key.NewBinding(
-		key.WithKeys("alt+n"),
-		key.WithHelp("alt+n", "note"),
+		key.WithKeys("ctrl+n"),
+		key.WithHelp("ctrl+n", "note"),
 	)
 	km.Dialog.Question.Toggle = key.NewBinding(
 		key.WithKeys(" ", "space"),
@@ -649,7 +650,7 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("enter", "select"),
 	)
 	km.Completions.Cancel = key.NewBinding(
-		key.WithKeys("esc", "alt+esc"),
+		key.WithKeys("esc"),
 		key.WithHelp("esc", "cancel"),
 	)
 	km.Completions.DownInsert = key.NewBinding(
