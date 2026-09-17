@@ -1041,6 +1041,7 @@
               "editor.paste_text",
               "editor.select_all",
               "editor.send_message",
+              "editor.skills",
               "export_conversation",
               "help",
               "models",
