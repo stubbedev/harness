@@ -281,6 +281,15 @@ func IsSubagentTool(name string) bool {
 	return name == agent.AgentToolName || name == tools.ResearchToolName
 }
 
+// IsInternalContextTool reports whether a tool call is harness's own
+// context plumbing rather than work the user asked for (skill_search
+// and tool_search defer skill and MCP tool loading out of the system
+// prompt). These calls stay in the message history the model sees, but
+// never render in the transcript or the export.
+func IsInternalContextTool(name string) bool {
+	return name == agent.SkillSearchToolName || name == agent.ToolSearchToolName
+}
+
 // SetCompact implements the Compactable interface.
 func (t *baseToolMessageItem) SetCompact(compact bool) {
 	if t.isCompact == compact {

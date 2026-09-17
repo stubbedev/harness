@@ -11,6 +11,7 @@ import (
 
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/ui/chat"
 )
 
 // conversationExportPath returns the file path where the given session's
@@ -119,6 +120,11 @@ func renderMessageMarkdown(msg message.Message, results map[string]message.ToolR
 	}
 
 	for _, tc := range msg.ToolCalls() {
+		// Context plumbing (skill_search, tool_search) never shows on
+		// screen, so it never shows in the export either.
+		if chat.IsInternalContextTool(tc.Name) {
+			continue
+		}
 		fmt.Fprintf(&body, "#### Tool: %s\n\n", tc.Name)
 		if input := strings.TrimSpace(tc.Input); input != "" {
 			fmt.Fprintf(&body, "%s\n\n", codeBlock("json", prettyJSON(input)))

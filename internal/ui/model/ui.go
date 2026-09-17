@@ -1895,6 +1895,11 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 			}
 			continue
 		}
+		// Context plumbing (skill_search, tool_search) stays in the
+		// history the model sees but is noise in the transcript.
+		if chat.IsInternalContextTool(tc.Name) {
+			continue
+		}
 		if toolItem := m.chat.ToolItem(tc.ID); toolItem != nil {
 			existingToolCall := toolItem.ToolCall()
 			// only update if finished state changed or input changed

@@ -40,6 +40,7 @@ func testConversation() (session.Session, []message.Message) {
 			Parts: []message.ContentPart{
 				message.ReasoningContent{Thinking: "check the hot loop"},
 				message.TextContent{Text: "Let me look."},
+				message.ToolCall{ID: "call-s", Name: "skill_search", Input: `{"query":"testing"}`},
 				message.ToolCall{ID: "call-1", Name: "view", Input: `{"file_path":"parser.go"}`},
 			},
 		},
@@ -48,6 +49,7 @@ func testConversation() (session.Session, []message.Message) {
 			SessionID: "sess-123",
 			Role:      message.Tool,
 			Parts: []message.ContentPart{
+				message.ToolResult{ToolCallID: "call-s", Name: "skill_search", Content: "found: pr-builder"},
 				message.ToolResult{ToolCallID: "call-1", Name: "view", Content: "package parser"},
 			},
 		},
@@ -78,6 +80,9 @@ func TestRenderConversationMarkdown(t *testing.T) {
 		// conversation, so it never appears in the export.
 		require.NotContains(t, out, "<details><summary>Thinking</summary>")
 		require.NotContains(t, out, "check the hot loop")
+		// Context plumbing never shows on screen, so never in the export.
+		require.NotContains(t, out, "skill_search")
+		require.NotContains(t, out, "found: pr-builder")
 		require.Contains(t, out, "#### Tool: view")
 		require.Contains(t, out, `"file_path": "parser.go"`)
 		require.Contains(t, out, "package parser")

@@ -37,3 +37,33 @@ func TestIsSubagentTool(t *testing.T) {
 	assert.False(t, IsSubagentTool("bash"))
 	assert.False(t, IsSubagentTool("mcp_foo"))
 }
+
+func TestExtractMessageItemsSkipsInternalContextTools(t *testing.T) {
+	t.Parallel()
+	sty := groupStyles()
+
+	msg := &message.Message{
+		ID:   "m1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ToolCall{ID: "s1", Name: "skill_search", Input: `{"query":"test"}`, Finished: true},
+			message.ToolCall{ID: "t1", Name: "tool_search", Input: `{"load":["bash"]}`, Finished: true},
+			message.ToolCall{ID: "g1", Name: "grep", Input: `{"pattern":"foo"}`, Finished: true},
+		},
+	}
+	items := ExtractMessageItems(sty, msg, nil, "/tmp")
+
+	require.Len(t, items, 1, "only the grep call renders in the transcript")
+	tool, ok := items[0].(ToolMessageItem)
+	require.True(t, ok)
+	assert.Equal(t, "g1", tool.ID())
+}
+
+func TestIsInternalContextTool(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, IsInternalContextTool("skill_search"))
+	assert.True(t, IsInternalContextTool("tool_search"))
+	assert.False(t, IsInternalContextTool("agent"))
+	assert.False(t, IsInternalContextTool("bash"))
+}

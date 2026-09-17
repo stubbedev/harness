@@ -499,6 +499,11 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			if IsSubagentTool(tc.Name) {
 				continue
 			}
+			// Context plumbing (skill_search, tool_search) stays in the
+			// history the model sees but is noise in the transcript.
+			if IsInternalContextTool(tc.Name) {
+				continue
+			}
 			var result *message.ToolResult
 			if tr, ok := toolResults[tc.ID]; ok {
 				result = &tr

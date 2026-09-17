@@ -272,6 +272,11 @@ func (m *UI) updateAgentTaskFromChildSession(event message.Message) {
 	}
 
 	for _, tc := range event.ToolCalls() {
+		// Context plumbing (skill_search, tool_search) is noise even in
+		// the expanded task view.
+		if chat.IsInternalContextTool(tc.Name) {
+			continue
+		}
 		found := false
 		for _, existing := range task.nested {
 			if existing.ToolCall().ID == tc.ID {
