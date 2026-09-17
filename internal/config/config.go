@@ -804,6 +804,12 @@ type Config struct {
 	// Recently used models stored in the data directory config.
 	RecentModels map[SelectedModelType][]SelectedModel `json:"recent_models,omitempty" jsonschema:"-"`
 
+	// ReasoningEfforts remembers manual reasoning effort choices per
+	// model, keyed by "provider/model", so switching models and back
+	// restores each model's own effort instead of leaking the current
+	// one. Stored in the data directory config.
+	ReasoningEfforts map[string]string `json:"reasoning_efforts,omitempty" jsonschema:"-"`
+
 	// The providers that are configured
 	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
 
@@ -829,6 +835,11 @@ type Config struct {
 	LargeConfigured SelectedModel `json:"large_configured" jsonschema:"-"`
 }
 
+// ModelReasoningKey builds the ReasoningEfforts map key for a model.
+func ModelReasoningKey(provider, model string) string {
+	return provider + "/" + model
+}
+
 // cloneForWrite returns a copy of c that the store's typed field mutators
 // may modify without racing readers of the currently published Config.
 //
@@ -844,6 +855,7 @@ func (c *Config) cloneForWrite() *Config {
 	nc := *c
 	nc.Models = maps.Clone(c.Models)
 	nc.RecentModels = maps.Clone(c.RecentModels)
+	nc.ReasoningEfforts = maps.Clone(c.ReasoningEfforts)
 	nc.MCP = maps.Clone(c.MCP)
 	if c.Options != nil {
 		opts := *c.Options

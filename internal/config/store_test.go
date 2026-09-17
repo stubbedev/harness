@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -86,6 +87,31 @@ func TestConfigStore_SetConfigField_GlobalScopeAlwaysWorks(t *testing.T) {
 	data, err := readConfigJSON(globalPath)
 	require.NoError(t, err)
 	require.Equal(t, "bar", gjson.GetBytes(data, "foo").String())
+}
+
+func TestConfigStore_SetConfigField_ReasoningEffortsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	globalPath := filepath.Join(dir, "harness.yaml")
+	store := &ConfigStore{
+		config:         &Config{},
+		globalDataPath: globalPath,
+	}
+
+	// The whole map is written as one field: model IDs contain dots and
+	// slashes, which dot-separated field paths cannot express.
+	err := store.SetConfigField(ScopeGlobal, "reasoning_efforts", map[string]string{
+		ModelReasoningKey("zai", "glm-5.3"): "low",
+	})
+	require.NoError(t, err)
+
+	data, err := readConfigJSON(globalPath)
+	require.NoError(t, err)
+
+	var cfg Config
+	require.NoError(t, json.Unmarshal(data, &cfg))
+	require.Equal(t, map[string]string{"zai/glm-5.3": "low"}, cfg.ReasoningEfforts)
 }
 
 func TestConfigStore_RemoveConfigField_WorkspaceScopeGuard(t *testing.T) {

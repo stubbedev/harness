@@ -805,7 +805,7 @@ func (c *Config) defaultModelSelection(knownProviders []catalog.Provider) (large
 			Provider:        string(p.ID),
 			Model:           defaultLargeModel.ID,
 			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
-			ReasoningEffort: defaultLargeModel.DefaultReasoningEffort,
+			ReasoningEffort: catalog.HighestReasoningLevel(defaultLargeModel.ReasoningLevels),
 		}
 
 		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
@@ -820,7 +820,7 @@ func (c *Config) defaultModelSelection(knownProviders []catalog.Provider) (large
 			Provider:        string(p.ID),
 			Model:           defaultSmallModel.ID,
 			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
-			ReasoningEffort: defaultSmallModel.DefaultReasoningEffort,
+			ReasoningEffort: catalog.HighestReasoningLevel(defaultSmallModel.ReasoningLevels),
 		}
 		return largeModel, smallModel, err
 	}
@@ -911,7 +911,7 @@ func resolveSelectedModels(cfg *Config, knownProviders []catalog.Provider) (reso
 			if largeModelSelected.ReasoningEffort != "" {
 				large.ReasoningEffort = largeModelSelected.ReasoningEffort
 			} else {
-				large.ReasoningEffort = model.DefaultReasoningEffort
+				large.ReasoningEffort = catalog.HighestReasoningLevel(model.ReasoningLevels)
 			}
 			large.Think = largeModelSelected.Think
 			if largeModelSelected.Temperature != nil {
@@ -956,7 +956,7 @@ func resolveSelectedModels(cfg *Config, knownProviders []catalog.Provider) (reso
 			if smallModelSelected.ReasoningEffort != "" {
 				small.ReasoningEffort = smallModelSelected.ReasoningEffort
 			} else {
-				small.ReasoningEffort = model.DefaultReasoningEffort
+				small.ReasoningEffort = catalog.HighestReasoningLevel(model.ReasoningLevels)
 			}
 			if smallModelSelected.Temperature != nil {
 				small.Temperature = smallModelSelected.Temperature

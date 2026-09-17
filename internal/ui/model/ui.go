@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"maps"
 	"math/rand"
 	"net/http"
 	"os"
@@ -2194,6 +2195,21 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 
+		// Remember the choice per model so switching models and back
+		// restores it instead of leaking the current model's effort. The
+		// whole map is written in one field: model IDs contain dots, which
+		// the dot-separated field paths cannot express.
+		if currentModel.Provider != "" && currentModel.Model != "" {
+			efforts := maps.Clone(cfg.ReasoningEfforts)
+			if efforts == nil {
+				efforts = make(map[string]string)
+			}
+			efforts[config.ModelReasoningKey(currentModel.Provider, currentModel.Model)] = msg.Effort
+			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "reasoning_efforts", efforts); err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			}
+		}
+
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 			m.com.Workspace.UpdateAgentModel(context.TODO())
 			return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
@@ -2399,6 +2415,13 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 			cmds = append(cmds, cmd)
 		}
 		return tea.Batch(cmds...)
+	}
+
+	// Restore a remembered per-model reasoning effort so manual choices
+	// survive model switches; without one the selection defaults to the
+	// model's highest supported level.
+	if effort, ok := cfg.ReasoningEfforts[config.ModelReasoningKey(msg.Model.Provider, msg.Model.Model)]; ok {
+		msg.Model.ReasoningEffort = effort
 	}
 
 	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {

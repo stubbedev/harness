@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 )
@@ -30,7 +31,7 @@ func (m *UI) modelInfo(width int) string {
 						reasoningInfo = "Thinking Off"
 					}
 				} else {
-					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, model.CatalogCfg.DefaultReasoningEffort)
+					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, catalog.HighestReasoningLevel(model.CatalogCfg.ReasoningLevels))
 					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
 				}
 			}
