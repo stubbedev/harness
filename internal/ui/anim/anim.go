@@ -30,8 +30,9 @@ const (
 	ellipsisAnimSpeed = 8
 
 	// Frames each pulse glyph stays on screen before the next one, so
-	// the pulse breathes instead of strobing at the full frame rate.
-	pulseAnimSpeed = 8
+	// the single cell spins at a readable pace instead of strobing at
+	// the full frame rate.
+	pulseAnimSpeed = 2
 
 	// The maximum number of animation steps that can pass before a
 	// character appears. With fps == 20 this is ~1s of staggered
@@ -62,9 +63,8 @@ var (
 	ellipsisFrames = []string{".", "..", "...", ""}
 
 	// DefaultPulseGlyphs is the default frame set for the minimal
-	// single-glyph pulse animation: a half disc rotating through its
-	// four orientations.
-	DefaultPulseGlyphs = []string{"◐", "◓", "◑", "◒"}
+	// single-glyph spinner: the classic braille dot sequence.
+	DefaultPulseGlyphs = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 )
 
 // Internal ID management. The ID seeds the deterministic birth schedule so
