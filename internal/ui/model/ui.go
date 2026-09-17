@@ -2850,6 +2850,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Editor.Skills) && m.textarea.Value() == "":
+				if cmd := m.openSkillsDialog(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Editor.Commands) && m.textarea.Value() == "":
 				if cmd := m.openCommandsDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
@@ -4711,6 +4715,31 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	m.dialog.OpenDialog(commands)
 
 	return commands.InitialCmd()
+}
+
+// openSkillsDialog opens the skills palette, the "/" counterpart of
+// the commands palette.
+func (m *UI) openSkillsDialog() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.CommandsID) {
+		// Already the skills palette: bring it to front. The commands
+		// palette is swapped for the skills one instead.
+		if front := m.dialog.DialogLast(); front != nil {
+			if c, ok := front.(*dialog.Commands); ok && c.SkillsOnly() {
+				m.dialog.BringToFront(dialog.CommandsID)
+				return nil
+			}
+		}
+		m.dialog.CloseDialog(dialog.CommandsID)
+	}
+
+	skillsDialog, err := dialog.NewSkills(m.com, m.customCommands)
+	if err != nil {
+		return util.ReportError(err)
+	}
+
+	m.dialog.OpenDialog(skillsDialog)
+
+	return skillsDialog.InitialCmd()
 }
 
 // openReasoningDialog opens the reasoning effort dialog.

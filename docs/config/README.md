@@ -458,7 +458,7 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `dialog.up_down` | `up`, `down` |
 | `editor.add_image` | `ctrl+f` |
 | `editor.attachment_delete_mode` | `ctrl+r` |
-| `editor.commands` | `/` |
+| `editor.commands` | `:` |
 | `editor.copy_selection` | `ctrl+shift+c` |
 | `editor.cut_selection` | `ctrl+shift+x` |
 | `editor.delete_all_attachments` | `r` |
@@ -473,6 +473,7 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `editor.paste_text` | `ctrl+shift+v` |
 | `editor.select_all` | `ctrl+shift+a` |
 | `editor.send_message` | `enter` |
+| `editor.skills` | `/` |
 | `export_conversation` | `ctrl+shift+e` |
 | `help` | `ctrl+g` |
 | `models` | `ctrl+m`, `ctrl+l` |

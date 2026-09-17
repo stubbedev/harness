@@ -25,12 +25,15 @@ const CommandsID = "commands"
 type CommandType uint
 
 // String returns the string representation of the CommandType.
-func (c CommandType) String() string { return []string{"System", "User", "MCP"}[c] }
+func (c CommandType) String() string {
+	return []string{"System", "User", "MCP", "Skills"}[c]
+}
 
 const (
 	SystemCommands CommandType = iota
 	UserCommands
 	MCPPrompts
+	SkillsCommands
 )
 
 // Commands represents a dialog that shows available commands.
@@ -63,6 +66,10 @@ type Commands struct {
 
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
+
+	// skillsOnly restricts the dialog to the skills palette: a single
+	// list of agent skills with no tab cycling.
+	skillsOnly bool
 }
 
 var _ Dialog = (*Commands)(nil)
@@ -120,6 +127,23 @@ func (c *Commands) ID() string {
 	return CommandsID
 }
 
+// NewSkills creates a dialog listing only agent skills, the palette
+// behind the "/" prefix.
+func NewSkills(com *common.Common, customCommands []commands.CustomCommand) (*Commands, error) {
+	c, err := NewCommands(com, "", false, false, false, customCommands, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.skillsOnly = true
+	c.setCommandItems(SkillsCommands)
+	return c, nil
+}
+
+// SkillsOnly reports whether the dialog is the skills palette.
+func (c *Commands) SkillsOnly() bool {
+	return c.skillsOnly
+}
+
 // HandleMsg implements [Dialog].
 func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
@@ -156,12 +180,12 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 				}
 			}
 		case key.Matches(msg, c.keyMap.Tab):
-			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
+			if !c.skillsOnly && (len(c.customCommands) > 0 || len(c.mcpPrompts) > 0) {
 				c.selected = c.nextCommandType()
 				c.setCommandItems(c.selected)
 			}
 		case key.Matches(msg, c.keyMap.ShiftTab):
-			if len(c.customCommands) > 0 || len(c.mcpPrompts) > 0 {
+			if !c.skillsOnly && (len(c.customCommands) > 0 || len(c.mcpPrompts) > 0) {
 				c.selected = c.previousCommandType()
 				c.setCommandItems(c.selected)
 			}
@@ -251,7 +275,11 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
-	rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
+	if c.skillsOnly {
+		rc.Title = "Skills"
+	} else {
+		rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
+	}
 	inputView := t.Dialog.InputPrompt.Render(c.input.View())
 	rc.AddPart(inputView)
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
@@ -328,6 +356,8 @@ func (c *Commands) previousCommandType() CommandType {
 			return UserCommands
 		}
 		return SystemCommands
+	case SkillsCommands:
+		return SkillsCommands
 	default:
 		return SystemCommands
 	}
@@ -345,22 +375,18 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 		}
 	case UserCommands:
 		for _, cmd := range c.customCommands {
-			var action Action
+			// Skills live in their own palette behind "/".
 			if cmd.Skill != nil {
-				action = ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
-			} else {
-				action = ActionRunCustomCommand{
-					Content:     cmd.Content,
-					Arguments:   cmd.Arguments,
-					Skill:       cmd.Skill,
-					ExtensionID: cmd.ExtensionID,
-				}
+				continue
+			}
+			action := ActionRunCustomCommand{
+				Content:     cmd.Content,
+				Arguments:   cmd.Arguments,
+				Skill:       cmd.Skill,
+				ExtensionID: cmd.ExtensionID,
 			}
 			item := NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
-			switch {
-			case cmd.Skill != nil:
-				item = item.WithDescription(cmd.Skill.Description)
-			case cmd.Description != "":
+			if cmd.Description != "" {
 				item = item.WithDescription(cmd.Description)
 			}
 			commandItems = append(commandItems, item)
@@ -375,6 +401,16 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 				Arguments:   cmd.Arguments,
 			}
 			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "mcp_"+cmd.ID, cmd.PromptID, "", action))
+		}
+	case SkillsCommands:
+		for _, cmd := range c.customCommands {
+			if cmd.Skill == nil {
+				continue
+			}
+			action := ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
+			item := NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
+			item = item.WithDescription(cmd.Skill.Description)
+			commandItems = append(commandItems, item)
 		}
 	}
 
