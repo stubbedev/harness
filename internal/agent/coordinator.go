@@ -2029,6 +2029,9 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 		// delivered with the result even when the run failed or was
 		// cancelled — that guarantee is the tool's whole point.
 		appendSubagentMessages(&resp, c.drainSubagentMessages(session.ID))
+		// Ground the report: flag cited paths that do not exist before the
+		// orchestrator acts on them.
+		c.warnOnFabricatedPaths(params, &resp)
 		c.fireSubagentStopHooks(context.WithoutCancel(ctx), session.ID, params.AgentName, finalStatus, &resp)
 	}()
 
@@ -2182,6 +2185,7 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 				slog.Warn("Dropping stranded subagent message", "child_session", session.ID, "error", err)
 			}
 		}
+		c.warnOnFabricatedPaths(params, &resp)
 		c.fireSubagentStopHooks(context.WithoutCancel(ctx), session.ID, params.AgentName, finalStatus, &resp)
 		run.finish(finalStatus, resp)
 		c.runtime.Finish(session.ID, finalStatus)
