@@ -121,7 +121,8 @@ func hasFileExtension(name string) bool {
 		return false
 	}
 	for _, r := range ext {
-		if !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9') {
+		isAlnum := 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9'
+		if !isAlnum {
 			return false
 		}
 	}

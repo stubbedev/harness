@@ -482,6 +482,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// it (the textarea's select-all, the chat items' copy/scroll keys), so
 	// user overrides from options.tui.keybinds reach every consumer.
 	keyMap := *com.KeyMap()
+	// Floating dialogs anchor to the bottom edge (which-key style) unless
+	// the user asked for the top-floating noice.nvim placement.
+	dialog.InstallPlacement(com.Config().Options.TUI.DialogPlacement)
 
 	// Editor components
 	ta := textarea.New()

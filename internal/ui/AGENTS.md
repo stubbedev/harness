@@ -167,6 +167,9 @@ chat and the pills.
   `ID()`, `HandleMsg()` returning an `Action`, `Draw()` onto `uv.Screen`.
 - `Overlay` manages a stack of dialogs with push/pop/contains operations.
 - Dialogs draw last and overlay everything else.
+- Position via `DrawCenterCursor`/`DrawCenter` — never center by hand. They
+  anchor horizontally centered, vertically per `options.tui.dialog_placement`:
+  bottom edge (which-key style, the default) or top edge (noice.nvim style).
 - Use `RenderContext` from `dialog/common.go` for consistent layout (title
   gradients, width, gap, cursor offset helpers).
 

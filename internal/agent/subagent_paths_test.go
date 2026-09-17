@@ -46,6 +46,7 @@ func TestWarnOnFabricatedPaths(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "real.go"), []byte("x"), 0o644))
 
 	t.Run("appends a warning listing the missing paths", func(t *testing.T) {
+		t.Parallel()
 		resp := fantasy.NewTextResponse("Map done: real.go and internal/coach/ui.go.")
 		c.warnOnFabricatedPaths(subAgentParams{AgentName: "fast"}, &resp)
 		require.False(t, resp.IsError)
@@ -56,12 +57,14 @@ func TestWarnOnFabricatedPaths(t *testing.T) {
 	})
 
 	t.Run("leaves grounded reports untouched", func(t *testing.T) {
+		t.Parallel()
 		resp := fantasy.NewTextResponse("Map done: real.go.")
 		c.warnOnFabricatedPaths(subAgentParams{AgentName: "fast"}, &resp)
 		require.NotContains(t, resp.Content, "## Warning")
 	})
 
 	t.Run("skips research dispatches and error responses", func(t *testing.T) {
+		t.Parallel()
 		resp := fantasy.NewTextResponse("saved to page-123.md, see internal/ghost/x.go")
 		c.warnOnFabricatedPaths(subAgentParams{AgentName: "research"}, &resp)
 		require.NotContains(t, resp.Content, "## Warning")

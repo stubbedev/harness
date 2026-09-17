@@ -339,6 +339,7 @@ options:
     mouse: true # false lets the terminal or tmux own selection and copy
     scrollbar: default # default | always | never
     exit_banner: default # default | compact | none
+    dialog_placement: bottom # bottom (which-key style) | top (noice.nvim style)
     git_status: true # branch and working-tree status in the header
     show_thinking: true # render reasoning blocks in the transcript
     textarea_min_height: 1 # collapsed height of the prompt; it grows to fit

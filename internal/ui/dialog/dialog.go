@@ -1,12 +1,15 @@
 package dialog
 
 import (
+	"image"
+	"sync/atomic"
 	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
 )
@@ -68,6 +71,45 @@ const (
 	// from keeping the dialog disarmed indefinitely.
 	graceMaxDelay = 1500 * time.Millisecond
 )
+
+// dialogPlacement records where dialogs anchor. Installed once at UI
+// startup from options.tui.dialog_placement; the zero value is the
+// bottom-anchored default, so dialogs render correctly before (or
+// without) installation.
+var dialogPlacement atomic.Value // string
+
+// InstallPlacement records where dialogs anchor on screen: "top" floats
+// them at the top edge (noice.nvim style); anything else anchors them to
+// the bottom edge (which-key style, the default).
+func InstallPlacement(placement string) {
+	dialogPlacement.Store(placement)
+}
+
+// placementTop reports whether dialogs currently anchor to the top.
+func placementTop() bool {
+	v, _ := dialogPlacement.Load().(string)
+	return v == config.DialogPlacementTop
+}
+
+// AnchorRect returns the rectangle a view of the given size occupies in
+// area: horizontally centered, and anchored to the configured screen edge.
+func AnchorRect(area uv.Rectangle, width, height int) uv.Rectangle {
+	if width > area.Dx() {
+		width = area.Dx()
+	}
+	if height > area.Dy() {
+		height = area.Dy()
+	}
+	x := area.Min.X + (area.Dx()-width)/2
+	y := area.Max.Y - height
+	if placementTop() {
+		y = area.Min.Y
+	}
+	return uv.Rectangle{
+		Min: image.Pt(x, y),
+		Max: image.Pt(x+width, y+height),
+	}
+}
 
 // Overlay manages multiple dialogs as an overlay.
 type Overlay struct {
@@ -260,20 +302,22 @@ func (d *Overlay) StopLoading() {
 	}
 }
 
-// DrawCenterCursor draws the given string view centered in the screen area and
-// adjusts the cursor position accordingly. Content larger than the area is
-// clamped to fit.
+// DrawCenterCursor draws the given string view anchored in the screen area
+// and adjusts the cursor position accordingly. Content larger than the area
+// is clamped to fit. Horizontally the view stays centered; vertically it
+// anchors per the configured dialog placement: bottom (the default,
+// which-key style) or top (noice.nvim style).
 func DrawCenterCursor(scr uv.Screen, area uv.Rectangle, view string, cur *tea.Cursor) {
 	width, height := lipgloss.Size(view)
 	// Clamp to available area so oversized dialogs don't draw outside bounds.
 	width = min(width, area.Dx())
 	height = min(height, area.Dy())
-	center := common.CenterRect(area, width, height)
+	anchor := AnchorRect(area, width, height)
 	if cur != nil {
-		cur.X += center.Min.X
-		cur.Y += center.Min.Y
+		cur.X += anchor.Min.X
+		cur.Y += anchor.Min.Y
 	}
-	uv.NewStyledString(view).Draw(scr, center)
+	uv.NewStyledString(view).Draw(scr, anchor)
 }
 
 // DrawCenter draws the given string view centered in the screen area.

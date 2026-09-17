@@ -921,6 +921,15 @@
           "description": "Exit banner style after quitting Harness",
           "default": "default"
         },
+        "dialog_placement": {
+          "type": "string",
+          "enum": [
+            "bottom",
+            "top"
+          ],
+          "description": "Where floating dialogs (command palette, sessions, models, themes, ...) anchor on screen: the bottom edge like which-key popups, or the top like noice.nvim",
+          "default": "bottom"
+        },
         "git_status": {
           "type": "boolean",
           "description": "Show git branch and working-tree status in the compact header",

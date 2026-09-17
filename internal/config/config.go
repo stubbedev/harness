@@ -292,6 +292,7 @@ type TUIOptions struct {
 	Scrollbar         string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
 	Mouse             *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
 	ExitBanner        ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Harness,enum=default,enum=compact,enum=none,default=default"`
+	DialogPlacement   string      `json:"dialog_placement,omitempty" jsonschema:"description=Where floating dialogs (command palette\\, sessions\\, models\\, themes\\, ...) anchor on screen: the bottom edge like which-key popups\\, or the top like noice.nvim,enum=bottom,enum=top,default=bottom"`
 	GitStatus         *bool       `json:"git_status,omitempty" jsonschema:"description=Show git branch and working-tree status in the compact header,default=true"`
 	ShowThinking      *bool       `json:"show_thinking,omitempty" jsonschema:"description=Render model reasoning (thinking) blocks in the transcript. Reasoning is still requested\\, streamed and stored when disabled - only the rendering is suppressed,default=true"`
 	TextareaMinHeight *int        `json:"textarea_min_height,omitempty" jsonschema:"description=Minimum height of the prompt textarea in rows. The textarea grows to fit content\\, so this only sets the collapsed floor. Values below 1 are clamped to 1.,default=1,example=1,example=3,example=5"`
@@ -333,6 +334,21 @@ func (t *TUIOptions) ShowGitStatus() bool {
 // the transcript. The nil receiver and the unset pointer both mean enabled.
 func (t *TUIOptions) ShouldShowThinking() bool {
 	return t == nil || t.ShowThinking == nil || *t.ShowThinking
+}
+
+// Dialog anchor placements: "bottom" anchors floating dialogs to the
+// bottom edge of the screen (which-key style), "top" floats them at the
+// top (noice.nvim style).
+const (
+	DialogPlacementBottom = "bottom"
+	DialogPlacementTop    = "top"
+)
+
+// DialogsAnchorTop reports whether floating dialogs anchor to the top of
+// the screen. The nil receiver and every value other than "top" mean the
+// bottom-anchored default.
+func (t *TUIOptions) DialogsAnchorTop() bool {
+	return t != nil && t.DialogPlacement == DialogPlacementTop
 }
 
 // DefaultTextareaMinHeight is the prompt textarea's minimum height in rows
