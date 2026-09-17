@@ -436,7 +436,11 @@ type Styles struct {
 		TitleGradFromColor color.Color    // Default dialog title ╱╱╱ gradient start
 		TitleGradToColor   color.Color    // Default dialog title ╱╱╱ gradient end
 		// View is the main content area style.
-		View          lipgloss.Style
+		View lipgloss.Style
+		// ViewBottom is the bottom-anchored variant of View: a top border
+		// only, no side or bottom borders, so a full-width panel's last
+		// content row sits on the bottommost screen line.
+		ViewBottom    lipgloss.Style
 		PrimaryText   lipgloss.Style
 		SecondaryText lipgloss.Style
 		// HelpView is the line that contains the help.
@@ -454,6 +458,10 @@ type Styles struct {
 		NormalItem   lipgloss.Style
 		SelectedItem lipgloss.Style
 		InputPrompt  lipgloss.Style
+		// InputBottom is the input row style for the bottom-anchored panel:
+		// like InputPrompt but without the bottom margin, so the input is
+		// the panel's last line.
+		InputBottom lipgloss.Style
 
 		List lipgloss.Style
 

@@ -93,6 +93,7 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 
 	s.input = textinput.New()
 	s.input.SetVirtualCursor(false)
+	s.input.Prompt = "❯ "
 	s.input.Placeholder = "Enter session name"
 	s.input.SetStyles(com.Styles.TextInput)
 	s.input.Focus()
@@ -253,9 +254,9 @@ func (s *Session) Cursor() *tea.Cursor {
 func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := s.com.Styles
 	s.bodyArea = image.Rectangle{}
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+	width := DialogWidth(t, area)
+	height := DialogHeightCeiling(t, area, defaultDialogHeight)
+	innerWidth := DialogInnerWidth(t, width)
 	s.input.SetWidth(dialogInputTextWidth(t, s.input, innerWidth))
 	listHeight, listTotalHeight, listWidth := sizeDialogList(t, s.list, innerWidth, height)
 
@@ -326,9 +327,7 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			cur.Y += 1
 		}
 	default:
-		inputView := t.Dialog.InputPrompt.Render(s.input.View())
-		cur = s.Cursor()
-		rc.AddPart(inputView)
+		rc.AddInput(s.input.View())
 	}
 	bodyView := t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
 	bodyView = joinScrollbar(t, bodyView, listHeight, listTotalHeight, listHeight, s.list.Offset())
@@ -336,6 +335,9 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Help = renderDialogHelp(t, &s.help, s, innerWidth)
 
 	view := rc.Render()
+	if cur == nil && s.sessionsMode != sessionsModeUpdating {
+		cur = DialogCursor(t, view, s.input.Cursor())
+	}
 	s.updateSessionListArea(area, view, bodyView, rc.Help, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
 
 	DrawCenterCursor(scr, area, view, cur)

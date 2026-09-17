@@ -91,8 +91,16 @@ func placementTop() bool {
 	return v == config.DialogPlacementTop
 }
 
+// anchoredAtBottom reports whether dialogs currently anchor to the
+// bottom edge (the default, which-key mode).
+func anchoredAtBottom() bool {
+	return !placementTop()
+}
+
 // AnchorRect returns the rectangle a view of the given size occupies in
-// area: horizontally centered, and anchored to the configured screen edge.
+// area. Bottom-anchored (which-key) mode: full-width panel flush with the
+// bottom edge. Top (noice.nvim) mode: horizontally centered, floating
+// about 30% down from the top rather than vertically centered.
 func AnchorRect(area uv.Rectangle, width, height int) uv.Rectangle {
 	if width > area.Dx() {
 		width = area.Dx()
@@ -103,7 +111,10 @@ func AnchorRect(area uv.Rectangle, width, height int) uv.Rectangle {
 	x := area.Min.X + (area.Dx()-width)/2
 	y := area.Max.Y - height
 	if placementTop() {
-		y = area.Min.Y
+		y = area.Min.Y + area.Dy()*3/10
+		if y+height > area.Max.Y {
+			y = area.Max.Y - height
+		}
 	}
 	return uv.Rectangle{
 		Min: image.Pt(x, y),

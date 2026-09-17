@@ -424,7 +424,7 @@ func (c *choiceList) height(width int) int {
 		width = c.lastWidth
 	}
 	innerWidth := min(width-4, choiceListMaxWidth)
-	return len(c.buildLines(innerWidth, "> ", func(int, question.Choice, bool, int) string {
+	return len(c.buildLines(innerWidth, "❯ ", func(int, question.Choice, bool, int) string {
 		return "x" // single-line placeholder; only count matters
 	}))
 }
@@ -493,7 +493,7 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 	c.clampScroll(lines, viewport)
 
 	// Blit the visible window.
-	fillPrefix := c.Styles.Editor.QuestionBody.Render("> ")
+	fillPrefix := c.Styles.Editor.QuestionBody.Render("❯ ")
 	var cur *tea.Cursor
 	for screenRow := range viewport {
 		idx := c.scrollOffset + screenRow
@@ -511,7 +511,7 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 			}
 		}
 		if ln.noteRow {
-			const notePrefix = "> "
+			const notePrefix = "❯ "
 			if tc := c.noteCursor(screenRow, area.Min.X, lipgloss.Width(notePrefix)); tc != nil {
 				cur = tc
 			}

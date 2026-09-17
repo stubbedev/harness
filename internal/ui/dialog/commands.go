@@ -98,6 +98,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary, h
 
 	c.input = textinput.New()
 	c.input.SetVirtualCursor(false)
+	c.input.Prompt = "❯ "
 	c.input.Placeholder = "Type to filter"
 	c.input.SetStyles(com.Styles.TextInput)
 	c.input.Focus()
@@ -251,8 +252,8 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 // Draw implements [Dialog].
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
-	width := max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
+	width := DialogWidth(t, area)
+	height := DialogHeightCeiling(t, area, defaultDialogHeight)
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
 		// since some items in the list depend on width (e.g. toggle sidebar command),
@@ -260,15 +261,18 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		c.setCommandItems(c.selected)
 	}
 
-	innerWidth := width - c.com.Styles.Dialog.View.GetHorizontalFrameSize()
+	innerWidth := DialogInnerWidth(t, width)
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
+		ActiveInput(t).GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
+		ActiveFrame(t).GetVerticalFrameSize()
+	// Hug the content: the list viewport never exceeds its item count, so
+	// a short list shrinks the panel instead of padding blank rows.
+	listHeight := min(max(0, height-heightOffset), c.list.TotalHeight())
 
 	c.input.SetWidth(dialogInputTextWidth(t, c.input, innerWidth))
 
-	c.list.SetSize(innerWidth, max(0, height-heightOffset))
+	c.list.SetSize(innerWidth, listHeight)
 
 	// Hide the shortcut hints uniformly when the widest would crowd names.
 	applyInfoColumnVisibility(c.list.FilteredItems(), innerWidth, commandInfoMaxPercent)
@@ -280,8 +284,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	} else {
 		rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
 	}
-	inputView := t.Dialog.InputPrompt.Render(c.input.View())
-	rc.AddPart(inputView)
+	rc.AddInput(c.input.View())
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
 	rc.AddPart(listView)
 	rc.Help = renderDialogHelp(t, &c.help, c, innerWidth)
@@ -292,7 +295,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	view := rc.Render()
 
-	cur := c.Cursor()
+	cur := DialogCursor(t, view, c.input.Cursor())
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }

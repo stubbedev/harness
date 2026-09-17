@@ -106,6 +106,28 @@ func TestUpdateLayoutAndSize_EditorGrowthShrinksChat(t *testing.T) {
 	}
 }
 
+// TestEditorRectRunsFlushInEveryState pins that the editor region reaches
+// the screen edges the same way in every state that has one. uiLanding
+// and uiOnboarding apply an extra cell of side padding to appRect that
+// uiChat does not; the editor rect must cancel exactly its ancestor's
+// padding, not a hardcoded guess, or the two states silently drift apart
+// (this regressed once already: uiLanding's editor kept one uncancelled
+// cell of padding while uiChat's did not).
+func TestEditorRectRunsFlushInEveryState(t *testing.T) {
+	t.Parallel()
+
+	const w, h = 140, 45
+	for _, state := range []uiState{uiLanding, uiChat} {
+		u := newTestUI()
+		u.state = state
+		layout := u.generateLayout(w, h)
+		if layout.editor.Min.X != 0 || layout.editor.Max.X != w {
+			t.Errorf("state %v: editor = [%d, %d), want [0, %d) - flush with the screen edges",
+				state, layout.editor.Min.X, layout.editor.Max.X, w)
+		}
+	}
+}
+
 func TestHandleTextareaHeightChange_FollowModeStaysAtBottom(t *testing.T) {
 	t.Parallel()
 

@@ -24,7 +24,6 @@ import (
 const (
 	// ConnectID is the identifier for the provider connection dialog.
 	ConnectID              = "connect"
-	connectDialogMaxWidth  = 60
 	connectDialogMinHeight = 8
 	connectDialogMaxHeight = 20
 )
@@ -63,6 +62,7 @@ func NewConnect(com *common.Common) (*Connect, error) {
 
 	c.input = textinput.New()
 	c.input.SetVirtualCursor(false)
+	c.input.Prompt = "❯ "
 	c.input.Placeholder = "Find a provider to connect"
 	c.input.SetStyles(com.Styles.TextInput)
 	c.input.Focus()
@@ -155,24 +155,24 @@ func (c *Connect) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (c *Connect) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	st := c.com.Styles
-	width := max(0, min(connectDialogMaxWidth, area.Dx()-st.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := width - st.Dialog.View.GetHorizontalFrameSize()
+	width := DialogWidth(st, area)
+	innerWidth := DialogInnerWidth(st, width)
 
 	c.input.SetWidth(dialogInputTextWidth(st, c.input, innerWidth))
 
 	heightOffset := st.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		st.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
+		ActiveInput(st).GetVerticalFrameSize() + inputContentHeight +
 		st.Dialog.HelpView.GetVerticalFrameSize() +
-		st.Dialog.View.GetVerticalFrameSize()
+		ActiveFrame(st).GetVerticalFrameSize()
 	desiredHeight := heightOffset + c.list.TotalHeight()
-	maxAvailable := area.Dy() - st.Dialog.View.GetVerticalBorderSize()
+	maxAvailable := DialogHeightCeiling(st, area, connectDialogMaxHeight)
 	height := max(connectDialogMinHeight, min(connectDialogMaxHeight, desiredHeight, maxAvailable))
 
 	listHeight, listTotalHeight, _ := sizeDialogList(st, c.list, innerWidth, height)
 
 	rc := NewRenderContext(st, width)
 	rc.Title = "Connect Provider"
-	rc.AddPart(st.Dialog.InputPrompt.Render(c.input.View()))
+	rc.AddInput(c.input.View())
 
 	listView := st.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
 	listView = joinScrollbar(st, listView, listHeight, listTotalHeight, listHeight, c.list.Offset())
@@ -181,7 +181,7 @@ func (c *Connect) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	view := rc.Render()
 
-	cur := c.Cursor()
+	cur := DialogCursor(st, view, c.input.Cursor())
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }

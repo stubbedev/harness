@@ -16,7 +16,6 @@ import (
 const (
 	// NotificationsID is the identifier for the notification style picker dialog.
 	NotificationsID              = "notifications"
-	notificationsDialogMaxWidth  = 50
 	notificationsDialogMaxHeight = 12
 )
 
@@ -87,6 +86,7 @@ func NewNotifications(com *common.Common) *Notifications {
 
 	n.input = textinput.New()
 	n.input.SetVirtualCursor(false)
+	n.input.Prompt = "❯ "
 	n.input.Placeholder = "Type to filter"
 	n.input.SetStyles(com.Styles.TextInput)
 	n.input.Focus()
@@ -167,21 +167,20 @@ func (n *Notifications) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := n.com.Styles
-	width := max(0, min(notificationsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(notificationsDialogMaxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+	width := DialogWidth(t, area)
+	height := DialogHeightCeiling(t, area, notificationsDialogMaxHeight)
+	innerWidth := DialogInnerWidth(t, width)
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
+		ActiveInput(t).GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
+		ActiveFrame(t).GetVerticalFrameSize()
 
 	n.input.SetWidth(dialogInputTextWidth(t, n.input, innerWidth))
 	n.list.SetSize(innerWidth, max(0, height-heightOffset))
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Notification Style"
-	inputView := t.Dialog.InputPrompt.Render(n.input.View())
-	rc.AddPart(inputView)
+	rc.AddInput(n.input.View())
 
 	visibleCount := len(n.list.FilteredItems())
 	if n.list.Height() >= visibleCount {
@@ -196,7 +195,7 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	view := rc.Render()
 
-	cur := n.Cursor()
+	cur := DialogCursor(t, view, n.input.Cursor())
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }

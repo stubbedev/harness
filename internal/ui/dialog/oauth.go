@@ -228,8 +228,8 @@ type oauthSaveErrMsg struct {
 func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	var (
 		t           = m.com.Styles
-		dialogWidth = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-		dialogStyle = t.Dialog.View.Width(dialogWidth)
+		dialogWidth = DialogWidth(t, area)
+		dialogStyle = ActiveFrame(t).Width(dialogWidth)
 	)
 	m.width = dialogWidth
 	if m.isOnboarding {
@@ -250,7 +250,7 @@ func (m *OAuth) dialogContent() string {
 		return m.innerDialogContent()
 
 	default:
-		innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+		innerWidth := DialogInnerWidth(t, m.width)
 		elements := []string{
 			m.headerContent(),
 			m.innerDialogContent(),
@@ -265,7 +265,7 @@ func (m *OAuth) headerContent() string {
 		t            = m.com.Styles
 		titleStyle   = t.Dialog.Title
 		textStyle    = t.Dialog.PrimaryText
-		dialogStyle  = t.Dialog.View.Width(m.width)
+		dialogStyle  = ActiveFrame(t).Width(m.width)
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 		dialogTitle  = fmt.Sprintf("Let’s authenticate with %s", m.oAuthProvider.name())
 	)
@@ -289,7 +289,7 @@ func (m *OAuth) innerDialogContent() string {
 	// innerWidth is the dialog's content area: total width minus the
 	// View frame (border). Every block sizes to this so nothing gets
 	// re-wrapped when the dialog frame renders it.
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+	innerWidth := DialogInnerWidth(t, m.width)
 
 	switch m.State {
 	case OAuthStateInitializing:

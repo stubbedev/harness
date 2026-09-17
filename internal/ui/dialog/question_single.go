@@ -203,9 +203,9 @@ func (d *SingleChoice) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// item, mirroring how a selected choice's label is styled. This
 	// lets the pink prompt carry the selection so the gutter bar
 	// doesn't have to stay lit for it.
-	fillPrefix := d.Styles.Editor.QuestionBody.Render("> ")
+	fillPrefix := d.Styles.Editor.QuestionBody.Render("❯ ")
 	if d.isFillIn() {
-		fillPrefix = d.Styles.Editor.QuestionSelected.Render("> ")
+		fillPrefix = d.Styles.Editor.QuestionSelected.Render("❯ ")
 	}
 
 	unselectedHeader := d.Styles.Editor.QuestionUnselected

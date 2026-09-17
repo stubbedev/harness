@@ -157,12 +157,12 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
 
-	m.width = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize() - 2
+	m.width = DialogWidth(t, area)
+	innerWidth := DialogInnerWidth(t, m.width) - 2
 	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
 
 	textStyle := t.Dialog.SecondaryText
-	dialogStyle := t.Dialog.View.Width(m.width)
+	dialogStyle := ActiveFrame(t).Width(m.width)
 	inputStyle := t.Dialog.InputPrompt
 	helpView := renderDialogHelp(t, &m.help, m, m.width-dialogStyle.GetHorizontalFrameSize())
 
@@ -195,7 +195,7 @@ func (m *APIKeyInput) headerView() string {
 		t           = m.com.Styles
 		titleStyle  = t.Dialog.Title
 		textStyle   = t.Dialog.PrimaryText
-		dialogStyle = t.Dialog.View.Width(m.width)
+		dialogStyle = ActiveFrame(t).Width(m.width)
 	)
 	if m.isOnboarding {
 		return textStyle.Render(m.dialogTitle())
@@ -229,7 +229,7 @@ func (m *APIKeyInput) inputView() string {
 
 	switch m.state {
 	case APIKeyInputStateInitial:
-		m.input.Prompt = "> "
+		m.input.Prompt = "❯ "
 		m.input.SetStyles(t.TextInput)
 		m.input.Focus()
 	case APIKeyInputStateVerifying:

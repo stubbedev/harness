@@ -26,7 +26,19 @@ func TestAnchorRectTopWhenInstalled(t *testing.T) {
 	area := uv.Rectangle{Min: image.Pt(0, 0), Max: image.Pt(100, 40)}
 	got := AnchorRect(area, 40, 10)
 
-	require.Equal(t, image.Rect(30, 0, 70, 10), got, "top-floating: flush with the top edge, horizontally centered")
+	// noice.nvim style: floating, about 30% down from the top.
+	require.Equal(t, image.Rect(30, 12, 70, 22), got)
+}
+
+func TestAnchorRectTopClampsTallViews(t *testing.T) {
+	// Not parallel: installs process-wide placement state.
+	t.Cleanup(func() { InstallPlacement(config.DialogPlacementBottom) })
+	InstallPlacement(config.DialogPlacementTop)
+
+	area := uv.Rectangle{Min: image.Pt(0, 0), Max: image.Pt(100, 40)}
+	got := AnchorRect(area, 40, 35)
+
+	require.Equal(t, image.Rect(30, 5, 70, 40), got, "a view taller than 70% of the area stays inside it")
 }
 
 func TestAnchorRectClampsOversizedViews(t *testing.T) {

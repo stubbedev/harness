@@ -205,9 +205,9 @@ const (
 // Draw renders the [FilePicker] dialog as a string.
 func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := f.com.Styles
-	width := max(0, min(filePickerMinWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(10, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+	width := DialogWidth(t, area)
+	height := DialogHeightCeiling(t, area, 10)
+	innerWidth := DialogInnerWidth(t, width)
 
 	// Scale down image preview on small screens. Hide it entirely
 	// when the dialog is too short to show both preview and files.

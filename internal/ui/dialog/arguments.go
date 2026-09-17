@@ -84,7 +84,7 @@ func NewArguments(com *common.Common, title, description string, arguments []com
 		input := textinput.New()
 		input.SetVirtualCursor(false)
 		input.SetStyles(com.Styles.TextInput)
-		input.Prompt = "> "
+		input.Prompt = "❯ "
 		// Use description as placeholder if available, otherwise title
 		if arg.Description != "" {
 			input.Placeholder = arg.Description
@@ -255,7 +255,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	s := a.com.Styles
 
 	dialogContentStyle := s.Dialog.Arguments.Content
-	possibleWidth := area.Dx() - s.Dialog.View.GetHorizontalFrameSize() - dialogContentStyle.GetHorizontalFrameSize()
+	possibleWidth := area.Dx() - ActiveFrame(s).GetHorizontalFrameSize() - dialogContentStyle.GetHorizontalFrameSize()
 	// Build fields with label and input.
 	caser := cases.Title(language.English)
 
@@ -323,7 +323,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + " Generating Prompt...")
 	}
 
-	availableHeight := area.Dy() - s.Dialog.View.GetVerticalFrameSize() - dialogContentStyle.GetVerticalFrameSize() - lipgloss.Height(header) - lipgloss.Height(description) - lipgloss.Height(helpView) - 2 // extra spacing
+	availableHeight := area.Dy() - ActiveFrame(s).GetVerticalFrameSize() - dialogContentStyle.GetVerticalFrameSize() - lipgloss.Height(header) - lipgloss.Height(description) - lipgloss.Height(helpView) - 2 // extra spacing
 	viewportHeight := min(height, maxViewportHeight, availableHeight)
 
 	a.viewport.SetWidth(width) // -1 for scrollbar
@@ -344,7 +344,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		helpView,
 	)
 
-	dialog := s.Dialog.View.Render(view)
+	dialog := ActiveFrame(s).Render(view)
 
 	descriptionHeight := 0
 	if a.description != "" {

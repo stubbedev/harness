@@ -114,6 +114,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
+	m.input.Prompt = "❯ "
 	m.input.Placeholder = onboardingModelInputPlaceholder
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
@@ -258,6 +259,13 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := max(0, min(defaultModelsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
 	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+	if !m.isOnboarding {
+		// Onboarding keeps its classic centered framing; the placement-
+		// aware sizing applies to the in-app palette.
+		width = DialogWidth(t, area)
+		height = DialogHeightCeiling(t, area, defaultDialogHeight)
+		innerWidth = DialogInnerWidth(t, width)
+	}
 	m.input.SetWidth(dialogInputTextWidth(t, m.input, innerWidth))
 
 	listHeight, listTotalHeight, _ := sizeDialogList(t, m.list, innerWidth, height)
@@ -271,8 +279,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.AddPart(titleText)
 	}
 
-	inputView := t.Dialog.InputPrompt.Render(m.input.View())
-	rc.AddPart(inputView)
+	rc.AddInput(m.input.View())
 
 	if m.list.Len() == 0 && !m.isOnboarding {
 		// Nothing is connected, so the list has nothing to offer. Say
@@ -289,19 +296,20 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
-	cur := m.Cursor()
-
 	if m.isOnboarding {
+		cur := m.Cursor()
 		rc.Title = ""
 		rc.TitleInfo = ""
 		rc.IsOnboarding = true
 		view := rc.Render()
 		cur = adjustOnboardingInputCursor(t, cur)
 		DrawOnboardingCursor(scr, area, view, cur)
-	} else {
-		view := rc.Render()
-		DrawCenterCursor(scr, area, view, cur)
+		return cur
 	}
+
+	view := rc.Render()
+	cur := DialogCursor(t, view, m.input.Cursor())
+	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }
 

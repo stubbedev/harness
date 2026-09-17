@@ -171,7 +171,7 @@ func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, b
 func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, barInactive, noteKey string, isActive bool) {
 	noteStyle := e.Styles.Editor.QuestionNote
 	isEditing := e.activeNoteKey == noteKey && e.noteEditor.Focused()
-	const notePrefix = "> "
+	const notePrefix = "❯ "
 
 	if isEditing && e.noteEditor.Focused() {
 		prefixWidth := lipgloss.Width(notePrefix)
@@ -197,7 +197,7 @@ func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, bar
 
 // fillInCursor returns the hardware cursor position for the fill-in
 // textarea when it's focused. areaMinX is the left edge of the
-// content area; prefixWidth is the visual width of the "> " prompt.
+// content area; prefixWidth is the visual width of the "❯ " prompt.
 func (e *questionEditor) fillInCursor(screenRow, areaMinX, prefixWidth int) *tea.Cursor {
 	if !e.fillIn.Focused() {
 		return nil
@@ -230,7 +230,7 @@ func (e *questionEditor) noteCursor(screenRow, areaMinX, prefixWidth int) *tea.C
 // onto the screen (not via line list). Used by YesNo which doesn't
 // use the line-list model. Returns the cursor or nil.
 func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y int, noteKey string) (*tea.Cursor, int) {
-	const notePrefix = "> "
+	const notePrefix = "❯ "
 
 	if e.activeNoteKey != "" && e.noteEditor.Focused() {
 		y++

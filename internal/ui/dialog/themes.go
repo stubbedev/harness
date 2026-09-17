@@ -19,7 +19,6 @@ import (
 const (
 	// ThemesID is the identifier for the theme picker dialog.
 	ThemesID              = "themes"
-	themesDialogMaxWidth  = 50
 	themesDialogMinHeight = 8
 	themesDialogMaxHeight = 16
 	// themeSwatchBlock is the glyph painted once per swatch color.
@@ -83,6 +82,7 @@ func NewThemes(com *common.Common) *Themes {
 
 	t.input = textinput.New()
 	t.input.SetVirtualCursor(false)
+	t.input.Prompt = "❯ "
 	t.input.Placeholder = "Type to filter"
 	t.input.SetStyles(com.Styles.TextInput)
 	t.input.Focus()
@@ -202,25 +202,25 @@ func (t *Themes) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (t *Themes) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	st := t.com.Styles
-	width := max(0, min(themesDialogMaxWidth, area.Dx()-st.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := width - st.Dialog.View.GetHorizontalFrameSize()
+	width := DialogWidth(st, area)
+	innerWidth := DialogInnerWidth(st, width)
 
 	t.input.SetWidth(dialogInputTextWidth(st, t.input, innerWidth))
 
 	// Size the dialog to fit the list content, clamped to min/max bounds.
 	heightOffset := st.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		st.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
+		ActiveInput(st).GetVerticalFrameSize() + inputContentHeight +
 		st.Dialog.HelpView.GetVerticalFrameSize() +
-		st.Dialog.View.GetVerticalFrameSize()
+		ActiveFrame(st).GetVerticalFrameSize()
 	desiredHeight := heightOffset + t.list.TotalHeight()
-	maxAvailable := area.Dy() - st.Dialog.View.GetVerticalBorderSize()
+	maxAvailable := DialogHeightCeiling(st, area, themesDialogMaxHeight)
 	height := max(themesDialogMinHeight, min(themesDialogMaxHeight, desiredHeight, maxAvailable))
 
 	listHeight, listTotalHeight, _ := sizeDialogList(st, t.list, innerWidth, height)
 
 	rc := NewRenderContext(st, width)
 	rc.Title = "Switch Theme"
-	rc.AddPart(st.Dialog.InputPrompt.Render(t.input.View()))
+	rc.AddInput(t.input.View())
 
 	if t.list.Height() >= len(t.list.FilteredItems()) {
 		t.list.ScrollToTop()
@@ -235,7 +235,7 @@ func (t *Themes) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	view := rc.Render()
 
-	cur := t.Cursor()
+	cur := DialogCursor(st, view, t.input.Cursor())
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }

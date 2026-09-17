@@ -139,8 +139,8 @@ func (m *AWSSSO) HandleMsg(msg tea.Msg) Action {
 func (m *AWSSSO) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	var (
 		t           = m.com.Styles
-		dialogWidth = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-		dialogStyle = t.Dialog.View.Width(dialogWidth)
+		dialogWidth = DialogWidth(t, area)
+		dialogStyle = ActiveFrame(t).Width(dialogWidth)
 	)
 	m.width = dialogWidth
 	view := dialogStyle.Render(m.dialogContent())
@@ -150,7 +150,7 @@ func (m *AWSSSO) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 func (m *AWSSSO) dialogContent() string {
 	t := m.com.Styles
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+	innerWidth := DialogInnerWidth(t, m.width)
 
 	elements := []string{
 		m.headerContent(),
@@ -164,7 +164,7 @@ func (m *AWSSSO) headerContent() string {
 	var (
 		t            = m.com.Styles
 		titleStyle   = t.Dialog.Title
-		dialogStyle  = t.Dialog.View.Width(m.width)
+		dialogStyle  = ActiveFrame(t).Width(m.width)
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 		dialogTitle  = "AWS SSO Authentication"
 	)
@@ -185,7 +185,7 @@ func (m *AWSSSO) innerDialogContent() string {
 	// innerWidth is the dialog's content area (total minus the View
 	// border). Every block sizes to this and uses padding for the inset, so
 	// nothing is re-wrapped when the dialog frame renders it.
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+	innerWidth := DialogInnerWidth(t, m.width)
 
 	switch m.state {
 	case awsSSOStateWaiting:

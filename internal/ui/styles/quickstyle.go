@@ -947,6 +947,13 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Permissions.ParamsBg = o.bgLessVisible
 
 	s.Dialog.View = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)
+	// Top border only: the sides variadic turns the other borders off
+	// entirely (an unset side would render as a blank colored row), and a
+	// one-column padding gives the full-width panel a content gutter.
+	s.Dialog.ViewBottom = base.
+		Border(lipgloss.Border{Top: "─"}, true, false, false, false).
+		BorderForeground(o.primary).
+		Padding(0, 1)
 	s.Dialog.PrimaryText = base.Padding(0, 1).Foreground(o.primary)
 	s.Dialog.SecondaryText = base.Padding(0, 1).Foreground(o.fgMostSubtle)
 	s.Dialog.HelpView = base.Padding(0, 1).AlignHorizontal(lipgloss.Left)
@@ -960,6 +967,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.NormalItem = base.Padding(0, 1).Foreground(o.fgBase)
 	s.Dialog.SelectedItem = base.Padding(0, 1).Background(o.primary).Foreground(o.onPrimary)
 	s.Dialog.InputPrompt = base.Margin(1, 1)
+	s.Dialog.InputBottom = base.Margin(1, 1, 0, 1)
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
 	s.Dialog.ContentPanel = base.Background(o.bgLessVisible).Foreground(o.fgBase).Padding(1, 2)

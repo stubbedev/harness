@@ -19,7 +19,6 @@ import (
 const (
 	// ReasoningID is the identifier for the reasoning effort dialog.
 	ReasoningID              = "reasoning"
-	reasoningDialogMaxWidth  = 50
 	reasoningDialogMinHeight = 8
 	reasoningDialogMaxHeight = 16
 )
@@ -158,27 +157,26 @@ func (r *Reasoning) Cursor() *tea.Cursor {
 // Draw implements [Dialog].
 func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := r.com.Styles
-	width := max(0, min(reasoningDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
+	width := DialogWidth(t, area)
+	innerWidth := DialogInnerWidth(t, width)
 
 	r.input.SetWidth(dialogInputTextWidth(t, r.input, innerWidth))
 
 	// Size the dialog to fit the list content, clamped to min/max bounds.
 	listTotalHeight := r.list.TotalHeight()
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
+		ActiveInput(t).GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
+		ActiveFrame(t).GetVerticalFrameSize()
 	desiredHeight := heightOffset + listTotalHeight
-	maxAvailable := area.Dy() - t.Dialog.View.GetVerticalBorderSize()
+	maxAvailable := DialogHeightCeiling(t, area, reasoningDialogMaxHeight)
 	height := max(reasoningDialogMinHeight, min(reasoningDialogMaxHeight, desiredHeight, maxAvailable))
 
 	listHeight, listTotalHeight, _ := sizeDialogList(t, r.list, innerWidth, height)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Select Reasoning Effort"
-	inputView := t.Dialog.InputPrompt.Render(r.input.View())
-	rc.AddPart(inputView)
+	rc.AddInput(r.input.View())
 
 	visibleCount := len(r.list.FilteredItems())
 	if r.list.Height() >= visibleCount {
@@ -194,7 +192,7 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	view := rc.Render()
 
-	cur := r.Cursor()
+	cur := DialogCursor(t, view, r.input.Cursor())
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
 }

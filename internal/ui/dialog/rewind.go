@@ -22,10 +22,7 @@ import (
 // RewindID is the identifier for the rewind (checkpoint) picker dialog.
 const RewindID = "rewind"
 
-const (
-	rewindDialogMaxWidth  = 80
-	rewindDialogMaxHeight = 24
-)
+const rewindDialogMaxHeight = 24
 
 // RewindTurn is one rewound-to candidate: a user prompt, when it was
 // sent, and whether a working-tree snapshot backs it.
@@ -238,8 +235,8 @@ func (r *Rewind) enterModePhase() {
 // Draw implements Dialog.
 func (r *Rewind) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	st := r.com.Styles
-	width := max(0, min(rewindDialogMaxWidth, area.Dx()-st.Dialog.View.GetHorizontalBorderSize()))
-	innerWidth := width - st.Dialog.View.GetHorizontalFrameSize()
+	width := DialogWidth(st, area)
+	innerWidth := DialogInnerWidth(st, width)
 
 	listHeight, listTotalHeight, _ := sizeDialogList(st, r.list, innerWidth, rewindDialogMaxHeight)
 

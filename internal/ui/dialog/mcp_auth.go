@@ -217,8 +217,8 @@ func (m *MCPAuth) currentServer() mcptools.PendingAuthServer {
 // overflows a narrow terminal.
 func (m *MCPAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
-	m.width = max(0, min(60, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	dialogStyle := t.Dialog.View.Width(m.width)
+	m.width = DialogWidth(t, area)
+	dialogStyle := ActiveFrame(t).Width(m.width)
 	view := dialogStyle.Render(m.dialogContent())
 	DrawCenter(scr, area, view)
 	return nil
@@ -226,7 +226,7 @@ func (m *MCPAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 func (m *MCPAuth) dialogContent() string {
 	t := m.com.Styles
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+	innerWidth := DialogInnerWidth(t, m.width)
 	elements := []string{
 		m.headerContent(),
 		m.innerContent(),
@@ -238,7 +238,7 @@ func (m *MCPAuth) dialogContent() string {
 func (m *MCPAuth) headerContent() string {
 	t := m.com.Styles
 	titleStyle := t.Dialog.Title
-	dialogStyle := t.Dialog.View.Width(m.width)
+	dialogStyle := ActiveFrame(t).Width(m.width)
 	headerOffset := titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 
 	title := fmt.Sprintf("Authenticate with %s", m.currentServer().Name)
@@ -257,7 +257,7 @@ func (m *MCPAuth) innerContent() string {
 	// innerWidth is the dialog's content area: total width minus the
 	// View frame (border). Every block sizes to this so nothing gets
 	// re-wrapped when the dialog frame renders it.
-	innerWidth := m.width - t.Dialog.View.GetHorizontalFrameSize()
+	innerWidth := DialogInnerWidth(t, m.width)
 	server := m.currentServer()
 
 	block := func(s string) string {

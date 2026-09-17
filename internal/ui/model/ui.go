@@ -79,8 +79,8 @@ const sessionDetailsMaxHeight = 20
 const TextareaMaxHeight = 15
 
 // editorHeightMargin is the vertical margin added to the textarea height to
-// account for the attachments row (top) and bottom margin.
-const editorHeightMargin = 2
+// account for the attachments row above it.
+const editorHeightMargin = 1
 
 // TextareaMinHeight is the minimum height of the prompt textarea when
 // options.tui.textarea_min_height is unset; the live value comes from
@@ -3136,22 +3136,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		m.drawHeader(scr, layout.header)
 		main := uv.NewStyledString(m.landingView())
 		main.Draw(scr, layout.main)
-
-		if m.activeInline != nil {
-			m.activeInline.SetFocused(m.focus == uiFocusEditor)
-			if m.focus == uiFocusEditor {
-				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
-			} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
-				qf.DrawCollapsed(scr, layout.editor)
-				m.inlineCursor = nil
-			} else {
-				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
-			}
-		} else {
-			editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
-			editor.Draw(scr, layout.editor)
-			m.inlineCursor = nil
-		}
+		m.drawEditorArea(scr, layout.editor)
 
 	case uiChat:
 		m.drawHeader(scr, layout.header)
@@ -3164,21 +3149,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
 		}
 
-		if m.activeInline != nil {
-			m.activeInline.SetFocused(m.focus == uiFocusEditor)
-			if m.focus == uiFocusEditor {
-				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
-			} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
-				qf.DrawCollapsed(scr, layout.editor)
-				m.inlineCursor = nil
-			} else {
-				m.inlineCursor = m.activeInline.Draw(scr, layout.editor)
-			}
-		} else {
-			editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
-			editor.Draw(scr, layout.editor)
-			m.inlineCursor = nil
-		}
+		m.drawEditorArea(scr, layout.editor)
 
 		// Draw the session details overlay when open
 		if m.detailsOpen {
@@ -3242,7 +3213,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.activeInline != nil {
 			if cur := m.inlineCursor; cur != nil {
-				cur.X++                        // Adjust for app margins
+				cur.X += m.layout.editor.Min.X // Editor may not start at the screen edge
 				cur.Y += m.layout.editor.Min.Y // Inline editor draws from area top
 				return cur
 			}
@@ -3251,7 +3222,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.textarea.Focused() {
 			cur := m.textarea.Cursor()
-			cur.X++                            // Adjust for app margins
+			cur.X += m.layout.editor.Min.X     // Editor may not start at the screen edge
 			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
 			return cur
 		}
@@ -3719,6 +3690,23 @@ func (m *UI) updateSize() {
 	m.renderPills()
 }
 
+// splitOffEditor slices editorHeight rows off the bottom of area for the
+// prompt textarea, then expands the result by sideMargin cells on each
+// side so the editor always runs flush to the screen edges - it must
+// cancel exactly the side inset the caller's state applied to area (via
+// its ancestor appRect), not a hardcoded guess, or the two drift apart
+// exactly as they did when uiLanding's extra padding went uncancelled.
+// Shared by every state with an editor so they can't diverge again.
+func splitOffEditor(area image.Rectangle, editorHeight, sideMargin int) (rest, editor image.Rectangle) {
+	layout.Vertical(
+		layout.Len(area.Dy()-editorHeight),
+		layout.Fill(1),
+	).Split(area).Assign(&rest, &editor)
+	editor.Min.X -= sideMargin
+	editor.Max.X += sideMargin
+	return rest, editor
+}
+
 // generateLayout calculates the layout rectangles for all UI components based
 // on the current UI state and terminal dimensions.
 func (m *UI) generateLayout(w, h int) uiLayout {
@@ -3766,10 +3754,16 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	appRect.Min.X += 1
 	appRect.Max.X -= 1
 
+	// sideMargin tracks how many cells of left/right inset appRect now
+	// carries, so splitOffEditor can cancel exactly that much rather than
+	// a hardcoded amount that silently goes stale when a state's padding
+	// changes here.
+	sideMargin := 1
 	if slices.Contains([]uiState{uiOnboarding, uiLanding}, m.state) {
 		// extra padding on left and right for these states
 		appRect.Min.X += 1
 		appRect.Max.X -= 1
+		sideMargin = 2
 	}
 
 	uiLayout := uiLayout{
@@ -3811,14 +3805,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			layout.Len(landingHeaderHeight),
 			layout.Fill(1),
 		).Split(appRect).Assign(&headerRect, &mainRect)
-		var editorRect image.Rectangle
-		layout.Vertical(
-			layout.Len(mainRect.Dy()-editorHeight),
-			layout.Fill(1),
-		).Split(mainRect).Assign(&mainRect, &editorRect)
-		// Remove extra padding from editor (but keep it for header and main)
-		editorRect.Min.X -= 1
-		editorRect.Max.X += 1
+		mainRect, editorRect := splitOffEditor(mainRect, editorHeight, sideMargin)
 		uiLayout.header = headerRect
 		uiLayout.main = mainRect
 		uiLayout.editor = editorRect
@@ -3849,11 +3836,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		uiLayout.sessionDetails.Min.Y += headerHeight // adjust for header
 		// Add one line gap between header and main content
 		mainRect.Min.Y += 1
-		var editorRect image.Rectangle
-		layout.Vertical(
-			layout.Len(mainRect.Dy()-editorHeight),
-			layout.Fill(1),
-		).Split(mainRect).Assign(&mainRect, &editorRect)
+		mainRect, editorRect := splitOffEditor(mainRect, editorHeight, sideMargin)
 		mainRect.Max.X -= 1 // Add padding right
 		uiLayout.header = headerRect
 		tasksHeight := m.tasksAreaHeight()
@@ -3967,13 +3950,13 @@ func (m *UI) setEditorPrompt() {
 	m.textarea.SetPromptFunc(4, m.normalPromptFunc)
 }
 
-// normalPromptFunc returns the normal editor prompt style ("  > " on first
+// normalPromptFunc returns the normal editor prompt style ("  ❯ " on first
 // line, "::: " on subsequent lines).
 func (m *UI) normalPromptFunc(info textarea.PromptInfo) string {
 	t := m.com.Styles
 	if info.LineNumber == 0 {
 		if info.Focused {
-			return "  > "
+			return "  ❯ "
 		}
 		return "::: "
 	}
@@ -4215,6 +4198,29 @@ func (m *UI) randomizePlaceholders() {
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
 }
 
+// drawEditorArea draws whatever occupies the editor region: the active
+// inline editor (or its collapsed form, when focus has moved away and it
+// asks to collapse) if one is present, otherwise the prompt textarea and
+// its attachments. Shared by every state with an editor region so they
+// draw it identically and can't drift apart.
+func (m *UI) drawEditorArea(scr uv.Screen, editorRect uv.Rectangle) {
+	if m.activeInline != nil {
+		m.activeInline.SetFocused(m.focus == uiFocusEditor)
+		if m.focus == uiFocusEditor {
+			m.inlineCursor = m.activeInline.Draw(scr, editorRect)
+		} else if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && m.shouldCollapseQuestion(qf) {
+			qf.DrawCollapsed(scr, editorRect)
+			m.inlineCursor = nil
+		} else {
+			m.inlineCursor = m.activeInline.Draw(scr, editorRect)
+		}
+		return
+	}
+	editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
+	editor.Draw(scr, editorRect)
+	m.inlineCursor = nil
+}
+
 // renderEditorView renders the editor view with attachments if any.
 func (m *UI) renderEditorView(width int) string {
 	var attachmentsView string
@@ -4224,7 +4230,6 @@ func (m *UI) renderEditorView(width int) string {
 	return strings.Join([]string{
 		attachmentsView,
 		m.textarea.View(),
-		"", // margin at bottom of editor
 	}, "\n")
 }
 

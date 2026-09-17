@@ -10,13 +10,14 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // dialogInputTextWidth returns the text-area width for a dialog input so
-// that the input frame, its prompt (e.g. "> "), the text, and a trailing
+// that the input frame, its prompt (e.g. "❯ "), the text, and a trailing
 // cursor cell all fit within contentWidth. The prompt is rendered outside
 // the text area, so it must be subtracted or long values wrap past the
 // dialog border.
@@ -51,12 +52,15 @@ type sizer interface {
 //   - dialogHeight: total dialog content height (already clamped).
 func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int) (listHeight, listTotalHeight, listWidth int) {
 	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		t.Dialog.InputPrompt.GetVerticalFrameSize() + inputContentHeight +
+		ActiveInput(t).GetVerticalFrameSize() + inputContentHeight +
 		t.Dialog.HelpView.GetVerticalFrameSize() +
-		t.Dialog.View.GetVerticalFrameSize()
+		ActiveFrame(t).GetVerticalFrameSize()
 
 	listHeight = max(0, dialogHeight-heightOffset)
 	listTotalHeight = l.TotalHeight()
+	// Hug the content: a short list shrinks its viewport — and with it the
+	// panel — instead of padding blank rows out to the height cap.
+	listHeight = min(listHeight, listTotalHeight)
 
 	// Reserve one column for the scrollbar only when it will actually
 	// show, so the list otherwise spans the full content width.
@@ -173,12 +177,15 @@ func shortHelpLine(h *help.Model, bindings []key.Binding, width int) string {
 	return b.String()
 }
 
-// InputCursor adjusts the cursor position for an input field within a dialog.
+// InputCursor adjusts the cursor position for an input field within a
+// dialog, for an input that sits under the title. The frame arithmetic
+// follows the active placement, so the bottom-anchored panel's borderless
+// frame does not shift the cursor.
 func InputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
 	if cur != nil {
 		titleStyle := t.Dialog.Title
-		dialogStyle := t.Dialog.View
-		inputStyle := t.Dialog.InputPrompt
+		dialogStyle := ActiveFrame(t)
+		inputStyle := ActiveInput(t)
 		// Adjust cursor position to account for dialog layout
 		cur.X += inputStyle.GetBorderLeftSize() +
 			inputStyle.GetMarginLeft() +
@@ -218,6 +225,70 @@ func adjustOnboardingInputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor 
 	return cur
 }
 
+// ActiveFrame returns the frame style dialogs wrap their content in for
+// the active placement: the rounded floating box, or the full-width
+// top-border-only panel of the bottom-anchored (which-key) mode.
+func ActiveFrame(t *styles.Styles) lipgloss.Style {
+	if placementTop() {
+		return t.Dialog.View
+	}
+	return t.Dialog.ViewBottom
+}
+
+// ActiveInput returns the input-row style for the active placement. The
+// bottom-anchored variant drops the bottom margin so the input is the
+// panel's last line.
+func ActiveInput(t *styles.Styles) lipgloss.Style {
+	if placementTop() {
+		return t.Dialog.InputPrompt
+	}
+	return t.Dialog.InputBottom
+}
+
+// DialogWidth returns a dialog's total width for area under the active
+// placement: full width when bottom-anchored, otherwise clamped to
+// defaultDialogMaxWidth inside the floating frame's borders.
+func DialogWidth(t *styles.Styles, area uv.Rectangle) int {
+	if placementTop() {
+		return max(0, min(defaultDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
+	}
+	return max(0, area.Dx())
+}
+
+// DialogInnerWidth returns the content width inside a dialog of the given
+// total width, for the active placement's frame.
+func DialogInnerWidth(t *styles.Styles, width int) int {
+	return max(0, width-ActiveFrame(t).GetHorizontalFrameSize())
+}
+
+// DialogHeightCeiling clamps a dialog's height to maxHeight within area
+// for the active placement's frame.
+func DialogHeightCeiling(t *styles.Styles, area uv.Rectangle, maxHeight int) int {
+	if placementTop() {
+		return max(0, min(maxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
+	}
+	return max(0, min(maxHeight, area.Dy()-t.Dialog.ViewBottom.GetVerticalBorderSize()))
+}
+
+// DialogCursor positions a text-input cursor for the active placement.
+// Floating: the input sits under the title, and InputCursor's frame
+// arithmetic applies. Bottom-anchored: the input is the panel's last
+// line, so the cursor lands on the final row of the rendered view.
+func DialogCursor(t *styles.Styles, view string, cur *tea.Cursor) *tea.Cursor {
+	if cur == nil {
+		return nil
+	}
+	if placementTop() {
+		return InputCursor(t, cur)
+	}
+	input := t.Dialog.InputBottom
+	frame := t.Dialog.ViewBottom
+	cur.X += input.GetMarginLeft() + input.GetPaddingLeft() + input.GetBorderLeftSize() +
+		frame.GetMarginLeft() + frame.GetPaddingLeft() + frame.GetBorderLeftSize()
+	cur.Y = lipgloss.Height(view) - 1
+	return cur
+}
+
 // RenderContext is a dialog rendering context that can be used to render
 // common dialog layouts.
 type RenderContext struct {
@@ -247,6 +318,10 @@ type RenderContext struct {
 	TitleInfo string
 	// Parts are the rendered parts of the dialog.
 	Parts []string
+	// Input is the raw input-row view. Render styles it with the active
+	// input style and places it first among the content (floating) or as
+	// the panel's last line (bottom-anchored). Set it with AddInput.
+	Input string
 	// Help is the fully rendered help footer line. Produce it with
 	// renderDialogHelp so it is sized and padded consistently; it is
 	// appended as-is without further styling.
@@ -262,12 +337,18 @@ func NewRenderContext(t *styles.Styles, width int) *RenderContext {
 	return &RenderContext{
 		Styles:                 t,
 		TitleStyle:             t.Dialog.Title,
-		ViewStyle:              t.Dialog.View,
+		ViewStyle:              ActiveFrame(t),
 		TitleGradientFromColor: t.Dialog.TitleGradFromColor,
 		TitleGradientToColor:   t.Dialog.TitleGradToColor,
 		Width:                  width,
 		Parts:                  []string{},
 	}
+}
+
+// AddInput sets the dialog's input row from the raw input view (e.g.
+// input.View()). Render applies the placement-appropriate prompt style.
+func (rc *RenderContext) AddInput(inputView string) {
+	rc.Input = inputView
 }
 
 // AddPart adds a rendered part to the dialog.
@@ -308,6 +389,24 @@ func (rc *RenderContext) Render() string {
 		}
 	}
 
+	// Input placement follows the anchoring: floating dialogs put the
+	// input directly under the title; the bottom-anchored panel puts it on
+	// the last line, below the options and help. Onboarding keeps the
+	// classic order and margins wherever it is drawn.
+	inputStyle := ActiveInput(rc.Styles)
+	inputLast := anchoredAtBottom()
+	if rc.IsOnboarding {
+		inputStyle = rc.Styles.Dialog.InputPrompt
+		inputLast = false
+	}
+	inputRow := ""
+	if rc.Input != "" {
+		inputRow = inputStyle.Render(rc.Input)
+	}
+	if inputRow != "" && !inputLast {
+		parts = append(parts, inputRow)
+	}
+
 	if rc.Gap <= 0 {
 		parts = append(parts, rc.Parts...)
 	} else {
@@ -326,6 +425,13 @@ func (rc *RenderContext) Render() string {
 			parts = append(parts, make([]string, rc.Gap)...)
 		}
 		parts = append(parts, rc.Help)
+	}
+
+	if inputRow != "" && inputLast {
+		if rc.Gap > 0 {
+			parts = append(parts, make([]string, rc.Gap)...)
+		}
+		parts = append(parts, inputRow)
 	}
 
 	content := strings.Join(parts, "\n")
