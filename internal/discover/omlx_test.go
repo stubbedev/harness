@@ -88,6 +88,3 @@ func TestOmlxEnricher(t *testing.T) {
 		require.Len(t, result, 1)
 	})
 }
-
-//go:fix inline
-func ptr[T any](v T) *T { return new(v) }

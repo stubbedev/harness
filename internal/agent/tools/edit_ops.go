@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,65 +22,6 @@ type editContext struct {
 	files       history.Service
 	filetracker filetracker.Service
 	workingDir  string
-}
-
-func createNewFile(edit editContext, filePath, content string, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	fileInfo, err := os.Stat(filePath)
-	if err == nil {
-		if fileInfo.IsDir() {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
-		}
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("file already exists: %s", filePath)), nil
-	} else if !os.IsNotExist(err) {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
-	}
-
-	dir := filepath.Dir(filePath)
-	if err = os.MkdirAll(dir, 0o755); err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
-	}
-
-	sessionID := GetSessionFromContext(edit.ctx)
-	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
-	}
-
-	_, additions, removals := diff.GenerateDiff(
-		"",
-		content,
-		strings.TrimPrefix(filePath, edit.workingDir),
-	)
-
-	err = os.WriteFile(filePath, []byte(content), 0o644)
-	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
-	}
-
-	// File can't be in the history so we create a new file history
-	_, err = edit.files.Create(edit.ctx, sessionID, filePath, "")
-	if err != nil {
-		// Log error but don't fail the operation
-		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-	}
-
-	// Add the new content to the file history
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, filePath, content)
-	if err != nil {
-		// Log error but don't fail the operation
-		slog.Error("Error creating file history version", "error", err)
-	}
-
-	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
-
-	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse("File created: "+filePath),
-		EditResponseMetadata{
-			OldContent: "",
-			NewContent: content,
-			Additions:  additions,
-			Removals:   removals,
-		},
-	), nil
 }
 
 // findAndReplace performs a find-and-replace on content. When replaceAll is
@@ -203,7 +143,7 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 	return sessionID, oldContent, isCrlf, fantasy.ToolResponse{}, nil
 }
 
-func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, filePath, "session ID is required for deleting content")
 	if err != nil {
 		return fantasy.ToolResponse{}, err
@@ -243,7 +183,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 	), nil
 }
 
-func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, filePath, "session ID is required for editing a file")
 	if err != nil {
 		return fantasy.ToolResponse{}, err

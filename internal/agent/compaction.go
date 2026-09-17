@@ -221,8 +221,7 @@ func toolResultStub(tr message.ToolResult) string {
 func dedupToolResults(msgs []message.Message) []message.Message {
 	seen := map[string]bool{}
 	var out []message.Message
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
+	for i, m := range slices.Backward(msgs) {
 		if m.Role != message.Tool {
 			continue
 		}

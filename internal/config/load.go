@@ -31,8 +31,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const defaultCatalogHint = "models.dev"
-
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {

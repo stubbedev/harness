@@ -181,7 +181,7 @@ func TestBuildTools_WrapsSubAgentTools(t *testing.T) {
 	})
 
 	agentCfg := config.Agent{ID: config.AgentTask, Name: "Task", AllowedTools: []string{"glob", "grep", "view"}}
-	toolsList, err := coord.buildTools(t.Context(), agentCfg, true, "")
+	toolsList, err := coord.buildTools(t.Context(), agentCfg, true)
 	require.NoError(t, err)
 	require.NotEmpty(t, toolsList)
 	for _, tool := range toolsList {

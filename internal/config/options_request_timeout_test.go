@@ -8,9 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//go:fix inline
-func ptr[T any](v T) *T { return new(v) }
-
 func TestOptionsGetRequestTimeout(t *testing.T) {
 	t.Parallel()
 

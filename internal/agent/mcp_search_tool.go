@@ -259,8 +259,7 @@ func (c *coordinator) refreshCoderTools(ctx context.Context) error {
 	if !ok {
 		return errCoderAgentNotConfigured
 	}
-	modelID := c.currentAgent.Model().CatalogCfg.ID
-	built, err := c.buildTools(ctx, agentCfg, false, modelID)
+	built, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
 		return err
 	}

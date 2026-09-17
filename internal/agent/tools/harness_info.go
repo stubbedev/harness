@@ -62,7 +62,7 @@ func writeConfigFiles(b *strings.Builder, cfg *config.ConfigStore) {
 	b.WriteString("[config_files]\n")
 	paths := cfg.LoadedPaths()
 	for _, p := range paths {
-		b.WriteString(p + "\n")
+		fmt.Fprintln(b, p)
 	}
 	b.WriteString("\n")
 }
@@ -441,7 +441,8 @@ func writeHooks(b *strings.Builder, cfg *config.ConfigStore) {
 		if e.timeout > 0 && e.timeout != 30 {
 			line += fmt.Sprintf(" (timeout: %ds)", e.timeout)
 		}
-		b.WriteString(line + "\n")
+		b.WriteString(line)
+		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")

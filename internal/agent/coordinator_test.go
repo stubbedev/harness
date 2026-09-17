@@ -1493,9 +1493,6 @@ func TestCallTopK(t *testing.T) {
 	})
 }
 
-//go:fix inline
-func ptr[T any](v T) *T { return new(v) }
-
 // TestUpdateModels_ClearsSubagentModelCache verifies that UpdateModels empties
 // the subagent model cache so stale LanguageModel instances are not reused
 // after a config reload, even when UpdateModels itself returns an error.

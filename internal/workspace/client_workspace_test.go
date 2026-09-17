@@ -86,9 +86,6 @@ func TestProtoToMessagePrismModel(t *testing.T) {
 	require.Equal(t, 0.002, *got.PrismDollarSavings)
 }
 
-//go:fix inline
-func protoPtrFloat(v float64) *float64 { return new(v) }
-
 // TestProtoToSkillStates verifies that the wire representation of skill
 // discovery states reconstructs identical values on the client,
 // including synthetic errors derived from Error strings.

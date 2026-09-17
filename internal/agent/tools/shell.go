@@ -235,7 +235,8 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 				sb.WriteString("[shell had exited; a fresh one replaced it and kept none of its state]\n")
 			}
 			if header != "" {
-				sb.WriteString(header + "\n")
+				sb.WriteString(header)
+				sb.WriteString("\n")
 			}
 			if stdout != "" {
 				sb.WriteString(stdout)

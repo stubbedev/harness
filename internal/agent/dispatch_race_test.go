@@ -51,10 +51,17 @@ func (m *concurrencyProbeModel) Stream(context.Context, fantasy.Call) (fantasy.S
 		<-m.release
 		m.inFlight.Add(-1)
 
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "1"})
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "1", Delta: "done"})
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "1"})
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+		parts := []fantasy.StreamPart{
+			{Type: fantasy.StreamPartTypeTextStart, ID: "1"},
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "1", Delta: "done"},
+			{Type: fantasy.StreamPartTypeTextEnd, ID: "1"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop},
+		}
+		for _, part := range parts {
+			if !yield(part) {
+				return
+			}
+		}
 	}, nil
 }
 
@@ -83,10 +90,17 @@ func (fastModel) Generate(context.Context, fantasy.Call) (*fantasy.Response, err
 
 func (fastModel) Stream(context.Context, fantasy.Call) (fantasy.StreamResponse, error) {
 	return func(yield func(fantasy.StreamPart) bool) {
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "1"})
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "1", Delta: "title"})
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "1"})
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+		parts := []fantasy.StreamPart{
+			{Type: fantasy.StreamPartTypeTextStart, ID: "1"},
+			{Type: fantasy.StreamPartTypeTextDelta, ID: "1", Delta: "title"},
+			{Type: fantasy.StreamPartTypeTextEnd, ID: "1"},
+			{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop},
+		}
+		for _, part := range parts {
+			if !yield(part) {
+				return
+			}
+		}
 	}, nil
 }
 

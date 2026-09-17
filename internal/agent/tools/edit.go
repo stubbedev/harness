@@ -139,7 +139,7 @@ func applyEditsToContent(currentContent string, edits []EditOperation, startInde
 	return currentContent, failedEdits, whitespaceCorrected
 }
 
-func processEditWithCreation(edit editContext, params EditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func processEditWithCreation(edit editContext, params EditParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	// First edit creates the file
 	firstEdit := params.Edits[0]
 	if firstEdit.OldString != "" {
@@ -212,7 +212,7 @@ func processEditWithCreation(edit editContext, params EditParams, call fantasy.T
 	), nil
 }
 
-func processEditExistingFile(edit editContext, params EditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+func processEditExistingFile(edit editContext, params EditParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, params.FilePath, "session ID is required for editing a file")
 	if err != nil {
 		return fantasy.ToolResponse{}, err

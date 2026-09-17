@@ -201,7 +201,8 @@ func memoryDelete(ctx context.Context, svc memory.Service, params MemoryParams) 
 
 func renderItem(item memory.Item) string {
 	var b strings.Builder
-	b.WriteString(item.IndexLine() + "\n\n")
+	b.WriteString(item.IndexLine())
+	b.WriteString("\n\n")
 	b.WriteString(item.Content)
 	return b.String()
 }

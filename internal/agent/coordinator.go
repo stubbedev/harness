@@ -1046,7 +1046,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	wg.Go(func() error {
-		tools, err := c.buildTools(initCtx, agent, isSubAgent, primary.CatalogCfg.ID)
+		tools, err := c.buildTools(initCtx, agent, isSubAgent)
 		if err != nil {
 			return err
 		}
@@ -1067,10 +1067,8 @@ func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
 	return slices.Contains(allowed, AgentToolName)
 }
 
-// buildTools assembles the agent's tool set. modelID is the catalog id of the
-// model the agent actually runs on (the resolved primary), used for
-// model-specific tool guidance such as the shell tool description.
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, modelID string) ([]fantasy.AgentTool, error) {
+// buildTools assembles the agent's tool set.
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
 	var allTools []fantasy.AgentTool
 	if shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
 		agentTool, err := c.agentTool(ctx)
@@ -1381,7 +1379,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
-func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, providerID string) (fantasy.Provider, error) {
+func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string) (fantasy.Provider, error) {
 	var opts []bedrock.Option
 	if c.cfg.Config().Options.Debug {
 		httpClient := log.NewHTTPClient()
@@ -1512,7 +1510,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case azure.Name:
 		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams, providerCfg.DisableHTTP2)
 	case bedrock.Name:
-		return c.buildBedrockProvider(apiKey, headers, providerCfg.ID)
+		return c.buildBedrockProvider(apiKey, headers)
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
 	case "google-vertex":
@@ -1533,17 +1531,6 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
-}
-
-func isExactoSupported(modelID string) bool {
-	supportedModels := []string{
-		"moonshotai/kimi-k2-0905",
-		"deepseek/deepseek-v3.1-terminus",
-		"z-ai/glm-4.6",
-		"openai/gpt-oss-120b",
-		"qwen/qwen3-coder",
-	}
-	return slices.Contains(supportedModels, modelID)
 }
 
 // BeginAccepted reserves an accept slot for sessionID on the active
@@ -1633,7 +1620,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return errCoderAgentNotConfigured
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg, false, large.CatalogCfg.ID)
+	tools, err := c.buildTools(ctx, agentCfg, false)
 	if err != nil {
 		return err
 	}

@@ -243,15 +243,6 @@ func newContentLine(text string) contentLine {
 	return contentLine{text: text, choiceIdx: -1}
 }
 
-// sectionHeight returns the visual line count of a text block
-// wrapped at width.
-func sectionHeight(text string, width int) int {
-	if text == "" {
-		return 0
-	}
-	return strings.Count(ansi.Wrap(text, width, ""), "\n") + 1
-}
-
 // wrapIndent wraps text at width and prefixes every continuation
 // line with indent so multi-line content aligns under the first
 // line's content rather than flush left.
@@ -417,11 +408,6 @@ func (c *choiceList) buildLines(innerWidth int, fillInPrefix string, itemFn choi
 	return lines
 }
 
-// renderDescription renders the markdown description at width.
-func (c *choiceList) renderDescription(width int) string {
-	return renderQuestionDescription(c.Styles, c.Request.Description, width)
-}
-
 // choiceItemRenderer renders a choice's label content as a string.
 // The bar prefix is applied by buildLines so that continuation
 // lines also receive it. innerWidth is the available content
@@ -473,11 +459,6 @@ func (c *choiceList) setHover(x, y int) {
 			c.hoveredChoice = idx
 		}
 	}
-}
-
-// iconPrompt returns the themed question icon based on focus.
-func (c *choiceList) iconPrompt() string {
-	return questionIconPrompt(c.Styles, c.focused)
 }
 
 // drawContent renders the choice list with scroll support. It

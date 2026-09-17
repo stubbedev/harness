@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/tree"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/tools"
@@ -1059,14 +1058,6 @@ func formatTimeout(timeout int) string {
 	return fmt.Sprintf("%ds", timeout)
 }
 
-// formatNonZero returns string representation of non-zero integers, empty string for zero.
-func formatNonZero(value int) string {
-	if value == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d", value)
-}
-
 // toolOutputEditDiffContent renders a diff with optional failed edits note.
 func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditResponseMetadata, totalEdits, width int, expanded bool) string {
 	bodyWidth := width - toolBodyLeftPaddingTotal
@@ -1106,24 +1097,6 @@ func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditR
 	}
 
 	return sty.Tool.Body.Render(formatted)
-}
-
-// roundedEnumerator creates a tree enumerator with rounded corners.
-func roundedEnumerator(lPadding, width int) tree.Enumerator {
-	if width == 0 {
-		width = 2
-	}
-	if lPadding == 0 {
-		lPadding = 1
-	}
-	return func(children tree.Children, index int) string {
-		line := strings.Repeat("─", width)
-		padding := strings.Repeat(" ", lPadding)
-		if children.Length()-1 == index {
-			return padding + "╰" + line
-		}
-		return padding + "├" + line
-	}
 }
 
 // toolOutputMarkdownContent renders markdown content with optional truncation.

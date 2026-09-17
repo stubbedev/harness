@@ -299,7 +299,8 @@ func TestPreparePromptDropsEarlierTurnsReasoning(t *testing.T) {
 	for _, msg := range history {
 		for _, part := range msg.Content {
 			if r, ok := fantasy.AsMessagePart[fantasy.ReasoningPart](part); ok {
-				text.WriteString(r.Text + "|")
+				text.WriteString(r.Text)
+				text.WriteString("|")
 			}
 		}
 	}

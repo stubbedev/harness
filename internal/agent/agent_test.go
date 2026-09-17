@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -112,30 +111,6 @@ func serveOnce(t *testing.T, contentType, body string) (*http.Client, string) {
 	}))
 	t.Cleanup(srv.Close)
 	return srv.Client(), srv.URL
-}
-
-// redirectClient returns a client that sends every request to target,
-// whatever URL the caller asked for, for tools that build their own
-// endpoint rather than taking one from the model.
-func redirectClient(t *testing.T, target string) *http.Client {
-	t.Helper()
-
-	u, err := url.Parse(target)
-	require.NoError(t, err)
-	return &http.Client{Transport: rewriteHost{host: u.Host, scheme: u.Scheme}}
-}
-
-type rewriteHost struct {
-	host   string
-	scheme string
-}
-
-func (r rewriteHost) RoundTrip(req *http.Request) (*http.Response, error) {
-	req = req.Clone(req.Context())
-	req.URL.Host = r.host
-	req.URL.Scheme = r.scheme
-	req.Host = r.host
-	return http.DefaultTransport.RoundTrip(req)
 }
 
 // TestCoderAgent checks the agent loop against a scripted model: a tool
@@ -417,7 +392,7 @@ func TestCoderAgent(t *testing.T) {
 
 func BenchmarkBuildSummaryPrompt(b *testing.B) {
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		_ = buildSummaryPrompt("keep the auth work")
 	}
 }

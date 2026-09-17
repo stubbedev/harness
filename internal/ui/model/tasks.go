@@ -778,7 +778,7 @@ func nestedOneLiner(t *styles.Styles, nested chat.ToolMessageItem, width int) st
 
 // handleTaskClick toggles the expanded task for a click inside the strip
 // and moves the keyboard cursor onto the clicked row.
-func (m *UI) handleTaskClick(x, y int) bool {
+func (m *UI) handleTaskClick(_, y int) bool {
 	if len(m.taskRows) == 0 {
 		return false
 	}
@@ -809,8 +809,4 @@ func fmtToolCalls(n int) string {
 		return "(1 tool call)"
 	}
 	return fmt.Sprintf("(%d tool calls)", n)
-}
-
-func fmtToolCallsExtra(n int) string {
-	return fmt.Sprintf("… and %d more tasks", n)
 }

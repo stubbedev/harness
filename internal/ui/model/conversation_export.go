@@ -167,7 +167,8 @@ func messageHeading(msg message.Message) string {
 	case message.System:
 		heading.WriteString("## System")
 	default:
-		heading.WriteString("## " + string(msg.Role))
+		heading.WriteString("## ")
+		heading.WriteString(string(msg.Role))
 	}
 	if msg.IsSummaryMessage {
 		heading.WriteString(" (summary)")

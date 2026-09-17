@@ -1519,7 +1519,7 @@ func (r *ptyRunner) collect(ctx context.Context, s ptyTerminal) PTYResult {
 // after its settle wait: the command may well finish in between, and
 // draining then would take the tail of its output away from the call
 // that is about to report it.
-func (r *ptyRunner) collectBusy(ctx context.Context, s ptyTerminal, busy bool) PTYResult {
+func (r *ptyRunner) collectBusy(_ context.Context, s ptyTerminal, busy bool) PTYResult {
 	// The call waiting on that command owns the output stream, so show
 	// the screen instead - a read, not a consume.
 	if busy {
