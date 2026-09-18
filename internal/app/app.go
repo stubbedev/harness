@@ -634,20 +634,12 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 
 	// Find the provider in the known providers list to get its default small model.
 	knownProviders, _ := config.Providers(cfg)
-	var knownProvider *catalog.Provider
-	for _, p := range knownProviders {
-		if string(p.ID) == providerID {
-			knownProvider = &p
-			break
-		}
-	}
-
-	// For unknown/local providers, use the large model as small.
-	if knownProvider == nil {
+	if config.KnownProviderByID(knownProviders, providerID) == nil {
+		// For unknown/local providers, use the large model as small.
 		slog.Warn("Using large model as small model for unknown provider", "provider", providerID, "model", largeModelCfg.Model)
 		return largeModelCfg
 	}
-
+	knownProvider := config.KnownProviderByID(knownProviders, providerID)
 	defaultSmallModelID := knownProvider.DefaultSmallModelID
 	model := cfg.GetModel(providerID, defaultSmallModelID)
 	if model == nil {

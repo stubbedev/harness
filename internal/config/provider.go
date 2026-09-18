@@ -41,6 +41,17 @@ var catalogSyncer = &catalogSync{}
 // A returned error is advisory: it reports that the catalog could not
 // be refreshed or cached. Callers decide whether an empty catalog is
 // fatal.
+// KnownProviderByID returns the catalog provider with the given ID, or
+// nil when it is not a built-in catalog provider.
+func KnownProviderByID(knownProviders []catalog.Provider, id string) *catalog.Provider {
+	for i, p := range knownProviders {
+		if string(p.ID) == id {
+			return &knownProviders[i]
+		}
+	}
+	return nil
+}
+
 func Providers(cfg *Config) ([]catalog.Provider, error) {
 	providerOnce.Do(func() {
 		autoupdate := !cfg.Options.DisableProviderAutoUpdate

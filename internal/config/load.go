@@ -786,41 +786,35 @@ func (c *Config) defaultModelSelection(knownProviders []catalog.Provider) (large
 
 	// Use the first provider enabled based on the known providers order
 	// if no provider found that is known use the first provider configured
+	defaultSelection := func(providerID, modelID, label string) (SelectedModel, error) {
+		model := c.GetModel(providerID, modelID)
+		if model == nil {
+			slog.Warn(fmt.Sprintf("Default %s model %s not found for provider %s", label, modelID, providerID))
+			providerConfig, ok := c.Providers.Get(providerID)
+			if !ok || len(providerConfig.Models) == 0 {
+				return SelectedModel{}, fmt.Errorf("default %s model %s not found for provider %s", label, modelID, providerID)
+			}
+			model = &providerConfig.Models[0]
+		}
+		return SelectedModel{
+			Provider:        providerID,
+			Model:           model.ID,
+			MaxTokens:       model.DefaultMaxTokens,
+			ReasoningEffort: catalog.HighestReasoningLevel(model.ReasoningLevels),
+		}, nil
+	}
 	for _, p := range knownProviders {
 		providerConfig, ok := c.Providers.Get(string(p.ID))
 		if !ok || providerConfig.Disable {
 			continue
 		}
-		defaultLargeModel := c.GetModel(string(p.ID), p.DefaultLargeModelID)
-		if defaultLargeModel == nil {
-			slog.Warn("Default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
-			if len(providerConfig.Models) == 0 {
-				return largeModel, smallModel, fmt.Errorf("default large model %s not found for provider %s", p.DefaultLargeModelID, p.ID)
-			}
-			defaultLargeModel = &providerConfig.Models[0]
+		if largeModel, err = defaultSelection(string(p.ID), p.DefaultLargeModelID, "large"); err != nil {
+			return largeModel, smallModel, err
 		}
-		largeModel = SelectedModel{
-			Provider:        string(p.ID),
-			Model:           defaultLargeModel.ID,
-			MaxTokens:       defaultLargeModel.DefaultMaxTokens,
-			ReasoningEffort: catalog.HighestReasoningLevel(defaultLargeModel.ReasoningLevels),
+		if smallModel, err = defaultSelection(string(p.ID), p.DefaultSmallModelID, "small"); err != nil {
+			return largeModel, smallModel, err
 		}
-
-		defaultSmallModel := c.GetModel(string(p.ID), p.DefaultSmallModelID)
-		if defaultSmallModel == nil {
-			slog.Warn("Default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
-			if len(providerConfig.Models) == 0 {
-				return largeModel, smallModel, fmt.Errorf("default small model %s not found for provider %s", p.DefaultSmallModelID, p.ID)
-			}
-			defaultSmallModel = &providerConfig.Models[0]
-		}
-		smallModel = SelectedModel{
-			Provider:        string(p.ID),
-			Model:           defaultSmallModel.ID,
-			MaxTokens:       defaultSmallModel.DefaultMaxTokens,
-			ReasoningEffort: catalog.HighestReasoningLevel(defaultSmallModel.ReasoningLevels),
-		}
-		return largeModel, smallModel, err
+		return largeModel, smallModel, nil
 	}
 
 	enabledProviders := c.EnabledProviders()
@@ -851,6 +845,55 @@ func (c *Config) defaultModelSelection(knownProviders []catalog.Provider) (large
 		MaxTokens: defaultSmallModel.DefaultMaxTokens,
 	}
 	return largeModel, smallModel, err
+}
+
+// resolveSelection overlays a user-selected model's provider and model
+// ID onto dst (where the selection is silent, dst keeps its current
+// values) and returns the catalog model for the overlaid selection, or
+// nil when it does not resolve.
+func (c *Config) resolveSelection(dst *SelectedModel, sel SelectedModel) *catalog.Model {
+	if sel.Model != "" {
+		dst.Model = sel.Model
+	}
+	if sel.Provider != "" {
+		dst.Provider = sel.Provider
+	}
+	return c.GetModel(dst.Provider, dst.Model)
+}
+
+// applySelectionParams copies a user-selected model's tuning parameters
+// onto dst, using the catalog model's defaults where the selection is
+// silent.
+func applySelectionParams(dst *SelectedModel, sel SelectedModel, model *catalog.Model) {
+	if sel.MaxTokens > 0 {
+		dst.MaxTokens = sel.MaxTokens
+	} else {
+		dst.MaxTokens = model.DefaultMaxTokens
+	}
+	if sel.ReasoningEffort != "" {
+		dst.ReasoningEffort = sel.ReasoningEffort
+	} else {
+		dst.ReasoningEffort = catalog.HighestReasoningLevel(model.ReasoningLevels)
+	}
+	dst.Think = sel.Think
+	if sel.Temperature != nil {
+		dst.Temperature = sel.Temperature
+	}
+	if sel.TopP != nil {
+		dst.TopP = sel.TopP
+	}
+	if sel.TopK != nil {
+		dst.TopK = sel.TopK
+	}
+	if sel.FrequencyPenalty != nil {
+		dst.FrequencyPenalty = sel.FrequencyPenalty
+	}
+	if sel.PresencePenalty != nil {
+		dst.PresencePenalty = sel.PresencePenalty
+	}
+	if sel.ProviderOptions != nil {
+		dst.ProviderOptions = maps.Clone(sel.ProviderOptions)
+	}
 }
 
 // resolvedModels holds the result of resolving user-configured model
@@ -887,94 +930,21 @@ func resolveSelectedModels(cfg *Config, knownProviders []catalog.Provider) (reso
 	}
 	large, small := defaultLarge, defaultSmall
 
-	largeModelSelected, largeModelConfigured := cfg.Models[SelectedModelTypeLarge]
-	if largeModelConfigured {
+	if largeModelSelected, ok := cfg.Models[SelectedModelTypeLarge]; ok {
 		result.LargeConfigured = largeModelSelected
-		if largeModelSelected.Model != "" {
-			large.Model = largeModelSelected.Model
-		}
-		if largeModelSelected.Provider != "" {
-			large.Provider = largeModelSelected.Provider
-		}
-		model := cfg.GetModel(large.Provider, large.Model)
-		if model == nil {
+		if model := cfg.resolveSelection(&large, largeModelSelected); model == nil {
 			large = defaultLarge
 			result.LargeFallback = true
 		} else {
-			if largeModelSelected.MaxTokens > 0 {
-				large.MaxTokens = largeModelSelected.MaxTokens
-			} else {
-				large.MaxTokens = model.DefaultMaxTokens
-			}
-			if largeModelSelected.ReasoningEffort != "" {
-				large.ReasoningEffort = largeModelSelected.ReasoningEffort
-			} else {
-				large.ReasoningEffort = catalog.HighestReasoningLevel(model.ReasoningLevels)
-			}
-			large.Think = largeModelSelected.Think
-			if largeModelSelected.Temperature != nil {
-				large.Temperature = largeModelSelected.Temperature
-			}
-			if largeModelSelected.TopP != nil {
-				large.TopP = largeModelSelected.TopP
-			}
-			if largeModelSelected.TopK != nil {
-				large.TopK = largeModelSelected.TopK
-			}
-			if largeModelSelected.FrequencyPenalty != nil {
-				large.FrequencyPenalty = largeModelSelected.FrequencyPenalty
-			}
-			if largeModelSelected.PresencePenalty != nil {
-				large.PresencePenalty = largeModelSelected.PresencePenalty
-			}
-			if largeModelSelected.ProviderOptions != nil {
-				large.ProviderOptions = maps.Clone(largeModelSelected.ProviderOptions)
-			}
+			applySelectionParams(&large, largeModelSelected, model)
 		}
 	}
-	smallModelSelected, smallModelConfigured := cfg.Models[SelectedModelTypeSmall]
-	if smallModelConfigured {
-		if smallModelSelected.Model != "" {
-			small.Model = smallModelSelected.Model
-		}
-		if smallModelSelected.Provider != "" {
-			small.Provider = smallModelSelected.Provider
-		}
-
-		model := cfg.GetModel(small.Provider, small.Model)
-		if model == nil {
+	if smallModelSelected, ok := cfg.Models[SelectedModelTypeSmall]; ok {
+		if model := cfg.resolveSelection(&small, smallModelSelected); model == nil {
 			small = defaultSmall
 			result.SmallFallback = true
 		} else {
-			if smallModelSelected.MaxTokens > 0 {
-				small.MaxTokens = smallModelSelected.MaxTokens
-			} else {
-				small.MaxTokens = model.DefaultMaxTokens
-			}
-			if smallModelSelected.ReasoningEffort != "" {
-				small.ReasoningEffort = smallModelSelected.ReasoningEffort
-			} else {
-				small.ReasoningEffort = catalog.HighestReasoningLevel(model.ReasoningLevels)
-			}
-			if smallModelSelected.Temperature != nil {
-				small.Temperature = smallModelSelected.Temperature
-			}
-			if smallModelSelected.TopP != nil {
-				small.TopP = smallModelSelected.TopP
-			}
-			if smallModelSelected.TopK != nil {
-				small.TopK = smallModelSelected.TopK
-			}
-			if smallModelSelected.FrequencyPenalty != nil {
-				small.FrequencyPenalty = smallModelSelected.FrequencyPenalty
-			}
-			if smallModelSelected.PresencePenalty != nil {
-				small.PresencePenalty = smallModelSelected.PresencePenalty
-			}
-			if smallModelSelected.ProviderOptions != nil {
-				small.ProviderOptions = maps.Clone(smallModelSelected.ProviderOptions)
-			}
-			small.Think = smallModelSelected.Think
+			applySelectionParams(&small, smallModelSelected, model)
 		}
 	}
 
@@ -982,18 +952,9 @@ func resolveSelectedModels(cfg *Config, knownProviders []catalog.Provider) (reso
 	// known built-in, use the large model as the small model. This
 	// prevents two different models from being requested concurrently
 	// for local/openai-compat providers.
-	if !smallModelConfigured {
-		isKnownProvider := false
-		for _, kp := range knownProviders {
-			if string(kp.ID) == small.Provider {
-				isKnownProvider = true
-				break
-			}
-		}
-		if !isKnownProvider {
-			slog.Warn("Using large model as small model for unknown provider", "provider", large.Provider, "model", large.Model)
-			small = large
-		}
+	if _, ok := cfg.Models[SelectedModelTypeSmall]; !ok && KnownProviderByID(knownProviders, small.Provider) == nil {
+		slog.Warn("Using large model as small model for unknown provider", "provider", large.Provider, "model", large.Model)
+		small = large
 	}
 
 	result.Large = large
