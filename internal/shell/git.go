@@ -38,13 +38,7 @@ func handleGit(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 		return interp.ExitStatus(127)
 	}
 
-	cmd := exec.CommandContext(ctx, path, args[1:]...)
-	cmd.Dir = hc.Dir
-	cmd.Env = execEnvList(hc.Env)
-	cmd.Stdin = stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	isolateProcess(cmd)
+	cmd := newIsolatedCmdContext(ctx, hc, path, args[1:], stdin, stdout, stderr)
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {

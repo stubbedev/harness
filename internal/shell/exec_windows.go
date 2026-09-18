@@ -49,16 +49,7 @@ func processGroupExecHandler(_ time.Duration) interp.ExecHandlerFunc {
 			return interp.ExitStatus(127)
 		}
 
-		cmd := exec.Cmd{
-			Path:   path,
-			Args:   args,
-			Env:    execEnvList(hc.Env),
-			Dir:    hc.Dir,
-			Stdin:  hc.Stdin,
-			Stdout: hc.Stdout,
-			Stderr: hc.Stderr,
-		}
-		isolateProcess(&cmd)
+		cmd := newIsolatedCmd(hc, path, args, hc.Stdin, hc.Stdout, hc.Stderr)
 
 		err = cmd.Start()
 		if err == nil {

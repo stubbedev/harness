@@ -190,14 +190,8 @@ func dispatchShebang(ctx context.Context, scriptPath string, probe []byte, args 
 	cmdArgs = append(cmdArgs, scriptPath)
 	cmdArgs = append(cmdArgs, args[1:]...)
 
-	cmd := exec.CommandContext(ctx, interpreter, cmdArgs...)
 	hc := interp.HandlerCtx(ctx)
-	cmd.Dir = hc.Dir
-	cmd.Env = execEnvList(hc.Env)
-	cmd.Stdin = hc.Stdin
-	cmd.Stdout = hc.Stdout
-	cmd.Stderr = hc.Stderr
-	isolateProcess(cmd)
+	cmd := newIsolatedCmdContext(ctx, hc, interpreter, cmdArgs, hc.Stdin, hc.Stdout, hc.Stderr)
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
@@ -421,4 +415,32 @@ func execEnvList(env expand.Environ) []string {
 		return true
 	})
 	return out
+}
+
+// newIsolatedCmd builds a detached exec.Cmd for path/args wired to the
+// interpreter's environment and stdio. Every process spawn under the
+// interpreter goes through here so the isolation policy (isolateProcess
+// and future guards around it) has exactly one construction point.
+// The spawned child outlives the current Go context; spawn paths that
+// want ctx cancellation to kill the child use newIsolatedCmdContext.
+func newIsolatedCmd(hc interp.HandlerContext, path string, args []string, stdin io.Reader, stdout, stderr io.Writer) *exec.Cmd {
+	return finishIsolatedCmd(exec.Command(path, args...), hc, stdin, stdout, stderr)
+}
+
+// newIsolatedCmdContext is newIsolatedCmd with ctx attached via
+// CommandContext, so cancelling ctx kills the child.
+func newIsolatedCmdContext(ctx context.Context, hc interp.HandlerContext, path string, args []string, stdin io.Reader, stdout, stderr io.Writer) *exec.Cmd {
+	return finishIsolatedCmd(exec.CommandContext(ctx, path, args...), hc, stdin, stdout, stderr)
+}
+
+// finishIsolatedCmd completes an isolated command: interpreter
+// environment, stdio, and the platform's process-isolation attributes.
+func finishIsolatedCmd(cmd *exec.Cmd, hc interp.HandlerContext, stdin io.Reader, stdout, stderr io.Writer) *exec.Cmd {
+	cmd.Dir = hc.Dir
+	cmd.Env = execEnvList(hc.Env)
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	isolateProcess(cmd)
+	return cmd
 }
