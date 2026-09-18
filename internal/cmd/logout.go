@@ -2,10 +2,8 @@ package cmd
 
 import (
 	"cmp"
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -76,17 +74,15 @@ harness logout copilot
 			}
 		}
 
-		switch provider {
-		case "copilot", "github", "github-copilot":
+		if copilotPlatform(provider) {
 			return logoutCopilot(c, ws.ID)
-		default:
-			return fmt.Errorf("unknown platform: %s", provider)
 		}
+		return fmt.Errorf("unknown platform: %s", provider)
 	},
 }
 
 func logoutCopilot(c *client.Client, wsID string) error {
-	ctx := getLogoutContext()
+	ctx := interactiveContext()
 
 	if err := cmp.Or(
 		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+string(catalog.InferenceProviderCopilot)+".api_key"),
@@ -100,7 +96,7 @@ func logoutCopilot(c *client.Client, wsID string) error {
 }
 
 func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
-	ctx := getLogoutContext()
+	ctx := interactiveContext()
 
 	cfg, err := c.GetConfig(ctx, wsID)
 	if err != nil {
@@ -112,8 +108,8 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
 		name string
 	}
 
-	// Only OAuth-based providers support login/logout. Keep this list in sync
-	// with the switch in RunE and the login command.
+	// Only OAuth-based providers support login/logout. Platform
+	// aliases live in copilotPlatform; this map is the display name.
 	oauthProviders := map[string]string{
 		string(catalog.InferenceProviderCopilot): "GitHub Copilot",
 	}
@@ -152,14 +148,4 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
 
 func init() {
 	logoutCmd.Flags().BoolP("force", "f", false, "Skip logout confirmation prompt")
-}
-
-func getLogoutContext() context.Context {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
-	go func() {
-		<-ctx.Done()
-		cancel()
-		os.Exit(1)
-	}()
-	return ctx
 }

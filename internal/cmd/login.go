@@ -49,12 +49,10 @@ harness login -f copilot
 			provider = args[0]
 		}
 		force, _ := cmd.Flags().GetBool("force")
-		switch provider {
-		case "copilot", "github", "github-copilot":
+		if copilotPlatform(provider) {
 			return loginCopilot(ws, force)
-		default:
-			return fmt.Errorf("unknown platform: %s", args[0])
 		}
+		return fmt.Errorf("unknown platform: %s", args[0])
 	},
 }
 
@@ -62,8 +60,20 @@ func init() {
 	loginCmd.Flags().BoolP("force", "f", false, "Force re-authentication even if already logged in")
 }
 
+// copilotPlatform reports whether the platform argument names GitHub
+// Copilot, in any of its accepted spellings. Single source for the
+// login and logout switches and the logged-in provider picker, so the
+// alias list cannot drift between them.
+func copilotPlatform(provider string) bool {
+	switch provider {
+	case "copilot", "github", "github-copilot":
+		return true
+	}
+	return false
+}
+
 func loginCopilot(ws workspace.Workspace, force bool) error {
-	loginCtx := getLoginContext()
+	loginCtx := interactiveContext()
 
 	if !force {
 		cfg := ws.Config()
@@ -138,7 +148,12 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 	return nil
 }
 
-func getLoginContext() context.Context {
+// interactiveContext returns a context cancelled on SIGINT/SIGKILL,
+// exiting the process when it fires. The forced exit is deliberate:
+// these interactive OAuth flows cannot be resumed, so a second signal
+// must not unwind through cobra's error handling. Shared by login and
+// logout.
+func interactiveContext() context.Context {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
 	go func() {
 		<-ctx.Done()

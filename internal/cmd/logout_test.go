@@ -34,7 +34,7 @@ func TestLogoutCmd_ValidArgs(t *testing.T) {
 }
 
 func TestLogoutContext_CreatesValidContext(t *testing.T) {
-	ctx := getLogoutContext()
+	ctx := interactiveContext()
 	require.NotNil(t, ctx)
 	require.NoError(t, ctx.Err())
 }
