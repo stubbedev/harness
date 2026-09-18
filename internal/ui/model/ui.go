@@ -59,6 +59,7 @@ import (
 	"github.com/stubbedev/harness/internal/ui/completions"
 	"github.com/stubbedev/harness/internal/ui/dialog"
 	fimage "github.com/stubbedev/harness/internal/ui/image"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/notification"
 	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/ui/util"
@@ -3321,10 +3322,9 @@ func (m *UI) ShortHelp() []key.Binding {
 	}
 
 	tab := k.Tab
-	commands := k.Commands
-	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
-		commands.SetHelp("/ or ctrl+p", "commands")
-	}
+	// "/" opens the skills palette only as the editor's first character, so
+	// the skills binding is hinted beside commands only while it is empty.
+	showSkills := m.focus == uiFocusEditor && m.textarea.Value() == ""
 
 	switch m.state {
 	case uiChat:
@@ -3333,30 +3333,29 @@ func (m *UI) ShortHelp() []key.Binding {
 		if m.isAgentBusy() && m.focus == uiFocusEditor {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
-				cancelBinding.SetHelp("esc", "press again to cancel")
+				cancelBinding.SetHelp(keys.HelpKeys(cancelBinding), "press again to cancel")
 			}
 			binds = append(binds, cancelBinding)
 		} else if m.focus == uiFocusEditor && m.rewindEscArmed {
 			// Idle with the first escape pressed: the next one opens the
 			// rewind picker.
 			rewindBinding := k.Chat.Cancel
-			rewindBinding.SetHelp("esc", "press again to rewind")
+			rewindBinding.SetHelp(keys.HelpKeys(rewindBinding), "press again to rewind")
 			binds = append(binds, rewindBinding)
 		}
 
 		switch m.focus {
 		case uiFocusEditor:
-			tab.SetHelp("tab", "focus chat")
+			tab.SetHelp(keys.HelpKeys(tab), "focus chat")
 		default:
-			tab.SetHelp("tab", "focus editor")
+			tab.SetHelp(keys.HelpKeys(tab), "focus editor")
 		}
 
-		binds = append(
-			binds,
-			tab,
-			commands,
-			k.Models,
-		)
+		binds = append(binds, tab, k.Commands)
+		if showSkills {
+			binds = append(binds, k.Editor.Skills)
+		}
+		binds = append(binds, k.Models)
 
 		switch m.focus {
 		case uiFocusEditor:
@@ -3387,15 +3386,18 @@ func (m *UI) ShortHelp() []key.Binding {
 		// no session selected
 		binds = append(
 			binds,
-			commands,
+			k.Commands,
 			k.Models,
 			k.Editor.Newline,
 		)
+		if showSkills {
+			binds = append(binds, k.Editor.Skills)
+		}
 	}
 
 	quit := k.Quit
 	if m.isQuitting {
-		quit.SetHelp(quit.Help().Key, "press again to quit")
+		quit.SetHelp(keys.HelpKeys(quit), "press again to quit")
 	}
 	binds = append(
 		binds,
@@ -3416,13 +3418,13 @@ func (m *UI) FullHelp() [][]key.Binding {
 	var binds [][]key.Binding
 	k := &m.keyMap
 	help := k.Help
-	help.SetHelp("ctrl+g", "less")
+	help.SetHelp(keys.HelpKeys(help), "less")
 	hasAttachments := len(m.attachments.List()) > 0
 	hasSession := m.hasSession()
-	commands := k.Commands
-	if m.focus == uiFocusEditor && m.textarea.Value() == "" {
-		commands.SetHelp("/ or ctrl+p", "commands")
-	}
+	// "/" opens the skills palette only as the editor's first character,
+	// so the skills binding is hinted beside commands only while it is
+	// empty.
+	showSkills := m.focus == uiFocusEditor && m.textarea.Value() == ""
 
 	switch m.state {
 	case uiChat:
@@ -3431,12 +3433,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 		if m.isAgentBusy() && m.focus == uiFocusEditor {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
-				cancelBinding.SetHelp("esc", "press again to cancel")
+				cancelBinding.SetHelp(keys.HelpKeys(cancelBinding), "press again to cancel")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
 		} else if m.focus == uiFocusEditor && m.rewindEscArmed {
 			rewindBinding := k.Chat.Cancel
-			rewindBinding.SetHelp("esc", "press again to rewind")
+			rewindBinding.SetHelp(keys.HelpKeys(rewindBinding), "press again to rewind")
 			binds = append(binds, []key.Binding{rewindBinding})
 		}
 
@@ -3444,15 +3446,21 @@ func (m *UI) FullHelp() [][]key.Binding {
 		tab := k.Tab
 		switch m.focus {
 		case uiFocusEditor:
-			tab.SetHelp("tab", "focus chat")
+			tab.SetHelp(keys.HelpKeys(tab), "focus chat")
 		default:
-			tab.SetHelp("tab", "focus editor")
+			tab.SetHelp(keys.HelpKeys(tab), "focus editor")
 		}
 
 		mainBinds = append(
 			mainBinds,
 			tab,
-			commands,
+			k.Commands,
+		)
+		if showSkills {
+			mainBinds = append(mainBinds, k.Editor.Skills)
+		}
+		mainBinds = append(
+			mainBinds,
 			k.Models,
 			k.Sessions,
 			k.Themes,
@@ -3528,12 +3536,15 @@ func (m *UI) FullHelp() [][]key.Binding {
 			binds = append(
 				binds,
 				[]key.Binding{
-					commands,
+					k.Commands,
 					k.Models,
 					k.Sessions,
 					k.Themes,
 				},
 			)
+			if showSkills {
+				binds[len(binds)-1] = append(binds[len(binds)-1], k.Editor.Skills)
+			}
 			editorBinds := []key.Binding{
 				k.Editor.Newline,
 				k.Editor.MentionFile,
@@ -3562,7 +3573,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 	quit := k.Quit
 	if m.isQuitting {
-		quit.SetHelp(quit.Help().Key, "press again to quit")
+		quit.SetHelp(keys.HelpKeys(quit), "press again to quit")
 	}
 	binds = append(
 		binds,

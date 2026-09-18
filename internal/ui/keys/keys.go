@@ -856,6 +856,13 @@ func rebind(b key.Binding, keys []string) key.Binding {
 	return key.NewBinding(opts...)
 }
 
+// HelpKeys derives a binding's help key text from the keys it is bound to,
+// so hints built from it cannot drift from the keymap or ignore keybind
+// overrides. Hand-written key text at a SetHelp call site can do both.
+func HelpKeys(b key.Binding) string {
+	return strings.Join(b.Keys(), "/")
+}
+
 // active is the process-wide keymap. Key bindings are read from every
 // layer of the UI — the model, each dialog, the completions popup, the
 // chat items — and several of those are constructed without a handle on
