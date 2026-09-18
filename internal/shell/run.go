@@ -105,8 +105,10 @@ type PersistFunc func(command, output string, exitCode int) error
 // RunAndPersist executes a shell command via PTY and optionally
 // persists the result through the provided callback. This unifies
 // the run-and-save pattern used by both AppWorkspace and Backend.
+// It runs through RunAndCaptureStream, so the same bounds apply:
+// watchdog, capped capture, coalesced progress.
 func RunAndPersist(ctx context.Context, opts RunOptions, persist PersistFunc) (CaptureResult, error) {
-	result, err := RunAndCapturePTY(ctx, opts)
+	result, err := RunAndCaptureStream(ctx, opts, nil)
 	if err != nil {
 		return CaptureResult{}, err
 	}

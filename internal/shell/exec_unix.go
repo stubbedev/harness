@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"mvdan.cc/sh/v3/interp"
+	"github.com/stubbedev/harness/internal/procgroup"
 )
 
 // defaultKillTimeout matches mvdan's DefaultExecHandler default. Extracted
@@ -64,15 +65,13 @@ func processGroupExecHandler(killTimeout time.Duration) interp.ExecHandlerFunc {
 		err = cmd.Start()
 		if err == nil {
 			stopf := context.AfterFunc(ctx, func() {
-				if killTimeout <= 0 {
-					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-					return
-				}
-				// Signal the child's process group (negative PID) so
-				// grandchildren also receive it.
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
-				time.Sleep(killTimeout)
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				// Kill the child's process group (negative PID) so
+				// grandchildren also receive it: interrupt first so
+				// well-behaved children run their traps, escalate to
+				// SIGKILL past the grace window (a group member may
+				// ignore SIGINT, e.g. trap '' INT), and sweep stragglers
+				// that forked between the kill and the reap.
+				procgroup.Kill(cmd.Process, killTimeout)
 			})
 			defer stopf()
 

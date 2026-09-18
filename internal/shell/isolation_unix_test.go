@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestProcessIsolation_SignalDoesNotReachParent verifies that a child
@@ -140,4 +142,63 @@ func TestProcessIsolation_ChildProcessGroupKill(t *testing.T) {
 	if elapsed > 4*time.Second {
 		t.Fatalf("cancellation took %v; expected prompt process group kill", elapsed)
 	}
+}
+
+// TestProcessIsolation_SigintImmuneChildEscalatesToKill verifies the
+// escalation a group member that ignores SIGINT (trap '' INT) cannot
+// survive: past the grace window the group is SIGKILLed, and stragglers
+// that forked between the kill and the reap are swept too.
+func TestProcessIsolation_SigintImmuneChildEscalatesToKill(t *testing.T) {
+	t.Parallel()
+
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh on this platform")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := Run(ctx, RunOptions{
+		Command: `sh -c 'trap "" INT; sleep 61'`,
+		Cwd:     t.TempDir(),
+		Env:     os.Environ(),
+	})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+	// 500ms timeout + 2s grace + margin: the SIGKILL must land promptly
+	// after the grace, not hang on the ignored SIGINT.
+	if elapsed > 4*time.Second {
+		t.Fatalf("cancellation took %v; SIGINT-immune child must be SIGKILLed after the grace", elapsed)
+	}
+}
+
+// TestProcessIsolation_GroupGoneAfterKill verifies no process of the
+// cancelled group is left behind once Run returns - including a
+// backgrounded child, which the kill's negative PID covers.
+func TestProcessIsolation_GroupGoneAfterKill(t *testing.T) {
+	t.Parallel()
+
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh on this platform")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	_ = Run(ctx, RunOptions{
+		Command: `sh -c 'sleep 62 & wait'`,
+		Cwd:     t.TempDir(),
+		Env:     os.Environ(),
+	})
+
+	// The unique sleep values make the pgrep specific to this test's
+	// children; a leftover means the group kill missed a member.
+	require.Eventually(t, func() bool {
+		out, err := exec.Command("pgrep", "-f", "sleep 62").Output()
+		return err != nil || len(strings.TrimSpace(string(out))) == 0
+	}, 3*time.Second, 100*time.Millisecond, "no group member may survive cancellation")
 }

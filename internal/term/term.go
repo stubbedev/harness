@@ -27,6 +27,7 @@ import (
 
 	"github.com/aymanbagabas/go-pty"
 	"github.com/hinshun/vt10x"
+	"github.com/stubbedev/harness/internal/procgroup"
 )
 
 const (
@@ -814,13 +815,22 @@ func (s *Session) Err() error {
 // wait goroutine releases the PTY when the shell exits on its own
 // (onExit), and a runner being torn down closes the session it holds,
 // so the same session can arrive here twice.
+//
+// The whole process group is killed, not just the shell: a background
+// or disowned child that stayed in the group would otherwise survive
+// holding the slave end open, and with no reader left on the master
+// the session never sees EIO - the wedged-terminal failure mode.
 func (s *Session) Close() {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		exited := s.exited
 		s.mu.Unlock()
 		if !exited {
-			_ = s.proc.Kill()
+			// The shell is a session leader (Setsid), so its pid is the
+			// group id and the group holds every descendant that did not
+			// escape into a session of its own. Teardown skips the
+			// interrupt grace: idle reapers close live shells routinely.
+			procgroup.Kill(s.proc, 0)
 		}
 		_ = s.pty.Close()
 		// Ends the reply-forwarding goroutine.
