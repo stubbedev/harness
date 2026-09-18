@@ -381,9 +381,9 @@ func WaitForInitBudget(ctx context.Context, budget time.Duration) error {
 
 // InitializeSingle initializes a single MCP client by name.
 func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore) error {
-	m, exists := cfg.Config().MCP[name]
-	if !exists {
-		return fmt.Errorf("mcp '%s' not found in configuration", name)
+	m, err := mcpConfigFor(cfg, name)
+	if err != nil {
+		return err
 	}
 
 	if m.Disabled {
@@ -400,13 +400,12 @@ func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore)
 // callback server), connects to the server (which triggers the browser
 // auth flow on 401), and transitions to StateConnected on success.
 func AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) error {
-	m, exists := cfg.Config().MCP[name]
-	if !exists {
-		return fmt.Errorf("mcp '%s' not found in configuration", name)
+	m, err := mcpConfigFor(cfg, name)
+	if err != nil {
+		return err
 	}
-
-	if !m.OAuth || m.Type != config.MCPHttp {
-		return fmt.Errorf("mcp '%s' does not use OAuth authentication", name)
+	if err := requireMCPOAuth(name, m); err != nil {
+		return err
 	}
 
 	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
@@ -417,7 +416,7 @@ func AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) 
 
 	// The OAuth handler persists the token automatically as it is
 	// exchanged, so a successful connection has already saved it.
-	_, err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	_, err = connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return err
 	}
@@ -468,12 +467,12 @@ func PendingAuthMCPs(cfg *config.ConfigStore) []PendingAuthServer {
 // returned cancel function aborts the flow without waiting; use it when the
 // caller's context is cancelled.
 func BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Context) error, cancel context.CancelFunc, err error) {
-	m, exists := cfg.Config().MCP[name]
-	if !exists {
-		return nil, nil, fmt.Errorf("mcp '%s' not found in configuration", name)
+	m, err := mcpConfigFor(cfg, name)
+	if err != nil {
+		return nil, nil, err
 	}
-	if !m.OAuth || m.Type != config.MCPHttp {
-		return nil, nil, fmt.Errorf("mcp '%s' does not use OAuth authentication", name)
+	if err := requireMCPOAuth(name, m); err != nil {
+		return nil, nil, err
 	}
 
 	lock := suppressLock(name)
@@ -700,6 +699,26 @@ func teardown(name string) {
 	clearMCPData(name)
 }
 
+// mcpConfigFor returns the configured MCP server entry for name, or an
+// error listing the configured names when it does not exist. Single
+// source for the per-command lookup guards.
+func mcpConfigFor(cfg *config.ConfigStore, name string) (config.MCPConfig, error) {
+	m, ok := cfg.Config().MCP[name]
+	if !ok {
+		return config.MCPConfig{}, fmt.Errorf("mcp '%s' not found in configuration; available: %s", name, configuredServerNames(cfg))
+	}
+	return m, nil
+}
+
+// requireMCPOAuth rejects configurations the interactive OAuth flow
+// cannot serve: only HTTP servers with OAuth enabled qualify.
+func requireMCPOAuth(name string, m config.MCPConfig) error {
+	if !m.OAuth || m.Type != config.MCPHttp {
+		return fmt.Errorf("mcp '%s' does not use OAuth authentication", name)
+	}
+	return nil
+}
+
 // configuredServerNames renders the configured MCP server names for error
 // messages so a caller that used an invented name can see what exists.
 func configuredServerNames(cfg *config.ConfigStore) string {
@@ -715,9 +734,9 @@ func configuredServerNames(cfg *config.ConfigStore) string {
 }
 
 func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string) (*ClientSession, error) {
-	m, ok := cfg.Config().MCP[name]
-	if !ok {
-		return nil, fmt.Errorf("mcp '%s' not found in configuration; available: %s", name, configuredServerNames(cfg))
+	m, err := mcpConfigFor(cfg, name)
+	if err != nil {
+		return nil, err
 	}
 	if m.Disabled {
 		return nil, fmt.Errorf("mcp '%s' is disabled", name)
