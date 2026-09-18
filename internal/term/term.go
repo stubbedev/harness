@@ -68,6 +68,11 @@ type Session struct {
 	err       error
 	closeOnce sync.Once
 
+	// job is the Windows job object the shell was assigned to at
+	// start, so closing it in Close kills the whole tree. Zero (no
+	// job) on non-Windows.
+	job uintptr
+
 	// emu is a headless terminal emulator fed the same bytes as pending.
 	// The raw stream is the right view of a normal command (it keeps
 	// everything, including output that scrolled past the screen), but
@@ -217,6 +222,10 @@ func Start(cwd string, env ...string) (*Session, error) {
 	afterStart(p)
 
 	s := newSession(p, cmd.Process, rows, cols)
+	// Assign the shell to a job object before it can spawn anything:
+	// every descendant then dies with the session on Windows. A no-op
+	// returning 0 elsewhere.
+	s.job = procgroup.NewJob(cmd.Process)
 	go s.reap(cmd)
 	return s, nil
 }
@@ -816,12 +825,22 @@ func (s *Session) Err() error {
 // (onExit), and a runner being torn down closes the session it holds,
 // so the same session can arrive here twice.
 //
-// The whole process group is killed, not just the shell: a background
+// The whole process tree is killed, not just the shell: a background
 // or disowned child that stayed in the group would otherwise survive
 // holding the slave end open, and with no reader left on the master
 // the session never sees EIO - the wedged-terminal failure mode.
+// A child that escaped the group with setsid is caught two ways: the
+// PPid walk inside the group kill (while the shell still parents it),
+// and a sweep of every process still holding the slave device, which
+// also reaches double-forked daemons that kept their stdio.
 func (s *Session) Close() {
 	s.closeOnce.Do(func() {
+		if s.job != 0 {
+			// Kill-on-close: the job takes the shell and every
+			// descendant assigned to it (Windows only).
+			procgroup.CloseJob(s.job)
+			s.job = 0
+		}
 		s.mu.Lock()
 		exited := s.exited
 		s.mu.Unlock()
@@ -832,6 +851,7 @@ func (s *Session) Close() {
 			// interrupt grace: idle reapers close live shells routinely.
 			procgroup.Kill(s.proc, 0)
 		}
+		procgroup.KillHolders(s.pty.Name())
 		_ = s.pty.Close()
 		// Ends the reply-forwarding goroutine.
 		s.replies.close()

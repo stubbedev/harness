@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -201,4 +202,35 @@ func TestProcessIsolation_GroupGoneAfterKill(t *testing.T) {
 		out, err := exec.CommandContext(t.Context(), "pgrep", "-f", "sleep 62").Output()
 		return err != nil || len(strings.TrimSpace(string(out))) == 0
 	}, 3*time.Second, 100*time.Millisecond, "no group member may survive cancellation")
+}
+
+// TestProcessIsolation_SetsidGrandchildKilledByTreeWalk: a grandchild
+// that escapes into its own session survives the group kill but not
+// the descendant walk, which collects pids while the parent chain is
+// still intact and signals them alongside the group.
+func TestProcessIsolation_SetsidGrandchildKilledByTreeWalk(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS != "linux" {
+		t.Skip("the descendant walk is linux-only")
+	}
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("no setsid on PATH")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	_ = Run(ctx, RunOptions{
+		// Descriptors closed on purpose: the child holds nothing the
+		// group kill could reach it through - only the tree walk finds it.
+		Command: `sh -c 'setsid sleep 63 <&- >&- 2>&- & wait'`,
+		Cwd:     t.TempDir(),
+		Env:     os.Environ(),
+	})
+
+	require.Eventually(t, func() bool {
+		out, err := exec.CommandContext(t.Context(), "pgrep", "-f", "sleep 63").Output()
+		return err != nil || len(strings.TrimSpace(string(out))) == 0
+	}, 3*time.Second, 100*time.Millisecond, "a setsid grandchild must not survive cancellation")
 }

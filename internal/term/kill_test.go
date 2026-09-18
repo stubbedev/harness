@@ -3,6 +3,9 @@
 package term
 
 import (
+	"os/exec"
+	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -70,4 +73,32 @@ func TestSession_CloseUnblocksTheReadLoop(t *testing.T) {
 	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("Close must unblock a pending wait")
 	}
+}
+
+// TestSession_CloseReapsSetsidEscapees: a child that escaped the group
+// with setsid still dies with the session - caught by the PPid walk
+// while the shell parents it, and by the sweep of processes still
+// holding the slave device.
+func TestSession_CloseReapsSetsidEscapees(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the escapee sweep is linux-only")
+	}
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("no setsid on PATH")
+	}
+	s := startTestSession(t)
+	waitReady(t, s)
+	s.Drain()
+
+	require.NoError(t, s.Send([]byte("setsid sleep 9873 &\n")))
+	require.True(t, s.WaitForQuiet(t.Context(), 2*time.Second, testTimeout(10*time.Second)),
+		"the escaped child must start before the session is closed")
+
+	s.Close()
+
+	require.Eventually(t, func() bool {
+		out, err := exec.CommandContext(t.Context(), "pgrep", "-f", "sleep 9873").Output()
+		return err != nil || len(strings.TrimSpace(string(out))) == 0
+	}, testTimeout(5*time.Second), 50*time.Millisecond,
+		"a setsid escapee must not survive the session")
 }
