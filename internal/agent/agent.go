@@ -1410,6 +1410,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				}
 			}
 			currentAssistant.AddFinish(finishReason, "", "")
+			stripOrphanThinking(currentAssistant)
 			sessionLock.Lock()
 			defer sessionLock.Unlock()
 
@@ -1734,12 +1735,34 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	return a.Run(ctx, firstQueuedMessage)
 }
 
+// stripOrphanThinking drops reasoning content from an assistant
+// message that produced nothing else. Thinking is always followed by
+// the answer or tool calls of its turn, so a message holding only
+// thinking can never end a transcript and is not persisted as one:
+// the finish (canceled marker or error banner) stays, the thinking
+// goes. Called where a turn's terminal state is persisted.
+func stripOrphanThinking(msg *message.Message) {
+	if strings.TrimSpace(msg.Content().Text) != "" || len(msg.ToolCalls()) > 0 {
+		return
+	}
+	msg.Parts = slices.DeleteFunc(msg.Parts, func(p message.ContentPart) bool {
+		_, ok := p.(message.ReasoningContent)
+		return ok
+	})
+}
+
 // persistFailedTurn writes the terminal state of a streaming turn that
 // ended with streamErr: unfinished tool calls are closed with error
 // results, the failure (or cancellation) is recorded on the assistant
 // message, and a terminal retry notice is published when the turn went
 // through retries. It returns nil when the state was persisted and the
 // error that stopped the persistence otherwise.
+//
+// A turn that died before producing anything — no text, no tool
+// calls — keeps its finish (the canceled marker or error banner the
+// transcript renders) but not its thinking: thinking is always
+// followed by the answer or tool calls of its turn, so a transcript
+// entry holding only thinking can never be a turn's real ending.
 func (a *sessionAgent) persistFailedTurn(
 	ctx context.Context,
 	sessionID, sessionTitle string,
@@ -1760,6 +1783,7 @@ func (a *sessionAgent) persistFailedTurn(
 	defer cleanupCancel()
 	// Ensure we finish thinking on error to close the reasoning state.
 	currentAssistant.FinishThinking()
+	stripOrphanThinking(currentAssistant)
 	toolCalls := currentAssistant.ToolCalls()
 	// INFO: we use the cleanup context here because the genCtx has been cancelled.
 	msgs, listErr := a.messages.List(cleanupCtx, currentAssistant.SessionID)
