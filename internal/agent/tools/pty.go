@@ -245,10 +245,14 @@ type ptyRunner struct {
 	mu     sync.Mutex
 	cmdMu  sync.Mutex
 	sendMu sync.Mutex
-	// key is the registry key (owner and directory) and cwd the
-	// directory the shell started in.
-	key string
-	cwd string
+	// agentID is the agent whose dispatch owns this terminal, kept
+	// separate from key so cleanup can close every session an agent
+	// holds (all dispatches, all directories) with an exact match. key
+	// is the registry key (owner and directory) and cwd the directory
+	// the shell started in.
+	agentID string
+	key     string
+	cwd     string
 	// lastCwd is the working directory the last completed command's
 	// sentinel reported - the session's cwd as of then. Calls that run
 	// no command (poll, keys, input) have no sentinel to read, so they
@@ -363,10 +367,12 @@ func CloseTerminalSessions() {
 	closeTerminalSessions(func(*ptyRunner) bool { return true })
 }
 
-// closeOwnerSessions closes the sessions one owner holds.
-func closeOwnerSessions(owner string) {
-	prefix := owner + "\x00"
-	closeTerminalSessions(func(r *ptyRunner) bool { return strings.HasPrefix(r.key, prefix) })
+// closeOwnerSessions closes every session one agent holds, across all
+// of its dispatches and working directories. Matching is exact on the
+// agent ID, so agent "fast" never closes "fast2"'s sessions and no
+// owner string can be a prefix of another's key.
+func closeOwnerSessions(agentID string) {
+	closeTerminalSessions(func(r *ptyRunner) bool { return r.agentID == agentID })
 }
 
 // CloseTerminalSessionsUnder closes every session whose shell was opened
@@ -412,21 +418,37 @@ func ptyReaperStart() {
 	})
 }
 
-// runnerKey names a runner in the registry: each owner (agent) gets its
-// own session per working directory, the way a person has one terminal
-// tab per project they are in.
+// runnerKey names a runner in the registry: each owner - an agent and
+// the dispatch (session) it is serving - gets its own session per
+// working directory, the way a person has one terminal tab per project
+// they are in.
 func runnerKey(owner, cwd string) string {
 	return owner + "\x00" + cwd
 }
 
-// ptyRunnerFor returns the runner for one owner's workingDir, creating
-// (and warm-starting) it on first use. The ask service collects sudo
-// passwords from the user; nil disables prompting. Runners are reused
-// until they idle out (ptyIdleTimeout) or are evicted at the cap, so
-// shell state survives across calls without leaking one PTY per agent
-// and working directory forever.
-func ptyRunnerFor(owner, cwd string, ask question.Service) *ptyRunner {
-	key := runnerKey(owner, cwd)
+// shellOwner scopes a terminal to one dispatch of an agent: the agent
+// ID plus the session the call runs in, which is unique per dispatch
+// for subagents (one child session per agent tool call) and stable per
+// conversation for the orchestrating agent. Concurrent dispatches of
+// the same agent type then drive separate terminals instead of typing
+// into each other's running programs. Without a session - direct
+// callers, tests - the plain agent ID is kept.
+func shellOwner(agentID, sessionID string) string {
+	if sessionID == "" {
+		return agentID
+	}
+	return agentID + "\x1f" + sessionID
+}
+
+// ptyRunnerFor returns the runner for one dispatch of agentID running
+// in sessionID and workingDir, creating (and warm-starting) it on first
+// use. The ask service collects sudo passwords from the user; nil
+// disables prompting. Runners are reused until they idle out
+// (ptyIdleTimeout) or are evicted at the cap - which is therefore also
+// the bound on concurrent terminals, waves included - so shell state
+// survives across calls without leaking one PTY per dispatch forever.
+func ptyRunnerFor(agentID, sessionID, cwd string, ask question.Service) *ptyRunner {
+	key := runnerKey(shellOwner(agentID, sessionID), cwd)
 
 	ptyRunnersMu.Lock()
 	defer ptyRunnersMu.Unlock()
@@ -453,7 +475,7 @@ func ptyRunnerFor(owner, cwd string, ask question.Service) *ptyRunner {
 			go victim.Close()
 		}
 	}
-	r := &ptyRunner{key: key, cwd: cwd, ask: ask, lastUsed: time.Now()}
+	r := &ptyRunner{agentID: agentID, key: key, cwd: cwd, ask: ask, lastUsed: time.Now()}
 	ptyRunners[key] = r
 	ptyReaperStart()
 	// Warm start in the background: interactive shells (nix,

@@ -144,12 +144,12 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 		return nil
 	}
 	// Commands run in a persistent terminal session (see pty.go): a real
-	// PTY whose shell state and sudo credential survive across calls. It
-	// warms up in the background while the agent starts.
-	// Sessions are scoped to the owner - the agent's ID - so every
-	// agent, the coder and each subagent alike, drives its own shell
-	// and none of them can type into, reset or pollute another's.
-	_ = ptyRunnerFor(owner, workingDir, questions)
+	// PTY whose shell state and sudo credential survive across calls,
+	// warm-started on first use.
+	// Sessions are scoped to the owner - the agent's ID plus the dispatch
+	// (session) the call runs in - so every agent, and every concurrent
+	// dispatch of the same agent, drives its own shell: none of them can
+	// type into, reset or pollute another's.
 	return fantasy.NewAgentTool(
 		ShellToolName,
 		string(shellDescription(shellPath)),
@@ -172,7 +172,7 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 
 			var result PTYResult
 			var err error
-			session := ptyRunnerFor(owner, execWorkingDir, questions)
+			session := ptyRunnerFor(owner, GetSessionFromContext(ctx), execWorkingDir, questions)
 			switch {
 			case params.Reset:
 				err = session.Reset(ctx)

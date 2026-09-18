@@ -850,7 +850,7 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 	// Fill to the cap.
 	for i := range ptyMaxRunners {
 		dir := t.TempDir()
-		r := ptyRunnerFor("test", dir, nil)
+		r := ptyRunnerFor("test", "", dir, nil)
 		if _, err := r.terminal(t.Context()); err != nil {
 			t.Fatalf("open %d: %v", i, err)
 		}
@@ -861,7 +861,7 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 
 	// One more evicts the most idle.
 	time.Sleep(10 * time.Millisecond)
-	r := ptyRunnerFor("test", t.TempDir(), nil)
+	r := ptyRunnerFor("test", "", t.TempDir(), nil)
 	_, err := r.terminal(t.Context())
 	require.NoError(t, err)
 	ptyRunnersMu.Lock()
@@ -936,10 +936,59 @@ func TestPtyRunner_OwnersGetSeparateSessions(t *testing.T) {
 		ptyRunnersMu.Unlock()
 	})
 
-	a := ptyRunnerFor("agent-a", t.TempDir(), nil)
-	b := ptyRunnerFor("agent-b", a.cwd, nil)
+	a := ptyRunnerFor("agent-a", "", t.TempDir(), nil)
+	b := ptyRunnerFor("agent-b", "", a.cwd, nil)
 	require.NotSame(t, a, b, "two owners in one directory must not share a session")
-	require.Same(t, a, ptyRunnerFor("agent-a", a.cwd, nil), "one owner resolves back to its own runner")
+	require.Same(t, a, ptyRunnerFor("agent-a", "", a.cwd, nil), "one owner resolves back to its own runner")
+}
+
+// Concurrent dispatches of one agent type share no terminal: the
+// session ID from the tool context (unique per agent-tool dispatch)
+// keys the runner, so a sibling's command cannot be typed into another
+// dispatch's running program. Cleanup still closes every session the
+// agent holds, and no agent's ID can close another's (exact match, not
+// prefix: "fast" must not close "fast2").
+func TestPtyRunner_DispatchesGetSeparateSessions(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh on this platform")
+	}
+
+	ptyRunnersMu.Lock()
+	saved := ptyRunners
+	ptyRunners = map[string]*ptyRunner{}
+	ptyRunnersMu.Unlock()
+	t.Cleanup(func() {
+		ptyRunnersMu.Lock()
+		for _, r := range ptyRunners {
+			r.Close()
+		}
+		ptyRunners = saved
+		ptyRunnersMu.Unlock()
+	})
+
+	cwd := t.TempDir()
+	d1 := ptyRunnerFor("fast", "msg1$$call1", cwd, nil)
+	d2 := ptyRunnerFor("fast", "msg2$$call2", cwd, nil)
+	require.NotSame(t, d1, d2, "two dispatches of one agent must not share a terminal")
+	require.Same(t, d1, ptyRunnerFor("fast", "msg1$$call1", cwd, nil), "one dispatch resolves back to its own runner")
+
+	ptyRunnersMu.Lock()
+	require.Len(t, ptyRunners, 2)
+	d2key := d2.key
+	ptyRunnersMu.Unlock()
+
+	// A same-prefixed sibling agent is untouched by fast's cleanup.
+	other := ptyRunnerFor("fast2", "", cwd, nil)
+	closeOwnerSessions("fast")
+	ptyRunnersMu.Lock()
+	_, d2Gone := ptyRunners[d2key]
+	_, otherAlive := ptyRunners[other.key]
+	require.False(t, d2Gone, "fast's dispatch sessions must be closed with the agent")
+	require.True(t, otherAlive, "fast2 must keep its sessions when fast closes its own")
+	for _, r := range ptyRunners {
+		r.Close()
+	}
+	ptyRunnersMu.Unlock()
 }
 
 // Reset is the way out of a session that cannot be talked down: the
