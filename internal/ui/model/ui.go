@@ -1800,14 +1800,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		}
 		// Shell commands are rendered live via shellResultMsg; skip
 		// the persisted duplicate.
-		hasShellCmd := false
-		for _, part := range msg.Parts {
-			if _, ok := part.(message.ShellCommand); ok {
-				hasShellCmd = true
-				break
-			}
-		}
-		if hasShellCmd {
+		if message.HasPart[message.ShellCommand](&msg) {
 			return nil
 		}
 		m.lastUserMessageTime = msg.CreatedAt

@@ -202,6 +202,41 @@ func (m *Message) SubagentNotes() []SubagentNote {
 	return notes
 }
 
+// PartOf returns the first part of m with type T, if any. Single source
+// for the part-type scans the UI re-typed per call site.
+func PartOf[T ContentPart](m *Message) (T, bool) {
+	var zero T
+	if m == nil {
+		return zero, false
+	}
+	for _, part := range m.Parts {
+		if t, ok := part.(T); ok {
+			return t, true
+		}
+	}
+	return zero, false
+}
+
+// HasPart reports whether m carries at least one part with type T.
+func HasPart[T ContentPart](m *Message) bool {
+	_, ok := PartOf[T](m)
+	return ok
+}
+
+// PartsOf returns every part of m with type T.
+func PartsOf[T ContentPart](m *Message) []T {
+	if m == nil {
+		return nil
+	}
+	var out []T
+	for _, part := range m.Parts {
+		if t, ok := part.(T); ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // SubagentNotesOnly reports whether the message carries nothing but
 // sub-agent report-backs. Persistence appends a Finish bookkeeping part
 // to every non-assistant message, so a report-back persists as

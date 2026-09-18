@@ -179,8 +179,8 @@ func copyJSON(raw string) string {
 // included: copy reproduces what the model said, not how it got there.
 func copyMessageText(msg *message.Message) string {
 	var parts []string
-	for _, part := range msg.Parts {
-		if c, ok := part.(message.TextContent); ok && strings.TrimSpace(c.Text) != "" {
+	for _, c := range message.PartsOf[message.TextContent](msg) {
+		if strings.TrimSpace(c.Text) != "" {
 			parts = append(parts, strings.TrimRight(c.Text, "\n"))
 		}
 	}

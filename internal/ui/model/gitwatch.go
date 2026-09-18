@@ -347,12 +347,7 @@ func (w *gitWatcher) addWatch(dir string) {
 // call, the signal the watcher uses to notice agent-driven tree changes
 // that never touch the git directory (plain worktree edits).
 func hasToolResult(msg message.Message) bool {
-	for _, part := range msg.Parts {
-		if _, ok := part.(message.ToolResult); ok {
-			return true
-		}
-	}
-	return false
+	return message.HasPart[message.ToolResult](&msg)
 }
 
 // resolveGitDirs locates a working directory's git directory and, for

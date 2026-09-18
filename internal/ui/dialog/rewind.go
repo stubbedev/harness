@@ -141,14 +141,14 @@ func NewRewind(com *common.Common, sessionID string) (*Rewind, error) {
 	return r, nil
 }
 
-// userPromptText returns the first text part of a user message.
+// userPromptText returns the first non-empty text part of a user
+// message.
 func userPromptText(msg message.Message) string {
-	for _, part := range msg.Parts {
-		if text, ok := part.(message.TextContent); ok && strings.TrimSpace(text.Text) != "" {
-			return text.Text
-		}
+	text, ok := message.PartOf[message.TextContent](&msg)
+	if !ok || strings.TrimSpace(text.Text) == "" {
+		return ""
 	}
-	return ""
+	return text.Text
 }
 
 // ID implements Dialog.
