@@ -128,13 +128,9 @@ func renderMessageMarkdown(msg message.Message, results map[string]message.ToolR
 	for _, tc := range msg.ToolCalls() {
 		// Subagent dispatches live in the background tasks strip on
 		// screen, so their prompts, results, and drained send_message
-		// blocks stay out of the export.
-		if chat.IsSubagentTool(tc.Name) {
-			continue
-		}
-		// Context plumbing (skill_search, tool_search, send_message)
-		// never shows on screen, so it never shows in the export either.
-		if chat.IsInternalContextTool(tc.Name) {
+		// blocks stay out of the export; context plumbing never shows on
+		// screen, so it never shows in the export either.
+		if chat.IsHiddenToolCall(tc.Name) {
 			continue
 		}
 		fmt.Fprintf(&body, "#### Tool: %s\n\n", tc.Name)

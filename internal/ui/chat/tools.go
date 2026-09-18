@@ -293,6 +293,16 @@ func IsInternalContextTool(name string) bool {
 		name == agent.SendMessageToolName
 }
 
+// IsHiddenToolCall reports whether a tool call renders nowhere on
+// screen: it is either a subagent dispatch (which lives in the
+// background tasks strip) or harness-internal context plumbing.
+// Single source for the transcript and export filters; the task strip
+// intentionally uses the narrower predicates because it collects the
+// subagent calls IsHiddenToolCall hides.
+func IsHiddenToolCall(name string) bool {
+	return IsSubagentTool(name) || IsInternalContextTool(name)
+}
+
 // SetCompact implements the Compactable interface.
 func (t *baseToolMessageItem) SetCompact(compact bool) {
 	if t.isCompact == compact {

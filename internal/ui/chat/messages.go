@@ -500,13 +500,10 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		}
 		for _, tc := range msg.ToolCalls() {
 			// Subagent dispatches render in the background tasks strip,
-			// not the transcript.
-			if IsSubagentTool(tc.Name) {
-				continue
-			}
-			// Context plumbing (skill_search, tool_search) stays in the
-			// history the model sees but is noise in the transcript.
-			if IsInternalContextTool(tc.Name) {
+			// not the transcript; context plumbing (skill_search,
+			// tool_search) stays in the history the model sees but is
+			// noise in the transcript.
+			if IsHiddenToolCall(tc.Name) {
 				continue
 			}
 			var result *message.ToolResult
