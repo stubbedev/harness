@@ -2,6 +2,8 @@ package stringext
 
 import (
 	"encoding/base64"
+	"errors"
+	"slices"
 	"strings"
 
 	"golang.org/x/text/cases"
@@ -10,6 +12,39 @@ import (
 
 func Capitalize(text string) string {
 	return cases.Title(language.English, cases.Compact).String(text)
+}
+
+// SplitFrontmatter extracts YAML frontmatter and body from markdown
+// content. The frontmatter is everything between the first non-blank
+// "---" line and its closing "---"; the body is what follows it. A
+// UTF-8 BOM is stripped and line endings normalized to \n before
+// parsing. Shared by skill and subagent file loading.
+func SplitFrontmatter(content string) (frontmatter, body string, err error) {
+	// Strip UTF-8 BOM for compatibility with editors that include it.
+	content = strings.TrimPrefix(content, "\ufeff")
+	// Normalize line endings to \n for consistent parsing.
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+
+	lines := strings.Split(content, "\n")
+	start := slices.IndexFunc(lines, func(line string) bool {
+		return strings.TrimSpace(line) != ""
+	})
+	if start == -1 || strings.TrimSpace(lines[start]) != "---" {
+		return "", "", errors.New("no YAML frontmatter found")
+	}
+
+	endOffset := slices.IndexFunc(lines[start+1:], func(line string) bool {
+		return strings.TrimSpace(line) == "---"
+	})
+	if endOffset == -1 {
+		return "", "", errors.New("unclosed frontmatter")
+	}
+	end := start + 1 + endOffset
+
+	frontmatter = strings.Join(lines[start+1:end], "\n")
+	body = strings.Join(lines[end+1:], "\n")
+	return frontmatter, body, nil
 }
 
 // NormalizeSpace normalizes whitespace in the given content string.

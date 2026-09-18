@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/stubbedev/harness/internal/home"
 )
@@ -244,6 +245,21 @@ func traverseUpBounded(dir, stopDir string, walkFn func(dir string, owner int) e
 
 		return err
 	}
+}
+
+// ResolveConfigPath expands a config-supplied path: home-directory
+// references first, then $VAR references through resolver when the
+// result still starts with "$". Best effort: a $VAR that the resolver
+// cannot resolve is returned as-is. Shared by the skill and subagent
+// discovery configs.
+func ResolveConfigPath(path string, resolver func(string) (string, error)) string {
+	expanded := home.Long(path)
+	if strings.HasPrefix(expanded, "$") && resolver != nil {
+		if resolved, err := resolver(expanded); err == nil {
+			return resolved
+		}
+	}
+	return expanded
 }
 
 // canonicalize resolves any symbolic links in path. If resolution fails

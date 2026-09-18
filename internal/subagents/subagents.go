@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/stringext"
 )
 
 const (
@@ -257,7 +258,7 @@ func (s *Subagent) ToConfigAgent(base config.Agent) config.Agent {
 
 // ParseContent parses a subagent definition from raw bytes.
 func ParseContent(content []byte) (*Subagent, error) {
-	frontmatter, body, err := splitFrontmatter(string(content))
+	frontmatter, body, err := stringext.SplitFrontmatter(string(content))
 	if err != nil {
 		return nil, err
 	}
@@ -629,33 +630,4 @@ func DiscoverWithStates(paths []string, isKnownModel func(provider, model string
 	}
 
 	return agents, states
-}
-
-// splitFrontmatter extracts YAML frontmatter and body from markdown content.
-func splitFrontmatter(content string) (frontmatter, body string, err error) {
-	// Strip UTF-8 BOM for compatibility with editors that include it.
-	content = strings.TrimPrefix(content, "\ufeff")
-	// Normalize line endings to \n for consistent parsing.
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "\n")
-
-	lines := strings.Split(content, "\n")
-	start := slices.IndexFunc(lines, func(line string) bool {
-		return strings.TrimSpace(line) != ""
-	})
-	if start == -1 || strings.TrimSpace(lines[start]) != "---" {
-		return "", "", errors.New("no YAML frontmatter found")
-	}
-
-	endOffset := slices.IndexFunc(lines[start+1:], func(line string) bool {
-		return strings.TrimSpace(line) == "---"
-	})
-	if endOffset == -1 {
-		return "", "", errors.New("unclosed frontmatter")
-	}
-	end := start + 1 + endOffset
-
-	frontmatter = strings.Join(lines[start+1:end], "\n")
-	body = strings.Join(lines[end+1:], "\n")
-	return frontmatter, body, nil
 }

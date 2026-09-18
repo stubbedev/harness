@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/stubbedev/harness/internal/home"
+	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
 
@@ -215,13 +215,7 @@ func (c DiscoveryConfig) ResolvePaths() []string {
 	}
 	out := make([]string, 0, len(c.SkillsPaths))
 	for _, pth := range c.SkillsPaths {
-		expanded := home.Long(pth)
-		if strings.HasPrefix(expanded, "$") && c.Resolver != nil {
-			if resolved, err := c.Resolver(expanded); err == nil {
-				expanded = resolved
-			}
-		}
-		out = append(out, expanded)
+		out = append(out, fsext.ResolveConfigPath(pth, c.Resolver))
 	}
 	return out
 }
