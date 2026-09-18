@@ -31,6 +31,21 @@ func HashID(id string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
+// FilterHashPrefix returns the sessions whose ID hash equals id or
+// starts with it. Callers try a direct UUID lookup first, so id is
+// typically a full or partial hash. Single-source for the CLI's
+// session-resolution paths (sessions, run, workspace).
+func FilterHashPrefix[T any](sessions []T, id string, idOf func(T) string) []T {
+	var matches []T
+	for _, s := range sessions {
+		hash := HashID(idOf(s))
+		if hash == id || strings.HasPrefix(hash, id) {
+			matches = append(matches, s)
+		}
+	}
+	return matches
+}
+
 type Todo struct {
 	Content    string     `json:"content"`
 	Status     TodoStatus `json:"status"`

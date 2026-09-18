@@ -231,13 +231,7 @@ func resolveSessionID(ctx context.Context, svc session.Service, id string) (sess
 		return session.Session{}, err
 	}
 
-	var matches []session.Session
-	for _, s := range sessions {
-		hash := session.HashID(s.ID)
-		if hash == id || strings.HasPrefix(hash, id) {
-			matches = append(matches, s)
-		}
-	}
+	matches := session.FilterHashPrefix(sessions, id, func(s session.Session) string { return s.ID })
 
 	if len(matches) == 0 {
 		return session.Session{}, fmt.Errorf("session not found: %s", id)

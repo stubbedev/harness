@@ -735,13 +735,7 @@ func resolveSessionByID(ctx context.Context, c *client.Client, wsID, id string) 
 		return nil, err
 	}
 
-	var matches []proto.Session
-	for _, s := range sessions {
-		hash := session.HashID(s.ID)
-		if hash == id || strings.HasPrefix(hash, id) {
-			matches = append(matches, s)
-		}
-	}
+	matches := session.FilterHashPrefix(sessions, id, func(s proto.Session) string { return s.ID })
 
 	switch len(matches) {
 	case 0:
