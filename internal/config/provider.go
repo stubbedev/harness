@@ -3,7 +3,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -154,27 +153,11 @@ func UpdateProviders(pathOrURL string) error {
 // rules as local files.
 func fetchCatalogFromHTTP(ctx context.Context, url string) ([]catalog.Provider, error) {
 	client := &http.Client{Timeout: 60 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("could not create request: %w", err)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close() //nolint:errcheck
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d from %s", resp.StatusCode, url)
-	}
-	content, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response from %s: %w", url, err)
-	}
-	providers, err := catalog.ParseProviders(content)
+	content, err := catalog.FetchBytes(ctx, client, url)
 	if err != nil {
 		return nil, err
 	}
-	return providers, nil
+	return catalog.ParseProviders(content)
 }
 
 func cmpOrString(a, b string) string {

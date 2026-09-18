@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -103,24 +102,9 @@ func fetchOpenRouterModels(ctx context.Context, client *http.Client) ([]Model, e
 	if base := envLookup("OPENROUTER_MODELS_URL"); base != "" {
 		url = base
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("could not create request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d from %s", resp.StatusCode, url)
-	}
-
 	var parsed openRouterModels
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return nil, fmt.Errorf("failed to decode OpenRouter model list: %w", err)
+	if err := FetchJSON(ctx, client, url, &parsed); err != nil {
+		return nil, err
 	}
 	if len(parsed.Data) == 0 {
 		return nil, fmt.Errorf("OpenRouter model list is empty")
