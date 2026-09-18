@@ -148,12 +148,12 @@ func (r *jobRunner) start(ext *Extension, name string, args any, timeout time.Du
 // run loads a private VM for the extension and calls the named handler
 // in it.
 func (r *jobRunner) run(ctx context.Context, ext *Extension, name string, args any) (string, error) {
-	worker := newInstance(r.host, ext)
-	defer worker.close()
-
-	if err := worker.load(ctx); err != nil {
+	worker, err := spawnLoadedInstance(ctx, r.host, ext)
+	if err != nil {
 		return "", err
 	}
+	defer worker.close()
+
 	spec, ok := worker.jobSpecs[name]
 	if !ok {
 		return "", fmt.Errorf("extension %q registers no job %q", ext.Name, name)

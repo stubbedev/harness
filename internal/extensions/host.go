@@ -97,11 +97,10 @@ func New(ctx context.Context, opts Options) *Host {
 	states = append(states, disabledStates...)
 
 	for _, ext := range enabled {
-		in := newInstance(h, ext)
-		if err := in.load(ctx); err != nil {
+		in, err := spawnLoadedInstance(ctx, h, ext)
+		if err != nil {
 			slog.Warn("Failed to load extension", "extension", ext.Name, "path", ext.EntryFile, "error", err)
 			states = append(states, &State{Name: ext.Name, Path: ext.EntryFile, State: StateError, Err: err})
-			in.close()
 			continue
 		}
 		slog.Debug(

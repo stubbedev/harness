@@ -67,6 +67,19 @@ func newInstance(host *Host, ext *Extension) *instance {
 	return in
 }
 
+// spawnLoadedInstance creates a VM for ext and runs its init.lua. On
+// load failure the instance is closed and nil is returned with the
+// error, so every boot path applies the same create-run-close
+// lifecycle.
+func spawnLoadedInstance(ctx context.Context, h *Host, ext *Extension) (*instance, error) {
+	in := newInstance(h, ext)
+	if err := in.load(ctx); err != nil {
+		in.close()
+		return nil, err
+	}
+	return in, nil
+}
+
 // newSandboxedState builds an LState with only the libraries an
 // extension may use. The VM starts empty (SkipOpenLibs) and each library
 // is opened deliberately: there is no io library, no debug library, and
