@@ -191,6 +191,11 @@ type coordinator struct {
 	// its dispatcher's next step while the child is still running.
 	liveInbox *liveInbox
 
+	// queueArrivals records prompts queued for a busy session: its
+	// epoch feeds the tool-result note and its signals wake the wait
+	// tool (see queue_signals.go).
+	queueArrivals *queueArrivalSignals
+
 	// backgroundRuns tracks background dispatches by handle, and
 	// backgroundByChild maps a background child session ID to its handle so
 	// send_message can route live. Runs are kept after they finish: their
@@ -330,6 +335,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		expandedBuiltins:   csync.NewMap[string, bool](),
 		subagentMessages:   newSubagentInbox(),
 		liveInbox:          newLiveInbox(),
+		queueArrivals:      newQueueArrivalSignals(),
 		backgroundRuns:     csync.NewMap[string, *backgroundRun](),
 		backgroundByChild:  csync.NewMap[string, string](),
 		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
@@ -1020,8 +1026,10 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		Hooks:                c.hooks,
 		// The live inbox is keyed by session, and only a session that can
 		// dispatch (the coder today) ever has entries, so wiring it for
-		// every agent is a no-op for children.
+		// every agent is a no-op for children. The queue notifier is the
+		// same shape: children are never waited on through the wait tool.
 		SubagentInbox: c,
+		QueueNotify:   c,
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -1220,7 +1228,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// PreToolUse policy has to see their calls to mean anything. A hook
 	// fired from inside a sub-agent sees the child session's ID, which is
 	// what distinguishes the call in the payload.
-	filteredTools = wrapToolsWithHooks(filteredTools, c.hooks)
+	filteredTools = wrapToolsWithHooks(filteredTools, c.hooks, c.queueArrivalEpoch)
 
 	// The batch tool composes the tools above, so it is built from the
 	// finished list and appended after it. Calling the wrapped tools
@@ -2272,6 +2280,35 @@ func (c *coordinator) notifySubagentInbox(parentSessionID string) {
 	if c.liveInbox != nil {
 		c.liveInbox.notify(parentSessionID)
 	}
+}
+
+// NotifyQueueArrival implements QueueArrivalNotifier: a prompt was
+// queued for a session whose agent is busy. It stamps the arrival (the
+// epoch tool results compare) and wakes any wait parked on the session
+// so the user's prompt is surfaced instead of sleeping to its timeout.
+func (c *coordinator) NotifyQueueArrival(sessionID string) {
+	if c.queueArrivals != nil {
+		c.queueArrivals.notify(sessionID)
+	}
+}
+
+// queueArrivalChan returns the session's queued-prompt wakeup channel
+// for the wait tool's select loop.
+func (c *coordinator) queueArrivalChan(sessionID string) chan struct{} {
+	if c.queueArrivals == nil {
+		return nil
+	}
+	return c.queueArrivals.chanFor(sessionID)
+}
+
+// queueArrivalEpoch returns how many prompts have been queued for the
+// session: hookedTool snapshots it around a run to report arrivals in
+// the tool result.
+func (c *coordinator) queueArrivalEpoch(sessionID string) uint64 {
+	if c.queueArrivals == nil {
+		return 0
+	}
+	return c.queueArrivals.epoch(sessionID)
 }
 
 // liveInboxSignalChan returns the session's live-inbox wakeup channel for

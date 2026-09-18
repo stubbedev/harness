@@ -17,28 +17,33 @@ import (
 type hookedTool struct {
 	inner fantasy.AgentTool
 	hooks *hooks.Registry
+	// queueEpoch, when set, snapshots the session's queued-prompt epoch
+	// around the inner run: a user prompt that arrived while the tool was
+	// executing is announced in the tool result, so the model reads it on
+	// the next step instead of continuing blind.
+	queueEpoch func(sessionID string) uint64
 }
 
-func newHookedTool(inner fantasy.AgentTool, registry *hooks.Registry) *hookedTool {
-	return &hookedTool{inner: inner, hooks: registry}
+func newHookedTool(inner fantasy.AgentTool, registry *hooks.Registry, queueEpoch func(sessionID string) uint64) *hookedTool {
+	return &hookedTool{inner: inner, hooks: registry, queueEpoch: queueEpoch}
 }
 
 // wrapToolsWithHooks returns a tool slice with each entry wrapped in a
-// hookedTool. Returns the original slice unchanged when no registry is
-// available or when neither tool event has hooks. Sub-agents are wrapped
-// the same as the top-level agent: they call the same toolset, so a
-// PreToolUse policy must see their calls too. Hooks fired from a sub-agent
-// see the child session's ID.
-func wrapToolsWithHooks(tools []fantasy.AgentTool, registry *hooks.Registry) []fantasy.AgentTool {
-	if registry == nil {
+// hookedTool. Returns the original slice unchanged when there is nothing
+// to wrap for: no registry, no hook on either tool event, and no queue
+// epoch probe. Sub-agents are wrapped the same as the top-level agent:
+// they call the same toolset, so a PreToolUse policy must see their calls
+// too. Hooks fired from a sub-agent see the child session's ID.
+func wrapToolsWithHooks(tools []fantasy.AgentTool, registry *hooks.Registry, queueEpoch func(sessionID string) uint64) []fantasy.AgentTool {
+	if registry == nil && queueEpoch == nil {
 		return tools
 	}
-	if !registry.Has(hooks.EventPreToolUse) && !registry.Has(hooks.EventPostToolUse) {
+	if registry != nil && !registry.Has(hooks.EventPreToolUse) && !registry.Has(hooks.EventPostToolUse) && queueEpoch == nil {
 		return tools
 	}
 	out := make([]fantasy.AgentTool, len(tools))
 	for i, tool := range tools {
-		out[i] = newHookedTool(tool, registry)
+		out[i] = newHookedTool(tool, registry, queueEpoch)
 	}
 	return out
 }
@@ -69,6 +74,11 @@ func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
 
 func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	sessionID := tools.GetSessionFromContext(ctx)
+
+	var queueBefore uint64
+	if h.queueEpoch != nil && sessionID != "" {
+		queueBefore = h.queueEpoch(sessionID)
+	}
 
 	var pre *hooks.AggregateResult
 	if h.hooks.Has(hooks.EventPreToolUse) {
@@ -135,6 +145,13 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 	}
 	if post != nil && post.HookCount > 0 {
 		resp.Metadata = mergeHookMetadata(resp.Metadata, *post)
+	}
+	if h.queueEpoch != nil && sessionID != "" {
+		if arrived := h.queueEpoch(sessionID) - queueBefore; arrived > 0 {
+			resp.Content = appendNote(resp.Content, fmt.Sprintf(
+				"[%d user message(s) arrived while this tool ran; they will be delivered as the next user message, before your next request]",
+				arrived))
+		}
 	}
 	return resp, nil
 }

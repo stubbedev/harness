@@ -51,7 +51,7 @@ func TestLiveMCPServersSeesThroughHooks(t *testing.T) {
 	})
 	wrapped := wrapToolsWithHooks([]fantasy.AgentTool{
 		newFakeMCPTool("mcp_sentry_get_issue", "sentry"),
-	}, registry)
+	}, registry, nil)
 	require.IsType(t, &hookedTool{}, wrapped[0], "the hook registry must actually wrap")
 
 	require.True(t, liveMCPServers(wrapped)["sentry"])
@@ -60,6 +60,6 @@ func TestLiveMCPServersSeesThroughHooks(t *testing.T) {
 func TestHookedToolMCPIsEmptyForPlainTools(t *testing.T) {
 	t.Parallel()
 
-	tool := newHookedTool(&fakeTool{name: "shell"}, nil)
+	tool := newHookedTool(&fakeTool{name: "shell"}, nil, nil)
 	require.Empty(t, tool.MCP())
 }

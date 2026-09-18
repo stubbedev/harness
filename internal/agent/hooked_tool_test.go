@@ -50,7 +50,7 @@ func TestHookedTool_DenySkipsInnerTool(t *testing.T) {
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPreToolUse: {{Command: `echo "blocked" >&2; exit 2`}},
 	})
-	tool := newHookedTool(inner, registry)
+	tool := newHookedTool(inner, registry, nil)
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-3", Name: "shell"})
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestHookedTool_PreToolUseRewritesInput(t *testing.T) {
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPreToolUse: {{Command: `echo '{"updated_input":{"command":"deno test"}}'`}},
 	})
-	tool := newHookedTool(inner, registry)
+	tool := newHookedTool(inner, registry, nil)
 
 	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell", Input: `{"command":"npm test","timeout":60000}`})
 	require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestHookedTool_PostToolUseContext(t *testing.T) {
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPostToolUse: {{Command: `echo '{"context":"remember gofumpt"}'`}},
 	})
-	tool := newHookedTool(inner, registry)
+	tool := newHookedTool(inner, registry, nil)
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell"})
 	require.NoError(t, err)
@@ -98,7 +98,7 @@ func TestHookedTool_PostToolUseDenyAppendsFeedback(t *testing.T) {
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPostToolUse: {{Command: `echo "run the linter" >&2; exit 2`}},
 	})
-	tool := newHookedTool(inner, registry)
+	tool := newHookedTool(inner, registry, nil)
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "write"})
 	require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestHookedTool_PostToolUseHaltStopsTurn(t *testing.T) {
 	registry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPostToolUse: {{Command: `echo '{"halt":true,"reason":"enough for today"}'`}},
 	})
-	tool := newHookedTool(inner, registry)
+	tool := newHookedTool(inner, registry, nil)
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell"})
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestWrapToolsWithHooks(t *testing.T) {
 
 	t.Run("wraps every tool", func(t *testing.T) {
 		t.Parallel()
-		out := wrapToolsWithHooks(inputs, registry)
+		out := wrapToolsWithHooks(inputs, registry, nil)
 		require.Len(t, out, len(inputs))
 		for i, tool := range out {
 			_, ok := tool.(*hookedTool)
@@ -144,7 +144,7 @@ func TestWrapToolsWithHooks(t *testing.T) {
 
 	t.Run("nil registry skips the wrap", func(t *testing.T) {
 		t.Parallel()
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil))
+		require.Equal(t, inputs, wrapToolsWithHooks(inputs, nil, nil))
 	})
 
 	t.Run("registry without tool events skips the wrap", func(t *testing.T) {
@@ -152,7 +152,7 @@ func TestWrapToolsWithHooks(t *testing.T) {
 		stopOnly := newTestRegistry(t, map[string][]config.HookConfig{
 			hooks.EventStop: {{Command: `exit 0`}},
 		})
-		require.Equal(t, inputs, wrapToolsWithHooks(inputs, stopOnly))
+		require.Equal(t, inputs, wrapToolsWithHooks(inputs, stopOnly, nil))
 	})
 
 	t.Run("PostToolUse-only registry still wraps", func(t *testing.T) {
@@ -160,7 +160,7 @@ func TestWrapToolsWithHooks(t *testing.T) {
 		postOnly := newTestRegistry(t, map[string][]config.HookConfig{
 			hooks.EventPostToolUse: {{Command: `exit 0`}},
 		})
-		out := wrapToolsWithHooks(inputs, postOnly)
+		out := wrapToolsWithHooks(inputs, postOnly, nil)
 		for _, tool := range out {
 			_, ok := tool.(*hookedTool)
 			require.True(t, ok)
@@ -207,7 +207,7 @@ func TestHookedTool_ToolInputArrivesAsObject(t *testing.T) {
 		}},
 		hooks.EventPostToolUse: {{Command: captureHookCmd(postLog, "")}},
 	})
-	tool := newHookedTool(inner, registry)
+	tool := newHookedTool(inner, registry, nil)
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{
 		ID:    "c1",
@@ -255,7 +255,7 @@ func TestHookedTool_MatcherFiltersByToolName(t *testing.T) {
 			Command: captureHookCmd(logPath, ""),
 		}},
 	})
-	tool := newHookedTool(inner, registry)
+	tool := newHookedTool(inner, registry, nil)
 
 	_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "edit", Input: `{"file_path":"a.go"}`})
 	require.NoError(t, err)
@@ -283,7 +283,7 @@ func TestHookedTool_PreToolUseHaltEndsTurn(t *testing.T) {
 	haltRegistry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPreToolUse: {{Command: `echo '{"halt":true,"reason":"enough"}'`}},
 	})
-	haltResp, err := newHookedTool(halting, haltRegistry).Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell"})
+	haltResp, err := newHookedTool(halting, haltRegistry, nil).Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell"})
 	require.NoError(t, err)
 	require.False(t, halting.called)
 	require.True(t, haltResp.StopTurn, "a PreToolUse halt must end the turn")
@@ -294,7 +294,7 @@ func TestHookedTool_PreToolUseHaltEndsTurn(t *testing.T) {
 	denyRegistry := newTestRegistry(t, map[string][]config.HookConfig{
 		hooks.EventPreToolUse: {{Command: `echo "blocked" >&2; exit 2`}},
 	})
-	denyResp, err := newHookedTool(denying, denyRegistry).Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell"})
+	denyResp, err := newHookedTool(denying, denyRegistry, nil).Run(t.Context(), fantasy.ToolCall{ID: "c1", Name: "shell"})
 	require.NoError(t, err)
 	require.False(t, denying.called)
 	require.False(t, denyResp.StopTurn, "a plain PreToolUse deny blocks only this call")

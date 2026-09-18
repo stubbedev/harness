@@ -145,7 +145,7 @@ func TestProcessIsolation_ChildProcessGroupKill(t *testing.T) {
 }
 
 // TestProcessIsolation_SigintImmuneChildEscalatesToKill verifies the
-// escalation a group member that ignores SIGINT (trap '' INT) cannot
+// escalation a group member that ignores SIGINT (trap ” INT) cannot
 // survive: past the grace window the group is SIGKILLed, and stragglers
 // that forked between the kill and the reap are swept too.
 func TestProcessIsolation_SigintImmuneChildEscalatesToKill(t *testing.T) {

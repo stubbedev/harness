@@ -72,13 +72,17 @@ func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	timer := time.NewTimer(time.Duration(timeout) * time.Second)
 	defer timer.Stop()
+	// A user prompt queued while this wait runs must interject, not wait
+	// out the timeout: baseline the queue's arrival epoch and watch it.
+	queueBaseline := c.queueArrivalEpoch(parentSession)
 
 	for {
-		// Fetch the wakeup channel before draining: record/finish notify by
-		// closing it under the same lock the drains read, so an event that
-		// lands between the check and the select still wakes this loop
-		// (see liveInbox).
+		// Fetch the wakeup channels before draining: record/finish notify
+		// by closing them under the same lock the drains read, so an event
+		// that lands between the check and the select still wakes this loop
+		// (see liveInbox; the queue signals close-and-replace the same way).
 		signal := c.liveInboxSignalChan(parentSession)
+		qsig := c.queueArrivalChan(parentSession)
 
 		msgs := c.drainLiveInboxFrom(parentSession, handleSet)
 		allFinished := true
@@ -88,12 +92,19 @@ func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string
 				break
 			}
 		}
+		queuedArrivals := c.queueArrivalEpoch(parentSession) - queueBaseline
 
 		switch {
 		case allFinished:
 			return fantasy.NewTextResponse(renderWaitResult(runs, msgs, "All waited agents finished."))
 		case len(msgs) > 0:
 			return fantasy.NewTextResponse(renderWaitResult(runs, msgs, "Returned early: new message(s) arrived; some agents are still running."))
+		case queuedArrivals > 0:
+			// The queued prompt stays queued: the next PrepareStep folds it
+			// into the next provider request, exactly as it would between
+			// steps. Ending the wait here only hurries the model to it.
+			return fantasy.NewTextResponse(renderWaitResult(runs, msgs, fmt.Sprintf(
+				"Returned early: %d user prompt(s) were queued while waiting; they will be delivered as the next user message, before your next request.", queuedArrivals)))
 		case timeout == 0:
 			return fantasy.NewTextResponse(renderWaitResult(runs, msgs, "Snapshot (timeout 0): not all agents have finished yet."))
 		case ctx.Err() != nil:
@@ -104,6 +115,7 @@ func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string
 
 		select {
 		case <-signal:
+		case <-qsig:
 		case <-timer.C:
 		case <-ctx.Done():
 		}

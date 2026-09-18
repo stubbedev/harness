@@ -160,5 +160,5 @@ func (c *coordinator) deferBuiltinTools(list []fantasy.AgentTool, isSubAgent boo
 	}
 	slices.SortFunc(deferred, func(a, b fantasy.ToolInfo) int { return strings.Compare(a.Name, b.Name) })
 	// Wrapped like every other tool, so a PreToolUse hook sees loads too.
-	return append(kept, wrapToolsWithHooks([]fantasy.AgentTool{&toolSearchTool{coord: c, deferred: deferred}}, c.hooks)...)
+	return append(kept, wrapToolsWithHooks([]fantasy.AgentTool{&toolSearchTool{coord: c, deferred: deferred}}, c.hooks, c.queueArrivalEpoch)...)
 }

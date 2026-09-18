@@ -232,6 +232,10 @@ type sessionAgent struct {
 	// running child lands in its dispatcher's next step.
 	subagentInbox SubagentInboxSource
 
+	// queueNotify, when set, is told every time a prompt is queued for a
+	// busy session (see QueueArrivalNotifier).
+	queueNotify QueueArrivalNotifier
+
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
 
@@ -301,6 +305,10 @@ type SessionAgentOptions struct {
 	// SubagentInbox, when set, is drained per step so messages from
 	// running background sub-agents reach this session mid-turn.
 	SubagentInbox SubagentInboxSource
+	// QueueNotify, when set, is told every time a prompt is queued for
+	// a busy session, so a wait blocked on that session can surface it
+	// at once instead of sleeping to its timeout.
+	QueueNotify QueueArrivalNotifier
 }
 
 func NewSessionAgent(
@@ -326,6 +334,7 @@ func NewSessionAgent(
 		runComplete:          opts.RunComplete,
 		hooks:                opts.Hooks,
 		subagentInbox:        opts.SubagentInbox,
+		queueNotify:          opts.QueueNotify,
 		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:       csync.NewMap[string, *activeCancel](),
 		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
@@ -457,6 +466,9 @@ func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
 	queued.Accepted = nil
 	existing = append(existing, queued)
 	a.messageQueue.Set(call.SessionID, existing)
+	if a.queueNotify != nil {
+		a.queueNotify.NotifyQueueArrival(call.SessionID)
+	}
 }
 
 // drainQueueForStep partitions the session's queued calls for the current

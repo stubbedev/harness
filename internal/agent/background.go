@@ -36,6 +36,14 @@ type SubagentInboxSource interface {
 	DrainSubagentInbox(sessionID string) []SubagentInboxMessage
 }
 
+// QueueArrivalNotifier is told when a prompt is queued for a busy
+// session. The coordinator is the only implementation: it stamps the
+// arrival so a tool call can report it, and wakes a wait parked on the
+// session so the prompt is surfaced instead of sleeping to the timeout.
+type QueueArrivalNotifier interface {
+	NotifyQueueArrival(sessionID string)
+}
+
 // liveInbox is the per-dispatching-session inbox for messages from running
 // background sub-agents. Unlike the per-child completion inbox, entries are
 // keyed by the parent session and many children may write the same key

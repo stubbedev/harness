@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"mvdan.cc/sh/v3/interp"
 	"github.com/stubbedev/harness/internal/procgroup"
+	"mvdan.cc/sh/v3/interp"
 )
 
 // defaultKillTimeout matches mvdan's DefaultExecHandler default. Extracted
