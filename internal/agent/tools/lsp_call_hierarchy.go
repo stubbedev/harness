@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -27,16 +26,12 @@ func NewCallHierarchyTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		CallHierarchyToolName,
 		callHierarchyDescription,
 		func(ctx context.Context, params CallHierarchyParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.Symbol == "" {
-				return fantasy.NewTextErrorResponse("symbol is required"), nil
-			}
 			if params.Direction != "incoming" && params.Direction != "outgoing" {
 				return fantasy.NewTextErrorResponse("direction must be 'incoming' or 'outgoing'"), nil
 			}
-			workingDir := cmp.Or(params.Path, ".")
-			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, workingDir)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
+			resolved, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbol)
+			if !ok {
+				return resp, nil
 			}
 
 			items, err := resolved.client.PrepareCallHierarchy(ctx, resolved.path, resolved.line, resolved.char)

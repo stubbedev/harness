@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"cmp"
 	"context"
 	_ "embed"
 	"fmt"
@@ -36,13 +35,9 @@ func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		DefinitionToolName,
 		definitionDescription,
 		func(ctx context.Context, params DefinitionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.Symbol == "" {
-				return fantasy.NewTextErrorResponse("symbol is required"), nil
-			}
-			workingDir := cmp.Or(params.Path, ".")
-			resolved, err := resolveSymbol(ctx, lspManager, params.Symbol, workingDir)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
+			resolved, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbol)
+			if !ok {
+				return resp, nil
 			}
 
 			locations, err := resolved.client.Definition(ctx, resolved.path, resolved.line, resolved.char)
@@ -59,11 +54,11 @@ func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			}
 
 			text, meta := formatDefinitions(locations)
-			resp := fantasy.NewTextResponse(text)
+			response := fantasy.NewTextResponse(text)
 			if meta != nil {
-				resp = fantasy.WithResponseMetadata(resp, meta)
+				response = fantasy.WithResponseMetadata(response, meta)
 			}
-			return resp, nil
+			return response, nil
 		},
 	)
 }

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stubbedev/harness/internal/lsp"
 )
@@ -19,6 +20,29 @@ type resolvedSymbol struct {
 	path   string
 	line   int
 	char   int
+}
+
+// resolveSymbolTool runs the preamble every LSP tool shares: require a
+// symbol, default the working directory to ".", and resolve the
+// symbol. resolve is either resolveSymbol or resolveSymbolResults. ok
+// is false when resp carries the shared failure response (missing or
+// unresolvable symbol) and the caller must return it.
+func resolveSymbolTool[T any](
+	ctx context.Context,
+	lspManager *lsp.Manager,
+	symbol, path string,
+	resolve func(context.Context, *lsp.Manager, string, string) (T, error),
+) (T, fantasy.ToolResponse, bool) {
+	if symbol == "" {
+		var zero T
+		return zero, fantasy.NewTextErrorResponse("symbol is required"), false
+	}
+	resolved, err := resolve(ctx, lspManager, symbol, cmp.Or(path, "."))
+	if err != nil {
+		var zero T
+		return zero, fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", symbol)), false
+	}
+	return resolved, fantasy.ToolResponse{}, true
 }
 
 // resolveSymbol greps for a symbol name, triggers lazy LSP startup, and

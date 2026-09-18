@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"cmp"
 	"context"
 	_ "embed"
 	"errors"
@@ -32,14 +31,9 @@ func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 		ReferencesToolName,
 		referencesDescription,
 		func(ctx context.Context, params ReferencesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.Symbol == "" {
-				return fantasy.NewTextErrorResponse("symbol is required"), nil
-			}
-
-			workingDir := cmp.Or(params.Path, ".")
-			results, err := resolveSymbolResults(ctx, lspManager, params.Symbol, workingDir)
-			if err != nil {
-				return fantasy.NewTextResponse(fmt.Sprintf("Symbol '%s' not found", params.Symbol)), nil
+			results, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbolResults)
+			if !ok {
+				return resp, nil
 			}
 
 			var allLocations []protocol.Location
@@ -47,7 +41,7 @@ func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
 			for _, r := range results {
 				locations, err := r.client.FindReferences(ctx, r.path, r.line, r.char, true)
 				if err != nil {
-					if strings.Contains(err.Error(), "no identifier found") {
+					if isNoIdentifierError(err) {
 						continue
 					}
 					slog.Error("Failed to find references", "error", err, "symbol", params.Symbol, "path", r.path, "line", r.line)
