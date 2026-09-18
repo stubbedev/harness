@@ -150,7 +150,7 @@ func NewReplaceSymbolTool(
 				summary = fmt.Sprintf("Deleted symbol '%s' from %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
 			}
 
-			resp := fantasy.NewTextResponse(summary + "\n" + reportDiagnostics(ctx, lspManager, settleGrace, params.FilePath))
+			resp := fantasy.NewTextResponse(summary + "\n" + reportDiagnosticsNow(ctx, lspManager, params.FilePath))
 			resp = fantasy.WithResponseMetadata(resp, ReplaceSymbolResponseMetadata{
 				FilePath:   params.FilePath,
 				OldContent: string(content),

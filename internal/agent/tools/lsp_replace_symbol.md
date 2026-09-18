@@ -6,4 +6,4 @@ Actions:
 - `add_after`: insert text after the symbol
 - `delete`: remove the symbol entirely
 
-Returns diagnostics after the edit.
+Diagnostics for the change are relayed asynchronously, before your next step.

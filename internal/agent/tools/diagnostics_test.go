@@ -157,7 +157,7 @@ func TestWriteDiagnosticSectionSkipsAnEmptyList(t *testing.T) {
 // Every reporting entry point has to survive a session with no LSP at all.
 func TestReportingWithoutAManager(t *testing.T) {
 	t.Parallel()
-	if got := reportDiagnostics(t.Context(), nil, settleGrace, "/x/f.go"); got != "" {
+	if got := reportDiagnostics(t.Context(), nil, sweepGrace, "/x/f.go"); got != "" {
 		t.Errorf("reportDiagnostics = %q", got)
 	}
 	if got := fullDiagnosticsReport(t.Context(), nil, "/x/f.go"); got != "" {

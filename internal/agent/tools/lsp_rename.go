@@ -94,7 +94,7 @@ func NewRenameTool(
 			// Every file the rename touched counts as the file in hand: a
 			// rename that breaks a caller breaks it in one of these, and
 			// burying that under "project diagnostics" reads as unrelated.
-			text := b.String() + "\n" + reportDiagnostics(ctx, lspManager, settleGrace, affectedFiles...)
+			text := b.String() + "\n" + reportDiagnosticsNow(ctx, lspManager, affectedFiles...)
 
 			return fantasy.NewTextResponse(text), nil
 		},

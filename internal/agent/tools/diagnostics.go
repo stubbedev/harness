@@ -20,12 +20,12 @@ type DiagnosticsParams struct {
 
 const DiagnosticsToolName = "lsp_diagnostics"
 
-// settleGrace is how long a report waits for a language server that is still
-// answering for a change made moments ago. It is deliberately short: the point
-// of reporting asynchronously is that an edit never pays for the server's
-// analysis, and a server slower than this is reported by the next call rather
-// than held for here.
-const settleGrace = 250 * time.Millisecond
+// sweepGrace is how long the sweep before a model step waits for a language
+// server that is still answering for a recent change. It is deliberately
+// short: tool calls never wait on a server — they hand the file over and
+// return — and a server slower than this grace is reported by the sweep after
+// the next step rather than held for here.
+const sweepGrace = 250 * time.Millisecond
 
 // maxReportedDiagnostics caps each section of a report. A project that is
 // badly broken has hundreds of diagnostics, and spending the context window on
@@ -69,7 +69,7 @@ func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
 // ready, without any edit having waited for it. It returns "" when there is
 // nothing new to say, which is the usual case.
 func DiagnosticsSweep(ctx context.Context, manager *lsp.Manager) string {
-	return reportDiagnostics(ctx, manager, settleGrace)
+	return reportDiagnostics(ctx, manager, sweepGrace)
 }
 
 // ForgetReportedDiagnostics drops the record of what a session has been shown,
@@ -85,8 +85,10 @@ func ForgetReportedDiagnostics(manager *lsp.Manager, sessionID string) {
 }
 
 // reportDiagnosticsNow is reportDiagnostics with no wait at all: it describes
-// what the servers already hold and returns. Use it from read paths where
-// diagnostics are a bonus, never the point.
+// what the servers already hold and returns. Use it from tool paths that must
+// never pay a server's analysis time — reads and writes alike. If a server is
+// still working, it reports nothing here; the answer reaches the model through
+// the sweep before its next step instead.
 func reportDiagnosticsNow(ctx context.Context, manager *lsp.Manager, focus ...string) string {
 	return reportDiagnostics(ctx, manager, 0, focus...)
 }

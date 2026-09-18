@@ -92,14 +92,14 @@ func NewEditTool(
 				return response, nil
 			}
 
-			// Tell the language servers what changed and move on. Their
-			// answer is reported by whatever runs next — the following tool
-			// call, or the sweep before the next model step — so a slow
-			// server never adds its analysis time to every edit.
+			// Tell the language servers what changed and move on without
+			// waiting. Their answer is relayed by the sweep before the next
+			// model step, so a slow server never adds its analysis time to
+			// an edit.
 			lspManager.NotifyChangeAsync(ctx, params.FilePath)
 
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
-			text += reportDiagnostics(ctx, lspManager, settleGrace, params.FilePath)
+			text += reportDiagnosticsNow(ctx, lspManager, params.FilePath)
 			response.Content = text
 			return response, nil
 		},
