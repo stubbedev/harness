@@ -9,6 +9,7 @@ import (
 
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/stubbedev/harness/internal/fsext"
 )
 
 func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit, encoding powernap.OffsetEncoding) error {
@@ -24,12 +25,7 @@ func applyTextEdits(uri protocol.DocumentURI, edits []protocol.TextEdit, encodin
 	}
 
 	// Detect line ending style
-	var lineEnding string
-	if bytes.Contains(content, []byte("\r\n")) {
-		lineEnding = "\r\n"
-	} else {
-		lineEnding = "\n"
-	}
+	lineEnding := fsext.DetectLineEndings(string(content))
 
 	// Track if file ends with a newline
 	endsWithNewline := len(content) > 0 && bytes.HasSuffix(content, []byte(lineEnding))

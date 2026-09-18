@@ -259,6 +259,17 @@ func ToUnixLineEndings(content string) (string, bool) {
 	return content, false
 }
 
+// DetectLineEndings returns the line ending a body already uses: CRLF
+// when it contains any CRLF, otherwise LF. Single source for code that
+// must preserve a file's existing ending style when rejoining lines
+// (LSP workspace edits) or reporting it.
+func DetectLineEndings(content string) string {
+	if strings.Contains(content, "\r\n") {
+		return "\r\n"
+	}
+	return "\n"
+}
+
 // ToWindowsLineEndings converts Unix line endings (LF) to Windows line endings (CRLF).
 func ToWindowsLineEndings(content string) (string, bool) {
 	if !strings.Contains(content, "\r\n") {
