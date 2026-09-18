@@ -168,11 +168,7 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
-	_, additions, removals := diff.GenerateDiff(
-		oldContent,
-		newContent,
-		strings.TrimPrefix(filePath, edit.workingDir),
-	)
+	additions, removals := diff.CountChanges(oldContent, newContent)
 
 	writeContent := newContent
 	if isCrlf {
@@ -211,11 +207,7 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		return fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."), nil
 	}
 
-	_, additions, removals := diff.GenerateDiff(
-		oldContent,
-		result,
-		strings.TrimPrefix(filePath, edit.workingDir),
-	)
+	additions, removals := diff.CountChanges(oldContent, result)
 
 	writeContent := result
 	if isCrlf {

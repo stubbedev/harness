@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/diff"
@@ -167,8 +166,8 @@ func processEditWithCreation(edit editContext, params EditParams, _ fantasy.Tool
 		return fantasy.ToolResponse{}, err
 	}
 
-	// Record the diff for the response metadata.
-	_, additions, removals := diff.GenerateDiff("", currentContent, strings.TrimPrefix(params.FilePath, edit.workingDir))
+	// Record the counts for the response metadata.
+	additions, removals := diff.CountChanges("", currentContent)
 
 	editsApplied := len(params.Edits) - len(failedEdits)
 
@@ -238,8 +237,8 @@ func processEditExistingFile(edit editContext, params EditParams, _ fantasy.Tool
 		return fantasy.NewTextErrorResponse("no changes made - all edits resulted in identical content"), nil
 	}
 
-	// Generate the diff for the response metadata.
-	_, additions, removals := diff.GenerateDiff(oldContent, currentContent, strings.TrimPrefix(params.FilePath, edit.workingDir))
+	// Generate the counts for the response metadata.
+	additions, removals := diff.CountChanges(oldContent, currentContent)
 
 	editsApplied := len(params.Edits) - len(failedEdits)
 
