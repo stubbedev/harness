@@ -409,6 +409,11 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 	if len(g.tools) == 1 {
 		calls = "1 tool call"
 	}
+	if failed > 0 {
+		// The glyph already signals a partial failure; the count says how
+		// much of the run to distrust without expanding it.
+		calls += fmt.Sprintf(", %d failed", failed)
+	}
 	header := fmt.Sprintf("%s %s %s",
 		glyph,
 		g.sty.Tool.NameNormal.Render(verb),
@@ -526,7 +531,7 @@ func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int) string {
 	} else if t.Status() == ToolStatusCanceled {
 		glyph = sty.Tool.IconCancelled.Render()
 	}
-	name := sty.Tool.NameNormal.Render(PrettifyToolName(t.ToolCall().Name))
+	name := sty.Tool.NameNormal.Render(ToolDisplayName(t.ToolCall()))
 	line := glyph + " " + name
 	if summary := ToolCallSummary(t.ToolCall()); summary != "" {
 		line += " " + sty.Tool.Body.Render(summary)

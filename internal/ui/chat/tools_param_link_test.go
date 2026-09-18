@@ -34,7 +34,8 @@ func TestToolParamListHyperlinksBareURLs(t *testing.T) {
 	require.Contains(t, got, url, "the URL is still the visible text:\n%q", got)
 
 	plain := toolParamList(sty, toolParamListParams("cmd.go"), 200, nil)
-	require.NotContains(t, plain, "\x1b]8;;", "non-URL params carry no hyperlink:\n%q", plain)}
+	require.NotContains(t, plain, "\x1b]8;;", "non-URL params carry no hyperlink:\n%q", plain)
+}
 
 // TestIsHTTPURL pins the strictness: only absolute http(s) URLs with a
 // host link; whitespace or scheme-less lookalikes never do.

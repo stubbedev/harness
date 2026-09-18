@@ -64,7 +64,7 @@ func (q *QuestionToolRenderContext) parseBlocks(content string) []questionBlock 
 func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Question", opts.Anim, opts.Compact)
+		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
 	}
 
 	params, ok := q.parseParams(opts.ToolCall.Input)
@@ -73,7 +73,7 @@ func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 	}
 
 	headerText := questionSummary(params)
-	header := toolHeader(sty, opts.Status, "Question", cappedWidth, opts, headerText)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, headerText)
 	if opts.Compact {
 		return header
 	}

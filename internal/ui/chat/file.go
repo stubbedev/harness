@@ -39,7 +39,7 @@ type ViewToolRenderContext struct{}
 func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "View", opts.Anim, opts.Compact)
+		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
 	}
 
 	var params tools.ViewParams
@@ -56,7 +56,7 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "offset", fmt.Sprintf("%d", params.Offset))
 	}
 
-	header := toolHeader(sty, opts.Status, "View", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -126,9 +126,9 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
-			return pendingToolDetail(sty, "Write", pendingDetail(fsext.PrettyPath(path), cappedWidth-24), opts.Anim, opts.Compact)
+			return pendingToolDetail(sty, ToolDisplayName(opts.ToolCall), pendingDetail(fsext.PrettyPath(path), cappedWidth-24), opts.Anim, opts.Compact)
 		}
-		return pendingTool(sty, "Write", opts.Anim, opts.Compact)
+		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
 	}
 
 	var params tools.WriteParams
@@ -137,7 +137,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status, "Write", cappedWidth, opts, file)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, file)
 	if opts.Compact {
 		return header
 	}
@@ -198,9 +198,9 @@ func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// Edit tool uses full width for diffs.
 	if opts.IsPending() {
 		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
-			return pendingToolDetail(sty, "Edit", pendingDetail(fsext.PrettyPath(path), width-24), opts.Anim, opts.Compact)
+			return pendingToolDetail(sty, ToolDisplayName(opts.ToolCall), pendingDetail(fsext.PrettyPath(path), width-24), opts.Anim, opts.Compact)
 		}
-		return pendingTool(sty, "Edit", opts.Anim, opts.Compact)
+		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
 	}
 
 	var params tools.EditParams
@@ -214,7 +214,7 @@ func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "edits", fmt.Sprintf("%d", len(params.Edits)))
 	}
 
-	header := toolHeader(sty, opts.Status, "Edit", width, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

@@ -1182,28 +1182,89 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 	return sty.Tool.Body.Render(strings.Join(out, "\n"))
 }
 
-// PrettifyToolName returns a human-readable name for tool names.
-func PrettifyToolName(name string) string {
-	switch name {
-	case agent.AgentToolName:
-		return "Agent"
+// ToolDisplayName returns the label the UI shows for a tool call. It is
+// the one place tool names become display text, so a full renderer's
+// header, a collapsed group's one-liner, the background task strip and
+// the clipboard heading cannot drift apart. The lsp tool folds several
+// actions into one wire name; the label follows the action it carries.
+func ToolDisplayName(tc message.ToolCall) string {
+	if name := lspDisplayName(tc); name != "" {
+		return name
+	}
+	switch tc.Name {
 	case tools.ShellToolName:
 		return "Shell"
-	case tools.EditToolName:
-		return "Edit"
-	case tools.FetchToolName:
-		return "Fetch"
-	case tools.ResearchToolName:
-		return "Research"
-	case tools.WebSearchToolName:
-		return "Search"
 	case tools.ViewToolName:
 		return "View"
 	case tools.WriteToolName:
 		return "Write"
-	default:
-		return humanizedToolName(name)
+	case tools.EditToolName:
+		return "Edit"
+	case tools.FetchToolName:
+		return "Fetch"
+	case tools.WebSearchToolName:
+		return "Search"
+	case tools.QuestionToolName:
+		return "Question"
+	case tools.DiagnosticsToolName:
+		return "Diagnostics"
 	}
+	if server, tool, ok := splitMCPName(tc.Name); ok {
+		return server + " -> " + tool
+	}
+	return humanizedToolName(tc.Name)
+}
+
+// lspDisplayName labels an lsp call by its action, reading the same
+// field the renderer dispatch in newLSPToolMessageItem reads, so a call
+// renders and summarizes under one name. Empty when tc is not an lsp
+// call.
+func lspDisplayName(tc message.ToolCall) string {
+	if tc.Name != tools.LSPToolName {
+		return ""
+	}
+	switch lspAction(tc) {
+	case "references":
+		return "Find References"
+	case "definition":
+		return "Find Definition"
+	case "rename":
+		return "Rename Symbol"
+	case "replace_symbol":
+		return "Replace Symbol"
+	case "call_hierarchy":
+		return "Call Hierarchy"
+	case "symbols":
+		return "List Symbols"
+	case "restart":
+		return "Restart LSP"
+	default:
+		return "Diagnostics"
+	}
+}
+
+// lspAction reads the action an lsp call dispatches. Unparsable input
+// falls through to the diagnostics default in both consumers.
+func lspAction(tc message.ToolCall) string {
+	var params struct {
+		Action string `json:"action"`
+	}
+	_ = json.Unmarshal([]byte(tc.Input), &params)
+	return params.Action
+}
+
+// splitMCPName splits the "mcp_server_tool" wire name into its human
+// parts. The mcp renderer styles these same parts with color; this is
+// the plain form one-liners and copy headings show.
+func splitMCPName(name string) (server, tool string, ok bool) {
+	if !strings.HasPrefix(name, "mcp_") {
+		return "", "", false
+	}
+	parts := strings.SplitN(name, "_", 3)
+	if len(parts) != 3 {
+		return "", "", false
+	}
+	return humanizedToolName(parts[1]), humanizedToolName(parts[2]), true
 }
 
 // newLSPToolMessageItem picks the renderer for an lsp call from its
@@ -1216,11 +1277,7 @@ func newLSPToolMessageItem(
 	result *message.ToolResult,
 	canceled bool,
 ) ToolMessageItem {
-	var params struct {
-		Action string `json:"action"`
-	}
-	_ = json.Unmarshal([]byte(toolCall.Input), &params)
-	switch params.Action {
+	switch lspAction(toolCall) {
 	case "references":
 		return NewReferencesToolMessageItem(sty, toolCall, result, canceled)
 	case "definition":

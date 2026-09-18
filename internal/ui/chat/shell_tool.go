@@ -43,9 +43,9 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if opts.IsPending() {
 		// The command shows as the model types it.
 		if cmd, ok := partialStringField(opts.ToolCall.Input, "command"); ok && strings.TrimSpace(cmd) != "" {
-			return pendingToolDetail(sty, "Shell", pendingDetail(cmd, cappedWidth-24), opts.Anim, opts.Compact)
+			return pendingToolDetail(sty, ToolDisplayName(opts.ToolCall), pendingDetail(cmd, cappedWidth-24), opts.Anim, opts.Compact)
 		}
-		return pendingTool(sty, "Shell", opts.Anim, opts.Compact)
+		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
 	}
 
 	var params tools.ShellParams
@@ -79,7 +79,7 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		toolParams = append(toolParams, "took", common.FormatDuration(opts.Elapsed))
 	}
 
-	header := toolHeader(sty, opts.Status, "Shell", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

@@ -36,7 +36,7 @@ type FetchToolRenderContext struct{}
 func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Fetch", opts.Anim, opts.Compact)
+		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
 	}
 
 	var params tools.FetchParams
@@ -52,7 +52,7 @@ func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		toolParams = append(toolParams, "timeout", formatTimeout(params.Timeout))
 	}
 
-	header := toolHeader(sty, opts.Status, "Fetch", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -111,7 +111,7 @@ type WebSearchToolRenderContext struct{}
 func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Search", opts.Anim, opts.Compact)
+		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
 	}
 
 	var params tools.WebSearchParams
@@ -120,7 +120,7 @@ func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 	}
 
 	toolParams := []string{params.Query}
-	header := toolHeader(sty, opts.Status, "Search", cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

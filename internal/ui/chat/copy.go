@@ -214,16 +214,11 @@ func copyAttachments(msg *message.Message) string {
 // Tool calls
 // -----------------------------------------------------------------------------
 
-// copyTitle names a tool call in a heading. MCP calls keep the server
-// and tool split the UI shows them with, rather than collapsing to the
-// underscore-joined wire name.
-func copyTitle(name string) string {
-	if strings.HasPrefix(name, "mcp_") {
-		if parts := strings.SplitN(name, "_", 3); len(parts) == 3 {
-			return fmt.Sprintf("%s -> %s", humanizedToolName(parts[1]), humanizedToolName(parts[2]))
-		}
-	}
-	return PrettifyToolName(name)
+// copyTitle names a tool call in a heading. It reads the same label
+// table the transcript renders, so what a paste says matches what was
+// on screen, including the lsp tool's per-action names.
+func copyTitle(tc message.ToolCall) string {
+	return ToolDisplayName(tc)
 }
 
 // formatToolForCopy formats a standalone tool call for the clipboard.
@@ -234,7 +229,7 @@ func (t *baseToolMessageItem) formatToolForCopy() string {
 // copyText formats the tool call with its heading at the given depth.
 // The body is identical whether the call is collapsed or expanded.
 func (t *baseToolMessageItem) copyText(depth int) string {
-	sections := []string{copyHeading(depth, copyTitle(t.toolCall.Name)+" Tool Call")}
+	sections := []string{copyHeading(depth, copyTitle(t.toolCall)+" Tool Call")}
 
 	if t.toolCall.Input != "" {
 		if params := t.formatParametersForCopy(); params != "" {

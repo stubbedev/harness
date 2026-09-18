@@ -32,13 +32,13 @@ type DefinitionToolRenderContext struct{}
 func (r *DefinitionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, "Find Definition", opts.Anim, opts.Compact)
+		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
 	}
 
 	var params tools.DefinitionParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
-	header := toolHeader(sty, opts.Status, "Find Definition", cappedWidth, opts, params.Symbol)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, params.Symbol)
 	if opts.Compact {
 		return header
 	}
