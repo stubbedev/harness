@@ -12,7 +12,6 @@ import (
 
 	"charm.land/log/v2"
 	"github.com/charmbracelet/colorprofile"
-	"github.com/charmbracelet/x/term"
 	"github.com/nxadm/tail"
 	"github.com/spf13/cobra"
 	"github.com/stubbedev/harness/internal/config"
@@ -47,7 +46,7 @@ var logsCmd = &cobra.Command{
 
 		log.SetLevel(log.DebugLevel)
 		log.SetOutput(os.Stdout)
-		if !term.IsTerminal(os.Stdout.Fd()) {
+		if !stdoutIsTTY() {
 			log.SetColorProfile(colorprofile.NoTTY)
 		}
 

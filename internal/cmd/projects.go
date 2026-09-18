@@ -2,11 +2,9 @@ package cmd
 
 import (
 	"encoding/json"
-	"os"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
-	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 	"github.com/stubbedev/harness/internal/projects"
 )
@@ -48,7 +46,7 @@ harness projects --json
 			return nil
 		}
 
-		if term.IsTerminal(os.Stdout.Fd()) {
+		if stdoutIsTTY() {
 			// We're in a TTY: make it fancy.
 			t := table.New().
 				Border(lipgloss.RoundedBorder()).

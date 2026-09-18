@@ -1,13 +1,11 @@
 package cmd
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
-	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 	"github.com/stubbedev/harness/internal/config"
 )
@@ -24,7 +22,7 @@ harness dirs
   `,
 	Run: func(cmd *cobra.Command, args []string) {
 		entries := collectDirs(cmd)
-		if term.IsTerminal(os.Stdout.Fd()) {
+		if stdoutIsTTY() {
 			printDirs(cmd, entries)
 			return
 		}

@@ -2,13 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"slices"
 	"sort"
 	"strings"
 
 	"charm.land/lipgloss/v2/tree"
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"github.com/stubbedev/harness/internal/config"
 )
@@ -128,7 +126,7 @@ harness models gpt5`,
 			return fmt.Errorf("no providers found matching %q", term)
 		}
 
-		if !isatty.IsTerminal(os.Stdout.Fd()) {
+		if !stdoutIsTTY() {
 			for _, providerID := range providerIDs {
 				entry := entries[providerID]
 				for _, modelID := range entry.models {

@@ -195,7 +195,7 @@ func Execute() {
 	// printing the version, and PreRunE runs after the version is already
 	// handled, so that doesn't work either.
 	// This is the only way I could find that works relatively well.
-	if term.IsTerminal(os.Stdout.Fd()) {
+	if stdoutIsTTY() {
 		var b bytes.Buffer
 		w := colorprofile.NewWriter(os.Stdout, os.Environ())
 		w.Forward = &b

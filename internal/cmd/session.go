@@ -166,9 +166,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 				Modified: time.Unix(s.UpdatedAt, 0).Format(time.RFC3339),
 			}
 		}
-		enc := json.NewEncoder(out)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(output)
+		return newJSONEncoder(out).Encode(output)
 	}
 
 	w, cleanup, usingPager := sessionWriter(ctx, len(list))
@@ -177,10 +175,7 @@ func runSessionList(cmd *cobra.Command, _ []string) error {
 	hashStyle := lipgloss.NewStyle().Foreground(charmtone.Malibu)
 	dateStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
 
-	width := sessionOutputWidth
-	if tw, _, err := term.GetSize(os.Stdout.Fd()); err == nil && tw > 0 {
-		width = tw
-	}
+	width := stdoutWidth(sessionOutputWidth)
 	// 7 (hash) + 1 (space) + 25 (RFC3339 date) + 1 (space) = 34 chars prefix.
 	titleWidth := max(width-34, 10)
 
@@ -307,9 +302,7 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 
 	out := cmd.OutOrStdout()
 	if sessionDeleteJSON {
-		enc := json.NewEncoder(out)
-		enc.SetEscapeHTML(false)
-		return enc.Encode(sessionMutationResult{
+		return newJSONEncoder(out).Encode(sessionMutationResult{
 			ID:      session.HashID(sess.ID),
 			UUID:    sess.ID,
 			Title:   sess.Title,
@@ -434,9 +427,7 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 		}
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	return enc.Encode(output)
+	return newJSONEncoder(w).Encode(output)
 }
 
 func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess session.Session, msgs []*message.Message) error {
@@ -454,10 +445,7 @@ func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess sessi
 	}
 	toolResults := chat.BuildToolResultMap(msgs)
 
-	width := sessionOutputWidth
-	if w, _, err := term.GetSize(os.Stdout.Fd()); err == nil && w > 0 {
-		width = w
-	}
+	width := stdoutWidth(sessionOutputWidth)
 	contentWidth := min(width, sessionMaxContentWidth)
 
 	keyStyle := lipgloss.NewStyle().Foreground(charmtone.Damson)
@@ -535,7 +523,7 @@ func isBrokenPipe(err error) bool {
 // it starts a pager process (respecting $PAGER, defaulting to "less -R").
 func sessionWriter(ctx context.Context, contentHeight int) (io.Writer, func(), bool) {
 	// Use NewWriter which automatically detects TTY and strips ANSI when redirected
-	if runtime.GOOS == "windows" || !term.IsTerminal(os.Stdout.Fd()) {
+	if runtime.GOOS == "windows" || !stdoutIsTTY() {
 		return colorprofile.NewWriter(os.Stdout, os.Environ()), func() {}, false
 	}
 
