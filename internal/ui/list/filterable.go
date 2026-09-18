@@ -1,8 +1,59 @@
 package list
 
 import (
+	"github.com/rivo/uniseg"
 	"github.com/sahilm/fuzzy"
 )
+
+// MatchedRanges converts a list of match indexes into contiguous ranges.
+// Shared by every fuzzy-match highlighter (completions popup, dialog
+// lists).
+func MatchedRanges(in []int) [][2]int {
+	if len(in) == 0 {
+		return [][2]int{}
+	}
+	current := [2]int{in[0], in[0]}
+	if len(in) == 1 {
+		return [][2]int{current}
+	}
+	var out [][2]int
+	for i := 1; i < len(in); i++ {
+		if in[i] == current[1]+1 {
+			current[1] = in[i]
+		} else {
+			out = append(out, current)
+			current = [2]int{in[i], in[i]}
+		}
+	}
+	out = append(out, current)
+	return out
+}
+
+// BytePosToVisibleCharPos converts byte positions in str to visible
+// character positions: grapheme clusters count as one character at their
+// cell width, so styled ranges line up with what the terminal shows.
+func BytePosToVisibleCharPos(str string, rng [2]int) (int, int) {
+	bytePos, byteStart, byteStop := 0, rng[0], rng[1]
+	pos, start, stop := 0, 0, 0
+	gr := uniseg.NewGraphemes(str)
+	for byteStart > bytePos {
+		if !gr.Next() {
+			break
+		}
+		bytePos += len(gr.Str())
+		pos += max(1, gr.Width())
+	}
+	start = pos
+	for byteStop > bytePos {
+		if !gr.Next() {
+			break
+		}
+		bytePos += len(gr.Str())
+		pos += max(1, gr.Width())
+	}
+	stop = pos
+	return start, stop
+}
 
 // FilterableItem is an item that can be filtered via a query.
 type FilterableItem interface {
