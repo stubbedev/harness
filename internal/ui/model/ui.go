@@ -396,6 +396,11 @@ type UI struct {
 	// dispatch as a running task. Tool call IDs are unique per dispatch,
 	// so entries survive session switches without colliding.
 	reapedAgentTasks map[string]bool
+	// lastTasksReconcile paces the periodic running-list refresh while
+	// tasks spin (see the spinner tick handler): a terminal RuntimeEvent
+	// lost in flight would otherwise leave a spinner that nothing ever
+	// settles, because no further event for that child arrives.
+	lastTasksReconcile time.Time
 	// taskCursor / taskSubCursor drive keyboard navigation of the
 	// strip: taskCursor indexes the visible entries, taskSubCursor the
 	// cursor task's nested calls (-1 = on the task row itself).
@@ -1492,6 +1497,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.taskSpinner, cmd = m.taskSpinner.Update(msg)
 			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			// Backstop: settle tasks whose terminal RuntimeEvent was lost
+			// in flight, so no spinner outlives its subagent.
+			if cmd := m.maybeReconcileSpinningTasks(); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		}

@@ -2019,9 +2019,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 	}
 
 	// Register with the runtime tracker and finish on return. finalStatus is
-	// captured by the deferred call and updated below based on the outcome.
+	// captured by the deferred call and updated below based on the outcome;
+	// it starts at failed so a panic in the run still clears the runtime
+	// entry with a terminal status instead of reporting success.
 	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
-	finalStatus := subagents.StatusCompleted
+	finalStatus := subagents.StatusFailed
 	defer func() { c.runtime.Finish(session.ID, finalStatus) }()
 
 	// resp is the named return so the deferred inbox drain and the
@@ -2171,6 +2173,11 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 		}
 	}
 	go func() {
+		// finalStatus defaults to failed so the deferred runtime cleanup
+		// below still clears the entry when the run never reaches its own
+		// terminal state — a panic mid-run would otherwise leave a spinner
+		// running in the TUI forever.
+		finalStatus := subagents.StatusFailed
 		defer func() {
 			if c.backgroundByChild != nil {
 				c.backgroundByChild.Del(session.ID)
@@ -2180,8 +2187,17 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 			}
 			cancelRun()
 			releaseSlot()
+			c.runtime.Finish(session.ID, finalStatus)
 		}()
-		resp, finalStatus := c.executeSubAgentRun(runCtx, context.WithoutCancel(ctx), session, params)
+		// A panic in the run or the hooks below must not kill the process
+		// or strand the wait tool on this handle: recover, record a failed
+		// result (finish is idempotent), and let the deferred cleanup run.
+		defer log.RecoverPanic("coordinator.runSubAgentBackground", func() {
+			run.finish(subagents.StatusFailed, fantasy.NewTextErrorResponse(
+				fmt.Sprintf("Background subagent %s panicked; see the panic log", params.AgentName)))
+		})
+		resp, status := c.executeSubAgentRun(runCtx, context.WithoutCancel(ctx), session, params)
+		finalStatus = status
 
 		// A background child's send_message output goes to the live inbox
 		// directly; forward anything that nonetheless landed in the
@@ -2194,7 +2210,6 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 		c.warnOnFabricatedPaths(params, &resp)
 		c.fireSubagentStopHooks(context.WithoutCancel(ctx), session.ID, params.AgentName, finalStatus, &resp)
 		run.finish(finalStatus, resp)
-		c.runtime.Finish(session.ID, finalStatus)
 		c.notifySubagentInbox(params.SessionID)
 	}()
 

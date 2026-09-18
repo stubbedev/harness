@@ -3,6 +3,7 @@ package model
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
@@ -364,6 +365,10 @@ func TestBackgroundDispatchReconcileAgainstRunningList(t *testing.T) {
 	require.NotNil(t, t2)
 	t1.childSessionID = "child-1"
 	t2.childSessionID = "child-2"
+	// Aged past the reconcile grace: a fetch that raced the runtime
+	// Register of a just-dispatched task must not settle it, so only a
+	// task that has been spinning a while may be reaped this way.
+	t2.startedAt = time.Now().Add(-2 * tasksReconcileGrace)
 
 	// child-1 is still running; child-2 is not.
 	u.reconcileBackgroundTasks([]workspace.RunningSubagentInfo{
@@ -371,6 +376,19 @@ func TestBackgroundDispatchReconcileAgainstRunningList(t *testing.T) {
 	})
 	assert.Nil(t, u.agentTaskByToolCall("a2"), "a background task missing from the running list is reaped")
 	assert.NotNil(t, u.agentTaskByToolCall("a1"), "a background task still running stays")
+
+	// A task younger than the grace is left alone even when absent from
+	// the list: its Register may simply not have landed yet.
+	bg := agentToolCall("a3")
+	bg.Input = `{"prompt":"dig"}`
+	_ = u.upsertAgentTask(msg, bg)
+	t3 := u.agentTaskByToolCall("a3")
+	require.NotNil(t, t3)
+	t3.childSessionID = "child-3"
+	u.reconcileBackgroundTasks([]workspace.RunningSubagentInfo{
+		{ChildSessionID: "child-1"},
+	})
+	assert.NotNil(t, u.agentTaskByToolCall("a3"), "a task inside the reconcile grace is not reaped")
 }
 
 // TestStripDoesNotResurrectFinishedDispatch pins the ordering that ghosts

@@ -81,6 +81,11 @@ func (r *Runtime) Register(parentSessionID, childSessionID, name, color, model s
 // Finish removes a running sub-agent entry with a terminal status and publishes
 // a RuntimeEvent whose Finished field carries the removed entry. Use one of the
 // Status* constants for finalStatus. It is a no-op when r is nil.
+//
+// The terminal event is published with must-deliver semantics: once the
+// entry is deleted no later event re-announces it, so a lossy publish here
+// leaves a spinner running in the TUI forever (reconciliation is only a
+// backstop, not a guarantee).
 func (r *Runtime) Finish(childSessionID, finalStatus string) {
 	if r == nil {
 		return
@@ -97,7 +102,7 @@ func (r *Runtime) Finish(childSessionID, finalStatus string) {
 		return
 	}
 
-	r.broker.Publish(pubsub.UpdatedEvent, RuntimeEvent{
+	r.broker.PublishMustDeliver(context.Background(), pubsub.UpdatedEvent, RuntimeEvent{
 		ParentSessionID: entry.ParentSessionID,
 		Entries:         r.entriesFor(entry.ParentSessionID),
 		Finished:        &entry,

@@ -416,10 +416,47 @@ func (m *UI) applyRunningSubagentInfo(info childSessionInfo) {
 	task.completionTokens = info.CompletionTokens
 }
 
-// reconcileBackgroundTasks settles background dispatches the event stream
-// can miss (a Finished RuntimeEvent raced a session switch, or the session
-// was reloaded from history): the fetched running list is authoritative, so
-// a background task whose child session is absent from it is done.
+// tasksReconcileInterval paces the backstop refresh of the running
+// list while tasks spin (see maybeReconcileSpinningTasks).
+const tasksReconcileInterval = 2 * time.Second
+
+// tasksReconcileGrace is how long a task must have been running before
+// the authoritative running list may settle it. A fetch dispatched
+// right after a dispatch's assistant message landed can race the
+// runtime Register that announces the child; the grace keeps that fetch
+// from reaping a task that is about to start. A lost terminal event
+// still heals within interval plus grace.
+const tasksReconcileGrace = 10 * time.Second
+
+// maybeReconcileSpinningTasks refreshes the authoritative running list
+// while tasks spin, at most once per tasksReconcileInterval. Runtime
+// events drive the normal path; this is the backstop for a terminal
+// event lost in flight — the runtime entry is already deleted, so no
+// later event would ever settle the strip row and the spinner would run
+// forever.
+func (m *UI) maybeReconcileSpinningTasks() tea.Cmd {
+	if !m.tasksSpinning() || m.session == nil {
+		return nil
+	}
+	if m.lastTasksReconcile.IsZero() {
+		m.lastTasksReconcile = time.Now()
+		return nil
+	}
+	if time.Since(m.lastTasksReconcile) < tasksReconcileInterval {
+		return nil
+	}
+	m.lastTasksReconcile = time.Now()
+	return m.refreshRunningSubagents(m.session.ID)
+}
+
+// reconcileBackgroundTasks settles dispatches the event stream can miss
+// (a Finished RuntimeEvent raced a session switch or was lost in
+// flight, or the session was reloaded from history): the fetched
+// running list is authoritative, so a task whose child session is
+// absent from it is done — blocking and background dispatches alike.
+// Young tasks are left alone so a fetch that raced the runtime Register
+// cannot reap a dispatch that is about to start (see
+// tasksReconcileGrace).
 func (m *UI) reconcileBackgroundTasks(list []workspace.RunningSubagentInfo) {
 	running := make(map[string]bool, len(list))
 	for _, info := range list {
@@ -427,10 +464,16 @@ func (m *UI) reconcileBackgroundTasks(list []workspace.RunningSubagentInfo) {
 	}
 	tasks := append([]*agentTask(nil), m.agentTasks...)
 	for _, t := range tasks {
-		if t.background && t.status == subagents.StatusRunning &&
-			t.childSessionID != "" && !running[t.childSessionID] {
-			m.reapAgentTask(t.toolCallID)
+		if t.status != subagents.StatusRunning && t.status != subagents.StatusRetrying {
+			continue
 		}
+		if t.childSessionID == "" || running[t.childSessionID] {
+			continue
+		}
+		if time.Since(t.startedAt) < tasksReconcileGrace {
+			continue
+		}
+		m.reapAgentTask(t.toolCallID)
 	}
 }
 
