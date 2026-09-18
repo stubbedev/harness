@@ -30,6 +30,18 @@ func Config() string {
 	)
 }
 
+// AppData returns the Windows local app-data directory, falling back to
+// the profile's AppData\Local when LOCALAPPDATA is unset. It is only
+// meaningful on Windows but returns a sensible path everywhere so
+// callers can build paths unconditionally. Single source for the
+// config, copilot, and skills/subagents/extensions directory lookups.
+func AppData() string {
+	return cmp.Or(
+		os.Getenv("LOCALAPPDATA"),
+		filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
+	)
+}
+
 // Short replaces the actual home path from [Dir] with `~`.
 func Short(p string) string {
 	if homedir == "" || !strings.HasPrefix(p, homedir) {

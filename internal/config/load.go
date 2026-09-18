@@ -1151,11 +1151,7 @@ func GlobalCacheDir() string {
 		return filepath.Join(xdgCacheHome, appName)
 	}
 	if runtime.GOOS == "windows" {
-		localAppData := cmp.Or(
-			os.Getenv("LOCALAPPDATA"),
-			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
-		)
-		return filepath.Join(localAppData, appName, "cache")
+		return filepath.Join(home.AppData(), appName, "cache")
 	}
 	return filepath.Join(home.Dir(), ".cache", appName)
 }
@@ -1179,11 +1175,7 @@ func GlobalConfigData() string {
 	// for windows, it should be in `%LOCALAPPDATA%/harness/`
 	// for linux and macOS, it should be in `$HOME/.local/share/harness/`
 	if runtime.GOOS == "windows" {
-		localAppData := cmp.Or(
-			os.Getenv("LOCALAPPDATA"),
-			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
-		)
-		return filepath.Join(localAppData, appName, stateConfigFile)
+		return filepath.Join(home.AppData(), appName, stateConfigFile)
 	}
 
 	return filepath.Join(home.Dir(), ".local", "share", appName, stateConfigFile)
@@ -1289,10 +1281,7 @@ func GlobalSkillsDirs() []string {
 	// On Windows, also load from app data on top of `$HOME/.config/harness`.
 	// This is here mostly for backwards compatibility.
 	if runtime.GOOS == "windows" {
-		appData := cmp.Or(
-			os.Getenv("LOCALAPPDATA"),
-			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
-		)
+		appData := home.AppData()
 		paths = append(
 			paths,
 			filepath.Join(appData, appName, "skills"),
@@ -1350,10 +1339,7 @@ func GlobalSubagentsDirs() []string {
 		filepath.Join(home.Dir(), ".agents", "subagents"),
 	}
 	if runtime.GOOS == "windows" {
-		appData := cmp.Or(
-			os.Getenv("LOCALAPPDATA"),
-			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
-		)
+		appData := home.AppData()
 		paths = append(
 			paths,
 			filepath.Join(appData, appName, "subagents"),
@@ -1492,10 +1478,7 @@ func GlobalExtensionsDirs() []string {
 		filepath.Join(home.Config(), "agents", "extensions"),
 	}
 	if runtime.GOOS == "windows" {
-		appData := cmp.Or(
-			os.Getenv("LOCALAPPDATA"),
-			filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
-		)
+		appData := home.AppData()
 		paths = append(
 			paths,
 			filepath.Join(appData, appName, "extensions"),

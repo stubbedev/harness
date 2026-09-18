@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/stubbedev/harness/internal/home"
 )
 
 func RefreshTokenFromDisk() (string, bool) {
@@ -29,7 +31,7 @@ func RefreshTokenFromDisk() (string, bool) {
 func tokenFilePath() string {
 	switch runtime.GOOS {
 	case "windows":
-		return filepath.Join(os.Getenv("LOCALAPPDATA"), "github-copilot/apps.json")
+		return filepath.Join(home.AppData(), "github-copilot/apps.json")
 	default:
 		return filepath.Join(os.Getenv("HOME"), ".config/github-copilot/apps.json")
 	}
