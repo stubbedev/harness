@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -672,6 +673,12 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 	}
 
 	mainParam := params[0]
+	if isHTTPURL(mainParam) {
+		// Carry the URL's OSC 8 link inside the styled param so terminals
+		// that support hyperlinks open it on click. The link wraps the
+		// bare text; the caller's style still colors the whole line.
+		mainParam = lipgloss.NewStyle().Hyperlink(mainParam).Render(mainParam)
+	}
 
 	// Build key=value pairs from remaining params (consecutive key, value pairs).
 	var kvPairs []string
@@ -696,6 +703,17 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 		output = ansi.Hardwrap(output, width, false)
 	}
 	return sty.Tool.ParamMain.Render(output)
+}
+
+// isHTTPURL reports whether s is a bare http(s) URL worth linking.
+// Strict on purpose: whitespace anywhere means the text only looks like
+// a URL, and linking it would capture the junk into the link target.
+func isHTTPURL(s string) bool {
+	if strings.ContainsAny(s, " \t\n\r") {
+		return false
+	}
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // toolHeader builds the tool header line: "● ToolName params..."
