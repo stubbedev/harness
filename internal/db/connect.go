@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"sync"
 	"testing"
 
@@ -166,6 +168,9 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 		slog.Error("Failed to apply migrations", "error", err)
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
+
+	runtime.GC()
+	debug.FreeOSMemory()
 
 	pool[absPath] = &connEntry{db: conn, refCount: 1, lock: lock}
 	return conn, nil
