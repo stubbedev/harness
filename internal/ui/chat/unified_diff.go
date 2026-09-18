@@ -133,10 +133,10 @@ func parseUnifiedDiff(content string) []parsedDiffFile {
 func toolOutputDiffContentFromUnified(sty *styles.Styles, content string, width int, expanded bool) string {
 	files := parseUnifiedDiff(content)
 	if len(files) == 0 {
-		bodyWidth := width - toolBodyLeftPaddingTotal
+		bodyWidth := width
 		return sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.diff", content, 0, bodyWidth, expanded))
 	}
-	bodyWidth := width - toolBodyLeftPaddingTotal
+	bodyWidth := width
 	var blocks []string
 	for i, f := range files {
 		formatter := common.DiffFormatter(sty).

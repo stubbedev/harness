@@ -654,10 +654,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Content rendering - prepared styles that accept width parameter
 	s.Tool.ContentLine = muted.Background(o.bgLeastVisible)
 	s.Tool.ContentTruncation = muted.Background(o.bgLeastVisible)
-	s.Tool.ContentCodeLine = base.Background(o.bgBase).PaddingLeft(2)
-	s.Tool.ContentCodeTruncation = muted.Background(o.bgBase).PaddingLeft(2)
+	s.Tool.ContentCodeLine = base.Background(o.bgBase)
+	s.Tool.ContentCodeTruncation = muted.Background(o.bgBase)
 	s.Tool.ContentCodeBg = o.bgBase
-	s.Tool.Body = base.PaddingLeft(2)
+	s.Tool.Body = base
 
 	// Deprecated - kept for backward compatibility
 	s.Tool.ContentBg = muted.Background(o.bgLeastVisible)
@@ -674,7 +674,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.WarnMessage = base.Foreground(o.fgSubtle)
 
 	// Diff and multi-edit styles
-	s.Tool.DiffTruncation = muted.Background(o.bgLeastVisible).PaddingLeft(2)
+	s.Tool.DiffTruncation = muted.Background(o.bgLeastVisible)
 	s.Tool.NoteTag = base.Padding(0, 1).Background(o.info).Foreground(o.onPrimary)
 	s.Tool.NoteMessage = base.Foreground(o.fgSubtle)
 

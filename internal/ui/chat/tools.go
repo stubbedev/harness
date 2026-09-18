@@ -25,9 +25,6 @@ import (
 // responseContextHeight limits the number of lines displayed in tool output.
 const responseContextHeight = 10
 
-// toolBodyLeftPaddingTotal represents the padding that should be applied to each tool body
-const toolBodyLeftPaddingTotal = 2
-
 // ToolStatus represents the current state of a tool call.
 type ToolStatus int
 
@@ -791,7 +788,7 @@ func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, wid
 	maxDigits := getDigits(maxLineNumber)
 	numFmt := fmt.Sprintf("%%%dd", maxDigits)
 
-	bodyWidth := width - toolBodyLeftPaddingTotal
+	bodyWidth := width
 	codeWidth := bodyWidth - maxDigits
 
 	var out []string
@@ -1045,7 +1042,7 @@ func formatSize(bytes int) string {
 
 // toolOutputDiffContent renders a diff between old and new content.
 func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent string, width int, expanded bool) string {
-	bodyWidth := width - toolBodyLeftPaddingTotal
+	bodyWidth := width
 
 	formatter := common.DiffFormatter(sty).
 		Before(file, oldContent).
@@ -1087,7 +1084,7 @@ func formatTimeout(timeout int) string {
 
 // toolOutputEditDiffContent renders a diff with optional failed edits note.
 func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditResponseMetadata, totalEdits, width int, expanded bool) string {
-	bodyWidth := width - toolBodyLeftPaddingTotal
+	bodyWidth := width
 
 	formatter := common.DiffFormatter(sty).
 		Before(file, meta.OldContent).

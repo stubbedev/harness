@@ -59,7 +59,7 @@ func (r *DefinitionToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 	}
 
 	// Fallback to plain text.
-	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
+	bodyWidth := cappedWidth
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

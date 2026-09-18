@@ -68,7 +68,7 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 	}
 
 	// Fallback to plain text if no metadata.
-	bodyWidth := width - toolBodyLeftPaddingTotal
+	bodyWidth := width
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

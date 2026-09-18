@@ -229,7 +229,7 @@ func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// Get diff content from metadata.
 	var meta tools.EditResponseMetadata
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err != nil {
-		bodyWidth := width - toolBodyLeftPaddingTotal
+		bodyWidth := width
 		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 		return joinToolParts(header, body)
 	}

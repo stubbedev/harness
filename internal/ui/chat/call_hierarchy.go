@@ -55,7 +55,7 @@ func (r *CallHierarchyToolRenderContext) RenderTool(sty *styles.Styles, width in
 		return header
 	}
 
-	bodyWidth := cappedWidth - toolBodyLeftPaddingTotal
+	bodyWidth := cappedWidth
 	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

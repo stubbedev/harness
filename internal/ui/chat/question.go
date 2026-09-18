@@ -86,7 +86,7 @@ func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return header
 	}
 
-	body := formatQuestionAnswers(sty, q.parseBlocks(opts.Result.Content), cappedWidth-toolBodyLeftPaddingTotal)
+	body := formatQuestionAnswers(sty, q.parseBlocks(opts.Result.Content), cappedWidth)
 	if body == "" {
 		return header
 	}
