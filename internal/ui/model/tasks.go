@@ -16,6 +16,7 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
+	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
@@ -793,8 +794,8 @@ func (m *UI) renderTasks(width int) string {
 		line := dot + " " + t.Resource.Name.Render(task.name) + " " + status
 		if task.model != "" {
 			meta := task.model
-			if tokens := task.promptTokens + task.completionTokens; tokens > 0 {
-				meta += " " + t.Resource.AdditionalText.Render(fmt.Sprintf("%d tok", tokens))
+			if count := common.FormatSubagentTokenCount(task.promptTokens, task.completionTokens); count != "" {
+				meta += " " + count
 			}
 			line += " " + t.Resource.AdditionalText.Render(meta)
 		}

@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/home"
+	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/styles"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -23,10 +24,43 @@ func PrettyPath(t *styles.Styles, path string, width int) string {
 
 // FormatReasoningEffort formats a reasoning effort level for display.
 func FormatReasoningEffort(effort string) string {
+	if effort == "" {
+		return ""
+	}
 	if effort == "xhigh" {
 		return "X-High"
 	}
 	return cases.Title(language.English).String(effort)
+}
+
+// FormatSubagentTokenCount returns the "N tok" summary for a
+// prompt/completion token pair, empty when both are zero. Single source
+// for the task strip, the sidebar panel, and the running-subagent
+// dialog.
+func FormatSubagentTokenCount(prompt, completion int64) string {
+	if tokens := prompt + completion; tokens > 0 {
+		return fmt.Sprintf("%d tok", tokens)
+	}
+	return ""
+}
+
+// FormatSubagentTokens is the styled FormatSubagentTokenCount for lines
+// that do not post-style their whole metadata segment.
+func FormatSubagentTokens(t *styles.Styles, prompt, completion int64) string {
+	if count := FormatSubagentTokenCount(prompt, completion); count != "" {
+		return t.Resource.AdditionalText.Render(count)
+	}
+	return ""
+}
+
+// SubagentStatusSuffix renders a non-running subagent status in the
+// shared parenthesized form. Live statuses render empty: the task strip
+// shows a spinner for them and the list views simply omit them.
+func SubagentStatusSuffix(t *styles.Styles, status string) string {
+	if status == "" || status == subagents.StatusRunning {
+		return ""
+	}
+	return t.Resource.AdditionalText.Render("(" + status + ")")
 }
 
 // ModelContextInfo contains token usage and cost information for a model.

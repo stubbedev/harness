@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"charm.land/lipgloss/v2"
-	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -32,21 +31,19 @@ func (m *UI) subagentsInfo(width, maxItems int, isSection bool) string {
 
 	items := make([]subagentStatusItem, 0, len(m.runningSubagents))
 	for _, e := range m.runningSubagents {
-		tokens := e.PromptTokens + e.CompletionTokens
 		desc := e.Model
-		if tokens > 0 {
-			desc = fmt.Sprintf("%s %s", e.Model, t.Resource.AdditionalText.Render(fmt.Sprintf("%d tok", tokens)))
+		if count := common.FormatSubagentTokenCount(e.PromptTokens, e.CompletionTokens); count != "" {
+			desc = fmt.Sprintf("%s %s", e.Model, t.Resource.AdditionalText.Render(count))
 		}
 		// A live entry is "running"; anything else (retrying while
 		// credentials refresh) is worth surfacing in the panel too.
-		if e.Status != "" && e.Status != subagents.StatusRunning {
-			status := t.Resource.AdditionalText.Render("(" + e.Status + ")")
+		if suffix := common.SubagentStatusSuffix(t, e.Status); suffix != "" {
 			// An entry registered without a model has no description yet;
 			// joining unconditionally would indent it by a stray space.
 			if desc == "" {
-				desc = status
+				desc = suffix
 			} else {
-				desc = desc + " " + status
+				desc = desc + " " + suffix
 			}
 		}
 		items = append(items, subagentStatusItem{

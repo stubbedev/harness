@@ -1,11 +1,9 @@
 package dialog
 
 import (
-	"fmt"
-
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
-	"github.com/stubbedev/harness/internal/subagents"
+	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -84,20 +82,20 @@ func (r *RunningSubagentItem) SetMatch(m fuzzy.Match) {
 // line showing the colored dot, name, model, and total token count.
 func (r *RunningSubagentItem) Render(width int) string {
 	dot := r.t.SubagentDot(r.data.Color)
-	totalTokens := r.data.PromptTokens + r.data.CompletionTokens
-	tokStr := fmt.Sprintf("%d tok", totalTokens)
 
 	itemStyle := r.t.Dialog.NormalItem
 	if r.focused {
 		itemStyle = r.t.Dialog.SelectedItem
 	}
 
-	content := dot + " " + r.data.Name + "  " + r.data.Model + "  " + tokStr
+	content := dot + " " + r.data.Name + "  " + r.data.Model
+	if count := common.FormatSubagentTokenCount(r.data.PromptTokens, r.data.CompletionTokens); count != "" {
+		content += "  " + count
+	}
 	// A live entry is "running"; anything else (retrying while credentials
-	// refresh) is worth spelling out. Parenthesized to match the sidebar
-	// panel, which renders the same status alongside the same fields.
-	if r.data.Status != "" && r.data.Status != subagents.StatusRunning {
-		content += "  (" + r.data.Status + ")"
+	// refresh) is worth spelling out.
+	if suffix := common.SubagentStatusSuffix(r.t, r.data.Status); suffix != "" {
+		content += "  " + suffix
 	}
 	content = ansi.Truncate(content, max(0, width-itemStyle.GetHorizontalFrameSize()), "…")
 	return itemStyle.Render(content)
