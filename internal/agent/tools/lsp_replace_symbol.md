@@ -5,5 +5,3 @@ Actions:
 - `add_before`: insert text before the symbol
 - `add_after`: insert text after the symbol
 - `delete`: remove the symbol entirely
-
-Diagnostics for the change are relayed asynchronously, before your next step.

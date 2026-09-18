@@ -74,7 +74,7 @@ For shell commands: prefer non-interactive flags and combine related commands in
 
 {{if gt (len .Config.LSP) 0}}
 <lsp>
-Diagnostics (lint/typecheck) included in tool output.
+Diagnostics arrive in tool output and in reports between steps, without you asking.
 - Fix issues in files you changed
 - Ignore issues in files you didn't touch (unless user asks)
 </lsp>

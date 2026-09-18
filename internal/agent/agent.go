@@ -1148,9 +1148,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// arrives. Usually there is nothing to say and nothing is added.
 			if report := tools.DiagnosticsSweep(callContext, a.lspManager); report != "" {
 				prepared.Messages = append(prepared.Messages, fantasy.NewUserMessage(fmt.Sprintf(
-					"<system_reminder>\nThe language servers reported this since your last step. "+
-						"It is not from the user; do not mention the reminder itself. Fix what you "+
-						"caused, and ignore what is unrelated to your work.\n%s</system_reminder>",
+					"<system_reminder>\nLanguage servers reported this since your last step. "+
+						"Fix what you caused; ignore the rest. Do not mention this reminder.\n%s</system_reminder>",
 					report,
 				)))
 			}
