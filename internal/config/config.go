@@ -1134,7 +1134,7 @@ func (c *Config) SetupAgents() {
 		AgentFast: {
 			ID:           AgentFast,
 			Name:         "Fast",
-			Description:  "A cheap agent for one narrow lookup, survey, or edit, run on the small model. Dispatch many in parallel.",
+			Description:  "A small-model agent for a substantial, independent piece of work. Dispatch is the exception: single lookups and quick searches are faster done directly.",
 			Model:        SelectedModelTypeSmall,
 			ContextPaths: c.Options.ContextPaths,
 			AllowedTools: resolveSubagentTools(allowedTools),

@@ -520,7 +520,7 @@ func TestBuildAgentDispatchInfo_SurfacesModel(t *testing.T) {
 	}))
 
 	require.Contains(t, desc, "scout (model: small, effort: low): Narrow lookups")
-	require.Contains(t, desc, "[cheap: prefer fanning several out in parallel]")
+	require.Contains(t, desc, "[cheap: runs on the small model]")
 
 	// An absent model: reports the large default, and effort is omitted when
 	// unset rather than rendered empty.

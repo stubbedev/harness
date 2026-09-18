@@ -58,7 +58,7 @@ func TestToPromptXML_ModelAndEffort(t *testing.T) {
 	xml := ToPromptXML(active)
 
 	// The small-model entry advertises its model, its effort, and the cost
-	// hint that tells the coordinator fanning it out is worthwhile.
+	// hint that tells the coordinator what a dispatch spends.
 	require.Contains(t, xml, "<model>small</model>")
 	require.Contains(t, xml, "<effort>low</effort>")
 	require.Contains(t, xml, "<cost>")

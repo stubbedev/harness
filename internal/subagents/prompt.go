@@ -13,9 +13,9 @@ import (
 //
 // Each entry carries its model and effort alongside the description because
 // the two drive different delegation decisions: the description answers
-// "does this subagent fit the task", the model answers "is dispatching it
-// cheap enough to fan several out". Emitting only the description left the
-// coordinator unable to reason about cost, so it never fanned out.
+// "does this subagent fit the task", the model answers "what does a
+// dispatch of it spend". Emitting only the description left the
+// coordinator unable to reason about cost.
 func ToPromptXML(active []*Subagent) string {
 	if len(active) == 0 {
 		return ""
@@ -31,7 +31,7 @@ func ToPromptXML(active []*Subagent) string {
 			fmt.Fprintf(&sb, "    <effort>%s</effort>\n", stringext.EscapeXML(sa.Effort))
 		}
 		if sa.IsCheap() {
-			sb.WriteString("    <cost>cheap: prefer fanning several of these out in parallel over doing the work yourself</cost>\n")
+			sb.WriteString("    <cost>cheap: runs on the small model</cost>\n")
 		}
 		sb.WriteString("  </subagent>\n")
 	}

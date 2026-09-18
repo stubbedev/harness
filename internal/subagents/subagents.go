@@ -186,10 +186,10 @@ func (s Subagent) ModelLabel() string {
 	return s.Model
 }
 
-// IsCheap reports whether dispatching this subagent is cheap enough that the
-// coordinator should prefer fanning several of them out over doing the work
-// itself. Only the `small` alias qualifies: a pinned model id may be anything,
-// so it is never assumed cheap.
+// IsCheap reports whether dispatching this subagent runs on the small model,
+// so repeated dispatches are inexpensive. Cost information for the
+// coordinator, not an instruction to fan out. Only the `small` alias
+// qualifies: a pinned model id may be anything, so it is never assumed cheap.
 func (s Subagent) IsCheap() bool {
 	return s.Model == ModelAliasSmall
 }

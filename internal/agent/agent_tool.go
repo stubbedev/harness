@@ -85,9 +85,9 @@ func findSubagentByName(active []*subagents.Subagent, name string) *subagents.Su
 // describeSubagentForEnum renders one line of the subagent_type enum's
 // description. The model and effort are included alongside the description
 // because they answer a different question than it does: the description says
-// whether a subagent fits the task, the model says whether dispatching it is
-// cheap enough to fan several out. Mirrors subagents.ToPromptXML, which feeds
-// the same two facts to the coder system prompt.
+// whether a subagent fits the task, the model says what a dispatch of it
+// spends. Mirrors subagents.ToPromptXML, which feeds the same two facts to
+// the coder system prompt.
 func describeSubagentForEnum(sa *subagents.Subagent) string {
 	attrs := "model: " + sa.ModelLabel()
 	if sa.Effort != "" {
@@ -95,7 +95,7 @@ func describeSubagentForEnum(sa *subagents.Subagent) string {
 	}
 	line := fmt.Sprintf("%s (%s): %s", sa.Name, attrs, sa.Description)
 	if sa.IsCheap() {
-		line += " [cheap: prefer fanning several out in parallel]"
+		line += " [cheap: runs on the small model]"
 	}
 	return line
 }
