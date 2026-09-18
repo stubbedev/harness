@@ -15,7 +15,7 @@ func TestAnchorRectBottomByDefault(t *testing.T) {
 	area := uv.Rectangle{Min: image.Pt(0, 0), Max: image.Pt(100, 40)}
 	got := AnchorRect(area, 40, 10)
 
-	require.Equal(t, image.Rect(30, 30, 70, 40), got, "bottom-anchored: flush with the bottom edge, horizontally centered")
+	require.Equal(t, image.Rect(30, 29, 70, 39), got, "bottom-anchored: one line off the bottom edge so the status hints stay visible, horizontally centered")
 }
 
 func TestAnchorRectTopWhenInstalled(t *testing.T) {
@@ -58,5 +58,14 @@ func TestAnchorRectUnknownPlacementFallsBackToBottom(t *testing.T) {
 	area := uv.Rectangle{Min: image.Pt(0, 0), Max: image.Pt(100, 40)}
 	got := AnchorRect(area, 40, 10)
 
-	require.Equal(t, image.Rect(30, 30, 70, 40), got)
+	require.Equal(t, image.Rect(30, 29, 70, 39), got)
+}
+
+func TestAnchorRectBottomClampsInTinyAreas(t *testing.T) {
+	t.Parallel()
+
+	area := uv.Rectangle{Min: image.Pt(0, 0), Max: image.Pt(100, 3)}
+	got := AnchorRect(area, 40, 3)
+
+	require.Equal(t, image.Rect(30, 0, 70, 3), got, "a view filling the area starts at its top, never above it")
 }

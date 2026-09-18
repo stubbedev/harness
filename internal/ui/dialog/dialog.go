@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -98,9 +99,10 @@ func anchoredAtBottom() bool {
 }
 
 // AnchorRect returns the rectangle a view of the given size occupies in
-// area. Bottom-anchored (which-key) mode: full-width panel flush with the
-// bottom edge. Top (noice.nvim) mode: horizontally centered, floating
-// about 30% down from the top rather than vertically centered.
+// area. Bottom-anchored (which-key) mode: full-width panel one line off
+// the bottom edge, so the status bar's keybind hints stay visible below
+// it. Top (noice.nvim) mode: horizontally centered, floating about 30%
+// down from the top rather than vertically centered.
 func AnchorRect(area uv.Rectangle, width, height int) uv.Rectangle {
 	if width > area.Dx() {
 		width = area.Dx()
@@ -109,7 +111,7 @@ func AnchorRect(area uv.Rectangle, width, height int) uv.Rectangle {
 		height = area.Dy()
 	}
 	x := area.Min.X + (area.Dx()-width)/2
-	y := area.Max.Y - height
+	y := max(area.Min.Y, area.Max.Y-height-1)
 	if placementTop() {
 		y = area.Min.Y + area.Dy()*3/10
 		if y+height > area.Max.Y {
@@ -259,6 +261,30 @@ func (d *Overlay) DialogLast() Dialog {
 		return nil
 	}
 	return d.dialogs[len(d.dialogs)-1]
+}
+
+// ShortHelp implements [help.KeyMap], delegating to the front dialog so
+// the status bar hints follow whatever popup has focus. Returns nil when
+// no dialog is open or the front dialog declares no bindings.
+func (d *Overlay) ShortHelp() []key.Binding {
+	front := d.DialogLast()
+	if km, ok := front.(help.KeyMap); ok {
+		return km.ShortHelp()
+	}
+	return nil
+}
+
+// FullHelp implements [help.KeyMap], delegating to the front dialog.
+// Dialogs that only declare short help render it as a single column.
+func (d *Overlay) FullHelp() [][]key.Binding {
+	front := d.DialogLast()
+	if km, ok := front.(help.KeyMap); ok {
+		if full := km.FullHelp(); len(full) > 0 {
+			return full
+		}
+		return [][]key.Binding{km.ShortHelp()}
+	}
+	return nil
 }
 
 // BringToFront brings the dialog with the specified ID to the front.

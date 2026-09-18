@@ -3319,6 +3319,12 @@ func (m *UI) ShortHelp() []key.Binding {
 	var binds []key.Binding
 	k := &m.keyMap
 
+	// A dialog owns the keyboard while it is open, so the hints are its
+	// own; the bottom-anchored panels leave that status line visible.
+	if m.dialog.HasDialogs() {
+		return m.dialog.ShortHelp()
+	}
+
 	// When an inline editor is active, show its help.
 	if m.activeInline != nil {
 		return m.activeInline.ShortHelp()
@@ -3410,6 +3416,12 @@ func (m *UI) ShortHelp() []key.Binding {
 
 // FullHelp implements [help.KeyMap].
 func (m *UI) FullHelp() [][]key.Binding {
+	// A dialog owns the keyboard while it is open, so the hints are its
+	// own; the bottom-anchored panels leave that status line visible.
+	if m.dialog.HasDialogs() {
+		return m.dialog.FullHelp()
+	}
+
 	// When an inline editor is active, show its help.
 	if m.activeInline != nil {
 		return [][]key.Binding{m.activeInline.ShortHelp()}
