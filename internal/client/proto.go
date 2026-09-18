@@ -26,13 +26,9 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]proto.Workspace, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workspaces: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list workspaces: status code %d", rsp.StatusCode)
-	}
 	var workspaces []proto.Workspace
-	if err := json.NewDecoder(rsp.Body).Decode(&workspaces); err != nil {
-		return nil, fmt.Errorf("failed to decode workspaces: %w", err)
+	if err := decodeJSON(rsp, &workspaces, "failed to list workspaces", "workspaces"); err != nil {
+		return nil, err
 	}
 	return workspaces, nil
 }
@@ -79,9 +75,8 @@ func (c *Client) DeleteWorkspace(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete workspace: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to delete workspace: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to delete workspace"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -271,13 +266,9 @@ func (c *Client) GetLSPDiagnostics(ctx context.Context, id string, lspName strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to get LSP diagnostics: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get LSP diagnostics: status code %d", rsp.StatusCode)
-	}
 	var diagnostics map[protocol.DocumentURI][]protocol.Diagnostic
-	if err := json.NewDecoder(rsp.Body).Decode(&diagnostics); err != nil {
-		return nil, fmt.Errorf("failed to decode LSP diagnostics: %w", err)
+	if err := decodeJSON(rsp, &diagnostics, "failed to get LSP diagnostics", "LSP diagnostics"); err != nil {
+		return nil, err
 	}
 	return diagnostics, nil
 }
@@ -288,13 +279,9 @@ func (c *Client) GetLSPs(ctx context.Context, id string) (map[string]proto.LSPCl
 	if err != nil {
 		return nil, fmt.Errorf("failed to get LSPs: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get LSPs: status code %d", rsp.StatusCode)
-	}
 	var lsps map[string]proto.LSPClientInfo
-	if err := json.NewDecoder(rsp.Body).Decode(&lsps); err != nil {
-		return nil, fmt.Errorf("failed to decode LSPs: %w", err)
+	if err := decodeJSON(rsp, &lsps, "failed to get LSPs", "LSPs"); err != nil {
+		return nil, err
 	}
 	return lsps, nil
 }
@@ -305,13 +292,9 @@ func (c *Client) MCPGetStates(ctx context.Context, id string) (map[string]proto.
 	if err != nil {
 		return nil, fmt.Errorf("failed to get MCP states: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get MCP states: status code %d", rsp.StatusCode)
-	}
 	var states map[string]proto.MCPClientInfo
-	if err := json.NewDecoder(rsp.Body).Decode(&states); err != nil {
-		return nil, fmt.Errorf("failed to decode MCP states: %w", err)
+	if err := decodeJSON(rsp, &states, "failed to get MCP states", "MCP states"); err != nil {
+		return nil, err
 	}
 	return states, nil
 }
@@ -323,13 +306,9 @@ func (c *Client) MCPPendingAuth(ctx context.Context, id string) ([]proto.MCPPend
 	if err != nil {
 		return nil, fmt.Errorf("failed to get MCP pending auth: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get MCP pending auth: status code %d", rsp.StatusCode)
-	}
 	var pending []proto.MCPPendingAuthServer
-	if err := json.NewDecoder(rsp.Body).Decode(&pending); err != nil {
-		return nil, fmt.Errorf("failed to decode MCP pending auth: %w", err)
+	if err := decodeJSON(rsp, &pending, "failed to get MCP pending auth", "MCP pending auth"); err != nil {
+		return nil, err
 	}
 	return pending, nil
 }
@@ -342,13 +321,9 @@ func (c *Client) MCPAuthURL(ctx context.Context, id, name string) (string, error
 	if err != nil {
 		return "", fmt.Errorf("failed to get MCP auth URL: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to get MCP auth URL: status code %d", rsp.StatusCode)
-	}
 	var resp proto.MCPAuthResponse
-	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
-		return "", fmt.Errorf("failed to decode MCP auth URL: %w", err)
+	if err := decodeJSON(rsp, &resp, "failed to get MCP auth URL", "MCP auth URL"); err != nil {
+		return "", err
 	}
 	return resp.AuthURL, nil
 }
@@ -365,15 +340,7 @@ func (c *Client) MCPAuthenticate(ctx context.Context, id, name string) error {
 	if err != nil {
 		return fmt.Errorf("failed to authenticate MCP: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		var e proto.Error
-		if err := json.NewDecoder(rsp.Body).Decode(&e); err == nil && e.Message != "" {
-			return fmt.Errorf("failed to authenticate MCP: %s", e.Message)
-		}
-		return fmt.Errorf("failed to authenticate MCP: status code %d", rsp.StatusCode)
-	}
-	return nil
+	return okOrError(rsp, "failed to authenticate MCP")
 }
 
 // MCPRefreshPrompts refreshes prompts for a named MCP client.
@@ -386,9 +353,8 @@ func (c *Client) MCPRefreshPrompts(ctx context.Context, id, name string) error {
 	if err != nil {
 		return fmt.Errorf("failed to refresh MCP prompts: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to refresh MCP prompts: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to refresh MCP prompts"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -403,9 +369,8 @@ func (c *Client) MCPRefreshResources(ctx context.Context, id, name string) error
 	if err != nil {
 		return fmt.Errorf("failed to refresh MCP resources: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to refresh MCP resources: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to refresh MCP resources"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -417,13 +382,9 @@ func (c *Client) GetAgentSessionQueuedPrompts(ctx context.Context, id string, se
 	if err != nil {
 		return 0, fmt.Errorf("failed to get session agent queued prompts: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("failed to get session agent queued prompts: status code %d", rsp.StatusCode)
-	}
 	var count int
-	if err := json.NewDecoder(rsp.Body).Decode(&count); err != nil {
-		return 0, fmt.Errorf("failed to decode session agent queued prompts: %w", err)
+	if err := decodeJSON(rsp, &count, "failed to get session agent queued prompts", "session agent queued prompts"); err != nil {
+		return 0, err
 	}
 	return count, nil
 }
@@ -434,9 +395,8 @@ func (c *Client) ClearAgentSessionQueuedPrompts(ctx context.Context, id string, 
 	if err != nil {
 		return fmt.Errorf("failed to clear session agent queued prompts: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to clear session agent queued prompts: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to clear session agent queued prompts"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -464,9 +424,8 @@ func (c *Client) UpdateAgent(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to update agent: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to update agent: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to update agent"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -489,11 +448,8 @@ func (c *Client) SendMessage(ctx context.Context, id string, sessionID, runID, p
 		return fmt.Errorf("failed to send message to agent: %w", err)
 	}
 	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK && rsp.StatusCode != http.StatusAccepted {
-		if msg := decodeErrorMessage(rsp.Body); msg != "" {
-			return fmt.Errorf("failed to send message to agent: status code %d: %s", rsp.StatusCode, msg)
-		}
-		return fmt.Errorf("failed to send message to agent: status code %d", rsp.StatusCode)
+	if err := checkStatus(rsp, http.StatusOK, http.StatusAccepted); err != nil {
+		return fmt.Errorf("failed to send message to agent: %w", err)
 	}
 	return nil
 }
@@ -520,13 +476,9 @@ func (c *Client) RunShellCommand(ctx context.Context, id, sessionID, command str
 	if err != nil {
 		return proto.ShellCommandResponse{}, fmt.Errorf("failed to run shell command: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return proto.ShellCommandResponse{}, fmt.Errorf("failed to run shell command: status code %d", rsp.StatusCode)
-	}
 	var resp proto.ShellCommandResponse
-	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
-		return proto.ShellCommandResponse{}, fmt.Errorf("failed to decode shell command response: %w", err)
+	if err := decodeJSON(rsp, &resp, "failed to run shell command", "shell command response"); err != nil {
+		return proto.ShellCommandResponse{}, err
 	}
 	return resp, nil
 }
@@ -537,13 +489,9 @@ func (c *Client) GetAgentSessionInfo(ctx context.Context, id string, sessionID s
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session agent info: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get session agent info: status code %d", rsp.StatusCode)
-	}
 	var info proto.AgentSession
-	if err := json.NewDecoder(rsp.Body).Decode(&info); err != nil {
-		return nil, fmt.Errorf("failed to decode session agent info: %w", err)
+	if err := decodeJSON(rsp, &info, "failed to get session agent info", "session agent info"); err != nil {
+		return nil, err
 	}
 	return &info, nil
 }
@@ -563,9 +511,8 @@ func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID
 	if err != nil {
 		return fmt.Errorf("failed to summarize session: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to summarize session: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to summarize session"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -577,9 +524,8 @@ func (c *Client) InitiateAgentProcessing(ctx context.Context, id string, interac
 	if err != nil {
 		return fmt.Errorf("failed to initiate session agent processing: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to initiate session agent processing: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to initiate session agent processing"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -590,13 +536,9 @@ func (c *Client) ListMessages(ctx context.Context, id string, sessionID string) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get messages: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get messages: status code %d", rsp.StatusCode)
-	}
 	var msgs []proto.Message
-	if err := json.NewDecoder(rsp.Body).Decode(&msgs); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("failed to decode messages: %w", err)
+	if err := decodeJSONAllowEmpty(rsp, &msgs, "failed to get messages", "messages"); err != nil {
+		return nil, err
 	}
 	return msgs, nil
 }
@@ -607,13 +549,9 @@ func (c *Client) GetSession(ctx context.Context, id string, sessionID string) (*
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get session: status code %d", rsp.StatusCode)
-	}
 	var sess proto.Session
-	if err := json.NewDecoder(rsp.Body).Decode(&sess); err != nil {
-		return nil, fmt.Errorf("failed to decode session: %w", err)
+	if err := decodeJSON(rsp, &sess, "failed to get session", "session"); err != nil {
+		return nil, err
 	}
 	return &sess, nil
 }
@@ -624,13 +562,9 @@ func (c *Client) ListSessionHistoryFiles(ctx context.Context, id string, session
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session history files: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get session history files: status code %d", rsp.StatusCode)
-	}
 	var files []proto.File
-	if err := json.NewDecoder(rsp.Body).Decode(&files); err != nil {
-		return nil, fmt.Errorf("failed to decode session history files: %w", err)
+	if err := decodeJSON(rsp, &files, "failed to get session history files", "session history files"); err != nil {
+		return nil, err
 	}
 	return files, nil
 }
@@ -641,13 +575,9 @@ func (c *Client) CreateSession(ctx context.Context, id string, title string) (*p
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to create session: status code %d", rsp.StatusCode)
-	}
 	var sess proto.Session
-	if err := json.NewDecoder(rsp.Body).Decode(&sess); err != nil {
-		return nil, fmt.Errorf("failed to decode session: %w", err)
+	if err := decodeJSON(rsp, &sess, "failed to create session", "session"); err != nil {
+		return nil, err
 	}
 	return &sess, nil
 }
@@ -658,13 +588,9 @@ func (c *Client) ListSessions(ctx context.Context, id string) ([]proto.Session, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get sessions: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get sessions: status code %d", rsp.StatusCode)
-	}
 	var sessions []proto.Session
-	if err := json.NewDecoder(rsp.Body).Decode(&sessions); err != nil {
-		return nil, fmt.Errorf("failed to decode sessions: %w", err)
+	if err := decodeJSON(rsp, &sessions, "failed to get sessions", "sessions"); err != nil {
+		return nil, err
 	}
 	return sessions, nil
 }
@@ -677,13 +603,9 @@ func (c *Client) AnswerQuestionBatch(ctx context.Context, id string, req proto.Q
 	if err != nil {
 		return false, fmt.Errorf("failed to answer question batch: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("failed to answer question batch: status code %d", rsp.StatusCode)
-	}
 	var resp proto.QuestionAnswerResponse
-	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
-		return false, fmt.Errorf("failed to decode answer question batch response: %w", err)
+	if err := decodeJSON(rsp, &resp, "failed to answer question batch", "answer question batch response"); err != nil {
+		return false, err
 	}
 	return resp.Resolved, nil
 }
@@ -696,13 +618,9 @@ func (c *Client) CancelQuestionBatch(ctx context.Context, id string) (bool, erro
 	if err != nil {
 		return false, fmt.Errorf("failed to cancel question batch: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("failed to cancel question batch: status code %d", rsp.StatusCode)
-	}
 	var resp proto.QuestionAnswerResponse
-	if err := json.NewDecoder(rsp.Body).Decode(&resp); err != nil {
-		return false, fmt.Errorf("failed to decode cancel question batch response: %w", err)
+	if err := decodeJSON(rsp, &resp, "failed to cancel question batch", "cancel question batch response"); err != nil {
+		return false, err
 	}
 	return resp.Resolved, nil
 }
@@ -713,13 +631,9 @@ func (c *Client) GetConfig(ctx context.Context, id string) (*config.Config, erro
 	if err != nil {
 		return nil, fmt.Errorf("failed to get config: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get config: status code %d", rsp.StatusCode)
-	}
 	var cfg config.Config
-	if err := json.NewDecoder(rsp.Body).Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("failed to decode config: %w", err)
+	if err := decodeJSON(rsp, &cfg, "failed to get config", "config"); err != nil {
+		return nil, err
 	}
 	return &cfg, nil
 }
@@ -737,13 +651,9 @@ func (c *Client) SaveSession(ctx context.Context, id string, sess proto.Session)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save session: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to save session: status code %d", rsp.StatusCode)
-	}
 	var saved proto.Session
-	if err := json.NewDecoder(rsp.Body).Decode(&saved); err != nil {
-		return nil, fmt.Errorf("failed to decode session: %w", err)
+	if err := decodeJSON(rsp, &saved, "failed to save session", "session"); err != nil {
+		return nil, err
 	}
 	return &saved, nil
 }
@@ -754,9 +664,8 @@ func (c *Client) DeleteSession(ctx context.Context, id string, sessionID string)
 	if err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to delete session: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to delete session"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -767,13 +676,9 @@ func (c *Client) ListUserMessages(ctx context.Context, id string, sessionID stri
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user messages: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get user messages: status code %d", rsp.StatusCode)
-	}
 	var msgs []proto.Message
-	if err := json.NewDecoder(rsp.Body).Decode(&msgs); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("failed to decode user messages: %w", err)
+	if err := decodeJSONAllowEmpty(rsp, &msgs, "failed to get user messages", "user messages"); err != nil {
+		return nil, err
 	}
 	return msgs, nil
 }
@@ -784,13 +689,9 @@ func (c *Client) ListAllUserMessages(ctx context.Context, id string) ([]proto.Me
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all user messages: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get all user messages: status code %d", rsp.StatusCode)
-	}
 	var msgs []proto.Message
-	if err := json.NewDecoder(rsp.Body).Decode(&msgs); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("failed to decode all user messages: %w", err)
+	if err := decodeJSONAllowEmpty(rsp, &msgs, "failed to get all user messages", "all user messages"); err != nil {
+		return nil, err
 	}
 	return msgs, nil
 }
@@ -801,9 +702,8 @@ func (c *Client) CancelAgentSession(ctx context.Context, id string, sessionID st
 	if err != nil {
 		return fmt.Errorf("failed to cancel agent session: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to cancel agent session: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to cancel agent session"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -815,9 +715,8 @@ func (c *Client) CancelAgentSessionTurn(ctx context.Context, id string, sessionI
 	if err != nil {
 		return fmt.Errorf("failed to cancel agent session turn: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to cancel agent session turn: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to cancel agent session turn"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -829,13 +728,9 @@ func (c *Client) GetAgentSessionQueuedPromptsList(ctx context.Context, id string
 	if err != nil {
 		return nil, fmt.Errorf("failed to get queued prompts list: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get queued prompts list: status code %d", rsp.StatusCode)
-	}
 	var prompts []string
-	if err := json.NewDecoder(rsp.Body).Decode(&prompts); err != nil {
-		return nil, fmt.Errorf("failed to decode queued prompts list: %w", err)
+	if err := decodeJSON(rsp, &prompts, "failed to get queued prompts list", "queued prompts list"); err != nil {
+		return nil, err
 	}
 	return prompts, nil
 }
@@ -846,13 +741,9 @@ func (c *Client) GetDefaultSmallModel(ctx context.Context, id string, providerID
 	if err != nil {
 		return nil, fmt.Errorf("failed to get default small model: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get default small model: status code %d", rsp.StatusCode)
-	}
 	var model config.SelectedModel
-	if err := json.NewDecoder(rsp.Body).Decode(&model); err != nil {
-		return nil, fmt.Errorf("failed to decode default small model: %w", err)
+	if err := decodeJSON(rsp, &model, "failed to get default small model", "default small model"); err != nil {
+		return nil, err
 	}
 	return &model, nil
 }
@@ -866,9 +757,8 @@ func (c *Client) FileTrackerRecordRead(ctx context.Context, id string, sessionID
 	if err != nil {
 		return fmt.Errorf("failed to record file read: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to record file read: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to record file read"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -883,13 +773,9 @@ func (c *Client) FileTrackerLastReadTime(ctx context.Context, id string, session
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to get last read time: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return time.Time{}, fmt.Errorf("failed to get last read time: status code %d", rsp.StatusCode)
-	}
 	var t time.Time
-	if err := json.NewDecoder(rsp.Body).Decode(&t); err != nil {
-		return time.Time{}, fmt.Errorf("failed to decode last read time: %w", err)
+	if err := decodeJSON(rsp, &t, "failed to get last read time", "last read time"); err != nil {
+		return time.Time{}, err
 	}
 	return t, nil
 }
@@ -900,13 +786,9 @@ func (c *Client) FileTrackerListReadFiles(ctx context.Context, id string, sessio
 	if err != nil {
 		return nil, fmt.Errorf("failed to get read files: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get read files: status code %d", rsp.StatusCode)
-	}
 	var files []string
-	if err := json.NewDecoder(rsp.Body).Decode(&files); err != nil {
-		return nil, fmt.Errorf("failed to decode read files: %w", err)
+	if err := decodeJSON(rsp, &files, "failed to get read files", "read files"); err != nil {
+		return nil, err
 	}
 	return files, nil
 }
@@ -919,9 +801,8 @@ func (c *Client) LSPStart(ctx context.Context, id string, path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to start LSP: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to start LSP: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to start LSP"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -932,9 +813,8 @@ func (c *Client) LSPStopAll(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to stop LSPs: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to stop LSPs: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to stop LSPs"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -945,13 +825,9 @@ func (c *Client) ListCheckpoints(ctx context.Context, id string, sessionID strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to get checkpoints: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get checkpoints: status code %d", rsp.StatusCode)
-	}
 	var checkpoints []proto.Checkpoint
-	if err := json.NewDecoder(rsp.Body).Decode(&checkpoints); err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("failed to decode checkpoints: %w", err)
+	if err := decodeJSONAllowEmpty(rsp, &checkpoints, "failed to get checkpoints", "checkpoints"); err != nil {
+		return nil, err
 	}
 	return checkpoints, nil
 }
@@ -963,9 +839,8 @@ func (c *Client) RewindSession(ctx context.Context, id, sessionID, messageID, mo
 	if err != nil {
 		return fmt.Errorf("failed to rewind session: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to rewind session: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to rewind session"); err != nil {
+		return err
 	}
 	return nil
 }

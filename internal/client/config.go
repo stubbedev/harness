@@ -21,9 +21,8 @@ func (c *Client) SetConfigField(ctx context.Context, id string, scope config.Sco
 	if err != nil {
 		return fmt.Errorf("failed to set config field: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to set config field: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to set config field"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -37,9 +36,8 @@ func (c *Client) RemoveConfigField(ctx context.Context, id string, scope config.
 	if err != nil {
 		return fmt.Errorf("failed to remove config field: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to remove config field: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to remove config field"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -54,9 +52,8 @@ func (c *Client) UpdatePreferredModel(ctx context.Context, id string, scope conf
 	if err != nil {
 		return fmt.Errorf("failed to update preferred model: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to update preferred model: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to update preferred model"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -70,9 +67,8 @@ func (c *Client) SetCompactMode(ctx context.Context, id string, scope config.Sco
 	if err != nil {
 		return fmt.Errorf("failed to set compact mode: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to set compact mode: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to set compact mode"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -117,9 +113,8 @@ func (c *Client) SetProviderAPIKey(ctx context.Context, id string, scope config.
 	if err != nil {
 		return fmt.Errorf("failed to set provider API key: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to set provider API key: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to set provider API key"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -131,16 +126,12 @@ func (c *Client) ImportCopilot(ctx context.Context, id string) (*oauth.Token, bo
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to import copilot: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, false, fmt.Errorf("failed to import copilot: status code %d", rsp.StatusCode)
-	}
 	var result struct {
 		Token   *oauth.Token `json:"token"`
 		Success bool         `json:"success"`
 	}
-	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
-		return nil, false, fmt.Errorf("failed to decode import copilot response: %w", err)
+	if err := decodeJSON(rsp, &result, "failed to import copilot", "import copilot response"); err != nil {
+		return nil, false, err
 	}
 	return result.Token, result.Success, nil
 }
@@ -155,9 +146,8 @@ func (c *Client) RefreshOAuthToken(ctx context.Context, id string, scope config.
 	if err != nil {
 		return fmt.Errorf("failed to refresh OAuth token: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to refresh OAuth token: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to refresh OAuth token"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -169,15 +159,11 @@ func (c *Client) GetInitializePrompt(ctx context.Context, id string) (string, er
 	if err != nil {
 		return "", fmt.Errorf("failed to get init prompt: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to get init prompt: status code %d", rsp.StatusCode)
-	}
 	var result struct {
 		Prompt string `json:"prompt"`
 	}
-	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode init prompt response: %w", err)
+	if err := decodeJSON(rsp, &result, "failed to get init prompt", "init prompt response"); err != nil {
+		return "", err
 	}
 	return result.Prompt, nil
 }
@@ -188,13 +174,9 @@ func (c *Client) ListSkills(ctx context.Context, id string) ([]proto.SkillInfo, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list skills: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list skills: status code %d", rsp.StatusCode)
-	}
 	var skills []proto.SkillInfo
-	if err := json.NewDecoder(rsp.Body).Decode(&skills); err != nil {
-		return nil, fmt.Errorf("failed to decode skills: %w", err)
+	if err := decodeJSON(rsp, &skills, "failed to list skills", "skills"); err != nil {
+		return nil, err
 	}
 	return skills, nil
 }
@@ -207,13 +189,9 @@ func (c *Client) ReadSkill(ctx context.Context, id, skillID string) (*proto.Read
 	if err != nil {
 		return nil, fmt.Errorf("failed to read skill: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to read skill: status code %d", rsp.StatusCode)
-	}
 	var result proto.ReadSkillResponse
-	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode skill response: %w", err)
+	if err := decodeJSON(rsp, &result, "failed to read skill", "skill response"); err != nil {
+		return nil, err
 	}
 	return &result, nil
 }
@@ -234,9 +212,8 @@ func (c *Client) RefreshMCPTools(ctx context.Context, id, name string) error {
 	if err != nil {
 		return fmt.Errorf("failed to refresh MCP tools: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to refresh MCP tools: status code %d", rsp.StatusCode)
+	if err := okOrError(rsp, "failed to refresh MCP tools"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -250,13 +227,9 @@ func (c *Client) ReadMCPResource(ctx context.Context, id, name, uri string) ([]M
 	if err != nil {
 		return nil, fmt.Errorf("failed to read MCP resource: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to read MCP resource: status code %d", rsp.StatusCode)
-	}
 	var contents []MCPResourceContents
-	if err := json.NewDecoder(rsp.Body).Decode(&contents); err != nil {
-		return nil, fmt.Errorf("failed to decode MCP resource: %w", err)
+	if err := decodeJSON(rsp, &contents, "failed to read MCP resource", "MCP resource"); err != nil {
+		return nil, err
 	}
 	return contents, nil
 }
@@ -266,13 +239,9 @@ func (c *Client) ListMCPPrompts(ctx context.Context, id string) ([]proto.MCPProm
 	if err != nil {
 		return nil, fmt.Errorf("failed to list MCP prompts: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list MCP prompts: status code %d", rsp.StatusCode)
-	}
 	var prompts []proto.MCPPrompt
-	if err := json.NewDecoder(rsp.Body).Decode(&prompts); err != nil {
-		return nil, fmt.Errorf("failed to decode MCP prompts: %w", err)
+	if err := decodeJSON(rsp, &prompts, "failed to list MCP prompts", "MCP prompts"); err != nil {
+		return nil, err
 	}
 	return prompts, nil
 }
@@ -287,15 +256,11 @@ func (c *Client) GetMCPPrompt(ctx context.Context, id, clientID, promptID string
 	if err != nil {
 		return "", fmt.Errorf("failed to get MCP prompt: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to get MCP prompt: status code %d", rsp.StatusCode)
-	}
 	var result struct {
 		Prompt string `json:"prompt"`
 	}
-	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode MCP prompt response: %w", err)
+	if err := decodeJSON(rsp, &result, "failed to get MCP prompt", "MCP prompt response"); err != nil {
+		return "", err
 	}
 	return result.Prompt, nil
 }
@@ -306,13 +271,9 @@ func (c *Client) ListExtensionCommands(ctx context.Context, id string) ([]proto.
 	if err != nil {
 		return nil, fmt.Errorf("failed to list extension commands: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to list extension commands: status code %d", rsp.StatusCode)
-	}
 	var commands []proto.ExtensionCommandInfo
-	if err := json.NewDecoder(rsp.Body).Decode(&commands); err != nil {
-		return nil, fmt.Errorf("failed to decode extension commands: %w", err)
+	if err := decodeJSON(rsp, &commands, "failed to list extension commands", "extension commands"); err != nil {
+		return nil, err
 	}
 	return commands, nil
 }
@@ -326,13 +287,9 @@ func (c *Client) RunExtensionCommand(ctx context.Context, id, commandID string, 
 	if err != nil {
 		return "", fmt.Errorf("failed to run extension command: %w", err)
 	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to run extension command: status code %d", rsp.StatusCode)
-	}
 	var result proto.RunExtensionCommandResponse
-	if err := json.NewDecoder(rsp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode extension command response: %w", err)
+	if err := decodeJSON(rsp, &result, "failed to run extension command", "extension command response"); err != nil {
+		return "", err
 	}
 	return result.Prompt, nil
 }
