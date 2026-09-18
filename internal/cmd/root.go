@@ -280,15 +280,8 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	cfg := store.Config()
 	store.Overrides().EnabledChannels = channels
 
-	if err := os.MkdirAll(cfg.Options.DataDirectory, 0o700); err != nil {
-		return nil, nil, fmt.Errorf("failed to create data directory: %q %w", cfg.Options.DataDirectory, err)
-	}
-
-	gitIgnorePath := filepath.Join(cfg.Options.DataDirectory, ".gitignore")
-	if _, err := os.Stat(gitIgnorePath); os.IsNotExist(err) {
-		if err := os.WriteFile(gitIgnorePath, []byte("*\n"), 0o644); err != nil {
-			return nil, nil, fmt.Errorf("failed to create .gitignore file: %q %w", gitIgnorePath, err)
-		}
+	if err := createDotHarnessDir(cfg.Options.DataDirectory); err != nil {
+		return nil, nil, err
 	}
 
 	if err := projects.Register(cwd, cfg.Options.DataDirectory); err != nil {
