@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -70,15 +69,9 @@ func (s *mcpSearchTool) ProviderOptions() fantasy.ProviderOptions        { retur
 func (s *mcpSearchTool) SetProviderOptions(opts fantasy.ProviderOptions) { s.opts = opts }
 
 func (s *mcpSearchTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	var params struct {
-		Query string   `json:"query"`
-		Load  []string `json:"load"`
-	}
-	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
-		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
-	}
-	if params.Query == "" && len(params.Load) == 0 {
-		return fantasy.NewTextErrorResponse(`provide "query" to search or "load" to load tools (both is fine)`), nil
+	params, resp, ok := decodeSearchLoadParams(call, "load tools")
+	if !ok {
+		return resp, nil
 	}
 
 	var b strings.Builder
@@ -98,16 +91,10 @@ func (s *mcpSearchTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 	}
 
 	if len(params.Load) > 0 {
-		known := s.coord.mcpServerToolNames(s.server)
-		var unknown []string
-		for _, name := range params.Load {
-			if !slices.Contains(known, name) {
-				unknown = append(unknown, name)
-			}
-		}
+		unknown := unknownNamesFunc(params.Load, func(name string) bool { return slices.Contains(s.coord.mcpServerToolNames(s.server), name) })
 		if len(unknown) > 0 {
 			return fantasy.NewTextErrorResponse(
-				fmt.Sprintf("unknown tool(s) on server %q: %s", s.server, strings.Join(unknown, ", "))), nil
+				fmt.Sprintf("unknown tool(s) on server %q: %s", s.server, joinNames(unknown))), nil
 		}
 		if err := s.coord.expandMCPServerTools(ctx, s.server, params.Load); err != nil {
 			return fantasy.NewTextErrorResponse("failed to load tools: " + err.Error()), nil

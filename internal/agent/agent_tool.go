@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -65,8 +64,8 @@ func (d *dispatcherTool) ProviderOptions() fantasy.ProviderOptions        { retu
 func (d *dispatcherTool) SetProviderOptions(opts fantasy.ProviderOptions) { d.providerOpts = opts }
 func (d *dispatcherTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	var params AgentDispatchParams
-	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
-		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
+	if resp, ok := decodeToolParams(call, &params); !ok {
+		return resp, nil
 	}
 	return d.dispatch(ctx, params, call)
 }

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -72,20 +71,17 @@ func (s *toolSearchTool) Run(ctx context.Context, call fantasy.ToolCall) (fantas
 	var params struct {
 		Load []string `json:"load"`
 	}
-	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
-		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
+	if resp, ok := decodeToolParams(call, &params); !ok {
+		return resp, nil
 	}
 	if len(params.Load) == 0 {
 		return fantasy.NewTextErrorResponse(`provide "load" with the tool names to load`), nil
 	}
-	var unknown []string
-	for _, name := range params.Load {
-		if !slices.ContainsFunc(s.deferred, func(info fantasy.ToolInfo) bool { return info.Name == name }) {
-			unknown = append(unknown, name)
-		}
-	}
+	unknown := unknownNamesFunc(params.Load, func(name string) bool {
+		return slices.ContainsFunc(s.deferred, func(info fantasy.ToolInfo) bool { return info.Name == name })
+	})
 	if len(unknown) > 0 {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown tool(s): %s", strings.Join(unknown, ", "))), nil
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown tool(s): %s", joinNames(unknown))), nil
 	}
 	if err := s.coord.expandBuiltinTools(ctx, params.Load); err != nil {
 		return fantasy.NewTextErrorResponse("failed to load tools: " + err.Error()), nil

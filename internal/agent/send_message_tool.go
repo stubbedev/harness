@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -65,8 +64,8 @@ func (t *sendMessageTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 	var params struct {
 		Message string `json:"message"`
 	}
-	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
-		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
+	if resp, ok := decodeToolParams(call, &params); !ok {
+		return resp, nil
 	}
 	message := strings.TrimSpace(params.Message)
 	if message == "" {

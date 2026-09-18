@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -70,15 +69,9 @@ func (s *skillSearchTool) ProviderOptions() fantasy.ProviderOptions        { ret
 func (s *skillSearchTool) SetProviderOptions(opts fantasy.ProviderOptions) { s.opts = opts }
 
 func (s *skillSearchTool) Run(_ context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	var params struct {
-		Query string   `json:"query"`
-		Load  []string `json:"load"`
-	}
-	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
-		return fantasy.NewTextErrorResponse("invalid parameters: " + err.Error()), nil
-	}
-	if params.Query == "" && len(params.Load) == 0 {
-		return fantasy.NewTextErrorResponse(`provide "query" to search or "load" to read skills (both is fine)`), nil
+	params, resp, ok := decodeSearchLoadParams(call, "read skills")
+	if !ok {
+		return resp, nil
 	}
 
 	available := s.availableSkills()
@@ -104,15 +97,10 @@ func (s *skillSearchTool) Run(_ context.Context, call fantasy.ToolCall) (fantasy
 	}
 
 	if len(params.Load) > 0 {
-		var unknown []string
-		for _, name := range params.Load {
-			if findSkill(available, name) == nil {
-				unknown = append(unknown, name)
-			}
-		}
+		unknown := unknownNamesFunc(params.Load, func(name string) bool { return findSkill(available, name) != nil })
 		if len(unknown) > 0 {
 			return fantasy.NewTextErrorResponse(
-				fmt.Sprintf("unknown skill(s): %s", strings.Join(unknown, ", "))), nil
+				fmt.Sprintf("unknown skill(s): %s", joinNames(unknown))), nil
 		}
 		for _, name := range params.Load {
 			if b.Len() > 0 {
