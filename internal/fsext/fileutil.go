@@ -22,6 +22,39 @@ type FileInfo struct {
 	ModTime time.Time
 }
 
+// commonIgnoredDirs are the directory names every crawling walker
+// skips: VCS metadata, harness's own data directory, dependency
+// stores, and build output. Single source for SkipHidden's walk and
+// the stats crawl; callers layer their own extras on top (the stats
+// crawl also skips .svn, .hg, .cache, .npm, .cargo, Library,
+// Applications, and System).
+var commonIgnoredDirs = []string{
+	".harness",
+	".git",
+	"node_modules",
+	"vendor",
+	"dist",
+	"build",
+	"target",
+	".idea",
+	".vscode",
+	"__pycache__",
+	"bin",
+	"obj",
+	"out",
+	"coverage",
+	"logs",
+	"generated",
+	"bower_components",
+	"jspm_packages",
+}
+
+// IsCommonIgnoredDir reports whether name is a directory every
+// crawling walker skips.
+func IsCommonIgnoredDir(name string) bool {
+	return slices.Contains(commonIgnoredDirs, name)
+}
+
 func SkipHidden(path string) bool {
 	// Check for hidden files (starting with a dot)
 	base := filepath.Base(path)
@@ -29,30 +62,9 @@ func SkipHidden(path string) bool {
 		return true
 	}
 
-	commonIgnoredDirs := map[string]bool{
-		".harness":         true,
-		"node_modules":     true,
-		"vendor":           true,
-		"dist":             true,
-		"build":            true,
-		"target":           true,
-		".git":             true,
-		".idea":            true,
-		".vscode":          true,
-		"__pycache__":      true,
-		"bin":              true,
-		"obj":              true,
-		"out":              true,
-		"coverage":         true,
-		"logs":             true,
-		"generated":        true,
-		"bower_components": true,
-		"jspm_packages":    true,
-	}
-
 	parts := strings.SplitSeq(path, string(os.PathSeparator))
 	for part := range parts {
-		if commonIgnoredDirs[part] {
+		if IsCommonIgnoredDir(part) {
 			return true
 		}
 	}

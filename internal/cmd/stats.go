@@ -22,6 +22,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/event"
+	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/projects"
 )
 
@@ -280,34 +281,20 @@ func crawlForStats(ctx context.Context, rootDir string) ([]ProjectStats, error) 
 
 // shouldSkipDir returns true for directories that should be skipped during crawling.
 func shouldSkipDir(name string) bool {
-	skipDirs := map[string]bool{
-		".git":             true,
-		".svn":             true,
-		".hg":              true,
-		"node_modules":     true,
-		"vendor":           true,
-		"dist":             true,
-		"build":            true,
-		"target":           true,
-		".idea":            true,
-		".vscode":          true,
-		"__pycache__":      true,
-		"bin":              true,
-		"obj":              true,
-		"out":              true,
-		"coverage":         true,
-		"logs":             true,
-		"generated":        true,
-		"bower_components": true,
-		"jspm_packages":    true,
-		".cache":           true,
-		".npm":             true,
-		".cargo":           true,
-		"Library":          true,
-		"Applications":     true,
-		"System":           true,
+	// The shared walker list plus the crawl's own extras: other VCS
+	// metadata, package-manager caches, and macOS system directories
+	// that show up when crawling from the home directory.
+	statsSkipDirs := map[string]bool{
+		".svn":         true,
+		".hg":          true,
+		".cache":       true,
+		".npm":         true,
+		".cargo":       true,
+		"Library":      true,
+		"Applications": true,
+		"System":       true,
 	}
-	return skipDirs[name]
+	return fsext.IsCommonIgnoredDir(name) || statsSkipDirs[name]
 }
 
 // gatherStatsFromProjects gathers stats from all known projects in projects.json.
