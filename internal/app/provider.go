@@ -26,13 +26,19 @@ func parseModelStr(providers map[string]config.ProviderConfig, modelStr string) 
 	return "", modelStr
 }
 
-// modelMatch represents a found model.
-type modelMatch struct {
-	provider string
-	modelID  string
+// ModelMatch is a resolved provider/model pair found in the provider
+// catalog.
+type ModelMatch struct {
+	Provider string
+	ModelID  string
 }
 
-func findModels(providers map[string]config.ProviderConfig, largeModel, smallModel string) ([]modelMatch, []modelMatch, error) {
+// FindModels resolves large and small model strings against the
+// configured providers. Format: "model-name", "provider/model-name" or
+// "synthetic/moonshot/kimi-k2". The first component of a slashed string
+// is only treated as a provider filter when it names a configured
+// provider; otherwise the whole string is a model ID.
+func FindModels(providers map[string]config.ProviderConfig, largeModel, smallModel string) ([]ModelMatch, []ModelMatch, error) {
 	largeProviderFilter, largeModelID := parseModelStr(providers, largeModel)
 	smallProviderFilter, smallModelID := parseModelStr(providers, smallModel)
 
@@ -51,17 +57,17 @@ func findModels(providers map[string]config.ProviderConfig, largeModel, smallMod
 	}
 
 	// Find matching models in a single pass.
-	var largeMatches, smallMatches []modelMatch
+	var largeMatches, smallMatches []ModelMatch
 	for name, provider := range providers {
 		if provider.Disable {
 			continue
 		}
 		for _, m := range provider.Models {
 			if filter(largeModelID, largeProviderFilter, m.ID, name) {
-				largeMatches = append(largeMatches, modelMatch{provider: name, modelID: m.ID})
+				largeMatches = append(largeMatches, ModelMatch{Provider: name, ModelID: m.ID})
 			}
 			if filter(smallModelID, smallProviderFilter, m.ID, name) {
-				smallMatches = append(smallMatches, modelMatch{provider: name, modelID: m.ID})
+				smallMatches = append(smallMatches, ModelMatch{Provider: name, ModelID: m.ID})
 			}
 		}
 	}
@@ -74,17 +80,17 @@ func filter(modelFilter, providerFilter, model, provider string) bool {
 		(providerFilter == "" || strings.EqualFold(provider, providerFilter))
 }
 
-// Validate and return a single match.
-func validateMatches(matches []modelMatch, modelID, label string) (modelMatch, error) {
+// ValidateModels ensures exactly one match exists and returns it.
+func ValidateModels(matches []ModelMatch, modelID, label string) (ModelMatch, error) {
 	switch {
 	case len(matches) == 0:
-		return modelMatch{}, fmt.Errorf("%s model %q not found", label, modelID)
+		return ModelMatch{}, fmt.Errorf("%s model %q not found", label, modelID)
 	case len(matches) > 1:
 		names := make([]string, len(matches))
 		for i, m := range matches {
-			names[i] = m.provider
+			names[i] = m.Provider
 		}
-		return modelMatch{}, fmt.Errorf(
+		return ModelMatch{}, fmt.Errorf(
 			"%s model: model %q found in multiple providers: %s. Please specify provider using 'provider/model' format",
 			label,
 			modelID,

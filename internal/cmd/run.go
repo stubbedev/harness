@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/event"
@@ -553,20 +554,23 @@ func overrideModels(
 
 	providers := cfg.Providers.Copy()
 
-	largeMatches, smallMatches := findModelMatches(providers, largeModel, smallModel)
+	largeMatches, smallMatches, err := app.FindModels(providers, largeModel, smallModel)
+	if err != nil {
+		return err
+	}
 
 	var largeProviderID string
 
 	if largeModel != "" {
-		found, err := validateModelMatches(largeMatches, largeModel, "large")
+		found, err := app.ValidateModels(largeMatches, largeModel, "large")
 		if err != nil {
 			return err
 		}
-		largeProviderID = found.provider
-		slog.Info("Overriding large model", "provider", found.provider, "model", found.modelID)
+		largeProviderID = found.Provider
+		slog.Info("Overriding large model", "provider", found.Provider, "model", found.ModelID)
 		if err := c.UpdatePreferredModel(ctx, ws.ID, config.ScopeWorkspace, config.SelectedModelTypeLarge, config.SelectedModel{
-			Provider: found.provider,
-			Model:    found.modelID,
+			Provider: found.Provider,
+			Model:    found.ModelID,
 		}); err != nil {
 			return fmt.Errorf("failed to set large model: %w", err)
 		}
@@ -574,14 +578,14 @@ func overrideModels(
 
 	switch {
 	case smallModel != "":
-		found, err := validateModelMatches(smallMatches, smallModel, "small")
+		found, err := app.ValidateModels(smallMatches, smallModel, "small")
 		if err != nil {
 			return err
 		}
-		slog.Info("Overriding small model", "provider", found.provider, "model", found.modelID)
+		slog.Info("Overriding small model", "provider", found.Provider, "model", found.ModelID)
 		if err := c.UpdatePreferredModel(ctx, ws.ID, config.ScopeWorkspace, config.SelectedModelTypeSmall, config.SelectedModel{
-			Provider: found.provider,
-			Model:    found.modelID,
+			Provider: found.Provider,
+			Model:    found.ModelID,
 		}); err != nil {
 			return fmt.Errorf("failed to set small model: %w", err)
 		}
@@ -683,76 +687,6 @@ func overrideReasoningEffort(ctx context.Context, c *client.Client, wsID, reason
 		return fmt.Errorf("failed to set reasoning effort: %w", err)
 	}
 	return c.UpdateAgent(ctx, wsID)
-}
-
-type modelMatch struct {
-	provider string
-	modelID  string
-}
-
-// findModelMatches searches providers for matching large/small model
-// strings.
-func findModelMatches(providers map[string]config.ProviderConfig, largeModel, smallModel string) ([]modelMatch, []modelMatch) {
-	largeFilter, largeID := parseModelString(largeModel)
-	smallFilter, smallID := parseModelString(smallModel)
-
-	var largeMatches, smallMatches []modelMatch
-	for name, provider := range providers {
-		if provider.Disable {
-			continue
-		}
-		for _, m := range provider.Models {
-			if matchesModel(largeID, largeFilter, m.ID, name) {
-				largeMatches = append(largeMatches, modelMatch{provider: name, modelID: m.ID})
-			}
-			if matchesModel(smallID, smallFilter, m.ID, name) {
-				smallMatches = append(smallMatches, modelMatch{provider: name, modelID: m.ID})
-			}
-		}
-	}
-	return largeMatches, smallMatches
-}
-
-// parseModelString splits "provider/model" into (provider, model) or
-// ("", model).
-func parseModelString(s string) (string, string) {
-	if s == "" {
-		return "", ""
-	}
-	if before, after, ok := strings.Cut(s, "/"); ok {
-		return before, after
-	}
-	return "", s
-}
-
-// matchesModel returns true if the model ID matches the filter
-// criteria.
-func matchesModel(wantID, wantProvider, modelID, providerName string) bool {
-	if wantID == "" {
-		return false
-	}
-	if wantProvider != "" && wantProvider != providerName {
-		return false
-	}
-	return strings.EqualFold(modelID, wantID)
-}
-
-// validateModelMatches ensures exactly one match exists.
-func validateModelMatches(matches []modelMatch, modelID, label string) (modelMatch, error) {
-	switch {
-	case len(matches) == 0:
-		return modelMatch{}, fmt.Errorf("%s model %q not found", label, modelID)
-	case len(matches) > 1:
-		names := make([]string, len(matches))
-		for i, m := range matches {
-			names[i] = m.provider
-		}
-		return modelMatch{}, fmt.Errorf(
-			"%s model: model %q found in multiple providers: %s. Please specify provider using 'provider/model' format",
-			label, modelID, strings.Join(names, ", "),
-		)
-	}
-	return matches[0], nil
 }
 
 // resolveSession returns the session to use for a non-interactive run.
