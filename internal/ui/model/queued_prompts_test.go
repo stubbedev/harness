@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/chat"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // newQueuedTestUI wires a UI whose workspace reports busy so sends queue.
@@ -33,7 +34,7 @@ func TestQueuedPromptRendersImmediately(t *testing.T) {
 	queued, ok := item.(*chat.QueuedMessageItem)
 	require.True(t, ok)
 	assert.Equal(t, "steer this way", queued.Text())
-	assert.Contains(t, item.Render(100), "queued", "the entry is marked as queued")
+	assert.Contains(t, item.Render(100), styles.QueuedIcon, "the entry is marked as queued")
 }
 
 // TestQueuedPromptsJoinIntoSingleEntry pins the join: a second prompt

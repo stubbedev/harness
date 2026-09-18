@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -63,7 +64,7 @@ func (q *QueuedMessageItem) ID() string { return q.id }
 func (q *QueuedMessageItem) Finished() bool { return true }
 
 // RawRender implements [MessageItem]: the prompt's markdown, like a user
-// message, prefixed with a dim "queued" tag on the first line.
+// message, prefixed with a dim clock glyph on the first line.
 func (q *QueuedMessageItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)
 
@@ -86,10 +87,14 @@ func (q *QueuedMessageItem) RawRender(width int) string {
 	}
 
 	lines := strings.Split(content, "\n")
+	tag := q.sty.Resource.AdditionalText.Render(styles.QueuedIcon)
 	if len(lines) > 0 && lines[0] != "" {
-		lines[0] = q.sty.Resource.AdditionalText.Render("queued") + " " + lines[0]
+		// The markdown wrapped before the tag was prepended, so the
+		// first line can now run past the width the renderer targeted;
+		// trim it back with an ANSI-aware truncate.
+		lines[0] = ansi.Truncate(tag+" "+lines[0], cappedWidth, "")
 	} else {
-		lines = []string{q.sty.Resource.AdditionalText.Render("queued")}
+		lines = []string{tag}
 	}
 	content = strings.Join(lines, "\n")
 

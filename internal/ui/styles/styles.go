@@ -43,6 +43,12 @@ const (
 	ToolSuccess string = "✓"
 	ToolError   string = "×"
 
+	// QueuedIcon marks a prompt queued behind the running turn:
+	// nf-md-clock_outline. It is private-use area, rendered one cell
+	// wide by nerd fonts (uax29 treats PUA as neutral, so width math
+	// keeps working); terminals without a nerd font show tofu there.
+	QueuedIcon string = "\U000f051b"
+
 	RadioOn  string = "◉"
 	RadioOff string = "○"
 
