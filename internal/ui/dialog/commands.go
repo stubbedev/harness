@@ -351,8 +351,8 @@ type commandMenu interface {
 // systemMenu is the built-in commands page. Always present.
 type systemMenu struct{ c *Commands }
 
-func (systemMenu) tab() CommandType       { return SystemCommands }
-func (systemMenu) hasItems() bool         { return true }
+func (systemMenu) tab() CommandType        { return SystemCommands }
+func (systemMenu) hasItems() bool          { return true }
 func (m systemMenu) items() []*CommandItem { return m.c.defaultCommands() }
 
 // userMenu is the user-defined command page: custom and extension
@@ -402,8 +402,8 @@ func (m mcpMenu) items() []*CommandItem {
 // skillsMenu is the skills palette page behind "/".
 type skillsMenu struct{ c *Commands }
 
-func (skillsMenu) tab() CommandType       { return SkillsCommands }
-func (m skillsMenu) hasItems() bool       { return len(m.items()) > 0 }
+func (skillsMenu) tab() CommandType { return SkillsCommands }
+func (m skillsMenu) hasItems() bool { return len(m.items()) > 0 }
 func (m skillsMenu) items() []*CommandItem {
 	var items []*CommandItem
 	for _, cmd := range m.c.customCommands {
