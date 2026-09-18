@@ -71,7 +71,10 @@ func TestIsInternalContextTool(t *testing.T) {
 
 // TestExtractMessageItemsSkipsSubagentNotes pins the report-back
 // contract: a send_message delivered as a user message is LLM-to-LLM
-// context that never becomes a transcript item.
+// context that never becomes a transcript item. The persisted shape
+// carries a trailing Finish bookkeeping part — persistence appends one
+// to every non-assistant message — which must not turn the note into a
+// rendered, empty user bubble.
 func TestExtractMessageItemsSkipsSubagentNotes(t *testing.T) {
 	t.Parallel()
 	sty := groupStyles()
@@ -81,6 +84,7 @@ func TestExtractMessageItemsSkipsSubagentNotes(t *testing.T) {
 		Role: message.User,
 		Parts: []message.ContentPart{
 			message.SubagentNote{AgentName: "researcher", Handle: "bg-1", ChildSessionID: "c1", Text: "halfway there"},
+			message.Finish{Reason: "stop"},
 		},
 	}
 	require.Empty(t, ExtractMessageItems(sty, noteOnly, nil, "/tmp"))

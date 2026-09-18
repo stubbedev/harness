@@ -1780,7 +1780,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 	case message.User:
 		// A background sub-agent's report-back bumps its task strip
 		// entry instead of rendering in the transcript.
-		if len(msg.Parts) > 0 && len(msg.SubagentNotes()) == len(msg.Parts) {
+		if msg.SubagentNotesOnly() {
 			for _, note := range msg.SubagentNotes() {
 				m.countSubagentNote(note)
 			}

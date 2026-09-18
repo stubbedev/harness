@@ -42,6 +42,22 @@ func TestToAIMessage_SubagentNoteReadsAsUserText(t *testing.T) {
 	require.Len(t, msg.SubagentNotes(), 1)
 }
 
+// TestSubagentNotesOnly pins the persisted report-back shape: Create
+// appends a Finish bookkeeping part to every non-assistant message, so
+// a note-only user message carries [SubagentNote, Finish]. Renderers
+// rely on SubagentNotesOnly to skip it instead of drawing an empty
+// user bubble.
+func TestSubagentNotesOnly(t *testing.T) {
+	t.Parallel()
+
+	note := SubagentNote{AgentName: "researcher", Text: "halfway there"}
+	require.False(t, (&Message{Role: User, Parts: nil}).SubagentNotesOnly())
+	require.False(t, (&Message{Role: User, Parts: []ContentPart{Finish{Reason: "stop"}}}).SubagentNotesOnly())
+	require.True(t, (&Message{Role: User, Parts: []ContentPart{note, Finish{Reason: "stop"}}}).SubagentNotesOnly())
+	require.True(t, (&Message{Role: User, Parts: []ContentPart{note}}).SubagentNotesOnly())
+	require.False(t, (&Message{Role: User, Parts: []ContentPart{note, TextContent{Text: "and I say"}}}).SubagentNotesOnly())
+}
+
 func TestToAIMessage_CorruptedMediaData(t *testing.T) {
 	t.Parallel()
 

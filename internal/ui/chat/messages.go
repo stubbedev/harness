@@ -465,7 +465,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 	case message.User:
 		// A background sub-agent's report-back is LLM-to-LLM context:
 		// it surfaces as a count on its task strip entry, never here.
-		if len(msg.Parts) > 0 && len(msg.SubagentNotes()) == len(msg.Parts) {
+		if msg.SubagentNotesOnly() {
 			return nil
 		}
 		// Reconstruct shell command items from ShellCommand parts.

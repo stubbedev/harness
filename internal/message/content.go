@@ -202,6 +202,26 @@ func (m *Message) SubagentNotes() []SubagentNote {
 	return notes
 }
 
+// SubagentNotesOnly reports whether the message carries nothing but
+// sub-agent report-backs. Persistence appends a Finish bookkeeping part
+// to every non-assistant message, so a report-back persists as
+// [SubagentNote, Finish]; comparing SubagentNotes to Parts directly
+// would miss that and render an empty user bubble. Finish parts carry
+// no user-visible content and are ignored here.
+func (m *Message) SubagentNotesOnly() bool {
+	notes := 0
+	for _, part := range m.Parts {
+		switch part.(type) {
+		case SubagentNote:
+			notes++
+		case Finish:
+		default:
+			return false
+		}
+	}
+	return notes > 0
+}
+
 type Message struct {
 	ID               string
 	Role             MessageRole
