@@ -494,7 +494,6 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 
 	// Blit the visible window.
 	fillPrefix := c.Styles.Editor.QuestionBody.Render("❯ ")
-	var cur *tea.Cursor
 	for screenRow := range viewport {
 		idx := c.scrollOffset + screenRow
 		if idx >= len(lines) {
@@ -505,31 +504,27 @@ func (c *choiceList) drawContent(scr uv.Screen, area uv.Rectangle, fillInPrefix 
 		if ln.text != "" {
 			uv.NewStyledString(ln.text).Draw(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1))
 		}
-		if ln.fillInRow {
-			if tc := c.fillInCursor(screenRow, area.Min.X, lipgloss.Width(fillPrefix)); tc != nil {
-				cur = tc
-			}
-		}
-		if ln.noteRow {
-			const notePrefix = "❯ "
-			if tc := c.noteCursor(screenRow, area.Min.X, lipgloss.Width(notePrefix)); tc != nil {
-				cur = tc
-			}
-		}
 	}
 
-	// Clamp cursor to visible area to prevent overflow.
-	if cur != nil {
-		if cur.Y < 0 {
-			cur.Y = 0
-		} else if cur.Y >= viewport {
-			cur.Y = viewport - 1
+	// The focused editor (fill-in or note) places its cursor on its
+	// first rendered row. An editor scrolled fully out of view shows
+	// no cursor.
+	noteTop := -1
+	for i, ln := range lines {
+		if ln.noteRow {
+			noteTop = i
+			break
 		}
-		if cur.X < 0 {
-			cur.X = 0
-		} else if cur.X >= area.Dx() {
-			cur.X = area.Dx() - 1
-		}
+	}
+	var cur *tea.Cursor
+	if c.fillInTop >= 0 {
+		cur = placeEditorCursor(c.fillIn.Cursor(), c.fillInTop-c.scrollOffset, questionBarCells, lipgloss.Width(fillPrefix))
+	}
+	if cur == nil && noteTop >= 0 {
+		cur = placeEditorCursor(c.noteEditor.Cursor(), noteTop-c.scrollOffset, questionBarCells, lipgloss.Width(questionNotePrefix))
+	}
+	if cur != nil && (cur.Y < 0 || cur.Y >= viewport || cur.X >= contentWidth) {
+		cur = nil
 	}
 
 	// Scrollbar.

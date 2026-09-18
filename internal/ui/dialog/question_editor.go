@@ -9,8 +9,33 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
+
+// questionBarCells is the display width of the cursor bar prefix
+// shared by question rows: "┃ " when active, "  " when not.
+const questionBarCells = 2
+
+// questionNotePrefix is the prompt drawn before note editor rows.
+const questionNotePrefix = "❯ "
+
+// questionEditorWidth returns the textarea width for question rows
+// that draw bar + prompt + editor content within the given total
+// width. barWidth is the width of the leading cursor bar (0 when
+// the row shape has none), promptWidth the width of any prompt
+// between the bar and the content.
+func questionEditorWidth(total, barWidth, promptWidth int) int {
+	return max(0, total-barWidth-promptWidth)
+}
+
+// placeEditorCursor positions a question textarea's cursor on the
+// rows the question components draw: bar + prompt + editor content,
+// with the editor's first rendered line at firstRow. Like every
+// input component, placement goes through common.OffsetCursor.
+func placeEditorCursor(tc *tea.Cursor, firstRow, barWidth, promptWidth int) *tea.Cursor {
+	return common.OffsetCursor(tc, 0, firstRow, barWidth+promptWidth, 0)
+}
 
 // newQuestionTextarea creates a configured textarea for question
 // input. All question textareas share the same base configuration;
@@ -141,7 +166,7 @@ func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, b
 	prefixWidth := lipgloss.Width(fillPrefix)
 
 	if isActive && e.fillIn.Focused() {
-		e.fillIn.SetWidth(innerWidth - 2 - prefixWidth)
+		e.fillIn.SetWidth(questionEditorWidth(innerWidth, questionBarCells, prefixWidth))
 		indent := strings.Repeat(" ", prefixWidth)
 		for j, tl := range strings.Split(e.fillIn.View(), "\n") {
 			text := bar + fillPrefix + tl
@@ -171,14 +196,13 @@ func (e *questionEditor) drawFillIn(lines *[]contentLine, innerWidth int, bar, b
 func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, barInactive, noteKey string, isActive bool) {
 	noteStyle := e.Styles.Editor.QuestionNote
 	isEditing := e.activeNoteKey == noteKey && e.noteEditor.Focused()
-	const notePrefix = "❯ "
 
 	if isEditing && e.noteEditor.Focused() {
-		prefixWidth := lipgloss.Width(notePrefix)
-		e.noteEditor.SetWidth(innerWidth - 2 - prefixWidth)
+		prefixWidth := lipgloss.Width(questionNotePrefix)
+		e.noteEditor.SetWidth(questionEditorWidth(innerWidth, questionBarCells, prefixWidth))
 		indent := strings.Repeat(" ", prefixWidth)
 		for j, tl := range strings.Split(e.noteEditor.View(), "\n") {
-			text := bar + notePrefix + tl
+			text := bar + questionNotePrefix + tl
 			if j > 0 {
 				text = barInactive + indent + tl
 			}
@@ -190,66 +214,30 @@ func (e *questionEditor) drawNote(lines *[]contentLine, innerWidth int, bar, bar
 	if saved, ok := e.notes[noteKey]; ok && saved != "" {
 		dimmed := noteStyle.Render(saved)
 		for ln := range strings.SplitSeq(dimmed, "\n") {
-			*lines = append(*lines, contentLine{text: bar + notePrefix + ln, cursorItem: isActive, choiceIdx: -1})
+			*lines = append(*lines, contentLine{text: bar + questionNotePrefix + ln, cursorItem: isActive, choiceIdx: -1})
 		}
 	}
 }
 
-// fillInCursor returns the hardware cursor position for the fill-in
-// textarea when it's focused. areaMinX is the left edge of the
-// content area; prefixWidth is the visual width of the "❯ " prompt.
-func (e *questionEditor) fillInCursor(screenRow, areaMinX, prefixWidth int) *tea.Cursor {
-	if !e.fillIn.Focused() {
-		return nil
-	}
-	tc := e.fillIn.Cursor()
-	if tc == nil {
-		return nil
-	}
-	tc.X += areaMinX + 1 + prefixWidth
-	tc.Y += screenRow
-	return tc
-}
-
-// noteCursor returns the hardware cursor position for the note
-// editor when it's focused.
-func (e *questionEditor) noteCursor(screenRow, areaMinX, prefixWidth int) *tea.Cursor {
-	if !e.noteEditor.Focused() {
-		return nil
-	}
-	tc := e.noteEditor.Cursor()
-	if tc == nil {
-		return nil
-	}
-	tc.X += areaMinX + 1 + prefixWidth
-	tc.Y += screenRow
-	return tc
-}
-
 // drawStandaloneNote draws a note editor or saved note directly
 // onto the screen (not via line list). Used by YesNo which doesn't
-// use the line-list model. Returns the cursor or nil.
+// use the line-list model. Its rows draw prompt + content without
+// the bar, so the bar width is 0. Returns the cursor or nil.
 func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y int, noteKey string) (*tea.Cursor, int) {
-	const notePrefix = "❯ "
-
 	if e.activeNoteKey != "" && e.noteEditor.Focused() {
 		y++
-		prefixWidth := lipgloss.Width(notePrefix)
-		e.noteEditor.SetWidth(area.Dx() - 2 - prefixWidth)
+		prefixWidth := lipgloss.Width(questionNotePrefix)
+		e.noteEditor.SetWidth(questionEditorWidth(area.Dx(), 0, prefixWidth))
 		noteView := e.noteEditor.View()
 		var cur *tea.Cursor
 		for j, ln := range strings.Split(noteView, "\n") {
-			text := notePrefix + ln
+			text := questionNotePrefix + ln
 			if j > 0 {
 				text = strings.Repeat(" ", prefixWidth) + ln
 			}
 			lines := drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), text)
 			if j == 0 {
-				if tc := e.noteEditor.Cursor(); tc != nil {
-					tc.X += prefixWidth
-					tc.Y += y - area.Min.Y
-					cur = tc
-				}
+				cur = placeEditorCursor(e.noteEditor.Cursor(), y-area.Min.Y, 0, prefixWidth)
 			}
 			y += lines
 		}
@@ -259,7 +247,7 @@ func (e *questionEditor) drawStandaloneNote(scr uv.Screen, area uv.Rectangle, y 
 	if saved, ok := e.notes[noteKey]; ok && saved != "" {
 		y++
 		noteStyle := e.Styles.Editor.QuestionNote
-		drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), notePrefix+noteStyle.Render(saved))
+		drawStyledText(scr, image.Rect(area.Min.X, y, area.Max.X, y+1), questionNotePrefix+noteStyle.Render(saved))
 		y++
 	}
 

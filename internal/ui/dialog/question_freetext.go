@@ -185,59 +185,61 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	prefixWidth := lipgloss.Width(bar)
 
-	// ftLine is a single buffer row. cursorX >= 0 marks the row
-	// carrying the textarea cursor and its column (incl. prefix).
+	// ftLine is a single buffer row.
 	type ftLine struct {
-		text    string
-		cursorX int
+		text string
 	}
 
 	// build renders the full content (header, description, textarea)
-	// into a flat line buffer at the given content width. Returns
-	// the buffer and the row index of the cursor (-1 if none).
-	build := func(contentWidth int) ([]ftLine, int) {
+	// into a flat line buffer at the given content width. Returns the
+	// buffer, the buffer row of the editor's first line, and the
+	// textarea's cursor (or a fabricated one for the masked secret
+	// input). The cursor row is firstEditorRow + tc.Y.
+	build := func(contentWidth int) ([]ftLine, int, *tea.Cursor) {
 		var lines []ftLine
-		cursorRow := -1
 
 		for _, l := range questionHeaderLines(d.Styles, d.focused, d.Request.Text, d.Request.Description, contentWidth) {
-			lines = append(lines, ftLine{text: l, cursorX: -1})
+			lines = append(lines, ftLine{text: l})
 		}
 
 		// Grow the textarea to fill the form height, bounded by the
 		// min and max editor heights.
-		headerLines := len(lines)
-		fill := viewport - headerLines - 1 // -1 for trailing padding
+		fill := viewport - len(lines) - 1 // -1 for trailing padding
 		available := min(freeTextMaxEditorHeight, max(freeTextMinEditorHeight, fill))
 		d.editor.SetHeight(available)
-		d.editor.SetWidth(contentWidth - 2 - prefixWidth)
+		d.editor.SetWidth(questionEditorWidth(contentWidth, prefixWidth, 0))
+		firstEditorRow := len(lines)
 		tc := d.editor.Cursor()
 		editorLines := strings.Split(d.editor.View(), "\n")
 		if d.Request.Secret {
-			// Masked single line; the cursor sits at the end.
+			// Masked single line; the cursor sits at the end. Secret
+			// rows draw bar + asterisks, so there is no prompt width.
 			editorLines = []string{strings.Repeat("*", len([]rune(d.secret)))}
 			tc = &tea.Cursor{X: len(editorLines[0]), Y: 0, Shape: tea.CursorBar, Blink: true}
 		}
-		for j, ln := range editorLines {
-			text := bar + ln
-			cursorX := -1
-			if tc != nil && tc.Y == j {
-				cursorRow = len(lines)
-				cursorX = tc.X + prefixWidth
-			}
-			lines = append(lines, ftLine{text: text, cursorX: cursorX})
+		for _, ln := range editorLines {
+			lines = append(lines, ftLine{text: bar + ln})
 		}
-		lines = append(lines, ftLine{cursorX: -1}) // trailing bottom padding, matches Height()
-		return lines, cursorRow
+		lines = append(lines, ftLine{}) // trailing bottom padding, matches Height()
+		return lines, firstEditorRow, tc
 	}
 
 	// Build at full width; reserve a scrollbar column and rebuild
 	// only if the content overflows the viewport.
 	contentWidth := area.Dx()
-	lines, cursorRow := build(contentWidth)
+	lines, firstEditorRow, tc := build(contentWidth)
+	cursorRow := -1
+	if tc != nil {
+		cursorRow = firstEditorRow + tc.Y
+	}
 	overflow := viewport > 0 && len(lines) > viewport
 	if overflow {
 		contentWidth--
-		lines, cursorRow = build(contentWidth)
+		lines, firstEditorRow, tc = build(contentWidth)
+		cursorRow = -1
+		if tc != nil {
+			cursorRow = firstEditorRow + tc.Y
+		}
 	}
 
 	// Clamp scroll, then keep the cursor row visible unless the
@@ -252,24 +254,22 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		d.scrollOffset = ClampScroll(d.scrollOffset, len(lines), viewport)
 	}
 
-	// Blit the visible window and place the cursor. The cursor is
-	// returned relative to the area's top-left, matching the
-	// InlineEditor contract.
-	var cur *tea.Cursor
-	baseCursor := d.editor.Cursor()
+	// Blit the visible window, then place the cursor on the editor's
+	// row. The cursor is returned relative to the area's top-left,
+	// matching the InlineEditor contract.
 	for screenRow := range viewport {
 		idx := d.scrollOffset + screenRow
 		if idx >= len(lines) {
 			break
 		}
-		ln := lines[idx]
 		y := area.Min.Y + screenRow
-		drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), ln.text)
-		if ln.cursorX >= 0 && ln.cursorX < contentWidth && baseCursor != nil {
-			c := *baseCursor
-			c.X = ln.cursorX
-			c.Y = screenRow
-			cur = &c
+		drawStyledText(scr, image.Rect(area.Min.X, y, area.Min.X+contentWidth, y+1), lines[idx].text)
+	}
+	var cur *tea.Cursor
+	if tc != nil {
+		cur = placeEditorCursor(tc, firstEditorRow-d.scrollOffset, prefixWidth, 0)
+		if cur.Y < 0 || cur.Y >= viewport || cur.X >= contentWidth {
+			cur = nil
 		}
 	}
 

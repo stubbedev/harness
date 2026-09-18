@@ -189,29 +189,30 @@ func shortHelpLine(h *help.Model, bindings []key.Binding, width int) string {
 // follows the active placement, so the bottom-anchored panel's borderless
 // frame does not shift the cursor.
 func InputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
-	if cur != nil {
-		titleStyle := t.Dialog.Title
-		dialogStyle := ActiveFrame(t)
-		inputStyle := ActiveInput(t)
-		// Adjust cursor position to account for dialog layout
-		cur.X += inputStyle.GetBorderLeftSize() +
-			inputStyle.GetMarginLeft() +
-			inputStyle.GetPaddingLeft() +
-			dialogStyle.GetBorderLeftSize() +
-			dialogStyle.GetPaddingLeft() +
-			dialogStyle.GetMarginLeft()
-		cur.Y += titleStyle.GetVerticalFrameSize() +
-			inputStyle.GetBorderTopSize() +
-			inputStyle.GetMarginTop() +
-			inputStyle.GetPaddingTop() +
-			inputStyle.GetBorderBottomSize() +
-			inputStyle.GetMarginBottom() +
-			inputStyle.GetPaddingBottom() +
-			dialogStyle.GetPaddingTop() +
-			dialogStyle.GetMarginTop() +
-			dialogStyle.GetBorderTopSize()
+	return inputCursorIn(cur, t.Dialog.Title, ActiveInput(t), ActiveFrame(t), 0)
+}
+
+// inputCursorIn positions a text-input cursor that sits under a title
+// and rowsAbove additional rendered rows, inside the given dialog and
+// input frames. All dialog inputs place their cursor through here so
+// the frame arithmetic lives in one place.
+func inputCursorIn(cur *tea.Cursor, titleStyle, inputStyle, dialogStyle lipgloss.Style, rowsAbove int) *tea.Cursor {
+	if cur == nil {
+		return nil
 	}
-	return cur
+	return common.OffsetCursor(cur, 0, 0,
+		inputStyle.GetBorderLeftSize()+
+			inputStyle.GetMarginLeft()+
+			inputStyle.GetPaddingLeft()+
+			dialogStyle.GetBorderLeftSize()+
+			dialogStyle.GetPaddingLeft()+
+			dialogStyle.GetMarginLeft(),
+		titleStyle.GetVerticalFrameSize()+
+			inputStyle.GetVerticalFrameSize()+
+			dialogStyle.GetPaddingTop()+
+			dialogStyle.GetMarginTop()+
+			dialogStyle.GetBorderTopSize()+
+			rowsAbove)
 }
 
 // adjustOnboardingInputCursor removes the dialog view frame offset from an
@@ -221,15 +222,11 @@ func adjustOnboardingInputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor 
 	if cur == nil {
 		return nil
 	}
-
 	dialogStyle := t.Dialog.View
-	cur.X -= dialogStyle.GetBorderLeftSize() +
-		dialogStyle.GetPaddingLeft() +
-		dialogStyle.GetMarginLeft()
-	cur.Y -= dialogStyle.GetBorderTopSize() +
-		dialogStyle.GetPaddingTop() +
-		dialogStyle.GetMarginTop()
-	return cur
+	return common.OffsetCursor(cur,
+		-(dialogStyle.GetBorderLeftSize() + dialogStyle.GetPaddingLeft() + dialogStyle.GetMarginLeft()),
+		-(dialogStyle.GetBorderTopSize() + dialogStyle.GetPaddingTop() + dialogStyle.GetMarginTop()),
+		0, 0)
 }
 
 // ActiveFrame returns the frame style dialogs wrap their content in for
@@ -290,10 +287,11 @@ func DialogCursor(t *styles.Styles, view string, cur *tea.Cursor) *tea.Cursor {
 	}
 	input := t.Dialog.InputBottom
 	frame := t.Dialog.ViewBottom
-	cur.X += input.GetMarginLeft() + input.GetPaddingLeft() + input.GetBorderLeftSize() +
-		frame.GetMarginLeft() + frame.GetPaddingLeft() + frame.GetBorderLeftSize()
 	cur.Y = lipgloss.Height(view) - 1
-	return cur
+	return common.OffsetCursor(cur, 0, 0,
+		input.GetMarginLeft()+input.GetPaddingLeft()+input.GetBorderLeftSize()+
+			frame.GetMarginLeft()+frame.GetPaddingLeft()+frame.GetBorderLeftSize(),
+		0)
 }
 
 // RenderContext is a dialog rendering context that can be used to render

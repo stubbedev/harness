@@ -3216,19 +3216,15 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		if m.activeInline != nil {
-			if cur := m.inlineCursor; cur != nil {
-				cur.X += m.layout.editor.Min.X // Editor may not start at the screen edge
-				cur.Y += m.layout.editor.Min.Y // Inline editor draws from area top
-				return cur
-			}
-			return nil
+			// Editor may not start at the screen edge; the inline
+			// editor draws from area top.
+			return common.OffsetCursor(m.inlineCursor, m.layout.editor.Min.X, m.layout.editor.Min.Y, 0, 0)
 		}
 
 		if m.textarea.Focused() {
-			cur := m.textarea.Cursor()
-			cur.X += m.layout.editor.Min.X     // Editor may not start at the screen edge
-			cur.Y += m.layout.editor.Min.Y + 1 // Offset for attachments row
-			return cur
+			// Editor may not start at the screen edge; offset for the
+			// attachments row above the textarea.
+			return common.OffsetCursor(m.textarea.Cursor(), m.layout.editor.Min.X, m.layout.editor.Min.Y, 0, 1)
 		}
 	}
 	return nil

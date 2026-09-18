@@ -300,32 +300,14 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		start, end := s.list.VisibleItemIndices()
 		selectedIndex := s.list.Selected()
 
-		titleStyle := t.Dialog.Sessions.RenamingingTitle
-		dialogStyle := t.Dialog.Sessions.RenamingView
-		inputStyle := t.Dialog.InputPrompt
-
-		// Adjust cursor position to account for dialog layout + message
-		cur.X += inputStyle.GetBorderLeftSize() +
-			inputStyle.GetMarginLeft() +
-			inputStyle.GetPaddingLeft() +
-			dialogStyle.GetBorderLeftSize() +
-			dialogStyle.GetPaddingLeft() +
-			dialogStyle.GetMarginLeft()
-		cur.Y += titleStyle.GetVerticalFrameSize() +
-			inputStyle.GetBorderTopSize() +
-			inputStyle.GetMarginTop() +
-			inputStyle.GetPaddingTop() +
-			inputStyle.GetBorderBottomSize() +
-			inputStyle.GetMarginBottom() +
-			inputStyle.GetPaddingBottom() +
-			dialogStyle.GetPaddingTop() +
-			dialogStyle.GetBorderTopSize() +
-			lipgloss.Height(message) - 1
-
-		// move the cursor by one down until we see the selectedIndex
+		// The input sits under the message, and the list body starts
+		// at the first visible item, so walk down to the selected row.
+		rows := lipgloss.Height(message) - 1
 		for ; start <= end && start != selectedIndex && selectedIndex > -1; start++ {
-			cur.Y += 1
+			rows++
 		}
+		cur = inputCursorIn(cur, t.Dialog.Sessions.RenamingingTitle,
+			t.Dialog.InputPrompt, t.Dialog.Sessions.RenamingView, rows)
 	default:
 		rc.AddInput(s.input.View())
 	}
