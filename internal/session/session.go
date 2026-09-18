@@ -126,44 +126,41 @@ type service struct {
 }
 
 func (s *service) Create(ctx context.Context, title string) (Session, error) {
-	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
+	return s.createSession(ctx, db.CreateSessionParams{
 		ID:    uuid.New().String(),
 		Title: title,
-	})
-	if err != nil {
-		return Session{}, err
-	}
-	session := s.fromDBItem(dbSession)
-	s.Publish(pubsub.CreatedEvent, session)
-	event.SessionCreated()
-	return session, nil
+	}, true)
 }
 
 func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error) {
-	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
+	return s.createSession(ctx, db.CreateSessionParams{
 		ID:              toolCallID,
 		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
 		Title:           title,
-	})
-	if err != nil {
-		return Session{}, err
-	}
-	session := s.fromDBItem(dbSession)
-	s.Publish(pubsub.CreatedEvent, session)
-	return session, nil
+	}, false)
 }
 
 func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error) {
-	dbSession, err := s.q.CreateSession(ctx, db.CreateSessionParams{
+	return s.createSession(ctx, db.CreateSessionParams{
 		ID:              "title-" + parentSessionID,
 		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
 		Title:           "Generate a title",
-	})
+	}, false)
+}
+
+// createSession inserts a session row, converts it, and publishes the
+// created event. Only user-created sessions count in telemetry: task
+// and title sessions are internal children.
+func (s *service) createSession(ctx context.Context, params db.CreateSessionParams, countTelemetry bool) (Session, error) {
+	dbSession, err := s.q.CreateSession(ctx, params)
 	if err != nil {
 		return Session{}, err
 	}
 	session := s.fromDBItem(dbSession)
 	s.Publish(pubsub.CreatedEvent, session)
+	if countTelemetry {
+		event.SessionCreated()
+	}
 	return session, nil
 }
 
@@ -227,22 +224,16 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	}
 
 	dbSession, err := s.q.UpdateSession(ctx, db.UpdateSessionParams{
-		ID:               session.ID,
-		Title:            session.Title,
-		PromptTokens:     session.PromptTokens,
-		CompletionTokens: session.CompletionTokens,
-		SummaryMessageID: sql.NullString{
-			String: session.SummaryMessageID,
-			Valid:  session.SummaryMessageID != "",
-		},
-		Cost: session.Cost,
-		Todos: sql.NullString{
-			String: todosJSON,
-			Valid:  todosJSON != "",
-		},
-		CompactionSummary:    sql.NullString{String: session.CompactionSummary, Valid: session.CompactionSummary != ""},
-		CompactionBoundaryID: sql.NullString{String: session.CompactionBoundaryID, Valid: session.CompactionBoundaryID != ""},
-		CompactionAgedID:     sql.NullString{String: session.CompactionAgedID, Valid: session.CompactionAgedID != ""},
+		ID:                   session.ID,
+		Title:                session.Title,
+		PromptTokens:         session.PromptTokens,
+		CompletionTokens:     session.CompletionTokens,
+		SummaryMessageID:     nullStr(session.SummaryMessageID),
+		Cost:                 session.Cost,
+		Todos:                nullStr(todosJSON),
+		CompactionSummary:    nullStr(session.CompactionSummary),
+		CompactionBoundaryID: nullStr(session.CompactionBoundaryID),
+		CompactionAgedID:     nullStr(session.CompactionAgedID),
 	})
 	if err != nil {
 		return Session{}, err
@@ -308,12 +299,7 @@ func (s *service) List(ctx context.Context) ([]Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	sessions := make([]Session, len(dbSessions))
-	for i, dbSession := range dbSessions {
-		sessions[i] = s.fromDBItem(dbSession)
-		s.applyEstimatedUsageState(&sessions[i])
-	}
-	return sessions, nil
+	return s.convertList(dbSessions), nil
 }
 
 // ListChildSessions returns the direct child sessions of parentSessionID.
@@ -323,12 +309,18 @@ func (s *service) ListChildSessions(ctx context.Context, parentSessionID string)
 	if err != nil {
 		return nil, err
 	}
+	return s.convertList(dbSessions), nil
+}
+
+// convertList converts DB rows and applies the in-memory
+// estimated-usage state.
+func (s *service) convertList(dbSessions []db.Session) []Session {
 	sessions := make([]Session, len(dbSessions))
 	for i, dbSession := range dbSessions {
 		sessions[i] = s.fromDBItem(dbSession)
 		s.applyEstimatedUsageState(&sessions[i])
 	}
-	return sessions, nil
+	return sessions
 }
 
 // publishSessionUpdate re-fetches a session and publishes an UpdatedEvent so
@@ -385,6 +377,12 @@ func (s *service) fromDBItem(item db.Session) Session {
 		CreatedAt:            item.CreatedAt,
 		UpdatedAt:            item.UpdatedAt,
 	}
+}
+
+// nullStr wraps a string as a nullable column value: empty means NULL.
+// Single source for the Save/fromDBItem conversion pattern.
+func nullStr(s string) sql.NullString {
+	return sql.NullString{String: s, Valid: s != ""}
 }
 
 func marshalTodos(todos []Todo) (string, error) {
