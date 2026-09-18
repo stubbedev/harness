@@ -310,7 +310,6 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
 	svc.checkpoints.DeleteSession(sess.ID)
-	svc.checkpoints.DeleteSession(sess.ID)
 
 	out := cmd.OutOrStdout()
 	if sessionDeleteJSON {
