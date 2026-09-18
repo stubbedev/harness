@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/envtools"
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/shell"
@@ -53,12 +54,16 @@ type Prompt struct {
 }
 
 type PromptDat struct {
-	Provider           string
-	Model              string
-	Config             config.Config
-	WorkingDir         string
-	IsGitRepo          bool
-	Platform           string
+	Provider   string
+	Model      string
+	Config     config.Config
+	WorkingDir string
+	IsGitRepo  bool
+	Platform   string
+	// ModernTools names the modern CLI tools installed on PATH, from
+	// one source shared with the shell tool's description. Empty when
+	// none are installed; the templates then omit the steering.
+	ModernTools        string
 	Date               string
 	GitStatus          string
 	ContextFiles       []ContextFile
@@ -315,6 +320,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		WorkingDir:         filepath.ToSlash(workingDir),
 		IsGitRepo:          isGit,
 		Platform:           platform,
+		ModernTools:        envtools.Summary(),
 		Date:               p.now().Format("1/2/2006"),
 		AvailSkillXML:      availSkillXML,
 		SkillSearch:        p.skillSearch,

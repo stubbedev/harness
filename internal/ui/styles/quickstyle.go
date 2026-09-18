@@ -641,8 +641,12 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.IconCancelled = muted.SetString(ToolPending)
 	s.Tool.IconPartial = base.Foreground(o.warning).SetString(ToolSuccess)
 
+	s.Tool.NamePending = base.Foreground(o.success)
 	s.Tool.NameNormal = base.Foreground(o.info)
 	s.Tool.NameNested = base.Foreground(o.info)
+	s.Tool.NameError = base.Foreground(o.error)
+	s.Tool.NamePartial = base.Foreground(o.warning)
+	s.Tool.NameCancelled = muted
 
 	s.Tool.ParamMain = subtle
 	s.Tool.ParamKey = subtle

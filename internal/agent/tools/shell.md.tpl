@@ -4,5 +4,5 @@ A call returns when the process exits (with its exit code), stops for input, tak
 
 cwd, variables, activated environments and held credentials carry across calls; a result ends with `<cwd>…</cwd>` only when the shell moved. Output over {{ .MaxOutputLength }} characters keeps a head and a long tail.
 {{- if .ModernTools }}
-Installed here and preferred over the POSIX default: {{ .ModernTools }}.
+Installed here; use these instead of their POSIX defaults: {{ .ModernTools }}. Reach for them first and fall back to the POSIX tool only when the modern one cannot do the job.
 {{- end }}

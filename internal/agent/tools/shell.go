@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"charm.land/fantasy"
+	"github.com/stubbedev/harness/internal/envtools"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/term"
@@ -69,7 +70,7 @@ func shellDescription(shell string) string {
 	var out bytes.Buffer
 	if err := shellDescriptionTpl.Execute(&out, shellDescriptionData{
 		MaxOutputLength: MaxOutputLength,
-		ModernTools:     availableModernTools(),
+		ModernTools:     envtools.Summary(),
 		DefaultRows:     descRows,
 		DefaultCols:     descCols,
 		// Naming the shell is most of what the model needs from this

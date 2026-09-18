@@ -69,7 +69,7 @@ Most work is done directly with your own tools; the agent tool is for the rare t
 
 Only use tools that exist in this conversation. Use the fetch tool rather than `curl`. Only visit URLs the user gave you or that appear in local files.
 
-For shell commands: prefer non-interactive flags and combine related commands into one call. A command that pauses to ask can simply be answered on the next call.
+For shell commands: prefer non-interactive flags and combine related commands into one call. A command that pauses to ask can simply be answered on the next call. When the environment lists a modern CLI tool as installed, reach for it in place of its POSIX counterpart (rg over grep, fd over find, sd over sed, bat over cat, eza over ls, jq/yq for structured data); fall back to the POSIX default only when the modern tool cannot do the job.
 </tool_usage>
 
 {{if gt (len .Config.LSP) 0}}
@@ -169,6 +169,9 @@ Working directory: {{.WorkingDir}}
 Is directory a git repo: {{if .IsGitRepo}}yes{{else}}no{{end}}
 Platform: {{.Platform}}
 Today's date: {{.Date}}
+{{if .ModernTools}}
+Modern CLI tools on PATH (prefer these over their POSIX defaults): {{.ModernTools}}
+{{end}}
 {{if .GitStatus}}
 
 Git status (snapshot at conversation start - may be outdated):
