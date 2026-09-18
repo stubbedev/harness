@@ -181,15 +181,9 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 				}
 			}
 		case key.Matches(msg, c.keyMap.Tab):
-			if !c.skillsOnly && (len(c.customCommands) > 0 || len(c.mcpPrompts) > 0) {
-				c.selected = c.nextCommandType()
-				c.setCommandItems(c.selected)
-			}
+			c.cycleTab(1)
 		case key.Matches(msg, c.keyMap.ShiftTab):
-			if !c.skillsOnly && (len(c.customCommands) > 0 || len(c.mcpPrompts) > 0) {
-				c.selected = c.previousCommandType()
-				c.setCommandItems(c.selected)
-			}
+			c.cycleTab(-1)
 		default:
 			var cmd tea.Cmd
 			for _, item := range c.list.FilteredItems() {
@@ -223,8 +217,8 @@ func (c *Commands) Cursor() *tea.Cursor {
 }
 
 // commandsRadioView generates the command type selector radio buttons.
-func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds bool, hasMCPPrompts bool) string {
-	if !hasUserCmds && !hasMCPPrompts {
+func commandsRadioView(sty *styles.Styles, tabs []commandMenu, selected CommandType) string {
+	if len(tabs) < 2 {
 		return ""
 	}
 
@@ -235,17 +229,10 @@ func commandsRadioView(sty *styles.Styles, selected CommandType, hasUserCmds boo
 		return sty.Radio.Off.Padding(0, 1).Render() + sty.Radio.Label.Render(t.String())
 	}
 
-	parts := []string{
-		selectedFn(SystemCommands),
+	parts := make([]string, 0, len(tabs))
+	for _, m := range tabs {
+		parts = append(parts, selectedFn(m.tab()))
 	}
-
-	if hasUserCmds {
-		parts = append(parts, selectedFn(UserCommands))
-	}
-	if hasMCPPrompts {
-		parts = append(parts, selectedFn(MCPPrompts))
-	}
-
 	return strings.Join(parts, " ")
 }
 
@@ -279,10 +266,11 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
+	tabs := c.tabs()
 	if c.skillsOnly {
 		rc.Title = "Skills"
 	} else {
-		rc.TitleInfo = commandsRadioView(t, c.selected, len(c.customCommands) > 0, len(c.mcpPrompts) > 0)
+		rc.TitleInfo = commandsRadioView(t, tabs, c.selected)
 	}
 	rc.AddInput(c.input.View())
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
@@ -302,118 +290,177 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp implements [help.KeyMap].
 func (c *Commands) ShortHelp() []key.Binding {
-	return []key.Binding{
-		c.keyMap.Tab,
-		c.keyMap.UpDown,
-		c.keyMap.Select,
-		c.keyMap.Close,
+	binds := []key.Binding{c.keyMap.UpDown, c.keyMap.Select}
+	if c.hasTabs() {
+		binds = append([]key.Binding{c.keyMap.Tab}, binds...)
 	}
+	return append(binds, c.keyMap.Close)
 }
 
 // FullHelp implements [help.KeyMap].
 func (c *Commands) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{c.keyMap.Select, c.keyMap.Next, c.keyMap.Previous, c.keyMap.Tab},
-		{c.keyMap.Close},
+	row := []key.Binding{c.keyMap.Select, c.keyMap.Next, c.keyMap.Previous}
+	if c.hasTabs() {
+		row = append(row, c.keyMap.Tab)
 	}
+	return [][]key.Binding{row, {c.keyMap.Close}}
 }
 
-// nextCommandType returns the next command type in the cycle.
-func (c *Commands) nextCommandType() CommandType {
-	switch c.selected {
-	case SystemCommands:
-		if len(c.customCommands) > 0 {
-			return UserCommands
-		}
-		if len(c.mcpPrompts) > 0 {
-			return MCPPrompts
-		}
-		fallthrough
-	case UserCommands:
-		if len(c.mcpPrompts) > 0 {
-			return MCPPrompts
-		}
-		fallthrough
-	case MCPPrompts:
-		return SystemCommands
-	default:
-		return SystemCommands
-	}
+// hasTabs reports whether the tab switcher has anywhere to go: two or
+// more menus with items. The Tab bindings are hinted only when this
+// holds, so the help never advertises a dead key.
+func (c *Commands) hasTabs() bool {
+	return len(c.tabs()) > 1
 }
 
-// previousCommandType returns the previous command type in the cycle.
-func (c *Commands) previousCommandType() CommandType {
-	switch c.selected {
-	case SystemCommands:
-		if len(c.mcpPrompts) > 0 {
-			return MCPPrompts
-		}
-		if len(c.customCommands) > 0 {
-			return UserCommands
-		}
-		return SystemCommands
-	case UserCommands:
-		return SystemCommands
-	case MCPPrompts:
-		if len(c.customCommands) > 0 {
-			return UserCommands
-		}
-		return SystemCommands
-	case SkillsCommands:
-		return SkillsCommands
-	default:
-		return SystemCommands
+// cycleTab moves the selection to the next menu tab with items (step -1
+// for the previous one), wrapping. No-op when there is nothing to
+// switch to.
+func (c *Commands) cycleTab(step int) {
+	tabs := c.tabs()
+	if len(tabs) < 2 {
+		return
 	}
+	for i, m := range tabs {
+		if m.tab() == c.selected {
+			c.selected = tabs[(i+step+len(tabs))%len(tabs)].tab()
+			c.setCommandItems(c.selected)
+			return
+		}
+	}
+	// The selected tab lost its content; land on the first one.
+	c.setCommandItems(tabs[0].tab())
+}
+
+// commandMenu is one content source of the commands palette: a page of
+// items the tab switcher can land on. Tab presence, the tab hint, the
+// radio row and tab cycling are all derived from the menus registered
+// in menus(), so a future source becomes a tab by implementing this
+// interface and joining that list; nothing else in the dialog learns
+// its name.
+type commandMenu interface {
+	// tab is the palette page this menu fills.
+	tab() CommandType
+	// hasItems reports whether the menu currently contributes a tab.
+	// An empty menu is not a tab: nothing to switch to, nothing to hint.
+	hasItems() bool
+	// items renders the menu's entries.
+	items() []*CommandItem
+}
+
+// systemMenu is the built-in commands page. Always present.
+type systemMenu struct{ c *Commands }
+
+func (systemMenu) tab() CommandType       { return SystemCommands }
+func (systemMenu) hasItems() bool         { return true }
+func (m systemMenu) items() []*CommandItem { return m.c.defaultCommands() }
+
+// userMenu is the user-defined command page: custom and extension
+// commands. Skills are excluded; they have their own palette.
+type userMenu struct{ c *Commands }
+
+func (userMenu) tab() CommandType { return UserCommands }
+func (m userMenu) hasItems() bool { return len(m.c.userCommands()) > 0 }
+func (m userMenu) items() []*CommandItem {
+	var items []*CommandItem
+	for _, cmd := range m.c.userCommands() {
+		action := ActionRunCustomCommand{
+			Content:     cmd.Content,
+			Arguments:   cmd.Arguments,
+			Skill:       cmd.Skill,
+			ExtensionID: cmd.ExtensionID,
+		}
+		item := NewCommandItem(m.c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
+		if cmd.Description != "" {
+			item = item.WithDescription(cmd.Description)
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+// mcpMenu is the MCP prompt page.
+type mcpMenu struct{ c *Commands }
+
+func (mcpMenu) tab() CommandType { return MCPPrompts }
+func (m mcpMenu) hasItems() bool { return len(m.c.mcpPrompts) > 0 }
+func (m mcpMenu) items() []*CommandItem {
+	var items []*CommandItem
+	for _, cmd := range m.c.mcpPrompts {
+		action := ActionRunMCPPrompt{
+			Title:       cmd.Title,
+			Description: cmd.Description,
+			PromptID:    cmd.PromptID,
+			ClientID:    cmd.ClientID,
+			Arguments:   cmd.Arguments,
+		}
+		items = append(items, NewCommandItem(m.c.com.Styles, "mcp_"+cmd.ID, cmd.PromptID, "", action))
+	}
+	return items
+}
+
+// skillsMenu is the skills palette page behind "/".
+type skillsMenu struct{ c *Commands }
+
+func (skillsMenu) tab() CommandType       { return SkillsCommands }
+func (m skillsMenu) hasItems() bool       { return len(m.items()) > 0 }
+func (m skillsMenu) items() []*CommandItem {
+	var items []*CommandItem
+	for _, cmd := range m.c.customCommands {
+		if cmd.Skill == nil {
+			continue
+		}
+		action := ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
+		item := NewCommandItem(m.c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
+		item = item.WithDescription(cmd.Skill.Description)
+		items = append(items, item)
+	}
+	return items
+}
+
+// menus returns the palette's content sources in tab order. The skills
+// palette replaces the whole set: it lists skills and nothing else.
+func (c *Commands) menus() []commandMenu {
+	if c.skillsOnly {
+		return []commandMenu{skillsMenu{c}}
+	}
+	return []commandMenu{systemMenu{c}, userMenu{c}, mcpMenu{c}}
+}
+
+// tabs returns the menus that currently have items: the pages the tab
+// switcher can land on.
+func (c *Commands) tabs() []commandMenu {
+	var tabs []commandMenu
+	for _, m := range c.menus() {
+		if m.hasItems() {
+			tabs = append(tabs, m)
+		}
+	}
+	return tabs
+}
+
+// userCommands returns the custom commands that are not skills.
+func (c *Commands) userCommands() []commands.CustomCommand {
+	var out []commands.CustomCommand
+	for _, cmd := range c.customCommands {
+		if cmd.Skill == nil {
+			out = append(out, cmd)
+		}
+	}
+	return out
 }
 
 // setCommandItems sets the command items based on the specified command type.
 func (c *Commands) setCommandItems(commandType CommandType) {
 	c.selected = commandType
 
-	commandItems := []list.FilterableItem{}
-	switch c.selected {
-	case SystemCommands:
-		for _, cmd := range c.defaultCommands() {
-			commandItems = append(commandItems, cmd)
-		}
-	case UserCommands:
-		for _, cmd := range c.customCommands {
-			// Skills live in their own palette behind "/".
-			if cmd.Skill != nil {
-				continue
+	var commandItems []list.FilterableItem
+	for _, m := range c.menus() {
+		if m.tab() == commandType {
+			for _, item := range m.items() {
+				commandItems = append(commandItems, item)
 			}
-			action := ActionRunCustomCommand{
-				Content:     cmd.Content,
-				Arguments:   cmd.Arguments,
-				Skill:       cmd.Skill,
-				ExtensionID: cmd.ExtensionID,
-			}
-			item := NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
-			if cmd.Description != "" {
-				item = item.WithDescription(cmd.Description)
-			}
-			commandItems = append(commandItems, item)
-		}
-	case MCPPrompts:
-		for _, cmd := range c.mcpPrompts {
-			action := ActionRunMCPPrompt{
-				Title:       cmd.Title,
-				Description: cmd.Description,
-				PromptID:    cmd.PromptID,
-				ClientID:    cmd.ClientID,
-				Arguments:   cmd.Arguments,
-			}
-			commandItems = append(commandItems, NewCommandItem(c.com.Styles, "mcp_"+cmd.ID, cmd.PromptID, "", action))
-		}
-	case SkillsCommands:
-		for _, cmd := range c.customCommands {
-			if cmd.Skill == nil {
-				continue
-			}
-			action := ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
-			item := NewCommandItem(c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
-			item = item.WithDescription(cmd.Skill.Description)
-			commandItems = append(commandItems, item)
+			break
 		}
 	}
 
