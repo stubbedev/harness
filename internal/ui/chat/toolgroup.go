@@ -511,26 +511,32 @@ func (g *ToolGroupMessageItem) advanceLiveTool() {
 	}
 }
 
-// oneLiner renders one tool call as a single line: status glyph, tool
-// name and an argument summary, truncated to width. A running call gets
-// the pending dot, not the tool's full scrambled spinner (a 15-cell
+// ToolOneLiner renders one tool call as a single line: status glyph,
+// tool name and an argument summary, truncated to width. A running call
+// gets the pending dot, not the tool's full scrambled spinner (a 15-cell
 // animation with its own timer would crowd the line; the group header
-// already carries the live animation).
-func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int) string {
-	glyph := g.sty.Tool.IconSuccess.Render()
+// already carries the live animation). Shared by the transcript's
+// collapsed groups and the background task strip's nested lines.
+func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int) string {
+	glyph := sty.Tool.IconSuccess.Render()
 	if a, ok := t.(Animatable); ok && a.Spinning() {
-		glyph = g.sty.Tool.IconPending.Render()
+		glyph = sty.Tool.IconPending.Render()
 	} else if res := t.Result(); res != nil && res.IsError {
-		glyph = g.sty.Tool.IconError.Render()
+		glyph = sty.Tool.IconError.Render()
 	} else if t.Status() == ToolStatusCanceled {
-		glyph = g.sty.Tool.IconCancelled.Render()
+		glyph = sty.Tool.IconCancelled.Render()
 	}
-	name := g.sty.Tool.NameNormal.Render(PrettifyToolName(t.ToolCall().Name))
+	name := sty.Tool.NameNormal.Render(PrettifyToolName(t.ToolCall().Name))
 	line := glyph + " " + name
 	if summary := ToolCallSummary(t.ToolCall()); summary != "" {
-		line += " " + g.sty.Tool.Body.Render(summary)
+		line += " " + sty.Tool.Body.Render(summary)
 	}
 	return ansi.Truncate(line, max(width, 1), "…")
+}
+
+// oneLiner renders one tool call as a single line.
+func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int) string {
+	return ToolOneLiner(g.sty, t, width)
 }
 
 const (
@@ -548,19 +554,21 @@ func ToolCallSummary(tc message.ToolCall) string {
 	preferred := []string{"command", "file_path", "path", "pattern", "url", "query", "symbol", "name"}
 	for _, key := range preferred {
 		if v, ok := params[key].(string); ok && strings.TrimSpace(v) != "" {
-			return firstLine(v)
+			return FirstLine(v)
 		}
 	}
 	// Fallback: the first string value, whatever its key.
 	for _, v := range params {
 		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-			return firstLine(s)
+			return FirstLine(s)
 		}
 	}
 	return ""
 }
 
-func firstLine(s string) string {
+// FirstLine returns the first line of s, collapsed to one
+// space-joined line.
+func FirstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
 	}

@@ -16,7 +16,6 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
-	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
@@ -865,14 +864,10 @@ func (m *UI) renderTaskDetails(task *agentTask, width, subCursor int) []string {
 			}
 			continue
 		}
-		lines = append(lines, indent+nestedOneLiner(t, nested, inner-2))
+		lines = append(lines, indent+chat.ToolOneLiner(t, nested, inner-2))
 	}
 	if task.result != nil && task.result.Content != "" {
-		excerpt := task.result.Content
-		if i := strings.IndexByte(excerpt, '\n'); i >= 0 {
-			excerpt = excerpt[:i]
-		}
-		excerpt = strings.Join(strings.Fields(excerpt), " ")
+		excerpt := chat.FirstLine(task.result.Content)
 		if excerpt != "" {
 			lines = append(lines, "  "+t.Resource.AdditionalText.Render("Result: ")+ansi.Truncate(excerpt, inner-9, "…"))
 		}
@@ -881,22 +876,6 @@ func (m *UI) renderTaskDetails(task *agentTask, width, subCursor int) []string {
 		lines = append(lines, "  "+t.Resource.AdditionalText.Render("No activity recorded"))
 	}
 	return lines
-}
-
-// nestedOneLiner renders one nested tool call as a single line.
-func nestedOneLiner(t *styles.Styles, nested chat.ToolMessageItem, width int) string {
-	glyph := t.Tool.IconSuccess.Render()
-	if a, ok := nested.(chat.Animatable); ok && a.Spinning() {
-		glyph = "…"
-	} else if res := nested.Result(); res != nil && res.IsError {
-		glyph = t.Tool.IconError.Render()
-	}
-	name := chat.PrettifyToolName(nested.ToolCall().Name)
-	line := glyph + " " + name
-	if summary := chat.ToolCallSummary(nested.ToolCall()); summary != "" {
-		line += " " + summary
-	}
-	return ansi.Truncate(line, max(width, 1), "…")
 }
 
 // handleTaskClick toggles the expanded task for a click inside the strip
