@@ -198,7 +198,7 @@ func TestProcessIsolation_GroupGoneAfterKill(t *testing.T) {
 	// The unique sleep values make the pgrep specific to this test's
 	// children; a leftover means the group kill missed a member.
 	require.Eventually(t, func() bool {
-		out, err := exec.Command("pgrep", "-f", "sleep 62").Output()
+		out, err := exec.CommandContext(t.Context(), "pgrep", "-f", "sleep 62").Output()
 		return err != nil || len(strings.TrimSpace(string(out))) == 0
 	}, 3*time.Second, 100*time.Millisecond, "no group member may survive cancellation")
 }
