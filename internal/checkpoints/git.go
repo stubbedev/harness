@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/stubbedev/harness/internal/filepathext"
 )
 
 // shadowRepoName is the directory, inside the workspace data
@@ -139,8 +141,8 @@ func (s *Service) dataDirExclude() string {
 	if s.dataDir == "" {
 		return ""
 	}
-	rel, err := filepath.Rel(s.workingDir, s.dataDir)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, ok := filepathext.RelWithin(s.workingDir, s.dataDir)
+	if !ok || rel == "." {
 		return ""
 	}
 	return ":(exclude)" + rel

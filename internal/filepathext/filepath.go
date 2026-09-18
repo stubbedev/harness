@@ -50,3 +50,55 @@ func SplitGlobPrefix(pattern string) (prefix, rest string) {
 	parent := strings.Join(literal[:len(literal)-1], "/")
 	return parent, literal[len(literal)-1]
 }
+
+// RelWithin computes rel of path against dir and reports whether path is
+// dir itself or inside it. The returned rel is the filepath.Rel result
+// when ok is true; callers that need to reject the directory itself can
+// still test rel == "." on it.
+func RelWithin(dir, path string) (rel string, ok bool) {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return "", false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
+}
+
+// SameOrInside reports whether path is dir itself or inside it, after
+// resolving both sides to their canonical form. The resolution matters:
+// a cwd can reach the same directory through a symlink (TMPDIR on macOS)
+// or a short name (RUNNER~1 on Windows) while tools report the canonical
+// path, and the raw comparison would misread repo-local paths as
+// outside.
+func SameOrInside(path, dir string) bool {
+	path = Canonicalize(path)
+	dir = Canonicalize(dir)
+	if runtime.GOOS == "windows" {
+		// Drive letters and 8.3 names differ in case alone.
+		path = strings.ToLower(path)
+		dir = strings.ToLower(dir)
+	}
+	_, ok := RelWithin(dir, path)
+	return ok
+}
+
+// Canonicalize resolves symlinks in the longest existing prefix of path.
+// The final elements usually do not exist yet (they are a worktree being
+// created), which would make a plain EvalSymlinks fail and leave
+// symlinked cwds unresolvable.
+func Canonicalize(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved
+	}
+	dir, rest := filepath.Split(path)
+	if dir == path {
+		return path
+	}
+	if rest == "" {
+		return Canonicalize(filepath.Clean(dir))
+	}
+	return filepath.Join(Canonicalize(filepath.Clean(dir)), rest)
+}

@@ -9,6 +9,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/filepathext"
 )
 
 // fabricatedPathLimit caps how many missing paths one warning lists; a
@@ -107,15 +108,14 @@ func pathExists(workdir, token string, glob bool) bool {
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(workdir, target)
 	}
-	rel, err := filepath.Rel(workdir, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if _, ok := filepathext.RelWithin(workdir, target); !ok {
 		return false
 	}
 	if glob {
 		matches, err := filepath.Glob(target)
 		return err == nil && len(matches) > 0
 	}
-	_, err = os.Stat(target)
+	_, err := os.Stat(target)
 	return err == nil
 }
 

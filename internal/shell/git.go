@@ -8,12 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
 
 	"mvdan.cc/sh/v3/interp"
+
+	"github.com/stubbedev/harness/internal/filepathext"
 )
 
 // handleGit is the `git` builtin. Everything passes straight through to the
@@ -94,7 +95,7 @@ func redirectWorktreeAdd(ctx context.Context, hc interp.HandlerContext, args []s
 		return args
 	}
 	root = filepath.Clean(root)
-	if sameOrInside(abs, root) {
+	if filepathext.SameOrInside(abs, root) {
 		// Already repo-local: the caller chose a deliberate spot.
 		return args
 	}
@@ -170,8 +171,8 @@ func worktreesDir(ctx context.Context, hc interp.HandlerContext, root string, st
 // .git may be a file (linked worktrees, submodules), in which case there is
 // nothing to do here.
 func excludeWorktreesDir(root, dir string) {
-	rel, err := filepath.Rel(root, dir)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, ok := filepathext.RelWithin(root, dir)
+	if !ok {
 		return
 	}
 	exclude := filepath.Join(root, ".git", "info", "exclude")
@@ -213,44 +214,4 @@ func gitOutputValue(ctx context.Context, hc interp.HandlerContext, gitArgs ...st
 		return "", false
 	}
 	return strings.TrimSpace(string(out)), true
-}
-
-// sameOrInside reports whether path is dir itself or inside it, after
-// resolving both sides to their canonical form. The resolution matters:
-// the shell's cwd can reach the same directory through a symlink (TMPDIR
-// on macOS) or a short name (RUNNER~1 on Windows) while git reports the
-// canonical path, and the raw comparison would misread repo-local paths
-// as outside.
-func sameOrInside(path, dir string) bool {
-	path = canonicalize(path)
-	dir = canonicalize(dir)
-	if runtime.GOOS == "windows" {
-		// Drive letters and 8.3 names differ in case alone.
-		path = strings.ToLower(path)
-		dir = strings.ToLower(dir)
-	}
-	rel, err := filepath.Rel(dir, path)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-// canonicalize resolves symlinks in the longest existing prefix of path.
-// The final elements usually do not exist yet (they are the worktree being
-// created), which would make a plain EvalSymlinks fail and leave symlinked
-// cwds (TMPDIR on macOS) unresolvable.
-func canonicalize(path string) string {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		return resolved
-	}
-	dir, rest := filepath.Split(path)
-	if dir == path {
-		return path
-	}
-	if rest == "" {
-		return canonicalize(filepath.Clean(dir))
-	}
-	return filepath.Join(canonicalize(filepath.Clean(dir)), rest)
 }

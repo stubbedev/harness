@@ -16,6 +16,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/term"
 )
@@ -381,8 +382,8 @@ func closeOwnerSessions(agentID string) {
 func CloseTerminalSessionsUnder(dir string) {
 	dir = filepath.Clean(dir)
 	closeTerminalSessions(func(r *ptyRunner) bool {
-		rel, err := filepath.Rel(dir, r.cwd)
-		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+		_, ok := filepathext.RelWithin(dir, r.cwd)
+		return ok
 	})
 }
 
