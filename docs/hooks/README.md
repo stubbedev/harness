@@ -397,7 +397,7 @@ the input, or still deny/halt with a reason:
 ```jsonc
 {
   "version": 1, // Output envelope version. Optional; defaults to 1.
-  "decision": "allow", // "allow", "deny", or null. Omit for no opinion.
+  "decision": "allow", // "allow", "deny", "block" (deny alias), or null. Omit for no opinion.
   "halt": false, // If true, halts the turn entirely. Where the event
                   // supports halting; see [Events](#events).
   "reason": "LGTM", // Shown when denying or halting.

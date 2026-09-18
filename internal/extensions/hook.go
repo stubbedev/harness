@@ -99,12 +99,12 @@ func hookResult(value lua.LValue) hooks.HookResult {
 		return hooks.HookResult{Decision: hooks.DecisionNone, Context: string(typed)}
 	case *lua.LTable:
 		result := hooks.HookResult{
-			Decision: parseDecision(tableString(typed, "decision", "")),
-			Halt:     tableBool(typed, "halt", false),
-			Reason:   tableString(typed, "reason", ""),
-			Context:  tableString(typed, "context", ""),
+			Decision:      hooks.ParseDecision(tableString(typed, "decision", "")),
+			Halt:          tableBool(typed, "halt", false),
+			Reason:        tableString(typed, "reason", ""),
+			Context:       tableString(typed, "context", ""),
+			UpdatedPrompt: tableString(typed, "updated_prompt", ""),
 		}
-		result.UpdatedPrompt = tableString(typed, "updated_prompt", "")
 		if patch, ok := typed.RawGetString("updated_input").(*lua.LTable); ok {
 			if data, err := json.Marshal(fromLua(patch)); err == nil {
 				result.UpdatedInput = string(data)
@@ -113,16 +113,5 @@ func hookResult(value lua.LValue) hooks.HookResult {
 		return result
 	default:
 		return hooks.HookResult{Decision: hooks.DecisionNone}
-	}
-}
-
-func parseDecision(value string) hooks.Decision {
-	switch value {
-	case "deny", "block":
-		return hooks.DecisionDeny
-	case "allow":
-		return hooks.DecisionAllow
-	default:
-		return hooks.DecisionNone
 	}
 }

@@ -225,7 +225,7 @@ func parseStdout(stdout string) HookResult {
 		UpdatedInput:  rawToString(parsed.UpdatedInput),
 		UpdatedPrompt: rawToString(parsed.UpdatedPrompt),
 	}
-	result.Decision = parseDecision(parsed.Decision)
+	result.Decision = ParseDecision(parsed.Decision)
 	return result
 }
 
@@ -274,7 +274,7 @@ func parseClaudeCodeOutput(data json.RawMessage) HookResult {
 	}
 
 	result := HookResult{
-		Decision: parseDecision(hso.PermissionDecision),
+		Decision: ParseDecision(hso.PermissionDecision),
 		Reason:   hso.PermissionDecisionReason,
 		Context:  hso.AdditionalContext,
 	}
@@ -305,11 +305,16 @@ func rawToString(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func parseDecision(s string) Decision {
+// ParseDecision maps a hook-authored decision string onto a Decision.
+// Matching is case-insensitive; "deny" and "block" both deny, "allow"
+// allows, and anything else expresses no opinion. The vocabulary is
+// shared by shell-hook stdout, the Claude Code format, and Lua handlers
+// so the same verdict string means the same thing on every path.
+func ParseDecision(s string) Decision {
 	switch strings.ToLower(s) {
 	case "allow":
 		return DecisionAllow
-	case "deny":
+	case "deny", "block":
 		return DecisionDeny
 	default:
 		return DecisionNone
