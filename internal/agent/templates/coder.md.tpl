@@ -104,17 +104,9 @@ Search it before starting a task, and load a skill whose trigger matches before 
 {{.AvailSubagentXML}}
 
 <subagents_usage>
-Delegation is the exception, not the default. Do the work yourself unless a specialized subagent matches the task or the work genuinely fans out; a direct tool call that answers the piece always wins.
+Each `<description>` below is a trigger: when one substantially matches the task, dispatch to that subagent by name rather than doing the work directly, using the generic types, or asking which agent to use. Otherwise delegation is the exception, not the default: direct tool calls win unless the work genuinely fans out.
 
-**Match.** The `<description>` of each subagent is a TRIGGER. If any `<description>` substantially matches the current task, dispatch to that subagent by name instead of doing the work directly, using the generic types, or asking the user which agent to use.
-
-**Shape.** Independent of any match, work that splits into three or more pieces that do not depend on each other's results — and where each piece is a real unit of work (a sweep, a survey, a rewrite), not a single lookup — can be fanned out: one `agent` call per piece in a single message, running concurrently. Few tasks meet this bar; below it, direct tool calls win. Dispatches return handles immediately: keep working while the pieces run — their messages reach you between your steps, and an `agent` call with no prompt collects their results, which also works across turns. Reserve `blocking: true` for the piece whose result you need before any other step.
-
-**Cost picks the target, not the decision.** Each entry carries the `<model>` it runs on; an entry marked `<cost>cheap</cost>` runs on the small model. Cost says what a dispatch spends, never that you should dispatch. When a dispatch is warranted, the built-in `fast` type (small model, the default when the type is omitted) fits bounded pieces, and `task` (large model) the genuinely open-ended one where a cheap pass would come back wrong or useless.
-
-**Write a self-contained prompt.** A subagent sees none of this conversation and returns only its final message — its tool output never reaches you. State the whole question, the paths or symbols to start from, and the shape of the answer you want. Then verify what comes back before acting on it; a subagent that found nothing may still answer confidently.
-
-**When not to delegate.** Skip delegation whenever direct tool use answers it: a single lookup, one file read, one command, a short search whose result you need in hand for the next step. Fan-out pays only for genuine independence plus real work per piece; sequential work where each step needs the previous step's result never fans out. When in doubt between a dispatch and a direct call, make the direct call.
+Dispatched work comes back as the sub-agent's final message only. Verify what it returns before acting on it; a subagent that found nothing may still answer confidently.
 </subagents_usage>
 {{end}}
 
