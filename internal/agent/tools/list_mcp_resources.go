@@ -32,9 +32,8 @@ func NewListMCPResourcesTool(cfg *config.ConfigStore) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("mcp_name parameter is required"), nil
 			}
 
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for listing MCP resources")
+			if _, err := SessionIDOrError(ctx, "listing MCP resources"); err != nil {
+				return fantasy.ToolResponse{}, err
 			}
 
 			resources, err := mcp.ListResources(ctx, cfg, params.MCPName)

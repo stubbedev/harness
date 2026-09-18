@@ -162,9 +162,9 @@ func processEditWithCreation(edit editContext, params EditParams, _ fantasy.Tool
 	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(firstEdit.NewString, params.Edits[1:], 1)
 
 	// Get session and message IDs
-	sessionID := GetSessionFromContext(edit.ctx)
-	if sessionID == "" {
-		return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for creating a new file")
+	sessionID, err := SessionIDOrError(edit.ctx, "creating a new file")
+	if err != nil {
+		return fantasy.ToolResponse{}, err
 	}
 
 	// Record the diff for the response metadata.
@@ -173,7 +173,7 @@ func processEditWithCreation(edit editContext, params EditParams, _ fantasy.Tool
 	editsApplied := len(params.Edits) - len(failedEdits)
 
 	// Write the file
-	err := os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
+	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}

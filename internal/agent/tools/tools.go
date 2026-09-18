@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"html/template"
 	"os/exec"
 	"testing"
@@ -42,6 +43,17 @@ func getContextValue[T any](ctx context.Context, key any, defaultValue T) T {
 // GetSessionFromContext retrieves the session ID from the context.
 func GetSessionFromContext(ctx context.Context) string {
 	return getContextValue(ctx, SessionIDContextKey, "")
+}
+
+// SessionIDOrError returns the session ID from the tool context, or an
+// error stating that it is required for purpose. Single source for the
+// per-tool missing-session guards so the wording cannot drift.
+func SessionIDOrError(ctx context.Context, purpose string) (string, error) {
+	sessionID := GetSessionFromContext(ctx)
+	if sessionID == "" {
+		return "", fmt.Errorf("session ID is required for %s", purpose)
+	}
+	return sessionID, nil
 }
 
 // GetMessageFromContext retrieves the message ID from the context.

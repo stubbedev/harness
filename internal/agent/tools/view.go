@@ -110,9 +110,9 @@ func NewViewTool(
 
 			isSkillFile := isInSkillsPath(absFilePath, skillsPaths)
 
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for reading files")
+			sessionID, err := SessionIDOrError(ctx, "reading files")
+			if err != nil {
+				return fantasy.ToolResponse{}, err
 			}
 
 			// Check if file exists

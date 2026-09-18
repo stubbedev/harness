@@ -48,9 +48,9 @@ func NewWriteTool(
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session_id is required")
+			sessionID, err := SessionIDOrError(ctx, "writing files")
+			if err != nil {
+				return fantasy.ToolResponse{}, err
 			}
 
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)

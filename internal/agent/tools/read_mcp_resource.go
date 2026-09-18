@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"log/slog"
 	"strings"
 
@@ -36,9 +35,8 @@ func NewReadMCPResourceTool(cfg *config.ConfigStore) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("uri parameter is required"), nil
 			}
 
-			sessionID := GetSessionFromContext(ctx)
-			if sessionID == "" {
-				return fantasy.ToolResponse{}, fmt.Errorf("session ID is required for reading MCP resources")
+			if _, err := SessionIDOrError(ctx, "reading MCP resources"); err != nil {
+				return fantasy.ToolResponse{}, err
 			}
 
 			contents, err := mcp.ReadResource(ctx, cfg, params.MCPName, params.URI)
