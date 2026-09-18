@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -309,17 +311,42 @@ func (v *viewTool) run(ctx context.Context, params ViewParams) (fantasy.ToolResp
 // viewFiles reads every requested file and concatenates the sections.
 // A file that cannot be read becomes an error section naming the path;
 // only when every entry failed does the call itself fail.
+//
+// The reads run concurrently: each is an independent stat-open-scan, so
+// ten files cost the slowest read rather than the sum of them. Sections
+// and metadata are assembled in request order afterwards.
 func (v *viewTool) viewFiles(ctx context.Context, files []ViewFileRequest) (fantasy.ToolResponse, error) {
+	contents := make([]viewFileContent, len(files))
+	failures := make([]*fantasy.ToolResponse, len(files))
+	hardErrs := make([]error, len(files))
+
+	var wg sync.WaitGroup
+	for i, f := range files {
+		wg.Go(func() {
+			contents[i], failures[i], hardErrs[i] = v.viewOneFile(ctx, ViewParams{
+				FilePath: f.FilePath,
+				Offset:   f.Offset,
+				Limit:    f.Limit,
+			})
+		})
+	}
+	wg.Wait()
+
+	// A hard failure (a failed read error, a cancelled context) aborts the
+	// call, as the sequential version did at the first one it hit.
+	for _, err := range hardErrs {
+		if err != nil {
+			return fantasy.ToolResponse{}, err
+		}
+	}
+
 	sections := make([]string, 0, len(files))
 	metas := make([]ViewResponseMetadata, 0, len(files))
 	var firstFailure *fantasy.ToolResponse
 	media, failed := 0, 0
 
-	for _, f := range files {
-		content, failure, err := v.viewOneFile(ctx, ViewParams{FilePath: f.FilePath, Offset: f.Offset, Limit: f.Limit})
-		if err != nil {
-			return fantasy.ToolResponse{}, err
-		}
+	for i, f := range files {
+		content, failure := contents[i], failures[i]
 		path := f.FilePath
 		if path == "" {
 			path = "(missing file_path)"
@@ -385,29 +412,51 @@ func failureResponse(message string) *fantasy.ToolResponse {
 	return &resp
 }
 
+// addLineNumbers prefixes each line with its line number, right-aligned in
+// six cells and followed by a pipe.
 func addLineNumbers(content string, startLine int) string {
 	if content == "" {
 		return ""
 	}
 
-	lines := strings.Split(content, "\n")
-
-	var result []string
-	for i, line := range lines {
+	var result strings.Builder
+	lineNum := startLine
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSuffix(line, "\r")
 
-		lineNum := i + startLine
-		numStr := fmt.Sprintf("%d", lineNum)
-
-		if len(numStr) >= 6 {
-			result = append(result, fmt.Sprintf("%s|%s", numStr, line))
-		} else {
-			paddedNum := fmt.Sprintf("%6s", numStr)
-			result = append(result, fmt.Sprintf("%s|%s", paddedNum, line))
+		numStr := strconv.Itoa(lineNum)
+		for range 6 - len(numStr) {
+			result.WriteByte(' ')
 		}
+		result.WriteString(numStr)
+		result.WriteByte('|')
+		result.WriteString(line)
+		result.WriteByte('\n')
+		lineNum++
 	}
 
-	return strings.Join(result, "\n")
+	return strings.TrimSuffix(result.String(), "\n")
+}
+
+// skipLines advances reader past the first offset lines without
+// materialising them: ReadSlice scans the buffer in place, so a deep
+// offset costs no string allocation per skipped line, only the scans
+// themselves. An overlong line is drained with further ReadSlice calls
+// until its newline or the end of the file turns up.
+func skipLines(reader *bufio.Reader, offset int) error {
+	for range offset {
+		for {
+			_, err := reader.ReadSlice('\n')
+			if err == bufio.ErrBufferFull {
+				continue // keep scanning an overlong line for its end
+			}
+			if err != nil {
+				return err // io.EOF ends the skip
+			}
+			break
+		}
+	}
+	return nil
 }
 
 func readTextFile(filePath string, offset, limit, maxContentSize int) (string, bool, error) {
@@ -418,16 +467,11 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 	defer file.Close()
 
 	reader := bufio.NewReader(file)
-	skipped := 0
-	for skipped < offset {
-		_, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				return "", false, nil
-			}
-			return "", false, err
+	if err := skipLines(reader, offset); err != nil {
+		if err == io.EOF {
+			return "", false, nil
 		}
-		skipped++
+		return "", false, err
 	}
 
 	lines := make([]string, 0, min(limit, DefaultReadLimit))
