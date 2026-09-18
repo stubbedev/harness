@@ -421,10 +421,12 @@ func execEnvList(env expand.Environ) []string {
 // interpreter's environment and stdio. Every process spawn under the
 // interpreter goes through here so the isolation policy (isolateProcess
 // and future guards around it) has exactly one construction point.
-// The spawned child outlives the current Go context; spawn paths that
-// want ctx cancellation to kill the child use newIsolatedCmdContext.
+// The spawned child outlives the current Go context — the mvdan exec
+// handler manages cancellation itself through the process group — so a
+// never-cancelled context is attached explicitly; spawn paths that want
+// ctx cancellation to kill the child use newIsolatedCmdContext instead.
 func newIsolatedCmd(hc interp.HandlerContext, path string, args []string, stdin io.Reader, stdout, stderr io.Writer) *exec.Cmd {
-	return finishIsolatedCmd(exec.Command(path, args...), hc, stdin, stdout, stderr)
+	return finishIsolatedCmd(exec.CommandContext(context.WithoutCancel(context.Background()), path, args...), hc, stdin, stdout, stderr)
 }
 
 // newIsolatedCmdContext is newIsolatedCmd with ctx attached via
