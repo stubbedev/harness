@@ -242,15 +242,14 @@ func (d *FreeText) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Clamp scroll, then keep the cursor row visible unless the
 	// user is wheel-scrolling.
-	maxScroll := max(0, len(lines)-viewport)
-	d.scrollOffset = min(max(0, d.scrollOffset), maxScroll)
+	d.scrollOffset = ClampScroll(d.scrollOffset, len(lines), viewport)
 	if !d.wheelActive && cursorRow >= 0 {
 		if cursorRow < d.scrollOffset {
 			d.scrollOffset = cursorRow
 		} else if cursorRow >= d.scrollOffset+viewport {
 			d.scrollOffset = cursorRow - viewport + 1
 		}
-		d.scrollOffset = min(max(0, d.scrollOffset), maxScroll)
+		d.scrollOffset = ClampScroll(d.scrollOffset, len(lines), viewport)
 	}
 
 	// Blit the visible window and place the cursor. The cursor is

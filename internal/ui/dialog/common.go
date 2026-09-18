@@ -16,6 +16,13 @@ import (
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
+// ClampScroll bounds a scroll offset to [0, max(0, totalLines-viewport)].
+// Single source for the question dialogs, which re-derive the same
+// arithmetic per dialog type before their own keep-visible extras.
+func ClampScroll(offset, totalLines, viewport int) int {
+	return min(max(0, offset), max(0, totalLines-viewport))
+}
+
 // dialogInputTextWidth returns the text-area width for a dialog input so
 // that the input frame, its prompt (e.g. "❯ "), the text, and a trailing
 // cursor cell all fit within contentWidth. The prompt is rendered outside

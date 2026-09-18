@@ -610,8 +610,7 @@ func (c *choiceList) HandleWheel(deltaX, deltaY float64) {
 // fill-in at least partially visible when active. It does NOT
 // snap to the cursor, making it safe for wheel-driven scrolling.
 func (c *choiceList) clampToBounds(lines []contentLine, viewport int) {
-	limit := max(0, len(lines)-viewport)
-	c.scrollOffset = min(max(0, c.scrollOffset), limit)
+	c.scrollOffset = ClampScroll(c.scrollOffset, len(lines), viewport)
 	// When fill-in is active, ensure at least one fill-in line
 	// remains visible in the viewport.
 	if c.isFillIn() && c.fillInTop >= 0 {
@@ -648,8 +647,7 @@ func (c *choiceList) clampScroll(lines []contentLine, viewport int) {
 		c.clampToBounds(lines, viewport)
 		return
 	}
-	limit := max(0, len(lines)-viewport)
-	if limit == 0 {
+	if len(lines) <= viewport {
 		c.scrollOffset = 0
 		return
 	}
@@ -676,7 +674,7 @@ func (c *choiceList) clampScroll(lines []contentLine, viewport int) {
 		}
 	}
 	if cursorTop < 0 {
-		c.scrollOffset = min(max(0, c.scrollOffset), limit)
+		c.scrollOffset = ClampScroll(c.scrollOffset, len(lines), viewport)
 		return
 	}
 
@@ -700,7 +698,7 @@ func (c *choiceList) clampScroll(lines []contentLine, viewport int) {
 		c.scrollOffset = cursorTop
 	}
 
-	c.scrollOffset = min(max(0, c.scrollOffset), limit)
+	c.scrollOffset = ClampScroll(c.scrollOffset, len(lines), viewport)
 }
 
 // handleFillInFocused processes keys when the fill-in textarea is

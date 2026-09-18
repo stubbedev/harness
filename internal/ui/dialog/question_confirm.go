@@ -211,13 +211,7 @@ func (c *ConfirmComponent) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	overflow := viewport > 0 && totalLines > viewport
 
 	// Clamp scroll offset.
-	maxScroll := max(totalLines-viewport, 0)
-	if c.scrollOffset > maxScroll {
-		c.scrollOffset = maxScroll
-	}
-	if c.scrollOffset < 0 {
-		c.scrollOffset = 0
-	}
+	c.scrollOffset = ClampScroll(c.scrollOffset, totalLines, viewport)
 
 	// Determine content width (shrink by 1 for scrollbar if overflowing).
 	contentWidth := area.Dx()
