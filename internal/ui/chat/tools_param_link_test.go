@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
@@ -29,11 +30,11 @@ func TestToolParamListHyperlinksBareURLs(t *testing.T) {
 	sty := linkStyles()
 	url := "https://example.com/docs?a=1"
 
-	got := toolParamList(sty, toolParamListParams(url), 200, nil)
+	got := toolParamList(sty, toolParamListParams(url), 200)
 	require.Contains(t, got, "\x1b]8;;"+url+"\a", "URL param is hyperlinked:\n%q", got)
 	require.Contains(t, got, url, "the URL is still the visible text:\n%q", got)
 
-	plain := toolParamList(sty, toolParamListParams("cmd.go"), 200, nil)
+	plain := toolParamList(sty, toolParamListParams("cmd.go"), 200)
 	require.NotContains(t, plain, "\x1b]8;;", "non-URL params carry no hyperlink:\n%q", plain)
 }
 
@@ -70,8 +71,42 @@ func TestToolParamListTruncationKeepsHyperlink(t *testing.T) {
 	sty := linkStyles()
 	url := "https://example.com/very/long/path/that/will/not/fit"
 
-	got := toolParamList(sty, toolParamListParams(url), 30, nil)
+	got := toolParamList(sty, toolParamListParams(url), 30)
 	require.LessOrEqual(t, ansi.StringWidth(got), 30, "truncated to width:\n%q", got)
 	require.Contains(t, got, "\x1b]8;;"+url, "hyperlink opens with the full target:\n%q", got)
 	require.Contains(t, got, "\x1b]8;;\a", "hyperlink closes even when truncated:\n%q", got)
+}
+
+// TestToolHeaderSingleLine: the text next to the tool name is always
+// one line. Multi-line commands collapse to spaces, whitespace runs
+// shrink to single spaces, and anything past the width is cut with an
+// ellipsis instead of wrapping.
+func TestToolHeaderSingleLine(t *testing.T) {
+	t.Parallel()
+
+	sty := linkStyles()
+	cmd := "cd /home/stubbe/git/private/harness &&  echo \"one\" \n echo   two"
+
+	for _, expanded := range []bool{false, true} {
+		got := toolHeader(sty, ToolStatusSuccess, "Shell", 80,
+			&ToolRenderOpts{ExpandedContent: expanded}, cmd)
+		require.NotContains(t, got, "\n", "header stays one line (expanded=%t):\n%q", expanded, got)
+		require.LessOrEqual(t, ansi.StringWidth(got), 80, "header fits its width (expanded=%t):\n%q", expanded, got)
+		require.NotContains(t, got, "  ", "no doubled spaces (expanded=%t):\n%q", expanded, got)
+		require.Contains(t, got, "cd /home/stubbe/git/private/harness", "command text kept:\n%q", got)
+	}
+}
+
+// TestToolHeaderLongParamEllipsizes: a param far wider than the line
+// is cut with the ellipsis glyph rather than wrapped or clipped hard.
+func TestToolHeaderLongParamEllipsizes(t *testing.T) {
+	t.Parallel()
+
+	sty := linkStyles()
+	long := strings.Repeat("a", 200)
+
+	got := toolHeader(sty, ToolStatusSuccess, "View", 60, nil, long)
+	require.NotContains(t, got, "\n", "header stays one line:\n%q", got)
+	require.LessOrEqual(t, ansi.StringWidth(got), 60, "header fits its width:\n%q", got)
+	require.Contains(t, got, "…", "long param ends in an ellipsis:\n%q", got)
 }

@@ -63,10 +63,6 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if cmd == "" {
 		cmd = "(poll session)"
 	}
-	if !opts.ExpandedContent {
-		cmd = strings.ReplaceAll(cmd, "\n", " ")
-	}
-	cmd = strings.ReplaceAll(cmd, "\t", "    ")
 	cmd = common.StripShellDisplayPrefix(cmd, b.workingDir)
 	if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
 		cmd = highlighted

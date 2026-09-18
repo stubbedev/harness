@@ -36,6 +36,6 @@ func TestPartialStringField(t *testing.T) {
 func TestPendingDetail(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "go build ./...", pendingDetail("  go build ./...\ngo test", 80))
-	assert.Equal(t, "a    b", pendingDetail("a\tb", 80))
+	assert.Equal(t, "a b", pendingDetail("a\tb", 80))
 	assert.Equal(t, "abcd…", pendingDetail("abcdefgh", 5))
 }

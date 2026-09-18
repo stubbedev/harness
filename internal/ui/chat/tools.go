@@ -562,19 +562,15 @@ func (t *baseToolMessageItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (b
 
 // pendingTool renders a tool that is still in progress with an animation.
 func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) string {
-	icon := sty.Tool.IconPending.Render()
-	nameStyle := sty.Tool.NameNormal
-	if nested {
-		nameStyle = sty.Tool.NameNested
-	}
-	toolName := nameStyle.Render(name)
-
+	toolName := toolNameStyle(sty, ToolStatusRunning, nested).Render(name)
 	var animView string
 	if anim != nil {
 		animView = anim.Render()
 	}
-
-	return fmt.Sprintf("%s %s %s", icon, toolName, animView)
+	if animView == "" {
+		return toolName
+	}
+	return fmt.Sprintf("%s %s", toolName, animView)
 }
 
 // pendingToolDetail is pendingTool with what is known of the call so
@@ -583,16 +579,12 @@ func pendingToolDetail(sty *styles.Styles, name, detail string, anim *anim.Anim,
 	if detail == "" {
 		return pendingTool(sty, name, anim, nested)
 	}
-	icon := sty.Tool.IconPending.Render()
-	nameStyle := sty.Tool.NameNormal
-	if nested {
-		nameStyle = sty.Tool.NameNested
-	}
-	var animView string
+	nameStyle := toolNameStyle(sty, ToolStatusRunning, nested)
+	parts := []string{nameStyle.Render(name), sty.Tool.ParamMain.Render(detail)}
 	if anim != nil {
-		animView = anim.Render()
+		parts = append(parts, anim.Render())
 	}
-	return fmt.Sprintf("%s %s %s %s", icon, nameStyle.Render(name), sty.Tool.ParamMain.Render(detail), animView)
+	return strings.Join(parts, " ")
 }
 
 // waitingForToolMessage builds the "Waiting for tool response..." label,
@@ -647,24 +639,37 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 	return fmt.Sprintf("%s %s", errTag, sty.Tool.ErrorMessage.Render(errContent))
 }
 
-// toolIcon returns the status icon for a tool call.
-// toolIcon returns the status icon for a tool call based on its status.
-func toolIcon(sty *styles.Styles, status ToolStatus) string {
+// toolNameStyle returns the tool-name style for a call's status: green
+// while running or awaiting permission, blue when done, red on
+// failure, and muted when canceled. Nested calls (rendered inside a
+// group) use NameNested for the done state.
+func toolNameStyle(sty *styles.Styles, status ToolStatus, nested bool) lipgloss.Style {
 	switch status {
-	case ToolStatusSuccess:
-		return sty.Tool.IconSuccess.String()
 	case ToolStatusError:
-		return sty.Tool.IconError.String()
+		return sty.Tool.NameError
 	case ToolStatusCanceled:
-		return sty.Tool.IconCancelled.String()
+		return sty.Tool.NameCancelled
+	case ToolStatusRunning, ToolStatusAwaitingPermission:
+		return sty.Tool.NamePending
 	default:
-		return sty.Tool.IconPending.String()
+		if nested {
+			return sty.Tool.NameNested
+		}
+		return sty.Tool.NameNormal
 	}
 }
 
-// toolParamList formats tool parameters as "main (key=value, ...)" with truncation.
-// When opts.ExpandedContent is true, the output wraps instead of truncating.
-func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRenderOpts) string {
+// oneLine flattens text to a single space-joined line: whitespace
+// runs, tabs, and newlines all collapse to single spaces.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// toolParamList formats tool parameters as "main (key=value, ...)".
+// The text is always a single line: whitespace runs (including
+// newlines in multi-line commands) collapse to single spaces, and
+// anything past the width is cut with an ellipsis.
+func toolParamList(sty *styles.Styles, params []string, width int) string {
 	// minSpaceForMainParam is the min space required for the main param
 	// if this is less that the value set we will only show the main param nothing else
 	const minSpaceForMainParam = 30
@@ -672,7 +677,7 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 		return ""
 	}
 
-	mainParam := params[0]
+	mainParam := oneLine(params[0])
 	if isHTTPURL(mainParam) {
 		// Carry the URL's OSC 8 link inside the styled param so terminals
 		// that support hyperlinks open it on click. The link wraps the
@@ -684,7 +689,8 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 	var kvPairs []string
 	for i := 1; i+1 < len(params); i += 2 {
 		if params[i+1] != "" {
-			kvPairs = append(kvPairs, fmt.Sprintf("%s=%s", params[i], params[i+1]))
+			kvPairs = append(kvPairs, fmt.Sprintf("%s=%s",
+				oneLine(params[i]), oneLine(params[i+1])))
 		}
 	}
 
@@ -697,10 +703,8 @@ func toolParamList(sty *styles.Styles, params []string, width int, opts *ToolRen
 		}
 	}
 
-	if width >= 0 && (opts == nil || !opts.ExpandedContent) {
+	if width >= 0 {
 		output = ansi.Truncate(output, width, "…")
-	} else if opts != nil && opts.ExpandedContent && width > 0 && lipgloss.Width(output) > width {
-		output = ansi.Hardwrap(output, width, false)
 	}
 	return sty.Tool.ParamMain.Render(output)
 }
@@ -716,32 +720,15 @@ func isHTTPURL(s string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
-// toolHeader builds the tool header line: "● ToolName params..."
-// When opts.ExpandedContent is true, long parameters wrap instead of truncating.
+// toolHeader builds the tool header line: "ToolName params...", with
+// the name colored by status. The parameter text is always a single
+// line, ellipsis-truncated to the remaining width.
 func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, opts *ToolRenderOpts, params ...string) string {
 	nested := opts != nil && opts.Compact
-	icon := toolIcon(sty, status)
-	nameStyle := sty.Tool.NameNormal
-	if nested {
-		nameStyle = sty.Tool.NameNested
-	}
-	toolName := nameStyle.Render(name)
-	prefix := fmt.Sprintf("%s %s ", icon, toolName)
-	prefixWidth := lipgloss.Width(prefix)
-	remainingWidth := width - prefixWidth
-	paramsStr := toolParamList(sty, params, remainingWidth, opts)
-
-	// When expanded, toolParamList may return multiple lines. Indent
-	// continuation lines to align with the first line's param text.
-	if strings.Contains(paramsStr, "\n") {
-		lines := strings.Split(paramsStr, "\n")
-		indent := strings.Repeat(" ", prefixWidth)
-		for i := 1; i < len(lines); i++ {
-			lines[i] = indent + lines[i]
-		}
-		return prefix + strings.Join(lines, "\n")
-	}
-	return prefix + paramsStr
+	toolName := toolNameStyle(sty, status, nested).Render(name)
+	prefix := toolName + " "
+	remainingWidth := width - lipgloss.Width(prefix)
+	return prefix + toolParamList(sty, params, remainingWidth)
 }
 
 // toolOutputPlainContent renders plain text with optional expansion support.

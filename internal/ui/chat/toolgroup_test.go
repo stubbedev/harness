@@ -187,7 +187,7 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		assert.Contains(t, out, "npm test")
 	})
 
-	t.Run("every failed call shows the error glyph", func(t *testing.T) {
+	t.Run("all-failed run colors the verb red", func(t *testing.T) {
 		t.Parallel()
 		item := bashTool("t1", "make build", true)
 		item.SetResult(&message.ToolResult{ToolCallID: "t1", Name: "shell", Content: "boom", IsError: true})
@@ -195,27 +195,29 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		item2.SetResult(&message.ToolResult{ToolCallID: "t2", Name: "shell", Content: "boom", IsError: true})
 		g := NewToolGroupMessageItem(sty, item)
 		g.AddTool(item2)
-		assert.Contains(t, g.Render(80), styles.ToolError)
+		out := g.Render(80)
+		assert.Contains(t, out, sty.Tool.NameError.Render("Ran"))
+		assert.NotContains(t, out, sty.Tool.NamePartial.Render("Ran"))
 	})
 
-	t.Run("partial failure shows the success glyph without the error glyph", func(t *testing.T) {
+	t.Run("partial failure colors the verb yellow without red", func(t *testing.T) {
 		t.Parallel()
 		item := bashTool("t1", "make build", true)
 		item.SetResult(&message.ToolResult{ToolCallID: "t1", Name: "shell", Content: "boom", IsError: true})
 		g := NewToolGroupMessageItem(sty, item)
 		g.AddTool(done("t2"))
 		out := g.Render(80)
-		assert.Contains(t, out, styles.ToolSuccess)
-		assert.NotContains(t, out, styles.ToolError)
+		assert.Contains(t, out, sty.Tool.NamePartial.Render("Ran"))
+		assert.NotContains(t, out, sty.Tool.NameError.Render("Ran"))
 	})
 
-	t.Run("all-succeeded group shows the success glyph", func(t *testing.T) {
+	t.Run("all-succeeded run colors the verb blue", func(t *testing.T) {
 		t.Parallel()
 		g := NewToolGroupMessageItem(sty, done("t1"))
 		g.AddTool(done("t2"))
 		out := g.Render(80)
-		assert.Contains(t, out, styles.ToolSuccess)
-		assert.NotContains(t, out, styles.ToolError)
+		assert.Contains(t, out, sty.Tool.NameNormal.Render("Ran"))
+		assert.NotContains(t, out, sty.Tool.NameError.Render("Ran"))
 	})
 
 	t.Run("one-liners prettify the tool name", func(t *testing.T) {

@@ -69,11 +69,10 @@ func partialStringField(input, key string) (string, bool) {
 	return sb.String(), true
 }
 
-// pendingDetail is the one-line form of a streaming input value: the
-// first line, tabs flattened, cut to fit.
+// pendingDetail is the one-line form of a streaming input value:
+// whitespace collapsed to one space-joined line, cut to fit.
 func pendingDetail(value string, width int) string {
-	line, _, _ := strings.Cut(strings.TrimSpace(value), "\n")
-	line = strings.ReplaceAll(line, "\t", "    ")
+	line := FirstLine(value)
 	if width <= 0 {
 		return line
 	}

@@ -393,30 +393,34 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 	}
 
 	verb := "Ran"
-	glyph := g.sty.Tool.IconSuccess.Render()
+	verbStyle := g.sty.Tool.NameNormal
 	if cancelled && failed == 0 {
-		glyph = g.sty.Tool.IconCancelled.Render()
+		verbStyle = g.sty.Tool.NameCancelled
 	} else if failed > 0 && succeeded == 0 {
-		glyph = g.sty.Tool.IconError.Render()
+		verbStyle = g.sty.Tool.NameError
 	} else if failed > 0 {
-		glyph = g.sty.Tool.IconPartial.Render()
+		verbStyle = g.sty.Tool.NamePartial
 	}
 	if running {
 		verb = "Running"
-		glyph = g.anim.Render()
+		verbStyle = g.sty.Tool.NamePending
 	}
 	calls := fmt.Sprintf("%d tool calls", len(g.tools))
 	if len(g.tools) == 1 {
 		calls = "1 tool call"
 	}
 	if failed > 0 {
-		// The glyph already signals a partial failure; the count says how
-		// much of the run to distrust without expanding it.
+		// The verb color already signals a partial failure; the count
+		// says how much of the run to distrust without expanding it.
 		calls += fmt.Sprintf(", %d failed", failed)
 	}
-	header := fmt.Sprintf("%s %s %s",
+	var glyph string
+	if running {
+		glyph = g.anim.Render() + " "
+	}
+	header := fmt.Sprintf("%s%s %s",
 		glyph,
-		g.sty.Tool.NameNormal.Render(verb),
+		verbStyle.Render(verb),
 		g.sty.Tool.Body.Render("("+calls+")"))
 
 	lines = append(lines, header)
@@ -516,23 +520,24 @@ func (g *ToolGroupMessageItem) advanceLiveTool() {
 	}
 }
 
-// ToolOneLiner renders one tool call as a single line: status glyph,
-// tool name and an argument summary, truncated to width. A running call
-// gets the pending dot, not the tool's full scrambled spinner (a 15-cell
-// animation with its own timer would crowd the line; the group header
-// already carries the live animation). Shared by the transcript's
-// collapsed groups and the background task strip's nested lines.
+// ToolOneLiner renders one tool call as a single line: tool name,
+// colored by status, and an argument summary, truncated to width. A
+// running call uses the green running color, not the tool's full
+// scrambled spinner (a 15-cell animation with its own timer would
+// crowd the line; the group header already carries the live
+// animation). Shared by the transcript's collapsed groups and the
+// background task strip's nested lines.
 func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int) string {
-	glyph := sty.Tool.IconSuccess.Render()
+	status := ToolStatusSuccess
 	if a, ok := t.(Animatable); ok && a.Spinning() {
-		glyph = sty.Tool.IconPending.Render()
+		status = ToolStatusRunning
 	} else if res := t.Result(); res != nil && res.IsError {
-		glyph = sty.Tool.IconError.Render()
+		status = ToolStatusError
 	} else if t.Status() == ToolStatusCanceled {
-		glyph = sty.Tool.IconCancelled.Render()
+		status = ToolStatusCanceled
 	}
-	name := sty.Tool.NameNormal.Render(ToolDisplayName(t.ToolCall()))
-	line := glyph + " " + name
+	name := toolNameStyle(sty, status, false).Render(ToolDisplayName(t.ToolCall()))
+	line := name
 	if summary := ToolCallSummary(t.ToolCall()); summary != "" {
 		line += " " + sty.Tool.Body.Render(summary)
 	}
