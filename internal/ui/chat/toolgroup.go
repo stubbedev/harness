@@ -550,8 +550,8 @@ func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int) string {
 }
 
 const (
-	subItemIndent       = 2
-	subItemIndentString = "  "
+	subItemIndent       = 1
+	subItemIndentString = " "
 )
 
 // ToolCallSummary extracts a one-line argument summary from a tool call
