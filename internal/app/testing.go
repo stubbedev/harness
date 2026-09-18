@@ -26,7 +26,7 @@ func NewForTest(ctx context.Context) *App {
 	app := &App{
 		Questions:          question.NewService(),
 		globalCtx:          ctx,
-		events:             pubsub.NewBroker[tea.Msg](),
+		events:             pubsub.NewStreamingBroker[tea.Msg](),
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),

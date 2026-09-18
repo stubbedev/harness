@@ -32,12 +32,19 @@ import (
 )
 
 const (
-	// bufferSize is the per-subscriber channel capacity for any broker
-	// created via NewBroker. Publish is non-blocking, so a full buffer
-	// drops events (with a warning log); sized to cover a long
-	// streaming assistant turn (~one UpdatedEvent per token) even under
-	// TUI render stalls.
-	bufferSize = 4096
+	// streamingBufferSize is the per-subscriber channel capacity for
+	// brokers that carry high-frequency streaming updates (roughly one
+	// event per token). Publish is non-blocking, so a full buffer drops
+	// events (with a warning log); sized to cover a long streaming
+	// assistant turn even under TUI render stalls.
+	streamingBufferSize = 4096
+
+	// bufferSize is the default per-subscriber channel capacity. Most
+	// brokers carry low-frequency events (session lifecycle, LSP state,
+	// notifications, skills, questions) that rarely burst, so a smaller
+	// buffer keeps each subscriber channel cheap while still absorbing
+	// short spikes without dropping.
+	bufferSize = 256
 
 	// defaultMustDeliverTimeout is the per-subscriber upper bound on how
 	// long [Broker.PublishMustDeliver] will block waiting for buffer
@@ -58,6 +65,14 @@ type Broker[T any] struct {
 
 func NewBroker[T any]() *Broker[T] {
 	return NewBrokerWithOptions[T](bufferSize)
+}
+
+// NewStreamingBroker creates a broker with the large per-subscriber
+// buffer used for high-frequency streaming updates. Prefer
+// [NewBroker] for everything else; the smaller default keeps each
+// subscriber channel cheap.
+func NewStreamingBroker[T any]() *Broker[T] {
+	return NewBrokerWithOptions[T](streamingBufferSize)
 }
 
 func NewBrokerWithOptions[T any](channelBufferSize int) *Broker[T] {

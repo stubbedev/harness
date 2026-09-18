@@ -154,7 +154,7 @@ func WithDebounce(d time.Duration) ServiceOption {
 
 func NewService(q db.Querier, opts ...ServiceOption) Service {
 	s := &service{
-		Broker:   pubsub.NewBroker[Message](),
+		Broker:   pubsub.NewStreamingBroker[Message](),
 		q:        q,
 		debounce: defaultUpdateDebounce,
 		pending:  make(map[string]*pendingState),

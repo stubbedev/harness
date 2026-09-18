@@ -151,7 +151,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 		config: store,
 
-		events:             pubsub.NewBroker[tea.Msg](),
+		events:             pubsub.NewStreamingBroker[tea.Msg](),
 		serviceEventsWG:    &sync.WaitGroup{},
 		tuiWG:              &sync.WaitGroup{},
 		agentNotifications: pubsub.NewBroker[notify.Notification](),
