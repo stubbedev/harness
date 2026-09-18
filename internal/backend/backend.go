@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -20,6 +19,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/db"
+	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/subagents"
@@ -1044,18 +1044,9 @@ func (b *Backend) ShutdownIfIdle() bool {
 }
 
 // resolveWorkspaceKey returns a stable canonical form of path suitable
-// for use as a dedup key. It applies filepath.Abs, then attempts
-// filepath.EvalSymlinks; because EvalSymlinks errors on non-existent
-// paths, it falls back to the cleaned absolute path in that case.
+// for use as a dedup key.
 func resolveWorkspaceKey(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		return resolved, nil
-	}
-	return abs, nil
+	return fsext.Canonicalize(path)
 }
 
 // validateClientID returns the trimmed UUID string or an error if the

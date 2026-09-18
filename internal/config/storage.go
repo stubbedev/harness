@@ -46,12 +46,9 @@ func DefaultWorkspaceDataDirectory(workingDir string) string {
 // name for a workspace root: a hash of its canonical absolute path,
 // suffixed for debuggability with a slug of its base name.
 func workspaceDirName(root string) string {
-	abs, err := filepath.Abs(root)
+	abs, err := fsext.Canonicalize(root)
 	if err != nil {
 		abs = root
-	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
 	}
 	h := xxh3.New()
 	h.WriteString(filepath.ToSlash(abs))

@@ -262,6 +262,23 @@ func ResolveConfigPath(path string, resolver func(string) (string, error)) strin
 	return expanded
 }
 
+// Canonicalize returns the absolute form of path with symlinks
+// resolved. Resolution is best effort: when EvalSymlinks fails
+// (typically a non-existent path) the absolute path is returned as-is,
+// so callers can still perform stable equality checks and derive names
+// from the result. Abs failures propagate. Single source for the
+// workspace directory-name and dedup-key derivations.
+func Canonicalize(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
+	}
+	return abs, nil
+}
+
 // canonicalize resolves any symbolic links in path. If resolution fails
 // (typically because path does not exist yet) the original path is
 // returned cleaned, so callers can still perform stable equality checks.
