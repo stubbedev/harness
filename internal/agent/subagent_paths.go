@@ -93,19 +93,29 @@ func missingCitedPaths(report, workdir string) []string {
 	return missing
 }
 
-// pathExists reports whether token resolves under workdir: absolute
-// tokens are checked directly, everything else is joined onto workdir.
-// Globs match when at least one file or directory matches.
+// pathExists reports whether token resolves under workdir. The token
+// comes from a sub-agent's free-text report, so the probe stays inside
+// the workspace: relative tokens are joined onto workdir, absolute
+// tokens are honored only when they already name something under it,
+// and anything that resolves outside - via .. or an unrelated absolute
+// path - counts as missing rather than being statted. Nothing outside
+// the workspace is ever probed; an existence oracle over arbitrary
+// paths would itself be a disclosure. Globs match when at least one
+// file or directory matches.
 func pathExists(workdir, token string, glob bool) bool {
 	target := token
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(workdir, target)
 	}
+	rel, err := filepath.Rel(workdir, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
 	if glob {
 		matches, err := filepath.Glob(target)
 		return err == nil && len(matches) > 0
 	}
-	_, err := os.Stat(target)
+	_, err = os.Stat(target)
 	return err == nil
 }
 

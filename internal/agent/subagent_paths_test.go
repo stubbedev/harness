@@ -37,6 +37,29 @@ func TestMissingCitedPaths(t *testing.T) {
 	}, missing)
 }
 
+// TestMissingCitedPathsStaysInsideTheWorkspace pins the containment the
+// existence probe promises: absolute citations under the workspace
+// count (the fast agent is told to cite absolute paths), while anything
+// resolving outside - an unrelated absolute path or a .. escape - is a
+// fabricated citation, never an existence probe of foreign ground.
+func TestMissingCitedPathsStaysInsideTheWorkspace(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "real.go"), []byte("x"), 0o644))
+
+	report := strings.Join([]string{
+		filepath.Join(dir, "real.go"),
+		"/usr/share/dict/words.txt",
+		"../../outside/x.go",
+	}, " ")
+
+	missing := missingCitedPaths(report, dir)
+
+	require.Equal(t, []string{"/usr/share/dict/words.txt", "../../outside/x.go"}, missing,
+		"the workspace file must be grounded; foreign paths must be flagged as fabricated")
+}
+
 func TestWarnOnFabricatedPaths(t *testing.T) {
 	t.Parallel()
 
