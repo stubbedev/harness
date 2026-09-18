@@ -2,7 +2,6 @@ package extensions
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 
 	"github.com/stubbedev/harness/internal/hooks"
@@ -106,7 +105,7 @@ func hookResult(value lua.LValue) hooks.HookResult {
 			UpdatedPrompt: tableString(typed, "updated_prompt", ""),
 		}
 		if patch, ok := typed.RawGetString("updated_input").(*lua.LTable); ok {
-			if data, err := json.Marshal(fromLua(patch)); err == nil {
+			if data, err := marshalLuaValue(patch); err == nil {
 				result.UpdatedInput = string(data)
 			}
 		}

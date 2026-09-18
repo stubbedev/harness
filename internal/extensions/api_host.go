@@ -3,7 +3,6 @@ package extensions
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -366,7 +365,7 @@ func requestBody(spec *lua.LTable) string {
 	case lua.LString:
 		return string(body)
 	case *lua.LTable:
-		data, err := json.Marshal(fromLua(body))
+		data, err := marshalLuaValue(body)
 		if err != nil {
 			return ""
 		}

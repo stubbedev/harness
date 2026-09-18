@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -174,7 +173,7 @@ func jobResultString(value lua.LValue) string {
 	case *lua.LNilType:
 		return ""
 	case *lua.LTable:
-		data, err := json.Marshal(fromLua(typed))
+		data, err := marshalLuaValue(typed)
 		if err != nil {
 			return typed.String()
 		}

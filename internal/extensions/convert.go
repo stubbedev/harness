@@ -86,6 +86,14 @@ func fromLua(v lua.LValue) any {
 	return fromLuaDepth(v, 0)
 }
 
+// marshalLuaValue encodes a Lua value as JSON. Single source for the
+// encode sites so the Lua-to-JSON conversion policy lives in one
+// place; callers keep their own failure policy (user-visible raise,
+// silent fallback, or substitute rendering).
+func marshalLuaValue(v lua.LValue) ([]byte, error) {
+	return json.Marshal(fromLua(v))
+}
+
 func fromLuaDepth(v lua.LValue, depth int) any {
 	if depth > maxConvertDepth {
 		return nil

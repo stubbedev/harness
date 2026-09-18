@@ -2,7 +2,6 @@ package extensions
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"os"
 	"regexp"
@@ -142,7 +141,7 @@ func (in *instance) logAt(level slog.Level) lua.LGFunction {
 }
 
 func (in *instance) luaJSONEncode(L *lua.LState) int {
-	data, err := json.Marshal(fromLua(L.CheckAny(1)))
+	data, err := marshalLuaValue(L.CheckAny(1))
 	if err != nil {
 		L.RaiseError("json.encode: %v", err)
 		return 0
