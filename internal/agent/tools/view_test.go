@@ -244,37 +244,45 @@ var _ filetracker.Service = mockFileTracker{}
 func TestReadBuiltinFile(t *testing.T) {
 	t.Parallel()
 
+	// readBuiltin is readBuiltinFile on a zero tool: it needs no
+	// dependencies, only the embedded skill filesystem.
+	readBuiltin := func(params ViewParams) (viewFileContent, *fantasy.ToolResponse, error) {
+		return (&viewTool{}).readBuiltinFile(params)
+	}
+
 	t.Run("reads harness-config skill", func(t *testing.T) {
 		t.Parallel()
 
-		resp, err := readBuiltinFile(ViewParams{
+		result, failure, err := readBuiltin(ViewParams{
 			FilePath: "harness://skills/harness-config/SKILL.md",
-		}, nil)
+		})
 		require.NoError(t, err)
-		require.NotEmpty(t, resp.Content)
-		require.Contains(t, resp.Content, "Harness Configuration")
+		require.Nil(t, failure)
+		require.NotEmpty(t, result.output)
+		require.Contains(t, result.output, "Harness Configuration")
 	})
 
 	t.Run("not found", func(t *testing.T) {
 		t.Parallel()
 
-		resp, err := readBuiltinFile(ViewParams{
+		_, failure, err := readBuiltin(ViewParams{
 			FilePath: "harness://skills/nonexistent/SKILL.md",
-		}, nil)
+		})
 		require.NoError(t, err)
-		require.True(t, resp.IsError)
+		require.NotNil(t, failure)
+		require.True(t, failure.IsError)
 	})
 
 	t.Run("metadata has skill info", func(t *testing.T) {
 		t.Parallel()
 
-		resp, err := readBuiltinFile(ViewParams{
+		result, failure, err := readBuiltin(ViewParams{
 			FilePath: "harness://skills/harness-config/SKILL.md",
-		}, nil)
+		})
 		require.NoError(t, err)
+		require.Nil(t, failure)
 
-		var meta ViewResponseMetadata
-		require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+		meta := result.meta
 		require.Equal(t, ViewResourceSkill, meta.ResourceType)
 		require.Equal(t, "harness-config", meta.ResourceName)
 		require.NotEmpty(t, meta.ResourceDescription)
@@ -283,12 +291,13 @@ func TestReadBuiltinFile(t *testing.T) {
 	t.Run("respects offset", func(t *testing.T) {
 		t.Parallel()
 
-		resp, err := readBuiltinFile(ViewParams{
+		result, failure, err := (&viewTool{}).readBuiltinFile(ViewParams{
 			FilePath: "harness://skills/harness-config/SKILL.md",
 			Offset:   5,
-		}, nil)
+		})
 		require.NoError(t, err)
-		require.NotContains(t, resp.Content, "     1|")
+		require.Nil(t, failure)
+		require.NotContains(t, result.output, "     1|")
 	})
 }
 
