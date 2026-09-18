@@ -52,7 +52,7 @@ func NewRunner(hooks []config.HookConfig, cwd, projectDir string) *Runner {
 	for _, h := range hooks {
 		ch := compiledHook{cfg: h}
 		if h.Matcher != "" {
-			re, err := regexp.Compile(h.Matcher)
+			re, err := config.CompileMatcher(h.Matcher)
 			if err != nil {
 				slog.Warn(
 					"Hook matcher failed to compile; skipping hook",

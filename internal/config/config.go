@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -790,6 +791,16 @@ type HookConfig struct {
 	Command string `json:"command" jsonschema:"required,description=Shell command to execute when the hook fires"`
 	// Timeout in seconds. Default 30.
 	Timeout int `json:"timeout,omitempty" jsonschema:"description=Timeout in seconds for the hook command,default=30"`
+}
+
+// CompileMatcher compiles a hook event matcher pattern. Single source
+// for the matcher consumers (config validation, the shell-hook Runner,
+// Lua extensions) so a change to the matcher semantics cannot be
+// applied to one path only. Error policy stays with the caller:
+// validation fails the load, the Runner skips the hook with a warning,
+// and Lua registration raises a Lua error.
+func CompileMatcher(pattern string) (*regexp.Regexp, error) {
+	return regexp.Compile(pattern)
 }
 
 // DisplayName returns the hook name for display purposes. It returns Name

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/hooks"
 	"github.com/stubbedev/harness/internal/version"
 	lua "github.com/yuin/gopher-lua"
@@ -282,7 +283,7 @@ func (in *instance) luaOn(L *lua.LState) int {
 
 	handler := &hookHandler{event: event, fn: fn, in: in}
 	if matcher != "" {
-		re, err := regexp.Compile(matcher)
+		re, err := config.CompileMatcher(matcher)
 		if err != nil {
 			L.RaiseError("harness.on %q: invalid matcher %q: %v", event, matcher, err)
 			return 0

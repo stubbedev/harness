@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -1472,7 +1471,7 @@ func (c *Config) ValidateHooks() error {
 			if h.Matcher == "" {
 				continue
 			}
-			if _, err := regexp.Compile(h.Matcher); err != nil {
+			if _, err := CompileMatcher(h.Matcher); err != nil {
 				return fmt.Errorf("hook %s[%d]: invalid matcher regex %q: %w", event, i, h.Matcher, err)
 			}
 		}
