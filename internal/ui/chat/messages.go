@@ -557,6 +557,38 @@ func ShouldRenderAssistantMessage(msg *message.Message) bool {
 	return !hasToolCalls || content != "" || thinking != "" || isThinking || msg.IsErrorLike() || isCancelled
 }
 
+// TrimTrailingThinking drops trailing assistant messages whose only
+// renderable content is thinking (or nothing at all). A transcript can
+// never legitimately end on a thinking entry — thinking is always
+// followed by the answer or tool calls of its turn — so a persisted
+// tail like that is a turn cut off mid-generation, and rebuilding the
+// transcript for display must not show it.
+func TrimTrailingThinking(msgs []*message.Message) []*message.Message {
+	for len(msgs) > 0 {
+		msg := msgs[len(msgs)-1]
+		if !isThinkingOnlyTail(msg) {
+			return msgs
+		}
+		msgs = msgs[:len(msgs)-1]
+	}
+	return nil
+}
+
+// isThinkingOnlyTail reports whether msg is an assistant message the
+// transcript should end on: no text, no tool calls, no error banner,
+// and not canceled — just (possibly) thinking. Canceled and error
+// messages carry information on their own and always stay.
+func isThinkingOnlyTail(msg *message.Message) bool {
+	if msg == nil || msg.Role != message.Assistant || msg.IsSummaryMessage {
+		return false
+	}
+	if len(msg.ToolCalls()) > 0 || msg.IsErrorLike() ||
+		msg.FinishReason() == message.FinishReasonCanceled {
+		return false
+	}
+	return strings.TrimSpace(msg.Content().Text) == ""
+}
+
 // BuildToolResultMap creates a map of tool call IDs to their results from a list of messages.
 // Tool result messages (role == message.Tool) contain the results that should be linked
 // to tool calls in assistant messages.

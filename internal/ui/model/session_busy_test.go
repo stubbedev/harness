@@ -601,7 +601,10 @@ func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 	m := newBusyUI(ws)
 	warmCaches(m, false)
 
-	// A message that looks unfinished (no Finish part, no content).
+	// A message that looks unfinished: an assistant turn with an
+	// unresolved tool call and no Finish part. (A thinking-only tail
+	// is dropped outright — a transcript cannot end on a thinking
+	// entry — so it would not exercise the spinner gating here.)
 	msgs := []message.Message{
 		{
 			ID:        "m1",
@@ -609,6 +612,7 @@ func TestSetSessionMessagesGatesAnimationsOnBusy(t *testing.T) {
 			Role:      message.Assistant,
 			Parts: []message.ContentPart{
 				message.ReasoningContent{Thinking: "thinking..."},
+				message.ToolCall{ID: "t1", Name: "shell", Input: `{"command":"make"}`},
 			},
 		},
 	}

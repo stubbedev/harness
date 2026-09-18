@@ -1695,6 +1695,9 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	for i := range msgs {
 		msgPtrs[i] = &msgs[i]
 	}
+	// A turn killed mid-generation can persist an assistant message
+	// whose only content is thinking; it must not end the transcript.
+	msgPtrs = chat.TrimTrailingThinking(msgPtrs)
 	toolResultMap := chat.BuildToolResultMap(msgPtrs)
 	if len(msgPtrs) > 0 {
 		m.lastUserMessageTime = msgPtrs[0].CreatedAt
