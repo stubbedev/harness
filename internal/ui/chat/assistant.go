@@ -693,7 +693,7 @@ func (a *AssistantMessageItem) renderError(width int) string {
 		detailsText = cmp.Or(detailsText, refusalDetails)
 	}
 	errTag := a.sty.Messages.ErrorTag.Render(tagLabel)
-	truncated := ansi.Truncate(titleText, width-2-lipgloss.Width(errTag), "...")
+	truncated := ansi.Truncate(titleText, width-2-lipgloss.Width(errTag), "…")
 	title := fmt.Sprintf("%s %s", errTag, a.sty.Messages.ErrorTitle.Render(truncated))
 	if detailsText == "" {
 		return title

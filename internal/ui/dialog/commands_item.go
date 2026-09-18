@@ -147,7 +147,7 @@ func (c *CommandItem) Render(width int) string {
 			descStyle = c.t.Dialog.SelectedItem
 		}
 		contentWidth := max(0, width-descStyle.GetHorizontalFrameSize()+1)
-		description := ansi.Truncate(strings.TrimSpace(c.description), contentWidth, "...")
+		description := ansi.Truncate(strings.TrimSpace(c.description), contentWidth, "…")
 		descVisWidth := lipgloss.Width(description)
 		gap := strings.Repeat(" ", max(0, contentWidth-descVisWidth))
 		if description == "" {
