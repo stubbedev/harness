@@ -30,6 +30,7 @@ func TestCommandsHintDerivesFromKeymap(t *testing.T) {
 
 	short := m.ShortHelp()
 	require.Equal(t, "ctrl+p", helpKey(t, short, "commands"))
+	require.Equal(t, ":", helpKey(t, short, "command palette"))
 	require.Equal(t, "/", helpKey(t, short, "skills"))
 
 	var flat []key.Binding
@@ -37,6 +38,7 @@ func TestCommandsHintDerivesFromKeymap(t *testing.T) {
 		flat = append(flat, col...)
 	}
 	require.Equal(t, "ctrl+p", helpKey(t, flat, "commands"))
+	require.Equal(t, ":", helpKey(t, flat, "command palette"))
 	require.Equal(t, "/", helpKey(t, flat, "skills"))
 
 	m.keyMap.ApplyKeybinds(map[string][]string{"commands": {"ctrl+k"}})
@@ -54,10 +56,12 @@ func TestSkillsHintOnlyWhileEditorEmpty(t *testing.T) {
 
 	for _, b := range m.ShortHelp() {
 		require.NotEqual(t, "skills", b.Help().Desc)
+		require.NotEqual(t, "command palette", b.Help().Desc)
 	}
 	for _, col := range m.FullHelp() {
 		for _, b := range col {
 			require.NotEqual(t, "skills", b.Help().Desc)
+			require.NotEqual(t, "command palette", b.Help().Desc)
 		}
 	}
 }

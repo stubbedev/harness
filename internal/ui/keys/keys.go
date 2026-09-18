@@ -305,7 +305,7 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.Commands = key.NewBinding(
 		key.WithKeys(":"),
-		key.WithHelp(":", "commands"),
+		key.WithHelp(":", "command palette"),
 	)
 	km.Editor.Skills = key.NewBinding(
 		key.WithKeys("/"),

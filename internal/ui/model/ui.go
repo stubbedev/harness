@@ -3304,6 +3304,16 @@ func (m *UI) applyProgressBar(v *tea.View) {
 	}
 }
 
+// editorPaletteHints returns the editor prefix bindings that open the
+// palettes. ":" and "/" only work as the editor's first character, so
+// they are hinted only while the editor is empty.
+func editorPaletteHints(k *KeyMap, show bool) []key.Binding {
+	if !show {
+		return nil
+	}
+	return []key.Binding{k.Editor.Commands, k.Editor.Skills}
+}
+
 // ShortHelp implements [help.KeyMap].
 func (m *UI) ShortHelp() []key.Binding {
 	var binds []key.Binding
@@ -3315,9 +3325,10 @@ func (m *UI) ShortHelp() []key.Binding {
 	}
 
 	tab := k.Tab
-	// "/" opens the skills palette only as the editor's first character, so
-	// the skills binding is hinted beside commands only while it is empty.
-	showSkills := m.focus == uiFocusEditor && m.textarea.Value() == ""
+	// ":" and "/" open the command and skills palettes only as the
+	// editor's first character, so they are hinted beside commands only
+	// while the editor is empty.
+	showEditorPalettes := m.focus == uiFocusEditor && m.textarea.Value() == ""
 
 	switch m.state {
 	case uiChat:
@@ -3345,9 +3356,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		}
 
 		binds = append(binds, tab, k.Commands)
-		if showSkills {
-			binds = append(binds, k.Editor.Skills)
-		}
+		binds = append(binds, editorPaletteHints(k, showEditorPalettes)...)
 		binds = append(binds, k.Models)
 
 		switch m.focus {
@@ -3383,9 +3392,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			k.Models,
 			k.Editor.Newline,
 		)
-		if showSkills {
-			binds = append(binds, k.Editor.Skills)
-		}
+		binds = append(binds, editorPaletteHints(k, showEditorPalettes)...)
 	}
 
 	quit := k.Quit
@@ -3414,10 +3421,10 @@ func (m *UI) FullHelp() [][]key.Binding {
 	help.SetHelp(keys.HelpKeys(help), "less")
 	hasAttachments := len(m.attachments.List()) > 0
 	hasSession := m.hasSession()
-	// "/" opens the skills palette only as the editor's first character,
-	// so the skills binding is hinted beside commands only while it is
-	// empty.
-	showSkills := m.focus == uiFocusEditor && m.textarea.Value() == ""
+	// ":" and "/" open the command and skills palettes only as the
+	// editor's first character, so they are hinted beside commands only
+	// while the editor is empty.
+	showEditorPalettes := m.focus == uiFocusEditor && m.textarea.Value() == ""
 
 	switch m.state {
 	case uiChat:
@@ -3449,9 +3456,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			tab,
 			k.Commands,
 		)
-		if showSkills {
-			mainBinds = append(mainBinds, k.Editor.Skills)
-		}
+		mainBinds = append(mainBinds, editorPaletteHints(k, showEditorPalettes)...)
 		mainBinds = append(
 			mainBinds,
 			k.Models,
@@ -3535,8 +3540,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Themes,
 				},
 			)
-			if showSkills {
-				binds[len(binds)-1] = append(binds[len(binds)-1], k.Editor.Skills)
+			if showEditorPalettes {
+				binds[len(binds)-1] = append(binds[len(binds)-1], editorPaletteHints(k, true)...)
 			}
 			editorBinds := []key.Binding{
 				k.Editor.Newline,
