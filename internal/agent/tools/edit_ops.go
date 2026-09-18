@@ -80,24 +80,35 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
-	file, err := edit.files.GetByPathAndSession(edit.ctx, filePath, sessionID)
+	if err := recordFileVersion(edit.ctx, edit.files, sessionID, filePath, oldContent, newContent); err != nil {
+		return err
+	}
+
+	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+	return nil
+}
+
+// recordFileVersion stores filePath in the session's file history: the
+// initial entry when the path is untracked, an intermediate version
+// when the tracked content differs from oldContent (the user edited the
+// file out of band), and a version holding newContent. Version
+// failures are logged, not fatal; only the initial Create is.
+func recordFileVersion(ctx context.Context, files history.Service, sessionID, filePath, oldContent, newContent string) error {
+	file, err := files.GetByPathAndSession(ctx, filePath, sessionID)
 	if err != nil {
-		_, err = edit.files.Create(edit.ctx, sessionID, filePath, oldContent)
-		if err != nil {
+		if _, err := files.Create(ctx, sessionID, filePath, oldContent); err != nil {
 			return fmt.Errorf("error creating file history: %w", err)
 		}
 	}
 	if file.Content != oldContent {
 		// User manually changed the content; store an intermediate version.
-		if _, err := edit.files.CreateVersion(edit.ctx, sessionID, filePath, oldContent); err != nil {
+		if _, err := files.CreateVersion(ctx, sessionID, filePath, oldContent); err != nil {
 			slog.Error("Error creating file history version", "error", err)
 		}
 	}
-	if _, err := edit.files.CreateVersion(edit.ctx, sessionID, filePath, newContent); err != nil {
+	if _, err := files.CreateVersion(ctx, sessionID, filePath, newContent); err != nil {
 		slog.Error("Error creating file history version", "error", err)
 	}
-
-	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
 	return nil
 }
 
