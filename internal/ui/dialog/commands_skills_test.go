@@ -33,7 +33,8 @@ func paletteTestCommon() *common.Common {
 }
 
 // TestSkillsPaletteListsOnlySkills pins the "/" palette: it shows
-// user-invocable skills and nothing else, with no tab cycling.
+// skills and nothing else, with no tab cycling. Every discovered skill
+// is listed — the user-invocable opt-in does not gate the palette.
 func TestSkillsPaletteListsOnlySkills(t *testing.T) {
 	t.Parallel()
 

@@ -38,9 +38,16 @@ var (
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
-	Name                   string         `yaml:"name" json:"name"`
-	Description            string         `yaml:"description" json:"description"`
-	UserInvocable          bool           `yaml:"user-invocable" json:"user_invocable"`
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description" json:"description"`
+	// UserInvocable mirrors the Claude Code field of the same name. The
+	// default is user-invocable: a nil pointer (field absent from the
+	// frontmatter) means the skill belongs in the user's / palette, and
+	// only an explicit `user-invocable: false` opts out — background
+	// knowledge the user should not invoke directly. The Agent Skills
+	// spec itself defines no invocation-control field, so spec-only
+	// skills land on the default.
+	UserInvocable          *bool          `yaml:"user-invocable" json:"user_invocable,omitempty"`
 	DisableModelInvocation bool           `yaml:"disable-model-invocation" json:"disable_model_invocation"`
 	License                string         `yaml:"license,omitempty" json:"license,omitempty"`
 	Compatibility          string         `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
@@ -114,6 +121,13 @@ func SetLatestStates(states []*SkillState) {
 	latestStatesMu.Lock()
 	latestStates = cloneStates(states)
 	latestStatesMu.Unlock()
+}
+
+// IsUserInvocable reports whether the skill belongs in the user's
+// palette: the default (nil UserInvocable) is yes, matching Claude
+// Code's documented default; only `user-invocable: false` opts out.
+func (s *Skill) IsUserInvocable() bool {
+	return s.UserInvocable == nil || *s.UserInvocable
 }
 
 // Validate checks if the skill meets spec requirements.

@@ -457,6 +457,40 @@ func TestParseContent_NoFrontmatter(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestUserInvocableDefaultsToTrue pins the invocation-control default:
+// a skill without the field is user-invocable, matching Claude Code's
+// documented default. The Agent Skills spec defines no such field, so
+// spec-only skills must land on the default and stay searchable in the
+// / palette; only an explicit opt-out hides one.
+func TestUserInvocableDefaultsToTrue(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		yaml    string
+		want    bool
+		present bool
+	}{
+		{"absent", "", true, false},
+		{"explicit true", "user-invocable: true\n", true, true},
+		{"explicit false", "user-invocable: false\n", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			skill, err := ParseContent([]byte("---\nname: my-skill\ndescription: A test skill.\n" + tt.yaml + "---\nBody."))
+			require.NoError(t, err)
+			require.Equal(t, tt.want, skill.IsUserInvocable())
+			require.Equal(t, tt.present, skill.UserInvocable != nil)
+
+			entries := Catalog([]*Skill{skill}, nil, "")
+			require.Len(t, entries, 1)
+			require.Equal(t, tt.want, entries[0].UserInvocable)
+		})
+	}
+}
+
 func TestDiscoverBuiltin(t *testing.T) {
 	t.Parallel()
 

@@ -507,19 +507,19 @@ mv _temp/skills/* . ; rm -r -force _temp
 
 #### User-Invocable Skills
 
-Skills can be made invocable as commands from the commands palette
-(<kbd>ctrl+p</kbd>). Add `user-invocable: true` to the skill's YAML
-frontmatter:
+Every skill is user-invocable by default and searchable from the skills
+palette (<kbd>/</kbd>). Set `user-invocable: false` to keep a skill out of
+the palette (background knowledge only the model should load):
 
 ```yaml
 ---
 name: my-hot-skill
-description: A skill that can be invoked as a command.
-user-invocable: true
+description: A skill that stays out of the / palette.
+user-invocable: false
 ---
 ```
 
-User-invocable skills appear in the commands palette with a `user:` or `project:` prefix:
+Skills appear in the palette with a `user:` or `project:` prefix:
 
 - Skills from global directories show as `user:skill-name`
 - Skills from project directories show as `project:skill-name`
@@ -532,7 +532,6 @@ To prevent the model from auto-triggering a skill (while still allowing user inv
 ---
 name: my-skill
 description: Only invocable by users, not the model.
-user-invocable: true
 disable-model-invocation: true
 ---
 ```

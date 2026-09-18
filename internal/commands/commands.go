@@ -68,8 +68,11 @@ func LoadCustomCommands(cfg *config.Config) ([]CustomCommand, error) {
 	return loadAll(buildCommandSources(cfg))
 }
 
-// FromSkillCatalog converts user-invocable catalog entries into custom
-// command entries for the command palette.
+// FromSkillCatalog converts catalog entries into custom command entries for
+// the skills palette. Every user-invocable skill is listed — which is the
+// default; only an explicit `user-invocable: false` opts out (background
+// knowledge the user should not invoke directly). Skill bodies stay lazily
+// loaded — only name and description travel here.
 func FromSkillCatalog(entries []skills.CatalogEntry) []CustomCommand {
 	commands := make([]CustomCommand, 0, len(entries))
 	for _, entry := range entries {

@@ -360,14 +360,15 @@ unchanged:
 
 ## User-invocable skills
 
-Skills can be invoked as commands. Add `user-invocable: true` to the skill's
-YAML frontmatter:
+Every skill is user-invocable by default and searchable in the `/` palette.
+Set `user-invocable: false` to hide a skill from the palette (background
+knowledge only the model should load):
 
 ```yaml
 ---
 name: my-skill
-description: A skill that can be invoked as a command.
-user-invocable: true
+description: A skill that stays out of the / palette.
+user-invocable: false
 ---
 ```
 
