@@ -103,19 +103,7 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 // SubagentStop).
 func (r *Runner) RunEvent(ctx context.Context, ec EventContext) (AggregateResult, error) {
 	results, infos := r.results(ctx, ec)
-	if len(results) == 0 {
-		return AggregateResult{Decision: DecisionNone}, nil
-	}
-	agg := aggregate(results, ec.ToolInput)
-	agg.Hooks = infos
-	slog.Info(
-		"Hook completed",
-		"event", ec.Event,
-		"tool", ec.ToolName,
-		"hooks", len(results),
-		"decision", agg.Decision.String(),
-	)
-	return agg, nil
+	return finalizeAggregation(ec, results, infos)
 }
 
 // results runs every hook matching the event and returns the raw

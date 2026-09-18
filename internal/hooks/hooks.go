@@ -205,6 +205,26 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 	return agg
 }
 
+// finalizeAggregation aggregates raw hook results into the
+// AggregateResult every entry point returns and logs the completion
+// line. It returns the decision-none aggregate when no hook ran, so
+// neither the aggregation nor the log line fires for an empty run.
+func finalizeAggregation(ec EventContext, results []HookResult, infos []HookInfo) (AggregateResult, error) {
+	if len(results) == 0 {
+		return AggregateResult{Decision: DecisionNone}, nil
+	}
+	agg := aggregate(results, ec.ToolInput)
+	agg.Hooks = infos
+	slog.Info(
+		"Hook completed",
+		"event", ec.Event,
+		"tool", ec.ToolName,
+		"hooks", len(results),
+		"decision", agg.Decision.String(),
+	)
+	return agg, nil
+}
+
 // shallowMerge applies a top-level-keys patch to base (both JSON
 // objects). Keys in patch overwrite keys in base; keys absent from the
 // patch are preserved. Returns an error if either value is not a valid

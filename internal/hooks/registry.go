@@ -2,7 +2,6 @@ package hooks
 
 import (
 	"context"
-	"log/slog"
 
 	"github.com/stubbedev/harness/internal/config"
 )
@@ -94,18 +93,5 @@ func (r *Registry) Run(ctx context.Context, ec EventContext) (AggregateResult, e
 		}
 	}
 
-	if len(results) == 0 {
-		return AggregateResult{Decision: DecisionNone}, nil
-	}
-
-	agg := aggregate(results, ec.ToolInput)
-	agg.Hooks = infos
-	slog.Info(
-		"Hook completed",
-		"event", ec.Event,
-		"tool", ec.ToolName,
-		"hooks", len(results),
-		"decision", agg.Decision.String(),
-	)
-	return agg, nil
+	return finalizeAggregation(ec, results, infos)
 }
