@@ -516,14 +516,7 @@ func (s *service) List(ctx context.Context, sessionID string) ([]Message, error)
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]Message, len(dbMessages))
-	for i, dbMessage := range dbMessages {
-		messages[i], err = s.fromDBItem(dbMessage)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return messages, nil
+	return s.convertAll(dbMessages)
 }
 
 func (s *service) ListFrom(ctx context.Context, sessionID, fromID string) ([]Message, error) {
@@ -551,14 +544,7 @@ func (s *service) ListFrom(ctx context.Context, sessionID, fromID string) ([]Mes
 		return s.List(ctx, sessionID)
 	}
 	dbMessages = dbMessages[start:]
-	messages := make([]Message, len(dbMessages))
-	for i, dbMessage := range dbMessages {
-		messages[i], err = s.fromDBItem(dbMessage)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return messages, nil
+	return s.convertAll(dbMessages)
 }
 
 func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]Message, error) {
@@ -566,14 +552,7 @@ func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]Mes
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]Message, len(dbMessages))
-	for i, dbMessage := range dbMessages {
-		messages[i], err = s.fromDBItem(dbMessage)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return messages, nil
+	return s.convertAll(dbMessages)
 }
 
 func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
@@ -581,14 +560,7 @@ func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]Message, len(dbMessages))
-	for i, dbMessage := range dbMessages {
-		messages[i], err = s.fromDBItem(dbMessage)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return messages, nil
+	return s.convertAll(dbMessages)
 }
 
 func (s *service) GetLastAssistantMessage(ctx context.Context, sessionID string) (Message, error) {
@@ -597,6 +569,20 @@ func (s *service) GetLastAssistantMessage(ctx context.Context, sessionID string)
 		return Message{}, err
 	}
 	return s.fromDBItem(dbMessage)
+}
+
+// convertAll converts DB rows, stopping at the first parse failure.
+// fromDBItem is fallible (attachment parsing), so the error policy is
+// shared by every list method.
+func (s *service) convertAll(dbMessages []db.Message) ([]Message, error) {
+	messages := make([]Message, len(dbMessages))
+	for i, dbMessage := range dbMessages {
+		var err error
+		if messages[i], err = s.fromDBItem(dbMessage); err != nil {
+			return nil, err
+		}
+	}
+	return messages, nil
 }
 
 func (s *service) fromDBItem(item db.Message) (Message, error) {
