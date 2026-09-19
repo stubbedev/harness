@@ -1264,3 +1264,13 @@ func TestPtyRunner_ExitedSessionKeptUntilVerdictDelivered(t *testing.T) {
 	ptyRunnersMu.Unlock()
 	require.True(t, kept, "a delivered session lives by the idle rule alone")
 }
+
+// Sessions start with pagers replaced by cat and color off: output
+// here is read by the model, not paged for a person.
+func TestPtyRunner_SessionStartsWithPagersAndColorOff(t *testing.T) {
+	r := newTestRunner(t)
+
+	res, err := r.Type(t.Context(), `printf %s "$PAGER:$GIT_PAGER:$NO_COLOR:$CLICOLOR"`, 10)
+	require.NoError(t, err)
+	require.Equal(t, "cat:cat:1:0", res.Output)
+}

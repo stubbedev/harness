@@ -352,6 +352,24 @@ const (
 	ptyReapInterval = time.Minute
 )
 
+// ptySessionEnv is the environment a terminal session is started with,
+// on top of what it inherits. Nothing here is run by a person at a
+// desk: a pager would open a full-screen program over output the model
+// meant to read, and color is noise for the model even where the
+// cleaner strips it. Set per command when one call really wants them
+// ("PAGER=less git log"); these only set the session's default.
+var ptySessionEnv = []string{
+	"PAGER=cat",
+	"GIT_PAGER=cat",
+	"MANPAGER=cat",
+	"SYSTEMD_PAGER=cat",
+	"SYSTEMD_COLORS=0",
+	"NO_COLOR=1",
+	"CLICOLOR=0",
+	"CLICOLOR_FORCE=0",
+	"FORCE_COLOR=0",
+}
+
 // shellIdle reports whether the shell itself is waiting at its prompt,
 // so that text typed now is a command line. It is not idle while the
 // last call left a program running - unless that program has since
@@ -660,7 +678,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 			time.Sleep(ptyRestartDelay)
 		}
 	}
-	s, err := term.Start(r.cwd)
+	s, err := term.Start(r.cwd, ptySessionEnv...)
 	if err != nil {
 		return nil, err
 	}
