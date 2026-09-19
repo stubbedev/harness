@@ -321,8 +321,10 @@ const (
 	// ptyIdleTimeout is how long an idle terminal session is kept alive
 	// before its shell is reaped. Any Run/Input/Poll refreshes it.
 	ptyIdleTimeout = 30 * time.Minute
-	// ptyExitedGrace is how long a runner whose shell has exited stays
-	// in the map before removal.
+	// ptyExitedGrace is how long a session whose shell has exited stays in
+	// the map: long enough for the agent to collect the exit code and the
+	// output the shell printed on its way out, then it is reaped. Fresh
+	// sessions open afterwards, in the spawn directory.
 	ptyExitedGrace = 2 * time.Minute
 	// ptyReapInterval is how often the reaper sweeps.
 	ptyReapInterval = time.Minute
@@ -357,7 +359,10 @@ func (r *ptyRunner) touch() {
 }
 
 // ptyReap closes and removes idle or long-exited runners. The caller
-// must hold ptyRunnersMu; closing happens off the map lock.
+// must hold ptyRunnersMu; closing happens off the map lock. A session
+// whose shell exited is reported by the next poll for it (exit code
+// and final output) and reaped once its grace lapses; an idle one is
+// closed outright.
 func ptyReap() {
 	for _, r := range ptyRunners {
 		r.mu.Lock()
