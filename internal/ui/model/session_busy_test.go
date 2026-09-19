@@ -164,6 +164,7 @@ func (w *countingWorkspace) resetCounters() {
 // "s1", enough state for Update to run end to end.
 func newBusyUI(ws *countingWorkspace) *UI {
 	com := common.DefaultCommon(ws)
+	km := DefaultKeyMap()
 	return &UI{
 		com:         com,
 		status:      NewStatus(com, nil),
@@ -174,9 +175,9 @@ func newBusyUI(ws *countingWorkspace) *UI {
 		width:       140,
 		height:      45,
 		session:     &session.Session{ID: "s1"},
-		keyMap:      DefaultKeyMap(),
+		keyMap:      km,
 		dialog:      dialog.NewOverlay(),
-		attachments: attachments.New(nil, attachments.Keymap{}),
+		attachments: attachments.New(nil, attachments.Keymap{DeleteMode: km.Editor.AttachmentDeleteMode, DeleteAll: km.Editor.DeleteAllAttachments, Escape: km.Editor.Escape}),
 	}
 }
 

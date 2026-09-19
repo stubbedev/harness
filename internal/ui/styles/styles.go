@@ -645,11 +645,6 @@ func (s *Styles) ChromaTheme() chroma.StyleEntries {
 	}
 }
 
-// DialogHelpStyles returns the styles for dialog help.
-func (s *Styles) DialogHelpStyles() help.Styles {
-	return help.Styles(s.Dialog.Help)
-}
-
 // SubagentColorNames are the palette color names accepted in a subagent's
 // `color:` frontmatter, in [Styles.SubagentPalette] order.
 var SubagentColorNames = [8]string{"red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink"}

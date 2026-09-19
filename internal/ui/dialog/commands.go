@@ -4,7 +4,6 @@ import (
 	"os"
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -58,7 +57,6 @@ type Commands struct {
 	spinner spinner.Model
 	loading bool
 
-	help  help.Model
 	input textinput.Model
 	list  *list.FilterableList
 
@@ -86,11 +84,6 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary, h
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
 	}
-
-	help := help.New()
-	help.Styles = com.Styles.DialogHelpStyles()
-
-	c.help = help
 
 	c.list = list.NewFilterableList()
 	c.list.Focus()
@@ -275,10 +268,9 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.AddInput(c.input.View())
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
 	rc.AddPart(listView)
-	rc.Help = renderDialogHelp(t, &c.help, c, innerWidth)
 
 	if c.loading {
-		rc.Help = t.Dialog.HelpView.Width(innerWidth).Render(c.spinner.View() + " Generating Prompt...")
+		rc.AddPart(t.Dialog.HelpView.Width(innerWidth).Render(c.spinner.View() + " Generating Prompt..."))
 	}
 
 	view := rc.Render()
@@ -481,13 +473,17 @@ var compactArguments = []commands.Argument{{
 }}
 
 // defaultCommands returns the list of default system commands.
+// defaultCommands returns the list of default system commands. Shortcut
+// labels follow the keymap: a rebound action shows its new key here, and
+// the palette matches the label literally, so the two never drift apart.
 func (c *Commands) defaultCommands() []*CommandItem {
+	km := c.com.KeyMap()
 	commands := []*CommandItem{
-		NewCommandItem(c.com.Styles, "new_session", "New Session", "ctrl+n", ActionNewSession{}).WithAliases("clear"),
-		NewCommandItem(c.com.Styles, "switch_session", "Sessions", "ctrl+s", ActionOpenDialog{SessionsID}).WithAliases("resume", "switch"),
-		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", "ctrl+l", ActionOpenDialog{ModelsID}),
+		NewCommandItem(c.com.Styles, "new_session", "New Session", km.Chat.NewSession.Help().Key, ActionNewSession{}).WithAliases("clear"),
+		NewCommandItem(c.com.Styles, "switch_session", "Sessions", km.Sessions.Help().Key, ActionOpenDialog{SessionsID}).WithAliases("resume", "switch"),
+		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", km.Models.Help().Key, ActionOpenDialog{ModelsID}),
 		NewCommandItem(c.com.Styles, "connect_provider", "Connect Provider", "", ActionOpenDialog{ConnectID}).WithAliases("provider", "auth", "login"),
-		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", "ctrl+shift+t", ActionOpenDialog{ThemesID}),
+		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", km.Themes.Help().Key, ActionOpenDialog{ThemesID}),
 	}
 
 	// Only show compact command if there's an active session
@@ -502,7 +498,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	// Only show the export command when there is a conversation to export
 	if c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "export_conversation", "Export Conversation", "ctrl+shift+e", ActionExportConversation{SessionID: c.sessionID}).WithAliases("export", "transcript", "copy"))
+		commands = append(commands, NewCommandItem(c.com.Styles, "export_conversation", "Export Conversation", km.ExportConversation.Help().Key, ActionExportConversation{SessionID: c.sessionID}).WithAliases("export", "transcript", "copy"))
 	}
 
 	// Only show the save summary command if the session already has one
@@ -540,7 +536,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		agentCfg := cfgPrime.Agents[config.AgentCoder]
 		model := cfgPrime.GetModelByType(agentCfg.Model)
 		if model != nil && model.SupportsImages {
-			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", "ctrl+f", ActionOpenDialog{
+			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", km.Editor.AddImage.Help().Key, ActionOpenDialog{
 				DialogID: FilePickerID,
 			}))
 		}
@@ -552,11 +548,11 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
 	// antipattern.
 	if os.Getenv("EDITOR") != "" {
-		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", "ctrl+o", ActionExternalEditor{}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", km.Editor.OpenEditor.Help().Key, ActionExternalEditor{}))
 	}
 
 	if c.hasTodos {
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", "Toggle To-Dos", "ctrl+t", ActionTogglePills{}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", "Toggle To-Dos", km.Chat.TogglePills.Help().Key, ActionTogglePills{}))
 	}
 
 	// Add a command for selecting notification style via picker dialog.
@@ -565,7 +561,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", "ctrl+g", ActionToggleHelp{}),
+		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", km.Help.Help().Key, ActionToggleHelp{}),
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)
 
@@ -585,7 +581,7 @@ func (c *Commands) defaultCommands() []*CommandItem {
 
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "quit", "Quit", "ctrl+c", tea.QuitMsg{}).WithAliases("exit"),
+		NewCommandItem(c.com.Styles, "quit", "Quit", km.Quit.Help().Key, tea.QuitMsg{}).WithAliases("exit"),
 	)
 
 	return commands

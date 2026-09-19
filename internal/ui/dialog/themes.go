@@ -3,7 +3,6 @@ package dialog
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -31,7 +30,6 @@ const (
 // restores the theme that was active when the dialog opened.
 type Themes struct {
 	com   *common.Common
-	help  help.Model
 	list  *list.FilterableList
 	input textinput.Model
 
@@ -72,10 +70,6 @@ var (
 // NewThemes creates a new theme picker dialog.
 func NewThemes(com *common.Common) *Themes {
 	t := &Themes{com: com}
-
-	h := help.New()
-	h.Styles = com.Styles.DialogHelpStyles()
-	t.help = h
 
 	t.list = list.NewFilterableList()
 	t.list.Focus()
@@ -231,7 +225,6 @@ func (t *Themes) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listView := st.Dialog.List.Height(t.list.Height()).Render(t.list.Render())
 	listView = joinScrollbar(st, listView, listHeight, listTotalHeight, listHeight, t.list.Offset())
 	rc.AddPart(listView)
-	rc.Help = renderDialogHelp(st, &t.help, t, innerWidth)
 
 	view := rc.Render()
 

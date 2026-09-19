@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -44,7 +43,6 @@ type Arguments struct {
 	description  string
 	resultAction Action
 
-	help   help.Model
 	keyMap struct {
 		Confirm,
 		Next,
@@ -68,9 +66,6 @@ func NewArguments(com *common.Common, title, description string, arguments []com
 		arguments:    arguments,
 		resultAction: resultAction,
 	}
-
-	a.help = help.New()
-	a.help.Styles = com.Styles.DialogHelpStyles()
 
 	km := dialogKeys()
 	a.keyMap.Confirm = km.Arguments.Confirm
@@ -318,7 +313,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		description = descStyle.Render(a.description)
 	}
 
-	helpView := renderDialogHelp(s, &a.help, a, width)
+	var helpView string
 	if a.loading {
 		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + " Generating Prompt...")
 	}

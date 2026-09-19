@@ -19,11 +19,10 @@ const DefaultStatusTTL = 5 * time.Second
 
 // Status is the status bar and help model.
 type Status struct {
-	com      *common.Common
-	hideHelp bool
-	help     help.Model
-	helpKm   help.KeyMap
-	msg      util.InfoMsg
+	com    *common.Common
+	help   help.Model
+	helpKm help.KeyMap
+	msg    util.InfoMsg
 }
 
 // NewStatus creates a new status bar and help model.
@@ -63,20 +62,13 @@ func (s *Status) ToggleHelp() {
 	s.help.ShowAll = !s.help.ShowAll
 }
 
-// SetHideHelp sets whether the app is on the onboarding flow.
-func (s *Status) SetHideHelp(hideHelp bool) {
-	s.hideHelp = hideHelp
-}
-
 // Draw draws the status bar onto the screen.
 //
 // The help (and the info message drawn over it) is anchored at the
 // bottom of the area so the hints always hug the terminal's last row.
 func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
-	if !s.hideHelp {
-		helpView := s.com.Styles.Status.Help.Render(s.help.View(s.helpKm))
-		uv.NewStyledString(helpView).Draw(scr, bottomRect(area, lipgloss.Height(helpView)))
-	}
+	helpView := s.com.Styles.Status.Help.Render(s.help.View(s.helpKm))
+	uv.NewStyledString(helpView).Draw(scr, bottomRect(area, lipgloss.Height(helpView)))
 
 	// Render notifications
 	if s.msg.IsEmpty() {

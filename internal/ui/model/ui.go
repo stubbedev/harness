@@ -1256,12 +1256,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.SupportsKeyDisambiguation() {
 			// Prefer the disambiguated key in the help text, but only
 			// while the binding still carries it — options.tui.keybinds
-			// may have rebound the action elsewhere.
+			// may have rebound the action elsewhere. The newline hint
+			// always names shift+enter; no swap needed there.
 			if slices.Contains(m.keyMap.Models.Keys(), "ctrl+m") {
 				m.keyMap.Models.SetHelp("ctrl+m", "models")
-			}
-			if slices.Contains(m.keyMap.Editor.Newline.Keys(), "shift+enter") {
-				m.keyMap.Editor.Newline.SetHelp("shift+enter", "newline")
 			}
 		}
 	case copyChatHighlightMsg:
@@ -2919,14 +2917,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				prevHeight := m.textarea.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 
-				// Bang mode: enter when "!" is typed at the start of the
-				// prompt, optionally preceded by whitespace (either on an
-				// empty/whitespace-only prompt or prepended to existing text).
-				// Exit on backspace clearing the last character.
+				// Bang mode: enter when the shell-mode key ("!") is typed
+				// at the start of the prompt, optionally preceded by
+				// whitespace (either on an empty/whitespace-only prompt or
+				// prepended to existing text). Exit on backspace clearing
+				// the last character.
 				newVal := m.textarea.Value()
 				trimmedNew := strings.TrimLeftFunc(newVal, unicode.IsSpace)
 				trimmedCur := strings.TrimLeftFunc(curValue, unicode.IsSpace)
-				if !m.bangMode && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
+				if !m.bangMode && key.Matches(msg, m.keyMap.Editor.ShellMode) && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
 					m.bangMode = true
 					m.bangWasEmpty = len(strings.TrimSpace(curValue)) == 0
 					// Strip leading whitespace and the "!" from the textarea
@@ -3164,7 +3163,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	isOnboarding := m.state == uiOnboarding
 
 	// Add status and help layer
-	m.status.SetHideHelp(isOnboarding)
 	m.status.Draw(scr, layout.status)
 
 	// Draw completions popup if open
@@ -3300,20 +3298,42 @@ func (m *UI) applyProgressBar(v *tea.View) {
 	}
 }
 
-// editorPaletteHints returns the editor prefix bindings that open the
-// palettes. ":" and "/" only work as the editor's first character, so
-// they are hinted only while the editor is empty.
-func editorPaletteHints(k *KeyMap, show bool) []key.Binding {
+// editorPrefixHints returns the editor's first-character triggers: "!"
+// enters shell mode, ":" opens the command palette and "/" the skills
+// palette. They only work as the editor's first character and none applies
+// while shell mode is already active, so they are hinted only while the
+// editor is empty and idle.
+func editorPrefixHints(k *KeyMap, show bool) []key.Binding {
 	if !show {
 		return nil
 	}
-	return []key.Binding{k.Editor.Commands, k.Editor.Skills}
+	return []key.Binding{k.Editor.ShellMode, k.Editor.Commands, k.Editor.Skills}
+}
+
+// attachmentHelpBinds returns the attachment bindings that work in the
+// current mode, so the help never advertises an attachment key the live
+// routing would not honor. ctrl+r arms delete mode whenever attachments
+// exist; once armed, esc leaves it and r clears every attachment. While a
+// busy cancel would consume esc first (it is checked before delete mode),
+// the esc hint steps aside.
+func attachmentHelpBinds(k *KeyMap, hasAttachments, deleting, busy bool) []key.Binding {
+	switch {
+	case deleting && !busy:
+		return []key.Binding{k.Editor.Escape, k.Editor.DeleteAllAttachments}
+	case deleting:
+		return []key.Binding{k.Editor.DeleteAllAttachments}
+	case hasAttachments:
+		return []key.Binding{k.Editor.AttachmentDeleteMode}
+	default:
+		return nil
+	}
 }
 
 // ShortHelp implements [help.KeyMap].
 func (m *UI) ShortHelp() []key.Binding {
 	var binds []key.Binding
 	k := &m.keyMap
+	deleting := m.attachments.Deleting()
 
 	// A dialog owns the keyboard while it is open, so the hints are its
 	// own; the bottom-anchored panels leave that status line visible.
@@ -3321,30 +3341,35 @@ func (m *UI) ShortHelp() []key.Binding {
 		return m.dialog.ShortHelp()
 	}
 
-	// When an inline editor is active, show its help.
-	if m.activeInline != nil {
+	// When an inline editor owns the editor area, its hints describe the
+	// keys it handles — and it only handles keys while it is focused, so
+	// show the chat's own hints once focus moves away.
+	if m.activeInline != nil && m.focus == uiFocusEditor {
 		return m.activeInline.ShortHelp()
 	}
 
 	tab := k.Tab
-	// ":" and "/" open the command and skills palettes only as the
-	// editor's first character, so they are hinted beside commands only
-	// while the editor is empty.
-	showEditorPalettes := m.focus == uiFocusEditor && m.textarea.Value() == ""
+	// "!" enters shell mode and ":" and "/" open the command and skills
+	// palettes only as the editor's first character, so they are hinted
+	// beside commands only while the editor is empty and idle.
+	showEditorPalettes := m.focus == uiFocusEditor && m.textarea.Value() == "" && !m.bangMode
 
 	switch m.state {
 	case uiChat:
 		// Show cancel binding if agent is busy. Esc cancels only from
-		// the editor, so hint it only there.
+		// the editor, so hint it only there. The cancel check runs
+		// before attachment delete mode consumes esc, so the hint stays
+		// accurate while that mode is armed.
 		if m.isAgentBusy() && m.focus == uiFocusEditor {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp(keys.HelpKeys(cancelBinding), "press again to cancel")
 			}
 			binds = append(binds, cancelBinding)
-		} else if m.focus == uiFocusEditor && m.rewindEscArmed {
+		} else if m.focus == uiFocusEditor && m.rewindEscArmed && !deleting {
 			// Idle with the first escape pressed: the next one opens the
-			// rewind picker.
+			// rewind picker. Armed delete mode consumes esc first, so the
+			// rewind hint yields while it is up.
 			rewindBinding := k.Chat.Cancel
 			rewindBinding.SetHelp(keys.HelpKeys(rewindBinding), "press again to rewind")
 			binds = append(binds, rewindBinding)
@@ -3358,7 +3383,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		}
 
 		binds = append(binds, tab, k.Commands)
-		binds = append(binds, editorPaletteHints(k, showEditorPalettes)...)
+		binds = append(binds, editorPrefixHints(k, showEditorPalettes)...)
 		binds = append(binds, k.Models)
 
 		switch m.focus {
@@ -3367,6 +3392,7 @@ func (m *UI) ShortHelp() []key.Binding {
 				binds,
 				k.Editor.Newline,
 			)
+			binds = append(binds, attachmentHelpBinds(k, len(m.attachments.List()) > 0, deleting, m.isAgentBusy())...)
 		case uiFocusMain:
 			binds = append(
 				binds,
@@ -3394,7 +3420,10 @@ func (m *UI) ShortHelp() []key.Binding {
 			k.Models,
 			k.Editor.Newline,
 		)
-		binds = append(binds, editorPaletteHints(k, showEditorPalettes)...)
+		binds = append(binds, editorPrefixHints(k, showEditorPalettes)...)
+		if m.focus == uiFocusEditor {
+			binds = append(binds, attachmentHelpBinds(k, len(m.attachments.List()) > 0, deleting, m.isAgentBusy())...)
+		}
 	}
 
 	quit := k.Quit
@@ -3418,33 +3447,36 @@ func (m *UI) FullHelp() [][]key.Binding {
 		return m.dialog.FullHelp()
 	}
 
-	// When an inline editor is active, show its help.
-	if m.activeInline != nil {
+	// When an inline editor owns the editor area, its hints describe the
+	// keys it handles — and it only handles keys while it is focused.
+	if m.activeInline != nil && m.focus == uiFocusEditor {
 		return [][]key.Binding{m.activeInline.ShortHelp()}
 	}
 
 	var binds [][]key.Binding
 	k := &m.keyMap
+	deleting := m.attachments.Deleting()
 	help := k.Help
 	help.SetHelp(keys.HelpKeys(help), "less")
 	hasAttachments := len(m.attachments.List()) > 0
 	hasSession := m.hasSession()
-	// ":" and "/" open the command and skills palettes only as the
-	// editor's first character, so they are hinted beside commands only
-	// while the editor is empty.
-	showEditorPalettes := m.focus == uiFocusEditor && m.textarea.Value() == ""
+	// "!" enters shell mode and ":" and "/" open the command and skills
+	// palettes only as the editor's first character, so they are hinted
+	// beside commands only while the editor is empty and idle.
+	showEditorPalettes := m.focus == uiFocusEditor && m.textarea.Value() == "" && !m.bangMode
 
 	switch m.state {
 	case uiChat:
 		// Show cancel binding if agent is busy; esc cancels only from
-		// the editor.
+		// the editor, and the cancel check runs before delete mode can
+		// consume esc, so the hint stays accurate either way.
 		if m.isAgentBusy() && m.focus == uiFocusEditor {
 			cancelBinding := k.Chat.Cancel
 			if m.isCanceling {
 				cancelBinding.SetHelp(keys.HelpKeys(cancelBinding), "press again to cancel")
 			}
 			binds = append(binds, []key.Binding{cancelBinding})
-		} else if m.focus == uiFocusEditor && m.rewindEscArmed {
+		} else if m.focus == uiFocusEditor && m.rewindEscArmed && !deleting {
 			rewindBinding := k.Chat.Cancel
 			rewindBinding.SetHelp(keys.HelpKeys(rewindBinding), "press again to rewind")
 			binds = append(binds, []key.Binding{rewindBinding})
@@ -3464,7 +3496,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			tab,
 			k.Commands,
 		)
-		mainBinds = append(mainBinds, editorPaletteHints(k, showEditorPalettes)...)
+		mainBinds = append(mainBinds, editorPrefixHints(k, showEditorPalettes)...)
 		mainBinds = append(
 			mainBinds,
 			k.Models,
@@ -3492,15 +3524,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
 			}
 			binds = append(binds, editorBinds)
-			if hasAttachments {
-				binds = append(
-					binds,
-					[]key.Binding{
-						k.Editor.AttachmentDeleteMode,
-						k.Editor.DeleteAllAttachments,
-						k.Editor.Escape,
-					},
-				)
+			if attBinds := attachmentHelpBinds(k, hasAttachments, deleting, m.isAgentBusy()); len(attBinds) > 0 {
+				binds = append(binds, attBinds)
 			}
 		case uiFocusMain:
 			binds = append(
@@ -3549,7 +3574,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 				},
 			)
 			if showEditorPalettes {
-				binds[len(binds)-1] = append(binds[len(binds)-1], editorPaletteHints(k, true)...)
+				binds[len(binds)-1] = append(binds[len(binds)-1], editorPrefixHints(k, true)...)
 			}
 			editorBinds := []key.Binding{
 				k.Editor.Newline,
@@ -3564,15 +3589,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
 			}
 			binds = append(binds, editorBinds)
-			if hasAttachments {
-				binds = append(
-					binds,
-					[]key.Binding{
-						k.Editor.AttachmentDeleteMode,
-						k.Editor.DeleteAllAttachments,
-						k.Editor.Escape,
-					},
-				)
+			if attBinds := attachmentHelpBinds(k, hasAttachments, deleting, m.isAgentBusy()); len(attBinds) > 0 {
+				binds = append(binds, attBinds)
 			}
 		}
 	}

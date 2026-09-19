@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -50,7 +49,6 @@ type APIKeyInput struct {
 	}
 	input   textinput.Model
 	spinner spinner.Model
-	help    help.Model
 }
 
 var _ Dialog = (*APIKeyInput)(nil)
@@ -83,9 +81,6 @@ func NewAPIKeyInput(
 		spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(t.Dialog.APIKey.Spinner),
 	)
-
-	m.help = help.New()
-	m.help.Styles = t.DialogHelpStyles()
 
 	km := dialogKeys()
 	m.keyMap.Submit = keys.WithDesc(km.Select, "submit")
@@ -164,7 +159,6 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	textStyle := t.Dialog.SecondaryText
 	dialogStyle := ActiveFrame(t).Width(m.width)
 	inputStyle := t.Dialog.InputPrompt
-	helpView := renderDialogHelp(t, &m.help, m, m.width-dialogStyle.GetHorizontalFrameSize())
 
 	m.input.Prompt = m.spinner.View()
 
@@ -173,8 +167,6 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		inputStyle.Render(m.inputView()),
 		textStyle.Render("This will be written in your global configuration:"),
 		textStyle.Render(config.GlobalConfigData()),
-		"",
-		helpView,
 	}, "\n")
 
 	cur := m.Cursor()

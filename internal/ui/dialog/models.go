@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"slices"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -92,7 +91,6 @@ type Models struct {
 	}
 	list  *ModelsList
 	input textinput.Model
-	help  help.Model
 }
 
 var _ Dialog = (*Models)(nil)
@@ -104,10 +102,6 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.com = com
 	m.isOnboarding = isOnboarding
 
-	help := help.New()
-	help.Styles = t.DialogHelpStyles()
-
-	m.help = help
 	m.list = NewModelsList(t)
 	m.list.Focus()
 	m.list.SetSelected(0)
@@ -293,8 +287,6 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, m.list.Offset())
 		rc.AddPart(listView)
 	}
-
-	rc.Help = renderDialogHelp(t, &m.help, m, innerWidth)
 
 	if m.isOnboarding {
 		cur := m.Cursor()

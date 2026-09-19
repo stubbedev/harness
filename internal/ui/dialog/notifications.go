@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -38,7 +37,6 @@ var AllNotificationStyles = []NotificationStyle{
 // Notifications represents a dialog for selecting notification style.
 type Notifications struct {
 	com   *common.Common
-	help  help.Model
 	list  *list.FilterableList
 	input textinput.Model
 
@@ -76,10 +74,6 @@ var (
 // NewNotifications creates a new notification style picker dialog.
 func NewNotifications(com *common.Common) *Notifications {
 	n := &Notifications{com: com}
-
-	h := help.New()
-	h.Styles = com.Styles.DialogHelpStyles()
-	n.help = h
 
 	n.list = list.NewFilterableList()
 	n.list.Focus()
@@ -191,7 +185,6 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	listView := t.Dialog.List.Height(n.list.Height()).Render(n.list.Render())
 	rc.AddPart(listView)
-	rc.Help = renderDialogHelp(t, &n.help, n, innerWidth)
 
 	view := rc.Render()
 

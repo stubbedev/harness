@@ -57,7 +57,7 @@ func TestKeyMapApplyKeybinds(t *testing.T) {
 		require.Equal(t, "ctrl+q/ctrl+Q", help.Key)
 	})
 
-	t.Run("leaves help-less bindings help-less", func(t *testing.T) {
+	t.Run("keeps every binding annotated through a rebind", func(t *testing.T) {
 		t.Parallel()
 
 		km := DefaultKeyMap()
@@ -67,8 +67,8 @@ func TestKeyMapApplyKeybinds(t *testing.T) {
 
 		require.Equal(t, []string{"alt+end"}, km.Chat.EndFollow.Keys())
 		help := km.Chat.EndFollow.Help()
-		require.Empty(t, help.Desc)
-		require.Empty(t, help.Key)
+		require.Equal(t, "end follow", help.Desc)
+		require.Equal(t, "alt+end", help.Key)
 	})
 
 	t.Run("warns and ignores unknown actions and empty key lists", func(t *testing.T) {
@@ -96,6 +96,21 @@ func TestKeyMapApplyKeybinds(t *testing.T) {
 			require.Equal(t, []string{"f13"}, binding.Keys(), "action %s did not rebind", action)
 		}
 	})
+}
+
+// TestDefaultKeyMap_HasNoUnannotatedBindings pins the help invariant: every
+// rebindable action carries both a key label and a description, so a hint can
+// be rendered for any action without a fallback, and a rebind can never
+// produce a help-less binding.
+func TestDefaultKeyMap_HasNoUnannotatedBindings(t *testing.T) {
+	t.Parallel()
+
+	km := DefaultKeyMap()
+	for action, binding := range km.keybindActions() {
+		help := binding.Help()
+		require.NotEmpty(t, help.Key, "action %s has no help key label", action)
+		require.NotEmpty(t, help.Desc, "action %s has no help description", action)
+	}
 }
 
 // TestDefaultKeyMap_HasNoAltBindings pins the portability rule: Alt

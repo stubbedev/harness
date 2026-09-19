@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -35,7 +34,6 @@ const (
 // Session is a session selector dialog.
 type Session struct {
 	com      *common.Common
-	help     help.Model
 	list     *list.FilterableList
 	input    textinput.Model
 	sessions []session.Session
@@ -83,10 +81,6 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 		}
 	}
 
-	help := help.New()
-	help.Styles = com.Styles.DialogHelpStyles()
-
-	s.help = help
 	s.list = list.NewFilterableList(sessionItems(com.Styles, sessionsModeNormal, sessions...)...)
 	s.list.Focus()
 	s.list.SetSelected(selectedInx)
@@ -314,13 +308,12 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	bodyView := t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
 	bodyView = joinScrollbar(t, bodyView, listHeight, listTotalHeight, listHeight, s.list.Offset())
 	rc.AddPart(bodyView)
-	rc.Help = renderDialogHelp(t, &s.help, s, innerWidth)
 
 	view := rc.Render()
 	if cur == nil && s.sessionsMode != sessionsModeUpdating {
 		cur = DialogCursor(t, view, s.input.Cursor())
 	}
-	s.updateSessionListArea(area, view, bodyView, rc.Help, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
+	s.updateSessionListArea(area, view, bodyView, rc.ViewStyle, t.Dialog.List, innerWidth, listHeight)
 
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
@@ -330,7 +323,6 @@ func (s *Session) updateSessionListArea(
 	area uv.Rectangle,
 	view string,
 	bodyView string,
-	helpView string,
 	viewStyle lipgloss.Style,
 	bodyStyle lipgloss.Style,
 	bodyWidth int,
@@ -342,7 +334,6 @@ func (s *Session) updateSessionListArea(
 		viewStyle.GetMarginBottom() -
 		viewStyle.GetBorderBottomSize() -
 		viewStyle.GetPaddingBottom() -
-		lipgloss.Height(helpView) -
 		lipgloss.Height(bodyView)
 	bodyMin := image.Pt(
 		dialogArea.Min.X+

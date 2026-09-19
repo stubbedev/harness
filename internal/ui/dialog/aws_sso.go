@@ -3,7 +3,6 @@ package dialog
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -40,7 +39,6 @@ type AWSSSO struct {
 	command string
 
 	spinner spinner.Model
-	help    help.Model
 	keyMap  struct {
 		Open  key.Binding
 		Close key.Binding
@@ -70,9 +68,6 @@ func NewAWSSSO(com *common.Common, command string) (*AWSSSO, tea.Cmd) {
 		spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(t.Dialog.OAuth.Spinner),
 	)
-
-	m.help = help.New()
-	m.help.Styles = t.DialogHelpStyles()
 
 	km := dialogKeys()
 	m.keyMap.Open = keys.WithDesc(km.Select, "open in browser")
@@ -149,13 +144,9 @@ func (m *AWSSSO) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 }
 
 func (m *AWSSSO) dialogContent() string {
-	t := m.com.Styles
-	innerWidth := DialogInnerWidth(t, m.width)
-
 	elements := []string{
 		m.headerContent(),
 		m.innerDialogContent(),
-		renderDialogHelp(t, &m.help, m, innerWidth),
 	}
 	return strings.Join(elements, "\n")
 }

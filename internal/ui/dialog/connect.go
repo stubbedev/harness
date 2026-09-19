@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -34,7 +33,6 @@ const (
 // authentication dialog takes over.
 type Connect struct {
 	com   *common.Common
-	help  help.Model
 	list  *list.FilterableList
 	input textinput.Model
 
@@ -52,10 +50,6 @@ var _ Dialog = (*Connect)(nil)
 // NewConnect creates the provider connection dialog.
 func NewConnect(com *common.Common) (*Connect, error) {
 	c := &Connect{com: com}
-
-	h := help.New()
-	h.Styles = com.Styles.DialogHelpStyles()
-	c.help = h
 
 	c.list = list.NewFilterableList()
 	c.list.Focus()
@@ -177,7 +171,6 @@ func (c *Connect) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listView := st.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
 	listView = joinScrollbar(st, listView, listHeight, listTotalHeight, listHeight, c.list.Offset())
 	rc.AddPart(listView)
-	rc.Help = renderDialogHelp(st, &c.help, c, innerWidth)
 
 	view := rc.Render()
 

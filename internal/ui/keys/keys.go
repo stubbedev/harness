@@ -24,12 +24,15 @@ type KeyMap struct {
 		Commands    key.Binding
 		Skills      key.Binding
 
+		// ShellMode enters bang mode: the prompt becomes a shell command.
+		ShellMode key.Binding
+
 		// Attachments key maps
 		AttachmentDeleteMode key.Binding
 		Escape               key.Binding
 		DeleteAllAttachments key.Binding
 
-		// History navigation
+		// History navigation.
 		HistoryPrev key.Binding
 		HistoryNext key.Binding
 
@@ -54,9 +57,7 @@ type KeyMap struct {
 
 	Chat struct {
 		NewSession      key.Binding
-		AddAttachment   key.Binding
 		Cancel          key.Binding
-		Tab             key.Binding
 		Details         key.Binding
 		TogglePills     key.Binding
 		Down            key.Binding
@@ -282,10 +283,9 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.Newline = key.NewBinding(
 		key.WithKeys("shift+enter", "ctrl+j"),
-		// "ctrl+j" is a common keybinding for newline in many editors. If
-		// the terminal supports "shift+enter", we substitute the help tex
-		// to reflect that.
-		key.WithHelp("ctrl+j", "newline"),
+		// "ctrl+j" is the fallback for terminals that cannot send
+		// "shift+enter", so the hint names the key users actually press.
+		key.WithHelp("shift+enter", "newline"),
 	)
 	km.Editor.AddImage = key.NewBinding(
 		key.WithKeys("ctrl+f"),
@@ -311,6 +311,10 @@ func DefaultKeyMap() KeyMap {
 		key.WithKeys("/"),
 		key.WithHelp("/", "skills"),
 	)
+	km.Editor.ShellMode = key.NewBinding(
+		key.WithKeys("!"),
+		key.WithHelp("!", "shell mode"),
+	)
 	km.Editor.AttachmentDeleteMode = key.NewBinding(
 		key.WithKeys("ctrl+r"),
 		key.WithHelp("ctrl+r+{i}", "delete attachment at index i"),
@@ -325,9 +329,11 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.HistoryPrev = key.NewBinding(
 		key.WithKeys("up"),
+		key.WithHelp("↑", "previous prompt"),
 	)
 	km.Editor.HistoryNext = key.NewBinding(
 		key.WithKeys("down"),
+		key.WithHelp("↓", "next prompt"),
 	)
 	km.Editor.CopySelection = key.NewBinding(
 		key.WithKeys("ctrl+shift+c"),
@@ -350,17 +356,9 @@ func DefaultKeyMap() KeyMap {
 		key.WithKeys("ctrl+n"),
 		key.WithHelp("ctrl+n", "new session"),
 	)
-	km.Chat.AddAttachment = key.NewBinding(
-		key.WithKeys("ctrl+f"),
-		key.WithHelp("ctrl+f", "add attachment"),
-	)
 	km.Chat.Cancel = key.NewBinding(
 		key.WithKeys("esc"),
 		key.WithHelp("esc", "cancel"),
-	)
-	km.Chat.Tab = key.NewBinding(
-		key.WithKeys("tab"),
-		key.WithHelp("tab", "change focus"),
 	)
 	km.Chat.Details = key.NewBinding(
 		key.WithKeys("ctrl+d"),
@@ -421,6 +419,7 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Chat.EndFollow = key.NewBinding(
 		key.WithKeys("ctrl+end"),
+		key.WithHelp("ctrl+end", "end follow"),
 	)
 	km.Chat.Copy = key.NewBinding(
 		key.WithKeys("c", "y", "C", "Y"),
@@ -721,6 +720,7 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"editor.mention_file":           &km.Editor.MentionFile,
 		"editor.commands":               &km.Editor.Commands,
 		"editor.skills":                 &km.Editor.Skills,
+		"editor.shell_mode":             &km.Editor.ShellMode,
 		"editor.attachment_delete_mode": &km.Editor.AttachmentDeleteMode,
 		"editor.escape":                 &km.Editor.Escape,
 		"editor.delete_all_attachments": &km.Editor.DeleteAllAttachments,
@@ -731,9 +731,7 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"editor.select_all":             &km.Editor.SelectAll,
 		"editor.line_start":             &km.Editor.LineStart,
 		"chat.new_session":              &km.Chat.NewSession,
-		"chat.add_attachment":           &km.Chat.AddAttachment,
 		"chat.cancel":                   &km.Chat.Cancel,
-		"chat.tab":                      &km.Chat.Tab,
 		"chat.details":                  &km.Chat.Details,
 		"chat.toggle_pills":             &km.Chat.TogglePills,
 		"chat.down":                     &km.Chat.Down,
@@ -845,15 +843,15 @@ func (km *KeyMap) ApplyKeybinds(overrides map[string][]string) {
 }
 
 // rebind returns a copy of b bound to keys instead of its current ones. The
-// help description survives; the help key text follows the new keys.
-// Bindings without help text (chat.end_follow, the history bindings) stay
-// help-less.
+// help description survives; the help key text follows the new keys. Every
+// binding in the keymap carries help text (enforced by
+// TestDefaultKeyMap_HasNoUnannotatedBindings), so a rebound action keeps a
+// usable hint.
 func rebind(b key.Binding, keys []string) key.Binding {
-	opts := []key.BindingOpt{key.WithKeys(keys...)}
-	if help := b.Help(); help.Desc != "" || help.Key != "" {
-		opts = append(opts, key.WithHelp(strings.Join(keys, "/"), help.Desc))
-	}
-	return key.NewBinding(opts...)
+	return key.NewBinding(
+		key.WithKeys(keys...),
+		key.WithHelp(strings.Join(keys, "/"), b.Help().Desc),
+	)
 }
 
 // HelpKeys derives a binding's help key text from the keys it is bound to,

@@ -191,13 +191,23 @@ box width — border and padding live *inside* it.
   strings and wrapping the whole thing in one style. An inner segment's
   reset code drops the outer color for everything after it.
 - Use the shared helpers instead of re-deriving widths:
-  - keybind hints → `renderDialogHelp(t, &m.help, m, innerWidth)` (sizes,
-    pads, truncates — never `helpStyle.Render(m.help.View(m))` raw);
   - text inputs → `dialogInputTextWidth(t, input, innerWidth)` (accounts
     for the `"> "` prompt);
   - titles → `common.DialogTitle` (truncates instead of wrapping);
   - list + scrollbar → `joinScrollbar`;
   - hiding a crowded info column → `applyInfoColumnVisibility`.
+
+### Keybind hints
+
+The status bar's bottom row is the single hint surface: it shows the
+help of whatever owns the keyboard (front dialog, inline editor, or the
+main view) via the `help.KeyMap` implementations. Dialogs must not
+render their own hint row, and rendered labels (header, pills, palette
+shortcuts) must come from `binding.Help().Key`, never a hardcoded key
+string, so an `options.tui.keybinds` rebind moves every hint. Hints must
+be gated on the state where the key is actually routed — a binding shown
+where it is inert is a bug. The keys package tests enforce that every
+binding carries help text, so any hint is always renderable.
 - Clamp width/height to the drawable `area` (`max(0, min(maxW, area.Dx()-frame))`)
   so dialogs stay inside small terminals.
 

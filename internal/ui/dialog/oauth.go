@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -54,7 +53,6 @@ type OAuth struct {
 	State OAuthState
 
 	spinner spinner.Model
-	help    help.Model
 	keyMap  struct {
 		Copy    key.Binding
 		CopyURL key.Binding
@@ -99,9 +97,6 @@ func newOAuth(
 		spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(t.Dialog.OAuth.Spinner),
 	)
-
-	m.help = help.New()
-	m.help.Styles = t.DialogHelpStyles()
 
 	km := dialogKeys()
 	m.keyMap.Copy = km.OAuth.Copy
@@ -243,18 +238,14 @@ func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 }
 
 func (m *OAuth) dialogContent() string {
-	t := m.com.Styles
-
 	switch m.State {
 	case OAuthStateInitializing, OAuthStateSaving:
 		return m.innerDialogContent()
 
 	default:
-		innerWidth := DialogInnerWidth(t, m.width)
 		elements := []string{
 			m.headerContent(),
 			m.innerDialogContent(),
-			renderDialogHelp(t, &m.help, m, innerWidth),
 		}
 		return strings.Join(elements, "\n")
 	}

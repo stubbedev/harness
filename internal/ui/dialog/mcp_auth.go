@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -44,7 +43,6 @@ type MCPAuth struct {
 	cancelAuth context.CancelFunc
 
 	spinner spinner.Model
-	help    help.Model
 	keyMap  struct {
 		Submit key.Binding
 		Copy   key.Binding
@@ -70,9 +68,6 @@ func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authUR
 		spinner.WithSpinner(spinner.Dot),
 		spinner.WithStyle(t.Dialog.OAuth.Spinner),
 	)
-
-	m.help = help.New()
-	m.help.Styles = t.DialogHelpStyles()
 
 	km := dialogKeys()
 	m.keyMap.Submit = keys.WithDesc(km.Select, "open browser")
@@ -225,12 +220,9 @@ func (m *MCPAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 }
 
 func (m *MCPAuth) dialogContent() string {
-	t := m.com.Styles
-	innerWidth := DialogInnerWidth(t, m.width)
 	elements := []string{
 		m.headerContent(),
 		m.innerContent(),
-		renderDialogHelp(t, &m.help, m, innerWidth),
 	}
 	return strings.Join(elements, "\n")
 }

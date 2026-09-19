@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -69,7 +68,6 @@ func rewindModeChoices(hasFiles bool) []rewindModeChoice {
 // what to restore: the transcript, the files on disk, or both.
 type Rewind struct {
 	com       *common.Common
-	help      help.Model
 	list      *list.FilterableList
 	sessionID string
 	turns     []RewindTurn
@@ -122,10 +120,6 @@ func NewRewind(com *common.Common, sessionID string) (*Rewind, error) {
 			HasFiles:  snapshotted[msg.ID],
 		})
 	}
-
-	h := help.New()
-	h.Styles = com.Styles.DialogHelpStyles()
-	r.help = h
 
 	r.list = list.NewFilterableList(rewindTurnItems(com.Styles, r.turns)...)
 	r.list.Focus()
@@ -256,7 +250,6 @@ func (r *Rewind) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listView := st.Dialog.List.Height(r.list.Height()).Render(r.list.Render())
 	listView = joinScrollbar(st, listView, listHeight, listTotalHeight, listHeight, r.list.Offset())
 	rc.AddPart(listView)
-	rc.Help = renderDialogHelp(st, &r.help, r, innerWidth)
 
 	view := rc.Render()
 	DrawCenterCursor(scr, area, view, nil)

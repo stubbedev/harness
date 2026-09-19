@@ -380,7 +380,6 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 
 | Action | Default key(s) |
 | --- | --- |
-| `chat.add_attachment` | `ctrl+f` |
 | `chat.background_tasks` | `ctrl+b` |
 | `chat.cancel` | `esc` |
 | `chat.clear_highlight` | `esc` |
@@ -400,7 +399,6 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `chat.page_up` | `pgup`, `b` |
 | `chat.scroll_left` | `shift+left`, `H` |
 | `chat.scroll_right` | `shift+right`, `L` |
-| `chat.tab` | `tab` |
 | `chat.toggle_pills` | `ctrl+t`, `ctrl+space` |
 | `chat.up` | `up`, `ctrl+k`, `k` |
 | `chat.up_down` | `up`, `down` |
@@ -474,6 +472,7 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `editor.paste_text` | `ctrl+shift+v` |
 | `editor.select_all` | `ctrl+shift+a` |
 | `editor.send_message` | `enter` |
+| `editor.shell_mode` | `!` |
 | `editor.skills` | `/` |
 | `export_conversation` | `ctrl+shift+e` |
 | `help` | `ctrl+g` |

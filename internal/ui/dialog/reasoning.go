@@ -3,7 +3,6 @@ package dialog
 import (
 	"errors"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -26,7 +25,6 @@ const (
 // Reasoning represents a dialog for selecting reasoning effort.
 type Reasoning struct {
 	com   *common.Common
-	help  help.Model
 	list  *list.FilterableList
 	input textinput.Model
 
@@ -65,10 +63,6 @@ var (
 // NewReasoning creates a new reasoning effort dialog.
 func NewReasoning(com *common.Common) (*Reasoning, error) {
 	r := &Reasoning{com: com}
-
-	help := help.New()
-	help.Styles = com.Styles.DialogHelpStyles()
-	r.help = help
 
 	r.list = list.NewFilterableList()
 	r.list.Focus()
@@ -188,7 +182,6 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listView := t.Dialog.List.Height(r.list.Height()).Render(r.list.Render())
 	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, r.list.Offset())
 	rc.AddPart(listView)
-	rc.Help = renderDialogHelp(t, &r.help, r, innerWidth)
 
 	view := rc.Render()
 

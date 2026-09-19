@@ -152,7 +152,9 @@ func renderHeaderDetails(
 		rightParts = append(rightParts, t.Header.Percentage.Render(percentageText))
 	}
 
-	const keystroke = "ctrl+d"
+	// The details hint follows the keymap so a rebind of chat.details
+	// moves the label with it.
+	keystroke := com.KeyMap().Chat.Details.Help().Key
 	if detailsOpen {
 		rightParts = append(rightParts, t.Header.Keystroke.Render(keystroke)+t.Header.KeystrokeTip.Render(" close"))
 	} else {
