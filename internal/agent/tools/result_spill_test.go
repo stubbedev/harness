@@ -23,11 +23,12 @@ func TestCapToolResponse(t *testing.T) {
 			content := strings.Repeat("x", size)
 			response := fantasy.ToolResponse{Type: "text", Content: content, IsError: true, StopTurn: true, Metadata: `{"exit_code":1}`}
 			got := CapToolResponse(ctx, response)
-			require.LessOrEqual(t, len(got.Content), MaxToolResultBytes)
+			require.LessOrEqual(t, len(got.Content), maxToolResponseBytes(t))
 			if size <= MaxToolResultBytes {
 				require.Equal(t, response, got)
 				return
 			}
+			require.LessOrEqual(t, len(got.Content), MaxToolPreviewBytes+2048, "spilled preview stays small")
 			path := spilledResultPath(t, got.Content)
 			require.True(t, filepath.IsAbs(path))
 			require.Equal(t, filepath.Join(root, "session", "tool-results"), filepath.Dir(path))
@@ -53,7 +54,7 @@ func TestCapToolResponseUTF8(t *testing.T) {
 	for _, content := range []string{strings.Repeat("界é😀", MaxToolResultBytes), strings.Repeat("x\xff", MaxToolResultBytes)} {
 		got := CapToolResponse(ctx, fantasy.NewTextResponse(content))
 		require.True(t, utf8.ValidString(got.Content))
-		require.LessOrEqual(t, len(got.Content), MaxToolResultBytes)
+		require.LessOrEqual(t, len(got.Content), maxToolResponseBytes(t))
 		data, err := os.ReadFile(spilledResultPath(t, got.Content))
 		require.NoError(t, err)
 		require.Equal(t, content, string(data))
@@ -95,8 +96,13 @@ func TestCapToolResponseConcurrent(t *testing.T) {
 		data, err := os.ReadFile(path)
 		require.NoError(t, err)
 		require.Equal(t, contents[i], string(data))
-		require.LessOrEqual(t, len(response.Content), MaxToolResultBytes)
+		require.LessOrEqual(t, len(response.Content), maxToolResponseBytes(t))
 	}
+}
+
+func maxToolResponseBytes(t *testing.T) int {
+	t.Helper()
+	return MaxToolResultBytes
 }
 
 func TestCapToolResponseFailure(t *testing.T) {
@@ -119,7 +125,7 @@ func TestCapToolResponseFailure(t *testing.T) {
 			ctx := context.WithValue(t.Context(), SessionIDContextKey, session)
 			response := fantasy.ToolResponse{Type: "text", Content: strings.Repeat("é", MaxToolResultBytes), IsError: true, StopTurn: true, Metadata: "metadata"}
 			got := CapToolResponse(ctx, response)
-			require.LessOrEqual(t, len(got.Content), MaxToolResultBytes)
+			require.LessOrEqual(t, len(got.Content), maxToolResponseBytes(t))
 			require.True(t, utf8.ValidString(got.Content))
 			require.Contains(t, got.Content, "WARNING: full result could not be saved")
 			require.Contains(t, got.Content, "Omitted output is lost")

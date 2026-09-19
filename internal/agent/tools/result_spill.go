@@ -12,6 +12,11 @@ import (
 
 const MaxToolResultBytes = 100_000
 
+// MaxToolPreviewBytes bounds what a spilled result still shows inline. The
+// full result rides the file path, so a large preview only re-spends the
+// context the spill exists to save.
+const MaxToolPreviewBytes = 4_000
+
 func CapToolResponse(ctx context.Context, response fantasy.ToolResponse) fantasy.ToolResponse {
 	if len(response.Data) != 0 || (response.Type != "" && response.Type != "text") || len(response.Content) <= MaxToolResultBytes {
 		return response
@@ -22,9 +27,9 @@ func CapToolResponse(ctx context.Context, response fantasy.ToolResponse) fantasy
 	if err != nil {
 		notice = fmt.Sprintf("Tool result exceeds %d bytes. WARNING: full result could not be saved: %s. Omitted output is lost; retry with a narrower request.\n\nPreview:\n", MaxToolResultBytes, toolResultPrefix(err.Error(), 512))
 	} else {
-		notice = fmt.Sprintf("Tool result (%d bytes) saved in full to: %s\nUse view with offset/limit or shell to selectively search/read this file.\n\nPreview:\n", len(response.Content), path)
+		notice = fmt.Sprintf("Tool result (%d bytes) saved in full to: %s\nUse view with offset/limit or shell to selectively search/read this file; only the first %d bytes follow.\n\nPreview:\n", len(response.Content), path, MaxToolPreviewBytes)
 	}
-	response.Content = notice + toolResultPrefix(response.Content, MaxToolResultBytes-len(notice))
+	response.Content = notice + toolResultPrefix(response.Content, min(MaxToolPreviewBytes, MaxToolResultBytes-len(notice)))
 	return response
 }
 

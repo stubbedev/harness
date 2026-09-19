@@ -22,6 +22,8 @@ type AgentWorktree struct {
 	gitDir       string
 	head         string
 	baseline     map[string]worktreeEntry
+	exclusions   *worktreeExclusions
+	excluded     []string
 	baselineGit  string
 	baselineTree string
 	gitFile      string
@@ -31,13 +33,14 @@ type AgentWorktree struct {
 }
 
 type WorktreeResult struct {
-	Path           string `json:"path"`
-	Branch         string `json:"branch"`
-	PatchPath      string `json:"patch_path,omitempty"`
-	IndexPatchPath string `json:"index_patch_path,omitempty"`
-	Changed        bool   `json:"changed"`
-	Preserved      bool   `json:"preserved"`
-	Removed        bool   `json:"removed"`
+	Path           string   `json:"path"`
+	Branch         string   `json:"branch"`
+	PatchPath      string   `json:"patch_path,omitempty"`
+	IndexPatchPath string   `json:"index_patch_path,omitempty"`
+	Changed        bool     `json:"changed"`
+	Preserved      bool     `json:"preserved"`
+	Removed        bool     `json:"removed"`
+	Excluded       []string `json:"excluded,omitempty"`
 }
 
 func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *AgentWorktree, err error) {
@@ -80,6 +83,7 @@ func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *Age
 			return nil, errors.New("worktree isolation does not support submodules; source preserved")
 		}
 	}
+	exclusions := &worktreeExclusions{trackedDirs: worktreeTrackedDirs(tracked)}
 	if parentDir == "" {
 		parentDir = os.TempDir()
 	}
@@ -101,18 +105,18 @@ func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *Age
 	if err != nil {
 		return nil, err
 	}
-	w := &AgentWorktree{SourceRoot: root, Path: filepath.Join(scratch, "worktree"), Branch: "harness/" + filepath.Base(scratch), scratch: scratch, gitDir: gitDir, head: head}
+	w := &AgentWorktree{SourceRoot: root, Path: filepath.Join(scratch, "worktree"), Branch: "harness/" + filepath.Base(scratch), scratch: scratch, gitDir: gitDir, head: head, exclusions: exclusions}
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("worktree creation failed; preserved storage %s, checkout %s, branch %s: %w", scratch, w.Path, w.Branch, err)
 		}
 	}()
 	baselinePath := filepath.Join(scratch, "baseline")
-	w.baseline, err = snapshotWorktree(ctx, root, baselinePath)
+	w.baseline, w.excluded, err = snapshotWorktree(ctx, root, baselinePath, exclusions)
 	if err != nil {
 		return w, fmt.Errorf("snapshot source; preserved %s: %w", scratch, err)
 	}
-	verify, err := snapshotWorktree(ctx, root, "")
+	verify, _, err := snapshotWorktree(ctx, root, "", exclusions)
 	if err != nil || !equalWorktreeEntries(w.baseline, verify) {
 		return w, fmt.Errorf("source changed during snapshot; preserved %s: %w", scratch, errors.Join(err, errors.New("snapshot is not stable")))
 	}
@@ -129,10 +133,10 @@ func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *Age
 	if _, err = w.git(ctx, "read-tree", head); err != nil {
 		return w, err
 	}
-	if _, err = snapshotWorktree(ctx, baselinePath, w.Path); err != nil {
+	if _, _, err = snapshotWorktree(ctx, baselinePath, w.Path, exclusions); err != nil {
 		return w, err
 	}
-	actual, err := snapshotWorktree(ctx, w.Path, "")
+	actual, _, err := snapshotWorktree(ctx, w.Path, "", exclusions)
 	if err != nil || !equalWorktreeEntries(w.baseline, actual) {
 		return w, errors.Join(err, errors.New("worktree overlay differs from baseline; preserving worktree"))
 	}
@@ -156,7 +160,7 @@ func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *Age
 func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	result := WorktreeResult{Path: w.Path, Branch: w.Branch, Preserved: !w.removed, Removed: w.removed}
+	result := WorktreeResult{Path: w.Path, Branch: w.Branch, Excluded: w.excluded, Preserved: !w.removed, Removed: w.removed}
 	if w.removed {
 		return result, nil
 	}
@@ -182,7 +186,7 @@ func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 	if err != nil {
 		return result, err
 	}
-	current, err := snapshotWorktree(ctx, w.Path, currentPath)
+	current, _, err := snapshotWorktree(ctx, w.Path, currentPath, w.exclusions)
 	if err != nil {
 		return result, err
 	}
@@ -227,7 +231,7 @@ func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 		}
 		return result, nil
 	}
-	verify, err := snapshotWorktree(ctx, w.Path, "")
+	verify, _, err := snapshotWorktree(ctx, w.Path, "", w.exclusions)
 	if err != nil || !equalWorktreeEntries(current, verify) {
 		return result, errors.Join(err, errors.New("worktree changed during inspection; preserving worktree"))
 	}
@@ -272,7 +276,7 @@ func (w *AgentWorktree) snapshotTree(ctx context.Context, path string) (string, 
 	if _, err := worktreeGit(ctx, path, pin, "read-tree", "--empty"); err != nil {
 		return "", err
 	}
-	entries, err := snapshotWorktree(ctx, path, "")
+	entries, _, err := snapshotWorktree(ctx, path, "", w.exclusions)
 	if err != nil {
 		return "", err
 	}

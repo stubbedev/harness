@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -9,9 +10,74 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
+
+var worktreeExcludedDirNames = map[string]struct{}{
+	"node_modules":        {},
+	"vendor":              {},
+	"target":              {},
+	"build":               {},
+	"dist":                {},
+	"out":                 {},
+	"bin":                 {},
+	"obj":                 {},
+	".next":               {},
+	".nuxt":               {},
+	".output":             {},
+	".venv":               {},
+	"venv":                {},
+	"__pycache__":         {},
+	".pytest_cache":       {},
+	".mypy_cache":         {},
+	".ruff_cache":         {},
+	".tox":                {},
+	".gradle":             {},
+	".cache":              {},
+	".idea":               {},
+	".vscode":             {},
+	"coverage":            {},
+	".turbo":              {},
+	".terraform":          {},
+	"Pods":                {},
+	".dart_tool":          {},
+	".parcel-cache":       {},
+	"elm-stuff":           {},
+	"_build":              {},
+	"deps":                {},
+	"bower_components":    {},
+	"cmake-build-debug":   {},
+	"cmake-build-release": {},
+}
+
+type worktreeExclusions struct {
+	trackedDirs map[string]struct{}
+}
+
+func worktreeTrackedDirs(index []byte) map[string]struct{} {
+	dirs := make(map[string]struct{})
+	for entry := range bytes.SplitSeq(index, []byte{0}) {
+		if _, file, found := bytes.Cut(entry, []byte{'\t'}); found {
+			for dir := path.Dir(string(file)); dir != "."; dir = path.Dir(dir) {
+				dirs[dir] = struct{}{}
+			}
+		}
+	}
+	return dirs
+}
+
+func (e *worktreeExclusions) skipDir(walkPath, name string) bool {
+	if e == nil {
+		return false
+	}
+	if _, excluded := worktreeExcludedDirNames[name]; !excluded {
+		return false
+	}
+	_, tracked := e.trackedDirs[walkPath]
+	return !tracked
+}
 
 type worktreeEntry struct {
 	Mode fs.FileMode
@@ -23,24 +89,25 @@ func equalWorktreeEntries(a, b map[string]worktreeEntry) bool {
 	return maps.Equal(a, b)
 }
 
-func snapshotWorktree(ctx context.Context, source, destination string) (map[string]worktreeEntry, error) {
+func snapshotWorktree(ctx context.Context, source, destination string, exclusions *worktreeExclusions) (map[string]worktreeEntry, []string, error) {
 	src, err := os.OpenRoot(source)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer src.Close()
 	var dst *os.Root
 	if destination != "" {
 		if err := os.MkdirAll(destination, 0o700); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		dst, err = os.OpenRoot(destination)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer dst.Close()
 	}
 	entries := make(map[string]worktreeEntry)
+	var excluded []string
 	err = fs.WalkDir(src.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -59,6 +126,10 @@ func snapshotWorktree(ctx context.Context, source, destination string) (map[stri
 				return fs.SkipDir
 			}
 			return nil
+		}
+		if entry.IsDir() && exclusions.skipDir(path, entry.Name()) {
+			excluded = append(excluded, path)
+			return fs.SkipDir
 		}
 		info, err := src.Lstat(path)
 		if err != nil {
@@ -123,18 +194,18 @@ func snapshotWorktree(ctx context.Context, source, destination string) (map[stri
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if dst != nil {
 		for path, entry := range entries {
 			if entry.Mode.IsDir() {
 				if err := dst.Chmod(filepath.FromSlash(path), entry.Mode.Perm()); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			}
 		}
 	}
-	return entries, nil
+	return entries, excluded, nil
 }
 
 type worktreeContextReader struct {

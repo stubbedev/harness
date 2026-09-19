@@ -37,7 +37,9 @@ func worktreeTestRepo(t *testing.T) string {
 
 func worktreeTestWrite(t *testing.T, root, name, value string) {
 	t.Helper()
-	require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte(value), 0o644))
+	target := filepath.Join(root, name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+	require.NoError(t, os.WriteFile(target, []byte(value), 0o644))
 }
 
 func TestWorktreeDirtyBaselineAndIndependentChildren(t *testing.T) {
@@ -49,7 +51,7 @@ func TestWorktreeDirtyBaselineAndIndependentChildren(t *testing.T) {
 	worktreeTestWrite(t, root, "untracked", "local\n")
 	worktreeTestWrite(t, root, "ignored", "ignored local\n")
 	require.NoError(t, os.Remove(filepath.Join(root, "deleted")))
-	before, err := snapshotWorktree(t.Context(), root, "")
+	before, _, err := snapshotWorktree(t.Context(), root, "", nil)
 	require.NoError(t, err)
 	indexBefore := worktreeTestGit(t, root, "diff", "--cached", "--binary")
 	statusBefore := worktreeTestGit(t, root, "status", "--porcelain=v1", "--untracked-files=all")
@@ -60,7 +62,7 @@ func TestWorktreeDirtyBaselineAndIndependentChildren(t *testing.T) {
 	require.NotEqual(t, first.Path, second.Path)
 	require.NotEqual(t, first.Branch, second.Branch)
 	for _, w := range []*AgentWorktree{first, second} {
-		got, err := snapshotWorktree(t.Context(), w.Path, "")
+		got, _, err := snapshotWorktree(t.Context(), w.Path, "", nil)
 		require.NoError(t, err)
 		require.Equal(t, before, got)
 	}
@@ -83,7 +85,7 @@ func TestWorktreeDirtyBaselineAndIndependentChildren(t *testing.T) {
 	again, err := second.Finish(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, unchanged, again)
-	after, err := snapshotWorktree(t.Context(), root, "")
+	after, _, err := snapshotWorktree(t.Context(), root, "", nil)
 	require.NoError(t, err)
 	require.Equal(t, before, after)
 	require.Equal(t, indexBefore, worktreeTestGit(t, root, "diff", "--cached", "--binary"))
@@ -111,14 +113,14 @@ func TestWorktreeBinaryPatchIncludesUntrackedAndDirtyBaseline(t *testing.T) {
 	require.Contains(t, string(patch), "-dirty baseline")
 	require.NotContains(t, string(patch), "-committed")
 	inspection := t.TempDir()
-	_, err = snapshotWorktree(t.Context(), filepath.Join(w.scratch, "baseline"), inspection)
+	_, _, err = snapshotWorktree(t.Context(), filepath.Join(w.scratch, "baseline"), inspection, nil)
 	require.NoError(t, err)
 	worktreeTestGit(t, inspection, "init")
 	require.NoError(t, os.WriteFile(filepath.Join(inspection, ".git", "info", "attributes"), []byte("* -text\n"), 0o644))
 	worktreeTestGit(t, inspection, "apply", "--binary", result.PatchPath)
-	want, err := snapshotWorktree(t.Context(), w.Path, "")
+	want, _, err := snapshotWorktree(t.Context(), w.Path, "", nil)
 	require.NoError(t, err)
-	got, err := snapshotWorktree(t.Context(), inspection, "")
+	got, _, err := snapshotWorktree(t.Context(), inspection, "", nil)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }
@@ -267,6 +269,55 @@ func TestWorktreeRejectedStorageDoesNotModifySource(t *testing.T) {
 	_, err = NewWorktree(t.Context(), root, filepath.Join(external, "link", "new"))
 	require.ErrorContains(t, err, "outside the source checkout")
 	require.NoDirExists(t, filepath.Join(root, "new"))
+}
+
+func TestWorktreeExcludesRegeneratedDirectories(t *testing.T) {
+	t.Parallel()
+	root := worktreeTestRepo(t)
+	worktreeTestWrite(t, root, ".gitignore", "ignored\nnode_modules/\n")
+	worktreeTestWrite(t, root, filepath.Join("node_modules", "left-pad", "index.js"), "module.exports = 1\n")
+	worktreeTestWrite(t, root, filepath.Join("pkg", "__pycache__", "main.pyc"), "\x00\x01")
+	w, err := NewWorktree(t.Context(), root, t.TempDir())
+	require.NoError(t, err)
+	require.NoDirExists(t, filepath.Join(w.Path, "node_modules"))
+	require.NoDirExists(t, filepath.Join(w.Path, "pkg", "__pycache__"))
+	require.NoDirExists(t, filepath.Join(w.scratch, "baseline", "node_modules"))
+	entries, _, err := snapshotWorktree(t.Context(), w.Path, "", nil)
+	require.NoError(t, err)
+	require.NotContains(t, entries, "node_modules")
+	require.NotContains(t, entries, filepath.Join("pkg", "__pycache__"))
+	worktreeTestWrite(t, w.Path, filepath.Join("node_modules", "regen", "index.js"), "regenerated\n")
+	result, err := w.Finish(t.Context())
+	require.NoError(t, err)
+	require.False(t, result.Changed)
+	require.True(t, result.Removed)
+	require.NoDirExists(t, result.Path)
+	require.Equal(t, []string{"node_modules", filepath.Join("pkg", "__pycache__")}, result.Excluded)
+	data, err := os.ReadFile(filepath.Join(root, "node_modules", "left-pad", "index.js"))
+	require.NoError(t, err)
+	require.Equal(t, "module.exports = 1\n", string(data))
+}
+
+func TestWorktreeKeepsTrackedRegeneratedDirectory(t *testing.T) {
+	t.Parallel()
+	root := worktreeTestRepo(t)
+	worktreeTestWrite(t, root, filepath.Join("vendor", "dep.txt"), "vendored\n")
+	worktreeTestGit(t, root, "add", "vendor")
+	worktreeTestGit(t, root, "commit", "-m", "vendor")
+	worktreeTestWrite(t, root, filepath.Join("vendor", "local.txt"), "local\n")
+	w, err := NewWorktree(t.Context(), root, t.TempDir())
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(w.Path, "vendor", "dep.txt"))
+	require.FileExists(t, filepath.Join(w.Path, "vendor", "local.txt"))
+	worktreeTestWrite(t, w.Path, filepath.Join("vendor", "dep.txt"), "child edit\n")
+	result, err := w.Finish(t.Context())
+	require.NoError(t, err)
+	require.True(t, result.Changed)
+	require.True(t, result.Preserved)
+	require.Empty(t, result.Excluded)
+	data, err := os.ReadFile(filepath.Join(result.Path, "vendor", "dep.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "child edit\n", string(data))
 }
 
 func TestWorktreeReplacedDirectoryPreserved(t *testing.T) {
