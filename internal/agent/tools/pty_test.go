@@ -597,6 +597,10 @@ func (s *stuckReaderTerm) SecretRead() term.SecretReadState {
 
 func (s *stuckReaderTerm) ForegroundIsShell() bool { return false }
 
+func (s *stuckReaderTerm) PendingInput() int { return 0 }
+
+func (s *stuckReaderTerm) DiscardPendingInput() {}
+
 func (s *stuckReaderTerm) ResetWaitSample() {}
 func (s *stuckReaderTerm) RescanFromStart() {}
 func (s *stuckReaderTerm) Close()           {}

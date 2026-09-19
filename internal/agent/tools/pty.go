@@ -234,6 +234,8 @@ type ptyTerminal interface {
 	SampleJob() term.JobActivity
 	SecretRead() term.SecretReadState
 	ForegroundIsShell() bool
+	PendingInput() int
+	DiscardPendingInput()
 	ResetWaitSample()
 	RescanFromStart()
 	Close()
@@ -789,10 +791,14 @@ func (r *ptyRunner) Type(ctx context.Context, text string, waitSeconds int) (res
 		return r.runCommand(ctx, s, text, segs, waitSeconds)
 	}
 	if !hasKeys(segs) && !takesInputNow(s) {
-		// A command line aimed at a shell that is not reading: the tty
-		// would hold it until the running command exits and then run it
-		// unwatched, its output lost between calls. Queue it instead;
-		// the next call at an idle shell delivers it.
+		// The foreground claims to read nothing. Type the line anyway
+		// and check shortly: a plain read (echo on) consumes instantly,
+		// so a still-pending line after the window is recalled with the
+		// tty's kill character and queued for the next prompt instead -
+		// where it would otherwise have run unwatched.
+		if res, typed := r.typeOrRecall(ctx, s, text, waitSeconds); typed {
+			return res, nil
+		}
 		r.enqueue(text)
 		return PTYResult{Queued: true, Running: s.Alive()}, nil
 	}
@@ -864,6 +870,57 @@ func (r *ptyRunner) driveProgram(ctx context.Context, s ptyTerminal, text string
 	// begins; its prompt can already be sitting in the undrained output.
 	s.RescanFromStart()
 	return r.awaitCompletion(ctx, s, echo, waitSeconds)
+}
+
+const (
+	// ptyConsumeWindow is how long typeOrRecall gives a foreground to
+	// consume a typed line before its input is flushed.
+	ptyConsumeWindow = 600 * time.Millisecond
+	// ptyConsumePoll paces the consumption check.
+	ptyConsumePoll = 40 * time.Millisecond
+)
+
+// typeOrRecall types a single command line at a session whose foreground
+// looks like it reads nothing, and decides by observation: the tty's
+// input queue either drains (a plain read - echo stays on, so no tty
+// state gave it away - consumed the line) and the call waits for the
+// command like any other, or the line is still pending, is recalled
+// with the kill character before anything can run it, and the caller
+// queues it instead. Returns (result, true) when the line stayed typed.
+func (r *ptyRunner) typeOrRecall(ctx context.Context, s ptyTerminal, text string, waitSeconds int) (PTYResult, bool) {
+	if strings.Contains(text, "\n") {
+		// Recall only works on the canonical line buffer; multi-line
+		// input queues without tempting fate.
+		return PTYResult{}, false
+	}
+	line := strings.TrimSuffix(text, "\n")
+
+	r.setState(func() {
+		r.lastEcho = []string{line}
+		r.inFlight = true
+	})
+	if err := r.send(s, []byte(line+"\n")); err != nil {
+		r.setState(func() { r.inFlight = false })
+		return PTYResult{}, false
+	}
+
+	deadline := time.Now().Add(ptyConsumeWindow)
+	for s.PendingInput() > 0 && time.Now().Before(deadline) && ctx.Err() == nil {
+		time.Sleep(ptyConsumePoll)
+	}
+	if s.PendingInput() <= 0 {
+		res, err := r.awaitCompletion(ctx, s, []string{line}, waitSeconds)
+		return res, err == nil
+	}
+
+	// Nobody consumed the line: flush it from the tty input queue
+	// before the running command can exit and hand it to the shell
+	// unwatched. A newline-terminated line cannot be recalled with the
+	// kill character - it is a complete queue entry - so the queue is
+	// flushed wholesale.
+	s.DiscardPendingInput()
+	r.setState(func() { r.inFlight = false })
+	return PTYResult{}, false
 }
 
 // typeWhileBusy types at a command another call is waiting on - the
