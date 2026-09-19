@@ -433,11 +433,10 @@ func ptyReaperStart() {
 }
 
 // runnerKey names a runner in the registry: each owner - an agent and
-// the dispatch (session) it is serving - gets its own session per
-// working directory, the way a person has one terminal tab per project
-// they are in.
-func runnerKey(owner, cwd string) string {
-	return owner + "\x00" + cwd
+// the dispatch (session) it is serving - gets one terminal per session
+// name, the way a person keeps several terminal tabs open at once.
+func runnerKey(owner, sessionName string) string {
+	return owner + "\x00" + sessionName
 }
 
 // shellOwner scopes a terminal to one dispatch of an agent: the agent
@@ -454,15 +453,18 @@ func shellOwner(agentID, sessionID string) string {
 	return agentID + "\x1f" + sessionID
 }
 
-// ptyRunnerFor returns the runner for one dispatch of agentID running
-// in sessionID and workingDir, creating (and warm-starting) it on first
-// use. The ask service collects sudo passwords from the user; nil
-// disables prompting. Runners are reused until they idle out
-// (ptyIdleTimeout) or are evicted at the cap - which is therefore also
-// the bound on concurrent terminals, waves included - so shell state
-// survives across calls without leaking one PTY per dispatch forever.
-func ptyRunnerFor(agentID, sessionID, cwd string, ask question.Service) *ptyRunner {
-	key := runnerKey(shellOwner(agentID, sessionID), cwd)
+// ptyRunnerFor returns the named-session runner for one dispatch of
+// agentID running in sessionID, creating (and warm-starting) it on
+// first use. Every session of an owner is an independent terminal; a
+// new one opens in cwd - the directory Harness was spawned from, unless
+// the call asked otherwise. The ask service collects sudo passwords
+// from the user; nil disables prompting. Runners are reused until they
+// idle out (ptyIdleTimeout) or are evicted at the cap - which is
+// therefore also the bound on concurrent terminals, waves included -
+// so shell state survives across calls without leaking one PTY per
+// session forever.
+func ptyRunnerFor(agentID, sessionID, sessionName, cwd string, ask question.Service) *ptyRunner {
+	key := runnerKey(shellOwner(agentID, sessionID), sessionName)
 
 	ptyRunnersMu.Lock()
 	defer ptyRunnersMu.Unlock()

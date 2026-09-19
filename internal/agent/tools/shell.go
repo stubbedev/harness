@@ -27,8 +27,9 @@ type ShellParams struct {
 	// demanded a command would reject the very call this tool's own
 	// description asks for.
 	Command             string `json:"command,omitempty" description:"What to type into the terminal: a command line at the prompt, or text and keys for the program that is running. Named keys go in angle brackets (<enter>, <escape>, <ctrl+c>). Leave empty to wait for the running command's next event."`
+	Session             string `json:"session,omitempty" description:"Which named terminal to use (default \"main\"). Sessions are independent terminals: state, working directory and running programs are per name. Keep long-lived programs (servers, watchers) in their own named session and work in another; poll that session empty to stream its output or collect its exit code."`
 	Reset               bool   `json:"reset,omitempty" description:"Kill a wedged session and start a fresh one, losing everything the old shell held"`
-	WorkingDir          string `json:"working_dir,omitempty" description:"Directory to open the session in; the session tracks cd from then on"`
+	WorkingDir          string `json:"working_dir,omitempty" description:"Directory for a new session to open in; defaults to the directory Harness was spawned from. Has no effect on an existing session - use cd inside it."`
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to hold a command that has gone completely idle before returning it as still running (default 60, ceiling 15 minutes)"`
 }
 
@@ -38,6 +39,7 @@ type ShellResponseMetadata struct {
 	Output           string `json:"output"`
 	Description      string `json:"description"`
 	WorkingDirectory string `json:"working_directory"`
+	Session          string `json:"session,omitempty"`
 }
 
 const (
@@ -85,6 +87,26 @@ func shellDescription(shell string) string {
 	}
 	return out.String()
 }
+
+// sessionName validates and normalizes the session parameter. The
+// default session is "main"; a name that would not make a sane
+// registry key or UI label is an error to name, not to guess at.
+func sessionName(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "main", nil
+	}
+	if len(s) > 32 || !sessionNameRe.MatchString(s) {
+		return "", fmt.Errorf("session must match %s (letters, digits, dot, dash, underscore)", sessionNamePattern)
+	}
+	return s, nil
+}
+
+const (
+	sessionNamePattern = `[A-Za-z0-9][A-Za-z0-9._-]{0,31}`
+)
+
+var sessionNameRe = regexp.MustCompile(`^` + sessionNamePattern + `$`)
 
 // conflictingShellInputs reports, as a message for the model, when one
 // call asks for two different things at once: a command to type and a
@@ -191,13 +213,16 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 					return fantasy.NewTextErrorResponse(notice), nil
 				}
 			}
+			name, err := sessionName(params.Session)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
 
 			startTime := time.Now()
 			waitSeconds := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
 
 			var result PTYResult
-			var err error
-			session := ptyRunnerFor(owner, GetSessionFromContext(ctx), execWorkingDir, questions)
+			session := ptyRunnerFor(owner, GetSessionFromContext(ctx), name, execWorkingDir, questions)
 			switch {
 			case params.Reset:
 				err = session.Reset(ctx)
@@ -254,6 +279,7 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 				Output:           stdout,
 				Description:      shellLabel(params),
 				WorkingDirectory: cwd,
+				Session:          name,
 			}
 
 			var sb strings.Builder

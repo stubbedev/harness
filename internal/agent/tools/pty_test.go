@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -924,10 +925,10 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 		ptyRunnersMu.Unlock()
 	})
 
-	// Fill to the cap.
+	// Fill to the cap: one runner per session name.
 	for i := range ptyMaxRunners {
-		dir := t.TempDir()
-		r := ptyRunnerFor("test", "", dir, nil)
+		name := fmt.Sprintf("s%d", i)
+		r := ptyRunnerFor("test", "", name, t.TempDir(), nil)
 		if _, err := r.terminal(t.Context()); err != nil {
 			t.Fatalf("open %d: %v", i, err)
 		}
@@ -938,7 +939,7 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 
 	// One more evicts the most idle.
 	time.Sleep(10 * time.Millisecond)
-	r := ptyRunnerFor("test", "", t.TempDir(), nil)
+	r := ptyRunnerFor("test", "", "fresh", t.TempDir(), nil)
 	_, err := r.terminal(t.Context())
 	require.NoError(t, err)
 	ptyRunnersMu.Lock()
@@ -967,7 +968,7 @@ func TestPtyRunnerIdleReapAndCap(t *testing.T) {
 	ptyRunnersMu.Lock()
 	defer ptyRunnersMu.Unlock()
 	require.Len(t, ptyRunners, ptyMaxRunners-1)
-	_, stillThere := ptyRunners[runnerKey("test", r.cwd)]
+	_, stillThere := ptyRunners[r.key]
 	require.True(t, stillThere, "the just-used runner must survive the reap")
 }
 
@@ -1013,10 +1014,10 @@ func TestPtyRunner_OwnersGetSeparateSessions(t *testing.T) {
 		ptyRunnersMu.Unlock()
 	})
 
-	a := ptyRunnerFor("agent-a", "", t.TempDir(), nil)
-	b := ptyRunnerFor("agent-b", "", a.cwd, nil)
+	a := ptyRunnerFor("agent-a", "", "main", t.TempDir(), nil)
+	b := ptyRunnerFor("agent-b", "", "main", a.cwd, nil)
 	require.NotSame(t, a, b, "two owners in one directory must not share a session")
-	require.Same(t, a, ptyRunnerFor("agent-a", "", a.cwd, nil), "one owner resolves back to its own runner")
+	require.Same(t, a, ptyRunnerFor("agent-a", "", "main", a.cwd, nil), "one owner resolves back to its own runner")
 }
 
 // Concurrent dispatches of one agent type share no terminal: the
@@ -1044,10 +1045,10 @@ func TestPtyRunner_DispatchesGetSeparateSessions(t *testing.T) {
 	})
 
 	cwd := t.TempDir()
-	d1 := ptyRunnerFor("fast", "msg1$$call1", cwd, nil)
-	d2 := ptyRunnerFor("fast", "msg2$$call2", cwd, nil)
+	d1 := ptyRunnerFor("fast", "msg1$$call1", "main", cwd, nil)
+	d2 := ptyRunnerFor("fast", "msg2$$call2", "main", cwd, nil)
 	require.NotSame(t, d1, d2, "two dispatches of one agent must not share a terminal")
-	require.Same(t, d1, ptyRunnerFor("fast", "msg1$$call1", cwd, nil), "one dispatch resolves back to its own runner")
+	require.Same(t, d1, ptyRunnerFor("fast", "msg1$$call1", "main", cwd, nil), "one dispatch resolves back to its own runner")
 
 	ptyRunnersMu.Lock()
 	require.Len(t, ptyRunners, 2)
@@ -1055,7 +1056,7 @@ func TestPtyRunner_DispatchesGetSeparateSessions(t *testing.T) {
 	ptyRunnersMu.Unlock()
 
 	// A same-prefixed sibling agent is untouched by fast's cleanup.
-	other := ptyRunnerFor("fast2", "", cwd, nil)
+	other := ptyRunnerFor("fast2", "", "main", cwd, nil)
 	closeOwnerSessions("fast")
 	ptyRunnersMu.Lock()
 	_, d2Gone := ptyRunners[d2key]

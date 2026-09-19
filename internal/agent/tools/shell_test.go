@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -49,6 +51,84 @@ func TestShellTool_BareSleepIsRefused(t *testing.T) {
 	})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "done")
+}
+
+// A single agent juggles named sessions: a long-lived program holds one
+// terminal while another keeps serving commands, and the program's exit
+// frees its session for new commands.
+func TestShellTool_NamedSessionsJuggle(t *testing.T) {
+	requireTerminalSession(t)
+	workingDir := t.TempDir()
+	tool := newShellToolForTest(t, workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	// A long-lived reader occupies the "srv" terminal.
+	resp := runShellTool(t, tool, ctx, ShellParams{
+		Session: "srv",
+		Command: "cat",
+	})
+	require.False(t, resp.IsError)
+
+	// Meanwhile the main terminal keeps serving commands.
+	resp = runShellTool(t, tool, ctx, ShellParams{
+		Command: "echo main-side",
+	})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "main-side")
+
+	// The server terminal feeds its program and shows what it prints.
+	resp = runShellTool(t, tool, ctx, ShellParams{
+		Session: "srv",
+		Command: "hello<enter>",
+	})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "hello")
+
+	// End the program; its session is free for new commands again.
+	resp = runShellTool(t, tool, ctx, ShellParams{
+		Session: "srv",
+		Command: "<ctrl+d>",
+	})
+	require.False(t, resp.IsError)
+	resp = runShellTool(t, tool, ctx, ShellParams{
+		Session: "srv",
+		Command: "echo srv-alive",
+	})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "srv-alive",
+		"the session must be back at its shell once the program exits")
+
+	var meta ShellResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Equal(t, "srv", meta.Session)
+}
+
+// A new session opens in the directory Harness was spawned from unless
+// the call asks otherwise, and sessions keep independent state.
+func TestShellTool_NewSessionsSpawnDirAndIsolation(t *testing.T) {
+	requireTerminalSession(t)
+	workingDir := t.TempDir()
+	sub := filepath.Join(workingDir, "sub")
+	require.NoError(t, os.MkdirAll(sub, 0o755))
+	tool := newShellToolForTest(t, workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runShellTool(t, tool, ctx, ShellParams{Session: "scratch", Command: "pwd"})
+	require.False(t, resp.IsError)
+	spawn, err := filepath.EvalSymlinks(workingDir)
+	require.NoError(t, err)
+	require.Contains(t, resp.Content, spawn, "a new session opens in the spawn directory")
+
+	resp = runShellTool(t, tool, ctx, ShellParams{Session: "elsewhere", Command: "pwd", WorkingDir: sub})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "sub", "working_dir places a new session")
+
+	// State is per session: an export in one is invisible in another.
+	resp = runShellTool(t, tool, ctx, ShellParams{Session: "scratch", Command: "export JUGGLE=a"})
+	require.False(t, resp.IsError)
+	resp = runShellTool(t, tool, ctx, ShellParams{Session: "elsewhere", Command: "printf %s \"$JUGGLE\""})
+	require.False(t, resp.IsError)
+	require.NotContains(t, resp.Content, "a", "sessions must not share shell state")
 }
 
 func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
