@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,17 @@ func directoryTestRoot(t *testing.T) string {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
 	return root
+}
+
+// directoryScopeMarker renders the scope attribute exactly as an injected
+// instruction body does: %q quoting, so Windows separators escape the same
+// way on both sides, and symlink resolution, so the marker matches the
+// canonical path the tracker records.
+func directoryScopeMarker(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	require.NoError(t, err)
+	return fmt.Sprintf("scope=%q", resolved)
 }
 
 func directoryTestFile(t *testing.T, root, name, body string) string {
@@ -76,7 +88,7 @@ func TestDirectoryInstructionsNestedPrecedenceAndMultiView(t *testing.T) {
 	require.Less(t, strings.Index(response.Content, "root rules"), strings.Index(response.Content, "parent rules"))
 	require.Less(t, strings.Index(response.Content, "parent rules"), strings.Index(response.Content, "deep rules"))
 	require.Contains(t, response.Content, "sibling rules")
-	require.Contains(t, response.Content, `scope="`+filepath.Join(root, "a", "deep")+`"`)
+	require.Contains(t, response.Content, directoryScopeMarker(t, filepath.Join(root, "a", "deep")))
 	require.Equal(t, "underlying content", directoryTestRun(t, ctx, tool, args).Content)
 }
 
@@ -348,7 +360,7 @@ func (t *directoryTestMCPTool) MCP() string { return "server" }
 
 func TestDirectoryInstructionsRootSymlinkAndConfiguredScope(t *testing.T) {
 	t.Parallel()
-	parent := t.TempDir()
+	parent := directoryTestRoot(t)
 	root := filepath.Join(parent, "real")
 	directoryTestFile(t, root, "nested/policy/rules.md", "configured nested rules")
 	alias := filepath.Join(parent, "alias")
@@ -359,9 +371,9 @@ func TestDirectoryInstructionsRootSymlinkAndConfiguredScope(t *testing.T) {
 	ctx := directoryTestContext(t, "one")
 	response := directoryTestRun(t, ctx, tool, map[string]any{"file_path": filepath.Join(alias, "nested/file.go")})
 	require.Contains(t, response.Content, "configured nested rules")
-	require.Contains(t, response.Content, `scope="`+filepath.Join(root, "nested")+`"`)
+	require.Contains(t, response.Content, directoryScopeMarker(t, filepath.Join(root, "nested")))
 	replayed := tracker.Prepare(ctx, nil)
-	require.True(t, directoryInstructionPresent(replayed, `scope="`+filepath.Join(root, "nested")+`"`))
+	require.True(t, directoryInstructionPresent(replayed, directoryScopeMarker(t, filepath.Join(root, "nested"))))
 }
 
 func TestDirectoryInstructionsLSPAndShellScopes(t *testing.T) {

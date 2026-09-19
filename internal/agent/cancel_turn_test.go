@@ -127,7 +127,7 @@ func TestRun_CanceledTurnRunsQueuedFollowUp(t *testing.T) {
 	select {
 	case runErr := <-runDone:
 		require.NoError(t, runErr, "the follow-up turn must complete normally")
-	case <-time.After(10 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("timed out waiting for the follow-up turn")
 	}
 

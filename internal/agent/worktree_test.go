@@ -23,7 +23,7 @@ func worktreeTestRepo(t *testing.T) string {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}
-	root := t.TempDir()
+	root := directoryTestRoot(t)
 	worktreeTestGit(t, root, "init")
 	worktreeTestGit(t, root, "config", "user.name", "Test")
 	worktreeTestGit(t, root, "config", "user.email", "test@example.invalid")
