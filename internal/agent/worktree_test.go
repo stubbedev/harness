@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -285,14 +286,14 @@ func TestWorktreeExcludesRegeneratedDirectories(t *testing.T) {
 	entries, _, err := snapshotWorktree(t.Context(), w.Path, "", nil)
 	require.NoError(t, err)
 	require.NotContains(t, entries, "node_modules")
-	require.NotContains(t, entries, filepath.Join("pkg", "__pycache__"))
+	require.NotContains(t, entries, path.Join("pkg", "__pycache__"))
 	worktreeTestWrite(t, w.Path, filepath.Join("node_modules", "regen", "index.js"), "regenerated\n")
 	result, err := w.Finish(t.Context())
 	require.NoError(t, err)
 	require.False(t, result.Changed)
 	require.True(t, result.Removed)
 	require.NoDirExists(t, result.Path)
-	require.Equal(t, []string{"node_modules", filepath.Join("pkg", "__pycache__")}, result.Excluded)
+	require.Equal(t, []string{"node_modules", path.Join("pkg", "__pycache__")}, result.Excluded)
 	data, err := os.ReadFile(filepath.Join(root, "node_modules", "left-pad", "index.js"))
 	require.NoError(t, err)
 	require.Equal(t, "module.exports = 1\n", string(data))
