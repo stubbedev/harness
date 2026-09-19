@@ -63,7 +63,6 @@ import (
 	"github.com/stubbedev/harness/internal/ui/notification"
 	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/ui/util"
-	"github.com/stubbedev/harness/internal/version"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
@@ -3153,11 +3152,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		m.drawEditorArea(scr, layout.editor)
-
-		// Draw the session details overlay when open
-		if m.detailsOpen {
-			m.drawSessionDetails(scr, layout.sessionDetails)
-		}
 	}
 
 	isOnboarding := m.state == uiOnboarding
@@ -3198,6 +3192,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// This needs to come last to overlay on top of everything. We always pass
 	// the full screen bounds because the dialogs will position themselves
 	// accordingly.
+	if m.state == uiChat && m.detailsOpen {
+		m.drawSessionDetails(scr, scr.Bounds())
+	}
 	if m.dialog.HasDialogs() {
 		return m.dialog.Draw(scr, scr.Bounds())
 	}
@@ -3871,14 +3868,6 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			layout.Len(headerHeight),
 			layout.Fill(1),
 		).Split(appRect).Assign(&headerRect, &mainRect)
-		detailsHeight := min(sessionDetailsMaxHeight, area.Dy()-1) // One row for the header
-		var sessionDetailsArea image.Rectangle
-		layout.Vertical(
-			layout.Len(detailsHeight),
-			layout.Fill(1),
-		).Split(appRect).Assign(&sessionDetailsArea, new(image.Rectangle))
-		uiLayout.sessionDetails = sessionDetailsArea
-		uiLayout.sessionDetails.Min.Y += headerHeight // adjust for header
 		// Add one line gap between header and main content
 		mainRect.Min.Y += 1
 		mainRect, editorRect := splitOffEditor(mainRect, editorHeight, sideMargin)
@@ -3938,9 +3927,6 @@ type uiLayout struct {
 
 	// status is the area for the status view.
 	status uv.Rectangle
-
-	// session details is the area for the session details overlay in compact mode.
-	sessionDetails uv.Rectangle
 }
 
 func (m *UI) openEditor(value string) tea.Cmd {
@@ -5414,63 +5400,10 @@ func (m *UI) pasteIdx() int {
 
 // drawSessionDetails draws the session details in compact mode.
 func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
-	if m.session == nil {
+	if m.session == nil || area.Dx() <= 0 || area.Dy() <= 1 {
 		return
 	}
-
-	s := m.com.Styles
-
-	width := area.Dx() - s.CompactDetails.View.GetHorizontalFrameSize()
-	height := area.Dy() - s.CompactDetails.View.GetVerticalFrameSize()
-
-	title := s.CompactDetails.Title.Width(width).MaxHeight(2).Render(m.session.Title)
-	blocks := []string{
-		title,
-		"",
-		m.modelInfo(width),
-		"",
-	}
-
-	detailsHeader := lipgloss.JoinVertical(
-		lipgloss.Left,
-		blocks...,
-	)
-
-	version := s.CompactDetails.Version.Width(width).AlignHorizontal(lipgloss.Right).Render(version.Version)
-
-	remainingHeight := height - lipgloss.Height(detailsHeader) - lipgloss.Height(version)
-
-	const maxSectionWidth = 50
-	numSections := 4
-	if len(m.runningSubagents) > 0 {
-		numSections = 5
-	}
-	sectionWidth := max(1, min(maxSectionWidth, width/numSections-2)) // account for spacing between sections
-	maxItemsPerSection := remainingHeight - 3                         // Account for section title and spacing
-
-	lspSection := m.lspInfo(sectionWidth, maxItemsPerSection, false)
-	mcpSection := m.mcpInfo(sectionWidth, maxItemsPerSection, false)
-	skillsSection := m.skillsInfo(sectionWidth, maxItemsPerSection, false)
-	filesSection := m.filesInfo(m.com.Workspace.WorkingDir(), sectionWidth, maxItemsPerSection, false)
-	var sections string
-	if len(m.runningSubagents) > 0 {
-		subagentsSection := m.subagentsInfo(sectionWidth, maxItemsPerSection, false)
-		sections = lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection, " ", subagentsSection)
-	} else {
-		sections = lipgloss.JoinHorizontal(lipgloss.Top, filesSection, " ", lspSection, " ", mcpSection, " ", skillsSection)
-	}
-	uv.NewStyledString(
-		s.CompactDetails.View.
-			Width(area.Dx()).
-			Render(
-				lipgloss.JoinVertical(
-					lipgloss.Left,
-					detailsHeader,
-					sections,
-					version,
-				),
-			),
-	).Draw(scr, area)
+	dialog.DrawCenter(scr, area, m.sessionDetailsView(area))
 }
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {

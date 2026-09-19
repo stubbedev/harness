@@ -3,6 +3,8 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -517,9 +519,8 @@ func ToolCallSummary(tc message.ToolCall) string {
 			return FirstLine(v)
 		}
 	}
-	// Fallback: the first string value, whatever its key.
-	for _, v := range params {
-		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+	for _, key := range slices.Sorted(maps.Keys(params)) {
+		if s, ok := params[key].(string); ok && strings.TrimSpace(s) != "" {
 			return FirstLine(s)
 		}
 	}

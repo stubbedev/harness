@@ -66,6 +66,36 @@ func TestToolCallSummary(t *testing.T) {
 			want: "value",
 		},
 		{
+			name: "fallback follows key order rather than input order",
+			tc:   message.ToolCall{Name: "Whatever", Input: `{"zebra":"last","alpha":"first","middle":"other"}`},
+			want: "first",
+		},
+		{
+			name: "fallback skips non-string and blank values",
+			tc:   message.ToolCall{Name: "Whatever", Input: `{"a":null,"b":3,"c":false,"d":[],"e":{},"f":" \t","g":"first\nsecond","h":"other"}`},
+			want: "first",
+		},
+		{
+			name: "preferred keys retain priority over fallback and input order",
+			tc:   message.ToolCall{Name: "Whatever", Input: `{"query":"query","path":"path","alpha":"fallback","command":"  run   tests\nnext"}`},
+			want: "run tests",
+		},
+		{
+			name: "unusable preferred keys allow fallback",
+			tc:   message.ToolCall{Name: "Whatever", Input: `{"command":false,"query":" \t","zebra":"last","alpha":"first"}`},
+			want: "first",
+		},
+		{
+			name: "invalid input",
+			tc:   message.ToolCall{Name: "Whatever", Input: `{"alpha":`},
+			want: "",
+		},
+		{
+			name: "no string values",
+			tc:   message.ToolCall{Name: "Whatever", Input: `{"count":3,"enabled":true}`},
+			want: "",
+		},
+		{
 			name: "no usable input",
 			tc:   message.ToolCall{Name: "View", Input: `{}`},
 			want: "",
@@ -74,7 +104,52 @@ func TestToolCallSummary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, ToolCallSummary(tt.tc))
+			for range 100 {
+				require.Equal(t, tt.want, ToolCallSummary(tt.tc))
+			}
+		})
+	}
+}
+
+func TestToolLabelsStableAcrossRenders(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"memory", `{"action":"search","query":"build commands","category":"project"}`, "Memory build commands"},
+		{"memory", `{"title":"Build commands","content":"Run go test\nThen lint","category":"project","action":"save","pinned":true}`, "Memory save"},
+		{"custom_tool", `{"zebra":"last","alpha":"first\nsecond","middle":"other"}`, "Custom Tool first"},
+		{"custom_tool", `{"alpha":"first\nsecond","middle":"other","zebra":"last"}`, "Custom Tool first"},
+	} {
+		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
+			sty := groupStyles()
+			call := message.ToolCall{ID: "t1", Name: tt.name, Input: tt.input, Finished: true}
+			item := NewToolMessageItem(sty, "msg", call, nil, false, "/tmp")
+			singleton := NewToolGroupMessageItem(sty, item)
+			group := NewToolGroupMessageItem(sty, item)
+			group.AddTool(bashTool("t2", "go test", true))
+			require.True(t, group.ToggleExpanded())
+			require.True(t, group.Spinning())
+			wantGroup := "Ran (2 tool calls)\n " + tt.want + "\n Shell go test"
+
+			for range 100 {
+				require.Equal(t, tt.want, ansi.Strip(ToolOneLiner(sty, item, 120)))
+				require.Equal(t, tt.want, ansi.Strip(singleton.RawRender(120)))
+				require.Equal(t, tt.want, strings.TrimSpace(ansi.Strip(singleton.Render(120))))
+				require.Equal(t, wantGroup, ansi.Strip(group.RawRender(120)))
+				require.Contains(t, ansi.Strip(group.Render(120)), tt.want)
+				group.Advance()
+			}
+
+			call.Input = `{"query":"updated parameters"}`
+			item.SetToolCall(call)
+			wantUpdated := ToolDisplayName(call) + " updated parameters"
+			require.Equal(t, wantUpdated, ansi.Strip(ToolOneLiner(sty, item, 120)))
+			require.Contains(t, ansi.Strip(group.Render(120)), wantUpdated)
 		})
 	}
 }
