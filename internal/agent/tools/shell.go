@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -105,6 +106,24 @@ func conflictingShellInputs(p ShellParams) string {
 		strings.Join(asked, " and "), asked[0])
 }
 
+// bareSleepRe matches a command that is nothing but a sleep: it burns
+// the call's wall-clock while waiting for nothing.
+var bareSleepRe = regexp.MustCompile(`^\s*sleep(\s+\d+(\.\d+)?[a-z]*)?\s*$`)
+
+// sleepNotice is what the model gets instead of the wasted call.
+const sleepNotice = "a bare sleep just burns wall-clock: an empty call waits for the terminal's next event on its own (output, a finished command, a question, a full-screen program), and waiting on a condition belongs in the command that checks it - a watch or a poll loop - not in sleep"
+
+// bareSleepCommand reports, as a message for the model, when the call
+// is nothing but a sleep. Everything the sleep might be standing in for
+// is already a feature of the session or belongs to a checking command;
+// there is no call in which honouring it is the right move.
+func bareSleepCommand(p ShellParams) string {
+	if !bareSleepRe.MatchString(p.Command) {
+		return ""
+	}
+	return sleepNotice
+}
+
 // shellLabel is what the call is called in the UI and in the message
 // metadata: the first line of what was typed, or a name for the calls
 // that type nothing - a poll, a reset. The model is not asked to
@@ -167,6 +186,11 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			if conflict := conflictingShellInputs(params); conflict != "" {
 				return fantasy.NewTextErrorResponse(conflict), nil
 			}
+			if params.Command != "" {
+				if notice := bareSleepCommand(params); notice != "" {
+					return fantasy.NewTextErrorResponse(notice), nil
+				}
+			}
 
 			startTime := time.Now()
 			waitSeconds := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
@@ -207,6 +231,8 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			case result.AltScreen:
 				rows, cols := session.Size()
 				header = fmt.Sprintf("[full-screen program; %dx%d screen follows]", cols, rows)
+			case result.Running && result.Output != "":
+				header = "[still running; poll empty to keep streaming]"
 			case result.Running:
 				header = "[still running, idle]"
 			case result.ExitCode != nil && *result.ExitCode != 0:

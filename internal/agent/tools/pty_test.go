@@ -197,6 +197,29 @@ func TestPtyRunner_CommandBehindSilentCommandQueues(t *testing.T) {
 	require.Contains(t, res.Output, "after")
 }
 
+// A poll over a command left running streams its new output as a chunk
+// instead of holding the call for the command's whole life; the next
+// poll carries the command to its exit code.
+func TestPtyRunner_PollStreamsChunksThenExitCode(t *testing.T) {
+	r := newTestRunner(t)
+
+	started, err := r.Type(t.Context(), "sleep 2; echo chunk; sleep 2; echo done", 1)
+	require.NoError(t, err)
+	require.True(t, started.Running)
+
+	poll, err := r.Poll(t.Context())
+	require.NoError(t, err)
+	require.True(t, poll.Running)
+	require.Contains(t, poll.Output, "chunk")
+	require.NotContains(t, poll.Output, "done")
+
+	final, err := r.Poll(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, final.ExitCode, "the poll returns the finished command's exit code")
+	require.Equal(t, 0, *final.ExitCode)
+	require.Contains(t, final.Output, "done")
+}
+
 // A command that stops to ask something is detected from the process
 // state, not waited out to the budget: the call returns as waiting for
 // input within a couple of seconds even with a minute of budget left.
@@ -397,7 +420,7 @@ func TestPtyRunner_BlindQuietJobIsNotWaitingRightAway(t *testing.T) {
 
 	blind := &blindSleeperTerm{since: time.Now()}
 	start := time.Now()
-	res, err := r.awaitCompletion(t.Context(), blind, nil, 2)
+	res, err := r.awaitCompletion(t.Context(), blind, nil, 2, false)
 	require.NoError(t, err)
 	require.True(t, res.Running)
 	require.False(t, res.Waiting, "a silent job with no visible wait point is not a question yet")
@@ -510,7 +533,7 @@ func TestPtyRunner_UnconsumedAnswerDoesNotReopenDialog(t *testing.T) {
 	require.NoError(t, err)
 
 	stuck := &stuckReaderTerm{}
-	res, err := r.awaitCompletion(t.Context(), stuck, nil, 2)
+	res, err := r.awaitCompletion(t.Context(), stuck, nil, 2, false)
 	require.NoError(t, err)
 	require.True(t, res.Running)
 

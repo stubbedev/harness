@@ -28,6 +28,29 @@ func TestShellTool_DefaultAutoBackgroundThreshold(t *testing.T) {
 	require.Contains(t, meta.Output, "done")
 }
 
+// A bare sleep burns the call's wall-clock while waiting for nothing:
+// the call is refused with the way out (poll empty; wait on conditions
+// inside the command that checks them), and a sleep inside a compound
+// command still runs.
+func TestShellTool_BareSleepIsRefused(t *testing.T) {
+	requireTerminalSession(t)
+	workingDir := t.TempDir()
+	tool := newShellToolForTest(t, workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+
+	resp := runShellTool(t, tool, ctx, ShellParams{
+		Command: "sleep 5",
+	})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "an empty call waits")
+
+	resp = runShellTool(t, tool, ctx, ShellParams{
+		Command: "sleep 0.1 && echo done",
+	})
+	require.False(t, resp.IsError)
+	require.Contains(t, resp.Content, "done")
+}
+
 func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	requireTerminalSession(t)
 	workingDir := t.TempDir()

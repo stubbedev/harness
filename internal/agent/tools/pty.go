@@ -843,7 +843,7 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 	if err != nil {
 		return PTYResult{}, err
 	}
-	return r.awaitCompletion(ctx, s, echo, waitSeconds)
+	return r.awaitCompletion(ctx, s, echo, waitSeconds, false)
 }
 
 // driveProgram types into the program the session has running and
@@ -869,7 +869,7 @@ func (r *ptyRunner) driveProgram(ctx context.Context, s ptyTerminal, text string
 	// The program may have finished on the keystroke before this wait
 	// begins; its prompt can already be sitting in the undrained output.
 	s.RescanFromStart()
-	return r.awaitCompletion(ctx, s, echo, waitSeconds)
+	return r.awaitCompletion(ctx, s, echo, waitSeconds, false)
 }
 
 const (
@@ -909,7 +909,7 @@ func (r *ptyRunner) typeOrRecall(ctx context.Context, s ptyTerminal, text string
 		time.Sleep(ptyConsumePoll)
 	}
 	if s.PendingInput() <= 0 {
-		res, err := r.awaitCompletion(ctx, s, []string{line}, waitSeconds)
+		res, err := r.awaitCompletion(ctx, s, []string{line}, waitSeconds, false)
 		return res, err == nil
 	}
 
@@ -962,7 +962,13 @@ func (r *ptyRunner) typeWhileBusy(ctx context.Context, s ptyTerminal, text strin
 // build inside one call instead of bouncing the agent into re-polling
 // it, while a command that has gone genuinely idle still returns on
 // schedule.
-func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []string, waitSeconds int) (PTYResult, error) {
+//
+// In stream mode - a poll picking up a command left running - a quiet
+// moment with new output pending hands that output back as a chunk
+// instead of holding the call for the command's whole life: the next
+// poll streams the next chunk, and completion still lands as the exit
+// code.
+func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []string, waitSeconds int, stream bool) (PTYResult, error) {
 	s.ResetWaitSample()
 	pats := []*regexp.Regexp{r.promptRe, credPromptRe, ptyAltScreenRe}
 	budget := time.Duration(waitSeconds) * time.Second
@@ -1053,6 +1059,10 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 				// The foreground job is blocked reading the terminal:
 				// the command has asked its question and gone quiet.
 				return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: true, Waiting: true}, nil
+			} else if stream && s.PendingLen() > 0 {
+				// New output is pending and the command is merely running:
+				// hand the chunk back now rather than holding the poll.
+				return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: s.Alive()}, nil
 			} else if !s.WaitForOutput(ctx, time.Until(deadline)) {
 				break // the silence outlasted the budget
 			} else {
@@ -1653,7 +1663,7 @@ func (r *ptyRunner) Poll(ctx context.Context) (PTYResult, error) {
 		s.RescanFromStart()
 		var echo []string
 		r.setState(func() { echo = r.lastEcho })
-		res, err := r.awaitCompletion(ctx, s, echo, DefaultPollWaitSeconds)
+		res, err := r.awaitCompletion(ctx, s, echo, DefaultPollWaitSeconds, true)
 		r.setState(func() { r.running = (res.Running || res.AltScreen) && s.Alive() })
 		return res, err
 	}
