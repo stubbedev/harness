@@ -87,14 +87,28 @@ func (m *UI) applyLSPStates(msg lspStatesMsg) tea.Cmd {
 	return nil
 }
 
-// lspErrorCount returns the total diagnostic count across the memoized LSP
-// states, shown in the compact header.
-func (m *UI) lspErrorCount() int {
-	count := 0
-	for _, info := range m.lspStates {
-		count += info.DiagnosticCount
+// lspDiagnosticTotals returns the diagnostic counts by severity summed
+// across the memoized LSP states, shown in the compact header.
+func (m *UI) lspDiagnosticTotals() lsp.DiagnosticCounts {
+	var totals lsp.DiagnosticCounts
+	for _, counts := range m.lspDiagnostics {
+		totals.Error += counts.Error
+		totals.Warning += counts.Warning
+		totals.Information += counts.Information
+		totals.Hint += counts.Hint
 	}
-	return count
+	return totals
+}
+
+// severityCounts spreads flat per-severity counts into the map shape
+// lspDiagnostics renders from.
+func severityCounts(counts lsp.DiagnosticCounts) map[protocol.DiagnosticSeverity]int {
+	return map[protocol.DiagnosticSeverity]int{
+		protocol.SeverityError:       counts.Error,
+		protocol.SeverityWarning:     counts.Warning,
+		protocol.SeverityHint:        counts.Hint,
+		protocol.SeverityInformation: counts.Information,
+	}
 }
 
 // lspInfo renders the LSP status section showing active LSP clients and their
@@ -111,13 +125,10 @@ func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 
 	var lsps []LSPInfo
 	for _, state := range states {
-		counts := m.lspDiagnostics[state.Name]
-		lsps = append(lsps, LSPInfo{LSPClientInfo: state, Diagnostics: map[protocol.DiagnosticSeverity]int{
-			protocol.SeverityError:       counts.Error,
-			protocol.SeverityWarning:     counts.Warning,
-			protocol.SeverityHint:        counts.Hint,
-			protocol.SeverityInformation: counts.Information,
-		}})
+		lsps = append(lsps, LSPInfo{
+			LSPClientInfo: state,
+			Diagnostics:   severityCounts(m.lspDiagnostics[state.Name]),
+		})
 	}
 
 	title := t.Resource.Heading.Render("LSPs")

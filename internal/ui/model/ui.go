@@ -3104,7 +3104,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		m.session,
 		m.detailsOpen,
 		area.Dx(),
-		m.lspErrorCount(),
+		m.lspDiagnosticTotals(),
 		parentBreadcrumbLine(m.com.Styles, m.subagentColor, m.parentTitle, area.Dx()),
 	)
 }

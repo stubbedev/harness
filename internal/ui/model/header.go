@@ -9,9 +9,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/ui/common"
-	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 const (
@@ -38,18 +38,18 @@ func (h *header) refresh() {
 	h.width = 0
 }
 
-// drawHeader draws the header for the given session. lspErrorCount comes
-// from the UI's memoized LSP state: drawing runs on every frame and must not
-// probe the workspace (a synchronous HTTP round-trip in client/server mode).
-// breadcrumb is the parent-session breadcrumb shown when a child (subagent)
-// session is being viewed, empty otherwise.
+// drawHeader draws the header for the given session. diagnostics come
+// from the UI's memoized LSP state: drawing runs on every frame and must
+// not probe the workspace (a synchronous HTTP round-trip in client/server
+// mode). breadcrumb is the parent-session breadcrumb shown when a child
+// (subagent) session is being viewed, empty otherwise.
 func (h *header) drawHeader(
 	scr uv.Screen,
 	area uv.Rectangle,
 	session *session.Session,
 	detailsOpen bool,
 	width int,
-	lspErrorCount int,
+	diagnostics lsp.DiagnosticCounts,
 	breadcrumb string,
 ) {
 	h.width = width
@@ -69,7 +69,7 @@ func (h *header) drawHeader(
 	left, right := renderHeaderDetails(
 		h.com,
 		session,
-		lspErrorCount,
+		diagnostics,
 		detailsOpen,
 		breadcrumb,
 	)
@@ -101,7 +101,7 @@ func (h *header) drawHeader(
 func renderHeaderDetails(
 	com *common.Common,
 	session *session.Session,
-	lspErrorCount int,
+	diagnostics lsp.DiagnosticCounts,
 	detailsOpen bool,
 	breadcrumb string,
 ) (left, right string) {
@@ -131,8 +131,10 @@ func renderHeaderDetails(
 	// Right: diagnostics, context usage with the model ID, and the
 	// session-details hint.
 	var rightParts []string
-	if lspErrorCount > 0 {
-		rightParts = append(rightParts, t.LSP.ErrorDiagnostic.Render(fmt.Sprintf("%s%d", styles.LSPErrorIcon, lspErrorCount)))
+	// Diagnostics are shown broken down by severity, the same rendered
+	// form the LSP section uses; the all-clear case renders nothing.
+	if diagnostics := lspDiagnostics(t, severityCounts(diagnostics)); diagnostics != "" {
+		rightParts = append(rightParts, diagnostics)
 	}
 
 	agentCfg := com.Config().Agents[config.AgentCoder]

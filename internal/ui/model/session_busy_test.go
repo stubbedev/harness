@@ -748,7 +748,7 @@ func TestRenderHelpersDoNotProbeWorkspace(t *testing.T) {
 	for range 10 {
 		require.NotNil(t, m.selectedLargeModel())
 		m.lspInfo(40, 5, true)
-		require.Equal(t, 3, m.lspErrorCount())
+		require.Equal(t, lsp.DiagnosticCounts{Error: 2, Warning: 1}, m.lspDiagnosticTotals())
 	}
 
 	// modelInfo reaches provider config only through the memoized model;
@@ -876,7 +876,7 @@ func TestLSPEventRefreshIsOffThreadAndDeduped(t *testing.T) {
 	require.False(t, m.lspRefreshQueued, "the queued flag must clear once the re-dispatched fetch lands")
 	require.Equal(t, 3, m.lspStates["gopls"].DiagnosticCount, "fetched states must land in the cache")
 	require.Equal(t, 2, m.lspDiagnostics["gopls"].Error, "fetched severity counts must land in the cache")
-	require.Equal(t, 3, m.lspErrorCount())
+	require.Equal(t, lsp.DiagnosticCounts{Error: 2, Warning: 1}, m.lspDiagnosticTotals())
 	require.Equal(t, 2, ws.lspStateCalls, "one fetch plus the queued re-fetch")
 }
 
