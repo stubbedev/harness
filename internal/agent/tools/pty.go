@@ -569,15 +569,35 @@ func (r *ptyRunner) pushFront(cmd string) {
 }
 
 // takesInputNow reports whether the session's foreground is in a state
-// that reads what is typed at this moment: a full-screen program, or a
-// job blocked reading the terminal (or one whose wait point the kernel
-// hides, where a harmless keystroke beats burning the budget). A command
-// that is merely running - a build, a sleep - reads nothing.
+// that reads what is typed at this moment: a full-screen program, a job
+// blocked reading the terminal where the kernel can say so (Linux), or -
+// everywhere the termios is observable - a foreground that turned echo
+// off, the mark of a line editor, REPL or hidden reader owning the
+// input. A command that is merely running - a build, a sleep - reads
+// nothing.
 func takesInputNow(s ptyTerminal) bool {
 	if s.AltScreen() {
 		return true
 	}
-	return jobWaitingForInput(s.SampleJob())
+	if act := s.SampleJob(); act.Observed {
+		return jobWaitingForInput(act)
+	}
+	switch s.SecretRead() {
+	case term.SecretReadYes, term.SecretReadRaw:
+		// Echo off while a command holds the session: a line editor or
+		// reader is taking input.
+		return true
+	case term.SecretReadNo:
+		// Echo on: the tty sits in the shell's ordinary discipline and
+		// nothing is reading - text typed now would wait, unwatched.
+		return false
+	default:
+		// The termios is not observable (Windows): nothing can be
+		// concluded from the terminal itself, so typing falls through
+		// to the pre-queue behavior rather than swallowing input an
+		// interactive program may be waiting for.
+		return true
+	}
 }
 
 // ensureSessionLocked opens (or reopens after a shell exit) the

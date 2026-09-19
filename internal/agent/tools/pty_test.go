@@ -155,7 +155,15 @@ func TestPtyRunner_StillRunning(t *testing.T) {
 // queued, not typed into the running program's tty - where it would sit
 // until the command exited and then run unwatched. The next poll that
 // finds the shell at its prompt delivers it.
+//
+// Queueing needs to know that the foreground reads nothing: the job's
+// wait point on Linux, the tty's echo state everywhere else the termios
+// is observable. Windows can observe neither, so it keeps the pre-queue
+// typing and the test skips there.
 func TestPtyRunner_CommandBehindSilentCommandQueues(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("queueing needs the foreground's input state, unobservable over ConPTY")
+	}
 	r := newTestRunner(t)
 
 	started, err := r.Type(t.Context(), "sleep 3", 1)
@@ -208,7 +216,10 @@ func TestPtyRunner_RunReturnsWhenInputNeeded(t *testing.T) {
 		require.True(t, res.Running)
 		require.Nil(t, res.ExitCode)
 
-		done, err := r.Type(t.Context(), "hello\n", 10)
+		// A plain read keeps echo on, so outside Linux a bare line
+		// queues rather than reaching the reader; the explicit <enter>
+		// is the documented way to send input to a waiting program.
+		done, err := r.Type(t.Context(), "hello<enter>", 10)
 		require.NoError(t, err)
 		require.Contains(t, done.Output, "got:hello")
 		return
@@ -263,11 +274,18 @@ func TestPtyRunner_InputAnswersPrompt(t *testing.T) {
 	r := newTestRunner(t)
 
 	// A program reading stdin hangs a pipe-based runner; in the
-	// terminal it just waits until Input feeds it.
+	// terminal it just waits until Input feeds it. Outside Linux a
+	// plain read keeps echo on, so the answer goes with an explicit
+	// <enter> (the documented way to feed a waiting program) instead of
+	// queueing behind it.
 	_, err := r.Type(t.Context(), "read answer; echo \"got:$answer\"", 1)
 	require.NoError(t, err) // returns as still running
 
-	res, err := r.Type(t.Context(), "hello\n", 10)
+	answer := "hello\n"
+	if runtime.GOOS != "linux" {
+		answer = "hello<enter>"
+	}
+	res, err := r.Type(t.Context(), answer, 10)
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "got:hello")
 
