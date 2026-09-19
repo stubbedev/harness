@@ -59,13 +59,20 @@ type Session struct {
 	notify chan struct{} // signalled (cap 1) whenever output arrives
 	closed chan struct{}
 
-	pty       pty.Pty
-	proc      *os.Process
-	pending   []byte    // output not yet drained
-	scanFrom  int       // where WaitFor pattern scanning continues from
-	lastData  time.Time // last time output arrived
-	exited    bool
-	err       error
+	pty      pty.Pty
+	proc     *os.Process
+	pending  []byte    // output not yet drained
+	scanFrom int       // where WaitFor pattern scanning continues from
+	lastData time.Time // last time output arrived
+	exited   bool
+	err      error
+	// exitCode/exitKnown are the shell process's own exit status,
+	// recorded by reap once the process has been waited on: the code it
+	// exited with, or -1 when a signal killed it. The read loop usually
+	// declares the session over first, so this lands a moment after
+	// exited does.
+	exitCode  int
+	exitKnown bool
 	closeOnce sync.Once
 
 	// job is the Windows job object the shell was assigned to at
@@ -238,6 +245,12 @@ func Start(cwd string, env ...string) (*Session, error) {
 // tty is still held open by a background child it left behind.
 func (s *Session) reap(cmd *pty.Cmd) {
 	err := cmd.Wait()
+	s.mu.Lock()
+	if ps := cmd.ProcessState; ps != nil {
+		s.exitCode = ps.ExitCode()
+		s.exitKnown = true
+	}
+	s.mu.Unlock()
 	onExit(s.pty)
 	select {
 	case <-s.closed:
@@ -817,6 +830,17 @@ func (s *Session) Err() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.err
+}
+
+// ExitStatus returns the shell process's exit status once the process
+// has been waited on: the code it exited with, -1 when a signal killed
+// it, and whether the status is known at all. It can lag the session's
+// own exit by a moment, since the read loop usually sees the exit
+// first.
+func (s *Session) ExitStatus() (code int, known bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.exitCode, s.exitKnown
 }
 
 // Close terminates the session process and releases the PTY. It is

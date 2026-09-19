@@ -625,9 +625,10 @@ func (s *stuckReaderTerm) PendingInput() int { return 0 }
 
 func (s *stuckReaderTerm) DiscardPendingInput() {}
 
-func (s *stuckReaderTerm) ResetWaitSample() {}
-func (s *stuckReaderTerm) RescanFromStart() {}
-func (s *stuckReaderTerm) Close()           {}
+func (s *stuckReaderTerm) ResetWaitSample()        {}
+func (s *stuckReaderTerm) RescanFromStart()        {}
+func (s *stuckReaderTerm) ExitStatus() (int, bool) { return 0, false }
+func (s *stuckReaderTerm) Close()                  {}
 
 func TestPtyRunner_MultilineCommand(t *testing.T) {
 	r := newTestRunner(t)
@@ -1156,4 +1157,110 @@ func TestPtyRunner_CwdIfMoved(t *testing.T) {
 	require.Equal(t, "/repo/sub", r.cwdIfMoved("/repo/sub"), "a move is announced")
 	require.Empty(t, r.cwdIfMoved("/repo/sub"), "staying put is not announced again")
 	require.Equal(t, "/repo", r.cwdIfMoved("/repo"), "moving back is a move too")
+}
+
+// A shell that dies unwatched - here by running exit as the last thing
+// it does - leaves no completion sentinel, so its verdict (the output
+// it printed with nobody waiting, and the shell process's own exit
+// status) is captured when the next call finds the session dead,
+// delivered exactly once, and the session comes back fresh.
+func TestPtyRunner_ExitVerdictDeliveredOnNextCall(t *testing.T) {
+	r := newTestRunner(t)
+
+	started, err := r.Type(t.Context(), "export PTY_VERDICT_VAR=here; sleep 2; echo DYING-LATE; exit 5", 1)
+	require.NoError(t, err)
+	require.True(t, started.Running)
+
+	// The shell dies while nobody is watching.
+	time.Sleep(3100 * time.Millisecond)
+
+	verdict, err := r.Poll(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, verdict.ShellExit, "the poll delivers the dead shell's verdict")
+	require.NotNil(t, verdict.ShellExit.Code)
+	require.Equal(t, 5, *verdict.ShellExit.Code)
+	require.Contains(t, verdict.ShellExit.Output, "DYING-LATE")
+
+	// Delivered once, and the fresh shell has none of the old state.
+	after, err := r.Type(t.Context(), "echo alive", 10)
+	require.NoError(t, err)
+	require.Nil(t, after.ShellExit)
+	require.Equal(t, "alive", after.Output)
+
+	state, err := r.Type(t.Context(), `printf %s "$PTY_VERDICT_VAR"`, 10)
+	require.NoError(t, err)
+	require.Equal(t, "", state.Output, "the fresh shell keeps none of the dead one's state")
+}
+
+// A shell killed by a signal has no exit code; the verdict says how it
+// died instead.
+func TestPtyRunner_SignalledShellReportsHowItDied(t *testing.T) {
+	r := newTestRunner(t)
+
+	_, err := r.Type(t.Context(), "kill -9 $$", 10)
+	require.NoError(t, err)
+
+	res, err := r.Type(t.Context(), "echo back", 10)
+	require.NoError(t, err)
+	require.NotNil(t, res.ShellExit)
+	require.Nil(t, res.ShellExit.Code, "a signalled shell has no exit code")
+	require.NotEmpty(t, res.ShellExit.Reason)
+	require.Equal(t, "back", res.Output)
+}
+
+// Deliver-then-reap: a session whose shell has exited is swept only
+// after a call for it has carried the verdict to the agent, however far
+// past any wall-clock grace that call sits; the idle timeout is the
+// only backstop.
+func TestPtyRunner_ExitedSessionKeptUntilVerdictDelivered(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh on this platform")
+	}
+	t.Setenv("SHELL", "/bin/sh")
+
+	ptyRunnersMu.Lock()
+	saved := ptyRunners
+	ptyRunners = map[string]*ptyRunner{}
+	ptyRunnersMu.Unlock()
+	t.Cleanup(func() {
+		ptyRunnersMu.Lock()
+		for _, r := range ptyRunners {
+			r.Close()
+		}
+		ptyRunners = saved
+		ptyRunnersMu.Unlock()
+	})
+
+	r := ptyRunnerFor("test", "", "doomed", t.TempDir(), nil)
+	if _, err := r.terminal(t.Context()); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	_, err := r.Type(t.Context(), "exit 3", 10)
+	require.NoError(t, err)
+
+	// Far past the old wall-clock exit grace (but short of the idle
+	// backstop), the sweep keeps the session: its verdict is
+	// undelivered.
+	ptyRunnersMu.Lock()
+	r.mu.Lock()
+	r.lastUsed = time.Now().Add(-(ptyIdleTimeout - time.Minute))
+	r.mu.Unlock()
+	ptyReap()
+	_, kept := ptyRunners[r.key]
+	ptyRunnersMu.Unlock()
+	require.True(t, kept, "an exited session is kept until its verdict is delivered")
+
+	res, err := r.Type(t.Context(), "echo delivered", 10)
+	require.NoError(t, err)
+	require.NotNil(t, res.ShellExit)
+	require.NotNil(t, res.ShellExit.Code)
+	require.Equal(t, 3, *res.ShellExit.Code)
+
+	// Delivered: the session lives by the idle rule alone, and the
+	// delivering call refreshed its clock.
+	ptyRunnersMu.Lock()
+	ptyReap()
+	_, kept = ptyRunners[r.key]
+	ptyRunnersMu.Unlock()
+	require.True(t, kept, "a delivered session lives by the idle rule alone")
 }

@@ -258,13 +258,13 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 				header = fmt.Sprintf("[full-screen program; %dx%d screen follows]", cols, rows)
 			case result.Running && result.Output != "":
 				header = "[still running; poll empty to keep streaming]"
-			case result.Running:
+			case result.Running && result.ShellExit == nil:
 				header = "[still running, idle]"
 			case result.ExitCode != nil && *result.ExitCode != 0:
 				header = fmt.Sprintf("[exit %d]", *result.ExitCode)
 			case params.Reset:
 				header = "[session reset]"
-			case result.Output == "" && params.Command == "":
+			case result.Output == "" && params.Command == "" && result.ShellExit == nil:
 				header = "[no new output]"
 			}
 
@@ -285,9 +285,13 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			var sb strings.Builder
 			// This says the shell state the model was counting on is
 			// not the shell state it got, which it cannot work out from
-			// the output alone. Everything else it can.
-			if session.tookRestart() {
-				sb.WriteString("[shell had exited; a fresh one replaced it and kept none of its state]\n")
+			// the output alone. Everything else it can. The verdict -
+			// what the dead shell printed on its way out and how it
+			// died - rides the same call, so a program that exited
+			// unwatched still gets its outcome to the model.
+			if result.ShellExit != nil {
+				sb.WriteString(shellExitNote(result.ShellExit))
+				sb.WriteString("\n")
 			}
 			if header != "" {
 				sb.WriteString(header)
@@ -295,7 +299,7 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			}
 			if stdout != "" {
 				sb.WriteString(stdout)
-			} else if header == "" {
+			} else if header == "" && result.ShellExit == nil {
 				sb.WriteString(ShellNoOutput)
 			}
 			// Only when the shell actually moved: see ptyRunner.cwdIfMoved.
@@ -305,6 +309,27 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(sb.String()), metadata), nil
 		},
 	)
+}
+
+// shellExitNote is what the model is told when its call landed on a
+// session whose shell had exited: the state that shell held is gone,
+// and what the shell printed on its way out is attached when the call
+// that watched it die did not already report it.
+func shellExitNote(v *shellExit) string {
+	var b strings.Builder
+	b.WriteString("[shell had exited")
+	switch {
+	case v.Code != nil:
+		fmt.Fprintf(&b, " (exit code %d)", *v.Code)
+	case v.Reason != "":
+		fmt.Fprintf(&b, " (%s)", v.Reason)
+	}
+	b.WriteString("; a fresh one replaced it and kept none of its state]")
+	if v.Output != "" {
+		b.WriteString("\nIts final output:\n")
+		b.WriteString(TruncateOutput(v.Output))
+	}
+	return b.String()
 }
 
 func TruncateOutput(content string) string {

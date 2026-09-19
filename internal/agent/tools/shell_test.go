@@ -283,3 +283,22 @@ func TestShellLabel(t *testing.T) {
 	require.LessOrEqual(t, utf8.RuneCountInString(shellLabel(ShellParams{Command: strings.Repeat("x", 200)})), 60,
 		"a runaway command line is shortened to something that fits a label")
 }
+
+func TestShellExitNote(t *testing.T) {
+	t.Parallel()
+
+	code := 5
+	require.Equal(t,
+		"[shell had exited (exit code 5); a fresh one replaced it and kept none of its state]",
+		shellExitNote(&shellExit{Code: &code}))
+	require.Equal(t,
+		"[shell had exited (killed by a signal); a fresh one replaced it and kept none of its state]",
+		shellExitNote(&shellExit{Reason: "killed by a signal"}))
+	require.Equal(t,
+		"[shell had exited; a fresh one replaced it and kept none of its state]",
+		shellExitNote(&shellExit{}))
+
+	note := shellExitNote(&shellExit{Code: &code, Output: "DYING-LATE"})
+	require.Contains(t, note, "Its final output:")
+	require.Contains(t, note, "DYING-LATE")
+}

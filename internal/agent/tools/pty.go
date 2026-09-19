@@ -211,6 +211,27 @@ type PTYResult struct {
 	// queue and the shell runs it, in the order typed, the next time it
 	// is back at its prompt.
 	Queued bool
+	// ShellExit reports that the session's shell had exited before this
+	// call, which therefore ran in a fresh one: the dead shell's final
+	// output and exit status, delivered to exactly one call.
+	ShellExit *shellExit
+}
+
+// shellExit is a dead shell's verdict: the output it left undrained
+// when it died, and the shell process's own exit status when that is
+// known. A shell killed outright (or gone through exit or EOF) has no
+// completion sentinel in its output, so the code comes from the
+// process, not the sentinel. The next call to the session carries the
+// verdict to the model and clears it.
+type shellExit struct {
+	// Output is the cleaned final output; empty when the call that
+	// watched the shell die already reported everything it printed.
+	Output string
+	// Code is the shell process's exit code; nil when it is unknown.
+	Code *int
+	// Reason describes a death with no exit code, a signal kill being
+	// the case worth naming (an OOM kill looks like this).
+	Reason string
 }
 
 // ptyTerminal is the slice of term.Session the runner uses; it exists
@@ -238,6 +259,7 @@ type ptyTerminal interface {
 	DiscardPendingInput()
 	ResetWaitSample()
 	RescanFromStart()
+	ExitStatus() (code int, known bool)
 	Close()
 }
 
@@ -300,10 +322,12 @@ type ptyRunner struct {
 	// exits and then run them unwatched; instead they wait here and the
 	// next call at an idle shell delivers them, in order.
 	pending []string
-	// restarted records that the shell had exited and a fresh one was
-	// opened to serve the current call, so the caller can be told that
-	// the state it built up (cd, exports, venv) is gone.
-	restarted bool
+	// exitVerdict holds a dead shell's verdict - the output it printed
+	// unobserved and its exit status - from the moment a call found the
+	// session dead until a result has carried it to the model. Until
+	// then the session is not reaped: the verdict is the reason the
+	// session is kept at all.
+	exitVerdict *shellExit
 }
 
 var (
@@ -319,13 +343,11 @@ const (
 	// max-sessions policy.
 	ptyMaxRunners = 16
 	// ptyIdleTimeout is how long an idle terminal session is kept alive
-	// before its shell is reaped. Any Run/Input/Poll refreshes it.
+	// before its shell is reaped. Any Run/Input/Poll refreshes it. It is
+	// also the backstop for a session whose shell has exited: such a
+	// session is kept until a call for it has carried its verdict (final
+	// output and exit status) to the agent, however far off that call is.
 	ptyIdleTimeout = 30 * time.Minute
-	// ptyExitedGrace is how long a session whose shell has exited stays in
-	// the map: long enough for the agent to collect the exit code and the
-	// output the shell printed on its way out, then it is reaped. Fresh
-	// sessions open afterwards, in the spawn directory.
-	ptyExitedGrace = 2 * time.Minute
 	// ptyReapInterval is how often the reaper sweeps.
 	ptyReapInterval = time.Minute
 )
@@ -358,18 +380,18 @@ func (r *ptyRunner) touch() {
 	r.lastUsed = time.Now()
 }
 
-// ptyReap closes and removes idle or long-exited runners. The caller
-// must hold ptyRunnersMu; closing happens off the map lock. A session
-// whose shell exited is reported by the next poll for it (exit code
-// and final output) and reaped once its grace lapses; an idle one is
-// closed outright.
+// ptyReap closes and removes idle runners. The caller must hold
+// ptyRunnersMu; closing happens off the map lock. A session whose shell
+// exited is not reaped for idling: its verdict - the output it printed
+// on its way out and its exit status - belongs to the agent, and the
+// next call for that session delivers it and reopens a fresh shell
+// there. The idle timeout below is the only backstop.
 func ptyReap() {
 	for _, r := range ptyRunners {
 		r.mu.Lock()
 		idle := time.Since(r.lastUsed)
-		exited := r.session != nil && !r.session.Alive()
 		r.mu.Unlock()
-		if idle >= ptyIdleTimeout || (exited && idle >= ptyExitedGrace) {
+		if idle >= ptyIdleTimeout {
 			delete(ptyRunners, r.key)
 			go r.Close()
 		}
@@ -621,12 +643,13 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	if r.session != nil && r.session.Alive() {
 		return r.session, nil
 	}
-	// The previous shell died (exit, crash): give restarts a small
-	// delay so a runaway loop cannot spin, and remember that it
-	// happened - the caller is about to run in a shell that has none of
-	// the state the last one had.
+	// The previous shell died (exit, crash): record its verdict - the
+	// output it printed unobserved and its exit status - before the
+	// buffer goes away, give restarts a small delay so a runaway loop
+	// cannot spin, and remember that it happened - the caller is about
+	// to run in a shell that has none of the state the last one had.
 	if r.session != nil {
-		r.restarted = true
+		r.captureExitLocked()
 		r.running = false
 		r.lastCwd = ""
 		// The replacement shell opens in the session directory again, so
@@ -677,6 +700,67 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 		s.Drain()
 	}
 	return s, nil
+}
+
+// captureExitLocked records a dead session's verdict before its shell
+// is replaced: the output it printed since the last call drained it,
+// and the shell process's own exit status once the process has been
+// waited on (it lags the session's exit by a moment at most). The old
+// session is closed here: its verdict is drained, and nothing else
+// closes a session a restart replaced. Callers must hold r.mu.
+func (r *ptyRunner) captureExitLocked() {
+	old := r.session
+	raw := string(old.Drain())
+	// The wait result lands within moments of the exit the caller has
+	// just observed; a bounded pause keeps the common case from
+	// reporting a death it could not explain.
+	var code int
+	var known bool
+	for range 25 {
+		if code, known = old.ExitStatus(); known {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	old.Close()
+
+	mark := r.sentinel
+	v := &shellExit{Output: r.cleanWith(mark, raw, nil)}
+	if known {
+		if code >= 0 {
+			v.Code = &code
+		} else {
+			v.Reason = "killed by a signal"
+		}
+	}
+	if have := r.exitVerdict; have != nil {
+		// A verdict captured by an earlier call whose restart failed is
+		// still undelivered: keep whichever side of the two captures
+		// knows more.
+		if v.Code != nil {
+			have.Code, have.Reason = v.Code, ""
+		}
+		if have.Output == "" {
+			have.Output = v.Output
+		}
+		return
+	}
+	r.exitVerdict = v
+}
+
+// attachShellExit hands the verdict captured when this call restarted a
+// dead shell to the result about to be reported, clearing it: exactly
+// one call delivers a shell's verdict. A call that errored out - a
+// restart that failed, a caller gone - leaves the verdict pending for
+// the next one.
+func (r *ptyRunner) attachShellExit(res *PTYResult) {
+	r.mu.Lock()
+	v := r.exitVerdict
+	r.exitVerdict = nil
+	r.mu.Unlock()
+	if v != nil {
+		res.ShellExit = v
+	}
 }
 
 // fence clears the session down to a known point before a command is
@@ -730,7 +814,6 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 	r.session = nil
 	r.inFlight = false
 	r.running = false
-	r.restarted = false
 	r.lastEcho = nil
 	r.lastScreen = ""
 	r.lastCwd = ""
@@ -750,7 +833,6 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 	r.setState(func() {
 		r.inFlight = false
 		r.running = false
-		r.restarted = false
 	})
 	return nil
 }
@@ -766,7 +848,15 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 // asking again (waiting), redrawing (screen), or going idle. Typing at a
 // command another call is still waiting on answers that call's question
 // without queuing behind it or taking its output.
-func (r *ptyRunner) Type(ctx context.Context, text string, waitSeconds int) (res PTYResult, err error) {
+func (r *ptyRunner) Type(ctx context.Context, text string, waitSeconds int) (PTYResult, error) {
+	res, err := r.typeSession(ctx, text, waitSeconds)
+	if err == nil {
+		r.attachShellExit(&res)
+	}
+	return res, err
+}
+
+func (r *ptyRunner) typeSession(ctx context.Context, text string, waitSeconds int) (res PTYResult, err error) {
 	s, err := r.terminal(ctx)
 	if err != nil {
 		return PTYResult{}, err
@@ -1659,6 +1749,14 @@ func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command str
 // its question once it stops to ask, its screen once it has redrawn -
 // so one poll is one event rather than a busy-loop of them.
 func (r *ptyRunner) Poll(ctx context.Context) (PTYResult, error) {
+	res, err := r.pollSession(ctx)
+	if err == nil {
+		r.attachShellExit(&res)
+	}
+	return res, err
+}
+
+func (r *ptyRunner) pollSession(ctx context.Context) (PTYResult, error) {
 	s, err := r.terminal(ctx)
 	if err != nil {
 		return PTYResult{}, err
@@ -1747,17 +1845,6 @@ func (r *ptyRunner) endRunningWait() {
 	r.cmdMu.Unlock()
 }
 
-// tookRestart reports - once - that the session's shell had exited and
-// a fresh one was opened, so the caller can pass that on rather than
-// leaving the agent to wonder where its working directory went.
-func (r *ptyRunner) tookRestart() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	was := r.restarted
-	r.restarted = false
-	return was
-}
-
 // Size reports the session's terminal size.
 func (r *ptyRunner) Size() (rows, cols int) {
 	r.mu.Lock()
@@ -1828,7 +1915,14 @@ func (r *ptyRunner) collectBusy(_ context.Context, s ptyTerminal, busy bool) PTY
 func (r *ptyRunner) clean(raw string, echo []string) string {
 	var mark sentinel
 	r.setState(func() { mark = r.sentinel })
+	return r.cleanWith(mark, raw, echo)
+}
 
+// cleanWith is clean with the session's sentinel already in hand, for
+// callers that hold the state lock or that clean bytes captured before
+// the call began (a dead shell's verdict: its sentinel is the one this
+// session had, even though a fresh one is about to replace it).
+func (r *ptyRunner) cleanWith(mark sentinel, raw string, echo []string) string {
 	out := strings.ReplaceAll(raw, "\r\n", "\n")
 	out = ptyPromptSplitRe.ReplaceAllString(out, "\n")
 	out = strings.ReplaceAll(out, "\x1b[?2004h", "\n")
