@@ -177,14 +177,15 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		assert.False(t, isToolExpanded(g.ChildTool("t2")))
 	})
 
-	t.Run("collapsed group keeps the live call visible", func(t *testing.T) {
+	t.Run("collapsed group stays one line while a call runs", func(t *testing.T) {
 		t.Parallel()
 		g := NewToolGroupMessageItem(sty, done("t1"))
 		g.AddTool(bashTool("t2", "npm test", false))
 		out := ansi.Strip(g.Render(80))
-		assert.Contains(t, out, "Running")
-		assert.Contains(t, out, "(2 tool calls)")
-		assert.Contains(t, out, "npm test")
+		assert.Contains(t, out, "Ran (2 tool calls)")
+		assert.NotContains(t, out, "npm test")
+		// The color says the run is in flight.
+		assert.Contains(t, g.Render(80), sty.Tool.NamePending.Render("Ran"))
 	})
 
 	t.Run("all-failed run colors the verb red", func(t *testing.T) {
@@ -276,31 +277,24 @@ func TestToolGroupAdvanceBumpsVersion(t *testing.T) {
 	require.Equal(t, settled, g.Version(), "a settled group must not bump")
 }
 
-// TestGroupLiveLineOnlyMovesForward covers the collapsed group's live
-// line: with calls running in parallel the newest one often finishes
-// first, and the preview must not fall back to an older call — that
-// reads as the run reordering itself at random.
-func TestGroupLiveLineOnlyMovesForward(t *testing.T) {
+// TestCollapsedGroupHidesItsChildren pins the collapsed group to a
+// single header line, spinning children or not: what the calls did
+// waits for an expansion, and the header's color alone says the run is
+// still in flight.
+func TestCollapsedGroupHidesItsChildren(t *testing.T) {
 	t.Parallel()
 
-	first := bashTool("a1", "first", false)
-	g := NewToolGroupMessageItem(groupStyles(), first)
-	second := bashTool("a2", "second", false)
-	third := bashTool("a3", "third", false)
-	g.AddTool(second)
-	g.AddTool(third)
+	g := NewToolGroupMessageItem(groupStyles(), bashTool("a1", "first", false))
+	g.AddTool(bashTool("a2", "second", true))
+	g.AddTool(bashTool("a3", "third", false))
+	require.True(t, g.Spinning(), "the unfinished call keeps the group live")
 
-	require.Same(t, third, g.liveTool(), "the newest running call is the live one")
-
-	// The newest call settles first: the line stays on it.
-	third.SetToolCall(message.ToolCall{ID: "a3", Name: "shell", Input: `{"command":"third"}`, Finished: true})
-	third.SetResult(&message.ToolResult{ToolCallID: "a3", Content: "done"})
-	require.False(t, third.(Animatable).Spinning())
-	g.advanceLiveTool()
-	assert.Same(t, third, g.liveTool(), "a finished newest call must not hand the line back to an older one")
-
-	// A call started after it takes the line over.
-	fourth := bashTool("a4", "fourth", false)
-	g.AddTool(fourth)
-	assert.Same(t, fourth, g.liveTool())
+	lines, selStart, selEnd := g.renderLines(120)
+	require.Len(t, lines, 1, "a collapsed group renders only its header")
+	require.Equal(t, -1, selStart)
+	require.Equal(t, -1, selEnd)
+	stripped := ansi.Strip(lines[0])
+	require.Contains(t, stripped, "Ran (3 tool calls)")
+	require.NotContains(t, stripped, "first")
+	require.NotContains(t, stripped, "third")
 }

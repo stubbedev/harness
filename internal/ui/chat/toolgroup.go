@@ -3,13 +3,11 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/ui/anim"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -31,7 +29,6 @@ type ToolGroupMessageItem struct {
 	*focusableMessageItem
 
 	sty      *styles.Styles
-	anim     *anim.Anim
 	id       string
 	tools    []ToolMessageItem
 	expanded bool
@@ -40,9 +37,6 @@ type ToolGroupMessageItem struct {
 	// group is selected, expanded and the list is focused; cleared when
 	// the group loses focus.
 	selectedChild int
-	// liveIdx is the call shown beneath a collapsed group's header
-	// while the run is in flight. See advanceLiveTool.
-	liveIdx int
 }
 
 var (
@@ -89,13 +83,6 @@ func NewToolGroupMessageItem(sty *styles.Styles, first ToolMessageItem) *ToolGro
 		// path only got away with because it also checks focus.
 		selectedChild: -1,
 	}
-	g.anim = anim.New(anim.Settings{
-		ID:          g.id,
-		PulseGlyphs: anim.DefaultPulseGlyphs,
-		GradColorA:  sty.WorkingGradFromColor,
-		GradColorB:  sty.WorkingGradToColor,
-		LabelColor:  sty.WorkingLabelColor,
-	})
 	return g
 }
 
@@ -176,7 +163,6 @@ func (g *ToolGroupMessageItem) ToggleSelectedChild() bool {
 // AddTool adds a tool call to the group.
 func (g *ToolGroupMessageItem) AddTool(tool ToolMessageItem) {
 	g.tools = append(g.tools, tool)
-	g.advanceLiveTool()
 	g.clearCache()
 	g.Bump()
 }
@@ -207,16 +193,14 @@ func (g *ToolGroupMessageItem) Spinning() bool {
 	return false
 }
 
-// Advance implements [Animatable]. Advances the group spinner and every
-// spinning child in one frame, bumping the group's list-cache version:
-// children are not list entries, so the list only sees this version.
+// Advance implements [Animatable]. Advances every spinning child in
+// one frame, bumping the group's list-cache version: children are not
+// list entries, so the list only sees this version.
 func (g *ToolGroupMessageItem) Advance() bool {
 	if !g.Spinning() {
 		return false
 	}
-	g.advanceLiveTool()
-	changed := g.anim.Advance()
-	changed = advanceNested(g.tools) || changed
+	changed := advanceNested(g.tools)
 	if changed {
 		g.Bump()
 	}
@@ -392,6 +376,8 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 		}
 	}
 
+	// The color alone says the run is in flight: pending for a live
+	// run, normal once it has settled, error when it did not survive.
 	verb := "Ran"
 	verbStyle := g.sty.Tool.NameNormal
 	if cancelled && failed == 0 {
@@ -402,7 +388,6 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 		verbStyle = g.sty.Tool.NamePartial
 	}
 	if running {
-		verb = "Running"
 		verbStyle = g.sty.Tool.NamePending
 	}
 	calls := fmt.Sprintf("%d tool calls", len(g.tools))
@@ -414,12 +399,7 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 		// says how much of the run to distrust without expanding it.
 		calls += fmt.Sprintf(", %d failed", failed)
 	}
-	var glyph string
-	if running {
-		glyph = g.anim.Render() + " "
-	}
-	header := fmt.Sprintf("%s%s %s",
-		glyph,
+	header := fmt.Sprintf("%s %s",
 		verbStyle.Render(verb),
 		g.sty.Tool.Body.Render("("+calls+")"))
 
@@ -442,13 +422,8 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 		return lines, selStart, selEnd
 	}
 
-	// Collapsed with work in flight: keep the live call visible beneath
-	// the header so the user still sees what is happening right now.
-	if running {
-		if last := g.liveTool(); last != nil {
-			lines = append(lines, subItemIndentString+g.oneLiner(last, contentWidth-subItemIndent))
-		}
-	}
+	// Collapsed: the header is the whole story. What the calls did
+	// waits for an expansion.
 	return lines, -1, -1
 }
 
@@ -496,36 +471,11 @@ func (g *ToolGroupMessageItem) prefixKey() uint64 {
 	return 0
 }
 
-// liveTool returns the call shown beneath a collapsed group's header
-// while work is in flight, or nil before any call has started.
-func (g *ToolGroupMessageItem) liveTool() ToolMessageItem {
-	if g.liveIdx < 0 || g.liveIdx >= len(g.tools) {
-		return nil
-	}
-	return g.tools[g.liveIdx]
-}
-
-// advanceLiveTool moves the live line forward to the newest call that is
-// still running. It never moves backwards. Picking the newest running
-// call afresh on every frame looks stable only while calls finish in the
-// order they were made: with parallel calls the newest one often settles
-// first, and the line then drops back to an older call, so the preview
-// appears to shuffle through the run at random as each call lands.
-func (g *ToolGroupMessageItem) advanceLiveTool() {
-	for i := range slices.Backward(g.tools) {
-		if a, ok := g.tools[i].(Animatable); ok && a.Spinning() {
-			g.liveIdx = max(g.liveIdx, i)
-			return
-		}
-	}
-}
-
 // ToolOneLiner renders one tool call as a single line: tool name,
 // colored by status, and an argument summary, truncated to width. A
 // running call uses the green running color, not the tool's full
 // scrambled spinner (a 15-cell animation with its own timer would
-// crowd the line; the group header already carries the live
-// animation). Shared by the transcript's collapsed groups and the
+// crowd the line). Shared by the transcript's expanded groups and the
 // background task strip's nested lines.
 func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int) string {
 	status := ToolStatusSuccess
