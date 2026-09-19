@@ -9,9 +9,10 @@ import "golang.org/x/sys/unix"
 // does not re-export for these platforms.
 const pendingInputRequest = 0x4004667f
 
-// discardInputRequest and discardInputArg flush the input queue on the
-// BSDs: TIOCFLUSH with the read flag.
-const (
-	discardInputRequest = unix.TIOCFLUSH
-	discardInputArg     = 1
-)
+// flushPendingInput drops the tty's input queue on the BSDs. TIOCFLUSH
+// takes a pointer to the flags to flush - FREAD being the input queue -
+// not the value itself: passing the value would have the kernel copy in
+// from that address, and the flush would fail silently (EFAULT).
+func flushPendingInput(fd int) error {
+	return unix.IoctlSetPointerInt(fd, unix.TIOCFLUSH, 1)
+}

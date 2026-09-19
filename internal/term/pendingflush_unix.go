@@ -20,5 +20,5 @@ func (s *Session) DiscardPendingInput() {
 		return
 	}
 	defer f.Close()
-	_ = unix.IoctlSetInt(int(f.Fd()), discardInputRequest, discardInputArg)
+	_ = flushPendingInput(int(f.Fd()))
 }

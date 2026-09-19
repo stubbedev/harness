@@ -8,9 +8,9 @@ import "golang.org/x/sys/unix"
 // unread byte count on Linux.
 const pendingInputRequest = unix.TIOCINQ
 
-// discardInputRequest and discardInputArg flush the input queue on
-// Linux: tcflush(fd, TCIFLUSH) as an ioctl.
-const (
-	discardInputRequest = unix.TCFLSH
-	discardInputArg     = unix.TCIFLUSH
-)
+// flushPendingInput drops the tty's input queue on Linux: TCFLSH takes
+// the queue selector as the ioctl's direct argument, not through a
+// pointer.
+func flushPendingInput(fd int) error {
+	return unix.IoctlSetInt(fd, unix.TCFLSH, unix.TCIFLUSH)
+}
