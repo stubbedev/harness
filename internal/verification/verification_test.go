@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -151,6 +152,9 @@ func TestRevisionInvalidation(t *testing.T) {
 			case "deleted":
 				require.NoError(t, os.Remove(filepath.Join(root, "src", "main.go")))
 			case "mode":
+				if runtime.GOOS == "windows" {
+					t.Skip("chmod cannot change permission bits on Windows")
+				}
 				require.NoError(t, os.Chmod(filepath.Join(root, "src", "main.go"), 0o755))
 			case "ignored":
 				require.NoError(t, os.WriteFile(filepath.Join(root, "src", "ignored.go"), []byte("ignored"), 0o644))
