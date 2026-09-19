@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -42,9 +43,11 @@ func TestViewToolMultiFile(t *testing.T) {
 	})
 
 	require.False(t, resp.IsError, "one missing file must not fail the call: %q", resp.Content)
-	require.Contains(t, resp.Content, `path="`+good+`"`)
+	// The renderer quotes paths with %q, so on Windows the separators
+	// come back escaped; build the expectation the same way.
+	require.Contains(t, resp.Content, "path="+strconv.Quote(good))
 	require.Contains(t, resp.Content, "alpha")
-	require.Contains(t, resp.Content, `path="`+missing+`" error`)
+	require.Contains(t, resp.Content, "path="+strconv.Quote(missing)+" error")
 	require.Contains(t, resp.Content, "File not found")
 	require.Contains(t, resp.Content, "gamma")
 	require.NotContains(t, resp.Content, "delta", "the per-entry limit applies")

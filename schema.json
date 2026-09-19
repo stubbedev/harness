@@ -956,7 +956,6 @@
           },
           "propertyNames": {
             "enum": [
-              "chat.add_attachment",
               "chat.background_tasks",
               "chat.cancel",
               "chat.clear_highlight",
@@ -976,7 +975,6 @@
               "chat.page_up",
               "chat.scroll_left",
               "chat.scroll_right",
-              "chat.tab",
               "chat.toggle_pills",
               "chat.up",
               "chat.up_down",
@@ -1050,6 +1048,7 @@
               "editor.paste_text",
               "editor.select_all",
               "editor.send_message",
+              "editor.shell_mode",
               "editor.skills",
               "export_conversation",
               "help",
