@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/diff"
@@ -37,7 +36,7 @@ const WriteToolName = "write"
 func NewWriteTool(
 	lspManager *lsp.Manager,
 	files history.Service,
-	filetracker filetracker.Service,
+	tracker filetracker.Service,
 	workingDir string,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
@@ -55,38 +54,24 @@ func NewWriteTool(
 
 			filePath := filepathext.SmartJoin(workingDir, params.FilePath)
 
-			fileInfo, err := os.Stat(filePath)
-			if err == nil {
-				if fileInfo.IsDir() {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
+			unlock := lockFile(filePath)
+			defer unlock()
+			oldBytes, err := os.ReadFile(filePath)
+			create := os.IsNotExist(err)
+			if err != nil && !create {
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("error reading file: %s", err)), nil
+			}
+			oldContent := string(oldBytes)
+			if !create {
+				if err := checkFileEvidence(ctx, tracker, sessionID, filePath, oldBytes, []filetracker.Range{{Start: 0, End: len(oldBytes)}}); err != nil {
+					return fantasy.NewTextErrorResponse(conflictEvidence(ctx, tracker, sessionID, filePath, oldBytes, 0, err).Error()), nil
 				}
-
-				modTime := fileInfo.ModTime().Truncate(time.Second)
-				lastRead := filetracker.LastReadTime(ctx, sessionID, filePath)
-				if modTime.After(lastRead) {
-					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s has been modified since it was last read.\nLast modification: %s\nLast read: %s\n\nPlease read the file again before modifying it.",
-						filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339))), nil
-				}
-
-				oldContent, readErr := os.ReadFile(filePath)
-				if readErr == nil && string(oldContent) == params.Content {
+				if oldContent == params.Content {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("File %s already contains the exact content. No changes made.", filePath)), nil
 				}
-			} else if !os.IsNotExist(err) {
-				return fantasy.ToolResponse{}, fmt.Errorf("error checking file: %w", err)
 			}
-
-			dir := filepath.Dir(filePath)
-			if err = os.MkdirAll(dir, 0o755); err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error creating directory: %w", err)
-			}
-
-			oldContent := ""
-			if fileInfo != nil && !fileInfo.IsDir() {
-				oldBytes, readErr := os.ReadFile(filePath)
-				if readErr == nil {
-					oldContent = string(oldBytes)
-				}
+			if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+				return fantasy.ToolResponse{}, err
 			}
 
 			diff, additions, removals := diff.GenerateDiff(
@@ -95,30 +80,33 @@ func NewWriteTool(
 				strings.TrimPrefix(filePath, workingDir),
 			)
 
-			err = os.WriteFile(filePath, []byte(params.Content), 0o644)
+			err = guardedWrite(filePath, oldBytes, []byte(params.Content), create)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error writing file: %w", err)
+				if current, readErr := os.ReadFile(filePath); readErr == nil {
+					err = conflictEvidence(ctx, tracker, sessionID, filePath, current, 0, err)
+				}
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
 			if err := recordFileVersion(ctx, files, sessionID, filePath, oldContent, params.Content); err != nil {
 				return fantasy.ToolResponse{}, err
 			}
 
-			filetracker.RecordRead(ctx, sessionID, filePath)
+			filetracker.Observe(ctx, tracker, sessionID, filePath, []byte(params.Content), []filetracker.Range{{Start: 0, End: len(params.Content)}})
 
 			lspManager.NotifyChangeAsync(ctx, params.FilePath)
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
 			result += reportDiagnosticsNow(ctx, lspManager, filePath)
-			return fantasy.WithResponseMetadata(
+			return withFileMutations(fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
 					Diff:      diff,
 					Additions: additions,
 					Removals:  removals,
 				},
-			), nil
+			), filePath), nil
 		},
 	)
 }

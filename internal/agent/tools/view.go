@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	_ "embed"
 	"errors"
@@ -120,6 +121,7 @@ type viewFileContent struct {
 	output   string
 	meta     ViewResponseMetadata
 	response *fantasy.ToolResponse
+	observe  func()
 }
 
 // viewOneFile reads one file or one section of it. A refusal (missing
@@ -186,7 +188,7 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 
 	// Check if it's a directory
 	if fileInfo.IsDir() {
-		return viewFileContent{}, failureResponse(fmt.Sprintf("Path is a directory, not a file: %s", filePath)), nil
+		return viewDirectory(filePath, params.Offset, params.Limit)
 	}
 
 	// Set default limit if not provided (no limit for SKILL.md files)
@@ -223,7 +225,9 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 		mimeType = sniffImageMimeType(imageData, mimeType)
 
 		resp := fantasy.NewImageResponse(imageData, mimeType)
-		return viewFileContent{response: &resp}, nil, nil
+		return viewFileContent{response: &resp, observe: func() {
+			filetracker.Observe(ctx, v.filetracker, sessionID, filePath, imageData, []filetracker.Range{{Start: 0, End: len(imageData)}})
+		}}, nil, nil
 	}
 
 	// Read the file content
@@ -231,7 +235,11 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 	if isSkillFile {
 		maxContentSize = 0
 	}
-	content, hasMore, err := readTextFile(filePath, params.Offset, params.Limit, maxContentSize)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return viewFileContent{}, nil, err
+	}
+	content, hasMore, err := readTextContent(bytes.NewReader(data), params.Offset, params.Limit, maxContentSize)
 	if err != nil {
 		if tooLarge, ok := errors.AsType[contentTooLargeError](err); ok {
 			return viewFileContent{}, failureResponse(fmt.Sprintf("Content section is too large (%d bytes). Maximum size is %d bytes",
@@ -257,7 +265,6 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 	}
 	output += "\n</file>\n"
 	output += reportDiagnosticsNow(ctx, v.lspManager, filePath)
-	v.filetracker.RecordRead(ctx, sessionID, filePath)
 
 	meta := ViewResponseMetadata{
 		FilePath: filePath,
@@ -272,7 +279,9 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 		}
 	}
 
-	return viewFileContent{output: output, meta: meta}, nil, nil
+	return viewFileContent{output: output, meta: meta, observe: func() {
+		filetracker.Observe(ctx, v.filetracker, sessionID, filePath, data, seenTextRanges(data, params.Offset, content))
+	}}, nil, nil
 }
 
 // run serves one view call. The single-file form returns the read (or
@@ -291,6 +300,9 @@ func (v *viewTool) run(ctx context.Context, params ViewParams) (fantasy.ToolResp
 		}
 		if failure != nil {
 			return *failure, nil
+		}
+		if content.observe != nil {
+			content.observe()
 		}
 		if content.response != nil {
 			return *content.response, nil
@@ -365,6 +377,9 @@ func (v *viewTool) viewFiles(ctx context.Context, files []ViewFileRequest) (fant
 			media++
 			sections = append(sections, fmt.Sprintf("<file path=%q error>\n%s is a media file; view it on its own with file_path.\n</file>\n", path, path))
 		default:
+			if content.observe != nil {
+				content.observe()
+			}
 			sections = append(sections, content.output)
 			metas = append(metas, content.meta)
 		}
@@ -466,7 +481,11 @@ func readTextFile(filePath string, offset, limit, maxContentSize int) (string, b
 	}
 	defer file.Close()
 
-	reader := bufio.NewReader(file)
+	return readTextContent(file, offset, limit, maxContentSize)
+}
+
+func readTextContent(source io.Reader, offset, limit, maxContentSize int) (string, bool, error) {
+	reader := bufio.NewReader(source)
 	if err := skipLines(reader, offset); err != nil {
 		if err == io.EOF {
 			return "", false, nil

@@ -17,6 +17,7 @@ import (
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/oauth/copilot"
+	"github.com/stubbedev/harness/internal/verification"
 )
 
 const (
@@ -848,6 +849,8 @@ type Config struct {
 
 	Hooks map[string][]HookConfig `json:"hooks,omitempty" jsonschema:"description=User-defined shell commands that fire on hook events (e.g. PreToolUse)"`
 
+	Verification verification.VerificationConfig `json:"verification,omitzero" jsonschema:"description=Explicit configured verification rules and optional completion gate"`
+
 	// Env is a map of environment variables set on startup.
 	Env map[string]string `json:"env,omitempty" jsonschema:"description=Environment variables to set on startup"`
 
@@ -1082,6 +1085,7 @@ func allToolNames() []string {
 		"web_search",
 		"send_message",
 		"view",
+		"verify",
 		"write",
 		"mcp_resource",
 	}

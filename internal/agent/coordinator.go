@@ -1019,11 +1019,13 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		MaxRetries:           c.cfg.Config().Options.MaxRetries,
 		Sessions:             c.sessions,
 		Messages:             c.messages,
+		Files:                c.history,
 		LSPManager:           c.lspManager,
 		Tools:                nil,
 		Notify:               c.notify,
 		RunComplete:          c.runComplete,
 		Hooks:                c.hooks,
+		SkillActivation:      c.skillActivationConfig(isSubAgent),
 		// The live inbox is keyed by session, and only a session that can
 		// dispatch (the coder today) ever has entries, so wiring it for
 		// every agent is a no-op for children. The queue notifier is the
@@ -1125,6 +1127,14 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		tools.NewViewTool(c.lspManager, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
 		tools.NewWriteTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
 	)
+
+	if len(c.cfg.Config().Verification.Rules) > 0 {
+		verifier, err := c.verificationTool()
+		if err != nil {
+			return nil, err
+		}
+		allTools = append(allTools, verifier)
+	}
 
 	// Question tool is interactive-only and not available to sub-agents.
 	if !isSubAgent && c.interactive {
@@ -2221,9 +2231,9 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 		c.notifySubagentInbox(params.SessionID)
 	}()
 
-	return fantasy.NewTextResponse(fmt.Sprintf(
+	return withBackgroundMetadata(fantasy.NewTextResponse(fmt.Sprintf(
 		"Started background agent %q with handle %s. It runs independently of this tool call: messages it sends you arrive as new user messages between your steps, and its result is collected by calling %s with no prompt (handles: [%s]).",
-		params.AgentName, handle, AgentToolName, handle)), nil
+		params.AgentName, handle, AgentToolName, handle)), []*backgroundRun{run}), nil
 }
 
 // newBackgroundHandle mints a handle unused by any tracked run.

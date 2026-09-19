@@ -43,6 +43,7 @@ import (
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/hooks"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
@@ -203,10 +204,12 @@ type sessionAgent struct {
 	systemPromptPrefix *csync.Value[string]
 	systemPrompt       *csync.Value[string]
 	tools              *csync.Slice[fantasy.AgentTool]
+	skillActivation    *SkillActivationConfig
 
 	isSubAgent           bool
 	sessions             session.Service
 	messages             message.Service
+	files                history.Service
 	checkpoints          *checkpoints.Service
 	disableAutoSummarize bool
 	autoSummarizeRatio   float64
@@ -283,6 +286,7 @@ type SessionAgentOptions struct {
 	SmallModel           Model
 	SystemPromptPrefix   string
 	SystemPrompt         string
+	SkillActivation      *SkillActivationConfig
 	IsSubAgent           bool
 	DisableAutoSummarize bool
 	AutoSummarizeRatio   float64
@@ -290,6 +294,7 @@ type SessionAgentOptions struct {
 	MaxRetries           *int
 	Sessions             session.Service
 	Messages             message.Service
+	Files                history.Service
 	// LSPManager supplies the diagnostics swept into each step. Nil
 	// disables the sweep.
 	LSPManager *lsp.Manager
@@ -320,9 +325,11 @@ func NewSessionAgent(
 		smallModel:           csync.NewValue(opts.SmallModel),
 		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
 		systemPrompt:         csync.NewValue(opts.SystemPrompt),
+		skillActivation:      opts.SkillActivation,
 		isSubAgent:           opts.IsSubAgent,
 		sessions:             opts.Sessions,
 		messages:             opts.Messages,
+		files:                opts.Files,
 		lspManager:           opts.LSPManager,
 		checkpoints:          opts.Checkpoints,
 		disableAutoSummarize: opts.DisableAutoSummarize,
@@ -827,7 +834,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
 	largeModel := a.largeModel.Get()
-	systemPrompt := a.systemPrompt.Get()
+	systemPrompt, runtimePrompt := splitRuntimePrompt(a.systemPrompt.Get())
+	activation := NewSkillActivation(a.skillActivation)
 	promptPrefix := a.systemPromptPrefix.Get()
 	var instructions strings.Builder
 
@@ -887,6 +895,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
+	hiddenSummary, execution := splitExecutionSummary(hiddenSummary)
+	execution.Ingest(msgs)
 
 	// Generate title from the first real (non-shell) user prompt.
 	// can take tens of seconds. Blocking Run on it delays the
@@ -1154,6 +1164,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				)))
 			}
 
+			sessionLock.Lock()
+			executionSnapshot := execution.Render()
+			sessionLock.Unlock()
+			if executionSnapshot != "" {
+				prepared.Messages = append(prepared.Messages, fantasy.NewUserMessage(executionSnapshot))
+			}
+			prepared.Messages = activation.Prepare(callContext, prepared.Messages)
+			prepared.Messages = withRuntimeContext(prepared.Messages, runtimePrompt)
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 			prepared.Messages = mergeConsecutiveUserMessages(prepared.Messages)
 
@@ -1352,6 +1370,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				Finished:         true,
 			}
 			currentAssistant.AddToolCall(toolCall)
+			sessionLock.Lock()
+			execution.Ingest([]message.Message{{Parts: []message.ContentPart{toolCall}}})
+			sessionLock.Unlock()
 			// Use parent ctx instead of genCtx to ensure the update succeeds
 			// even if the request is canceled mid-stream
 			return a.messages.Update(ctx, *currentAssistant)
@@ -1362,6 +1383,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
 			}
+			sessionLock.Lock()
+			execution.Ingest([]message.Message{{Parts: []message.ContentPart{toolResult}}})
+			sessionLock.Unlock()
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
 			_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{
@@ -1475,6 +1499,48 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			break
 		}
 		result = mergeContinuation(result, cont)
+	}
+
+	for repairs := 0; err == nil && !shouldSummarize && result != nil && result.Response.FinishReason == fantasy.FinishReasonStop; {
+		decision, gateErr := a.completionVerification(genCtx, call.SessionID, repairs)
+		if gateErr != nil {
+			err = gateErr
+			break
+		}
+		if decision.Allow {
+			break
+		}
+		if decision.Action == "verify" {
+			if err = a.runCompletionVerification(genCtx, call.SessionID); err != nil {
+				break
+			}
+			decision, err = a.completionVerification(genCtx, call.SessionID, repairs)
+			if err != nil || decision.Allow {
+				break
+			}
+		}
+		if decision.Action != "repair" {
+			err = fmt.Errorf("completion blocked: %s", decision.Reason)
+			break
+		}
+		repairs++
+		follow := streamCall
+		follow.Prompt = "Configured verification failed. Inspect the recorded verification results, repair the relevant changes, and verify again."
+		follow.Files = nil
+		stored, repairSummary, loadErr := a.sessionHistory(genCtx, currentSession)
+		if loadErr != nil {
+			err = loadErr
+			break
+		}
+		execution.Ingest(stored)
+		repairNarrative, _ := splitExecutionSummary(repairSummary)
+		follow.Messages, _ = a.preparePrompt(stored, largeModel.CatalogCfg.SupportsImages)
+		follow.Messages = withSummary(repairNarrative, follow.Messages)
+		var repaired *fantasy.AgentResult
+		repaired, err = agent.Stream(genCtx, follow)
+		if err == nil {
+			result = mergeContinuation(result, repaired)
+		}
 	}
 
 	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))

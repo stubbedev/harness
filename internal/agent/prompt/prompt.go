@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"text/template" // nosemgrep: go.lang.security.audit.xss.import-text-template.import-text-template
 	"time"
 
@@ -24,6 +25,9 @@ import (
 type Prompt struct {
 	name               string
 	template           string
+	parseOnce          sync.Once
+	parsedTmpl         *template.Template
+	parseErr           error
 	now                func() time.Time
 	platform           string
 	workingDir         string
@@ -175,8 +179,15 @@ func NewPrompt(name, promptTemplate string, opts ...Option) (*Prompt, error) {
 	return p, nil
 }
 
+func (p *Prompt) parsedTemplate() (*template.Template, error) {
+	p.parseOnce.Do(func() {
+		p.parsedTmpl, p.parseErr = template.New(p.name).Parse(p.template)
+	})
+	return p.parsedTmpl, p.parseErr
+}
+
 func (p *Prompt) Build(ctx context.Context, provider, model string, store *config.ConfigStore) (string, error) {
-	t, err := template.New(p.name).Parse(p.template)
+	t, err := p.parsedTemplate()
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)
 	}
@@ -245,15 +256,17 @@ func expandPath(path string, store *config.ConfigStore) string {
 }
 
 // loadContextFiles loads and deduplicates context files from a list of paths.
-func loadContextFiles(paths []string, store *config.ConfigStore) map[string][]ContextFile {
-	files := map[string][]ContextFile{}
+func loadContextFiles(paths []string, store *config.ConfigStore) []ContextFile {
+	var files []ContextFile
+	seen := make(map[string]bool, len(paths))
 	for _, pth := range paths {
 		expanded := expandPath(pth, store)
 		pathKey := strings.ToLower(expanded)
-		if _, ok := files[pathKey]; ok {
+		if seen[pathKey] {
 			continue
 		}
-		files[pathKey] = processContextPath(expanded, store)
+		seen[pathKey] = true
+		files = append(files, processContextPath(expanded, store)...)
 	}
 	return files
 }
@@ -338,12 +351,8 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		}
 	}
 
-	for _, files := range contextFiles {
-		data.ContextFiles = append(data.ContextFiles, files...)
-	}
-	for _, files := range globalContextFiles {
-		data.GlobalContextFiles = append(data.GlobalContextFiles, files...)
-	}
+	data.ContextFiles = contextFiles
+	data.GlobalContextFiles = globalContextFiles
 	// Both sets share one budget: the project files first, since they are
 	// the ones about the code at hand.
 	capped := capContextFiles(append(data.ContextFiles, data.GlobalContextFiles...), maxContextFileBytes, maxContextTotalBytes)

@@ -40,6 +40,15 @@ type ShellResponseMetadata struct {
 	Description      string `json:"description"`
 	WorkingDirectory string `json:"working_directory"`
 	Session          string `json:"session,omitempty"`
+	ExitCode         *int   `json:"exit_code,omitempty"`
+	Running          bool   `json:"running"`
+	Waiting          bool   `json:"waiting"`
+	Queued           bool   `json:"queued,omitempty"`
+	WhileBusy        bool   `json:"while_busy,omitempty"`
+	AltScreen        bool   `json:"alt_screen,omitempty"`
+	Interrupted      bool   `json:"interrupted,omitempty"`
+	ShellExited      bool   `json:"shell_exited,omitempty"`
+	ShellExitCode    *int   `json:"shell_exit_code,omitempty"`
 }
 
 const (
@@ -280,6 +289,17 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 				Description:      shellLabel(params),
 				WorkingDirectory: cwd,
 				Session:          name,
+				ExitCode:         result.ExitCode,
+				Running:          result.Running,
+				Waiting:          result.Waiting,
+				Queued:           result.Queued,
+				WhileBusy:        result.WhileBusy,
+				AltScreen:        result.AltScreen,
+				Interrupted:      result.Interrupted,
+				ShellExited:      result.ShellExit != nil,
+			}
+			if result.ShellExit != nil {
+				metadata.ShellExitCode = result.ShellExit.Code
 			}
 
 			var sb strings.Builder

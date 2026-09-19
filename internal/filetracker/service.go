@@ -26,7 +26,8 @@ type Service interface {
 }
 
 type service struct {
-	q *db.Queries
+	q        *db.Queries
+	evidence evidenceStore
 }
 
 // NewService creates a new file tracker service.
@@ -36,6 +37,9 @@ func NewService(q *db.Queries) Service {
 
 // RecordRead records when a file was read.
 func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
+	if s.q == nil {
+		return
+	}
 	if err := s.q.RecordFileRead(ctx, db.RecordFileReadParams{
 		SessionID: sessionID,
 		Path:      relpath(path),

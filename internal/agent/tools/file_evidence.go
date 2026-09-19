@@ -1,0 +1,214 @@
+package tools
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"hash/fnv"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"github.com/aymanbagabas/go-udiff"
+	"github.com/stubbedev/harness/internal/filetracker"
+)
+
+var fileLocks [128]sync.Mutex
+
+func lockFile(path string) func() {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(path))
+	mu := &fileLocks[h.Sum32()%uint32(len(fileLocks))]
+	mu.Lock()
+	return mu.Unlock
+}
+
+func checkFileEvidence(ctx context.Context, tracker filetracker.Service, session, path string, content []byte, ranges []filetracker.Range) error {
+	if evidence, ok := tracker.(filetracker.Evidence); ok {
+		return evidence.Check(ctx, session, path, content, ranges)
+	}
+	if tracker == nil {
+		return filetracker.ErrUnread
+	}
+	lastRead := tracker.LastReadTime(ctx, session, path)
+	if lastRead.IsZero() {
+		return filetracker.ErrUnread
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.ModTime().Truncate(time.Second).After(lastRead) {
+		return filetracker.ErrStale
+	}
+	return nil
+}
+
+func conflictEvidence(ctx context.Context, tracker filetracker.Service, session, path string, content []byte, at int, reason error) error {
+	at = max(0, min(at, len(content)))
+	start := max(0, at-512)
+	end := min(len(content), start+2048)
+	for start < end && !utf8.RuneStart(content[start]) {
+		start++
+	}
+	for end < len(content) && end > start && !utf8.RuneStart(content[end]) {
+		end--
+	}
+	excerpt := content[start:end]
+	if !utf8.Valid(excerpt) {
+		return fmt.Errorf("%w\nRead the affected range with view before retrying (non-UTF-8 content)", reason)
+	}
+	filetracker.Observe(ctx, tracker, session, path, content, []filetracker.Range{{Start: start, End: end}})
+	return fmt.Errorf("%w\nCurrent file %q, bytes %d-%d (bounded excerpt; retry explicitly):\n%s", reason, path, start, end, excerpt)
+}
+
+func changedRanges(before, after string) []filetracker.Range {
+	var ranges []filetracker.Range
+	for _, change := range udiff.Strings(before, after) {
+		start, end := change.Start, change.End
+		if start == end && len(before) > 0 {
+			start = max(0, start-1)
+			end = min(len(before), end+1)
+		}
+		ranges = append(ranges, filetracker.Range{Start: start, End: end})
+	}
+	return ranges
+}
+
+func guardedWrite(path string, before, after []byte, create bool) error {
+	if create {
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			return err
+		}
+		_, err = f.Write(after)
+		return errors.Join(err, f.Close())
+	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".harness-write-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if err := f.Chmod(info.Mode().Perm()); err != nil {
+		f.Close()
+		return err
+	}
+	_, writeErr := f.Write(after)
+	if err := errors.Join(writeErr, f.Close()); err != nil {
+		return err
+	}
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, before) {
+		return filetracker.ErrStale
+	}
+	return os.Rename(f.Name(), path)
+}
+
+func lineRange(content []byte, offset, limit int) filetracker.Range {
+	start := 0
+	for range max(0, offset) {
+		i := bytes.IndexByte(content[start:], '\n')
+		if i < 0 {
+			return filetracker.Range{Start: len(content), End: len(content)}
+		}
+		start += i + 1
+	}
+	end := start
+	for range max(0, limit) {
+		i := bytes.IndexByte(content[end:], '\n')
+		if i < 0 {
+			end = len(content)
+			break
+		}
+		end += i + 1
+	}
+	return filetracker.Range{Start: start, End: end}
+}
+
+func seenTextRanges(data []byte, offset int, text string) []filetracker.Range {
+	var ranges []filetracker.Range
+	for i, line := range strings.Split(text, "\n") {
+		r := lineRange(data, offset+i, 1)
+		raw := strings.TrimSuffix(strings.TrimSuffix(string(data[r.Start:r.End]), "\n"), "\r")
+		if len(raw) > MaxLineLength {
+			prefix := strings.ToValidUTF8(raw[:MaxLineLength], "")
+			if line == prefix+"..." {
+				ranges = append(ranges, filetracker.Range{Start: r.Start, End: r.Start + len(prefix)})
+			}
+		} else if line == raw {
+			ranges = append(ranges, r)
+		}
+	}
+	return ranges
+}
+
+type sourceEvidenceKey struct{}
+
+func sourceTracker(ctx context.Context) filetracker.Service {
+	tracker, _ := ctx.Value(sourceEvidenceKey{}).(filetracker.Service)
+	return tracker
+}
+
+func checkEditRanges(edit editContext, session, path, content string, crlf bool, operations []EditOperation) error {
+	if _, ok := edit.filetracker.(filetracker.Evidence); !ok {
+		return nil
+	}
+	raw := content
+	if crlf {
+		raw = strings.ReplaceAll(content, "\n", "\r\n")
+	}
+	var ranges []filetracker.Range
+	toRaw := func(offset int) int {
+		if crlf {
+			return offset + strings.Count(content[:offset], "\n")
+		}
+		return offset
+	}
+	for _, operation := range operations {
+		found := false
+		for cursor := 0; cursor <= len(content); {
+			i := strings.Index(content[cursor:], operation.OldString)
+			if i < 0 || operation.OldString == "" {
+				break
+			}
+			start := cursor + i
+			end := start + len(operation.OldString)
+			ranges = append(ranges, filetracker.Range{Start: toRaw(start), End: toRaw(end)})
+			found = true
+			cursor = end
+		}
+		if !found {
+			for _, match := range findNormalizedMatches(content, operation.OldString) {
+				r := lineRange([]byte(content), match.startLine, match.endLine-match.startLine+1)
+				ranges = append(ranges, filetracker.Range{Start: toRaw(r.Start), End: toRaw(r.End)})
+			}
+		}
+	}
+	for _, affected := range ranges {
+		if err := checkFileEvidence(edit.ctx, edit.filetracker, session, path, []byte(raw), []filetracker.Range{affected}); err != nil {
+			return conflictEvidence(edit.ctx, edit.filetracker, session, path, []byte(raw), affected.Start, err)
+		}
+	}
+
+	return nil
+}

@@ -120,7 +120,7 @@ func lastUserText(t *testing.T, call fantasy.Call) string {
 		}
 		var sb strings.Builder
 		for _, part := range msg.Content {
-			if text, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok {
+			if text, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok && !strings.HasPrefix(text.Text, "<harness_runtime>\n") {
 				sb.WriteString(text.Text)
 			}
 		}

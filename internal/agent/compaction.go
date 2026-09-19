@@ -264,7 +264,7 @@ func summaryMessage(summary string) fantasy.Message {
 	return fantasy.NewUserMessage(
 		"<session_memory>\nEarlier parts of this conversation were compacted into the summary below. " +
 			"The messages after it are the most recent ones, verbatim.\n\n" +
-			summary + "\n</session_memory>")
+			renderExecutionSummary(summary) + "\n</session_memory>")
 }
 
 // withSummary prepends the hidden summary to an assembled history.
@@ -466,18 +466,20 @@ func (a *sessionAgent) summarizeMessages(
 	onAuthRefresh func(context.Context, *fantasy.ProviderError) error,
 	instructions string,
 ) (string, error) {
+	narrative, state := splitExecutionSummary(previous)
+	state.Ingest(folded)
 	large := a.largeModel.Get()
 	model := a.smallModel.Get()
 	if model.Model == nil {
 		model = large
 	}
 	history, _ := a.preparePrompt(folded, model.CatalogCfg.SupportsImages)
-	history = withSummary(previous, history)
+	history = withSummary(state.Summary(narrative), history)
 	if cw := usableContextWindow(model); model.Model != large.Model && cw > 0 &&
 		approxTokenCount(string(summaryPrompt))+estimateMessageTokens(history) > cw {
 		model = large
 		history, _ = a.preparePrompt(folded, model.CatalogCfg.SupportsImages)
-		history = withSummary(previous, history)
+		history = withSummary(state.Summary(narrative), history)
 	}
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
@@ -520,7 +522,7 @@ func (a *sessionAgent) summarizeMessages(
 		}
 	}
 	a.updateSessionUsage(model, sess, resp.TotalUsage, cost, false)
-	return text, nil
+	return state.Summary(text), nil
 }
 
 // buildSummaryPrompt is the user turn of the summary request; the

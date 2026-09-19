@@ -92,6 +92,7 @@ func NewLSPTool(lspManager *lsp.Manager, files history.Service, filetracker file
 			}
 			call.Input = string(input)
 			call.Name = action.tool.Info().Name
+			ctx = context.WithValue(ctx, sourceEvidenceKey{}, filetracker)
 			return action.tool.Run(ctx, call)
 		},
 	)

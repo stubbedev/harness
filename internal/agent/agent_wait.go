@@ -25,7 +25,7 @@ const (
 // named it waits on every background agent this session has dispatched.
 // Results are kept, so waiting again on a finished handle returns its
 // result again.
-func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string, requested []string, timeoutSeconds *int) fantasy.ToolResponse {
+func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string, requested []string, timeoutSeconds *int) (response fantasy.ToolResponse) {
 	// Deduplicate while preserving order: the response lists each handle
 	// once, in the order asked for.
 	handleSet := make(map[string]bool, len(requested))
@@ -48,6 +48,9 @@ func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string
 	}
 
 	var runs []*backgroundRun
+	defer func() {
+		response = withBackgroundMetadata(response, runs)
+	}()
 	var unknown []string
 	for _, h := range handles {
 		run, ok := c.backgroundRunFor(parentSession, h)

@@ -30,7 +30,7 @@ var renameDescription string
 func NewRenameTool(
 	lspManager *lsp.Manager,
 	files history.Service,
-	filetracker filetracker.Service,
+	tracker filetracker.Service,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		RenameToolName,
@@ -74,9 +74,11 @@ func NewRenameTool(
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to apply rename edits: %s", err)), nil
 			}
 
-			if filetracker != nil && sessionID != "" {
+			if tracker != nil && sessionID != "" {
 				for _, path := range affectedFiles {
-					filetracker.RecordRead(ctx, sessionID, path)
+					if _, strict := tracker.(filetracker.Evidence); !strict {
+						tracker.RecordRead(ctx, sessionID, path)
+					}
 				}
 			}
 
@@ -96,7 +98,7 @@ func NewRenameTool(
 			// burying that under "project diagnostics" reads as unrelated.
 			text := b.String() + "\n" + reportDiagnosticsNow(ctx, lspManager, affectedFiles...)
 
-			return fantasy.NewTextResponse(text), nil
+			return withFileMutations(fantasy.NewTextResponse(text), affectedFiles...), nil
 		},
 	)
 }

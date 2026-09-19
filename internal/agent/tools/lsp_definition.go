@@ -10,6 +10,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/lsp"
 )
 
@@ -53,7 +54,7 @@ func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
 			}
 
-			text, meta := formatDefinitions(locations)
+			text, meta := formatDefinitions(locations, ctx)
 			response := fantasy.NewTextResponse(text)
 			if meta != nil {
 				response = fantasy.WithResponseMetadata(response, meta)
@@ -63,7 +64,7 @@ func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
 	)
 }
 
-func formatDefinitions(locations []protocol.Location) (string, *DefinitionResponseMetadata) {
+func formatDefinitions(locations []protocol.Location, contexts ...context.Context) (string, *DefinitionResponseMetadata) {
 	locations = cleanupLocations(locations)
 
 	var b strings.Builder
@@ -78,7 +79,7 @@ func formatDefinitions(locations []protocol.Location) (string, *DefinitionRespon
 			continue
 		}
 		line := loc.Range.Start.Line + 1
-		snippet := readSourceContext(path, int(loc.Range.Start.Line), 3)
+		snippet := readSourceContext(path, int(loc.Range.Start.Line), 3, contexts...)
 
 		fmt.Fprintf(&b, "%s:%d\n", path, line)
 		if snippet != "" {
@@ -91,7 +92,7 @@ func formatDefinitions(locations []protocol.Location) (string, *DefinitionRespon
 			firstMeta = &DefinitionResponseMetadata{
 				FilePath: path,
 				Line:     int(loc.Range.Start.Line),
-				Content:  readSourceLines(path, int(loc.Range.Start.Line), 3),
+				Content:  sourceContextText(snippet),
 			}
 		}
 	}
@@ -99,16 +100,20 @@ func formatDefinitions(locations []protocol.Location) (string, *DefinitionRespon
 	return b.String(), firstMeta
 }
 
-func readSourceContext(filePath string, targetLine int, contextLines int) string {
+func readSourceContext(filePath string, targetLine int, contextLines int, contexts ...context.Context) string {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return ""
 	}
 
 	lines := strings.Split(string(data), "\n")
-	start := max(0, targetLine-contextLines)
-	end := min(len(lines), targetLine+contextLines+1)
+	start := min(len(lines), max(0, targetLine-contextLines))
+	end := max(start, min(len(lines), targetLine+contextLines+1))
 
+	if len(contexts) > 0 {
+		ctx := contexts[0]
+		filetracker.Observe(ctx, sourceTracker(ctx), GetSessionFromContext(ctx), filePath, data, []filetracker.Range{lineRange(data, start, end-start)})
+	}
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		marker := "  "
@@ -132,4 +137,15 @@ func readSourceLines(filePath string, targetLine int, contextLines int) string {
 	end := min(len(lines), targetLine+contextLines+1)
 
 	return strings.Join(lines[start:end], "\n")
+}
+
+func sourceContextText(snippet string) string {
+	var lines []string
+	for line := range strings.SplitSeq(strings.TrimSuffix(snippet, "\n"), "\n") {
+		_, text, ok := strings.Cut(line, " | ")
+		if ok {
+			lines = append(lines, text)
+		}
+	}
+	return strings.Join(lines, "\n")
 }

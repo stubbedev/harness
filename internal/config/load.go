@@ -88,6 +88,9 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	if err := cfg.ValidateHooks(); err != nil {
 		return nil, fmt.Errorf("invalid hook configuration: %w", err)
 	}
+	if err := cfg.Verification.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid verification configuration: %w", err)
+	}
 
 	if !isInsideWorktree() {
 		const depth = 2

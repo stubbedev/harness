@@ -394,3 +394,39 @@ func TestLoadForCompactionReadsFromTheBoundary(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, loaded, 3, "a lost anchor lists everything")
 }
+
+func TestCompactionExecutionStatePersistsIndependentOfNarrative(t *testing.T) {
+	env := testEnv(t)
+	sess, err := env.sessions.Create(t.Context(), "execution")
+	require.NoError(t, err)
+	sa, _ := compactionAgent(t, env, 1_000_000, "all facts omitted")
+	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "do work"})
+	for _, msg := range executionMessages("write", "write", `{"file_path":"/project/a.go"}`, `{"changed_files":[{"path":"/project/a.go","version":"sha256:first"}]}`, false) {
+		createMessage(t, env, sess.ID, msg.Role, msg.Parts...)
+	}
+	for _, msg := range executionMessages("test", "shell", `{"command":"go test ./..."}`, `{"exit_code":3}`, false) {
+		createMessage(t, env, sess.ID, msg.Role, msg.Parts...)
+	}
+	require.NoError(t, sa.summarize(t.Context(), sess.ID, nil, nil, "manual", ""))
+	updated, err := env.sessions.Get(t.Context(), sess.ID)
+	require.NoError(t, err)
+	narrative, state := splitExecutionSummary(updated.CompactionSummary)
+	require.Equal(t, "all facts omitted", narrative)
+	require.Len(t, state.Files, 1)
+	require.Len(t, state.Failures, 1)
+	snapshot := state.Render()
+	sa, _ = compactionAgent(t, env, 1_000_000, "still no facts")
+	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "continue"})
+	createMessage(t, env, sess.ID, message.Assistant, message.TextContent{Text: "nothing"})
+	require.NoError(t, sa.summarize(t.Context(), sess.ID, nil, nil, "manual", ""))
+	updated, err = env.sessions.Get(t.Context(), sess.ID)
+	require.NoError(t, err)
+	narrative, state = splitExecutionSummary(updated.CompactionSummary)
+	require.Equal(t, "still no facts", narrative)
+	require.Equal(t, snapshot, state.Render())
+	rendered := summaryMessage(updated.CompactionSummary).Content[0].(fantasy.TextPart).Text
+	require.Contains(t, rendered, "still no facts")
+	require.Contains(t, rendered, "<execution_state>")
+	require.Contains(t, rendered, "sha256:first")
+	require.NotContains(t, rendered, "harness_execution_version")
+}

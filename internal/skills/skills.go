@@ -38,8 +38,9 @@ var (
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
-	Name        string `yaml:"name" json:"name"`
-	Description string `yaml:"description" json:"description"`
+	Name        string           `yaml:"name" json:"name"`
+	Description string           `yaml:"description" json:"description"`
+	Activation  *ActivationRules `yaml:"activation,omitempty" json:"activation,omitempty"`
 	// UserInvocable mirrors the Claude Code field of the same name. The
 	// default is user-invocable: a nil pointer (field absent from the
 	// frontmatter) means the skill belongs in the user's / palette, and
@@ -160,6 +161,10 @@ func (s *Skill) Validate() error {
 
 	if len(s.Compatibility) > MaxCompatibilityLength {
 		errs = append(errs, fmt.Errorf("compatibility exceeds %d characters", MaxCompatibilityLength))
+	}
+
+	if err := s.Activation.Validate(); err != nil {
+		errs = append(errs, err)
 	}
 
 	return errors.Join(errs...)

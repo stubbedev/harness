@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/diff"
@@ -75,8 +74,32 @@ func notFoundError(content, old string) error {
 // commitFileChange writes newContent to filePath, updates the file history,
 // and records the read in the file tracker. Callers must convert line endings
 // before calling this function.
-func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string) error {
-	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
+func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf ...bool) error {
+	current, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+	expected := oldContent
+	if len(crlf) > 0 && crlf[0] {
+		expected, _ = fsext.ToWindowsLineEndings(oldContent)
+	}
+	if string(current) != expected {
+		return conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, filetracker.ErrStale)
+	}
+	oldContent = string(current)
+	ranges := changedRanges(oldContent, newContent)
+	if err := checkFileEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, ranges); err != nil {
+		at := 0
+		if len(ranges) > 0 {
+			at = ranges[0].Start
+		}
+		return conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, at, err)
+	}
+
+	if err := guardedWrite(filePath, []byte(oldContent), []byte(newContent), false); err != nil {
+		if current, readErr := os.ReadFile(filePath); readErr == nil {
+			return conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, err)
+		}
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -84,7 +107,7 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 		return err
 	}
 
-	edit.filetracker.RecordRead(edit.ctx, sessionID, filePath)
+	filetracker.Advance(edit.ctx, edit.filetracker, sessionID, filePath, []byte(oldContent), []byte(newContent))
 	return nil
 }
 
@@ -112,7 +135,7 @@ func recordFileVersion(ctx context.Context, files history.Service, sessionID, fi
 	return nil
 }
 
-func loadExistingFile(edit editContext, filePath, sessionError string) (sessionID, oldContent string, isCrlf bool, resp fantasy.ToolResponse, err error) {
+func loadExistingFile(edit editContext, filePath, sessionError string, hints ...string) (sessionID, oldContent string, isCrlf bool, resp fantasy.ToolResponse, err error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -130,24 +153,17 @@ func loadExistingFile(edit editContext, filePath, sessionError string) (sessionI
 		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("%s", sessionError)
 	}
 
-	lastRead := edit.filetracker.LastReadTime(edit.ctx, sessionID, filePath)
-	if lastRead.IsZero() {
-		return "", "", false, fantasy.NewTextErrorResponse("you must read the file before editing it. Use the View tool first"), nil
-	}
-
-	modTime := fileInfo.ModTime().Truncate(time.Second)
-	if modTime.After(lastRead) {
-		return "", "", false, fantasy.NewTextErrorResponse(
-			fmt.Sprintf(
-				"file %s has been modified since it was last read (mod time: %s, last read: %s)",
-				filePath, modTime.Format(time.RFC3339), lastRead.Format(time.RFC3339),
-			),
-		), nil
-	}
-
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	if checkErr := checkFileEvidence(edit.ctx, edit.filetracker, sessionID, filePath, content, nil); checkErr != nil {
+		at := 0
+		if len(hints) > 0 {
+			at = max(0, strings.Index(string(content), hints[0]))
+		}
+		return "", "", false, fantasy.NewTextErrorResponse(conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, content, at, checkErr).Error()), nil
 	}
 
 	oldContent, isCrlf = fsext.ToUnixLineEndings(string(content))
@@ -175,8 +191,8 @@ func deleteContent(edit editContext, filePath, oldString string, replaceAll bool
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent); err != nil {
-		return fantasy.ToolResponse{}, err
+	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent, isCrlf); err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
 	return fantasy.WithResponseMetadata(
@@ -214,8 +230,8 @@ func replaceContent(edit editContext, filePath, oldString, newString string, rep
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent); err != nil {
-		return fantasy.ToolResponse{}, err
+	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent, isCrlf); err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
 	return fantasy.WithResponseMetadata(

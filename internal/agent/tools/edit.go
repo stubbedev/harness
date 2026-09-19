@@ -76,6 +76,8 @@ func NewEditTool(
 			var response fantasy.ToolResponse
 			var err error
 
+			unlock := lockFile(params.FilePath)
+			defer unlock()
 			editCtx := editContext{ctx, files, filetracker, workingDir}
 			// Handle file creation case (first edit has empty old_string)
 			if len(params.Edits) > 0 && params.Edits[0].OldString == "" {
@@ -101,7 +103,7 @@ func NewEditTool(
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
 			text += reportDiagnosticsNow(ctx, lspManager, params.FilePath)
 			response.Content = text
-			return response, nil
+			return withFileMutations(response, params.FilePath), nil
 		},
 	)
 }
@@ -172,7 +174,7 @@ func processEditWithCreation(edit editContext, params EditParams, _ fantasy.Tool
 	editsApplied := len(params.Edits) - len(failedEdits)
 
 	// Write the file
-	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
+	err = guardedWrite(params.FilePath, nil, []byte(currentContent), true)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -188,7 +190,7 @@ func processEditWithCreation(edit editContext, params EditParams, _ fantasy.Tool
 		slog.Error("Error creating file history version", "error", err)
 	}
 
-	edit.filetracker.RecordRead(edit.ctx, sessionID, params.FilePath)
+	filetracker.Observe(edit.ctx, edit.filetracker, sessionID, params.FilePath, []byte(currentContent), []filetracker.Range{{Start: 0, End: len(currentContent)}})
 
 	var message string
 	if len(failedEdits) > 0 {
@@ -212,7 +214,7 @@ func processEditWithCreation(edit editContext, params EditParams, _ fantasy.Tool
 }
 
 func processEditExistingFile(edit editContext, params EditParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, params.FilePath, "session ID is required for editing a file")
+	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, params.FilePath, "session ID is required for editing a file", params.Edits[0].OldString)
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -220,6 +222,9 @@ func processEditExistingFile(edit editContext, params EditParams, _ fantasy.Tool
 		return resp, nil
 	}
 
+	if err := checkEditRanges(edit, sessionID, params.FilePath, oldContent, isCrlf, params.Edits); err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
 	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(oldContent, params.Edits, 0)
 
 	// Check if content actually changed
@@ -247,8 +252,8 @@ func processEditExistingFile(edit editContext, params EditParams, _ fantasy.Tool
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent); err != nil {
-		return fantasy.ToolResponse{}, err
+	if err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent, isCrlf); err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
 	var message string

@@ -66,6 +66,10 @@
           "type": "object",
           "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
         },
+        "verification": {
+          "$ref": "#/$defs/VerificationConfig",
+          "description": "Explicit configured verification rules and optional completion gate"
+        },
         "env": {
           "additionalProperties": {
             "type": "string"
@@ -784,6 +788,59 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "Rule": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique check name"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Workspace relative doublestar globs selecting this check"
+        },
+        "inputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Additional input globs included in the revision fingerprint"
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "minItems": 1,
+          "description": "Literal executable and arguments without shell expansion"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "maximum": 3600,
+          "minimum": 0,
+          "description": "Command timeout in seconds",
+          "default": 120
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "maximum": 1048576,
+          "minimum": 0,
+          "description": "Combined stdout and stderr byte limit",
+          "default": 32768
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "paths",
+        "command"
+      ]
+    },
     "SelectedModel": {
       "properties": {
         "model": {
@@ -1094,6 +1151,31 @@
         "expires_in",
         "expires_at"
       ]
+    },
+    "VerificationConfig": {
+      "properties": {
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/Rule"
+          },
+          "type": "array",
+          "description": "Explicit checks selected by changed workspace paths"
+        },
+        "require_on_completion": {
+          "type": "boolean",
+          "description": "Require current successful applicable checks before completion",
+          "default": false
+        },
+        "max_repair_attempts": {
+          "type": "integer",
+          "maximum": 10,
+          "minimum": 0,
+          "description": "Maximum completion repair attempts",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     }
   }
 }

@@ -1,6 +1,6 @@
 You are summarizing a conversation to preserve context for continuing work later.
 
-**Critical**: This summary replaces the messages above when the conversation continues; only the most recent messages after them stay visible. Assume everything above will be lost. Be thorough. If a summary of even earlier conversation is included, carry its content forward: nothing it holds is available anywhere else.
+**Critical**: Preserve the user's intent, decisions, rationale, unresolved questions, and next steps. Harness separately retains a bounded execution ledger of observed file changes, command outcomes, verification results, and tool failures; do not invent or override those facts. Preserve important older details outside that ledger, especially rationale and omitted history. Carry forward relevant context from earlier summaries.
 
 **Required sections**:
 
@@ -23,8 +23,8 @@ You are summarizing a conversation to preserve context for continuing work later
 - Architecture decisions made and why
 - Patterns being followed (with examples)
 - Libraries/frameworks being used
-- Commands that worked (exact commands with context)
-- Commands that failed (what was tried and why it didn't work)
+- Why commands or approaches worked or failed, when that explains the next step
+- Important execution details not captured by the bounded ledger
 - Environment details (language versions, dependencies, etc.)
 
 ## Strategy & Approach
@@ -45,4 +45,4 @@ Be specific. Don't write "implement authentication" - write:
 
 **Tone**: Write as if briefing a teammate taking over mid-task. Include everything they'd need to continue without asking questions. No emojis ever.
 
-**Length**: No limit. Err on the side of too much detail rather than too little. Critical context is worth the tokens.
+**Length**: Be concise without dropping decisions, constraints, blockers, or actionable next steps. Avoid duplicating raw tool output.

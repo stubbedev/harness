@@ -38,7 +38,7 @@ type ReplaceSymbolResponseMetadata struct {
 func NewReplaceSymbolTool(
 	lspManager *lsp.Manager,
 	files history.Service,
-	filetracker filetracker.Service,
+	tracker filetracker.Service,
 ) fantasy.AgentTool {
 	return fantasy.NewAgentTool(
 		ReplaceSymbolToolName,
@@ -83,6 +83,8 @@ func NewReplaceSymbolTool(
 
 			rng := target.GetRange()
 
+			unlock := lockFile(params.FilePath)
+			defer unlock()
 			content, err := os.ReadFile(params.FilePath)
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
@@ -122,19 +124,24 @@ func NewReplaceSymbolTool(
 			newContent := strings.Join(newLines, "\n")
 
 			sessionID := GetSessionFromContext(ctx)
+			affected := lineRange(content, startLine, endLine-startLine+1)
+			if err := checkFileEvidence(ctx, tracker, sessionID, params.FilePath, content, []filetracker.Range{affected}); err != nil {
+				return fantasy.NewTextErrorResponse(conflictEvidence(ctx, tracker, sessionID, params.FilePath, content, affected.Start, err).Error()), nil
+			}
 			if files != nil && sessionID != "" {
 				if _, err := files.CreateVersion(ctx, sessionID, params.FilePath, string(content)); err != nil {
 					slog.Warn("Failed to create file version before replace", "path", params.FilePath, "error", err)
 				}
 			}
 
-			if err := os.WriteFile(params.FilePath, []byte(newContent), 0o644); err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+			if err := guardedWrite(params.FilePath, content, []byte(newContent), false); err != nil {
+				if current, readErr := os.ReadFile(params.FilePath); readErr == nil {
+					err = conflictEvidence(ctx, tracker, sessionID, params.FilePath, current, affected.Start, err)
+				}
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
-			if filetracker != nil && sessionID != "" {
-				filetracker.RecordRead(ctx, sessionID, params.FilePath)
-			}
+			filetracker.Advance(ctx, tracker, sessionID, params.FilePath, content, []byte(newContent))
 
 			lspManager.NotifyChangeAsync(ctx, params.FilePath)
 
@@ -157,7 +164,7 @@ func NewReplaceSymbolTool(
 				NewContent: newContent,
 				Action:     action,
 			})
-			return resp, nil
+			return withFileMutations(resp, params.FilePath), nil
 		},
 	)
 }
