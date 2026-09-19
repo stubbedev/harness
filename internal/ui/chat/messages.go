@@ -122,6 +122,26 @@ func IsWorkingSpinner(item list.Item) bool {
 	return ok && s.SpinnerOnly()
 }
 
+// LiveThinker is implemented by items that may currently be the live
+// thinking entry: an assistant message still streaming reasoning, with
+// no settled content yet.
+type LiveThinker interface {
+	MessageItem
+	IsLiveThinking() bool
+}
+
+// IsTransient reports whether the item is a transient indicator rather
+// than settled content: the turn's working spinner or a message that
+// is still thinking. Such items keep changing underneath the reader,
+// so they hold nothing stable to select, focus, or copy.
+func IsTransient(item list.Item) bool {
+	if s, ok := item.(WorkingSpinner); ok && s.SpinnerOnly() {
+		return true
+	}
+	t, ok := item.(LiveThinker)
+	return ok && t.IsLiveThinking()
+}
+
 // FocusableMessageItem is a message item that supports focus.
 type FocusableMessageItem interface {
 	MessageItem
@@ -468,6 +488,11 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		if msg.SubagentNotesOnly() {
 			return nil
 		}
+		// Nothing to render means no item: an empty entry would sit in
+		// the transcript as an invisible slot the selection could land on.
+		if strings.TrimSpace(msg.Content().Text) == "" && len(msg.BinaryContent()) == 0 {
+			return nil
+		}
 		// Reconstruct shell command items from ShellCommand parts.
 		var items []MessageItem
 		for _, part := range msg.Parts {
@@ -538,23 +563,24 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 // options.tui.show_thinking, before any message items are built.
 var HideThinking bool
 
-// ShouldRenderAssistantMessage determines if an assistant message should be rendered
-//
-// In some cases the assistant message only has tools so we do not want to render an
-// empty message. An in-progress thinking block keeps the message alive so its
-// spinner stays visible, but only when thinking actually renders: with
-// HideThinking set, such a message would render as an empty shell (the lone
-// focused border) for as long as its tool calls run.
+// ShouldRenderAssistantMessage determines whether an assistant message
+// renders a transcript item at all. An item exists only when something
+// of it is visible: settled text, reasoning (when shown), an error or
+// cancellation footer, or the working spinner of a turn that has
+// produced nothing yet. Anything else — an empty finished message, a
+// tool-only turn with hidden thinking — would render zero lines; such
+// an item must never enter the list, where it would sit as an
+// invisible slot the selection could land on.
 func ShouldRenderAssistantMessage(msg *message.Message) bool {
-	content := strings.TrimSpace(msg.Content().Text)
 	thinking := strings.TrimSpace(msg.ReasoningContent().Thinking)
 	if HideThinking {
 		thinking = ""
 	}
-	isCancelled := msg.FinishReason() == message.FinishReasonCanceled
-	hasToolCalls := len(msg.ToolCalls()) > 0
-	isThinking := msg.IsThinking() && !HideThinking
-	return !hasToolCalls || content != "" || thinking != "" || isThinking || msg.IsErrorLike() || isCancelled
+	return strings.TrimSpace(msg.Content().Text) != "" ||
+		thinking != "" ||
+		msg.IsErrorLike() ||
+		msg.FinishReason() == message.FinishReasonCanceled ||
+		assistantSpinnerActive(msg)
 }
 
 // BuildToolResultMap creates a map of tool call IDs to their results from a list of messages.

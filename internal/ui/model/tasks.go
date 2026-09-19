@@ -566,39 +566,43 @@ func (m *UI) focusTasks() {
 }
 
 // taskCursorDown moves the strip cursor down: through the cursor
-// task's nested calls when expanded, otherwise to the next task.
-func (m *UI) taskCursorDown() {
+// task's nested calls when expanded, otherwise to the next task. It
+// reports whether the cursor moved.
+func (m *UI) taskCursorDown() bool {
 	if len(m.agentTasks) == 0 {
-		return
+		return false
 	}
 	m.clampTaskCursor()
 	task := m.agentTasks[m.taskCursor]
 	if task.toolCallID == m.expandedTaskID && m.taskSubCursor < len(task.nested)-1 {
 		m.taskSubCursor++
 		m.noteTaskFocus()
-		return
+		return true
 	}
 	if m.taskCursor < len(m.agentTasks)-1 {
 		m.taskCursor++
 		m.taskSubCursor = -1
 		m.noteTaskFocus()
+		return true
 	}
+	return false
 }
 
-// taskCursorUp moves the strip cursor up, mirroring taskCursorDown.
-func (m *UI) taskCursorUp() {
+// taskCursorUp moves the strip cursor up, mirroring taskCursorDown. It
+// reports whether the cursor moved.
+func (m *UI) taskCursorUp() bool {
 	if len(m.agentTasks) == 0 {
-		return
+		return false
 	}
 	m.clampTaskCursor()
 	if m.taskSubCursor > 0 {
 		m.taskSubCursor--
 		m.noteTaskFocus()
-		return
+		return true
 	}
 	if m.taskSubCursor == 0 {
 		m.taskSubCursor = -1
-		return
+		return true
 	}
 	if m.taskCursor > 0 {
 		m.taskCursor--
@@ -609,7 +613,9 @@ func (m *UI) taskCursorUp() {
 			m.taskSubCursor = -1
 		}
 		m.noteTaskFocus()
+		return true
 	}
+	return false
 }
 
 // toggleTaskAtCursor expands or collapses whatever the strip cursor is
@@ -725,11 +731,25 @@ func (m *UI) ascendTaskAtCursor() {
 // goes in, escape goes out, tab leaves for the editor.
 func (m *UI) handleTaskKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch {
-	case key.Matches(msg, m.keyMap.Chat.Up), key.Matches(msg, m.keyMap.Chat.UpOneItem):
+	case key.Matches(msg, m.keyMap.Chat.Up):
 		m.taskCursorUp()
 		return true, nil
-	case key.Matches(msg, m.keyMap.Chat.Down), key.Matches(msg, m.keyMap.Chat.DownOneItem):
+	case key.Matches(msg, m.keyMap.Chat.UpOneItem):
+		// Shift+up at the top of the strip continues into the
+		// transcript; the plain arrow stops at the edge.
+		if !m.taskCursorUp() {
+			return true, m.focusChatFromTasks()
+		}
+		return true, nil
+	case key.Matches(msg, m.keyMap.Chat.Down):
 		m.taskCursorDown()
+		return true, nil
+	case key.Matches(msg, m.keyMap.Chat.DownOneItem):
+		// Shift+down at the bottom of the strip continues into the
+		// editor; the plain arrow stops at the edge.
+		if !m.taskCursorDown() {
+			return true, m.focusEditorFromTasks()
+		}
 		return true, nil
 	case key.Matches(msg, m.keyMap.Chat.DigIn):
 		m.enterTaskAtCursor()
@@ -755,6 +775,34 @@ func (m *UI) focusEditorFromTasks() tea.Cmd {
 
 func (m *UI) focusChatFromTasks() tea.Cmd {
 	m.focus = uiFocusMain
+	return m.chat.FocusRestoringSelection()
+}
+
+// focusBelowChat moves focus out of the transcript to the region below
+// it: the background tasks strip when present, otherwise the editor.
+func (m *UI) focusBelowChat() tea.Cmd {
+	m.chat.Blur()
+	if m.state == uiChat && len(m.agentTasks) > 0 {
+		m.focusTasks()
+		return nil
+	}
+	m.focus = uiFocusEditor
+	return m.textarea.Focus()
+}
+
+// focusAboveEditor moves focus out of the editor to the region above
+// it: the background tasks strip when present, otherwise the
+// transcript. The landing state has no transcript, so it stays put.
+func (m *UI) focusAboveEditor() tea.Cmd {
+	if m.state == uiChat && len(m.agentTasks) > 0 {
+		m.focusTasks()
+		return nil
+	}
+	if m.state == uiLanding {
+		return nil
+	}
+	m.setState(m.state, uiFocusMain)
+	m.textarea.Blur()
 	return m.chat.FocusRestoringSelection()
 }
 

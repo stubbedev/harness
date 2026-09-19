@@ -871,42 +871,76 @@ func (l *List) IsSelectedLast() bool {
 	return l.selectedIdx == len(l.items)-1
 }
 
+// IndexAfter returns the index of the item visually after start, or
+// -1 when none follows it. start may be -1 (no selection), whose
+// successor is the visually first item.
+func (l *List) IndexAfter(start int) int {
+	if len(l.items) == 0 {
+		return -1
+	}
+	if l.reverse {
+		// In reverse, visual down = lower index.
+		switch {
+		case start < 0:
+			return len(l.items) - 1
+		case start > 0:
+			return start - 1
+		}
+		return -1
+	}
+	switch {
+	case start < 0:
+		return 0
+	case start < len(l.items)-1:
+		return start + 1
+	}
+	return -1
+}
+
+// IndexBefore returns the index of the item visually before start, or
+// -1 when none precedes it. start may be len(l.items), whose
+// predecessor is the visually last item.
+func (l *List) IndexBefore(start int) int {
+	if len(l.items) == 0 {
+		return -1
+	}
+	if l.reverse {
+		// In reverse, visual up = higher index.
+		switch {
+		case start >= len(l.items):
+			return 0
+		case start < len(l.items)-1:
+			return start + 1
+		}
+		return -1
+	}
+	switch {
+	case start > 0 && start <= len(l.items):
+		return start - 1
+	}
+	return -1
+}
+
 // SelectPrev selects the visually previous item (moves toward visual top).
 // It returns whether the selection changed.
 func (l *List) SelectPrev() bool {
-	if l.reverse {
-		// In reverse, visual up = higher index
-		if l.selectedIdx < len(l.items)-1 {
-			l.selectedIdx++
-			return true
-		}
-	} else {
-		// Normal: visual up = lower index
-		if l.selectedIdx > 0 {
-			l.selectedIdx--
-			return true
-		}
+	idx := l.IndexBefore(l.selectedIdx)
+	if idx < 0 {
+		return false
 	}
-	return false
+	l.selectedIdx = idx
+	return true
 }
 
 // SelectNext selects the next item in the list.
 // It returns whether the selection changed.
 func (l *List) SelectNext() bool {
-	if l.reverse {
-		// In reverse, visual down = lower index
-		if l.selectedIdx > 0 {
-			l.selectedIdx--
-			return true
-		}
-	} else {
-		// Normal: visual down = higher index
-		if l.selectedIdx < len(l.items)-1 {
-			l.selectedIdx++
-			return true
-		}
+	idx := l.IndexAfter(l.selectedIdx)
+	if idx < 0 {
+		return false
 	}
-	return false
+	l.selectedIdx = idx
+	return true
 }
 
 // SelectFirst selects the first item in the list.

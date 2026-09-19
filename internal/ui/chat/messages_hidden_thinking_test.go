@@ -73,6 +73,27 @@ func TestVisibleThinkingToolCallStillRendered(t *testing.T) {
 		"visible thinking keeps the item so the reasoning block renders")
 }
 
+// TestEmptyFinishedAssistantNotRendered pins the construction rule
+// behind the invisible-slot bug: an item that would render zero lines
+// must never be created. A finished assistant message with no content,
+// thinking, error, or cancellation renders nothing, while an
+// unfinished one keeps rendering the working spinner.
+func TestEmptyFinishedAssistantNotRendered(t *testing.T) {
+	finishedEmpty := &message.Message{
+		ID:   "m-empty",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.Finish{Reason: message.FinishReasonEndTurn},
+		},
+	}
+	require.False(t, ShouldRenderAssistantMessage(finishedEmpty),
+		"a finished message with nothing to show must not become an item")
+
+	streaming := &message.Message{ID: "m-live", Role: message.Assistant}
+	require.True(t, ShouldRenderAssistantMessage(streaming),
+		"the streaming placeholder keeps rendering the working spinner")
+}
+
 // TestHiddenThinkingBeforeToolCallKeepsSpinner covers the window the
 // IsThinking term exists for: reasoning has started, nothing else has
 // arrived yet. The placeholder (with its spinner) must survive even

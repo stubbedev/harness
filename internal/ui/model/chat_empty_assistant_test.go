@@ -9,6 +9,27 @@ import (
 	"github.com/stubbedev/harness/internal/ui/chat"
 )
 
+// TestEmptyFinishedAssistantDropped pins the live-update half of the
+// invisible-slot rule: a message that finishes with nothing to render
+// has its placeholder item removed, so no zero-height entry can linger
+// in the transcript where the selection could land on it.
+func TestEmptyFinishedAssistantDropped(t *testing.T) {
+	t.Parallel()
+	u := liveFlowUI()
+
+	_ = u.appendSessionMessage(message.Message{ID: "u1", Role: message.User, Parts: []message.ContentPart{
+		message.TextContent{Text: "hi"},
+	}})
+	_ = u.appendSessionMessage(message.Message{ID: "m1", Role: message.Assistant})
+	require.NotNil(t, u.chat.MessageItem("m1"), "the streaming placeholder should exist while unfinished")
+
+	finishedEmpty := message.Message{ID: "m1", Role: message.Assistant, Parts: []message.ContentPart{
+		message.Finish{Reason: message.FinishReasonEndTurn},
+	}}
+	_ = u.updateSessionMessage(finishedEmpty)
+	assert.Nil(t, u.chat.MessageItem("m1"), "a finished-empty message renders nothing and must be dropped")
+}
+
 // TestHiddenThinkingToolRunDropsEmptyAssistant reproduces the reported
 // transcript bug: with thinking suppressed (options.tui.show_thinking
 // = false), a turn that thinks and then calls a tool left an empty

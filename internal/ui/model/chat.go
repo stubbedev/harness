@@ -921,9 +921,10 @@ func (m *Chat) isSelectable(index int) bool {
 	if item == nil {
 		return false
 	}
-	// The working spinner is an animation, not content: stopping on it
-	// wraps a focus border around a line with nothing to read or copy.
-	if chat.IsWorkingSpinner(item) {
+	// Transient items — the working spinner, the live thinking entry —
+	// keep changing underneath the reader and hold nothing stable to
+	// select or copy.
+	if chat.IsTransient(item) {
 		return false
 	}
 	_, ok := item.(list.Focusable)
@@ -956,95 +957,61 @@ func (m *Chat) lastSelectableIndex() int {
 	return -1
 }
 
-// SetSelected sets the selected message index in the chat list.
+// selectFrom moves the selection to the nearest selectable item in the
+// direction step walks, starting at start's neighbor. The selection is
+// written only when such an item is found, so a walk that runs off the
+// end leaves it exactly where it was.
+func (m *Chat) selectFrom(start int, step func(int) int) bool {
+	for idx := step(start); idx >= 0; idx = step(idx) {
+		if m.isSelectable(idx) {
+			m.list.SetSelected(idx)
+			return true
+		}
+	}
+	return false
+}
+
+// SetSelected sets the selected message to index when it is selectable,
+// and otherwise to the nearest selectable item below it, falling back
+// to the nearest one above.
 func (m *Chat) SetSelected(index int) {
-	m.list.SetSelected(index)
 	defer m.refreshManualSelection()
-	if index < 0 || index >= m.list.Len() {
+	if m.isSelectable(index) {
+		m.list.SetSelected(index)
 		return
 	}
-	for {
-		if m.isSelectable(m.list.Selected()) {
-			return
-		}
-		if m.list.SelectNext() {
-			continue
-		}
-		// If we're at the end and the last item isn't selectable, walk backwards
-		// to find the nearest selectable item.
-		for {
-			if !m.list.SelectPrev() {
-				return
-			}
-			if m.isSelectable(m.list.Selected()) {
-				return
-			}
-		}
+	if m.selectFrom(index, m.list.IndexAfter) {
+		return
 	}
+	m.selectFrom(index, m.list.IndexBefore)
 }
 
-// SelectPrev selects the previous message in the chat list.
-func (m *Chat) SelectPrev() {
+// SelectPrev selects the previous selectable message in the chat list.
+// It reports whether one exists above the current selection; when none
+// does, the selection is left untouched.
+func (m *Chat) SelectPrev() bool {
 	defer m.refreshManualSelection()
-	for {
-		if !m.list.SelectPrev() {
-			return
-		}
-		if m.isSelectable(m.list.Selected()) {
-			return
-		}
-	}
+	return m.selectFrom(m.list.Selected(), m.list.IndexBefore)
 }
 
-// SelectNext selects the next message in the chat list.
-func (m *Chat) SelectNext() {
+// SelectNext selects the next selectable message in the chat list. It
+// reports whether one exists below the current selection; when none
+// does, the selection is left untouched.
+func (m *Chat) SelectNext() bool {
 	defer m.refreshManualSelection()
-	for {
-		if !m.list.SelectNext() {
-			return
-		}
-		if m.isSelectable(m.list.Selected()) {
-			return
-		}
-	}
+	return m.selectFrom(m.list.Selected(), m.list.IndexAfter)
 }
 
-// SelectFirst selects the first message in the chat list.
-func (m *Chat) SelectFirst() {
+// SelectFirst selects the first selectable message in the chat list.
+func (m *Chat) SelectFirst() bool {
 	defer m.refreshManualSelection()
-	if !m.list.SelectFirst() {
-		return
-	}
-	if m.isSelectable(m.list.Selected()) {
-		return
-	}
-	for {
-		if !m.list.SelectNext() {
-			return
-		}
-		if m.isSelectable(m.list.Selected()) {
-			return
-		}
-	}
+	return m.selectFrom(-1, m.list.IndexAfter)
 }
 
-// SelectLast selects the last message in the chat list.
-func (m *Chat) SelectLast() {
+// SelectLast selects the last selectable message in the chat list.
+func (m *Chat) SelectLast() bool {
 	defer m.refreshManualSelection()
-	if !m.list.SelectLast() {
-		return
-	}
-	if m.isSelectable(m.list.Selected()) {
-		return
-	}
-	for {
-		if !m.list.SelectPrev() {
-			return
-		}
-		if m.isSelectable(m.list.Selected()) {
-			return
-		}
-	}
+	return m.selectFrom(m.list.Len(), m.list.IndexBefore)
 }
 
 // SelectFirstInView selects the first message currently in view.

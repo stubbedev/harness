@@ -25,6 +25,10 @@ func TestChatToggleExpandedSelectedItem_AssistantMessage(t *testing.T) {
 		Role: message.Assistant,
 		Parts: []message.ContentPart{
 			message.ReasoningContent{Thinking: "thinking about it"},
+			// A finished turn: while the message is still thinking it is
+			// the live (unselectable) thinking entry, so the expand path
+			// is only reachable once the turn settles.
+			message.Finish{Reason: message.FinishReasonEndTurn},
 		},
 	}
 	item := chat.NewAssistantMessageItem(u.com.Styles, msg)

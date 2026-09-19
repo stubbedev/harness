@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,76 @@ import (
 	"github.com/stubbedev/harness/internal/ui/chat"
 	"github.com/stubbedev/harness/internal/workspace"
 )
+
+// shiftUp and shiftDown build the shifted arrows the terminal delivers.
+func shiftUp() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift} }
+func shiftDown() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift} }
+
+// TestShiftArrowsChainTranscriptTasksEditor pins the shift-arrow focus
+// chain: transcript -> background tasks -> editor going down, editor
+// -> tasks -> transcript going up. Each region hands focus to the next
+// at its edge; without subagents the strip is skipped.
+func TestShiftArrowsChainTranscriptTasksEditor(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	u.focus = uiFocusMain
+	u.chat.SelectLast()
+	require.Equal(t, u.chat.Len()-1, u.chat.Selected())
+
+	// Down off the newest item without subagents: straight to the editor.
+	_, _ = u.Update(shiftDown())
+	require.Equal(t, uiFocusEditor, u.focus)
+
+	// Up from the editor without subagents: back to the transcript.
+	_, _ = u.Update(shiftUp())
+	require.Equal(t, uiFocusMain, u.focus)
+	require.Equal(t, u.chat.Len()-1, u.chat.Selected(), "returning to the transcript lands on the newest item")
+
+	// A running subagent inserts the strip into the chain, both ways.
+	_ = u.upsertAgentTask(&message.Message{ID: "m1", Role: message.Assistant}, agentToolCall("a1"))
+
+	_, _ = u.Update(shiftDown())
+	require.Equal(t, uiFocusTasks, u.focus, "down off the newest item selects the strip")
+
+	_, _ = u.Update(shiftDown())
+	require.Equal(t, uiFocusEditor, u.focus, "down off the strip's last row focuses the editor")
+
+	_, _ = u.Update(shiftUp())
+	require.Equal(t, uiFocusTasks, u.focus, "up from the editor selects the strip")
+
+	_, _ = u.Update(shiftUp())
+	require.Equal(t, uiFocusMain, u.focus, "up off the strip's first row returns to the transcript")
+}
+
+// TestPlainArrowsStopAtStripEdges pins that the unshifted arrows keep
+// their meaning inside the strip: they move the cursor and stop at the
+// edges instead of handing focus off.
+func TestPlainArrowsStopAtStripEdges(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	_ = u.upsertAgentTask(&message.Message{ID: "m1", Role: message.Assistant}, agentToolCall("a1"))
+	u.focusTasks()
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	require.Equal(t, uiFocusTasks, u.focus, "plain up at the top of the strip stays in the strip")
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	require.Equal(t, uiFocusTasks, u.focus, "plain down at the bottom of the strip stays in the strip")
+}
+
+// TestShiftUpLetterAliasStaysTypeable pins that only the arrow form of
+// the up-one-item binding leaves the editor: its letter alias must
+// insert text instead of moving focus.
+func TestShiftUpLetterAliasStaysTypeable(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	u.focus = uiFocusEditor
+	u.textarea.Focus()
+	u.chat.Blur()
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: 'k', Mod: tea.ModShift, Text: "K"})
+	require.Equal(t, uiFocusEditor, u.focus, "the K alias must not move focus from the editor")
+	require.Equal(t, "K", u.textarea.Value(), "the K alias must stay typeable")
+}
 
 // agentToolCall builds the tool call a parent-session agent dispatch
 // produces. Blocking keeps the inline-result semantics these strip tests

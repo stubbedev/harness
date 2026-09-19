@@ -1880,10 +1880,11 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 	}
 
 	shouldRenderAssistant := chat.ShouldRenderAssistantMessage(&msg)
-	// If the message of the assistant does not have any response just tool
-	// calls we need to remove it, but keep the info item per finished turn
-	// renders so the footer (model/provider/duration) remains visible.
-	if !shouldRenderAssistant && len(msg.ToolCalls()) > 0 && existingItem != nil {
+	// A message whose item has nothing left to render is removed again:
+	// an empty shell would sit in the transcript as an invisible slot.
+	// The removal is not limited to tool-call messages — a message that
+	// finishes without content is just as empty.
+	if existingItem != nil && !shouldRenderAssistant {
 		m.chat.RemoveMessage(msg.ID)
 	}
 
@@ -2807,12 +2808,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, m.chat.FocusRestoringSelection())
 				}
 			case key.Matches(msg, m.keyMap.ShiftTab):
-				if m.state == uiChat && len(m.agentTasks) > 0 {
-					m.focusTasks()
-				} else if m.state != uiLanding {
-					m.setState(m.state, uiFocusMain)
-					m.textarea.Blur()
-					cmds = append(cmds, m.chat.FocusRestoringSelection())
+				if cmd := m.focusAboveEditor(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			case key.Matches(msg, m.keyMap.Chat.UpOneItem) && msg.String() == "shift+up":
+				// Shift+up leaves the editor the same way shift+tab does.
+				// Only the arrow key qualifies: the binding's letter alias
+				// (K) must stay typeable.
+				if cmd := m.focusAboveEditor(); cmd != nil {
+					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
 				if m.isAgentBusy() {
@@ -3038,8 +3042,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if m.chat.SubCursorDown() {
 					break
 				}
-				m.chat.SelectNext()
-				m.chat.ScrollToSelected()
+				if m.chat.SelectNext() {
+					m.chat.ScrollToSelected()
+					break
+				}
+				// At the newest item: continue into the region below the
+				// transcript.
+				if cmd := m.focusBelowChat(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			case key.Matches(msg, m.keyMap.Chat.HalfPageUp):
 				m.markScrollOnly()
 				m.chat.ScrollBy(-m.chat.Height() / 2)

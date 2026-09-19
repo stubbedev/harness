@@ -7,16 +7,21 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/chat"
 )
 
 // liveFlowUI returns a UI wired like a live session (a workspace stub
-// with a config, so appendSessionMessage can build info footers).
+// with a config, so appendSessionMessage can build info footers). The
+// config carries an empty providers map so rendering an info footer
+// survives the model lookup.
 func liveFlowUI() *UI {
 	u := newTestUI()
 	u.state = uiChat
-	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{
+		Providers: csync.NewMap[string, config.ProviderConfig](),
+	}}
 	return u
 }
 
@@ -159,6 +164,46 @@ func TestLiveFlowSpinnerStaysLastAcrossAppends(t *testing.T) {
 	last = u.chat.list.ItemAt(u.chat.Len() - 1)
 	assert.Same(t, spinner, last, "a tool group absorbed mid-turn must not land below the spinner")
 	require.Len(t, groupsIn(u), 1)
+}
+
+// TestLiveThinkingEntryIsNotSelectable pins that the streaming thinking
+// entry is never selectable: while the message is still thinking, a
+// focus border would highlight text that keeps changing underneath it.
+func TestLiveThinkingEntryIsNotSelectable(t *testing.T) {
+	t.Parallel()
+	u := liveFlowUI()
+
+	text := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID:    "m-text",
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "done"}},
+	})
+	thinking := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID:    "m-think",
+		Role:  message.Assistant,
+		Parts: []message.ContentPart{message.ReasoningContent{Thinking: "hmm"}},
+	})
+	u.chat.AppendMessages(text, thinking)
+
+	require.False(t, u.chat.isSelectable(u.chat.Len()-1), "a message that is still thinking is not selectable")
+	u.chat.SelectLast()
+	assert.Equal(t, u.chat.Len()-2, u.chat.list.Selected(), "selection stops on the last settled message")
+	assert.False(t, u.chat.HasManualSelection(), "the thinking entry is not the newest selectable item")
+
+	// A walk onto it mid-list is skipped in both directions.
+	u.chat.SetSelected(u.chat.Len() - 2)
+	require.False(t, u.chat.SelectNext(), "shift+down off the settled message cannot land on the thinking entry")
+	assert.Equal(t, u.chat.Len()-2, u.chat.Selected(), "the selection is restored, not stranded")
+
+	// Once content arrives the entry settles and becomes selectable again.
+	_ = u.updateSessionMessage(message.Message{
+		ID: "m-think", SessionID: "s1", Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.ReasoningContent{Thinking: "hmm"},
+			message.TextContent{Text: "answer"},
+		},
+	})
+	require.True(t, u.chat.isSelectable(u.chat.Len()-1), "a settled message is selectable even while it shows thinking")
 }
 
 // TestSpinnerIsNotSelectable covers the selection walk skipping the

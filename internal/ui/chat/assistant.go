@@ -702,13 +702,21 @@ func (a *AssistantMessageItem) renderError(width int) string {
 	return fmt.Sprintf("%s\n\n%s", title, details)
 }
 
+// assistantSpinnerActive reports whether an assistant message in this
+// state renders the working animation: the turn is still running and
+// nothing readable (content, tool calls) has arrived yet. The spinner
+// is the only thing such a message can show, so it is also the only
+// reason to keep the message's transcript item alive.
+func assistantSpinnerActive(msg *message.Message) bool {
+	if strings.TrimSpace(msg.Content().Text) != "" || len(msg.ToolCalls()) > 0 {
+		return false
+	}
+	return msg.IsThinking() || !msg.IsFinished()
+}
+
 // isSpinning returns true if the assistant message is still generating.
 func (a *AssistantMessageItem) isSpinning() bool {
-	isThinking := a.message.IsThinking()
-	isFinished := a.message.IsFinished()
-	hasContent := strings.TrimSpace(a.message.Content().Text) != ""
-	hasToolCalls := len(a.message.ToolCalls()) > 0
-	return (isThinking || !isFinished) && !hasContent && !hasToolCalls
+	return assistantSpinnerActive(a.message)
 }
 
 // SpinnerOnly implements [WorkingSpinner]. It reports whether this item
@@ -725,6 +733,14 @@ func (a *AssistantMessageItem) SpinnerOnly() bool {
 		return true
 	}
 	return strings.TrimSpace(a.message.ReasoningContent().Thinking) == ""
+}
+
+// IsLiveThinking reports whether the item is the live thinking entry:
+// the message is still streaming reasoning and no content has arrived
+// yet. The entry is transient, so while this is true there is nothing
+// settled to select or copy.
+func (a *AssistantMessageItem) IsLiveThinking() bool {
+	return a.message.IsThinking()
 }
 
 // SetMessage is used to update the underlying message. Only the
