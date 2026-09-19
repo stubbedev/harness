@@ -489,7 +489,12 @@ func TestPtyRunner_PlainQuestionIsNotMasked(t *testing.T) {
 		require.True(t, res.Waiting, "an ordinary question waits for input from the model")
 	}
 
-	done, err := r.Type(t.Context(), "alpha\n", 10)
+	// The explicit <enter> is the documented way to answer a waiting
+	// program. A bare newline makes the text a multi-line paste, which
+	// queues when the foreground claims to read nothing - true wherever
+	// the tty says so and procfs does not (macOS) - and a program waiting
+	// for that very answer would then never be answered.
+	done, err := r.Type(t.Context(), "alpha<enter>", 10)
 	require.NoError(t, err)
 	require.Contains(t, done.Output, "got:alpha")
 }
