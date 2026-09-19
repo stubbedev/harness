@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/catalog"
 )
 
@@ -62,35 +64,41 @@ func TestIsContextLengthError(t *testing.T) {
 	}
 }
 
-func TestTruncateToolResponse(t *testing.T) {
-	t.Parallel()
-	t.Run("small response passes through", func(t *testing.T) {
-		t.Parallel()
-		response := fantasy.NewTextResponse("small")
-		require.Equal(t, response, truncateToolResponse(response))
+func TestWithResultCap(t *testing.T) {
+	t.Setenv("HARNESS_SCRATCH_DIR", t.TempDir())
+	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "cap-session")
+	for _, name := range []string{"builtin", "mcp_server_tool"} {
+		t.Run(name, func(t *testing.T) {
+			response := fantasy.ToolResponse{
+				Type: "text", Content: strings.Repeat("x", maxToolResultChars+1),
+				IsError: true, StopTurn: true, Metadata: `{"status":42}`,
+			}
+			call := fantasy.ToolCall{ID: "call", Name: name, Input: "{}"}
+			original := fantasy.NewAgentTool(name, "description", func(gotCtx context.Context, _ struct{}, gotCall fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				require.Equal(t, ctx, gotCtx)
+				require.Equal(t, call, gotCall)
+				return response, nil
+			})
+			wrapped := withResultCap([]fantasy.AgentTool{original})
+			require.Equal(t, original.Info(), wrapped[0].Info())
+			got, err := wrapped[0].Run(ctx, call)
+			require.NoError(t, err)
+			require.LessOrEqual(t, len(got.Content), maxToolResultChars)
+			require.Contains(t, got.Content, "saved in full to:")
+			got.Content = response.Content
+			require.Equal(t, response, got)
+		})
+	}
+	t.Run("run error passes through", func(t *testing.T) {
+		wantErr := errors.New("tool failed")
+		response := fantasy.NewTextResponse("failure details")
+		original := fantasy.NewAgentTool("failure", "description", func(context.Context, struct{}, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			return response, wantErr
+		})
+		wantResponse, wantRunErr := original.Run(ctx, fantasy.ToolCall{Input: "{}"})
+		got, err := withResultCap([]fantasy.AgentTool{original})[0].Run(ctx, fantasy.ToolCall{Input: "{}"})
+		require.Equal(t, wantRunErr, err)
+		require.Equal(t, wantResponse, got)
 	})
-	t.Run("media response passes through", func(t *testing.T) {
-		t.Parallel()
-		response := fantasy.ToolResponse{Content: strings.Repeat("a", maxToolResultChars+1), Data: []byte{1}}
-		require.Equal(t, response, truncateToolResponse(response))
-	})
-	t.Run("oversized response is capped with a visible marker", func(t *testing.T) {
-		t.Parallel()
-		content := strings.Repeat("ab", maxToolResultChars) + "xyz"
-		truncated := truncateToolResponse(fantasy.NewTextResponse(content))
-		expected := strings.Repeat("ab", maxToolResultChars/2) + fmt.Sprintf(
-			"\n\n(result truncated: %d of %d characters shown — narrow the request (filter, offset, or paginate) to see the rest)",
-			maxToolResultChars, len(content),
-		)
-		require.Equal(t, expected, truncated.Content)
-	})
-	t.Run("cut does not split a rune", func(t *testing.T) {
-		t.Parallel()
-		content := strings.Repeat("é", maxToolResultChars+10)
-		truncated := truncateToolResponse(fantasy.NewTextResponse(content))
-		require.Contains(t, truncated.Content, "result truncated")
-		for _, r := range truncated.Content {
-			require.NotEqual(t, 0xFFFD, r)
-		}
-	})
+	require.Nil(t, withResultCap(nil))
 }

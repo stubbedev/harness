@@ -198,13 +198,14 @@ type activeCancel struct {
 }
 
 type sessionAgent struct {
-	cfg                *config.ConfigStore
-	largeModel         *csync.Value[Model]
-	smallModel         *csync.Value[Model]
-	systemPromptPrefix *csync.Value[string]
-	systemPrompt       *csync.Value[string]
-	tools              *csync.Slice[fantasy.AgentTool]
-	skillActivation    *SkillActivationConfig
+	cfg                   *config.ConfigStore
+	largeModel            *csync.Value[Model]
+	smallModel            *csync.Value[Model]
+	systemPromptPrefix    *csync.Value[string]
+	systemPrompt          *csync.Value[string]
+	tools                 *csync.Slice[fantasy.AgentTool]
+	skillActivation       *SkillActivationConfig
+	directoryInstructions *DirectoryInstructions
 
 	isSubAgent           bool
 	sessions             session.Service
@@ -281,20 +282,21 @@ type sessionAgent struct {
 }
 
 type SessionAgentOptions struct {
-	Config               *config.ConfigStore
-	LargeModel           Model
-	SmallModel           Model
-	SystemPromptPrefix   string
-	SystemPrompt         string
-	SkillActivation      *SkillActivationConfig
-	IsSubAgent           bool
-	DisableAutoSummarize bool
-	AutoSummarizeRatio   float64
-	AutoSummarizeBuffer  int64
-	MaxRetries           *int
-	Sessions             session.Service
-	Messages             message.Service
-	Files                history.Service
+	Config                *config.ConfigStore
+	LargeModel            Model
+	SmallModel            Model
+	SystemPromptPrefix    string
+	SystemPrompt          string
+	SkillActivation       *SkillActivationConfig
+	DirectoryInstructions *DirectoryInstructions
+	IsSubAgent            bool
+	DisableAutoSummarize  bool
+	AutoSummarizeRatio    float64
+	AutoSummarizeBuffer   int64
+	MaxRetries            *int
+	Sessions              session.Service
+	Messages              message.Service
+	Files                 history.Service
 	// LSPManager supplies the diagnostics swept into each step. Nil
 	// disables the sweep.
 	LSPManager *lsp.Manager
@@ -320,33 +322,34 @@ func NewSessionAgent(
 	opts SessionAgentOptions,
 ) SessionAgent {
 	return &sessionAgent{
-		cfg:                  opts.Config,
-		largeModel:           csync.NewValue(opts.LargeModel),
-		smallModel:           csync.NewValue(opts.SmallModel),
-		systemPromptPrefix:   csync.NewValue(opts.SystemPromptPrefix),
-		systemPrompt:         csync.NewValue(opts.SystemPrompt),
-		skillActivation:      opts.SkillActivation,
-		isSubAgent:           opts.IsSubAgent,
-		sessions:             opts.Sessions,
-		messages:             opts.Messages,
-		files:                opts.Files,
-		lspManager:           opts.LSPManager,
-		checkpoints:          opts.Checkpoints,
-		disableAutoSummarize: opts.DisableAutoSummarize,
-		autoSummarizeRatio:   opts.AutoSummarizeRatio,
-		autoSummarizeBuffer:  opts.AutoSummarizeBuffer,
-		maxRetries:           opts.MaxRetries,
-		tools:                csync.NewSliceFrom(withResultCap(opts.Tools)),
-		notify:               opts.Notify,
-		runComplete:          opts.RunComplete,
-		hooks:                opts.Hooks,
-		subagentInbox:        opts.SubagentInbox,
-		queueNotify:          opts.QueueNotify,
-		messageQueue:         csync.NewMap[string, []SessionAgentCall](),
-		activeRequests:       csync.NewMap[string, *activeCancel](),
-		dispatchMu:           csync.NewMap[string, *sync.Mutex](),
-		acceptedRuns:         csync.NewMap[string, int](),
-		cancelMark:           csync.NewMap[string, uint64](),
+		cfg:                   opts.Config,
+		largeModel:            csync.NewValue(opts.LargeModel),
+		smallModel:            csync.NewValue(opts.SmallModel),
+		systemPromptPrefix:    csync.NewValue(opts.SystemPromptPrefix),
+		systemPrompt:          csync.NewValue(opts.SystemPrompt),
+		skillActivation:       opts.SkillActivation,
+		directoryInstructions: opts.DirectoryInstructions,
+		isSubAgent:            opts.IsSubAgent,
+		sessions:              opts.Sessions,
+		messages:              opts.Messages,
+		files:                 opts.Files,
+		lspManager:            opts.LSPManager,
+		checkpoints:           opts.Checkpoints,
+		disableAutoSummarize:  opts.DisableAutoSummarize,
+		autoSummarizeRatio:    opts.AutoSummarizeRatio,
+		autoSummarizeBuffer:   opts.AutoSummarizeBuffer,
+		maxRetries:            opts.MaxRetries,
+		tools:                 csync.NewSliceFrom(withResultCap(opts.Tools)),
+		notify:                opts.Notify,
+		runComplete:           opts.RunComplete,
+		hooks:                 opts.Hooks,
+		subagentInbox:         opts.SubagentInbox,
+		queueNotify:           opts.QueueNotify,
+		messageQueue:          csync.NewMap[string, []SessionAgentCall](),
+		activeRequests:        csync.NewMap[string, *activeCancel](),
+		dispatchMu:            csync.NewMap[string, *sync.Mutex](),
+		acceptedRuns:          csync.NewMap[string, int](),
+		cancelMark:            csync.NewMap[string, uint64](),
 	}
 }
 
@@ -1170,6 +1173,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if executionSnapshot != "" {
 				prepared.Messages = append(prepared.Messages, fantasy.NewUserMessage(executionSnapshot))
 			}
+			prepared.Messages = a.directoryInstructions.Prepare(callContext, prepared.Messages)
 			prepared.Messages = activation.Prepare(callContext, prepared.Messages)
 			prepared.Messages = withRuntimeContext(prepared.Messages, runtimePrompt)
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)

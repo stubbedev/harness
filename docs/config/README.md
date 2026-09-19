@@ -323,6 +323,9 @@ options:
     enabled: true # durable agent notes across sessions
 ```
 
+Custom subagents can opt into [worktree isolation](worktree-isolation.md) with
+`isolation: worktree` in their Markdown frontmatter.
+
 > [!IMPORTANT]
 > These skill paths load by default — you do NOT need `skills_paths` for them:
 > `.agents/skills`, `.harness/skills`, `.claude/skills`, `.cursor/skills`.

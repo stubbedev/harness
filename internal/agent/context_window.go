@@ -3,10 +3,10 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/config"
 )
 
@@ -63,26 +63,8 @@ func isContextLengthError(err error) bool {
 // maxToolResultChars caps a single tool result before it reaches the
 // model. One uncapped result can consume a whole context window on its
 // own, which no auto-summarize trigger can recover from gracefully.
-const maxToolResultChars = 100_000
+const maxToolResultChars = tools.MaxToolResultBytes
 
-// truncateToolResponse caps a text tool result at maxToolResultChars and
-// appends a marker telling the model what was dropped and how to get it.
-// Binary (media) responses are passed through untouched.
-func truncateToolResponse(response fantasy.ToolResponse) fantasy.ToolResponse {
-	if len(response.Data) != 0 || len(response.Content) <= maxToolResultChars {
-		return response
-	}
-	truncated := response
-	cut := strings.ToValidUTF8(response.Content[:maxToolResultChars], "")
-	truncated.Content = fmt.Sprintf(
-		"%s\n\n(result truncated: %d of %d characters shown — narrow the request (filter, offset, or paginate) to see the rest)",
-		cut, len(cut), len(response.Content),
-	)
-	return truncated
-}
-
-// resultCappingTool wraps an AgentTool so oversized text results are
-// truncated before they enter the message history and the next request.
 type resultCappingTool struct {
 	fantasy.AgentTool
 }
@@ -90,7 +72,7 @@ type resultCappingTool struct {
 func (t resultCappingTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	response, err := t.AgentTool.Run(ctx, call)
 	if err == nil {
-		response = truncateToolResponse(response)
+		response = tools.CapToolResponse(ctx, response)
 	}
 	return response, err
 }

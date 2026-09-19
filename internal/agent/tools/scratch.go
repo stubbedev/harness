@@ -28,9 +28,22 @@ func ScratchDir(sessionID, kind string) (string, error) {
 	if session == "" {
 		return "", fmt.Errorf("session ID is required")
 	}
-	dir := filepath.Join(scratchRoot(), session, sanitizePathSegment(kind))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("failed to create scratch directory: %w", err)
+	root, err := filepath.Abs(scratchRoot())
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve scratch directory: %w", err)
+	}
+	dir := filepath.Join(root, session, sanitizePathSegment(kind))
+	for _, path := range []string{root, filepath.Join(root, session), dir} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			return "", fmt.Errorf("failed to create scratch directory: %w", err)
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return "", fmt.Errorf("failed to inspect scratch directory: %w", err)
+		}
+		if !info.IsDir() || info.Mode().Perm()&0o022 != 0 || (path != root && info.Mode().Perm()&0o077 != 0) {
+			return "", fmt.Errorf("scratch directory must be a private directory, not a symlink: %s", path)
+		}
 	}
 	return dir, nil
 }

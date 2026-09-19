@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	"charm.land/fantasy"
 	"github.com/google/uuid"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/history"
+
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/verification"
 )
@@ -24,6 +27,12 @@ func verificationChangedPaths(ctx context.Context, root, sessionID string, files
 			return nil, err
 		}
 		for _, file := range changed {
+			if filepath.IsAbs(file.Path) {
+				relative, err := filepath.Rel(root, file.Path)
+				if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+					continue
+				}
+			}
 			paths = append(paths, file.Path)
 		}
 	}
@@ -53,13 +62,13 @@ func verificationChangedPaths(ctx context.Context, root, sessionID string, files
 	return slices.Compact(paths), nil
 }
 
-func (c *coordinator) verificationTool() (fantasy.AgentTool, error) {
-	runner, err := verification.New(c.cfg.WorkingDir(), c.cfg.Config().Verification)
+func (c *coordinator) verificationToolFor(store *config.ConfigStore) (fantasy.AgentTool, error) {
+	runner, err := verification.New(store.WorkingDir(), store.Config().Verification)
 	if err != nil {
 		return nil, err
 	}
 	return NewVerificationTool(runner, func(ctx context.Context) ([]string, error) {
-		return verificationChangedPaths(ctx, c.cfg.WorkingDir(), tools.GetSessionFromContext(ctx), c.history)
+		return verificationChangedPaths(ctx, store.WorkingDir(), tools.GetSessionFromContext(ctx), c.history)
 	}, nil), nil
 }
 

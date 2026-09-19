@@ -200,8 +200,10 @@ type coordinator struct {
 	// backgroundByChild maps a background child session ID to its handle so
 	// send_message can route live. Runs are kept after they finish: their
 	// result stays collectable through the wait tool in later turns.
-	backgroundRuns    *csync.Map[string, *backgroundRun]
-	backgroundByChild *csync.Map[string, string]
+	backgroundRuns        *csync.Map[string, *backgroundRun]
+	backgroundByChild     *csync.Map[string, string]
+	directoryOnce         sync.Once
+	directoryInstructions *DirectoryInstructions
 
 	// expandedMCPTools records which tools of defer-loaded (tool-search)
 	// MCP servers have been loaded into the coder agent's tool set.
@@ -980,7 +982,11 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 // resolved via resolveModelByID. sm.Effort is applied to the resolved primary,
 // which is also the only large/specific model built — small always backs
 // titles/summaries, so it is built unconditionally.
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel, wg *errgroup.Group) (SessionAgent, error) {
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel, wg *errgroup.Group, workspace ...*agentWorkspace) (SessionAgent, error) {
+	store, manager := c.cfg, c.lspManager
+	if len(workspace) > 0 && workspace[0] != nil {
+		store, manager = workspace[0].store, workspace[0].manager
+	}
 	small, err := c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
 	if err != nil {
 		return nil, err
@@ -1007,25 +1013,26 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 
 	primaryProviderCfg, _ := c.cfg.Config().Providers.Get(primary.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
-		Config:               c.cfg,
-		LargeModel:           primary,
-		SmallModel:           small,
-		SystemPromptPrefix:   primaryProviderCfg.SystemPromptPrefix,
-		SystemPrompt:         "",
-		IsSubAgent:           isSubAgent,
-		DisableAutoSummarize: c.cfg.Config().Options.DisableAutoSummarize,
-		AutoSummarizeRatio:   c.cfg.Config().Options.AutoSummarizeRatio,
-		AutoSummarizeBuffer:  c.cfg.Config().Options.AutoSummarizeBuffer,
-		MaxRetries:           c.cfg.Config().Options.MaxRetries,
-		Sessions:             c.sessions,
-		Messages:             c.messages,
-		Files:                c.history,
-		LSPManager:           c.lspManager,
-		Tools:                nil,
-		Notify:               c.notify,
-		RunComplete:          c.runComplete,
-		Hooks:                c.hooks,
-		SkillActivation:      c.skillActivationConfig(isSubAgent),
+		Config:                store,
+		LargeModel:            primary,
+		SmallModel:            small,
+		SystemPromptPrefix:    primaryProviderCfg.SystemPromptPrefix,
+		SystemPrompt:          "",
+		IsSubAgent:            isSubAgent,
+		DisableAutoSummarize:  c.cfg.Config().Options.DisableAutoSummarize,
+		AutoSummarizeRatio:    c.cfg.Config().Options.AutoSummarizeRatio,
+		AutoSummarizeBuffer:   c.cfg.Config().Options.AutoSummarizeBuffer,
+		MaxRetries:            c.cfg.Config().Options.MaxRetries,
+		Sessions:              c.sessions,
+		Messages:              c.messages,
+		Files:                 c.history,
+		LSPManager:            manager,
+		Tools:                 nil,
+		Notify:                c.notify,
+		RunComplete:           c.runComplete,
+		Hooks:                 c.hooks,
+		SkillActivation:       c.skillActivationConfig(isSubAgent),
+		DirectoryInstructions: c.directoryTracker(workspace...),
 		// The live inbox is keyed by session, and only a session that can
 		// dispatch (the coder today) ever has entries, so wiring it for
 		// every agent is a no-op for children. The queue notifier is the
@@ -1047,7 +1054,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	initCtx := context.WithoutCancel(ctx)
 
 	wg.Go(func() error {
-		systemPrompt, err := prompt.Build(initCtx, primary.Model.Provider(), primary.Model.Model(), c.cfg)
+		systemPrompt, err := prompt.Build(initCtx, primary.Model.Provider(), primary.Model.Model(), store)
 		if err != nil {
 			return err
 		}
@@ -1056,7 +1063,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	wg.Go(func() error {
-		tools, err := c.buildTools(initCtx, agent, isSubAgent)
+		tools, err := c.buildTools(initCtx, agent, isSubAgent, workspace...)
 		if err != nil {
 			return err
 		}
@@ -1078,7 +1085,11 @@ func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
 }
 
 // buildTools assembles the agent's tool set.
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool) ([]fantasy.AgentTool, error) {
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, workspace ...*agentWorkspace) ([]fantasy.AgentTool, error) {
+	store, manager := c.cfg, c.lspManager
+	if len(workspace) > 0 && workspace[0] != nil {
+		store, manager = workspace[0].store, workspace[0].manager
+	}
 	var allTools []fantasy.AgentTool
 	if shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
 		agentTool, err := c.agentTool(ctx)
@@ -1113,23 +1124,23 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// could not name the shell to write for.
 	if tools.ShellAvailable() {
 		allTools = append(allTools,
-			tools.NewShellTool(c.cfg.WorkingDir(), agent.ID, c.questions))
+			tools.NewShellTool(store.WorkingDir(), agent.ID, c.questions))
 	} else {
 		slog.Warn("No shell could be identified; the shell tool is not available this session")
 	}
 
 	allTools = append(
 		allTools,
-		tools.NewHarnessTool(c.cfg, c.lspManager, c.allSkills, c.activeSkills, c.skillTracker, c.extensions, logFile),
-		tools.NewEditTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewHarnessTool(store, manager, c.allSkills, c.activeSkills, c.skillTracker, c.extensions, logFile),
+		tools.NewEditTool(manager, c.history, c.filetracker, store.WorkingDir()),
 		tools.NewFetchTool(nil),
 		tools.NewWebSearchTool(nil),
-		tools.NewViewTool(c.lspManager, c.filetracker, c.skillTracker, c.cfg.WorkingDir(), c.cfg.Config().Options.SkillsPaths...),
-		tools.NewWriteTool(c.lspManager, c.history, c.filetracker, c.cfg.WorkingDir()),
+		tools.NewViewTool(manager, c.filetracker, c.skillTracker, store.WorkingDir(), store.Config().Options.SkillsPaths...),
+		tools.NewWriteTool(manager, c.history, c.filetracker, store.WorkingDir()),
 	)
 
 	if len(c.cfg.Config().Verification.Rules) > 0 {
-		verifier, err := c.verificationTool()
+		verifier, err := c.verificationToolFor(store)
 		if err != nil {
 			return nil, err
 		}
@@ -1151,7 +1162,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
-		allTools = append(allTools, tools.NewLSPTool(c.lspManager, c.history, c.filetracker))
+		allTools = append(allTools, tools.NewLSPTool(manager, c.history, c.filetracker))
 	}
 
 	if len(c.cfg.Config().MCP) > 0 {
@@ -1161,6 +1172,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		)
 	}
 
+	allTools = workspaceTools(allTools, store.WorkingDir())
 	var filteredTools []fantasy.AgentTool
 	for _, tool := range allTools {
 		if slices.Contains(agent.AllowedTools, tool.Info().Name) {
@@ -1178,7 +1190,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		deferredServers = c.deferredMCPServers(agent)
 	}
 
-	for _, tool := range tools.GetMCPTools(c.cfg, c.cfg.WorkingDir()) {
+	for _, tool := range tools.GetMCPTools(store, store.WorkingDir()) {
 		if deferredServers[tool.MCP()] && !c.mcpToolExpanded(tool.MCP(), tool.MCPToolName()) {
 			continue
 		}
@@ -1238,6 +1250,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// PreToolUse policy has to see their calls to mean anything. A hook
 	// fired from inside a sub-agent sees the child session's ID, which is
 	// what distinguishes the call in the payload.
+	filteredTools = c.directoryTracker(workspace...).WrapTools(filteredTools)
 	filteredTools = wrapToolsWithHooks(filteredTools, c.hooks, c.queueArrivalEpoch)
 
 	// The batch tool composes the tools above, so it is built from the
@@ -1247,7 +1260,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// tool still denies it here. Batch is not in the list it closes
 	// over, so a plan cannot nest another plan.
 	if slices.Contains(agent.AllowedTools, tools.BatchToolName) {
-		callable := slices.Clone(filteredTools)
+		callable := withResultCap(slices.Clone(filteredTools))
 		filteredTools = append(filteredTools, tools.NewBatchTool(func() []fantasy.AgentTool {
 			return callable
 		}))
@@ -1961,15 +1974,16 @@ type subagentModelKey struct {
 
 // subAgentParams holds the parameters for running a sub-agent.
 type subAgentParams struct {
-	Agent          SessionAgent
-	SessionID      string
-	AgentMessageID string
-	ToolCallID     string
-	Prompt         string
-	SessionTitle   string
-	AgentName      string
-	AgentColor     string
-	AgentModel     string
+	Agent           SessionAgent
+	SessionID       string
+	AgentMessageID  string
+	ToolCallID      string
+	Prompt          string
+	SessionTitle    string
+	AgentName       string
+	AgentColor      string
+	AgentModel      string
+	FinishWorkspace func(*fantasy.ToolResponse)
 	// Background runs the child detached from the dispatching turn: the
 	// dispatch tool call returns a handle immediately while the child runs
 	// to completion on its own goroutine (see runSubAgentBackground).
@@ -2013,7 +2027,11 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 		// the whole step in fantasy, discarding the sibling dispatches'
 		// results. As a tool error the model sees the failure and the
 		// turn continues.
-		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create subagent session: %v", err)), nil
+		resp = fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to create subagent session: %v", err))
+		if params.FinishWorkspace != nil {
+			params.FinishWorkspace(&resp)
+		}
+		return resp, nil
 	}
 
 	// Call session setup function if provided
@@ -2073,7 +2091,10 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 // runCtx is what cancels the child; parentCtx is used for work that must
 // outlive the run (the cost update), so a background caller passes a
 // detached context.
-func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, session session.Session, params subAgentParams) (fantasy.ToolResponse, string) {
+func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, session session.Session, params subAgentParams) (response fantasy.ToolResponse, status string) {
+	if params.FinishWorkspace != nil {
+		defer func() { params.FinishWorkspace(&response) }()
+	}
 	// Get model configuration
 	model := params.Agent.Model()
 	maxTokens := model.CatalogCfg.DefaultMaxTokens

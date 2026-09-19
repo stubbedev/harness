@@ -36,6 +36,7 @@ type AgentParams struct {
 type AgentDispatchParams struct {
 	SubagentType string `json:"subagent_type,omitempty"`
 	Prompt       string `json:"prompt,omitempty"`
+	Isolation    string `json:"isolation,omitempty"`
 	// Blocking opts into waiting for the child: the tool call returns its
 	// result inline once the run finishes. The default (omitted or false)
 	// dispatches in the background — the call returns a handle immediately
@@ -137,6 +138,11 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			"prompt": map[string]any{
 				"type":        "string",
 				"description": "The task for the agent to perform. Leave empty to wait for background agents instead of dispatching one.",
+			},
+			"isolation": map[string]any{
+				"type":        "string",
+				"enum":        []string{"worktree"},
+				"description": "Dispatch only: run in a separate Git worktree seeded with the current checkout. Changed worktrees and a patch are retained for inspection; no automatic merge. Full trust, not a sandbox.",
 			},
 			"blocking": map[string]any{
 				"type":        "boolean",
@@ -254,7 +260,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 
 	return &dispatcherTool{
 		info: info,
-		dispatch: func(ctx context.Context, params AgentDispatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		dispatch: func(ctx context.Context, params AgentDispatchParams, call fantasy.ToolCall) (response fantasy.ToolResponse, dispatchErr error) {
 			sessionID := tools.GetSessionFromContext(ctx)
 			if sessionID == "" {
 				// Tool-error responses, never bare errors: a bare error from
@@ -274,6 +280,10 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				return fantasy.NewTextErrorResponse("agent message id missing from context"), nil
 			}
 
+			if params.Isolation != "" && params.Isolation != "worktree" {
+				return fantasy.NewTextErrorResponse("isolation must be worktree or omitted"), nil
+			}
+
 			// Every dispatch below runs a whole child session, so the
 			// concurrency slot is taken here — before any build work — and
 			// held for the run. Over the limit this blocks rather than
@@ -290,6 +300,13 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 			// Blocking and background forms share it; only the slot ownership
 			// differs.
 			handedOff := false
+			var isolated *isolatedDispatch
+			workspaceTransferred := false
+			defer func() {
+				if isolated != nil && !workspaceTransferred {
+					isolated.finish(&response)
+				}
+			}()
 			dispatchRun := func(agent SessionAgent, title, name, color, model string) (fantasy.ToolResponse, error) {
 				runParams := subAgentParams{
 					Agent:          agent,
@@ -301,6 +318,11 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 					AgentName:      name,
 					AgentColor:     color,
 					AgentModel:     model,
+				}
+				if isolated != nil {
+					runParams.Prompt = fmt.Sprintf("Isolated workspace: %s. Perform this task in that checkout; report changes without merging or committing.\n\n%s", isolated.workspace.store.WorkingDir(), params.Prompt)
+					runParams.FinishWorkspace = isolated.finish
+					workspaceTransferred = true
 				}
 				if !params.Blocking {
 					runParams.Background = true
@@ -332,7 +354,28 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				subagentType = config.AgentFast
 			}
 			if builtin, ok := builtins[subagentType]; ok {
-				builtAgent, err := builtin.get(ctx)
+				var builtAgent SessionAgent
+				var err error
+				if params.Isolation == "worktree" {
+					isolated, err = c.prepareIsolatedDispatch(ctx)
+					if err == nil {
+						var pr *prompt.Prompt
+						if subagentType == config.AgentFast {
+							pr, err = fastPrompt(prompt.WithWorkingDir(isolated.workspace.store.WorkingDir()))
+						} else {
+							pr, err = taskPrompt(prompt.WithWorkingDir(isolated.workspace.store.WorkingDir()))
+						}
+						if err == nil {
+							var group errgroup.Group
+							builtAgent, err = c.buildAgent(ctx, pr, builtin.cfg, true, builtin.model, &group, isolated.workspace)
+							if waitErr := group.Wait(); err == nil {
+								err = waitErr
+							}
+						}
+					}
+				} else {
+					builtAgent, err = builtin.get(ctx)
+				}
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("build %s agent: %v", subagentType, err)), nil
 				}
@@ -344,6 +387,17 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("unknown subagent type: %q", subagentType)), nil
 			}
 
+			workingDir := c.cfg.WorkingDir()
+			var workspace []*agentWorkspace
+			if params.Isolation == "worktree" || sa.Isolation == "worktree" {
+				var err error
+				isolated, err = c.prepareIsolatedDispatch(ctx)
+				if err != nil {
+					return fantasy.NewTextErrorResponse(err.Error()), nil
+				}
+				workingDir = isolated.workspace.store.WorkingDir()
+				workspace = append(workspace, isolated.workspace)
+			}
 			agentCfg := sa.ToConfigAgent(coderCfg)
 			// Config-driven setup failures (prompt build, model/provider that
 			// passed discovery but fails at build) are surfaced as tool-error
@@ -353,7 +407,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 			subPr, err := subagentPrompt(
 				sa,
 				activeSkills,
-				prompt.WithWorkingDir(c.cfg.WorkingDir()),
+				prompt.WithWorkingDir(workingDir),
 				// Reuse the skills the coordinator already holds instead of
 				// letting prompt.Build re-walk every configured skills path.
 				// This tool is Parallel, so N concurrent dispatches would
@@ -369,7 +423,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 			// here as a tool error rather than in the coordinator-wide
 			// readyWg, whose sticky error would fail every subsequent turn.
 			var buildWg errgroup.Group
-			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider}, &buildWg)
+			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider}, &buildWg, workspace...)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
 			}

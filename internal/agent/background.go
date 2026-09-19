@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -156,6 +157,7 @@ type backgroundRun struct {
 	status    string
 	result    string
 	resultErr bool
+	worktree  *WorktreeResult
 }
 
 // finish records the terminal state exactly once. Later calls are no-ops so
@@ -170,6 +172,12 @@ func (r *backgroundRun) finish(status string, resp fantasy.ToolResponse) {
 	r.status = status
 	r.result = resp.Content
 	r.resultErr = resp.IsError
+	var metadata struct {
+		Worktree *WorktreeResult `json:"worktree"`
+	}
+	if json.Unmarshal([]byte(resp.Metadata), &metadata) == nil {
+		r.worktree = metadata.Worktree
+	}
 }
 
 // snapshot returns the run's current state.

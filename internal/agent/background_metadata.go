@@ -3,10 +3,11 @@ package agent
 import "charm.land/fantasy"
 
 type backgroundJobMetadata struct {
-	Handle    string `json:"handle"`
-	SessionID string `json:"session_id"`
-	Agent     string `json:"agent"`
-	Status    string `json:"status"`
+	Handle    string          `json:"handle"`
+	SessionID string          `json:"session_id"`
+	Agent     string          `json:"agent"`
+	Status    string          `json:"status"`
+	Worktree  *WorktreeResult `json:"worktree,omitempty"`
 }
 
 func withBackgroundMetadata(response fantasy.ToolResponse, runs []*backgroundRun) fantasy.ToolResponse {
@@ -16,7 +17,10 @@ func withBackgroundMetadata(response fantasy.ToolResponse, runs []*backgroundRun
 		if !finished {
 			status = "running"
 		}
-		jobs = append(jobs, backgroundJobMetadata{Handle: run.handle, SessionID: run.childSession, Agent: run.agentName, Status: status})
+		run.mu.Lock()
+		worktree := run.worktree
+		run.mu.Unlock()
+		jobs = append(jobs, backgroundJobMetadata{Handle: run.handle, SessionID: run.childSession, Agent: run.agentName, Status: status, Worktree: worktree})
 	}
 	if len(jobs) == 0 {
 		return response

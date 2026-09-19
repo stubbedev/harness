@@ -145,6 +145,7 @@ type Subagent struct {
 	Skills          []string `yaml:"skills"`
 	MCPServers      []string `yaml:"mcp_servers"`
 	PermissionMode  string   `yaml:"permissionMode"`
+	Isolation       string   `yaml:"isolation"`
 	Color           string   `yaml:"color"`
 	Provider        string   `yaml:"provider"`
 	Body            string   // set from markdown body after frontmatter
@@ -159,6 +160,8 @@ func (s Subagent) ResolvedColor() string {
 	}
 	return AutoColor(s.Name)
 }
+
+const IsolationWorktree = "worktree"
 
 // PermissionMode values accepted in the PermissionMode field.
 const (
@@ -395,6 +398,12 @@ func (s *Subagent) Validate() error {
 	case "", EffortNone, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax:
 	default:
 		errs = append(errs, fmt.Errorf("effort %q is not valid; use one of: %q, %q, %q, %q, %q, %q, %q", s.Effort, EffortNone, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax))
+	}
+
+	switch s.Isolation {
+	case "", IsolationWorktree:
+	default:
+		errs = append(errs, fmt.Errorf("isolation %q is not valid; use %q or omit the field", s.Isolation, IsolationWorktree))
 	}
 
 	switch s.PermissionMode {
