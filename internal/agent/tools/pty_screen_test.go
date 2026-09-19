@@ -2,7 +2,6 @@ package tools
 
 import (
 	"os/exec"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -282,14 +281,7 @@ func TestPtyRunner_SinglelineInputIsNotPasted(t *testing.T) {
 	_, err := r.Type(t.Context(), "read answer; echo \"got:$answer\"", 1)
 	require.NoError(t, err)
 
-	// A plain read keeps echo on, so outside Linux the line queues
-	// rather than reaching the reader; the explicit <enter> is the
-	// documented way to send input to a waiting program.
-	line := "plain\n"
-	if runtime.GOOS != "linux" {
-		line = "plain<enter>"
-	}
-	res, err := r.Type(t.Context(), line, 10)
+	res, err := r.Type(t.Context(), "plain\n", 10)
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "got:plain")
 	require.NotContains(t, res.Output, "200~", "paste markers must not reach a program that did not ask for them")

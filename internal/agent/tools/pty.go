@@ -233,6 +233,7 @@ type ptyTerminal interface {
 	IdleFor() time.Duration
 	SampleJob() term.JobActivity
 	SecretRead() term.SecretReadState
+	ForegroundIsShell() bool
 	ResetWaitSample()
 	RescanFromStart()
 	Close()
@@ -570,17 +571,22 @@ func (r *ptyRunner) pushFront(cmd string) {
 
 // takesInputNow reports whether the session's foreground is in a state
 // that reads what is typed at this moment: a full-screen program, a job
-// blocked reading the terminal where the kernel can say so (Linux), or -
-// everywhere the termios is observable - a foreground that turned echo
-// off, the mark of a line editor, REPL or hidden reader owning the
-// input. A command that is merely running - a build, a sleep - reads
-// nothing.
+// blocked reading the terminal where the kernel can say so (Linux), the
+// shell's own process group blocking in a builtin read (a plain read
+// keeps the tty echoing, so only the process table tells it from a
+// silent command), or - everywhere the termios is observable - a
+// foreground that turned echo off, the mark of a line editor, REPL or
+// hidden reader owning the input. A command that is merely running - a
+// build, a sleep - reads nothing.
 func takesInputNow(s ptyTerminal) bool {
 	if s.AltScreen() {
 		return true
 	}
 	if act := s.SampleJob(); act.Observed {
 		return jobWaitingForInput(act)
+	}
+	if s.ForegroundIsShell() {
+		return true
 	}
 	switch s.SecretRead() {
 	case term.SecretReadYes, term.SecretReadRaw:

@@ -216,10 +216,7 @@ func TestPtyRunner_RunReturnsWhenInputNeeded(t *testing.T) {
 		require.True(t, res.Running)
 		require.Nil(t, res.ExitCode)
 
-		// A plain read keeps echo on, so outside Linux a bare line
-		// queues rather than reaching the reader; the explicit <enter>
-		// is the documented way to send input to a waiting program.
-		done, err := r.Type(t.Context(), "hello<enter>", 10)
+		done, err := r.Type(t.Context(), "hello\n", 10)
 		require.NoError(t, err)
 		require.Contains(t, done.Output, "got:hello")
 		return
@@ -274,18 +271,11 @@ func TestPtyRunner_InputAnswersPrompt(t *testing.T) {
 	r := newTestRunner(t)
 
 	// A program reading stdin hangs a pipe-based runner; in the
-	// terminal it just waits until Input feeds it. Outside Linux a
-	// plain read keeps echo on, so the answer goes with an explicit
-	// <enter> (the documented way to feed a waiting program) instead of
-	// queueing behind it.
+	// terminal it just waits until Input feeds it.
 	_, err := r.Type(t.Context(), "read answer; echo \"got:$answer\"", 1)
 	require.NoError(t, err) // returns as still running
 
-	answer := "hello\n"
-	if runtime.GOOS != "linux" {
-		answer = "hello<enter>"
-	}
-	res, err := r.Type(t.Context(), answer, 10)
+	res, err := r.Type(t.Context(), "hello\n", 10)
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "got:hello")
 
@@ -437,6 +427,8 @@ func (b *blindSleeperTerm) SampleJob() term.JobActivity {
 }
 
 func (b *blindSleeperTerm) SecretRead() term.SecretReadState { return term.SecretReadNo }
+
+func (b *blindSleeperTerm) ForegroundIsShell() bool { return false }
 
 // A generic Password: prompt - su, docker login and friends - opens the
 // masked dialog even when nothing in the output says "password" in a
@@ -602,6 +594,8 @@ func (s *stuckReaderTerm) SecretRead() term.SecretReadState {
 	}
 	return term.SecretReadYes
 }
+
+func (s *stuckReaderTerm) ForegroundIsShell() bool { return false }
 
 func (s *stuckReaderTerm) ResetWaitSample() {}
 func (s *stuckReaderTerm) RescanFromStart() {}
