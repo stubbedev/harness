@@ -862,15 +862,12 @@ func (r *ptyRunner) driveProgram(ctx context.Context, s ptyTerminal, text string
 
 // typeWhileBusy types at a command another call is waiting on - the
 // answer to its question - and reports the screen as it stands. That
-// call owns the output stream, so nothing is drained here. A command
-// line aimed at a foreground that reads no input is queued instead of
-// typed: it would sit in the tty and run unwatched later.
+// call owns the output stream, so nothing is drained here. This path is
+// always a keystroke or an answer to whatever is running, so it types
+// unconditionally: queueing here would strand the very program the
+// model is talking to.
 func (r *ptyRunner) typeWhileBusy(ctx context.Context, s ptyTerminal, text string) (PTYResult, error) {
 	segs := parseInput(text)
-	if !hasKeys(segs) && !takesInputNow(s) {
-		r.enqueue(text)
-		return PTYResult{Queued: true, Running: s.Alive()}, nil
-	}
 	if !hasKeys(segs) {
 		r.setState(func() { r.lastEcho = strings.Split(strings.TrimSuffix(text, "\n"), "\n") })
 	}
