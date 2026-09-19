@@ -151,6 +151,44 @@ func TestPtyRunner_StillRunning(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// A command line typed while a silent command holds the session is
+// queued, not typed into the running program's tty - where it would sit
+// until the command exited and then run unwatched. The next poll that
+// finds the shell at its prompt delivers it.
+func TestPtyRunner_CommandBehindSilentCommandQueues(t *testing.T) {
+	r := newTestRunner(t)
+
+	started, err := r.Type(t.Context(), "sleep 3", 1)
+	require.NoError(t, err)
+	require.True(t, started.Running)
+
+	queued, err := r.Type(t.Context(), "echo queued-ran", 5)
+	require.NoError(t, err)
+	require.True(t, queued.Queued, "a command line behind a silent command queues instead of typing in")
+
+	// Poll until the queue is delivered: an early poll sees the sleep
+	// out, one that finds the shell idle runs the queued command.
+	delivered := false
+	for range 50 {
+		res, err := r.Poll(t.Context())
+		require.NoError(t, err)
+		if strings.Contains(res.Output, "queued-ran") {
+			delivered = true
+			break
+		}
+		if !res.Running && !res.Queued {
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	require.True(t, delivered, "the queued command was never delivered")
+
+	// And the session is clean: the delivered command really ran at the
+	// shell, with its exit code recovered.
+	res, err := r.Type(t.Context(), "echo after", 10)
+	require.NoError(t, err)
+	require.Contains(t, res.Output, "after")
+}
+
 // A command that stops to ask something is detected from the process
 // state, not waited out to the budget: the call returns as waiting for
 // input within a couple of seconds even with a minute of budget left.

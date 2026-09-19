@@ -48,11 +48,19 @@ func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 	require.NotContains(t, resp.Content, "moved to background")
 
 	// A follow-up call in the same session observes later commands
-	// finishing normally.
+	// finishing normally. If it arrives while the first command still
+	// holds the session, it queues instead, and polls deliver it.
 	resp = runShellTool(t, tool, ctx, ShellParams{
 		Command: "echo after",
 	})
 	require.False(t, resp.IsError)
+	for range 20 {
+		if strings.Contains(resp.Content, "after") {
+			break
+		}
+		resp = runShellTool(t, tool, ctx, ShellParams{})
+		require.False(t, resp.IsError)
+	}
 	require.Contains(t, resp.Content, "after")
 }
 

@@ -206,6 +206,11 @@ type PTYResult struct {
 	// and needs input or keys before anything else happens. There is no
 	// exit code yet.
 	Waiting bool
+	// Queued reports that the text was not typed: the session's
+	// foreground command does not read input, so the line joined a
+	// queue and the shell runs it, in the order typed, the next time it
+	// is back at its prompt.
+	Queued bool
 }
 
 // ptyTerminal is the slice of term.Session the runner uses; it exists
@@ -287,6 +292,11 @@ type ptyRunner struct {
 	// inFlight is set while a call is waiting on the session and owns
 	// its output; a call typing meanwhile answers, it does not report.
 	inFlight bool
+	// pending holds command lines typed while a command that reads no
+	// input was running. The tty would hold them until that command
+	// exits and then run them unwatched; instead they wait here and the
+	// next call at an idle shell delivers them, in order.
+	pending []string
 	// restarted records that the shell had exited and a fresh one was
 	// opened to serve the current call, so the caller can be told that
 	// the state it built up (cd, exports, venv) is gone.
@@ -528,6 +538,48 @@ func (r *ptyRunner) commandInFlight() bool {
 	return r.inFlight
 }
 
+// enqueue appends a command line to the queue of commands waiting for
+// the shell to come back to its prompt.
+func (r *ptyRunner) enqueue(cmd string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pending = append(r.pending, cmd)
+}
+
+// dequeue pops the oldest queued command, if any. Callers deliver it
+// only while holding the command lock, so queued lines and live typing
+// stay ordered.
+func (r *ptyRunner) dequeue() (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.pending) == 0 {
+		return "", false
+	}
+	cmd := r.pending[0]
+	r.pending = r.pending[1:]
+	return cmd, true
+}
+
+// pushFront returns a command to the head of the queue: a delivery that
+// found the shell busy again must not reorder the lines behind it.
+func (r *ptyRunner) pushFront(cmd string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pending = append([]string{cmd}, r.pending...)
+}
+
+// takesInputNow reports whether the session's foreground is in a state
+// that reads what is typed at this moment: a full-screen program, or a
+// job blocked reading the terminal (or one whose wait point the kernel
+// hides, where a harmless keystroke beats burning the budget). A command
+// that is merely running - a build, a sleep - reads nothing.
+func takesInputNow(s ptyTerminal) bool {
+	if s.AltScreen() {
+		return true
+	}
+	return jobWaitingForInput(s.SampleJob())
+}
+
 // ensureSessionLocked opens (or reopens after a shell exit) the
 // terminal session. Callers must hold r.mu.
 func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error) {
@@ -701,7 +753,22 @@ func (r *ptyRunner) Type(ctx context.Context, text string, waitSeconds int) (res
 		r.running = (res.Running || res.AltScreen) && s.Alive()
 	})
 	if r.shellIdle(s) {
+		// Commands queued while a busy command held the session run
+		// first, in the order they were typed; this call's own text
+		// joins the tail of the queue.
+		if cmd, ok := r.dequeue(); ok {
+			r.enqueue(text)
+			text, segs = cmd, parseInput(cmd)
+		}
 		return r.runCommand(ctx, s, text, segs, waitSeconds)
+	}
+	if !hasKeys(segs) && !takesInputNow(s) {
+		// A command line aimed at a shell that is not reading: the tty
+		// would hold it until the running command exits and then run it
+		// unwatched, its output lost between calls. Queue it instead;
+		// the next call at an idle shell delivers it.
+		r.enqueue(text)
+		return PTYResult{Queued: true, Running: s.Alive()}, nil
 	}
 	return r.driveProgram(ctx, s, text, segs, waitSeconds)
 }
@@ -775,9 +842,15 @@ func (r *ptyRunner) driveProgram(ctx context.Context, s ptyTerminal, text string
 
 // typeWhileBusy types at a command another call is waiting on - the
 // answer to its question - and reports the screen as it stands. That
-// call owns the output stream, so nothing is drained here.
+// call owns the output stream, so nothing is drained here. A command
+// line aimed at a foreground that reads no input is queued instead of
+// typed: it would sit in the tty and run unwatched later.
 func (r *ptyRunner) typeWhileBusy(ctx context.Context, s ptyTerminal, text string) (PTYResult, error) {
 	segs := parseInput(text)
+	if !hasKeys(segs) && !takesInputNow(s) {
+		r.enqueue(text)
+		return PTYResult{Queued: true, Running: s.Alive()}, nil
+	}
 	if !hasKeys(segs) {
 		r.setState(func() { r.lastEcho = strings.Split(strings.TrimSuffix(text, "\n"), "\n") })
 	}
@@ -1504,6 +1577,19 @@ func (r *ptyRunner) Poll(ctx context.Context) (PTYResult, error) {
 		r.setState(func() { r.running = (res.Running || res.AltScreen) && s.Alive() })
 		return res, err
 	}
+	if r.commandInFlight() {
+		return r.collect(ctx, s), nil
+	}
+	// An idle shell holding queued commands: a poll is as good a moment
+	// as any to run the oldest one. takePending holds the command lock
+	// only when it has a command to run, and the lock is released after
+	// runCommand returns.
+	if cmd, locked := r.takePending(s); locked {
+		res, err := r.runCommand(ctx, s, cmd, parseInput(cmd), DefaultPollWaitSeconds)
+		r.setState(func() { r.running = (res.Running || res.AltScreen) && s.Alive() })
+		r.cmdMu.Unlock()
+		return res, err
+	}
 	return r.collect(ctx, s), nil
 }
 
@@ -1511,6 +1597,28 @@ func (r *ptyRunner) Poll(ctx context.Context) (PTYResult, error) {
 // up: long enough for a build to land, short enough that a command that
 // never finishes still comes back to the caller.
 const DefaultPollWaitSeconds = 60
+
+// takePending claims the command lock and pops the oldest command
+// queued behind a running one, but only when the shell is back at its
+// prompt; otherwise the command goes back to the head of the queue and
+// the lock is released. locked is false when there is nothing to
+// deliver; when it is true the caller must unlock cmdMu after the run.
+func (r *ptyRunner) takePending(s ptyTerminal) (string, bool) {
+	r.cmdMu.Lock()
+	cmd, ok := r.dequeue()
+	if !ok {
+		r.cmdMu.Unlock()
+		return "", false
+	}
+	if !r.shellIdle(s) {
+		// A Type raced in ahead of the poll: the queued line runs after
+		// that one, not before it.
+		r.pushFront(cmd)
+		r.cmdMu.Unlock()
+		return "", false
+	}
+	return cmd, true
+}
 
 // beginRunningWait claims the wait for a program left running. The
 // cheap state check comes first: a poll arriving while a call is in

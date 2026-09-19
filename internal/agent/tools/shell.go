@@ -196,6 +196,8 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			switch {
 			case result.Interrupted:
 				header = "[interrupted]"
+			case result.Queued:
+				header = "[queued; the shell runs it when the current command exits]"
 			case result.WhileBusy:
 				header = "[another command holds the session; its screen follows]"
 			case result.Waiting:
