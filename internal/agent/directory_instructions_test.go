@@ -17,6 +17,16 @@ import (
 	"github.com/stubbedev/harness/internal/agent/tools"
 )
 
+// directoryTestRoot returns a symlink-resolved temp directory. The tracker
+// canonicalizes its root, so a TMPDIR reached through a symlink (macOS /var)
+// would otherwise make every path assertion diverge from the tracker's.
+func directoryTestRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return root
+}
+
 func directoryTestFile(t *testing.T, root, name, body string) string {
 	t.Helper()
 	path := filepath.Join(root, name)
@@ -48,7 +58,7 @@ func directoryTestRun(t *testing.T, ctx context.Context, tool fantasy.AgentTool,
 
 func TestDirectoryInstructionsNestedPrecedenceAndMultiView(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := directoryTestRoot(t)
 	directoryTestFile(t, root, "AGENTS.md", "root rules")
 	directoryTestFile(t, root, "a/AGENTS.md", "parent rules")
 	directoryTestFile(t, root, "a/deep/AGENTS.md", "deep rules")
@@ -75,7 +85,7 @@ func TestDirectoryInstructionsMutationRequiresNextModelTurn(t *testing.T) {
 	for _, name := range []string{"write", "edit"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			root := t.TempDir()
+			root := directoryTestRoot(t)
 			directoryTestFile(t, root, "nested/AGENTS.md", "review before mutation")
 			tracker := NewDirectoryInstructions(root, nil)
 			var calls atomic.Int32
@@ -98,7 +108,7 @@ func TestDirectoryInstructionsMutationRequiresNextModelTurn(t *testing.T) {
 
 func TestDirectoryInstructionsReadCannotUnlockMutationSameTurn(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := directoryTestRoot(t)
 	directoryTestFile(t, root, "nested/AGENTS.md", "rules")
 	tracker := NewDirectoryInstructions(root, nil)
 	var calls atomic.Int32
@@ -114,7 +124,7 @@ func TestDirectoryInstructionsReadCannotUnlockMutationSameTurn(t *testing.T) {
 
 func TestDirectoryInstructionsReloadAndExclusions(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := directoryTestRoot(t)
 	directoryTestFile(t, root, "AGENTS.md", "already in prompt")
 	path := directoryTestFile(t, root, "nested/AGENTS.md", "first version")
 	tracker := NewDirectoryInstructions(root, nil)
@@ -143,7 +153,7 @@ func TestDirectoryInstructionsReloadAndExclusions(t *testing.T) {
 
 func TestDirectoryInstructionsCompactionAndResultDedup(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := directoryTestRoot(t)
 	directoryTestFile(t, root, "nested/AGENTS.md", "persistent rules")
 	tracker := NewDirectoryInstructions(root, nil)
 	var calls atomic.Int32
@@ -170,7 +180,7 @@ func TestDirectoryInstructionsCompactionAndResultDedup(t *testing.T) {
 
 func TestDirectoryInstructionsConcurrentSessionIsolation(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := directoryTestRoot(t)
 	directoryTestFile(t, root, "nested/AGENTS.md", "rules")
 	tracker := NewDirectoryInstructions(root, nil)
 	var calls atomic.Int32
@@ -224,7 +234,7 @@ func TestDirectoryInstructionsWorkspaceBoundaries(t *testing.T) {
 
 func TestDirectoryInstructionsSymlinkInstructionOutside(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := directoryTestRoot(t)
 	outside := directoryTestFile(t, t.TempDir(), "secret.md", "never expose")
 	require.NoError(t, os.Symlink(outside, filepath.Join(root, "AGENTS.md")))
 	tracker := NewDirectoryInstructions(root, nil)
@@ -239,7 +249,7 @@ func TestDirectoryInstructionsSymlinkInstructionOutside(t *testing.T) {
 
 func TestDirectoryInstructionsDefaultsAndConfiguredPaths(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := directoryTestRoot(t)
 	for _, name := range []string{"HARNESS.md", "CLAUDE.local.md", "GEMINI.md", "custom.md"} {
 		directoryTestFile(t, root, filepath.Join("nested", name), "rules "+name)
 	}
@@ -281,7 +291,7 @@ func TestDirectoryInstructionsBoundedOutput(t *testing.T) {
 	for _, total := range []bool{false, true} {
 		t.Run(map[bool]string{false: "per-file", true: "total"}[total], func(t *testing.T) {
 			t.Parallel()
-			root := t.TempDir()
+			root := directoryTestRoot(t)
 			if total {
 				for _, name := range []string{"AGENTS.md", "CLAUDE.md", "HARNESS.md", "GEMINI.md"} {
 					directoryTestFile(t, root, name, strings.Repeat("x", directoryInstructionFileLimit))
@@ -304,7 +314,7 @@ func TestDirectoryInstructionsBoundedOutput(t *testing.T) {
 
 func TestDirectoryInstructionsWorktreeRoot(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := directoryTestRoot(t)
 	worktree := t.TempDir()
 	directoryTestFile(t, root, "nested/AGENTS.md", "main workspace")
 	directoryTestFile(t, worktree, "nested/AGENTS.md", "worktree workspace")
@@ -356,7 +366,7 @@ func TestDirectoryInstructionsRootSymlinkAndConfiguredScope(t *testing.T) {
 
 func TestDirectoryInstructionsLSPAndShellScopes(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := directoryTestRoot(t)
 	directoryTestFile(t, root, "nested/AGENTS.md", "nested rules")
 	tracker := NewDirectoryInstructions(root, nil)
 	var calls atomic.Int32

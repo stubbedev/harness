@@ -92,6 +92,13 @@ func (r *Runner) selectRules(paths []string) ([]Rule, []string, error) {
 			return nil, nil, fmt.Errorf("empty changed path")
 		}
 		if filepath.IsAbs(p) {
+			// The workspace root is canonicalized at construction; an
+			// absolute ledger path may arrive through a symlinked prefix
+			// (macOS TMPDIR is /var, the canonical prefix /private/var),
+			// which would otherwise relativize as an escape.
+			if resolved, err := filepath.EvalSymlinks(p); err == nil {
+				p = resolved
+			}
 			var err error
 			p, err = filepath.Rel(r.root, p)
 			if err != nil {

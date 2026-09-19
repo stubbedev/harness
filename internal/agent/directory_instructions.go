@@ -88,10 +88,18 @@ func (d *DirectoryInstructions) ExcludePromptPaths(paths []string) {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	root, err := os.OpenRoot(d.root)
+	if err != nil {
+		return
+	}
+	defer root.Close()
 	for _, path := range paths {
-		path = filepathext.SmartJoin(d.root, path)
-		if instruction, err := d.read(path); err == nil && instruction.body != "" {
-			d.excluded[path] = instruction.hash
+		joined := filepathext.SmartJoin(d.root, path)
+		if resolved, ok := directoryInstructionName(root, d.root, d.root, filepath.ToSlash(path)); ok {
+			joined = resolved
+		}
+		if instruction, err := d.read(joined); err == nil && instruction.body != "" {
+			d.excluded[joined] = instruction.hash
 		}
 	}
 }
@@ -208,6 +216,11 @@ func (d *DirectoryInstructions) activate(ctx context.Context, paths []string) (s
 		return "", false, fmt.Errorf("cannot resolve workspace root: %w", d.initErr)
 	}
 	candidates := make(map[string]string)
+	instructionRoot, err := os.OpenRoot(d.root)
+	if err != nil {
+		return "", false, fmt.Errorf("open instruction root: %w", err)
+	}
+	defer instructionRoot.Close()
 	for _, path := range paths {
 		dir, err := d.scope(path)
 		if err != nil {
@@ -215,7 +228,9 @@ func (d *DirectoryInstructions) activate(ctx context.Context, paths []string) (s
 		}
 		for dir != "" {
 			for _, name := range d.names {
-				candidates[filepath.Join(dir, name)] = dir
+				if resolved, ok := directoryInstructionName(instructionRoot, d.root, dir, name); ok {
+					candidates[resolved] = dir
+				}
 			}
 			if dir == d.root {
 				break
@@ -306,6 +321,51 @@ func directoryInstructionResolve(path string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(resolved, filepath.Base(path)), nil
+}
+
+// directoryInstructionName resolves a configured instruction name against
+// the directory listing of dir, component by component, requiring exact
+// name matches. On case-insensitive filesystems a Stat of every configured
+// casing variant would find the same file several times and load its body
+// once per variant; matching listing entries keeps discovery exact and the
+// resulting path carries the on-disk casing.
+func directoryInstructionName(root *os.Root, workspace, dir, name string) (string, bool) {
+	current := dir
+	for part := range strings.SplitSeq(filepath.ToSlash(name), "/") {
+		rel, inside := filepathext.RelWithin(workspace, current)
+		if !inside {
+			return "", false
+		}
+		entries, ok := directoryInstructionEntries(root, rel)
+		if !ok {
+			return "", false
+		}
+		found := ""
+		for _, entry := range entries {
+			if entry.Name() == part {
+				found = entry.Name()
+				break
+			}
+		}
+		if found == "" {
+			return "", false
+		}
+		current = filepath.Join(current, found)
+	}
+	return current, true
+}
+
+func directoryInstructionEntries(root *os.Root, rel string) ([]os.DirEntry, bool) {
+	file, err := root.Open(rel)
+	if err != nil {
+		return nil, false
+	}
+	defer file.Close()
+	entries, err := file.ReadDir(-1)
+	if err != nil {
+		return nil, false
+	}
+	return entries, true
 }
 
 func (d *DirectoryInstructions) read(path string, scopes ...string) (directoryInstruction, error) {

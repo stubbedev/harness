@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -41,11 +42,24 @@ func ScratchDir(sessionID, kind string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to inspect scratch directory: %w", err)
 		}
-		if !info.IsDir() || info.Mode().Perm()&0o022 != 0 || (path != root && info.Mode().Perm()&0o077 != 0) {
-			return "", fmt.Errorf("scratch directory must be a private directory, not a symlink: %s", path)
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("scratch directory must be a directory, not a symlink: %s", path)
+		}
+		// Unix permission bits do not exist on Windows: mode bits there
+		// reflect only the read-only attribute, so the privacy check is a
+		// no-op that would reject every directory.
+		if runtime.GOOS != "windows" && !privateScratchMode(info.Mode().Perm(), path == root) {
+			return "", fmt.Errorf("scratch directory must be private to the owner: %s", path)
 		}
 	}
 	return dir, nil
+}
+
+func privateScratchMode(perm os.FileMode, isRoot bool) bool {
+	if perm&0o022 != 0 {
+		return false
+	}
+	return isRoot || perm&0o077 == 0
 }
 
 // ScratchFilePath places name inside a session's scratch directory. Only

@@ -113,6 +113,19 @@ func TestRun(t *testing.T) {
 	}
 }
 
+func TestSymlinkedChangedPathSelectsRules(t *testing.T) {
+	t.Parallel()
+	root := repository(t)
+	aliasParent := t.TempDir()
+	alias := filepath.Join(aliasParent, "alias")
+	require.NoError(t, os.Symlink(root, alias))
+	r, err := New(root, testConfig(t, "pass"))
+	require.NoError(t, err)
+	result := r.Run(t.Context(), []string{filepath.Join(alias, "src", "main.go")})
+	require.Equal(t, Passed, result.Status)
+	require.Equal(t, []string{"src/main.go"}, result.ChangedPaths)
+}
+
 func TestRevisionInvalidation(t *testing.T) {
 	t.Parallel()
 	for _, change := range []string{"dirty", "untracked", "input", "deleted", "mode", "ignored"} {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -37,10 +38,14 @@ func TestCapToolResponse(t *testing.T) {
 			require.Equal(t, content, string(data))
 			info, err := os.Stat(path)
 			require.NoError(t, err)
-			require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			if runtime.GOOS != "windows" {
+				require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			}
 			info, err = os.Stat(filepath.Dir(path))
 			require.NoError(t, err)
-			require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+			if runtime.GOOS != "windows" {
+				require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+			}
 			require.Contains(t, got.Content, "view with offset/limit or shell")
 			got.Content = response.Content
 			require.Equal(t, response, got)
@@ -119,6 +124,9 @@ func TestCapToolResponseFailure(t *testing.T) {
 			case "symlink":
 				require.NoError(t, os.Symlink(t.TempDir(), filepath.Join(root, session)))
 			case "public directory":
+				if runtime.GOOS == "windows" {
+					t.Skip("chmod does not change permissions on Windows")
+				}
 				require.NoError(t, os.Chmod(root, 0o777))
 			}
 			t.Setenv("HARNESS_SCRATCH_DIR", root)
