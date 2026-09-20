@@ -54,14 +54,20 @@ type rewindModeChoice struct {
 }
 
 func rewindModeChoices(hasFiles bool) []rewindModeChoice {
-	choices := []rewindModeChoice{
+	// Without a snapshot there is nothing to restore on disk, so files
+	// modes are not offered: the rewind dialog reports HasFiles from the
+	// checkpoint rows, and the service degrades conversation-and-files
+	// to conversation-only if the row vanished in between.
+	if !hasFiles {
+		return []rewindModeChoice{
+			{mode: checkpoints.ModeConversation, label: "Conversation only"},
+		}
+	}
+	return []rewindModeChoice{
 		{mode: checkpoints.ModeBoth, label: "Conversation and files"},
 		{mode: checkpoints.ModeConversation, label: "Conversation only"},
+		{mode: checkpoints.ModeFiles, label: "Files only"},
 	}
-	if hasFiles {
-		choices = append(choices, rewindModeChoice{mode: checkpoints.ModeFiles, label: "Files only"})
-	}
-	return choices
 }
 
 // Rewind is a picker over a session's user turns; selecting one offers

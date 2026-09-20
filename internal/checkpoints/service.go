@@ -13,6 +13,8 @@ package checkpoints
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -165,7 +167,10 @@ func (s *Service) Get(ctx context.Context, messageID string) (Checkpoint, error)
 // Rewind restores the session to the state it was in just before the
 // given user message was sent. Conversation mode deletes the message
 // and everything after it; files mode restores the snapshot committed
-// at submit time. Rewinding while the session is busy is the caller's
+// at submit time. Conversation-and-files mode degrades to
+// conversation-only when no snapshot backs the turn (checkpoints were
+// unavailable or the snapshot failed), since the transcript rewind is
+// still possible. Rewinding while the session is busy is the caller's
 // responsibility to prevent.
 func (s *Service) Rewind(ctx context.Context, sessionID, messageID string, mode Mode) error {
 	if s == nil {
@@ -173,11 +178,15 @@ func (s *Service) Rewind(ctx context.Context, sessionID, messageID string, mode 
 	}
 	if mode != ModeConversation {
 		cp, err := s.Get(ctx, messageID)
-		if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows) && mode == ModeBoth:
+			slog.Info("No snapshot backs this turn; rewinding conversation only", "messageID", messageID)
+		case err != nil:
 			return fmt.Errorf("no snapshot for this turn, try conversation-only rewind: %w", err)
-		}
-		if err := s.restore(ctx, sessionID, cp.CommitSHA); err != nil {
-			return fmt.Errorf("restoring files: %w", err)
+		default:
+			if err := s.restore(ctx, sessionID, cp.CommitSHA); err != nil {
+				return fmt.Errorf("restoring files: %w", err)
+			}
 		}
 	}
 	if mode == ModeFiles {
