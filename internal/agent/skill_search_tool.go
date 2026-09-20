@@ -141,7 +141,8 @@ func (s *skillSearchTool) writeSkill(b *strings.Builder, available []*skills.Ski
 	if err != nil {
 		return fmt.Errorf("read skill %q: %w", name, err)
 	}
-	fmt.Fprintf(b, "<loaded_skill name=%q path=%q>\n%s\n</loaded_skill>\n", sk.Name, sk.SkillFilePath, strings.TrimRight(string(content), "\n"))
+	b.WriteString(skills.FormatLoadedSkill(sk.Name, sk.SkillFilePath, string(content)))
+	b.WriteByte('\n')
 	s.coord.skillTracker.MarkLoaded(sk.Name)
 	return nil
 }

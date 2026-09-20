@@ -331,6 +331,22 @@ func (s *Skill) FormatInvocation() string {
 	return sb.String()
 }
 
+// LoadedSkillPrecedence rides with every skill body the harness injects,
+// keeping an explicit user command above the skill's instructions even in
+// agent contexts that never see the coder system prompt.
+const LoadedSkillPrecedence = "An explicit user command overrides this skill's instructions."
+
+// FormatLoadedSkill renders a loaded skill's SKILL.md the way the harness
+// injects it into the conversation. Auto-activation and skill_search loads
+// both go through here, so every injected skill carries the precedence line
+// by construction.
+func FormatLoadedSkill(name, path, content string) string {
+	return fmt.Sprintf(
+		"<loaded_skill name=%q path=%q>\n%s\n%s\n</loaded_skill>",
+		name, path, LoadedSkillPrecedence, strings.TrimRight(content, "\n"),
+	)
+}
+
 // DeduplicateStates removes duplicate skill states by name. When duplicates exist,
 // the last occurrence wins (consistent with Deduplicate for skills).
 func DeduplicateStates(all []*SkillState) []*SkillState {

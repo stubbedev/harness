@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -78,7 +77,7 @@ func (a *SkillActivation) Prepare(ctx context.Context, messages []fantasy.Messag
 			slog.Warn("Failed to activate skill", "skill", skill.Name, "error", err)
 			continue
 		}
-		body := fmt.Sprintf("<loaded_skill name=%q path=%q>\n%s\n</loaded_skill>", skill.Name, skill.SkillFilePath, strings.TrimRight(string(content), "\n"))
+		body := skills.FormatLoadedSkill(skill.Name, skill.SkillFilePath, string(content))
 		if a.bytes+len(body) > skillActivationByteBudget {
 			continue
 		}

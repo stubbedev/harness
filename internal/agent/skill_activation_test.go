@@ -53,6 +53,7 @@ func TestSkillActivationPrepare(t *testing.T) {
 	prepared := activation.Prepare(t.Context(), messages)
 	require.Len(t, prepared, 3)
 	require.Contains(t, activationTestText(prepared), "Follow go-procedure instructions.")
+	require.Contains(t, activationTestText(prepared), skills.LoadedSkillPrecedence)
 	require.True(t, tracker.IsLoaded(skill.Name))
 	require.Len(t, activation.Prepare(t.Context(), prepared), 3)
 	require.Len(t, activation.Prepare(t.Context(), messages), 3)

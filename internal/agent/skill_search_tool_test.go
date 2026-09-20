@@ -73,6 +73,7 @@ func TestSkillSearchLoadReturnsWholeSkill(t *testing.T) {
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "<loaded_skill")
 	require.Contains(t, resp.Content, "Step one.", "the body is what a load is for")
+	require.Contains(t, resp.Content, skills.LoadedSkillPrecedence)
 	require.True(t, tool.coord.skillTracker.IsLoaded("jq"), "a loaded skill counts as loaded")
 }
 

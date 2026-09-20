@@ -10,6 +10,21 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+func TestFormatLoadedSkill(t *testing.T) {
+	t.Parallel()
+
+	got := FormatLoadedSkill("jq", "/skills/jq/SKILL.md", "# jq\n\nStep one.\n")
+
+	require.Contains(t, got, `<loaded_skill name="jq" path="/skills/jq/SKILL.md">`)
+	require.Contains(t, got, "Step one.")
+	require.Contains(t, got, LoadedSkillPrecedence)
+	require.Less(
+		t, strings.Index(got, LoadedSkillPrecedence), strings.Index(got, "Step one."),
+		"the precedence line comes before the skill body",
+	)
+	require.Contains(t, got, "</loaded_skill>")
+}
+
 func TestParse(t *testing.T) {
 	t.Parallel()
 
