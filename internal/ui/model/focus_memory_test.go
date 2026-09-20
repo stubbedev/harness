@@ -19,15 +19,39 @@ func TestFocusRestoringSelection_ReturnsToKeptItem(t *testing.T) {
 	require.False(t, u.chat.HasManualSelection())
 	require.Equal(t, u.chat.Len()-1, u.chat.Selected())
 
-	// Move to an older item, leave the chat for the editor, and come
-	// back: focus returns to that same item instead of the newest.
+	// Move to an older item, keep it on screen, leave the chat for the
+	// editor, and come back: focus returns to that same item instead of
+	// the newest.
 	u.chat.SetSelected(10)
+	_ = u.chat.ScrollItemIntoView(10)
 	require.True(t, u.chat.HasManualSelection())
 	u.focus = uiFocusEditor
 	u.textarea.Focus()
 	u.chat.Blur()
 	_ = u.chat.FocusRestoringSelection()
-	require.Equal(t, 10, u.chat.Selected(), "focus must return to the last-focused transcript item")
+	require.Equal(t, 10, u.chat.Selected(), "focus must return to the last-focused transcript item while it is in view")
+}
+
+func TestFocusRestoringSelection_ScrolledOffKeptItemFallsToNewest(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+
+	// The user selected an older item, then left the transcript; while
+	// away the conversation scrolled on, moving that item off screen.
+	u.chat.SetSelected(10)
+	_ = u.chat.ScrollItemIntoView(10)
+	require.True(t, u.chat.HasManualSelection())
+	u.focus = uiFocusEditor
+	u.textarea.Focus()
+	u.chat.Blur()
+	_ = u.chat.ScrollToBottom()
+	require.False(t, u.chat.SelectedItemInView(), "precondition: the kept item is off screen")
+
+	before := u.chat.Offset()
+	_ = u.chat.FocusRestoringSelection()
+	require.Equal(t, u.chat.Len()-1, u.chat.Selected(), "focus falls to the newest item, not the off-screen one")
+	require.False(t, u.chat.HasManualSelection(), "landing on the newest item releases the pin")
+	require.Equal(t, before, u.chat.Offset(), "returning focus must not yank the viewport back")
 }
 
 func TestFocusTasks_ReturnsToLastFocusedTaskAfterReaps(t *testing.T) {

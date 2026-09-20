@@ -744,11 +744,12 @@ func (m *Chat) Blur() {
 
 // FocusRestoringSelection focuses the transcript and returns a command
 // scrolling the selection into view. When the user last moved the
-// selection off the newest item, focus returns to that same item;
-// otherwise it lands on the newest one.
+// selection off the newest item and that item is still in view, focus
+// returns to it; otherwise it lands on the newest one, leaving the
+// viewport wherever the conversation has since scrolled to.
 func (m *Chat) FocusRestoringSelection() tea.Cmd {
 	m.Focus()
-	if m.HasManualSelection() {
+	if m.HasManualSelection() && m.SelectedItemInView() {
 		return m.ScrollToSelected()
 	}
 	m.SetSelected(m.Len() - 1)
