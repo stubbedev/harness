@@ -863,6 +863,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case promptQueueMsg:
 		cmds = append(cmds, m.applyPromptQueue(msg)...)
 	case lspStatesMsg:
+		if servers, ok := m.dialog.Dialog(dialog.LSPServersID).(*dialog.LSPServers); ok {
+			servers.SetStates(msg.states, msg.diagnostics)
+		}
 		if cmd := m.applyLSPStates(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -992,6 +995,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mcpStateChangedMsg:
 		m.mcpStates = msg.states
+		if servers, ok := m.dialog.Dialog(dialog.MCPServersID).(*dialog.MCPServers); ok {
+			servers.SetStates(msg.states)
+		}
 		// Auto-open the MCP auth dialog if any servers need authentication.
 		if cmd := m.openMCPAuthDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2016,6 +2022,19 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.openDialog(msg.DialogID); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+
+	// Server manager messages. The dialogs stay open; state events
+	// refresh them as the operation takes effect.
+	case dialog.ActionMCPReconnect:
+		cmds = append(cmds, m.reconnectMCP(msg.Name))
+	case dialog.ActionMCPDisableForSession:
+		cmds = append(cmds, m.disableMCPForSession(msg.Name))
+	case dialog.ActionOpenMCPAuth:
+		cmds = append(cmds, m.openMCPAuthDialog())
+	case dialog.ActionLSPRestart:
+		cmds = append(cmds, m.restartLSP(msg.Name))
+	case dialog.ActionLSPSetSessionDisabled:
+		cmds = append(cmds, m.setLSPSessionDisabled(msg.Name, msg.Disabled))
 
 	// Command dialog messages.
 	case dialog.ActionSelectNotificationStyle:
@@ -4686,6 +4705,14 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.MCPServersID:
+		if cmd := m.openMCPServersDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.LSPServersID:
+		if cmd := m.openLSPServersDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	default:

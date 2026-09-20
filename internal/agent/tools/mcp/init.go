@@ -86,6 +86,13 @@ var (
 	renewMusMu sync.Mutex
 	renewMus   = map[string]*sync.Mutex{}
 
+	// sessionDisabled records servers disabled at runtime for the rest
+	// of the process. Reconciliation skips them so a later config write
+	// does not resurrect a server the user turned off; the mark is
+	// cleared by reconnecting, by the server leaving config, or by
+	// process exit.
+	sessionDisabled = csync.NewMap[string, bool]()
+
 	// gens hands out a per-server generation number. teardown bumps a
 	// server's generation; an init goroutine captures it at launch and only
 	// commits its session if the generation is still current. A config
@@ -201,6 +208,22 @@ type Counts struct {
 	Resources int
 }
 
+// String renders the non-zero capability counts, e.g. "2 tools · 3
+// prompts"; empty when the server has none.
+func (c Counts) String() string {
+	var parts []string
+	if c.Tools > 0 {
+		parts = append(parts, fmt.Sprintf("%d tools", c.Tools))
+	}
+	if c.Prompts > 0 {
+		parts = append(parts, fmt.Sprintf("%d prompts", c.Prompts))
+	}
+	if c.Resources > 0 {
+		parts = append(parts, fmt.Sprintf("%d resources", c.Resources))
+	}
+	return strings.Join(parts, " · ")
+}
+
 // ClientInfo holds information about an MCP client's state.
 type ClientInfo struct {
 	Name        string
@@ -223,6 +246,28 @@ type ClientInfo struct {
 	// progress rather than the last successful one, which would leave the
 	// server skipped as "starting" and never restarted for the new config.
 	PendingConfig *config.MCPConfig
+}
+
+// StatusText returns the human-readable status of the client: the one
+// line a server listing shows next to the server name.
+func (i ClientInfo) StatusText() string {
+	switch i.State {
+	case StateStarting:
+		return "starting…"
+	case StateConnected:
+		return "connected"
+	case StateError:
+		if i.Error != nil {
+			return "error: " + i.Error.Error()
+		}
+		return "error"
+	case StateNeedsAuth:
+		return "needs authentication"
+	case StateDisabled:
+		return "disabled"
+	default:
+		return i.State.String()
+	}
 }
 
 // SubscribeEvents returns a channel for MCP events.
@@ -637,6 +682,46 @@ func DisableSingle(cfg *config.ConfigStore, name string) error {
 	teardown(name)
 	updateState(name, StateDisabled, nil, nil, Counts{})
 	slog.Info("Disabled mcp client", "name", name)
+	return nil
+}
+
+// ReconnectSingle restarts a single MCP server by name: any running
+// session is torn down and a fresh connection attempt launches in the
+// background, publishing state events as it progresses. A
+// session-scoped disable is cleared first, which makes this also the
+// enable path for servers disabled at runtime. A server disabled in
+// configuration is refused; the config itself has to enable it.
+func ReconnectSingle(ctx context.Context, cfg *config.ConfigStore, name string) error {
+	m, err := mcpConfigFor(cfg, name)
+	if err != nil {
+		return err
+	}
+	if m.Disabled {
+		return fmt.Errorf("mcp '%s' is disabled in configuration", name)
+	}
+
+	sessionDisabled.Del(name)
+	teardown(name)
+	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
+	goInitClient(ctx, cfg, name, m, nil)
+	slog.Info("Reconnecting MCP server", "name", name)
+	return nil
+}
+
+// DisableSingleForSession disables a server for the rest of the
+// process without touching its configuration: the session is torn
+// down, the state becomes StateDisabled, and the name is marked so
+// config reconciliation leaves it alone until it is reconnected or
+// the process exits.
+func DisableSingleForSession(cfg *config.ConfigStore, name string) error {
+	if _, err := mcpConfigFor(cfg, name); err != nil {
+		return err
+	}
+
+	sessionDisabled.Set(name, true)
+	teardown(name)
+	updateState(name, StateDisabled, nil, nil, Counts{})
+	slog.Info("Disabled MCP server for this session", "name", name)
 	return nil
 }
 

@@ -553,10 +553,11 @@ func TestReconcile(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		servers map[string]server
-		current config.MCPs
-		want    map[string]reinitAction
+		name            string
+		servers         map[string]server
+		current         config.MCPs
+		sessionDisabled map[string]bool
+		want            map[string]reinitAction
 	}{
 		{
 			name:    "new server starts",
@@ -601,6 +602,15 @@ func TestReconcile(t *testing.T) {
 			servers: map[string]server{"a": {state: StateDisabled}},
 			current: config.MCPs{"a": base},
 			want:    map[string]reinitAction{"a": reinitStart},
+		},
+		{
+			// A server disabled at runtime stays down: a config write must not
+			// resurrect what the user turned off for this process.
+			name:            "session-disabled server is left alone",
+			servers:         map[string]server{"a": {state: StateDisabled}},
+			current:         config.MCPs{"a": base},
+			sessionDisabled: map[string]bool{"a": true},
+			want:            map[string]reinitAction{},
 		},
 		{
 			name:    "errored server restarts",
@@ -655,7 +665,7 @@ func TestReconcile(t *testing.T) {
 					PendingConfig: s.pending,
 				}
 			}
-			got := reconcile(tc.current, running)
+			got := reconcile(tc.current, running, tc.sessionDisabled)
 			require.Equal(t, tc.want, got)
 		})
 	}

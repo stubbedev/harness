@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
@@ -36,11 +37,16 @@ type Manager struct {
 	// recentFanout remembers which (file type, directory) pairs StartAsync
 	// has already fanned out for, keyed as ext + NUL + dir.
 	recentFanout *csync.Map[string, time.Time]
-	cfg          *config.ConfigStore
-	manager      *powernapconfig.Manager
-	callback     func(name string, client *Client)
-	now          func() time.Time
-	lookPath     func(string) (string, error)
+	// sessionDisabled records servers disabled at runtime for the rest
+	// of the process. startServer skips them so on-demand file access
+	// does not resurrect a server the user turned off; the mark is
+	// cleared by re-enabling or by process exit.
+	sessionDisabled *csync.Map[string, bool]
+	cfg             *config.ConfigStore
+	manager         *powernapconfig.Manager
+	callback        func(name string, client *Client)
+	now             func() time.Time
+	lookPath        func(string) (string, error)
 	// ledger tracks which diagnostics each session has already been shown.
 	ledger *Ledger
 	// settleMu guards settlePending, the done channels of the background
@@ -78,15 +84,16 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 	}
 
 	return &Manager{
-		clients:      csync.NewMap[string, *Client](),
-		unavailable:  csync.NewMap[string, time.Time](),
-		recentFanout: csync.NewMap[string, time.Time](),
-		cfg:          cfg,
-		manager:      manager,
-		callback:     func(string, *Client) {}, // default no-op callback
-		now:          time.Now,
-		lookPath:     exec.LookPath,
-		ledger:       NewLedger(),
+		clients:         csync.NewMap[string, *Client](),
+		unavailable:     csync.NewMap[string, time.Time](),
+		recentFanout:    csync.NewMap[string, time.Time](),
+		sessionDisabled: csync.NewMap[string, bool](),
+		cfg:             cfg,
+		manager:         manager,
+		callback:        func(string, *Client) {}, // default no-op callback
+		now:             time.Now,
+		lookPath:        exec.LookPath,
+		ledger:          NewLedger(),
 	}
 }
 
@@ -217,6 +224,9 @@ var skipAutoStartCommands = map[string]bool{
 }
 
 func (s *Manager) startServer(name, filepath string, server *powernapconfig.ServerConfig) {
+	if _, disabled := s.sessionDisabled.Get(name); disabled {
+		return
+	}
 	var (
 		isUserConfigured = s.isUserConfigured(name)
 		autoLSP          = s.cfg.Config().Options.AutoLSP
@@ -469,19 +479,60 @@ func (s *Manager) StopAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	for name, client := range s.clients.Seq2() {
 		wg.Go(func() {
-			defer func() { s.callback(name, client) }()
-			if err := client.Close(ctx); err != nil &&
-				!errors.Is(err, io.EOF) &&
-				!errors.Is(err, context.Canceled) &&
-				!errors.Is(err, jsonrpc2.ErrClosed) &&
-				err.Error() != "signal: killed" {
-				slog.Warn("Failed to stop LSP client", "name", name, "error", err)
-			}
-			client.cancelCtx()
-			client.SetServerState(StateStopped)
+			s.stopClient(ctx, name, client)
 			s.clients.Del(name)
 			slog.Debug("Stopped LSP client", "name", name)
 		})
 	}
 	wg.Wait()
+}
+
+// stopClient closes one client and records its stopped state. The
+// state callback runs after the client reports stopped, so observers
+// see the final state. Whether the client leaves the clients map is
+// the caller's decision.
+func (s *Manager) stopClient(ctx context.Context, name string, client *Client) {
+	defer s.callback(name, client)
+	if err := client.Close(ctx); err != nil &&
+		!errors.Is(err, io.EOF) &&
+		!errors.Is(err, context.Canceled) &&
+		!errors.Is(err, jsonrpc2.ErrClosed) &&
+		err.Error() != "signal: killed" {
+		slog.Warn("Failed to stop LSP client", "name", name, "error", err)
+	}
+	client.cancelCtx()
+	client.SetServerState(StateStopped)
+}
+
+// RestartSingle restarts one running LSP client by name. It errors
+// when no client runs under that name; a stopped server comes back on
+// demand the next time a file it handles is opened.
+func (s *Manager) RestartSingle(name string) error {
+	client, ok := s.clients.Get(name)
+	if !ok {
+		return fmt.Errorf("lsp '%s' is not running", name)
+	}
+	return client.Restart()
+}
+
+// SetSessionDisabled turns a server off (or back on) for the rest of
+// the process without touching its configuration. Disabling also
+// stops a running client; enabling leaves it stopped, and it starts
+// on demand the next time a file it handles is opened.
+func (s *Manager) SetSessionDisabled(ctx context.Context, name string, disabled bool) {
+	if !disabled {
+		s.sessionDisabled.Del(name)
+		return
+	}
+	s.sessionDisabled.Set(name, true)
+	if client, ok := s.clients.Take(name); ok {
+		s.stopClient(ctx, name, client)
+		slog.Info("Disabled LSP server for this session", "name", name)
+	}
+}
+
+// SessionDisabled returns the servers disabled at runtime for the
+// rest of the process.
+func (s *Manager) SessionDisabled() map[string]bool {
+	return s.sessionDisabled.Copy()
 }

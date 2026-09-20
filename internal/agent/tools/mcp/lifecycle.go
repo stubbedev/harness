@@ -41,8 +41,10 @@ const (
 //     each config write is the desired recovery path.
 //
 // Servers gone from config are removed entirely; enabled-in-config servers
-// marked disabled are disabled.
-func reconcile(current config.MCPs, running map[string]ClientInfo) map[string]reinitAction {
+// marked disabled are disabled. A server in sessionDisabled (disabled at
+// runtime for this process) is left alone: only an explicit reconnect or a
+// process exit brings it back.
+func reconcile(current config.MCPs, running map[string]ClientInfo, sessionDisabled map[string]bool) map[string]reinitAction {
 	actions := map[string]reinitAction{}
 
 	// Servers no longer in config are removed entirely.
@@ -58,6 +60,10 @@ func reconcile(current config.MCPs, running map[string]ClientInfo) map[string]re
 			if exists && info.State != StateDisabled {
 				actions[name] = reinitDisable
 			}
+			continue
+		}
+
+		if sessionDisabled[name] {
 			continue
 		}
 
@@ -127,7 +133,7 @@ func Reinitialize(ctx context.Context, cfg *config.ConfigStore) {
 // reconcileOnce applies one reconciliation pass against the current config.
 func reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
 	current := cfg.Config().MCP
-	actions := reconcile(current, states.Copy())
+	actions := reconcile(current, states.Copy(), sessionDisabled.Copy())
 	for name, action := range actions {
 		switch action {
 		case reinitRemove:
@@ -156,11 +162,14 @@ func reconcileOnce(ctx context.Context, cfg *config.ConfigStore) {
 
 // removeServer fully tears down an MCP server and deletes its state
 // entry. Unlike DisableSingle (which keeps the entry as StateDisabled),
-// this is for servers that no longer exist in config at all.
+// this is for servers that no longer exist in config at all. A
+// session-scoped disable dies with the config entry so re-adding the
+// server later starts it cleanly.
 func removeServer(name string) {
 	teardown(name)
 	states.Del(name)
 	gens.Del(name)
+	sessionDisabled.Del(name)
 }
 
 // mcpConfigEqual reports whether two MCPConfig values are equal, ignoring

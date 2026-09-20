@@ -174,27 +174,21 @@ func lspList(t *styles.Styles, lsps []LSPInfo, width, maxItems int) string {
 		var description string
 		var diagnostics string
 		switch l.State {
-		case lsp.StateUnstarted:
+		case lsp.StateUnstarted, lsp.StateStopped:
 			icon = t.Resource.OfflineIcon.String()
-			description = t.Resource.StatusText.Render("unstarted")
-		case lsp.StateStopped:
-			icon = t.Resource.OfflineIcon.String()
-			description = t.Resource.StatusText.Render("stopped")
+			description = t.Resource.StatusText.Render(l.StatusText())
 		case lsp.StateStarting:
 			icon = t.Resource.BusyIcon.String()
-			description = t.Resource.StatusText.Render("starting...")
+			description = t.Resource.StatusText.Render(l.StatusText())
 		case lsp.StateReady:
 			icon = t.Resource.OnlineIcon.String()
 			diagnostics = lspDiagnostics(t, l.Diagnostics)
 		case lsp.StateError:
 			icon = t.Resource.ErrorIcon.String()
-			description = t.Resource.StatusText.Render("error")
-			if l.Error != nil {
-				description = t.Resource.StatusText.Render(fmt.Sprintf("error: %s", l.Error.Error()))
-			}
+			description = t.Resource.StatusText.Render(l.StatusText())
 		case lsp.StateDisabled:
 			icon = t.Resource.DisabledIcon.String()
-			description = t.Resource.StatusText.Render("disabled")
+			description = t.Resource.StatusText.Render(l.StatusText())
 		default:
 			continue
 		}

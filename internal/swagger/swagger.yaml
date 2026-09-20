@@ -292,6 +292,8 @@ definitions:
         type: boolean
       completions:
         $ref: '#/definitions/config.Completions'
+      dialog_placement:
+        type: string
       diff_mode:
         type: string
       exit_banner:
@@ -363,6 +365,15 @@ definitions:
         allOf:
         - $ref: '#/definitions/csync.Map-string-config_ProviderConfig'
         description: The providers that are configured
+      reasoning_efforts:
+        additionalProperties:
+          type: string
+        description: |-
+          ReasoningEfforts remembers manual reasoning effort choices per
+          model, keyed by "provider/model", so switching models and back
+          restores each model's own effort instead of leaking the current
+          one. Stored in the data directory config.
+        type: object
       recent_models:
         additionalProperties:
           items:
@@ -370,6 +381,8 @@ definitions:
           type: array
         description: Recently used models stored in the data directory config.
         type: object
+      verification:
+        $ref: '#/definitions/verification.VerificationConfig'
     type: object
   github_com_stubbedev_harness_internal_config.Options:
     properties:
@@ -762,8 +775,18 @@ definitions:
       error: {}
       name:
         type: string
+      session_disabled:
+        description: |-
+          SessionDisabled marks a server turned off at runtime for the rest
+          of the process, so the UI can tell it from a merely stopped one.
+        type: boolean
       state:
         $ref: '#/definitions/lsp.ServerState'
+    type: object
+  proto.LSPNameRequest:
+    properties:
+      name:
+        type: string
     type: object
   proto.LSPStartRequest:
     properties:
@@ -1113,6 +1136,38 @@ definitions:
         type: array
       version:
         type: string
+    type: object
+  verification.Rule:
+    properties:
+      command:
+        items:
+          type: string
+        type: array
+      inputs:
+        items:
+          type: string
+        type: array
+      max_output_bytes:
+        type: integer
+      name:
+        type: string
+      paths:
+        items:
+          type: string
+        type: array
+      timeout_seconds:
+        type: integer
+    type: object
+  verification.VerificationConfig:
+    properties:
+      max_repair_attempts:
+        type: integer
+      require_on_completion:
+        type: boolean
+      rules:
+        items:
+          $ref: '#/definitions/verification.Rule'
+        type: array
     type: object
 info:
   contact:
@@ -2188,6 +2243,108 @@ paths:
       summary: Get LSP diagnostics
       tags:
       - lsp
+  /workspaces/{id}/lsps/disable:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: LSP name request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.LSPNameRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Disable an LSP server for this session
+      tags:
+      - lsp
+  /workspaces/{id}/lsps/enable:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: LSP name request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.LSPNameRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Enable a session-disabled LSP server
+      tags:
+      - lsp
+  /workspaces/{id}/lsps/restart:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: LSP name request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.LSPNameRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Restart an LSP server
+      tags:
+      - lsp
   /workspaces/{id}/lsps/start:
     post:
       consumes:
@@ -2307,6 +2464,40 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Get MCP OAuth authorization URL
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/disable:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP name request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.MCPNameRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Disable an MCP server for this session
       tags:
       - mcp
   /workspaces/{id}/mcp/get-prompt:
@@ -2439,6 +2630,40 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Read MCP resource
+      tags:
+      - mcp
+  /workspaces/{id}/mcp/reconnect:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: MCP name request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.MCPNameRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Reconnect an MCP server
       tags:
       - mcp
   /workspaces/{id}/mcp/refresh-prompts:

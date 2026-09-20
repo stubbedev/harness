@@ -426,6 +426,7 @@ func (w *ClientWorkspace) LSPGetStates() map[string]LSPClientInfo {
 			Error:           v.Error,
 			DiagnosticCount: v.DiagnosticCount,
 			ConnectedAt:     v.ConnectedAt,
+			SessionDisabled: v.SessionDisabled,
 		}
 	}
 	return result
@@ -452,6 +453,14 @@ func (w *ClientWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCoun
 		}
 	}
 	return counts
+}
+
+func (w *ClientWorkspace) LSPRestartSingle(ctx context.Context, name string) error {
+	return w.client.LSPRestartSingle(ctx, w.workspaceID(), name)
+}
+
+func (w *ClientWorkspace) LSPSetSessionDisabled(ctx context.Context, name string, disabled bool) error {
+	return w.client.LSPSetSessionDisabled(ctx, w.workspaceID(), name, disabled)
 }
 
 // -- Config (read-only) --
@@ -746,6 +755,14 @@ func (w *ClientWorkspace) MCPAuthURL(name string) string {
 		return ""
 	}
 	return u
+}
+
+func (w *ClientWorkspace) MCPReconnect(ctx context.Context, name string) error {
+	return w.client.MCPReconnect(ctx, w.workspaceID(), name)
+}
+
+func (w *ClientWorkspace) MCPDisableForSession(ctx context.Context, name string) error {
+	return w.client.MCPDisableForSession(ctx, w.workspaceID(), name)
 }
 
 // -- Lifecycle --

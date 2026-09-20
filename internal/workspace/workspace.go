@@ -86,6 +86,36 @@ type LSPClientInfo struct {
 	Error           error
 	DiagnosticCount int
 	ConnectedAt     time.Time
+	// SessionDisabled marks a server turned off at runtime for the rest
+	// of the process, so the UI can tell it from a merely stopped one.
+	SessionDisabled bool
+}
+
+// StatusText returns the human-readable status of the server: the one
+// line a server listing shows next to the server name.
+func (i LSPClientInfo) StatusText() string {
+	if i.SessionDisabled {
+		return "disabled for this session"
+	}
+	switch i.State {
+	case lsp.StateUnstarted:
+		return "not started yet"
+	case lsp.StateStopped:
+		return "stopped"
+	case lsp.StateStarting:
+		return "starting…"
+	case lsp.StateReady:
+		return "ready"
+	case lsp.StateError:
+		if i.Error != nil {
+			return "error: " + i.Error.Error()
+		}
+		return "error"
+	case lsp.StateDisabled:
+		return "disabled"
+	default:
+		return "unknown"
+	}
 }
 
 // LSPEventType represents the type of LSP event.
@@ -195,6 +225,8 @@ type Workspace interface {
 	LSPStopAll(ctx context.Context)
 	LSPGetStates() map[string]LSPClientInfo
 	LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts
+	LSPRestartSingle(ctx context.Context, name string) error
+	LSPSetSessionDisabled(ctx context.Context, name string, disabled bool) error
 
 	// Config (read-only data)
 	Config() *config.Config
@@ -234,6 +266,8 @@ type Workspace interface {
 	MCPAuthenticate(ctx context.Context, name string) error
 	MCPPendingAuth() []mcptools.PendingAuthServer
 	MCPAuthURL(name string) string
+	MCPReconnect(ctx context.Context, name string) error
+	MCPDisableForSession(ctx context.Context, name string) error
 
 	// Events
 	Subscribe(program *tea.Program)

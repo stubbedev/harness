@@ -425,8 +425,12 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `dialog.file_picker.forward` | `right`, `l` |
 | `dialog.file_picker.select` | `enter` |
 | `dialog.file_picker.up` | `up`, `k` |
+| `dialog.lsp_servers.back` | `esc`, `h`, `backspace` |
+| `dialog.lsp_servers.select` | `enter`, `tab`, `ctrl+y` |
 | `dialog.mcp_auth.copy` | `c`, `u` |
 | `dialog.mcp_auth.skip` | `s` |
+| `dialog.mcp_servers.back` | `esc`, `h`, `backspace` |
+| `dialog.mcp_servers.select` | `enter`, `tab`, `ctrl+y` |
 | `dialog.models.connect` | `ctrl+g` |
 | `dialog.models.edit` | `ctrl+e` |
 | `dialog.models.toggle_type` | `tab`, `shift+tab` |

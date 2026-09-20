@@ -34,6 +34,11 @@ type LSPClientInfo struct {
 	Client          *lsp.Client
 	DiagnosticCount int
 	ConnectedAt     time.Time
+	// SessionDisabled marks a server turned off at runtime for the rest
+	// of the process, so the UI can tell it from a merely stopped one.
+	// It is filled in by the state readers, not updateLSPState, because
+	// the mark lives in the manager rather than the state map.
+	SessionDisabled bool
 }
 
 var (
@@ -54,6 +59,23 @@ func GetLSPStates() map[string]LSPClientInfo {
 // GetLSPState returns the state of a specific LSP client
 func GetLSPState(name string) (LSPClientInfo, bool) {
 	return lspStates.Get(name)
+}
+
+// LSPStatesWithSessionDisabled returns the LSP states with the
+// manager's runtime session-disable marks applied: marked servers are
+// flagged so readers can tell them from merely stopped ones, and a
+// marked server without a state entry gets a stopped entry of its own.
+func LSPStatesWithSessionDisabled(m *lsp.Manager) map[string]LSPClientInfo {
+	states := GetLSPStates()
+	for name := range m.SessionDisabled() {
+		info, ok := states[name]
+		if !ok {
+			info = LSPClientInfo{Name: name, State: lsp.StateStopped}
+		}
+		info.SessionDisabled = true
+		states[name] = info
+	}
+	return states
 }
 
 // updateLSPState updates the state of an LSP client and publishes an event

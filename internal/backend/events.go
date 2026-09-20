@@ -24,12 +24,11 @@ func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-ch
 
 // GetLSPStates returns the state of all LSP clients.
 func (b *Backend) GetLSPStates(workspaceID string) (map[string]app.LSPClientInfo, error) {
-	_, err := b.GetWorkspace(workspaceID)
+	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
 	}
-
-	return app.GetLSPStates(), nil
+	return app.LSPStatesWithSessionDisabled(ws.LSPManager), nil
 }
 
 // GetLSPDiagnostics returns diagnostics for a specific LSP client in
@@ -93,6 +92,26 @@ func (b *Backend) LSPStopAll(ctx context.Context, workspaceID string) error {
 	return nil
 }
 
+// LSPRestartSingle restarts a named running LSP server.
+func (b *Backend) LSPRestartSingle(workspaceID, name string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return ws.LSPManager.RestartSingle(name)
+}
+
+// LSPSetSessionDisabled turns a named LSP server off (or back on) for
+// the rest of the process without touching its configuration.
+func (b *Backend) LSPSetSessionDisabled(ctx context.Context, workspaceID, name string, disabled bool) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	ws.LSPManager.SetSessionDisabled(ctx, name, disabled)
+	return nil
+}
+
 // MCPGetStates returns the current state of all MCP clients.
 func (b *Backend) MCPGetStates(_ string) map[string]mcptools.ClientInfo {
 	return mcptools.GetStates()
@@ -142,4 +161,24 @@ func (b *Backend) MCPAuthenticate(ctx context.Context, workspaceID, name string)
 	}
 	defer cancel()
 	return finish(ctx)
+}
+
+// MCPReconnect restarts a named MCP server, clearing a session-scoped
+// disable.
+func (b *Backend) MCPReconnect(ctx context.Context, workspaceID, name string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return mcptools.ReconnectSingle(ctx, ws.Cfg, name)
+}
+
+// MCPDisableForSession disables a named MCP server for the rest of the
+// process without touching its configuration.
+func (b *Backend) MCPDisableForSession(workspaceID, name string) error {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return err
+	}
+	return mcptools.DisableSingleForSession(ws.Cfg, name)
 }

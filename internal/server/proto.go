@@ -363,6 +363,7 @@ func (c *controllerV1) handleGetWorkspaceLSPs(w http.ResponseWriter, r *http.Req
 			Error:           v.Error,
 			DiagnosticCount: v.DiagnosticCount,
 			ConnectedAt:     v.ConnectedAt,
+			SessionDisabled: v.SessionDisabled,
 		}
 	}
 	jsonEncode(w, result)
@@ -737,6 +738,88 @@ func (c *controllerV1) handlePostWorkspaceLSPStart(w http.ResponseWriter, r *htt
 func (c *controllerV1) handlePostWorkspaceLSPStopAll(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := c.backend.LSPStopAll(r.Context(), id); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceLSPRestart restarts a named running LSP server.
+//
+//	@Summary		Restart an LSP server
+//	@Tags			lsp
+//	@Accept			json
+//	@Param			id		path	string					true	"Workspace ID"
+//	@Param			request	body	proto.LSPNameRequest	true	"LSP name request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/lsps/restart [post]
+func (c *controllerV1) handlePostWorkspaceLSPRestart(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	var req proto.LSPNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.LSPRestartSingle(id, req.Name); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// handlePostWorkspaceLSPDisable turns a named LSP server off for the
+// rest of the process without touching its configuration.
+//
+//	@Summary		Disable an LSP server for this session
+//	@Tags			lsp
+//	@Accept			json
+//	@Param			id		path	string					true	"Workspace ID"
+//	@Param			request	body	proto.LSPNameRequest	true	"LSP name request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/lsps/disable [post]
+func (c *controllerV1) handlePostWorkspaceLSPDisable(w http.ResponseWriter, r *http.Request) {
+	c.handleLSPSessionDisabled(w, r, true)
+}
+
+// handlePostWorkspaceLSPEnable turns a session-disabled LSP server
+// back on.
+//
+//	@Summary		Enable a session-disabled LSP server
+//	@Tags			lsp
+//	@Accept			json
+//	@Param			id		path	string					true	"Workspace ID"
+//	@Param			request	body	proto.LSPNameRequest	true	"LSP name request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/lsps/enable [post]
+func (c *controllerV1) handlePostWorkspaceLSPEnable(w http.ResponseWriter, r *http.Request) {
+	c.handleLSPSessionDisabled(w, r, false)
+}
+
+// handleLSPSessionDisabled is the shared body of the LSP disable and
+// enable endpoints.
+func (c *controllerV1) handleLSPSessionDisabled(w http.ResponseWriter, r *http.Request, disabled bool) {
+	id := r.PathValue("id")
+
+	var req proto.LSPNameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.server.logError(r, "Failed to decode request", "error", err)
+		jsonError(w, http.StatusBadRequest, "failed to decode request")
+		return
+	}
+
+	if err := c.backend.LSPSetSessionDisabled(r.Context(), id, req.Name, disabled); err != nil {
 		c.handleError(w, r, err)
 		return
 	}

@@ -124,6 +124,9 @@ type DialogKeys struct {
 	OAuth      OAuthDialogKeys
 	MCPAuth    MCPAuthDialogKeys
 	Question   QuestionDialogKeys
+
+	MCPServers MCPServersDialogKeys
+	LSPServers LSPServersDialogKeys
 }
 
 // ModelsDialogKeys are the model picker's own bindings.
@@ -191,6 +194,18 @@ type OAuthDialogKeys struct {
 type MCPAuthDialogKeys struct {
 	Copy key.Binding
 	Skip key.Binding
+}
+
+// MCPServersDialogKeys are the MCP server manager's own bindings.
+type MCPServersDialogKeys struct {
+	Select key.Binding
+	Back   key.Binding
+}
+
+// LSPServersDialogKeys are the LSP server manager's own bindings.
+type LSPServersDialogKeys struct {
+	Select key.Binding
+	Back   key.Binding
 }
 
 // QuestionDialogKeys are the bindings shared by the question dialogs the
@@ -535,6 +550,24 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("esc", "back"),
 	)
 
+	km.Dialog.MCPServers.Select = key.NewBinding(
+		key.WithKeys("enter", "tab", "ctrl+y"),
+		key.WithHelp("enter", "choose"),
+	)
+	km.Dialog.MCPServers.Back = key.NewBinding(
+		key.WithKeys("esc", "h", "backspace"),
+		key.WithHelp("esc", "back"),
+	)
+
+	km.Dialog.LSPServers.Select = key.NewBinding(
+		key.WithKeys("enter", "tab", "ctrl+y"),
+		key.WithHelp("enter", "choose"),
+	)
+	km.Dialog.LSPServers.Back = key.NewBinding(
+		key.WithKeys("esc", "h", "backspace"),
+		key.WithHelp("esc", "back"),
+	)
+
 	km.Dialog.FilePicker.Select = key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "accept"),
@@ -799,6 +832,10 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"dialog.question.newline":        &km.Dialog.Question.Newline,
 		"dialog.question.prev_tab":       &km.Dialog.Question.PrevTab,
 		"dialog.question.next_tab":       &km.Dialog.Question.NextTab,
+		"dialog.mcp_servers.select":      &km.Dialog.MCPServers.Select,
+		"dialog.mcp_servers.back":        &km.Dialog.MCPServers.Back,
+		"dialog.lsp_servers.select":      &km.Dialog.LSPServers.Select,
+		"dialog.lsp_servers.back":        &km.Dialog.LSPServers.Back,
 
 		"completions.up":              &km.Completions.Up,
 		"completions.down":            &km.Completions.Down,

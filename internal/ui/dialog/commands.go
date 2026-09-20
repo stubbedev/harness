@@ -484,6 +484,8 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", km.Models.Help().Key, ActionOpenDialog{ModelsID}),
 		NewCommandItem(c.com.Styles, "connect_provider", "Connect Provider", "", ActionOpenDialog{ConnectID}).WithAliases("provider", "auth", "login"),
 		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", km.Themes.Help().Key, ActionOpenDialog{ThemesID}),
+		NewCommandItem(c.com.Styles, "mcp_servers", "MCP Servers", "", ActionOpenDialog{DialogID: MCPServersID}).WithAliases("mcp"),
+		NewCommandItem(c.com.Styles, "lsp_servers", "LSP Servers", "", ActionOpenDialog{DialogID: LSPServersID}).WithAliases("lsp"),
 	}
 
 	// Only show compact command if there's an active session

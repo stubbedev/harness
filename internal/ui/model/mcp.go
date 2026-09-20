@@ -2,7 +2,6 @@ package model
 
 import (
 	"fmt"
-	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
@@ -36,17 +35,7 @@ func (m *UI) mcpInfo(width, maxItems int, isSection bool) string {
 
 // mcpCounts formats tool, prompt, and resource counts for display.
 func mcpCounts(t *styles.Styles, counts mcp.Counts) string {
-	var parts []string
-	if counts.Tools > 0 {
-		parts = append(parts, t.Resource.CapabilityCount.Render(fmt.Sprintf("%d tools", counts.Tools)))
-	}
-	if counts.Prompts > 0 {
-		parts = append(parts, t.Resource.CapabilityCount.Render(fmt.Sprintf("%d prompts", counts.Prompts)))
-	}
-	if counts.Resources > 0 {
-		parts = append(parts, t.Resource.CapabilityCount.Render(fmt.Sprintf("%d resources", counts.Resources)))
-	}
-	return strings.Join(parts, " ")
+	return t.Resource.CapabilityCount.Render(counts.String())
 }
 
 // mcpList renders a list of MCP clients with their status and counts,
@@ -67,22 +56,19 @@ func mcpList(t *styles.Styles, mcps []mcp.ClientInfo, width, maxItems int) strin
 		switch m.State {
 		case mcp.StateStarting:
 			icon = t.Resource.BusyIcon.String()
-			description = t.Resource.StatusText.Render("starting...")
+			description = t.Resource.StatusText.Render(m.StatusText())
 		case mcp.StateConnected:
 			icon = t.Resource.OnlineIcon.String()
 			extraContent = mcpCounts(t, m.Counts)
 		case mcp.StateError:
 			icon = t.Resource.ErrorIcon.String()
-			description = t.Resource.StatusText.Render("error")
-			if m.Error != nil {
-				description = t.Resource.StatusText.Render(fmt.Sprintf("error: %s", m.Error.Error()))
-			}
+			description = t.Resource.StatusText.Render(m.StatusText())
 		case mcp.StateNeedsAuth:
 			icon = t.Resource.NeedsAuthIcon.String()
-			description = t.Resource.StatusText.Render("needs authentication")
+			description = t.Resource.StatusText.Render(m.StatusText())
 		case mcp.StateDisabled:
 			icon = t.Resource.DisabledIcon.String()
-			description = t.Resource.StatusText.Render("disabled")
+			description = t.Resource.StatusText.Render(m.StatusText())
 		default:
 			icon = t.Resource.OfflineIcon.String()
 		}

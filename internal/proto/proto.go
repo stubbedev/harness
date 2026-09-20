@@ -298,6 +298,9 @@ type LSPClientInfo struct {
 	Error           error           `json:"error,omitempty"`
 	DiagnosticCount int             `json:"diagnostic_count,omitempty"`
 	ConnectedAt     time.Time       `json:"connected_at"`
+	// SessionDisabled marks a server turned off at runtime for the rest
+	// of the process, so the UI can tell it from a merely stopped one.
+	SessionDisabled bool `json:"session_disabled,omitempty"`
 }
 
 // MarshalJSON implements the [json.Marshaler] interface.

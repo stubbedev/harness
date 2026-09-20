@@ -300,7 +300,7 @@ func (w *AppWorkspace) LSPStopAll(ctx context.Context) {
 }
 
 func (w *AppWorkspace) LSPGetStates() map[string]LSPClientInfo {
-	states := app.GetLSPStates()
+	states := app.LSPStatesWithSessionDisabled(w.app.LSPManager)
 	result := make(map[string]LSPClientInfo, len(states))
 	for k, v := range states {
 		result[k] = LSPClientInfo{
@@ -309,6 +309,7 @@ func (w *AppWorkspace) LSPGetStates() map[string]LSPClientInfo {
 			Error:           v.Error,
 			DiagnosticCount: v.DiagnosticCount,
 			ConnectedAt:     v.ConnectedAt,
+			SessionDisabled: v.SessionDisabled,
 		}
 	}
 	return result
@@ -320,6 +321,15 @@ func (w *AppWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts 
 		return lsp.DiagnosticCounts{}
 	}
 	return state.Client.GetDiagnosticCounts()
+}
+
+func (w *AppWorkspace) LSPRestartSingle(_ context.Context, name string) error {
+	return w.app.LSPManager.RestartSingle(name)
+}
+
+func (w *AppWorkspace) LSPSetSessionDisabled(ctx context.Context, name string, disabled bool) error {
+	w.app.LSPManager.SetSessionDisabled(ctx, name, disabled)
+	return nil
 }
 
 // -- Config (read-only) --
@@ -699,6 +709,14 @@ func (w *AppWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
 
 func (w *AppWorkspace) MCPAuthURL(name string) string {
 	return mcptools.MCPAuthURL(name)
+}
+
+func (w *AppWorkspace) MCPReconnect(ctx context.Context, name string) error {
+	return mcptools.ReconnectSingle(ctx, w.store, name)
+}
+
+func (w *AppWorkspace) MCPDisableForSession(_ context.Context, name string) error {
+	return mcptools.DisableSingleForSession(w.store, name)
 }
 
 // -- Lifecycle --

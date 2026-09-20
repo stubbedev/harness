@@ -343,6 +343,30 @@ func (c *Client) MCPAuthenticate(ctx context.Context, id, name string) error {
 	return okOrError(rsp, "failed to authenticate MCP")
 }
 
+// MCPReconnect restarts a named MCP server, clearing a session-scoped
+// disable.
+func (c *Client) MCPReconnect(ctx context.Context, id, name string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/reconnect", id), nil,
+		jsonBody(proto.MCPNameRequest{Name: name}),
+		http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to reconnect MCP: %w", err)
+	}
+	return okOrError(rsp, "failed to reconnect MCP")
+}
+
+// MCPDisableForSession disables a named MCP server for the rest of the
+// server process without touching its configuration.
+func (c *Client) MCPDisableForSession(ctx context.Context, id, name string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/disable", id), nil,
+		jsonBody(proto.MCPNameRequest{Name: name}),
+		http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to disable MCP: %w", err)
+	}
+	return okOrError(rsp, "failed to disable MCP")
+}
+
 // MCPRefreshPrompts refreshes prompts for a named MCP client.
 func (c *Client) MCPRefreshPrompts(ctx context.Context, id, name string) error {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/mcp/refresh-prompts", id), nil,
@@ -817,6 +841,33 @@ func (c *Client) LSPStopAll(ctx context.Context, id string) error {
 		return err
 	}
 	return nil
+}
+
+// LSPRestartSingle restarts a named running LSP server.
+func (c *Client) LSPRestartSingle(ctx context.Context, id, name string) error {
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/lsps/restart", id), nil,
+		jsonBody(proto.LSPNameRequest{Name: name}),
+		http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to restart LSP: %w", err)
+	}
+	return okOrError(rsp, "failed to restart LSP")
+}
+
+// LSPSetSessionDisabled turns a named LSP server off (or back on) for
+// the rest of the server process without touching its configuration.
+func (c *Client) LSPSetSessionDisabled(ctx context.Context, id, name string, disabled bool) error {
+	path := "enable"
+	if disabled {
+		path = "disable"
+	}
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/lsps/%s", id, path), nil,
+		jsonBody(proto.LSPNameRequest{Name: name}),
+		http.Header{"Content-Type": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("failed to set LSP session state: %w", err)
+	}
+	return okOrError(rsp, "failed to set LSP session state")
 }
 
 // ListCheckpoints retrieves a session's rewind checkpoints.

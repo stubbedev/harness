@@ -137,6 +137,14 @@ func (w *countingWorkspace) WorkingDir() string { return "" }
 
 func (w *countingWorkspace) LSPStart(context.Context, string) {}
 
+func (w *countingWorkspace) LSPRestartSingle(context.Context, string) error { return nil }
+
+func (w *countingWorkspace) LSPSetSessionDisabled(context.Context, string, bool) error { return nil }
+
+func (w *countingWorkspace) MCPReconnect(context.Context, string) error { return nil }
+
+func (w *countingWorkspace) MCPDisableForSession(context.Context, string) error { return nil }
+
 func (w *countingWorkspace) RunningSubagents(string) []workspace.RunningSubagentInfo {
 	return w.runningSubagent
 }

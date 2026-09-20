@@ -118,6 +118,11 @@ type MCPNameRequest struct {
 	Name string `json:"name"`
 }
 
+// LSPNameRequest represents a request targeting a named LSP server.
+type LSPNameRequest struct {
+	Name string `json:"name"`
+}
+
 // MCPPendingAuthServer describes an MCP server awaiting OAuth
 // authentication, returned to clients so they can prompt the user.
 type MCPPendingAuthServer struct {
