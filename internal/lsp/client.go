@@ -245,6 +245,11 @@ func (c *Client) registerHandlers() {
 
 // Restart closes the current LSP client and creates a new one with the same configuration.
 func (c *Client) Restart() error {
+	// Files renamed or deleted since they were opened can never be
+	// reopened; drop them and their stale diagnostics instead of carrying
+	// the phantom entries into the new session.
+	c.closeVanishedFiles(c.ctx)
+
 	var openFiles []string
 	for uri := range c.openFiles.Seq2() {
 		openFiles = append(openFiles, string(uri))
@@ -594,6 +599,7 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 	if c == nil {
 		return
 	}
+	c.closeVanishedFiles(ctx)
 	for uri, info := range c.openFiles.Seq2() {
 		path, err := protocol.DocumentURI(uri).Path()
 		if err != nil {

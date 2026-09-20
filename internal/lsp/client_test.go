@@ -3,6 +3,8 @@ package lsp
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -218,4 +220,49 @@ func TestWaitForDiagnostics_SettlesPromptly(t *testing.T) {
 	// Publication plus one settle window (300ms) and nothing else: the wait is
 	// woken by the change, not by a poll interval.
 	require.Less(t, elapsed, 450*time.Millisecond, "settle should not add polling slack")
+}
+
+func TestCloseVanishedFiles(t *testing.T) {
+	t.Parallel()
+
+	c := newTestClient()
+	dir := t.TempDir()
+	kept := filepath.Join(dir, "kept.go")
+	gone := filepath.Join(dir, "gone.go")
+	require.NoError(t, os.WriteFile(kept, []byte("package a\n"), 0o644))
+	require.NoError(t, os.WriteFile(gone, []byte("package b\n"), 0o644))
+
+	keptURI := string(protocol.URIFromPath(kept))
+	goneURI := string(protocol.URIFromPath(gone))
+	for _, uri := range []string{keptURI, goneURI} {
+		c.openFiles.Set(uri, &OpenFileInfo{Version: 1, URI: protocol.DocumentURI(uri)})
+		c.diagnostics.Set(protocol.DocumentURI(uri), []protocol.Diagnostic{{Message: "problem"}})
+	}
+	require.NoError(t, os.Remove(gone))
+
+	c.closeVanishedFiles(t.Context())
+
+	require.False(t, c.IsFileOpen(gone), "a renamed-away file must not stay open")
+	require.True(t, c.IsFileOpen(kept), "a file still on disk stays open")
+	require.Empty(t, c.GetFileDiagnostics(protocol.DocumentURI(goneURI)), "stale diagnostics must be dropped")
+	require.Len(t, c.GetFileDiagnostics(protocol.DocumentURI(keptURI)), 1)
+}
+
+func TestRefreshOpenFilesForgetsVanishedFiles(t *testing.T) {
+	t.Parallel()
+
+	c := newTestClient()
+	gone := filepath.Join(t.TempDir(), "gone.go")
+	require.NoError(t, os.WriteFile(gone, []byte("package a\n"), 0o644))
+	uri := string(protocol.URIFromPath(gone))
+	c.openFiles.Set(uri, &OpenFileInfo{Version: 1, URI: protocol.DocumentURI(uri)})
+	c.diagnostics.Set(protocol.DocumentURI(uri), []protocol.Diagnostic{{Message: "No packages found for open file"}})
+	require.NoError(t, os.Remove(gone))
+
+	// Every open file has vanished, so the refresh prunes them without
+	// ever reaching the (nil in this test) server connection.
+	c.RefreshOpenFiles(t.Context())
+
+	require.False(t, c.IsFileOpen(gone))
+	require.Empty(t, c.GetFileDiagnostics(protocol.DocumentURI(uri)))
 }
