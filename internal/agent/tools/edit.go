@@ -114,14 +114,21 @@ func validateEdits(edits []EditOperation) error {
 		if i > 0 && edit.OldString == "" {
 			return fmt.Errorf("edit %d: only the first edit can have empty old_string (for file creation)", i+1)
 		}
+		if len(edit.NewString) > maxEditNewStringBytes {
+			return fmt.Errorf("edit %d: new_string is %d bytes, over the %d-byte cap; use the write tool for whole-file rewrites", i+1, len(edit.NewString), maxEditNewStringBytes)
+		}
+		if _, count := degenerateRepetition(edit.NewString); count > 0 {
+			return fmt.Errorf("edit %d: new_string contains the same text repeated %d times, which looks like a corrupted payload; regenerate the edit and resend it", i+1, count)
+		}
 	}
 	return nil
 }
 
 // applyEditsToContent applies edits sequentially, collecting the ones that
 // failed. It also reports whether any edit only matched after whitespace
-// normalization.
-func applyEditsToContent(currentContent string, edits []EditOperation, startIndex int) (string, []FailedEdit, bool) {
+// normalization. An error means an applied edit failed the post-replacement
+// verification: nothing downstream should be written.
+func applyEditsToContent(currentContent string, edits []EditOperation, startIndex int) (string, []FailedEdit, bool, error) {
 	var failedEdits []FailedEdit
 	var whitespaceCorrected bool
 	for i, edit := range edits {
@@ -134,10 +141,13 @@ func applyEditsToContent(currentContent string, edits []EditOperation, startInde
 			})
 			continue
 		}
+		if err := verifyReplacement(newContent, edit, corrected); err != nil {
+			return "", nil, false, fmt.Errorf("edit %d failed internal verification (%w); no changes were written, re-read the section and resend the edit", startIndex+i+1, err)
+		}
 		whitespaceCorrected = whitespaceCorrected || corrected
 		currentContent = newContent
 	}
-	return currentContent, failedEdits, whitespaceCorrected
+	return currentContent, failedEdits, whitespaceCorrected, nil
 }
 
 func processEditWithCreation(edit editContext, params EditParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -160,7 +170,10 @@ func processEditWithCreation(edit editContext, params EditParams, _ fantasy.Tool
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
 
-	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(firstEdit.NewString, params.Edits[1:], 1)
+	currentContent, failedEdits, whitespaceCorrected, err := applyEditsToContent(firstEdit.NewString, params.Edits[1:], 1)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
 
 	// Get session and message IDs
 	sessionID, err := SessionIDOrError(edit.ctx, "creating a new file")
@@ -222,10 +235,17 @@ func processEditExistingFile(edit editContext, params EditParams, _ fantasy.Tool
 		return resp, nil
 	}
 
+	if err := validateEditSizes(oldContent, params.Edits); err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+
 	if err := checkEditRanges(edit, sessionID, params.FilePath, oldContent, isCrlf, params.Edits); err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
-	currentContent, failedEdits, whitespaceCorrected := applyEditsToContent(oldContent, params.Edits, 0)
+	currentContent, failedEdits, whitespaceCorrected, err := applyEditsToContent(oldContent, params.Edits, 0)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
 
 	// Check if content actually changed
 	if oldContent == currentContent {
