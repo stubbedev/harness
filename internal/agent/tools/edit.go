@@ -117,7 +117,7 @@ func validateEdits(edits []EditOperation) error {
 		if len(edit.NewString) > maxEditNewStringBytes {
 			return fmt.Errorf("edit %d: new_string is %d bytes, over the %d-byte cap; use the write tool for whole-file rewrites", i+1, len(edit.NewString), maxEditNewStringBytes)
 		}
-		if _, count := degenerateRepetition(edit.NewString); count > 0 {
+		if _, count := degenerateRepetition(edit.NewString, editRepetitionLimits); count > 0 {
 			return fmt.Errorf("edit %d: new_string contains the same text repeated %d times, which looks like a corrupted payload; regenerate the edit and resend it", i+1, count)
 		}
 	}

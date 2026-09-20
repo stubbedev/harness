@@ -47,6 +47,10 @@ func NewWriteTool(
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
 
+			if err := validateWritePayload(params.Content); err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+
 			sessionID, err := SessionIDOrError(ctx, "writing files")
 			if err != nil {
 				return fantasy.ToolResponse{}, err

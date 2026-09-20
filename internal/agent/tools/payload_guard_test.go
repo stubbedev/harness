@@ -56,7 +56,7 @@ func TestDegenerateRepetition(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			unit, count := degenerateRepetition(tt.payload)
+			unit, count := degenerateRepetition(tt.payload, editRepetitionLimits)
 			require.Equal(t, tt.wantUnit, unit)
 			require.Equal(t, tt.wantCount, count)
 		})
@@ -83,6 +83,38 @@ func TestValidateEditsRejectsRunawayPayloads(t *testing.T) {
 	require.ErrorContains(t, err, "write tool")
 
 	require.NoError(t, validateEdits([]EditOperation{{OldString: "a", NewString: "b"}}))
+}
+
+func TestValidateWritePayload(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validateWritePayload("package main\n\nfunc main() {}\n"))
+
+	// Section-sized repetition stays under write's looser floor: the same
+	// payload trips the edit detector.
+	require.NoError(t, validateWritePayload(strings.Repeat("\t\t\t\t\tsus service content\n", 400)))
+
+	// A modest file of repeated identical rows stays legitimate.
+	require.NoError(t, validateWritePayload(strings.Repeat("0,0,0\n", 100)))
+
+	// A bulk runaway of identical rows is rejected: 5-byte lines, so the
+	// 64KB gate trips at count 13108.
+	runaway := strings.Repeat("0,0,0\n", 30000)
+	unit, count := degenerateRepetition(runaway, writeRepetitionLimits)
+	require.Equal(t, "0,0,0", unit)
+	require.Equal(t, 13108, count)
+	require.ErrorContains(t, validateWritePayload(runaway), "corrupted payload")
+
+	// A single long line of one repeated unit is rejected past the unit
+	// thresholds.
+	blob := strings.Repeat("sus ", 8192)
+	unit, count = degenerateRepetition(blob, writeRepetitionLimits)
+	require.Equal(t, "sus ", unit)
+	require.Equal(t, 8192, count)
+	require.ErrorContains(t, validateWritePayload(blob), "corrupted payload")
+
+	// The absolute cap.
+	require.ErrorContains(t, validateWritePayload(strings.Repeat("x", maxWriteBytes+1)), "byte cap")
 }
 
 func TestValidateEditSizes(t *testing.T) {
