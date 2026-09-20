@@ -125,20 +125,6 @@ func readSourceContext(filePath string, targetLine int, contextLines int, contex
 	return b.String()
 }
 
-// readSourceLines returns raw source lines around targetLine without markers.
-func readSourceLines(filePath string, targetLine int, contextLines int) string {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return ""
-	}
-
-	lines := strings.Split(string(data), "\n")
-	start := max(0, targetLine-contextLines)
-	end := min(len(lines), targetLine+contextLines+1)
-
-	return strings.Join(lines[start:end], "\n")
-}
-
 func sourceContextText(snippet string) string {
 	var lines []string
 	for line := range strings.SplitSeq(strings.TrimSuffix(snippet, "\n"), "\n") {

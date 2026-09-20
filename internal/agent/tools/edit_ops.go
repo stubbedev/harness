@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,7 +9,6 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
-	"github.com/stubbedev/harness/internal/diff"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/history"
@@ -168,79 +166,4 @@ func loadExistingFile(edit editContext, filePath, sessionError string, hints ...
 
 	oldContent, isCrlf = fsext.ToUnixLineEndings(string(content))
 	return sessionID, oldContent, isCrlf, fantasy.ToolResponse{}, nil
-}
-
-func deleteContent(edit editContext, filePath, oldString string, replaceAll bool, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, filePath, "session ID is required for deleting content")
-	if err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	if resp.Content != "" || resp.IsError {
-		return resp, nil
-	}
-
-	newContent, whitespaceCorrected, err := findAndReplace(oldContent, oldString, "", replaceAll)
-	if err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
-	}
-
-	additions, removals := diff.CountChanges(oldContent, newContent)
-
-	writeContent := newContent
-	if isCrlf {
-		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
-	}
-
-	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent, isCrlf); err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
-	}
-
-	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(withWhitespaceNote("Content deleted from file: "+filePath, whitespaceCorrected)),
-		EditResponseMetadata{
-			OldContent: oldContent,
-			NewContent: writeContent,
-			Additions:  additions,
-			Removals:   removals,
-		},
-	), nil
-}
-
-func replaceContent(edit editContext, filePath, oldString, newString string, replaceAll bool, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, filePath, "session ID is required for editing a file")
-	if err != nil {
-		return fantasy.ToolResponse{}, err
-	}
-	if resp.Content != "" || resp.IsError {
-		return resp, nil
-	}
-
-	result, whitespaceCorrected, err := findAndReplace(oldContent, oldString, newString, replaceAll)
-	if err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
-	}
-	if result == oldContent {
-		return fantasy.NewTextErrorResponse("new content is the same as old content. No changes made."), nil
-	}
-
-	additions, removals := diff.CountChanges(oldContent, result)
-
-	writeContent := result
-	if isCrlf {
-		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
-	}
-
-	if err := commitFileChange(edit, sessionID, filePath, oldContent, writeContent, isCrlf); err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
-	}
-
-	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(withWhitespaceNote("Content replaced in file: "+filePath, whitespaceCorrected)),
-		EditResponseMetadata{
-			OldContent: oldContent,
-			NewContent: writeContent,
-			Additions:  additions,
-			Removals:   removals,
-		},
-	), nil
 }

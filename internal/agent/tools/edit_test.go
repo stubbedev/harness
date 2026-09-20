@@ -29,7 +29,7 @@ func (m *mockEditFileTracker) ListReadFiles(ctx context.Context, sessionID strin
 	return m.reads, nil
 }
 
-func TestReplaceContentPreservesCRLFAndMetadata(t *testing.T) {
+func TestEditPreservesCRLFAndMetadata(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -44,23 +44,25 @@ func TestReplaceContentPreservesCRLFAndMetadata(t *testing.T) {
 		workingDir:  dir,
 	}
 
-	resp, err := replaceContent(edit, filePath, "beta", "BETA", false, fantasy.ToolCall{ID: "call"})
+	resp, err := processEditExistingFile(edit, EditParams{
+		FilePath: filePath,
+		Edits:    []EditOperation{{OldString: "beta", NewString: "BETA"}},
+	}, fantasy.ToolCall{ID: "call"})
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
-	require.Equal(t, "Content replaced in file: "+filePath, resp.Content)
 
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
-	require.Equal(t, "alpha\r\nBETA\r\n", string(content))
+	require.Equal(t, "alpha\r\nBETA\r\n", string(content), "the file keeps CRLF line endings on disk")
 	require.Equal(t, []string{filePath}, tracker.reads)
 
 	var meta EditResponseMetadata
 	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
 	require.Equal(t, "alpha\nbeta\n", meta.OldContent)
-	require.Equal(t, "alpha\r\nBETA\r\n", meta.NewContent)
+	require.Equal(t, "alpha\nBETA\n", meta.NewContent)
 }
 
-func TestDeleteContentRejectsMultipleMatchesWithoutReplaceAll(t *testing.T) {
+func TestEditRejectsMultipleMatchesWithoutReplaceAll(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -74,10 +76,19 @@ func TestDeleteContentRejectsMultipleMatchesWithoutReplaceAll(t *testing.T) {
 		workingDir:  dir,
 	}
 
-	resp, err := deleteContent(edit, filePath, "alpha\n", false, fantasy.ToolCall{ID: "call"})
+	resp, err := processEditExistingFile(edit, EditParams{
+		FilePath: filePath,
+		Edits:    []EditOperation{{OldString: "alpha\n", NewString: ""}},
+	}, fantasy.ToolCall{ID: "call"})
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "old_string appears multiple times")
+	require.Contains(t, resp.Content, "all 1 edit(s) failed")
+
+	var meta EditResponseMetadata
+	require.NoError(t, json.Unmarshal([]byte(resp.Metadata), &meta))
+	require.Len(t, meta.EditsFailed, 1)
+	require.Equal(t, 1, meta.EditsFailed[0].Index)
+	require.Contains(t, meta.EditsFailed[0].Error, "appears multiple times")
 
 	content, err := os.ReadFile(filePath)
 	require.NoError(t, err)
