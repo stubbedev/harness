@@ -26,6 +26,7 @@ var deferredBuiltinTools = []string{
 	tools.HarnessToolName,
 	tools.LSPToolName,
 	tools.MCPResourceToolName,
+	tools.ResearchToolName,
 }
 
 // ToolSearchToolName is the tool the model calls to load a deferred tool.
