@@ -93,7 +93,7 @@ func toolResultsByCallID(msgs []message.Message) map[string]message.ToolResult {
 func renderMessageMarkdown(msg message.Message, results map[string]message.ToolResult) string {
 	// A background sub-agent's report-back is LLM-to-LLM context that
 	// never rendered on screen; it stays out of the minutes too.
-	if msg.SubagentNotesOnly() {
+	if msg.SubagentNotesOnly() || msg.ContextNotesOnly() {
 		return ""
 	}
 

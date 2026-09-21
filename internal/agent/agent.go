@@ -1083,6 +1083,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// max_tokens: PrepareStep then keeps writing into the assistant
 	// message the cut happened in instead of opening a new one.
 	var continuing bool
+	// injections is everything this turn added to its requests beyond
+	// what fantasy carries between steps; see turnInjections.
+	var injections turnInjections
 	streamCall := fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(outboundPrompt, call.Attachments),
 		Files:            files,
@@ -1096,10 +1099,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		TopK:             call.TopK,
 		FrequencyPenalty: call.FrequencyPenalty,
 		PrepareStep: func(callContext context.Context, options fantasy.PrepareStepFunctionOptions) (_ context.Context, prepared fantasy.PrepareStepResult, err error) {
-			prepared.Messages = options.Messages
-			for i := range prepared.Messages {
-				prepared.Messages[i].ProviderOptions = nil
+			for i := range options.Messages {
+				options.Messages[i].ProviderOptions = nil
 			}
+			// Everything appended below goes in at this index on later
+			// steps, behind the messages that exist now and ahead of
+			// the ones this step produces.
+			appendAt := len(options.Messages)
+			prepared.Messages = injections.apply(options.Messages)
 
 			// Use latest tools (updated by SetTools when MCP tools change).
 			prepared.Tools = a.tools.Copy()
@@ -1139,7 +1146,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					a.requeueCalls(call.SessionID, fold)
 					return callContext, prepared, createErr
 				}
-				prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+				folded := userMessage.ToAIMessage()
+				injections.add(appendAt, folded...)
+				prepared.Messages = append(prepared.Messages, folded...)
 			}
 
 			// Fold in messages background sub-agents sent this session since
@@ -1164,31 +1173,97 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					if createErr != nil {
 						return callContext, prepared, createErr
 					}
-					prepared.Messages = append(prepared.Messages, userMessage.ToAIMessage()...)
+					note := userMessage.ToAIMessage()
+					injections.add(appendAt, note...)
+					prepared.Messages = append(prepared.Messages, note...)
 				}
+			}
+
+			// Context the harness adds for the model - directory
+			// instructions, activated skills, language-server reports,
+			// the execution state, the runtime environment - is written
+			// to the session as a ContextNote row and replayed at this
+			// index for the rest of the turn. Sent only in the request
+			// that first needed it, each of these sat behind the step's
+			// new tool results, past every cached token, and was paid
+			// for again on every step; as history it is cached like the
+			// rest. A canceled step adds nothing: it is about to fail,
+			// and its rows would be created on a dead context.
+			inject := func(kind string, produce func([]fantasy.Message) []fantasy.Message) error {
+				if callContext.Err() != nil {
+					return nil
+				}
+				before := len(prepared.Messages)
+				next := produce(prepared.Messages)
+				for _, msg := range next[before:] {
+					text := messageText(msg)
+					if text == "" {
+						continue
+					}
+					if _, createErr := a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
+						Role:  message.User,
+						Parts: []message.ContentPart{message.ContextNote{Kind: kind, Text: text}},
+					}); createErr != nil {
+						return createErr
+					}
+					injections.add(appendAt, msg)
+				}
+				prepared.Messages = next
+				return nil
 			}
 
 			// Collect whatever the language servers worked out since the last
 			// step. Edits hand their file over and return without waiting, so
 			// this is where the analysis of the previous step's writes
 			// arrives. Usually there is nothing to say and nothing is added.
-			if report := tools.DiagnosticsSweep(callContext, a.lspManager); report != "" {
-				prepared.Messages = append(prepared.Messages, fantasy.NewUserMessage(fmt.Sprintf(
+			if err = inject(message.ContextNoteDiagnostics, func(msgs []fantasy.Message) []fantasy.Message {
+				report := tools.DiagnosticsSweep(callContext, a.lspManager)
+				if report == "" {
+					return msgs
+				}
+				return append(msgs, fantasy.NewUserMessage(fmt.Sprintf(
 					"<system_reminder>\nLanguage servers reported this since your last step. "+
 						"Fix what you caused; ignore the rest. Do not mention this reminder.\n%s</system_reminder>",
 					report,
 				)))
+			}); err != nil {
+				return callContext, prepared, err
 			}
 
-			sessionLock.Lock()
-			executionSnapshot := execution.Render()
-			sessionLock.Unlock()
-			if executionSnapshot != "" {
-				prepared.Messages = append(prepared.Messages, fantasy.NewUserMessage(executionSnapshot))
+			// The execution state is a snapshot; a new one is written
+			// only when it differs from the last one sent.
+			if err = inject(message.ContextNoteExecutionState, func(msgs []fantasy.Message) []fantasy.Message {
+				sessionLock.Lock()
+				snapshot := execution.Render()
+				sessionLock.Unlock()
+				if snapshot == "" || snapshot == lastTaggedUserText(msgs, "<execution_state>") {
+					return msgs
+				}
+				return append(msgs, fantasy.NewUserMessage(snapshot))
+			}); err != nil {
+				return callContext, prepared, err
 			}
-			prepared.Messages = a.directoryInstructions.Prepare(callContext, prepared.Messages)
-			prepared.Messages = activation.Prepare(callContext, prepared.Messages)
-			prepared.Messages = withRuntimeContext(prepared.Messages, runtimePrompt)
+			if err = inject(message.ContextNoteDirectoryInstructions, func(msgs []fantasy.Message) []fantasy.Message {
+				return a.directoryInstructions.Prepare(callContext, msgs)
+			}); err != nil {
+				return callContext, prepared, err
+			}
+			if err = inject(message.ContextNoteSkill, func(msgs []fantasy.Message) []fantasy.Message {
+				return activation.Prepare(callContext, msgs)
+			}); err != nil {
+				return callContext, prepared, err
+			}
+			// The runtime environment is described once, behind the
+			// first prompt; the git status in it is a snapshot from
+			// then anyway, and the date rarely turns over mid-session.
+			if err = inject(message.ContextNoteRuntime, func(msgs []fantasy.Message) []fantasy.Message {
+				if runtimeContextPresent(msgs) {
+					return msgs
+				}
+				return withRuntimeContext(msgs, runtimePrompt)
+			}); err != nil {
+				return callContext, prepared, err
+			}
 			prepared.Messages = a.workaroundProviderMediaLimitations(prepared.Messages, largeModel)
 			prepared.Messages = mergeConsecutiveUserMessages(prepared.Messages)
 

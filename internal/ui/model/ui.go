@@ -1801,6 +1801,10 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			m.updateLayoutAndSize()
 			return nil
 		}
+		// A harness context note is history for the model only.
+		if msg.ContextNotesOnly() {
+			return nil
+		}
 		// Shell commands are rendered live via shellResultMsg; skip
 		// the persisted duplicate.
 		if message.HasPart[message.ShellCommand](&msg) {

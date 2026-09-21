@@ -41,16 +41,20 @@ func TestCoderRuntimeChangesLeaveStableInstructionsUnchanged(t *testing.T) {
 	require.Equal(t, stablePrompts[0], stablePrompts[1])
 }
 
-func TestRuntimeContextIsEphemeralAndFollowsHistory(t *testing.T) {
+// The runtime block follows the first prompt and is then found in the
+// history rather than sent again: a message that trails every step's
+// new tool results is never in the cached prefix.
+func TestRuntimeContextIsWrittenOnceAndFoundThereafter(t *testing.T) {
 	t.Parallel()
 	history := []fantasy.Message{fantasy.NewUserMessage("task")}
-	for range 2 {
-		prepared := withRuntimeContext(history, "environment")
-		require.Len(t, prepared, 2)
-		require.Len(t, history, 1)
-		text, ok := fantasy.AsMessagePart[fantasy.TextPart](prepared[1].Content[0])
-		require.True(t, ok)
-		require.Equal(t, 1, strings.Count(text.Text, "environment"))
-	}
+	require.False(t, runtimeContextPresent(history))
+	prepared := withRuntimeContext(history, "environment")
+	require.Len(t, prepared, 2)
+	text, ok := fantasy.AsMessagePart[fantasy.TextPart](prepared[1].Content[0])
+	require.True(t, ok)
+	require.Equal(t, 1, strings.Count(text.Text, "environment"))
+	require.True(t, runtimeContextPresent(prepared))
+	merged := []fantasy.Message{fantasy.NewUserMessage("task\n\n" + text.Text)}
+	require.True(t, runtimeContextPresent(merged), "a block merged behind the prompt still counts")
 	require.Equal(t, history, withRuntimeContext(history, ""))
 }

@@ -359,3 +359,25 @@ func TestAppendReasoningContentPreservesFields(t *testing.T) {
 	require.Equal(t, "tool-1", got.ToolID)
 	require.Equal(t, "outer-sig", got.Signature)
 }
+
+func TestToAIMessage_ContextNoteReadsAsUserText(t *testing.T) {
+	t.Parallel()
+
+	note := ContextNote{Kind: ContextNoteRuntime, Text: "<harness_runtime>\nenv\n</harness_runtime>"}
+	msg := &Message{Role: User, Parts: []ContentPart{note, Finish{Reason: "stop"}}}
+	messages := msg.ToAIMessage()
+	require.Len(t, messages, 1)
+	require.Len(t, messages[0].Content, 1)
+	text, ok := messages[0].Content[0].(fantasy.TextPart)
+	require.True(t, ok)
+	require.Equal(t, note.Text, text.Text, "the note is sent verbatim, so it matches the message it was first sent as")
+	require.True(t, msg.ContextNotesOnly())
+	require.False(t, (&Message{Role: User, Parts: []ContentPart{note, TextContent{Text: "typed"}}}).ContextNotesOnly())
+	require.False(t, (&Message{Role: User, Parts: []ContentPart{Finish{Reason: "stop"}}}).ContextNotesOnly())
+
+	data, err := marshalParts(msg.Parts)
+	require.NoError(t, err)
+	parts, err := unmarshalParts(data)
+	require.NoError(t, err)
+	require.Equal(t, note, parts[0])
+}

@@ -488,6 +488,10 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		if msg.SubagentNotesOnly() {
 			return nil
 		}
+		// A harness context note is history for the model only.
+		if msg.ContextNotesOnly() {
+			return nil
+		}
 		// Nothing to render means no item: an empty entry would sit in
 		// the transcript as an invisible slot the selection could land on.
 		if strings.TrimSpace(msg.Content().Text) == "" && len(msg.BinaryContent()) == 0 {

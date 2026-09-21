@@ -170,6 +170,54 @@ func (sn SubagentNote) String() string {
 
 func (SubagentNote) isPart() {}
 
+// ContextNote is context the harness put in front of the model on its
+// own: a directory's instructions, an auto-activated skill, a
+// language-server report, the execution-state snapshot or the runtime
+// environment. Nobody typed it and nobody reads it in the transcript,
+// so renderers skip it like a SubagentNote. It is stored as a user
+// message all the same, because a note that only lives in one step's
+// request sits past every cached token and is paid for again on every
+// step; a stored row has a fixed place in the history the model is sent
+// and is cached like the rest of it.
+type ContextNote struct {
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+}
+
+// The kinds of ContextNote the agent writes.
+const (
+	ContextNoteRuntime               = "runtime"
+	ContextNoteExecutionState        = "execution_state"
+	ContextNoteDirectoryInstructions = "directory_instructions"
+	ContextNoteSkill                 = "skill"
+	ContextNoteDiagnostics           = "diagnostics"
+)
+
+func (ContextNote) isPart() {}
+
+// ContextNotes returns all ContextNote parts from the message.
+func (m *Message) ContextNotes() []ContextNote {
+	return PartsOf[ContextNote](m)
+}
+
+// ContextNotesOnly reports whether the message carries nothing but
+// harness context notes (and the Finish part persistence appends to
+// every non-assistant message). Such a message is history for the
+// model, not conversation for the reader.
+func (m *Message) ContextNotesOnly() bool {
+	notes := 0
+	for _, part := range m.Parts {
+		switch part.(type) {
+		case ContextNote:
+			notes++
+		case Finish:
+		default:
+			return false
+		}
+	}
+	return notes > 0
+}
+
 // HasShellCommand reports whether the message contains any ShellCommand parts.
 func (m *Message) HasShellCommand() bool {
 	for _, part := range m.Parts {
@@ -702,6 +750,14 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 				text += "\n\n"
 			}
 			text += note.String()
+		}
+		// Harness context notes likewise: the model reads them, the
+		// transcript does not show them.
+		for _, note := range m.ContextNotes() {
+			if text != "" {
+				text += "\n\n"
+			}
+			text += note.Text
 		}
 		if text != "" {
 			parts = append(parts, fantasy.TextPart{Text: text})

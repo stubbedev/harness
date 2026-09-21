@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -62,7 +63,10 @@ func runScript(t *testing.T, agent SessionAgent, env fakeEnv, prompt string) []m
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
-	return msgs
+	// The runtime block and other harness context are stored as
+	// ContextNote rows so they stay in the cached prefix; they are not
+	// conversation and the scripts here assert on the conversation.
+	return slices.DeleteFunc(msgs, func(m message.Message) bool { return m.ContextNotesOnly() })
 }
 
 // toolResults pairs every tool result back to the call that produced it
