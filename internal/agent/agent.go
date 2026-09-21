@@ -1230,9 +1230,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return callContext, prepared, err
 			}
 
-			// The execution state is a snapshot; a new one is written
-			// only when it differs from the last one sent.
+			// The execution state is a snapshot, written at the start of
+			// a turn when it differs from the last one sent. Not per
+			// step: within a turn the tool results themselves say what
+			// changed, and a snapshot per step either piles up (every
+			// one stays in the history) or has to replace the previous
+			// one, which rewrites a sent message and costs the cache.
 			if err = inject(message.ContextNoteExecutionState, func(msgs []fantasy.Message) []fantasy.Message {
+				if options.StepNumber > 0 {
+					return msgs
+				}
 				sessionLock.Lock()
 				snapshot := execution.Render()
 				sessionLock.Unlock()

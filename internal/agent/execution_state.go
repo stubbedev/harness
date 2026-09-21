@@ -19,6 +19,7 @@ const (
 	executionRecordsLimit  = 16
 	executionTextLimit     = 512
 	executionMetadataLimit = 2048
+	executionKeyLength     = 12
 )
 
 type executionEntry struct {
@@ -29,11 +30,13 @@ type executionEntry struct {
 	ExitCode *int            `json:"exit_code,omitempty"`
 	Detail   string          `json:"detail,omitempty"`
 	Metadata json.RawMessage `json:"metadata,omitempty"`
-	Sequence uint64          `json:"sequence"`
+	// Sequence orders entries while the state is built; it is not
+	// rendered, since the model gets nothing from a counter per entry.
+	Sequence uint64 `json:"-"`
 }
 
 type executionState struct {
-	Sequence     uint64            `json:"sequence,omitempty"`
+	Sequence     uint64            `json:"-"`
 	Files        []executionEntry  `json:"changed_files,omitempty"`
 	Commands     []executionEntry  `json:"commands,omitempty"`
 	Sessions     []executionEntry  `json:"shell_sessions,omitempty"`
@@ -124,7 +127,9 @@ func executionKey(tool, input string) string {
 		}
 	}
 	digest := sha256.Sum256([]byte(tool + "\x00" + input))
-	return hex.EncodeToString(digest[:])
+	// Twelve hex digits: the key only has to be unique within one
+	// session, and the full digest was a third of every snapshot.
+	return hex.EncodeToString(digest[:])[:executionKeyLength]
 }
 
 func (s *executionState) put(entries *[]executionEntry, entry executionEntry) {
@@ -362,6 +367,10 @@ func (s *executionState) ingestFiles(metadata map[string]json.RawMessage, entry 
 			if path == "" {
 				continue
 			}
+			// The key is the path; saying it again in the metadata was
+			// the longest field of every file entry.
+			delete(file, "path")
+			delete(file, "file_path")
 			data, _ := json.Marshal(file)
 			fileEntry := executionEntry{Key: path, Tool: entry.Tool, Status: "changed", Metadata: boundedExecutionMetadata(data)}
 			s.put(&s.Files, fileEntry)

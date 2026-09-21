@@ -26,5 +26,5 @@ func TestFileMutationMetadataPreservesRendererMetadata(t *testing.T) {
 	require.Equal(t, 1, metadata.Additions)
 	require.Len(t, metadata.Mutations, 1)
 	digest := sha256.Sum256(content)
-	require.Equal(t, fileMutation{Path: path, Version: hex.EncodeToString(digest[:])}, metadata.Mutations[0])
+	require.Equal(t, fileMutation{Path: path, Version: hex.EncodeToString(digest[:])[:12]}, metadata.Mutations[0], "the version is the first twelve hex digits of the content digest")
 }

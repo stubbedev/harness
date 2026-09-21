@@ -125,3 +125,50 @@ func TestRequestsGrowOnlyAtTheEnd(t *testing.T) {
 	require.Equal(t, message.ContextNoteRuntime, notes[0].Kind)
 	require.Contains(t, notes[0].Text, "<harness_runtime>")
 }
+
+func countTagged(msgs []fantasy.Message, tag string) int {
+	n := 0
+	for _, msg := range msgs {
+		n += strings.Count(messageText(msg), tag)
+	}
+	return n
+}
+
+// The execution state is written at the start of a turn, not once per
+// step: a turn's own tool results already say what changed, and a
+// snapshot per step would pile up in the history.
+func TestExecutionStateIsSnapshottedOncePerTurn(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on windows for now")
+	}
+
+	env := testEnv(t)
+	createSimpleGoProject(t, env.workingDir)
+	large := newScriptedModel(
+		scriptedTurn{calls: []scriptedCall{{name: tools.WriteToolName, input: map[string]any{"file_path": "a.txt", "content": "one"}}}},
+		scriptedTurn{calls: []scriptedCall{{name: tools.WriteToolName, input: map[string]any{"file_path": "b.txt", "content": "two"}}}},
+		scriptedTurn{text: "written"},
+		scriptedTurn{text: "still here"},
+	)
+	agent, err := coderAgent(nil, env, large, textModel("A Session"))
+	require.NoError(t, err)
+	sess, err := env.sessions.Create(t.Context(), "snapshots")
+	require.NoError(t, err)
+	for _, prompt := range []string{"write two files", "anything else?"} {
+		res, runErr := agent.Run(t.Context(), SessionAgentCall{Prompt: prompt, SessionID: sess.ID, MaxOutputTokens: 10000})
+		require.NoError(t, runErr)
+		require.NotNil(t, res)
+	}
+
+	sent := large.sentCalls()
+	require.Len(t, sent, 4, "three steps in the first turn, one in the second")
+	for i := range 3 {
+		require.Equal(t, 0, countTagged(sent[i].Prompt, "<execution_state>"), "request %d: nothing had run when the turn began", i+1)
+	}
+	require.Equal(t, 1, countTagged(sent[3].Prompt, "<execution_state>"), "the second turn opens with one snapshot of the first")
+	snapshot := lastTaggedUserText(sent[3].Prompt, "<execution_state>")
+	require.Contains(t, snapshot, "a.txt")
+	require.Contains(t, snapshot, "b.txt")
+	require.NotContains(t, snapshot, `"sequence"`, "per-entry sequence numbers are not rendered")
+}

@@ -23,7 +23,10 @@ func withFileMutations(response fantasy.ToolResponse, paths ...string) fantasy.T
 			continue
 		}
 		digest := sha256.Sum256(content)
-		mutations = append(mutations, fileMutation{Path: path, Version: hex.EncodeToString(digest[:])})
+		// The version tells one edit of a file from the next within a
+		// session; twelve hex digits do that, and the full digest per
+		// file was a third of every execution-state snapshot.
+		mutations = append(mutations, fileMutation{Path: path, Version: hex.EncodeToString(digest[:])[:12]})
 	}
 	if len(mutations) == 0 {
 		return response
