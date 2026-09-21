@@ -71,6 +71,15 @@ func NewDirectoryInstructions(root string, contextPaths []string) *DirectoryInst
 		if filepath.IsAbs(name) || strings.HasSuffix(name, "/") || strings.ContainsAny(name, "*?[") {
 			continue
 		}
+		// In a subdirectory only the upper-case spelling is an
+		// instruction file. A lower-case harness.md deep in a tree is
+		// something else - this repository documents its `harness` tool
+		// in one - and it was injected as project instructions.
+		if base := filepath.Base(name); strings.EqualFold(base, "harness.md") || strings.EqualFold(base, "harness.local.md") {
+			if base != "HARNESS.md" && base != "HARNESS.local.md" {
+				continue
+			}
+		}
 		name = filepath.Clean(name)
 		if name == "." || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
 			continue
