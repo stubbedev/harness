@@ -660,6 +660,22 @@ func TestCreateWorkspace_RejectsRelativePath(t *testing.T) {
 	}
 }
 
+// TestCreateWorkspace_RejectsRelativeDataDir covers the data_dir half of
+// the wire-boundary validation: the data directory roots every
+// workspace-scoped write, so an explicit one must be absolute with no
+// control characters; an empty one selects the harness default and must
+// keep flowing through untouched.
+func TestCreateWorkspace_RejectsRelativeDataDir(t *testing.T) {
+	t.Parallel()
+
+	b := New(context.Background(), nil, func() {})
+
+	for _, dataDir := range []string{"relative/dir", "../escape", "dir\x00name"} {
+		_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), dataDir, uuid.New().String()))
+		require.ErrorIs(t, err, ErrInvalidDataDir, "data_dir %q must be rejected", dataDir)
+	}
+}
+
 // drainBackend tears the backend down at the end of a test by deleting
 // every remaining workspace. Necessary so the test process doesn't
 // leak goroutines or DB handles from the embedded [app.App] instances.

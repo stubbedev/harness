@@ -34,6 +34,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/event"
+	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/lock"
 	harnesslog "github.com/stubbedev/harness/internal/log"
 	"github.com/stubbedev/harness/internal/projects"
@@ -391,6 +392,13 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	cwd, err := ResolveCwd(cmd)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+
+	// The server accepts only an absolute data_dir; resolve a relative
+	// --data-dir against the working directory the way the local config
+	// loader would.
+	if dataDir != "" {
+		dataDir = filepathext.SmartJoin(cwd, dataDir)
 	}
 
 	c, err := client.NewClient(cwd, hostURL.Scheme, hostURL.Host)

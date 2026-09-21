@@ -38,6 +38,7 @@ var (
 	ErrInvalidWorkspacePath    = errors.New("invalid workspace path")
 	ErrInvalidSessionID        = errors.New("invalid session_id")
 	ErrInvalidRunID            = errors.New("invalid run_id")
+	ErrInvalidDataDir          = errors.New("invalid data_dir")
 	ErrInvalidPermissionAction = errors.New("invalid permission action")
 	ErrUnknownCommand          = errors.New("unknown command")
 	ErrInvalidClientID         = errors.New("invalid client_id")
@@ -55,6 +56,11 @@ var (
 // The filepath.IsAbs and directory checks in CreateWorkspace narrow it
 // further on the host that accepts it.
 var workspacePathPattern = regexp.MustCompile(`^(/|[A-Za-z]:[\\/]|\\\\)[^\x00-\x1f]*$`)
+
+// dataDirPattern matches workspacePathPattern or the empty string: an
+// empty data_dir selects the harness default workspace data directory,
+// so only the shape and absoluteness of an explicit one are checked.
+var dataDirPattern = regexp.MustCompile("^$|" + workspacePathPattern.String())
 
 // DefaultCreateGrace is the window in which a client must open an SSE
 // stream after creating a workspace before its creation hold is
@@ -371,6 +377,14 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	if !workspacePathPattern.MatchString(path) || !filepath.IsAbs(path) {
 		return nil, proto.Workspace{}, fmt.Errorf("%w: %q", ErrInvalidWorkspacePath, path)
 	}
+	dataDir := args.DataDir
+	// The data directory arrives over the same wire and becomes the root
+	// for every workspace-scoped write (sessions, database, logs), so it
+	// follows the workspace path's rule: absolute, no control characters,
+	// or empty to take the harness default.
+	if !dataDirPattern.MatchString(dataDir) || (dataDir != "" && !filepath.IsAbs(dataDir)) {
+		return nil, proto.Workspace{}, fmt.Errorf("%w: %q", ErrInvalidDataDir, dataDir)
+	}
 	clientID, err := validateClientID(args.ClientID)
 	if err != nil {
 		return nil, proto.Workspace{}, err
@@ -436,7 +450,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}()
 
 	id := uuid.New().String()
-	cfg, err := config.Init(path, args.DataDir, args.Debug)
+	cfg, err := config.Init(path, dataDir, args.Debug)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
 	}
