@@ -137,7 +137,7 @@ func TestPostAgentSessionCancelTurn_RoutesToTurnCancel(t *testing.T) {
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		"/v1/workspaces/"+wsID+"/agent/sessions/S1/cancel-turn", nil)
 	req.SetPathValue("id", wsID)
-	req.SetPathValue("sid", "S1")
+	req.SetPathValue("sid", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	rec := httptest.NewRecorder()
 	c.handlePostWorkspaceAgentSessionCancelTurn(rec, req)
 
@@ -163,7 +163,7 @@ func TestPostAgent_ReturnsOKOnContextCanceled(t *testing.T) {
 
 	// The handler returns immediately, before the dispatched run is
 	// released, because the run no longer owns the HTTP response.
-	rec := postAgent(t, c, t.Context(), wsID, "S1")
+	rec := postAgent(t, c, t.Context(), wsID, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	require.Equal(t, http.StatusAccepted, rec.Code, "fire-and-forget SendMessage must return 202 without waiting for the run")
 
 	// The run is dispatched on a goroutine; let it return
@@ -223,7 +223,7 @@ func TestPostAgent_DetachesRequestContext(t *testing.T) {
 
 	// The handler returns immediately; the run keeps executing on its
 	// own goroutine bound to the workspace context.
-	rec := postAgent(t, c, reqCtx, wsID, "S1")
+	rec := postAgent(t, c, reqCtx, wsID, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	require.Equal(t, http.StatusAccepted, rec.Code)
 
 	select {

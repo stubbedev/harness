@@ -15,6 +15,14 @@ import (
 	"github.com/stubbedev/harness/internal/proto"
 )
 
+// testSessionID and testRunID are pattern-valid identifiers for wire
+// fixtures; the backend now rejects identifiers that are not canonical
+// UUIDs, so fixtures must use the shape real clients send.
+const (
+	testSessionID = "00000000-0000-4000-8000-000000000001"
+	testRunID     = "00000000-0000-4000-8000-000000000002"
+)
+
 // blockingCoordinator is a minimal agent.Coordinator whose RunAccepted
 // blocks until release is closed. It records that RunAccepted was
 // entered so tests can observe the dispatched goroutine. Every other
@@ -84,7 +92,7 @@ func insertAgentWorkspace(t *testing.T, b *Backend, coord agent.Coordinator) *Wo
 func TestSendMessage_WorkspaceNotFound(t *testing.T) {
 	t.Parallel()
 	b, _ := newTestBackend(t)
-	err := b.SendMessage("nope", proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
+	err := b.SendMessage("nope", proto.AgentMessage{SessionID: testSessionID, Prompt: "hi"})
 	require.ErrorIs(t, err, ErrWorkspaceNotFound)
 }
 
@@ -92,7 +100,7 @@ func TestSendMessage_AgentNotInitialized(t *testing.T) {
 	t.Parallel()
 	b, _ := newTestBackend(t)
 	ws := insertAgentWorkspace(t, b, nil)
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
+	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: testSessionID, Prompt: "hi"})
 	require.ErrorIs(t, err, ErrAgentNotInitialized)
 }
 
@@ -100,7 +108,7 @@ func TestSendMessage_EmptyPrompt(t *testing.T) {
 	t.Parallel()
 	b, _ := newTestBackend(t)
 	ws := insertAgentWorkspace(t, b, newBlockingCoordinator())
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: ""})
+	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: testSessionID, Prompt: ""})
 	require.ErrorIs(t, err, agent.ErrEmptyPrompt)
 }
 
@@ -112,6 +120,25 @@ func TestSendMessage_SessionMissing(t *testing.T) {
 	require.ErrorIs(t, err, agent.ErrSessionMissing)
 }
 
+// TestSendMessage_RejectsNonUUIDIdentifiers covers the wire-boundary
+// identifier validation: identifiers reach scratch directory names,
+// context values, and child-process environments downstream, so only
+// the canonical UUID shape harness mints them in is accepted.
+func TestSendMessage_RejectsNonUUIDIdentifiers(t *testing.T) {
+	t.Parallel()
+	b, _ := newTestBackend(t)
+	ws := insertAgentWorkspace(t, b, newBlockingCoordinator())
+
+	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
+	require.ErrorIs(t, err, ErrInvalidSessionID)
+
+	err = b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "../../etc", Prompt: "hi"})
+	require.ErrorIs(t, err, ErrInvalidSessionID)
+
+	err = b.SendMessage(ws.ID, proto.AgentMessage{SessionID: testSessionID, RunID: "run-1", Prompt: "hi"})
+	require.ErrorIs(t, err, ErrInvalidRunID)
+}
+
 func TestSendMessage_WorkspaceClosing(t *testing.T) {
 	t.Parallel()
 	b, _ := newTestBackend(t)
@@ -119,7 +146,7 @@ func TestSendMessage_WorkspaceClosing(t *testing.T) {
 	ws.runMu.Lock()
 	ws.closing = true
 	ws.runMu.Unlock()
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
+	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: testSessionID, Prompt: "hi"})
 	require.ErrorIs(t, err, ErrWorkspaceClosing)
 }
 
@@ -133,7 +160,7 @@ func TestSendMessage_SuccessIncrementsRunWG(t *testing.T) {
 	coord := newBlockingCoordinator()
 	ws := insertAgentWorkspace(t, b, coord)
 
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
+	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: testSessionID, Prompt: "hi"})
 	require.NoError(t, err)
 
 	select {

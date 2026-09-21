@@ -641,6 +641,22 @@ func TestCreateWorkspace_RejectsBadClientID(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidClientID)
 }
 
+// TestCreateWorkspace_RejectsRelativePath covers the wire-boundary path
+// validation: the path becomes the root every file operation and child
+// process runs against, so only an absolute path with no control
+// characters is accepted. Relative paths, traversal payloads, and
+// home-relative forms are rejected before reaching config or the tools.
+func TestCreateWorkspace_RejectsRelativePath(t *testing.T) {
+	t.Parallel()
+
+	b := New(context.Background(), nil, func() {})
+
+	for _, path := range []string{"relative/path", "../escape", "dir\x00name", "~/home-relative"} {
+		_, _, err := b.CreateWorkspace(protoWS(path, t.TempDir(), uuid.New().String()))
+		require.ErrorIs(t, err, ErrInvalidWorkspacePath, "path %q must be rejected", path)
+	}
+}
+
 // drainBackend tears the backend down at the end of a test by deleting
 // every remaining workspace. Necessary so the test process doesn't
 // leak goroutines or DB handles from the embedded [app.App] instances.

@@ -339,7 +339,7 @@ func TestE2E_CancelByOtherClientDoesNotErrorPrompter(t *testing.T) {
 	t.Cleanup(cancelB)
 	h.waitForAttached(t, 2)
 
-	const sid = "s-cancel-other"
+	const sid = "33333333-3333-4333-8333-333333333333"
 
 	// A posts a long-running prompt; the handler must return 202
 	// immediately (the run blocks in the coordinator).
@@ -398,7 +398,7 @@ func TestE2E_CancelImmediatelyAfter202IsNotLost(t *testing.T) {
 	t.Cleanup(cancelSSE)
 	h.waitForAttached(t, 1)
 
-	const sid = "s-race-cancel"
+	const sid = "44444444-4444-4444-8444-444444444444"
 	require.Equal(t, http.StatusAccepted, h.postAgentHTTP(t, ctx, sid))
 	h.waitForRunEntered(t)
 
@@ -447,7 +447,7 @@ func TestE2E_IdleCancelDoesNotPoisonNextPrompt(t *testing.T) {
 	t.Cleanup(cancelSSE)
 	h.waitForAttached(t, 1)
 
-	const sid = "s-idle-cancel"
+	const sid = "55555555-5555-4555-8555-555555555555"
 
 	// Idle cancel: no run in flight. The scripted coordinator drops it
 	// (no pending cancel recorded for a session that has no run), which
@@ -498,7 +498,7 @@ func TestE2E_CancelBetweenActiveSetAndAssistantCreate(t *testing.T) {
 	t.Cleanup(cancelSSE)
 	h.waitForAttached(t, 1)
 
-	const sid = "s-mid-window"
+	const sid = "66666666-6666-4666-8666-666666666666"
 	require.Equal(t, http.StatusAccepted, h.postAgentHTTP(t, ctx, sid))
 	h.waitForRunEntered(t)
 
@@ -549,7 +549,7 @@ func TestE2E_PromptRequestContextDoesNotOwnRun(t *testing.T) {
 	t.Cleanup(cancelSSE)
 	h.waitForAttached(t, 1)
 
-	const sid = "s-short-req"
+	const sid = "77777777-7777-4777-8777-777777777777"
 
 	// The POST request context times out almost immediately. The
 	// handler must still return 202 (fire-and-forget) and the run must
@@ -593,7 +593,7 @@ func TestE2E_AgentRunSurvivesAcrossWorkspaceClaims(t *testing.T) {
 	t.Cleanup(killB)
 	h.waitForAttached(t, 2)
 
-	const sid = "s-survive"
+	const sid = "88888888-8888-4888-8888-888888888888"
 	// A is the poster; the run must outlive A detaching as long as B
 	// keeps the workspace alive.
 	require.Equal(t, http.StatusAccepted, h.postAgentHTTP(t, ctxA, sid))
@@ -647,7 +647,7 @@ func TestE2E_CancelOfActiveRunAlsoCancelsAcceptedFollowUp(t *testing.T) {
 	t.Cleanup(cancelSSE)
 	h.waitForAttached(t, 1)
 
-	const sid = "s-followup"
+	const sid = "99999999-9999-4999-8999-999999999999"
 
 	// (a) Prompt 1 for sid becomes the active run. Capture its run id so
 	// the canceled assistant message below can be attributed to run 1

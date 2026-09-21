@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"sync"
@@ -33,6 +35,9 @@ var (
 	ErrLSPClientNotFound       = errors.New("LSP client not found")
 	ErrAgentNotInitialized     = errors.New("agent coordinator not initialized")
 	ErrPathRequired            = errors.New("path is required")
+	ErrInvalidWorkspacePath    = errors.New("invalid workspace path")
+	ErrInvalidSessionID        = errors.New("invalid session_id")
+	ErrInvalidRunID            = errors.New("invalid run_id")
 	ErrInvalidPermissionAction = errors.New("invalid permission action")
 	ErrUnknownCommand          = errors.New("unknown command")
 	ErrInvalidClientID         = errors.New("invalid client_id")
@@ -43,6 +48,13 @@ var (
 	ErrClientRetired           = errors.New("client has been retired")
 	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
 )
+
+// workspacePathPattern matches the absolute path shapes a client may
+// register as a workspace root: rooted Unix paths, drive-absolute
+// Windows paths, and UNC shares, with no control characters anywhere.
+// The filepath.IsAbs and directory checks in CreateWorkspace narrow it
+// further on the host that accepts it.
+var workspacePathPattern = regexp.MustCompile(`^(/|[A-Za-z]:[\\/]|\\\\)[^\x00-\x1f]*$`)
 
 // DefaultCreateGrace is the window in which a client must open an SSE
 // stream after creating a workspace before its creation hold is
@@ -347,12 +359,24 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	if args.Path == "" {
 		return nil, proto.Workspace{}, ErrPathRequired
 	}
+	path := args.Path
+	// The path arrives over the wire and becomes the root every file
+	// operation and child process in the workspace runs against, so it
+	// is accepted only in absolute form, with no control characters.
+	// Everything else - relative paths, traversal payloads, drive-relative
+	// Windows forms - is rejected before it can reach config or the agent
+	// tools. The path may not exist yet: resolveWorkspaceKey canonicalizes
+	// the longest existing prefix so two creates of the same not-yet-born
+	// path still dedupe.
+	if !workspacePathPattern.MatchString(path) || !filepath.IsAbs(path) {
+		return nil, proto.Workspace{}, fmt.Errorf("%w: %q", ErrInvalidWorkspacePath, path)
+	}
 	clientID, err := validateClientID(args.ClientID)
 	if err != nil {
 		return nil, proto.Workspace{}, err
 	}
 
-	key, err := resolveWorkspaceKey(args.Path)
+	key, err := resolveWorkspaceKey(path)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
@@ -412,7 +436,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}()
 
 	id := uuid.New().String()
-	cfg, err := config.Init(args.Path, args.DataDir, args.Debug)
+	cfg, err := config.Init(path, args.DataDir, args.Debug)
 	if err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to initialize config: %w", err)
 	}
@@ -453,7 +477,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	ws := &Workspace{
 		App:          appWorkspace,
 		ID:           id,
-		Path:         args.Path,
+		Path:         path,
 		Cfg:          cfg,
 		Env:          args.Env,
 		Skills:       skillsMgr,

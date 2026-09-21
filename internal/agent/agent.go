@@ -741,6 +741,19 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
+// UUIDPattern matches the canonical UUID form every externally visible
+// harness identifier is minted in: session IDs (see session.Create), run
+// IDs, workspace IDs, and client IDs. Wire intake validates against it
+// so an externally supplied identifier can never carry path or command
+// metacharacters into the places an identifier reaches: scratch
+// directories, context values, and child-process environments.
+var UUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// OptionalUUIDPattern matches UUIDPattern or the empty string, for
+// wire identifiers a caller may legitimately omit (an empty value means
+// "not supplied").
+var OptionalUUIDPattern = regexp.MustCompile(`^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err

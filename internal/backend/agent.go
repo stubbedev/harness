@@ -25,8 +25,9 @@ import (
 // ErrWorkspaceNotFound if the workspace is missing, ErrAgentNotInitialized
 // if its coordinator is nil, the structural validation errors from
 // agent.ValidateCall (ErrEmptyPrompt, ErrSessionMissing) when the prompt
-// or session is missing, and ErrWorkspaceClosing if the workspace is
-// being torn down.
+// or session is missing, ErrInvalidSessionID or ErrInvalidRunID when an
+// identifier is not the canonical UUID shape harness mints them in, and
+// ErrWorkspaceClosing if the workspace is being torn down.
 func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
@@ -45,7 +46,23 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return err
 	}
 
-	accept := ws.AgentCoordinator.BeginAccepted(msg.SessionID)
+	sessionID := msg.SessionID
+	// The ID arrives over the wire and reaches scratch directory names,
+	// context values, and git command environments downstream, so only
+	// the canonical UUID shape every session is minted in is accepted.
+	if !agent.UUIDPattern.MatchString(sessionID) {
+		return ErrInvalidSessionID
+	}
+
+	runID := msg.RunID
+	// Same boundary, same rule for the optional run correlator: an empty
+	// RunID means the caller supplied none, anything else must be the
+	// canonical UUID shape `harness run` mints.
+	if !agent.OptionalUUIDPattern.MatchString(runID) {
+		return ErrInvalidRunID
+	}
+
+	accept := ws.AgentCoordinator.BeginAccepted(sessionID)
 
 	ws.runMu.Lock()
 	if ws.closing {
@@ -56,7 +73,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 	ws.runWG.Add(1)
 	ws.runMu.Unlock()
 
-	go b.runAgent(ws, msg, accept)
+	go b.runAgent(ws, msg, sessionID, runID, accept)
 	return nil
 }
 
@@ -84,24 +101,24 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // notify.RunComplete event with that correlator. A run-complete marker
 // is also attached so the coordinator can report whether it published
 // the terminal event, letting runAgent avoid a duplicate fallback.
-func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.AcceptedRun) {
+func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, sessionID, runID string, accept *agent.AcceptedRun) {
 	defer ws.runWG.Done()
 	defer accept.Close()
 
 	ctx := ws.ctx
-	if msg.RunID != "" {
-		ctx = agent.WithRunID(ctx, msg.RunID)
+	if runID != "" {
+		ctx = agent.WithRunID(ctx, runID)
 	}
 	ctx = agent.WithRunCompleteMarker(ctx)
 
-	_, err := ws.AgentCoordinator.RunAccepted(ctx, accept, msg.SessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
+	_, err := ws.AgentCoordinator.RunAccepted(ctx, accept, sessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
 	if err == nil || errors.Is(err, context.Canceled) {
 		return
 	}
 
 	ws.AgentNotifications().Publish(pubsub.CreatedEvent, notify.Notification{
-		SessionID: msg.SessionID,
-		RunID:     msg.RunID,
+		SessionID: sessionID,
+		RunID:     runID,
 		Type:      notify.TypeAgentError,
 		Message:   err.Error(),
 	})
@@ -109,13 +126,13 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, accept *agent.
 	// Reliable terminal fallback. Only needed when a RunID waiter
 	// exists and the coordinator has not already emitted the run's
 	// terminal RunComplete; otherwise this would be a duplicate.
-	if msg.RunID == "" || agent.RunCompletePublished(ctx) {
+	if runID == "" || agent.RunCompletePublished(ctx) {
 		return
 	}
 	if rc := ws.RunCompletions(); rc != nil {
 		rc.PublishMustDeliver(ctx, pubsub.UpdatedEvent, notify.RunComplete{
-			SessionID: msg.SessionID,
-			RunID:     msg.RunID,
+			SessionID: sessionID,
+			RunID:     runID,
 			Error:     err.Error(),
 		})
 	}

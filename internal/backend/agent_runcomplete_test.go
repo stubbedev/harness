@@ -90,14 +90,14 @@ func TestRunAgent_PreRunErrorPublishesTerminalRunComplete(t *testing.T) {
 	subCtx := t.Context()
 	ch := ws.RunCompletions().Subscribe(subCtx)
 
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
+	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: testSessionID, RunID: testRunID, Prompt: "hi"})
 	require.NoError(t, err)
 
 	select {
 	case ev := <-ch:
-		require.Equal(t, "run-1", ev.Payload.RunID,
+		require.Equal(t, testRunID, ev.Payload.RunID,
 			"the terminal RunComplete must carry the dispatched RunID")
-		require.Equal(t, "S1", ev.Payload.SessionID)
+		require.Equal(t, testSessionID, ev.Payload.SessionID)
 		require.Equal(t, runErr.Error(), ev.Payload.Error,
 			"the fallback terminal event must be marked errored")
 		require.False(t, ev.Payload.Cancelled)
@@ -120,7 +120,7 @@ func TestRunAgent_NoFallbackWhenCoordinatorPublished(t *testing.T) {
 	subCtx := t.Context()
 	ch := ws.RunCompletions().Subscribe(subCtx)
 
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
+	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: testSessionID, RunID: testRunID, Prompt: "hi"})
 	require.NoError(t, err)
 
 	// Wait for the dispatched run goroutine to return so any publish
@@ -148,7 +148,7 @@ func TestRunAgent_CancellationPublishesNoErrorTerminal(t *testing.T) {
 	subCtx := t.Context()
 	ch := ws.RunCompletions().Subscribe(subCtx)
 
-	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", RunID: "run-1", Prompt: "hi"})
+	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: testSessionID, RunID: testRunID, Prompt: "hi"})
 	require.NoError(t, err)
 
 	ws.runWG.Wait()

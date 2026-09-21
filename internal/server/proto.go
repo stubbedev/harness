@@ -1220,6 +1220,10 @@ func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err e
 		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrInvalidClientID):
 		status = http.StatusBadRequest
+	case errors.Is(err, backend.ErrInvalidWorkspacePath),
+		errors.Is(err, backend.ErrInvalidSessionID),
+		errors.Is(err, backend.ErrInvalidRunID):
+		status = http.StatusBadRequest
 	case errors.Is(err, backend.ErrClientNotAttached):
 		// 409, not 404: the workspace exists, the caller just has no live
 		// stream yet. A 404 here is indistinguishable from "workspace
