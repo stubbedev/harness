@@ -89,6 +89,17 @@ func equalWorktreeEntries(a, b map[string]worktreeEntry) bool {
 	return maps.Equal(a, b)
 }
 
+// gitFilePerm collapses a regular file's permission bits to the two
+// modes Git records: 0755 when any execute bit is set, 0644 otherwise.
+// Git itself tracks only the executable bit, so anything else on disk
+// is umask noise that would make otherwise-equal snapshots differ.
+func gitFilePerm(perm fs.FileMode) fs.FileMode {
+	if perm&0o111 != 0 {
+		return 0o755
+	}
+	return 0o644
+}
+
 func snapshotWorktree(ctx context.Context, source, destination string, exclusions *worktreeExclusions) (map[string]worktreeEntry, []string, error) {
 	src, err := os.OpenRoot(source)
 	if err != nil {
@@ -136,7 +147,11 @@ func snapshotWorktree(ctx context.Context, source, destination string, exclusion
 			return err
 		}
 		mode := info.Mode()
-		record := worktreeEntry{Mode: mode.Type() | mode.Perm()}
+		perm := mode.Perm()
+		if mode.IsRegular() {
+			perm = gitFilePerm(perm)
+		}
+		record := worktreeEntry{Mode: mode.Type() | perm}
 		switch {
 		case mode.IsDir():
 			if dst != nil {
@@ -168,7 +183,7 @@ func snapshotWorktree(ctx context.Context, source, destination string, exclusion
 			var writer io.Writer = hash
 			var target *os.File
 			if dst != nil {
-				target, err = dst.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode.Perm())
+				target, err = dst.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 				if err != nil {
 					return err
 				}
@@ -179,7 +194,7 @@ func snapshotWorktree(ctx context.Context, source, destination string, exclusion
 				return err
 			}
 			if target != nil {
-				if err := target.Chmod(mode.Perm()); err != nil {
+				if err := target.Chmod(perm); err != nil {
 					return err
 				}
 				if err := target.Close(); err != nil {

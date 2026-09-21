@@ -126,6 +126,23 @@ func TestWorktreeBinaryPatchIncludesUntrackedAndDirtyBaseline(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+// Git tracks only the executable bit, so snapshot modes collapse to
+// 0644/0755 and stay comparable across umasks.
+func TestSnapshotWorktreeNormalizesFileModes(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	worktreeTestWrite(t, root, "plain", "plain\n")
+	worktreeTestWrite(t, root, "loose", "loose\n")
+	worktreeTestWrite(t, root, "script", "#!/bin/sh\n")
+	require.NoError(t, os.Chmod(filepath.Join(root, "loose"), 0o664))
+	require.NoError(t, os.Chmod(filepath.Join(root, "script"), 0o775))
+	entries, _, err := snapshotWorktree(t.Context(), root, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o644), entries["plain"].Mode)
+	require.Equal(t, os.FileMode(0o644), entries["loose"].Mode, "group-write noise must not reach the snapshot")
+	require.Equal(t, os.FileMode(0o755), entries["script"].Mode)
+}
+
 func TestWorktreeCancellationPreserves(t *testing.T) {
 	t.Parallel()
 	root := worktreeTestRepo(t)
