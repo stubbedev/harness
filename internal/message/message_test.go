@@ -808,3 +808,42 @@ func TestShouldFlushNow_AgainstCompactBaseline(t *testing.T) {
 		require.NotZero(t, got.ReasoningContent().FinishedAt)
 	})
 }
+
+// A session's message_count is the transcript's length: rows written for
+// the model alone - context notes, sub-agent report-backs - and legacy
+// summary rows leave it alone, and deleting them leaves it alone too. An
+// assistant row created empty, before it streams, counts.
+func TestMessageCountCountsVisibleMessagesOnly(t *testing.T) {
+	t.Parallel()
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	sess, err := sessions.Create(t.Context(), "count")
+	require.NoError(t, err)
+	svc := NewService(q)
+
+	count := func() int64 {
+		got, getErr := sessions.Get(t.Context(), sess.ID)
+		require.NoError(t, getErr)
+		return got.MessageCount
+	}
+
+	_, err = svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: User, Parts: []ContentPart{TextContent{Text: "hello"}}})
+	require.NoError(t, err)
+	_, err = svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant, Parts: []ContentPart{}})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), count(), "a prompt and an empty assistant row both count")
+
+	note, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: User, Parts: []ContentPart{ContextNote{Kind: ContextNoteRuntime, Text: "env"}}})
+	require.NoError(t, err)
+	_, err = svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: User, Parts: []ContentPart{SubagentNote{AgentName: "bg", Text: "done"}}})
+	require.NoError(t, err)
+	_, err = svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant, Parts: []ContentPart{TextContent{Text: "summary"}}, IsSummaryMessage: true})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), count(), "notes and summaries are not conversation")
+
+	require.NoError(t, svc.Delete(t.Context(), note.ID))
+	require.Equal(t, int64(2), count(), "deleting a note changes nothing")
+}
