@@ -15,8 +15,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCapToolResponse(t *testing.T) {
+// scratchRootForTest returns a scratch root the privacy check accepts:
+// t.TempDir is 0775 under a umask of 002, which ScratchDir refuses.
+func scratchRootForTest(t *testing.T) string {
+	t.Helper()
 	root := t.TempDir()
+	require.NoError(t, os.Chmod(root, 0o700))
+	return root
+}
+
+func TestCapToolResponse(t *testing.T) {
+	root := scratchRootForTest(t)
 	t.Setenv("HARNESS_SCRATCH_DIR", root)
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "session")
 	for _, size := range []int{0, 1, MaxToolResultBytes - 1, MaxToolResultBytes, MaxToolResultBytes + 1, 2 * MaxToolResultBytes, 10 * MaxToolResultBytes} {
@@ -54,7 +63,7 @@ func TestCapToolResponse(t *testing.T) {
 }
 
 func TestCapToolResponseUTF8(t *testing.T) {
-	t.Setenv("HARNESS_SCRATCH_DIR", t.TempDir())
+	t.Setenv("HARNESS_SCRATCH_DIR", scratchRootForTest(t))
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "unicode")
 	for _, content := range []string{strings.Repeat("界é😀", MaxToolResultBytes), strings.Repeat("x\xff", MaxToolResultBytes)} {
 		got := CapToolResponse(ctx, fantasy.NewTextResponse(content))
@@ -67,7 +76,7 @@ func TestCapToolResponseUTF8(t *testing.T) {
 }
 
 func TestCapToolResponseMedia(t *testing.T) {
-	t.Setenv("HARNESS_SCRATCH_DIR", filepath.Join(t.TempDir(), "unused"))
+	t.Setenv("HARNESS_SCRATCH_DIR", filepath.Join(scratchRootForTest(t), "unused"))
 	for _, response := range []fantasy.ToolResponse{
 		{Type: "image", Content: strings.Repeat("a", MaxToolResultBytes+1), MediaType: "image/png"},
 		{Type: "media", Content: strings.Repeat("b", MaxToolResultBytes+1), MediaType: "audio/wav"},
@@ -80,7 +89,7 @@ func TestCapToolResponseMedia(t *testing.T) {
 }
 
 func TestCapToolResponseConcurrent(t *testing.T) {
-	t.Setenv("HARNESS_SCRATCH_DIR", t.TempDir())
+	t.Setenv("HARNESS_SCRATCH_DIR", scratchRootForTest(t))
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "concurrent")
 	const count = 32
 	responses := make([]fantasy.ToolResponse, count)

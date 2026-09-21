@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -65,7 +66,11 @@ func TestIsContextLengthError(t *testing.T) {
 }
 
 func TestWithResultCap(t *testing.T) {
-	t.Setenv("HARNESS_SCRATCH_DIR", t.TempDir())
+	// t.TempDir is 0775 under a umask of 002, which the scratch privacy
+	// check rejects; tighten it to 0700.
+	root := t.TempDir()
+	require.NoError(t, os.Chmod(root, 0o700))
+	t.Setenv("HARNESS_SCRATCH_DIR", root)
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "cap-session")
 	for _, name := range []string{"builtin", "mcp_server_tool"} {
 		t.Run(name, func(t *testing.T) {
