@@ -431,3 +431,12 @@ func TestCompactionExecutionStatePersistsIndependentOfNarrative(t *testing.T) {
 	require.Contains(t, rendered, "sha256:first")
 	require.NotContains(t, rendered, "harness_execution_version")
 }
+
+// The compaction ratios apply to the usable window up to a ceiling: a
+// million-token model still compacts once its history passes a quarter
+// million tokens.
+func TestCompactionBudgetIsCapped(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, int64(8000), compactionBudget(8000))
+	assert.Equal(t, int64(compactionWindowCeiling), compactionBudget(1_000_000))
+}

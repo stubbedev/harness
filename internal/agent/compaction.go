@@ -48,10 +48,18 @@ const (
 	compactionSummarizeRatio = 0.75
 	compactionKeepRatio      = 0.25
 
-	// compactionAgeMinSavingRatio is the share of the usable window an
+	// compactionAgeMinSavingRatio is the share of the compaction budget an
 	// advance of the aging watermark has to free to be worth the cache
 	// it costs.
 	compactionAgeMinSavingRatio = 0.1
+
+	// compactionWindowCeiling caps the window the ratios above apply to.
+	// Past a quarter million tokens of history, dead tool output costs
+	// more on every request - billed even when cached, and prefilled in
+	// full on a miss - than the summary that replaces it, however large
+	// the model's window is. The hard overflow checks keep using the
+	// real window.
+	compactionWindowCeiling = 256 << 10
 
 	// compactionStubMaxChars is the size below which a tool result is
 	// not worth stubbing: the stub would be about as long.
@@ -406,7 +414,8 @@ func (a *sessionAgent) maintainContext(
 		return false, nil
 	}
 	projected := a.projectRequest(sess.CompactionSummary, dedupToolResults(ageMessages(tail, agedIdx)), supportsImages)
-	over := func(ratio float64) bool { return cw > 0 && float64(projected) > ratio*float64(cw) }
+	budget := compactionBudget(cw)
+	over := func(ratio float64) bool { return budget > 0 && float64(projected) > ratio*float64(budget) }
 	changed := false
 
 	// Layer 1: age the tool results of every turn but the current one,
@@ -414,7 +423,7 @@ func (a *sessionAgent) maintainContext(
 	if force || over(compactionAgeRatio) {
 		if start := lastUserTurnStart(tail); start > 0 && tail[start-1].ID != sess.CompactionAgedID {
 			aged := a.projectRequest(sess.CompactionSummary, dedupToolResults(ageMessages(tail, start-1)), supportsImages)
-			if force || float64(projected-aged) >= compactionAgeMinSavingRatio*float64(cw) {
+			if force || float64(projected-aged) >= compactionAgeMinSavingRatio*float64(budget) {
 				sess.CompactionAgedID = tail[start-1].ID
 				projected = aged
 				changed = true
@@ -426,7 +435,7 @@ func (a *sessionAgent) maintainContext(
 	if force || over(compactionSummarizeRatio) {
 		cut := len(tail)
 		if !force {
-			cut = a.foldCut(tail, int64(compactionKeepRatio*float64(cw)), supportsImages)
+			cut = a.foldCut(tail, int64(compactionKeepRatio*float64(budget)), supportsImages)
 		}
 		if cut > 0 {
 			if !a.isSubAgent && a.hooks.Has(hooks.EventPreCompact) {
@@ -508,6 +517,14 @@ func (a *sessionAgent) summarizeMessages(
 		history, _ = a.preparePrompt(folded, model.CatalogCfg.SupportsImages)
 		history = withSummary(state.Summary(narrative), history)
 	}
+	// The options handed in are the coding call's, for the large model
+	// at the configured effort; the summary runs on whichever model was
+	// chosen above, at its weakest level.
+	if a.cfg != nil {
+		if providerCfg, ok := a.cfg.Config().Providers.Get(model.ModelCfg.Provider); ok {
+			opts = withPromptCacheKey(sess.ID, auxiliaryProviderOptions(model, providerCfg))
+		}
+	}
 	systemPromptPrefix := a.systemPromptPrefix.Get()
 
 	agent := fantasy.NewAgent(
@@ -563,4 +580,10 @@ func buildSummaryPrompt(instructions string) string {
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+// compactionBudget is the window the compaction ratios apply to: the
+// usable window, capped at compactionWindowCeiling.
+func compactionBudget(usableWindow int64) int64 {
+	return min(usableWindow, compactionWindowCeiling)
 }
