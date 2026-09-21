@@ -665,8 +665,8 @@ func takesInputNow(s ptyTerminal) bool {
 	if s.AltScreen() {
 		return true
 	}
-	if act := s.SampleJob(); act.Observed {
-		return jobWaitingForInput(act)
+	if act := s.SampleJob(); act.Observed && act.WchanReadable {
+		return waitingForInput(s, act)
 	}
 	if s.ForegroundIsShell() {
 		return true
@@ -1177,7 +1177,7 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 				// raw stream is a redraw log and says nothing.
 				s.Drain()
 				return r.screenResult(s), nil
-			} else if act := s.SampleJob(); jobWaitingForInput(act) {
+			} else if act := s.SampleJob(); waitingForInput(s, act) {
 				if r.credentialRead(s) {
 					if asked && s.PendingLen() <= answeredLen {
 						// A hidden-line read with nothing back from the
@@ -1322,21 +1322,32 @@ func jobWorking(a term.JobActivity) bool {
 	return a.CPUDelta > ptyActiveCPUTicks || a.RSSDeltaKB > ptyActiveRSSKB
 }
 
-// jobWaitingForInput reports the deterministic "the command stopped and
-// is waiting to be answered" state: a foreground job exists, every one
-// of its processes is asleep, it consumed no CPU and grew no memory
-// since the last sample, and it is parked in a terminal read. When the
-// kernel does not expose wait points, a fully idle job is taken as
-// waiting: sending a harmless keystroke beats burning the whole wait
-// budget on a question.
-func jobWaitingForInput(a term.JobActivity) bool {
-	if !a.Observed || !a.Asleep {
+// waitingForInput reports the "the command stopped and is waiting to be
+// answered" state: a foreground job exists, every one of its processes
+// is asleep, it consumed no CPU and grew no memory since the last
+// sample, and it is parked in a terminal read. Where the kernel shows
+// wait points (Linux) that last part is read off the job. Where it does
+// not - a setuid program hiding its state, or a platform sampled
+// through ps - the terminal's own discipline decides: echo turned off
+// is a reader taking a line, and the shell itself in the foreground is
+// a builtin read; a sleeping job with echo on is a command that is
+// merely idle, and typing at it would only queue in its tty.
+func waitingForInput(s ptyTerminal, a term.JobActivity) bool {
+	if !a.Observed || !a.Asleep || jobWorking(a) {
 		return false
 	}
-	if jobWorking(a) {
+	if a.WchanReadable {
+		return a.InputWait
+	}
+	if s.ForegroundIsShell() {
+		return true
+	}
+	switch s.SecretRead() {
+	case term.SecretReadYes, term.SecretReadRaw:
+		return true
+	default:
 		return false
 	}
-	return a.InputWait || !a.WchanReadable
 }
 
 // Thresholds for reading a JobActivity sample as progress. A handful of
