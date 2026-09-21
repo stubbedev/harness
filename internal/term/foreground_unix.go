@@ -30,7 +30,9 @@ func (s *Session) ForegroundIsShell() bool {
 	if err != nil || pgrp <= 0 {
 		return false
 	}
-	out, err := exec.CommandContext(context.Background(), "ps", "-axo", "pid=,pgid=").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), psTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,pgid=").Output()
 	if err != nil {
 		return false
 	}

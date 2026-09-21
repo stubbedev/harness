@@ -11,14 +11,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// inputWaitWchans are kernel wait points a process blocked on input -
-// terminal reads, multiplexed waits - can sit in. "wait_woken" is the
-// generic interruptible sleep on kernels that do not expose the
-// specific function; nanosleep and child-reaping are deliberately
-// absent: sleeping on a timer is not waiting for the agent.
-var inputWaitWchans = []string{
-	"tty_read", "n_tty_read", "wait_woken",
-	"do_select", "do_poll", "ep_poll", "poll_schedule_timeout",
+// ttyReadWchans are the kernel wait points that are a terminal read and
+// nothing else.
+var ttyReadWchans = []string{"tty_read", "n_tty_read"}
+
+// ambiguousWaitWchans are wait points a terminal reader can sit in but
+// that sockets, pipes and event loops sit in just as often: the generic
+// interruptible sleep, and the multiplexers. A process parked in one is
+// waiting for the agent only when the file it waits on is this
+// terminal, which ttyReadBlocked checks through the syscall it is in.
+// nanosleep and child-reaping are deliberately absent: sleeping on a
+// timer is not waiting for the agent.
+var ambiguousWaitWchans = []string{
+	"wait_woken", "do_select", "do_poll", "ep_poll", "poll_schedule_timeout",
 }
 
 // SampleJob inspects the terminal's foreground job - the shell itself
@@ -86,7 +91,7 @@ func (s *Session) SampleJob() JobActivity {
 			continue
 		}
 		wchanSeen = true
-		if slices.Contains(inputWaitWchans, w) {
+		if slices.Contains(ttyReadWchans, w) || (slices.Contains(ambiguousWaitWchans, w) && ttyReadBlocked(entry.Name(), w, s.pty.Name())) {
 			inputWait = true
 		}
 	}
@@ -127,18 +132,6 @@ func residentKB(pid string) int64 {
 	return pages * int64(os.Getpagesize()) / 1024
 }
 
-// foregroundPgrp returns the process group currently reading the
-// terminal, or 0 when it cannot be determined.
-func (s *Session) foregroundPgrp() int {
-	pgrp := 0
-	_ = s.masterControl(func(fd int) {
-		if g, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP); err == nil {
-			pgrp = g
-		}
-	})
-	return pgrp
-}
-
 func isDigits(s string) bool {
 	for _, r := range s {
 		if r < '0' || r > '9' {
@@ -146,4 +139,74 @@ func isDigits(s string) bool {
 		}
 	}
 	return len(s) > 0
+}
+
+// ttyReadBlocked reports whether a process parked in an ambiguous wait
+// point is waiting on this terminal. /proc/<pid>/syscall names the call
+// it is blocked in and its arguments: a read whose descriptor is the
+// terminal's slave is a terminal read; an epoll wait is one when the
+// epoll instance watches a descriptor that is. A poll or select cannot
+// be checked without reading the process's memory, so it is not taken
+// as a terminal read: a dev server or test runner idling in one is the
+// common case, and typing at it would go nowhere. When the syscall file
+// is unreadable the same conservative answer applies.
+func ttyReadBlocked(pid, wchan, slave string) bool {
+	if slave == "" {
+		return false
+	}
+	raw, err := os.ReadFile("/proc/" + pid + "/syscall")
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(raw))
+	if len(fields) < 2 {
+		return false
+	}
+	nr, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return false
+	}
+	fd, err := strconv.ParseInt(strings.TrimPrefix(fields[1], "0x"), 16, 64)
+	if err != nil {
+		return false
+	}
+	switch {
+	case nr == unix.SYS_READ || nr == unix.SYS_READV || nr == unix.SYS_PREAD64:
+		return fdIsTerminal(pid, fd, slave)
+	case wchan == "ep_poll":
+		return epollWatchesTerminal(pid, fd, slave)
+	}
+	return false
+}
+
+// fdIsTerminal reports whether descriptor fd of process pid is the
+// terminal's slave.
+func fdIsTerminal(pid string, fd int64, slave string) bool {
+	target, err := os.Readlink("/proc/" + pid + "/fd/" + strconv.FormatInt(fd, 10))
+	return err == nil && target == slave
+}
+
+// epollWatchesTerminal reports whether the epoll instance behind epfd
+// has the terminal's slave among the descriptors it watches, read from
+// the "tfd:" lines of its fdinfo.
+func epollWatchesTerminal(pid string, epfd int64, slave string) bool {
+	info, err := os.ReadFile("/proc/" + pid + "/fdinfo/" + strconv.FormatInt(epfd, 10))
+	if err != nil {
+		return false
+	}
+	for line := range strings.SplitSeq(string(info), "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "tfd:")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			continue
+		}
+		fd, err := strconv.ParseInt(fields[0], 10, 64)
+		if err == nil && fdIsTerminal(pid, fd, slave) {
+			return true
+		}
+	}
+	return false
 }
