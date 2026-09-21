@@ -198,27 +198,94 @@ func TestPtyRunner_CommandBehindSilentCommandQueues(t *testing.T) {
 	require.Contains(t, res.Output, "after")
 }
 
-// A poll over a command left running streams its new output as a chunk
-// instead of holding the call for the command's whole life; the next
-// poll carries the command to its exit code.
-func TestPtyRunner_PollStreamsChunksThenExitCode(t *testing.T) {
+// A poll over a command left running holds until the command reaches an
+// event worth reporting - here its exit - rather than handing back a
+// chunk at the first pause and leaving the caller to poll again.
+func TestPtyRunner_PollWaitsThroughPausesToTheExitCode(t *testing.T) {
 	r := newTestRunner(t)
 
 	started, err := r.Type(t.Context(), "sleep 2; echo chunk; sleep 2; echo done", 1)
 	require.NoError(t, err)
 	require.True(t, started.Running)
 
-	poll, err := r.Poll(t.Context())
-	require.NoError(t, err)
-	require.True(t, poll.Running)
-	require.Contains(t, poll.Output, "chunk")
-	require.NotContains(t, poll.Output, "done")
-
 	final, err := r.Poll(t.Context())
 	require.NoError(t, err)
-	require.NotNil(t, final.ExitCode, "the poll returns the finished command's exit code")
+	require.NotNil(t, final.ExitCode, "one poll carries the command to its exit code")
 	require.Equal(t, 0, *final.ExitCode)
+	require.Contains(t, final.Output, "chunk")
 	require.Contains(t, final.Output, "done")
+}
+
+// Output alone does not lease a wait forever: a program that prints a
+// heartbeat but does no work is reported running once the streaming
+// bound passes, so a server left in the foreground gives the session
+// back instead of holding the call to the hard ceiling.
+func TestPtyRunner_HeartbeatWithoutWorkIsReportedRunning(t *testing.T) {
+	r := newTestRunner(t)
+
+	start := time.Now()
+	res, err := r.Type(t.Context(), "while true; do echo beat; sleep 0.5; done", 1)
+	require.NoError(t, err)
+	require.True(t, res.Running)
+	require.Nil(t, res.ExitCode)
+	require.Less(t, time.Since(start), ptyStreamingWaitMin+15*time.Second, "the streaming bound, not the hard ceiling, ended the wait")
+	require.Contains(t, res.Output, "beat")
+
+	_, err = r.Type(t.Context(), "\x03", 10)
+	require.NoError(t, err)
+}
+
+// Every line queued behind a busy command runs in the call that finds
+// the shell idle, each under the line that ran it, so the caller does
+// not spend one call per queued line.
+func TestPtyRunner_QueuedLinesAllRunInOneCall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("queueing needs the foreground's input state, unobservable over ConPTY")
+	}
+	r := newTestRunner(t)
+
+	started, err := r.Type(t.Context(), "sleep 5", 1)
+	require.NoError(t, err)
+	require.True(t, started.Running)
+	for _, line := range []string{"echo first-queued", "echo second-queued"} {
+		queued, err := r.Type(t.Context(), line, 5)
+		require.NoError(t, err)
+		require.True(t, queued.Queued, line)
+	}
+
+	// The poll waits the sleep out and then runs both queued lines.
+	res, err := r.Poll(t.Context())
+	require.NoError(t, err)
+	require.False(t, res.Running)
+	require.Contains(t, res.Output, "$ echo first-queued\nfirst-queued")
+	require.Contains(t, res.Output, "$ echo second-queued\nsecond-queued")
+	require.Less(t, strings.Index(res.Output, "first-queued"), strings.Index(res.Output, "second-queued"))
+
+	// Nothing is left behind: the next line runs on its own.
+	after, err := r.Type(t.Context(), "echo after", 10)
+	require.NoError(t, err)
+	require.Contains(t, after.Output, "after")
+	require.NotContains(t, after.Output, "queued")
+}
+
+func TestJoinResults(t *testing.T) {
+	zero, one := 0, 1
+	joined := joinResults(
+		PTYResult{Output: "$ a\nfrom a\n", ExitCode: &zero},
+		PTYResult{Output: "$ b\nfrom b", ExitCode: &one, Running: false},
+		PTYResult{Output: "final", Running: true},
+	)
+	require.Equal(t, "$ a\nfrom a\n[exit 0]\n\n$ b\nfrom b\n[exit 1]\n\nfinal", joined.Output)
+	require.True(t, joined.Running)
+	require.Nil(t, joined.ExitCode)
+	require.Equal(t, PTYResult{}, joinResults())
+}
+
+func TestClampWaitSeconds(t *testing.T) {
+	require.Equal(t, DefaultAutoBackgroundAfter, clampWaitSeconds(0))
+	require.Equal(t, DefaultAutoBackgroundAfter, clampWaitSeconds(-5))
+	require.Equal(t, 30, clampWaitSeconds(30))
+	require.Equal(t, int(ptyMaxWait/time.Second), clampWaitSeconds(1<<20))
 }
 
 // A command that stops to ask something is detected from the process
@@ -421,7 +488,7 @@ func TestPtyRunner_BlindQuietJobIsNotWaitingRightAway(t *testing.T) {
 
 	blind := &blindSleeperTerm{since: time.Now()}
 	start := time.Now()
-	res, err := r.awaitCompletion(t.Context(), blind, nil, 2, false)
+	res, err := r.awaitCompletion(t.Context(), blind, nil, 2)
 	require.NoError(t, err)
 	require.True(t, res.Running)
 	require.False(t, res.Waiting, "a silent job with no visible wait point is not a question yet")
@@ -453,6 +520,8 @@ func (b *blindSleeperTerm) SampleJob() term.JobActivity {
 func (b *blindSleeperTerm) SecretRead() term.SecretReadState { return term.SecretReadNo }
 
 func (b *blindSleeperTerm) ForegroundIsShell() bool { return false }
+
+func (b *blindSleeperTerm) KillForeground() error { return nil }
 
 // A generic Password: prompt - su, docker login and friends - opens the
 // masked dialog even when nothing in the output says "password" in a
@@ -539,7 +608,7 @@ func TestPtyRunner_UnconsumedAnswerDoesNotReopenDialog(t *testing.T) {
 	require.NoError(t, err)
 
 	stuck := &stuckReaderTerm{}
-	res, err := r.awaitCompletion(t.Context(), stuck, nil, 2, false)
+	res, err := r.awaitCompletion(t.Context(), stuck, nil, 2)
 	require.NoError(t, err)
 	require.True(t, res.Running)
 
@@ -625,6 +694,7 @@ func (s *stuckReaderTerm) SecretRead() term.SecretReadState {
 }
 
 func (s *stuckReaderTerm) ForegroundIsShell() bool { return false }
+func (s *stuckReaderTerm) KillForeground() error   { return nil }
 
 func (s *stuckReaderTerm) PendingInput() int { return 0 }
 

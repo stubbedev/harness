@@ -225,7 +225,7 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			}
 
 			startTime := time.Now()
-			waitSeconds := cmp.Or(params.AutoBackgroundAfter, DefaultAutoBackgroundAfter)
+			waitSeconds := clampWaitSeconds(params.AutoBackgroundAfter)
 
 			var result PTYResult
 			session := ptyRunnerFor(owner, GetSessionFromContext(ctx), name, execWorkingDir, questions)
@@ -235,7 +235,7 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			case params.Command != "":
 				result, err = session.Type(ctx, params.Command, waitSeconds)
 			default:
-				result, err = session.Poll(ctx)
+				result, err = session.PollFor(ctx, waitSeconds)
 			}
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("terminal session: %w", err)
@@ -263,7 +263,7 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 				rows, cols := session.Size()
 				header = fmt.Sprintf("[full-screen program; %dx%d screen follows]", cols, rows)
 			case result.Running && result.Output != "":
-				header = "[still running; poll empty to keep streaming]"
+				header = "[still running; an empty call waits for it]"
 			case result.Running && result.ShellExit == nil:
 				header = "[still running, idle]"
 			case result.ExitCode != nil && *result.ExitCode != 0:
@@ -379,4 +379,15 @@ func normalizeWorkingDir(path string) string {
 func ShellAvailable() bool {
 	_, ok := term.Shell()
 	return ok
+}
+
+// clampWaitSeconds turns the call's auto_background_after into a wait
+// budget the runner can honor: the default when unset or nonsense, and
+// never past the runner's hard ceiling, since a budget beyond it would
+// only promise a wait the runner will not keep.
+func clampWaitSeconds(requested int) int {
+	if requested <= 0 {
+		return DefaultAutoBackgroundAfter
+	}
+	return min(requested, int(ptyMaxWait/time.Second))
 }

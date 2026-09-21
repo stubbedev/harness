@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -95,10 +96,34 @@ const (
 	// end the wait on silence instead.
 	ptyFenceQuietMs = 20
 	// ptyMaxWait bounds how long one call keeps leasing patience
-	// forward to a command that is still producing output, so a stream
-	// that never ends cannot hold a call forever.
+	// forward to a command that is still working - burning CPU, growing
+	// memory - so a build that never ends cannot hold a call forever.
 	ptyMaxWait = 15 * time.Minute
+	// ptyStreamingWaitFactor bounds, as a multiple of the wait budget,
+	// how long output alone keeps leasing the wait forward. A compiler
+	// or test runner works as it prints, and jobWorking carries it to
+	// ptyMaxWait; a dev server printing a heartbeat works no more than
+	// an idle one, and after this many budgets it is reported running so
+	// the caller gets its session back.
+	ptyStreamingWaitFactor = 2
+	// ptyStreamingWaitMin is the least the streaming bound can be, so a
+	// short-budget call is not cut off behind a slow start.
+	ptyStreamingWaitMin = 10 * time.Second
+	// ptyInputQueueCapacity is how many unread bytes the terminal's
+	// input queue is allowed to hold before typing more is refused. The
+	// kernel's queue holds about 4 KiB and a write past it blocks until
+	// the program reads - which a program that is not reading never
+	// does, and the call would hang with it.
+	ptyInputQueueCapacity = 3 << 10
+	// ptyCredentialDialogWait bounds how long a masked credential dialog
+	// may stay open before the prompt is cancelled instead: a dispatch
+	// whose dialog nobody is there to answer must still return.
+	ptyCredentialDialogWait = 10 * time.Minute
 )
+
+// errTerminalInputFull reports that the program in the foreground is
+// not reading and the terminal's input queue is full.
+var errTerminalInputFull = errors.New("the terminal's input queue is full: the program is not reading what was typed")
 
 // sentinel is one session's completion marker: the command that prints
 // it, the pattern that parses it, and the loose pattern used to wait
@@ -255,6 +280,7 @@ type ptyTerminal interface {
 	SampleJob() term.JobActivity
 	SecretRead() term.SecretReadState
 	ForegroundIsShell() bool
+	KillForeground() error
 	PendingInput() int
 	DiscardPendingInput()
 	ResetWaitSample()
@@ -574,6 +600,14 @@ func (r *ptyRunner) setState(f func()) {
 func (r *ptyRunner) send(s ptyTerminal, b []byte) error {
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
+	// A write into a full input queue blocks until the program reads,
+	// and a program that is not reading blocks it for good - with this
+	// lock held, so every later call on the session would queue behind
+	// it. Refuse instead; the caller reports it and the session stays
+	// usable.
+	if queued := s.PendingInput(); queued > 0 && queued+len(b) > ptyInputQueueCapacity {
+		return errTerminalInputFull
+	}
 	if err := s.Send(b); err != nil {
 		return fmt.Errorf("terminal session: %w", err)
 	}
@@ -836,6 +870,9 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 	r.lastScreen = ""
 	r.lastCwd = ""
 	r.announcedCwd = r.cwd
+	// Lines queued behind the old shell's command were meant for that
+	// shell's state; a fresh one would run them against nothing.
+	r.pending = nil
 	r.mu.Unlock()
 
 	if old != nil {
@@ -897,13 +934,25 @@ func (r *ptyRunner) typeSession(ctx context.Context, text string, waitSeconds in
 	})
 	if r.shellIdle(s) {
 		// Commands queued while a busy command held the session run
-		// first, in the order they were typed; this call's own text
-		// joins the tail of the queue.
-		if cmd, ok := r.dequeue(); ok {
+		// first, in the order they were typed, and this call's own text
+		// runs after them - all in this call. Only when one of them does
+		// not finish does the text join the tail of the queue.
+		ran, err := r.runQueuedLocked(ctx, s, waitSeconds)
+		if err != nil {
 			r.enqueue(text)
-			text, segs = cmd, parseInput(cmd)
+			return joinResults(ran...), err
 		}
-		return r.runCommand(ctx, s, text, segs, waitSeconds)
+		if n := len(ran); n > 0 && (ran[n-1].Running || ran[n-1].AltScreen || ctx.Err() != nil) {
+			r.enqueue(text)
+			res = joinResults(ran...)
+			res.Queued = true
+			return res, nil
+		}
+		final, err := r.runCommand(ctx, s, text, segs, waitSeconds)
+		if err != nil {
+			return final, err
+		}
+		return joinResults(append(ran, final)...), nil
 	}
 	if !hasKeys(segs) && !takesInputNow(s) {
 		// The foreground claims to read nothing. Type the line anyway
@@ -958,7 +1007,7 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 	if err != nil {
 		return PTYResult{}, err
 	}
-	return r.awaitCompletion(ctx, s, echo, waitSeconds, false)
+	return r.awaitCompletion(ctx, s, echo, waitSeconds)
 }
 
 // driveProgram types into the program the session has running and
@@ -984,7 +1033,7 @@ func (r *ptyRunner) driveProgram(ctx context.Context, s ptyTerminal, text string
 	// The program may have finished on the keystroke before this wait
 	// begins; its prompt can already be sitting in the undrained output.
 	s.RescanFromStart()
-	return r.awaitCompletion(ctx, s, echo, waitSeconds, false)
+	return r.awaitCompletion(ctx, s, echo, waitSeconds)
 }
 
 const (
@@ -1024,7 +1073,7 @@ func (r *ptyRunner) typeOrRecall(ctx context.Context, s ptyTerminal, text string
 		time.Sleep(ptyConsumePoll)
 	}
 	if s.PendingInput() <= 0 {
-		res, err := r.awaitCompletion(ctx, s, []string{line}, waitSeconds, false)
+		res, err := r.awaitCompletion(ctx, s, []string{line}, waitSeconds)
 		return res, err == nil
 	}
 
@@ -1083,7 +1132,7 @@ func (r *ptyRunner) typeWhileBusy(ctx context.Context, s ptyTerminal, text strin
 // instead of holding the call for the command's whole life: the next
 // poll streams the next chunk, and completion still lands as the exit
 // code.
-func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []string, waitSeconds int, stream bool) (PTYResult, error) {
+func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []string, waitSeconds int) (PTYResult, error) {
 	s.ResetWaitSample()
 	pats := []*regexp.Regexp{r.promptRe, credPromptRe, ptyAltScreenRe}
 	budget := time.Duration(waitSeconds) * time.Second
@@ -1093,6 +1142,9 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 	lease := min(3*time.Second, budget/2)
 	deadline := time.Now().Add(budget)
 	hardDeadline := time.Now().Add(ptyMaxWait)
+	// Output alone leases the wait forward only this far; see
+	// ptyStreamingWaitFactor.
+	streamingDeadline := time.Now().Add(max(ptyStreamingWaitFactor*budget, ptyStreamingWaitMin))
 	// asked records that a masked credential prompt was already answered
 	// in this wait; the next one means the reader refused the answer, and
 	// the user is told so. answeredLen is how much undrained output there
@@ -1174,10 +1226,6 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 				// The foreground job is blocked reading the terminal:
 				// the command has asked its question and gone quiet.
 				return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: true, Waiting: true}, nil
-			} else if stream && s.PendingLen() > 0 {
-				// New output is pending and the command is merely running:
-				// hand the chunk back now rather than holding the poll.
-				return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: s.Alive()}, nil
 			} else if !s.WaitForOutput(ctx, time.Until(deadline)) {
 				break // the silence outlasted the budget
 			} else {
@@ -1186,12 +1234,15 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 		}
 		if matched < 0 {
 			// The budget ran out (or the session exited). A command that
-			// was still speaking a moment ago - or still burning CPU, or
-			// still growing its memory - is making progress, not stuck:
-			// lease it another budget's worth of patience, bounded by the
-			// hard ceiling, rather than reporting it mid-stream.
+			// is still burning CPU or growing its memory is working, not
+			// stuck: lease it another budget's worth of patience, bounded
+			// by the hard ceiling, rather than reporting it mid-build. A
+			// command that only keeps speaking gets the same lease for a
+			// while - a slow but steady script - and is then reported
+			// running: past that point it is a server or a watcher, and
+			// the caller wants its session back more than its next line.
 			if s.Alive() && time.Now().Before(hardDeadline) &&
-				(s.IdleFor() < lease || jobWorking(s.SampleJob())) {
+				(jobWorking(s.SampleJob()) || (s.IdleFor() < lease && time.Now().Before(streamingDeadline))) {
 				deadline = time.Now().Add(budget)
 				continue
 			}
@@ -1405,6 +1456,13 @@ func (r *ptyRunner) interrupt(s ptyTerminal) PTYResult {
 
 	_ = r.send(s, []byte{0x03})
 	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 3*time.Second)
+	if s.Alive() && !r.shellIdle(s) {
+		// The program ignored ctrl-c. Terminate its process group so it
+		// does not run on into the next call's output; the shell is
+		// left alone, since it is what the next call needs.
+		_ = s.KillForeground()
+		s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 2*time.Second)
+	}
 	res := r.collect(ctx, s)
 	res.Interrupted = true
 	return res
@@ -1507,6 +1565,10 @@ func (r *ptyRunner) answerCredentialPrompt(ctx context.Context, s ptyTerminal, r
 	if rejected {
 		text += " again: the previous attempt was rejected"
 	}
+	// A dialog nobody answers must not hold the call forever: past the
+	// ceiling the prompt is cancelled like a dialog that was dismissed.
+	ctx, cancel := context.WithTimeout(ctx, ptyCredentialDialogWait)
+	defer cancel()
 	answers, err := r.ask.Ask(ctx, question.Request{
 		Questions: []question.Question{{
 			ID:          "terminal_password",
@@ -1767,71 +1829,138 @@ func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command str
 // its question once it stops to ask, its screen once it has redrawn -
 // so one poll is one event rather than a busy-loop of them.
 func (r *ptyRunner) Poll(ctx context.Context) (PTYResult, error) {
-	res, err := r.pollSession(ctx)
+	return r.PollFor(ctx, DefaultPollWaitSeconds)
+}
+
+// PollFor is Poll with the caller's wait budget: how long a program
+// that neither finishes nor asks anything is held before it is reported
+// as still running.
+func (r *ptyRunner) PollFor(ctx context.Context, waitSeconds int) (PTYResult, error) {
+	res, err := r.pollSession(ctx, waitSeconds)
 	if err == nil {
 		r.attachShellExit(&res)
 	}
 	return res, err
 }
 
-func (r *ptyRunner) pollSession(ctx context.Context) (PTYResult, error) {
+func (r *ptyRunner) pollSession(ctx context.Context, waitSeconds int) (PTYResult, error) {
 	s, err := r.terminal(ctx)
 	if err != nil {
 		return PTYResult{}, err
 	}
 	if r.beginRunningWait() {
-		defer r.endRunningWait()
-		// The program may have finished while nobody watched: its
-		// prompt can already be sitting in the undrained output.
-		s.RescanFromStart()
-		var echo []string
-		r.setState(func() { echo = r.lastEcho })
-		res, err := r.awaitCompletion(ctx, s, echo, DefaultPollWaitSeconds, true)
-		r.setState(func() { r.running = (res.Running || res.AltScreen) && s.Alive() })
-		return res, err
+		res, err := r.awaitRunning(ctx, s, waitSeconds)
+		if err != nil || res.Running || res.AltScreen || ctx.Err() != nil {
+			return res, err
+		}
+		// The program finished. The lines queued behind it run now, in
+		// this call, rather than one per call from here on.
+		r.cmdMu.Lock()
+		ran, qerr := r.runQueuedLocked(ctx, s, waitSeconds)
+		r.cmdMu.Unlock()
+		if qerr != nil {
+			return res, qerr
+		}
+		if len(ran) > 0 {
+			res = joinResults(append([]PTYResult{res}, ran...)...)
+			r.setState(func() { r.running = (res.Running || res.AltScreen) && s.Alive() })
+		}
+		return res, nil
 	}
 	if r.commandInFlight() {
 		return r.collect(ctx, s), nil
 	}
 	// An idle shell holding queued commands: a poll is as good a moment
-	// as any to run the oldest one. takePending holds the command lock
-	// only when it has a command to run, and the lock is released after
-	// runCommand returns.
-	if cmd, locked := r.takePending(s); locked {
-		res, err := r.runCommand(ctx, s, cmd, parseInput(cmd), DefaultPollWaitSeconds)
+	// as any to run them.
+	r.cmdMu.Lock()
+	ran, err := r.runQueuedLocked(ctx, s, waitSeconds)
+	r.cmdMu.Unlock()
+	if err != nil {
+		return PTYResult{}, err
+	}
+	if len(ran) > 0 {
+		res := joinResults(ran...)
 		r.setState(func() { r.running = (res.Running || res.AltScreen) && s.Alive() })
-		r.cmdMu.Unlock()
-		return res, err
+		return res, nil
 	}
 	return r.collect(ctx, s), nil
+}
+
+// awaitRunning waits on the program an earlier call left running, as
+// that call would have.
+func (r *ptyRunner) awaitRunning(ctx context.Context, s ptyTerminal, waitSeconds int) (PTYResult, error) {
+	defer r.endRunningWait()
+	// The program may have finished while nobody watched: its prompt
+	// can already be sitting in the undrained output.
+	s.RescanFromStart()
+	var echo []string
+	r.setState(func() { echo = r.lastEcho })
+	res, err := r.awaitCompletion(ctx, s, echo, waitSeconds)
+	r.setState(func() { r.running = (res.Running || res.AltScreen) && s.Alive() })
+	return res, err
+}
+
+// runQueuedLocked runs the command lines queued behind a busy command,
+// oldest first, for as long as each finishes and leaves the shell at
+// its prompt, and returns their results with each output placed under
+// the line that ran it. It stops after one that did not finish; the
+// rest stay queued. A line whose run failed goes back to the head of the
+// queue. The caller holds cmdMu.
+func (r *ptyRunner) runQueuedLocked(ctx context.Context, s ptyTerminal, waitSeconds int) ([]PTYResult, error) {
+	var ran []PTYResult
+	for ctx.Err() == nil {
+		cmd, ok := r.dequeue()
+		if !ok {
+			break
+		}
+		if !r.shellIdle(s) {
+			// A Type raced in ahead: the queued line runs after that
+			// one, not before it.
+			r.pushFront(cmd)
+			break
+		}
+		res, err := r.runCommand(ctx, s, cmd, parseInput(cmd), waitSeconds)
+		// runCommand marks the runner as owning the session and leaves
+		// clearing it to its caller; each queued run ends here.
+		r.setState(func() { r.inFlight = false })
+		if err != nil {
+			r.pushFront(cmd)
+			return ran, err
+		}
+		res.Output = "$ " + cmd + "\n" + res.Output
+		ran = append(ran, res)
+		if res.Running || res.AltScreen {
+			break
+		}
+	}
+	return ran, nil
+}
+
+// joinResults folds the results of the commands one call ran into the
+// last of them, with the earlier outputs ahead of it, each closed by its
+// exit code.
+func joinResults(results ...PTYResult) PTYResult {
+	if len(results) == 0 {
+		return PTYResult{}
+	}
+	last := results[len(results)-1]
+	var b strings.Builder
+	for _, res := range results[:len(results)-1] {
+		b.WriteString(strings.TrimRight(res.Output, "\n"))
+		if res.ExitCode != nil {
+			fmt.Fprintf(&b, "\n[exit %d]", *res.ExitCode)
+		}
+		b.WriteString("\n\n")
+	}
+	b.WriteString(last.Output)
+	last.Output = b.String()
+	return last
 }
 
 // DefaultPollWaitSeconds is the budget a poll gives a program it picks
 // up: long enough for a build to land, short enough that a command that
 // never finishes still comes back to the caller.
 const DefaultPollWaitSeconds = 60
-
-// takePending claims the command lock and pops the oldest command
-// queued behind a running one, but only when the shell is back at its
-// prompt; otherwise the command goes back to the head of the queue and
-// the lock is released. locked is false when there is nothing to
-// deliver; when it is true the caller must unlock cmdMu after the run.
-func (r *ptyRunner) takePending(s ptyTerminal) (string, bool) {
-	r.cmdMu.Lock()
-	cmd, ok := r.dequeue()
-	if !ok {
-		r.cmdMu.Unlock()
-		return "", false
-	}
-	if !r.shellIdle(s) {
-		// A Type raced in ahead of the poll: the queued line runs after
-		// that one, not before it.
-		r.pushFront(cmd)
-		r.cmdMu.Unlock()
-		return "", false
-	}
-	return cmd, true
-}
 
 // beginRunningWait claims the wait for a program left running. The
 // cheap state check comes first: a poll arriving while a call is in
