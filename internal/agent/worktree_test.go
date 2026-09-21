@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -140,7 +141,13 @@ func TestSnapshotWorktreeNormalizesFileModes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o644), entries["plain"].Mode)
 	require.Equal(t, os.FileMode(0o644), entries["loose"].Mode, "group-write noise must not reach the snapshot")
-	require.Equal(t, os.FileMode(0o755), entries["script"].Mode)
+	script := os.FileMode(0o755)
+	if runtime.GOOS == "windows" {
+		// Windows has no execute bit: chmod cannot set one and stat never
+		// reports one, so every regular file collapses to 0644.
+		script = 0o644
+	}
+	require.Equal(t, script, entries["script"].Mode)
 }
 
 func TestWorktreeCancellationPreserves(t *testing.T) {
