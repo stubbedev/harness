@@ -50,6 +50,10 @@ type serversSource interface {
 // newServersDialog builds the shared state machine for src. The
 // concrete dialog embeds the result; selectKey and backKey come from
 // the kind's own rebindable group, the rest from the shared dialog set.
+// The returned value must be embedded before the first refresh: src's
+// methods read state through the embedding struct, which is still the
+// zero value until the assignment completes. Callers therefore call
+// [serversDialog.refresh] themselves after embedding.
 func newServersDialog(com *common.Common, src serversSource, selectKey, backKey key.Binding) serversDialog {
 	km := dialogKeys()
 	d := serversDialog{
@@ -66,7 +70,6 @@ func newServersDialog(com *common.Common, src serversSource, selectKey, backKey 
 
 	d.list = list.NewFilterableList()
 	d.list.Focus()
-	d.refreshServers()
 	return d
 }
 

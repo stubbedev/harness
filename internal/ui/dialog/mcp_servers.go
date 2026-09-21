@@ -50,6 +50,7 @@ func NewMCPServers(com *common.Common, states map[string]mcptools.ClientInfo) *M
 	m := &MCPServers{states: states}
 	km := dialogKeys()
 	m.serversDialog = newServersDialog(com, m, km.MCPServers.Select, km.MCPServers.Back)
+	m.refresh()
 	return m
 }
 

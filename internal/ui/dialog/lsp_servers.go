@@ -50,6 +50,7 @@ func NewLSPServers(com *common.Common, states map[string]workspace.LSPClientInfo
 	m := &LSPServers{states: states, diagnostics: diagnostics}
 	km := dialogKeys()
 	m.serversDialog = newServersDialog(com, m, km.LSPServers.Select, km.LSPServers.Back)
+	m.refresh()
 	return m
 }
 
