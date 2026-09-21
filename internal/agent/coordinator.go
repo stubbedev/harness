@@ -535,7 +535,8 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 
 // effectiveReasoningEffort returns the reasoning effort to apply for provider calls.
 // It prefers the user-selected effort when valid, and otherwise defaults
-// to the highest level the model supports: anything lower is a deliberate
+// to the middle of the levels the model supports (see
+// catalog.DefaultReasoningLevel): the strongest level is a deliberate
 // manual choice.
 func effectiveReasoningEffort(model Model) string {
 	if !model.CatalogCfg.CanReason {
@@ -545,7 +546,7 @@ func effectiveReasoningEffort(model Model) string {
 	if effort := model.ModelCfg.ReasoningEffort; effort != "" && slices.Contains(model.CatalogCfg.ReasoningLevels, effort) {
 		return effort
 	}
-	return catalog.HighestReasoningLevel(model.CatalogCfg.ReasoningLevels)
+	return catalog.DefaultReasoningLevel(model.CatalogCfg.ReasoningLevels)
 }
 
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {

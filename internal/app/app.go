@@ -652,7 +652,7 @@ func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
 		Provider:        providerID,
 		Model:           defaultSmallModelID,
 		MaxTokens:       model.DefaultMaxTokens,
-		ReasoningEffort: catalog.HighestReasoningLevel(model.ReasoningLevels),
+		ReasoningEffort: catalog.DefaultReasoningLevel(model.ReasoningLevels),
 	}
 }
 

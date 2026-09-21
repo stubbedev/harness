@@ -234,7 +234,7 @@ func (r *Reasoning) setReasoningItems() error {
 
 	currentEffort := selectedModel.ReasoningEffort
 	if currentEffort == "" {
-		currentEffort = catalog.HighestReasoningLevel(model.ReasoningLevels)
+		currentEffort = catalog.DefaultReasoningLevel(model.ReasoningLevels)
 	}
 
 	items := make([]list.FilterableItem, 0, len(model.ReasoningLevels))

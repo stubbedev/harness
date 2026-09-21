@@ -31,7 +31,7 @@ func (m *UI) modelInfo(width int) string {
 						reasoningInfo = "Thinking Off"
 					}
 				} else {
-					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, catalog.HighestReasoningLevel(model.CatalogCfg.ReasoningLevels))
+					reasoningEffort := cmp.Or(model.ModelCfg.ReasoningEffort, catalog.DefaultReasoningLevel(model.CatalogCfg.ReasoningLevels))
 					reasoningInfo = fmt.Sprintf("Reasoning %s", common.FormatReasoningEffort(reasoningEffort))
 				}
 			}

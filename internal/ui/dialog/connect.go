@@ -258,7 +258,7 @@ func defaultSelectedModel(provider catalog.Provider) config.SelectedModel {
 	return config.SelectedModel{
 		Model:           model.ID,
 		Provider:        string(provider.ID),
-		ReasoningEffort: catalog.HighestReasoningLevel(model.ReasoningLevels),
+		ReasoningEffort: catalog.DefaultReasoningLevel(model.ReasoningLevels),
 		MaxTokens:       model.DefaultMaxTokens,
 	}
 }

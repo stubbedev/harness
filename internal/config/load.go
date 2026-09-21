@@ -802,7 +802,7 @@ func (c *Config) defaultModelSelection(knownProviders []catalog.Provider) (large
 			Provider:        providerID,
 			Model:           model.ID,
 			MaxTokens:       model.DefaultMaxTokens,
-			ReasoningEffort: catalog.HighestReasoningLevel(model.ReasoningLevels),
+			ReasoningEffort: catalog.DefaultReasoningLevel(model.ReasoningLevels),
 		}, nil
 	}
 	for _, p := range knownProviders {
@@ -875,7 +875,7 @@ func applySelectionParams(dst *SelectedModel, sel SelectedModel, model *catalog.
 	if sel.ReasoningEffort != "" {
 		dst.ReasoningEffort = sel.ReasoningEffort
 	} else {
-		dst.ReasoningEffort = catalog.HighestReasoningLevel(model.ReasoningLevels)
+		dst.ReasoningEffort = catalog.DefaultReasoningLevel(model.ReasoningLevels)
 	}
 	dst.Think = sel.Think
 	if sel.Temperature != nil {

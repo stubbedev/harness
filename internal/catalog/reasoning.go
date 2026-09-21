@@ -1,5 +1,7 @@
 package catalog
 
+import "slices"
+
 // effortRank orders the known reasoning effort names from weakest to
 // strongest. Values are comparable so an unknown custom level ranks
 // below every known one without breaking the pick.
@@ -13,33 +15,31 @@ var effortRank = map[string]int{
 	"max":     6,
 }
 
-// HighestReasoningLevel returns the strongest reasoning effort the
-// model supports. Reasoning defaults to the maximum a model supports;
-// anything lower is a deliberate manual choice. Levels list ascending
-// in practice, so with unknown level names the last entry wins.
-func HighestReasoningLevel(levels []string) string {
+// DefaultReasoningLevel returns the effort a model runs at until the
+// user picks one: the middle of the levels it supports, and the upper
+// of the two middle ones when there is an even number. Models arrive
+// from the catalog rather than by hand, and a model's strongest level
+// is tuned for its hardest problems, not for the tool-call steps that
+// make up most of a coding session - GLM-5.3 at "max" thinks for tens
+// of seconds before every step. Known names are ranked; a list with a
+// name this table does not know is taken in the order it came, which
+// is ascending in practice.
+func DefaultReasoningLevel(levels []string) string {
 	if len(levels) == 0 {
 		return ""
 	}
-	best := levels[0]
-	bestRank, known := effortRank[best]
-	if !known {
-		bestRank = -1
-	}
-	for _, level := range levels[1:] {
-		rank, ok := effortRank[level]
-		if !ok {
-			// Unknown name: keep it only when nothing known has been
-			// seen yet; a later unknown still replaces an earlier one
-			// so ascending lists work.
-			if bestRank < 0 {
-				best, bestRank = level, -1
-			}
-			continue
-		}
-		if !known || rank >= bestRank {
-			best, bestRank, known = level, rank, true
+	ordered := slices.Clone(levels)
+	known := true
+	for _, level := range ordered {
+		if _, ok := effortRank[level]; !ok {
+			known = false
+			break
 		}
 	}
-	return best
+	if known {
+		slices.SortStableFunc(ordered, func(a, b string) int {
+			return effortRank[a] - effortRank[b]
+		})
+	}
+	return ordered[len(ordered)/2]
 }

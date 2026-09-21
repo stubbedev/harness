@@ -1320,7 +1320,8 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 	parsed, ok := raw.(*openaicompat.ProviderOptions)
 	require.True(t, ok)
 	require.NotNil(t, parsed.ReasoningEffort)
-	// Effort defaults to the highest supported level when unset.
+	// Effort defaults to the middle supported level when unset; with two
+	// levels that is the higher one.
 	assert.Equal(t, "max", string(*parsed.ReasoningEffort))
 
 	thinking, ok := parsed.ExtraBody["thinking"].(map[string]any)
