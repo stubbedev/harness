@@ -108,6 +108,34 @@ func TestMemoryToolEdit(t *testing.T) {
 	require.ErrorContains(t, err, "id or title is required")
 }
 
+func TestMemoryToolReadByQuery(t *testing.T) {
+	tool := newMemoryToolForTest(t)
+
+	runMemoryTool(t, tool, `{"action":"save","title":"Build commands","content":"just build"}`)
+	runMemoryTool(t, tool, `{"action":"save","title":"Test commands","content":"just test"}`)
+
+	// A query matching one memory reads it in full.
+	one := runMemoryTool(t, tool, `{"action":"read","query":"build"}`)
+	require.Contains(t, one.Content, "just build")
+
+	// A query matching several memories returns the index, so the
+	// follow-up read can name an id.
+	many := runMemoryTool(t, tool, `{"action":"read","query":"commands"}`)
+	require.Contains(t, many.Content, "2 memories")
+	require.Contains(t, many.Content, "[build-commands]")
+	require.Contains(t, many.Content, "[test-commands]")
+	require.NotContains(t, many.Content, "just build")
+
+	// A title works the same way as a query.
+	byTitle := runMemoryTool(t, tool, `{"action":"read","title":"Build commands"}`)
+	require.Contains(t, byTitle.Content, "just build")
+
+	// No match is an error result naming the query.
+	none := runMemoryTool(t, tool, `{"action":"read","query":"nope"}`)
+	require.True(t, none.IsError)
+	require.Contains(t, none.Content, "no memory matching")
+}
+
 func TestMemoryToolValidation(t *testing.T) {
 	tool := newMemoryToolForTest(t)
 
@@ -118,7 +146,7 @@ func TestMemoryToolValidation(t *testing.T) {
 	require.ErrorContains(t, err, "title is required")
 
 	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"read"}`})
-	require.ErrorContains(t, err, "id is required")
+	require.ErrorContains(t, err, "id or query is required")
 
 	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"search"}`})
 	require.ErrorContains(t, err, "query is required")

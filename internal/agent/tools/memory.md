@@ -2,7 +2,7 @@ Save, read, search, list, edit or delete memories that outlive the session. The 
 
 - `save` — create or update; needs title and content. Omitting id upserts by title. Optional category and `pinned` (protects from reaping).
 - `edit` — update by id or exact title; omitted fields keep what is stored.
-- `read`, `delete` — by id. `search` — title and content. `list` — the index.
+- `read` — by id or query: one match returns the note in full, several return the index. `delete` — by id. `search` — title and content. `list` — the index.
 
 Categories: `user` (stable facts about them), `feedback` (corrections that shape how you work), `project` (non-obvious codebase facts that cost real effort to find), `reference` (pointers to external material).
 

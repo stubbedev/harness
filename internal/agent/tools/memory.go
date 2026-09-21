@@ -19,12 +19,12 @@ const MemoryToolName = "memory"
 
 type MemoryParams struct {
 	Action   string `json:"action" description:"One of: save, edit, read, search, list, delete"`
-	ID       string `json:"id,omitempty" description:"Memory id (required for read and delete; optional for save and edit)"`
+	ID       string `json:"id,omitempty" description:"Memory id (required for delete; optional for save, edit and read)"`
 	Title    string `json:"title,omitempty" description:"Short title (required for save; for edit identifies the memory when id is omitted)"`
 	Content  string `json:"content,omitempty" description:"Full note content (required for save and edit; replaces existing content on update)"`
 	Category string `json:"category,omitempty" description:"user, feedback, project, or reference (default project; edit keeps the existing category when omitted)"`
 	Pinned   *bool  `json:"pinned,omitempty" description:"Pin to protect from reaping (save and edit; omit to keep the current value)"`
-	Query    string `json:"query,omitempty" description:"Search query (required for search)"`
+	Query    string `json:"query,omitempty" description:"Search query (for search; read falls back to it without an id)"`
 }
 
 // NewMemoryTool builds the tool that lets the agent maintain durable
@@ -155,9 +155,27 @@ func memoryEdit(ctx context.Context, svc memory.Service, params MemoryParams) (f
 	return fantasy.NewTextResponse(response), nil
 }
 
+// memoryRead returns a memory's full content. Agents ask to read by
+// subject far more often than by id, so a missing id falls back to a
+// search: one match is read outright, several come back as the index
+// so the follow-up call can name the id.
 func memoryRead(ctx context.Context, svc memory.Service, params MemoryParams) (fantasy.ToolResponse, error) {
 	if params.ID == "" {
-		return fantasy.ToolResponse{}, errors.New("id is required for read")
+		query := cmp.Or(params.Query, params.Title)
+		if query == "" {
+			return fantasy.ToolResponse{}, errors.New("id or query is required for read")
+		}
+		matches, err := svc.Search(ctx, query)
+		if err != nil {
+			return fantasy.ToolResponse{}, err
+		}
+		switch len(matches) {
+		case 0:
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("no memory matching %q", query)), nil
+		case 1:
+			return fantasy.NewTextResponse(renderItem(matches[0])), nil
+		}
+		return fantasy.NewTextResponse(renderIndex(matches)), nil
 	}
 	item, err := svc.Get(ctx, params.ID)
 	if err != nil {
