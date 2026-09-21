@@ -1,1 +1,1 @@
-Search the web via DuckDuckGo; returns titles, URLs, and snippets. Follow up with fetch to get full page content.
+Search the web via DuckDuckGo; returns titles, URLs, and snippets. Set `fetch_top` (1-3) to also fetch the top results and return the start of each page in the same call; follow up with fetch for the full page.
