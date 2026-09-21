@@ -635,9 +635,12 @@ func TestCreateWorkspace_RejectsBadClientID(t *testing.T) {
 
 	b := New(context.Background(), nil, func() {})
 
-	_, _, err := b.CreateWorkspace(protoWS("/tmp/x", t.TempDir(), ""))
+	// The path must be absolute on every platform: the workspace-path
+	// validation runs before the client-ID check, so a Unix-only absolute
+	// literal would be rejected as a bad path on Windows instead.
+	_, _, err := b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), ""))
 	require.ErrorIs(t, err, ErrInvalidClientID)
-	_, _, err = b.CreateWorkspace(protoWS("/tmp/x", t.TempDir(), "not-a-uuid"))
+	_, _, err = b.CreateWorkspace(protoWS(t.TempDir(), t.TempDir(), "not-a-uuid"))
 	require.ErrorIs(t, err, ErrInvalidClientID)
 }
 
