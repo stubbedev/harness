@@ -19,6 +19,7 @@ type fakeTool struct {
 	called bool
 	input  string
 	resp   fantasy.ToolResponse
+	err    error
 }
 
 func (f *fakeTool) Info() fantasy.ToolInfo {
@@ -28,7 +29,7 @@ func (f *fakeTool) Info() fantasy.ToolInfo {
 func (f *fakeTool) Run(_ context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	f.called = true
 	f.input = call.Input
-	return f.resp, nil
+	return f.resp, f.err
 }
 
 func (f *fakeTool) ProviderOptions() fantasy.ProviderOptions     { return nil }

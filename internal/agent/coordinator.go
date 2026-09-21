@@ -1251,6 +1251,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// fired from inside a sub-agent sees the child session's ID, which is
 	// what distinguishes the call in the payload.
 	filteredTools = c.directoryTracker(workspace...).WrapTools(filteredTools)
+	// Innermost on purpose: a failed call becomes an error result the
+	// model reads and corrects, and the hook wrap above sees that result
+	// like any other.
+	filteredTools = wrapToolsResilient(filteredTools)
 	filteredTools = wrapToolsWithHooks(filteredTools, c.hooks, c.queueArrivalEpoch)
 
 	// The batch tool composes the tools above, so it is built from the

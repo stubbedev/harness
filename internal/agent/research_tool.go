@@ -146,7 +146,7 @@ func (c *coordinator) researchTool(_ context.Context, client *http.Client) (fant
 
 			// Sub-agent tool calls fire the same Pre/PostToolUse hooks as the
 			// top-level agent's; the hooks see this run's (child) session ID.
-			fetchTools = wrapToolsWithHooks(fetchTools, c.hooks, c.queueArrivalEpoch)
+			fetchTools = wrapToolsWithHooks(wrapToolsResilient(fetchTools), c.hooks, c.queueArrivalEpoch)
 
 			agent := NewSessionAgent(SessionAgentOptions{
 				Config:               c.cfg,
