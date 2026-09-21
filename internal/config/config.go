@@ -1106,7 +1106,7 @@ func resolveSubagentTools(tools []string) []string {
 	// session), which it can background but not share with a sibling
 	// dispatch. Specialized agents are unaffected — they build their own
 	// allowlist in frontmatter.
-	subagentTools := []string{"batch", "edit", "lsp", "send_message", "shell", "view", "web_search", "write"}
+	subagentTools := []string{"batch", "edit", "fetch", "lsp", "send_message", "shell", "view", "web_search", "write"}
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, subagentTools, true)
 }
