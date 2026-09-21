@@ -104,7 +104,7 @@ func (m *Tool) Info() fantasy.ToolInfo {
 
 	return fantasy.ToolInfo{
 		Name:        m.Name(),
-		Description: m.tool.Description,
+		Description: boundedMCPDescription(m.tool.Description),
 		Parameters:  parameters,
 		Required:    required,
 	}
@@ -215,4 +215,26 @@ func (m *Tool) Run(ctx context.Context, params fantasy.ToolCall) (fantasy.ToolRe
 	default:
 		return fantasy.NewTextResponse(result.Content), nil
 	}
+}
+
+// mcpToolDescriptionLimit bounds an MCP tool's description once its
+// schema is loaded. A server's tools stay in every request for the rest
+// of the session, and some servers ship several kilobytes of prose per
+// tool; the first two thousand characters carry what the tool does and
+// how to call it, which is what the schema is for.
+const mcpToolDescriptionLimit = 2000
+
+// boundedMCPDescription cuts a description to mcpToolDescriptionLimit at
+// a line or word boundary and says that it did.
+func boundedMCPDescription(description string) string {
+	if len(description) <= mcpToolDescriptionLimit {
+		return description
+	}
+	cut := description[:mcpToolDescriptionLimit]
+	if i := strings.LastIndexByte(cut, '\n'); i > mcpToolDescriptionLimit/2 {
+		cut = cut[:i]
+	} else if i := strings.LastIndexByte(cut, ' '); i > mcpToolDescriptionLimit/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " \n") + "\n[description truncated]"
 }
