@@ -2485,7 +2485,7 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		call := streamCall
 		if a.cfg != nil {
 			providerCfg, _ := a.cfg.Config().Providers.Get(attempt.model.ModelCfg.Provider)
-			call.ProviderOptions = withPromptCacheKey(sessionID, getProviderOptions(attempt.model, providerCfg))
+			call.ProviderOptions = withPromptCacheKey(sessionID, auxiliaryProviderOptions(attempt.model, providerCfg))
 		}
 		resp, err = agent.Stream(ctx, call)
 		if err == nil && resp.Response.FinishReason != fantasy.FinishReasonLength {

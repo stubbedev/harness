@@ -35,3 +35,11 @@ func TestDefaultReasoningLevel(t *testing.T) {
 		})
 	}
 }
+
+func TestLowestReasoningLevel(t *testing.T) {
+	t.Parallel()
+	assert.Empty(t, LowestReasoningLevel(nil))
+	assert.Equal(t, "low", LowestReasoningLevel([]string{"max", "high", "low"}))
+	assert.Equal(t, "none", LowestReasoningLevel([]string{"low", "none"}))
+	assert.Equal(t, "custom", LowestReasoningLevel([]string{"custom", "turbo"}), "unknown names keep their order")
+}
