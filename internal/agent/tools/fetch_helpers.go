@@ -6,17 +6,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	md "github.com/JohannesKaufmann/html-to-markdown"
+	"github.com/JohannesKaufmann/html-to-markdown/plugin"
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/html"
+	"golang.org/x/net/html/charset"
 )
 
 // BrowserUserAgent is a realistic browser User-Agent. A fair number of
@@ -107,20 +113,13 @@ func (e *HTTPStatusError) Error() string {
 // FetchURL fetches a URL and renders it in the requested format. It is the
 // single fetch path: every web-fetching tool goes through it, so they all
 // get the boilerplate stripping, the JSON formatting and the error detail.
-func FetchURL(ctx context.Context, client *http.Client, url string, format FetchFormat) (FetchResult, error) {
+func FetchURL(ctx context.Context, client *http.Client, rawURL string, format FetchFormat) (FetchResult, error) {
 	if client == nil {
 		client = DefaultHTTPClient()
 	}
+	rawURL = rewriteGitHubBlobURL(rawURL)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return FetchResult{}, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("User-Agent", BrowserUserAgent)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
-
-	resp, err := client.Do(req)
+	resp, err := doFetchRequest(ctx, client, rawURL)
 	if err != nil {
 		return FetchResult{}, err
 	}
@@ -128,7 +127,7 @@ func FetchURL(ctx context.Context, client *http.Client, url string, format Fetch
 
 	result := FetchResult{
 		ContentType: resp.Header.Get("Content-Type"),
-		FinalURL:    url,
+		FinalURL:    rawURL,
 	}
 	if resp.Request != nil && resp.Request.URL != nil {
 		result.FinalURL = resp.Request.URL.String()
@@ -156,7 +155,8 @@ func FetchURL(ctx context.Context, client *http.Client, url string, format Fetch
 	}
 	result.Size = len(body)
 
-	content := string(body)
+	result.ContentType = sniffContentType(result.ContentType, body)
+	content := string(decodeTextBody(body, result.ContentType))
 	if !utf8.ValidString(content) {
 		// A PDF or an image is not an error: say what it is and let the
 		// model decide to download it instead.
@@ -164,16 +164,200 @@ func FetchURL(ctx context.Context, client *http.Client, url string, format Fetch
 		return result, nil
 	}
 
-	result.Content, err = convertFetchedContent(content, result.ContentType, format)
+	result.Content, err = convertFetchedContent(content, result.ContentType, result.FinalURL, format)
 	if err != nil {
 		return result, err
 	}
 	return result, nil
 }
 
+// newFetchRequest builds a page request that looks like a browser's.
+func newFetchRequest(ctx context.Context, rawURL, userAgent, referer string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+	return req, nil
+}
+
+const (
+	// fetchRetryDefaultDelay is the pause before the one retry when the
+	// server did not say how long to wait.
+	fetchRetryDefaultDelay = time.Second
+	// fetchRetryMaxDelay caps a Retry-After: a tool call cannot sit on a
+	// server's hour-long request.
+	fetchRetryMaxDelay = 10 * time.Second
+)
+
+// doFetchRequest performs the request and, on the statuses a bot filter
+// or a rate limiter answers with, tries once more as a different browser
+// arriving from the site's own origin. The caller closes the body.
+func doFetchRequest(ctx context.Context, client *http.Client, rawURL string) (*http.Response, error) {
+	req, err := newFetchRequest(ctx, rawURL, BrowserUserAgent, "")
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if !isRetryableFetchStatus(resp.StatusCode) {
+		return resp, nil
+	}
+
+	delay := fetchRetryDelay(resp.Header.Get("Retry-After"))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, errorBodySnippetLimit))
+	_ = resp.Body.Close()
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+	}
+
+	retry, err := newFetchRequest(ctx, rawURL, userAgents[rand.IntN(len(userAgents))], originOf(rawURL))
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(retry)
+}
+
+func isRetryableFetchStatus(status int) bool {
+	switch status {
+	case http.StatusForbidden, http.StatusTooManyRequests, http.StatusServiceUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// fetchRetryDelay reads a Retry-After header, in either of its forms,
+// into a bounded pause.
+func fetchRetryDelay(retryAfter string) time.Duration {
+	retryAfter = strings.TrimSpace(retryAfter)
+	if retryAfter == "" {
+		return fetchRetryDefaultDelay
+	}
+	var delay time.Duration
+	if seconds, err := strconv.Atoi(retryAfter); err == nil {
+		delay = time.Duration(seconds) * time.Second
+	} else if at, err := http.ParseTime(retryAfter); err == nil {
+		delay = time.Until(at)
+	} else {
+		return fetchRetryDefaultDelay
+	}
+	return min(max(delay, 0), fetchRetryMaxDelay)
+}
+
+// originOf is the scheme and host of a URL as a Referer value, or empty
+// when the URL does not parse.
+func originOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/"
+}
+
+// rewriteGitHubBlobURL turns a GitHub file page into its raw counterpart,
+// so the model reads the file rather than the web UI wrapped around it.
+// Anything that is not a blob URL comes back unchanged.
+func rewriteGitHubBlobURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Host != "github.com" && u.Host != "www.github.com") {
+		return rawURL
+	}
+	// owner / repo / "blob" / ref / path, with the path keeping its slashes.
+	parts := strings.SplitN(strings.TrimPrefix(u.Path, "/"), "/", 5)
+	if len(parts) < 5 || parts[2] != "blob" || parts[0] == "" || parts[1] == "" || parts[3] == "" || parts[4] == "" {
+		return rawURL
+	}
+	return "https://raw.githubusercontent.com/" + parts[0] + "/" + parts[1] + "/" + parts[3] + "/" + parts[4]
+}
+
+// sniffContentType corrects a header that says nothing useful about a
+// body that is plainly HTML: a missing type, text/plain or octet-stream
+// over a document starting with a doctype or an html tag becomes
+// text/html, keeping any charset the header did declare.
+func sniffContentType(header string, body []byte) string {
+	mediaType := strings.ToLower(strings.TrimSpace(header))
+	var params map[string]string
+	if parsed, p, err := mime.ParseMediaType(header); err == nil {
+		mediaType, params = parsed, p
+	}
+	switch mediaType {
+	case "", "text/plain", "application/octet-stream":
+	default:
+		return header
+	}
+	if !looksLikeHTML(body) {
+		return header
+	}
+	return mime.FormatMediaType("text/html", params)
+}
+
+// htmlSniffLimit is how far into a body the HTML sniff looks.
+const htmlSniffLimit = 512
+
+func looksLikeHTML(body []byte) bool {
+	head := body[:min(len(body), htmlSniffLimit)]
+	head = bytes.TrimPrefix(head, []byte("\xef\xbb\xbf"))
+	head = bytes.ToLower(bytes.TrimLeft(head, " \t\r\n\f"))
+	for _, marker := range []string{"<!doctype html", "<html", "<head", "<body"} {
+		if bytes.HasPrefix(head, []byte(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+// decodeTextBody converts a text response to UTF-8 from the charset its
+// header, BOM or meta tag declares. A page that declares nothing and is
+// not UTF-8 is read as Windows-1252, the web's historical default, rather
+// than reported as binary. Non-text types pass through untouched.
+func decodeTextBody(body []byte, contentType string) []byte {
+	if len(body) == 0 || !isTextContentType(contentType) {
+		return body
+	}
+	enc, name, certain := charset.DetermineEncoding(body, contentType)
+	if name == "utf-8" && !certain && !utf8.Valid(body) {
+		// The UTF-8 guess is made on the first kilobyte; when it does not
+		// hold for the whole body, nothing declared a charset at all.
+		enc, _ = charset.Lookup("windows-1252")
+	}
+	if enc == nil {
+		return body
+	}
+	decoded, err := enc.NewDecoder().Bytes(body)
+	if err != nil {
+		return body
+	}
+	return decoded
+}
+
+// isTextContentType reports a media type worth charset decoding.
+func isTextContentType(contentType string) bool {
+	lower := strings.ToLower(contentType)
+	return strings.HasPrefix(lower, "text/") ||
+		isHTMLContentType(lower) ||
+		isJSONContentType(lower) ||
+		strings.Contains(lower, "xml") ||
+		strings.Contains(lower, "javascript") ||
+		strings.Contains(lower, "ecmascript")
+}
+
 // convertFetchedContent renders a text response in the requested format.
-// Non-HTML content is returned as-is, except JSON, which is indented.
-func convertFetchedContent(content, contentType string, format FetchFormat) (string, error) {
+// Non-HTML content is returned as-is, except JSON, which is indented. The
+// base URL is what relative links in an HTML page resolve against.
+func convertFetchedContent(content, contentType, baseURL string, format FetchFormat) (string, error) {
 	if isHTMLContentType(contentType) {
 		switch format {
 		case FetchFormatText:
@@ -189,7 +373,7 @@ func convertFetchedContent(content, contentType string, format FetchFormat) (str
 			}
 			return body, nil
 		default:
-			markdown, err := ConvertHTMLToMarkdown(removeNoisyElements(content))
+			markdown, err := ConvertHTMLToMarkdown(removeNoisyElements(content), baseURL)
 			if err != nil {
 				return "", fmt.Errorf("failed to convert HTML to markdown: %w", err)
 			}
@@ -251,7 +435,9 @@ func collapseWhitespace(s string) string {
 }
 
 // removeNoisyElements removes script, style, nav, header, footer, and other
-// noisy elements from HTML to improve content extraction.
+// noisy elements from HTML to improve content extraction. A header inside
+// main or article is the article's own heading, not site chrome, so it
+// stays.
 func removeNoisyElements(htmlContent string) string {
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	if err != nil {
@@ -272,15 +458,17 @@ func removeNoisyElements(htmlContent string) string {
 		"svg":      true,
 	}
 
-	var removeNodes func(*html.Node)
-	removeNodes = func(n *html.Node) {
+	var removeNodes func(n *html.Node, inContent bool)
+	removeNodes = func(n *html.Node, inContent bool) {
 		var toRemove []*html.Node
 
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			if c.Type == html.ElementNode && noisyTags[c.Data] {
+			isElement := c.Type == html.ElementNode
+			keepHeader := inContent && c.Data == "header"
+			if isElement && noisyTags[c.Data] && !keepHeader {
 				toRemove = append(toRemove, c)
 			} else {
-				removeNodes(c)
+				removeNodes(c, inContent || (isElement && (c.Data == "main" || c.Data == "article")))
 			}
 		}
 
@@ -289,7 +477,7 @@ func removeNoisyElements(htmlContent string) string {
 		}
 	}
 
-	removeNodes(doc)
+	removeNodes(doc, false)
 
 	var buf bytes.Buffer
 	if err := html.Render(&buf, doc); err != nil {
@@ -317,16 +505,90 @@ func cleanupMarkdown(content string) string {
 	return content
 }
 
-// ConvertHTMLToMarkdown converts HTML content to markdown format.
-func ConvertHTMLToMarkdown(htmlContent string) (string, error) {
-	converter := md.NewConverter("", true, nil)
-
-	markdown, err := converter.ConvertString(htmlContent)
+// ConvertHTMLToMarkdown converts HTML content to GitHub-flavored markdown,
+// so tables, strikethrough and fenced code survive. Links and images are
+// made absolute against baseURL (the page's final URL, or its <base>),
+// and the conversion starts at the page's main content when it has one.
+func ConvertHTMLToMarkdown(htmlContent, baseURL string) (string, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
 	if err != nil {
 		return "", err
 	}
 
-	return markdown, nil
+	var domain string
+	if base := documentBaseURL(doc, baseURL); base != nil {
+		domain = base.Host
+		absolutizeURLs(doc, base)
+	}
+
+	converter := md.NewConverter(domain, true, &md.Options{CodeBlockStyle: "fenced"})
+	converter.Use(plugin.GitHubFlavored())
+	return converter.Convert(mainContentRoot(doc)), nil
+}
+
+// documentBaseURL is what relative URLs in the document resolve against:
+// its <base href> when it has one, otherwise the URL it was fetched from.
+// It is nil when neither parses.
+func documentBaseURL(doc *goquery.Document, pageURL string) *url.URL {
+	base, err := url.Parse(pageURL)
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		base = nil
+	}
+	if href, ok := doc.Find("base[href]").First().Attr("href"); ok {
+		if ref, err := url.Parse(strings.TrimSpace(href)); err == nil {
+			if base != nil {
+				ref = base.ResolveReference(ref)
+			}
+			if ref.Scheme != "" && ref.Host != "" {
+				base = ref
+			}
+		}
+	}
+	return base
+}
+
+// absolutizeURLs resolves every link and image against base, so the
+// markdown carries URLs the model can fetch rather than paths relative to
+// a page it no longer has.
+func absolutizeURLs(doc *goquery.Document, base *url.URL) {
+	for _, target := range []struct{ selector, attr string }{
+		{"a[href]", "href"},
+		{"img[src]", "src"},
+	} {
+		doc.Find(target.selector).Each(func(_ int, s *goquery.Selection) {
+			raw, _ := s.Attr(target.attr)
+			ref, err := url.Parse(strings.TrimSpace(raw))
+			if err != nil {
+				return
+			}
+			s.SetAttr(target.attr, base.ResolveReference(ref).String())
+		})
+	}
+}
+
+// mainContentMinPercent is how much of the body's text a main, article
+// or role=main element must hold to be converted on its own. Below it
+// the element is a teaser or a sidebar, and the body stays the root.
+const mainContentMinPercent = 40
+
+// mainContentRoot picks the element the conversion starts from: the
+// page's main content when it is marked up and substantial, otherwise
+// the whole document.
+func mainContentRoot(doc *goquery.Document) *goquery.Selection {
+	bodyLen := len(collapseWhitespace(doc.Find("body").Text()))
+	if bodyLen == 0 {
+		return doc.Selection
+	}
+	for _, selector := range []string{"main", "article", "[role=main]"} {
+		node := doc.Find(selector).First()
+		if node.Length() == 0 {
+			continue
+		}
+		if len(collapseWhitespace(node.Text()))*100 >= bodyLen*mainContentMinPercent {
+			return node
+		}
+	}
+	return doc.Selection
 }
 
 // FormatJSON formats JSON content with proper indentation.
