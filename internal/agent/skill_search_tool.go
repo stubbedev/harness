@@ -38,13 +38,9 @@ func (s *skillSearchTool) Info() fantasy.ToolInfo {
 	return fantasy.ToolInfo{
 		Name: SkillSearchToolName,
 		Description: fmt.Sprintf(
-			`Written-down procedures for specific kinds of task. %d available, named below; their triggers and instructions load on demand.
+			`Written-down procedures for specific kinds of task; %d available: %s
 
-Skills: %s
-
-`+"`query`"+` lists matching skills with the trigger saying when each applies (keywords fuzzy-matched against names and triggers, all must match). `+"`load`"+` returns the whole SKILL.md — no follow-up %s call. Both fields may be combined; a name above can be loaded without searching first.
-
-Skills with explicit activation rules load automatically when their configured project or tool conditions match. Use search for relevant procedures not already loaded; a trigger describes when a skill applies, not its instructions. Load a selected skill before following it. A skill's scripts and assets live beside the SKILL.md whose path the load reports.`,
+`+"`query`"+` lists matching skills with the trigger saying when each applies (keywords fuzzy-matched against names and triggers, all must match). `+"`load`"+` returns the whole SKILL.md; no follow-up %s call. Both may be combined, and a name above loads without a search. A skill's scripts and assets live beside the SKILL.md whose path the load reports.`,
 			len(names), nameList(names, skillSearchNameBudget), tools.ViewToolName,
 		),
 		Parameters: map[string]any{

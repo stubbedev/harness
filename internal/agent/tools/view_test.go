@@ -123,7 +123,7 @@ func TestViewToolAllowsSmallSectionsOfLargeFiles(t *testing.T) {
 	})
 
 	require.False(t, resp.IsError)
-	require.Contains(t, resp.Content, "     2|target line")
+	require.Contains(t, resp.Content, "2|target line")
 	require.NotContains(t, resp.Content, "File is too large")
 
 	var meta ViewResponseMetadata
@@ -297,7 +297,7 @@ func TestReadBuiltinFile(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Nil(t, failure)
-		require.NotContains(t, result.output, "     1|")
+		require.NotContains(t, result.output, "\n1|")
 	})
 }
 

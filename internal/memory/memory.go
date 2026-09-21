@@ -78,14 +78,21 @@ type Item struct {
 	UpdatedAt  int64    `json:"updated_at"`
 }
 
-// IndexLine renders the compact one-line form used in the system prompt
-// index and the tool's list/search output.
+// IndexLine renders the compact one-line form used in the tool's
+// list/search output, id included so the model can delete or edit by it.
 func (i Item) IndexLine() string {
+	return fmt.Sprintf("- [%s] %s", i.ID, i.promptLine()[2:])
+}
+
+// promptLine is the line the system prompt index carries: category and
+// title, no id. The id is derived from the title, so it doubled the
+// index for nothing; the tool reads by title.
+func (i Item) promptLine() string {
 	category := string(i.Category)
 	if i.Pinned {
 		category += ", pinned"
 	}
-	return fmt.Sprintf("- [%s] (%s) %s", i.ID, category, i.Title)
+	return fmt.Sprintf("- (%s) %s", category, i.Title)
 }
 
 // SaveInput describes a create-or-update. When ID is set that memory is
@@ -313,7 +320,7 @@ func (s *service) Index(ctx context.Context, budget int) (string, error) {
 
 	lines := make([]string, 0, len(items))
 	for _, item := range items {
-		lines = append(lines, item.IndexLine())
+		lines = append(lines, item.promptLine())
 	}
 
 	if budget <= 0 {

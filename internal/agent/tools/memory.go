@@ -18,11 +18,11 @@ var memoryDescription string
 const MemoryToolName = "memory"
 
 type MemoryParams struct {
-	Action   string `json:"action" description:"One of: save, edit, read, search, list, delete"`
+	Action   string `json:"action" enum:"save,edit,read,search,list,delete"`
 	ID       string `json:"id,omitempty" description:"Memory id (required for delete; optional for save, edit and read)"`
 	Title    string `json:"title,omitempty" description:"Short title (required for save; for edit identifies the memory when id is omitted)"`
 	Content  string `json:"content,omitempty" description:"Full note content (required for save and edit; replaces existing content on update)"`
-	Category string `json:"category,omitempty" description:"user, feedback, project, or reference (default project; edit keeps the existing category when omitted)"`
+	Category string `json:"category,omitempty" enum:"user,feedback,project,reference" description:"user: stable facts about them; feedback: corrections that shape how you work; project: non-obvious codebase facts; reference: pointers to external material. Default project"`
 	Pinned   *bool  `json:"pinned,omitempty" description:"Pin to protect from reaping (save and edit; omit to keep the current value)"`
 	Query    string `json:"query,omitempty" description:"Search query (for search; read falls back to it without an id)"`
 }

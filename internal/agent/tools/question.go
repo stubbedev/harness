@@ -57,11 +57,28 @@ func (p *QuestionParams) UnmarshalJSON(data []byte) error {
 // QuestionItem is a single question from the tool input.
 type QuestionItem struct {
 	Label       string           `json:"label,omitempty" description:"Short tab header label (max 60 characters)."`
-	Type        string           `json:"type" description:"The type of question: yes_no, single_choice, multi_choice, or free_text"`
+	Type        string           `json:"type" enum:"yes_no,single_choice,multi_choice,free_text" description:"The type of question"`
 	Question    string           `json:"question" description:"The question text (max 240 characters)"`
 	Description string           `json:"description" description:"Required markdown description shown below the question (1-600 characters)"`
 	Choices     []QuestionChoice `json:"choices,omitempty" description:"List of choices (2-10 for choice questions)"`
-	Options     []QuestionChoice `json:"options,omitempty"` // alias for Choices
+	// Options is an alias for Choices some models send; it is accepted on
+	// decode (see UnmarshalJSON) and kept out of the schema.
+	Options []QuestionChoice `json:"-"`
+}
+
+// UnmarshalJSON accepts `options` as an alias for `choices` without
+// advertising the duplicate in the schema.
+func (q *QuestionItem) UnmarshalJSON(data []byte) error {
+	type Alias QuestionItem
+	aux := &struct {
+		Options []QuestionChoice `json:"options,omitempty"`
+		*Alias
+	}{Alias: (*Alias)(q)}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	q.Options = aux.Options
+	return nil
 }
 
 // GetChoices returns choices, preferring the Choices field over Options.

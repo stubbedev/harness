@@ -25,14 +25,14 @@ var lspDescription string
 // most of their parameters in common anyway: nearly all of them name a
 // symbol and a place to look for it.
 type LSPParams struct {
-	Action      string `json:"action" description:"diagnostics, symbols, definition, references, call_hierarchy, rename, replace_symbol or restart"`
+	Action      string `json:"action" enum:"diagnostics,symbols,definition,references,call_hierarchy,rename,replace_symbol,restart"`
 	Symbol      string `json:"symbol,omitempty" description:"Symbol name, for definition, references, call_hierarchy, rename and replace_symbol"`
 	FilePath    string `json:"file_path,omitempty" description:"File to act on, for symbols, replace_symbol, and diagnostics (whole project when omitted)"`
 	Path        string `json:"path,omitempty" description:"Directory or file to narrow the symbol search to; defaults to the working directory"`
-	Direction   string `json:"direction,omitempty" description:"call_hierarchy only: incoming (who calls this) or outgoing (what this calls)"`
+	Direction   string `json:"direction,omitempty" enum:"incoming,outgoing" description:"call_hierarchy only: who calls this, or what this calls"`
 	NewName     string `json:"new_name,omitempty" description:"rename only: the new name"`
 	Replacement string `json:"replacement,omitempty" description:"replace_symbol only: the text to write, ignored when mode is delete"`
-	Mode        string `json:"mode,omitempty" description:"replace_symbol only: replace (default), add_before, add_after or delete"`
+	Mode        string `json:"mode,omitempty" enum:"replace,add_before,add_after,delete" description:"replace_symbol only; replace is the default"`
 	Name        string `json:"name,omitempty" description:"restart only: one client to restart; all of them when omitted"`
 }
 

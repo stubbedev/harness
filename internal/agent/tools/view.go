@@ -427,8 +427,9 @@ func failureResponse(message string) *fantasy.ToolResponse {
 	return &resp
 }
 
-// addLineNumbers prefixes each line with its line number, right-aligned in
-// six cells and followed by a pipe.
+// addLineNumbers prefixes each line with its line number and a pipe. No
+// padding: the model does not need the columns to line up, and the
+// blanks were about two tokens per line on every file read.
 func addLineNumbers(content string, startLine int) string {
 	if content == "" {
 		return ""
@@ -439,11 +440,7 @@ func addLineNumbers(content string, startLine int) string {
 	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSuffix(line, "\r")
 
-		numStr := strconv.Itoa(lineNum)
-		for range 6 - len(numStr) {
-			result.WriteByte(' ')
-		}
-		result.WriteString(numStr)
+		result.WriteString(strconv.Itoa(lineNum))
 		result.WriteByte('|')
 		result.WriteString(line)
 		result.WriteByte('\n')

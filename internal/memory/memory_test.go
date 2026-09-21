@@ -153,9 +153,9 @@ func TestIndexRespectsBudget(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, strings.Split(full, "\n"), 3)
 
-	// Fits "- [alpha] (project) alpha" but not the second line plus its
+	// Fits "- (project) alpha" but not the second line plus its
 	// newline separator.
-	tight, err := svc.Index(t.Context(), len("- [alpha] (project) alpha")+len("- [beta] (project) beta"))
+	tight, err := svc.Index(t.Context(), len("- (project) alpha")+len("- (project) beta"))
 	require.NoError(t, err)
 	require.Contains(t, tight, "alpha")
 	require.NotContains(t, tight, "gamma")

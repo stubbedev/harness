@@ -2,8 +2,10 @@ package tools
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
+	"charm.land/fantasy/schema"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/question"
 )
@@ -73,4 +75,20 @@ func TestFormatAnswer_Skipped(t *testing.T) {
 	resp, err := formatAnswer(&answer, question.TypeFreeText)
 	require.NoError(t, err)
 	require.Equal(t, "User skipped this question", resp.Content)
+}
+
+// `options` is accepted as an alias for `choices` on decode but is not
+// part of the schema, so the duplicate nested schema is never sent.
+func TestQuestionItemOptionsAliasDecodesButIsNotInSchema(t *testing.T) {
+	t.Parallel()
+	var item QuestionItem
+	require.NoError(t, json.Unmarshal([]byte(`{"type":"single_choice","question":"q","description":"d","options":[{"id":"a","label":"A"}]}`), &item))
+	require.Len(t, item.GetChoices(), 1)
+	require.Equal(t, "a", item.GetChoices()[0].ID)
+
+	data, err := json.Marshal(schema.ToMap(schema.Generate(reflect.TypeFor[QuestionParams]())))
+	require.NoError(t, err)
+	require.NotContains(t, string(data), `"options"`)
+	require.Contains(t, string(data), `"choices"`)
+	require.Contains(t, string(data), `"yes_no"`)
 }
