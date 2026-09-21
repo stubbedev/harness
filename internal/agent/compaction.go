@@ -23,10 +23,12 @@ import (
 //  1. Aging. Tool results are the bulk of a long session and the least
 //     worth re-reading. Once the request passes compactionAgeRatio of the
 //     usable window, every tool result before the most recent user turn
-//     is sent as a one-line stub instead. The watermark this leaves on
-//     the session (CompactionAgedID) moves only when the threshold is
-//     crossed again, so the request prefix stays stable in between and
-//     prompt caching keeps working.
+//     is sent as a one-line stub instead. Moving the watermark this
+//     leaves on the session (CompactionAgedID) rewrites the request from
+//     the old watermark on and costs the prompt cache for all of it, so
+//     it moves only when doing so frees at least
+//     compactionAgeMinSavingRatio of the window; a turn whose results
+//     are small stays verbatim and cached until enough of them add up.
 //  2. Folding. Past compactionSummarizeRatio, the oldest history is
 //     summarized into the session's hidden summary and the request
 //     restarts from the boundary this leaves (CompactionBoundaryID),
@@ -45,6 +47,11 @@ const (
 	compactionAgeRatio       = 0.5
 	compactionSummarizeRatio = 0.75
 	compactionKeepRatio      = 0.25
+
+	// compactionAgeMinSavingRatio is the share of the usable window an
+	// advance of the aging watermark has to free to be worth the cache
+	// it costs.
+	compactionAgeMinSavingRatio = 0.1
 
 	// compactionStubMaxChars is the size below which a tool result is
 	// not worth stubbing: the stub would be about as long.
@@ -131,12 +138,21 @@ func indexOfMessage(msgs []message.Message, id string) int {
 //   - Long assistant answers are cut to their opening: the decisions in
 //     them are restated by later turns, or land in the summary when the
 //     turn is folded.
+//   - Execution-state snapshots that a later snapshot replaced are cut
+//     to a line saying so; the newest one is the state.
 func ageMessages(msgs []message.Message, agedIdx int) []message.Message {
 	if agedIdx < 0 {
 		return msgs
 	}
 	out := make([]message.Message, len(msgs))
 	copy(out, msgs)
+	latestExecutionState := -1
+	for i, m := range slices.Backward(msgs) {
+		if slices.ContainsFunc(m.ContextNotes(), func(n message.ContextNote) bool { return n.Kind == message.ContextNoteExecutionState }) {
+			latestExecutionState = i
+			break
+		}
+	}
 	for i := 0; i <= agedIdx && i < len(out); i++ {
 		switch out[i].Role {
 		case message.Tool, message.User, message.Assistant:
@@ -164,6 +180,11 @@ func ageMessages(msgs []message.Message, agedIdx int) []message.Message {
 			case message.TextContent:
 				if out[i].Role == message.Assistant && len(p.Text) > compactionAnswerMaxChars {
 					p.Text = cutAnswer(p.Text)
+				}
+				parts = append(parts, p)
+			case message.ContextNote:
+				if p.Kind == message.ContextNoteExecutionState && i < latestExecutionState {
+					p.Text = "<execution_state>\n[superseded by a later snapshot]\n</execution_state>"
 				}
 				parts = append(parts, p)
 			default:
@@ -215,13 +236,16 @@ func toolResultStub(tr message.ToolResult) string {
 
 // dedupToolResults sends an identical tool result once: when the same
 // output appears more than once in the history - a file read twice, a
-// command re-run to the same effect - every copy but the latest is
-// replaced with a stub pointing at the one that stays. The latest is
-// kept because it is the one the model most recently acted on.
+// command re-run to the same effect - every copy but the earliest is
+// replaced with a stub pointing at the one that stays. The earliest is
+// kept because it is the one already in the request prefix: stubbing
+// it instead would rewrite a message the provider has cached and cost
+// the cache on everything after it, every time the model repeats a
+// command.
 func dedupToolResults(msgs []message.Message) []message.Message {
 	seen := map[string]bool{}
 	var out []message.Message
-	for i, m := range slices.Backward(msgs) {
+	for i, m := range msgs {
 		if m.Role != message.Tool {
 			continue
 		}
@@ -243,7 +267,7 @@ func dedupToolResults(msgs []message.Message) []message.Message {
 					copy(out, msgs)
 				}
 			}
-			tr.Content = fmt.Sprintf("[%s output identical to a later result in this conversation: %d lines, %d characters; see that one]",
+			tr.Content = fmt.Sprintf("[%s output identical to an earlier result in this conversation: %d lines, %d characters; see that one]",
 				toolLabel(tr.Name), strings.Count(tr.Content, "\n")+1, len(tr.Content))
 			parts[j] = tr
 		}
@@ -385,13 +409,16 @@ func (a *sessionAgent) maintainContext(
 	over := func(ratio float64) bool { return cw > 0 && float64(projected) > ratio*float64(cw) }
 	changed := false
 
-	// Layer 1: age the tool results of every turn but the current one.
+	// Layer 1: age the tool results of every turn but the current one,
+	// when that frees enough to be worth re-sending the prefix.
 	if force || over(compactionAgeRatio) {
 		if start := lastUserTurnStart(tail); start > 0 && tail[start-1].ID != sess.CompactionAgedID {
-			sess.CompactionAgedID = tail[start-1].ID
-			agedIdx = start - 1
-			projected = a.projectRequest(sess.CompactionSummary, dedupToolResults(ageMessages(tail, agedIdx)), supportsImages)
-			changed = true
+			aged := a.projectRequest(sess.CompactionSummary, dedupToolResults(ageMessages(tail, start-1)), supportsImages)
+			if force || float64(projected-aged) >= compactionAgeMinSavingRatio*float64(cw) {
+				sess.CompactionAgedID = tail[start-1].ID
+				projected = aged
+				changed = true
+			}
 		}
 	}
 

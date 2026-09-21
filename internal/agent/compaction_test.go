@@ -309,9 +309,10 @@ func TestPreparePromptDropsEarlierTurnsReasoning(t *testing.T) {
 	assert.Len(t, history[1].Content, 1, "the earlier answer keeps its text and loses its thinking")
 }
 
-// Identical tool results are sent once: the latest copy stays, earlier
-// ones become a pointer to it. Different outputs are left alone.
-func TestDedupToolResultsKeepsTheLatestCopy(t *testing.T) {
+// Identical tool results are sent once: the earliest copy stays, later
+// ones become a pointer to it, so the cached prefix is never rewritten.
+// Different outputs are left alone.
+func TestDedupToolResultsKeepsTheEarliestCopy(t *testing.T) {
 	t.Parallel()
 	body := strings.Repeat("the same file\n", 100)
 	msgs := []message.Message{
@@ -320,10 +321,10 @@ func TestDedupToolResultsKeepsTheLatestCopy(t *testing.T) {
 		{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: "c", Name: "view", Content: body}}},
 	}
 	out := dedupToolResults(msgs)
-	assert.Contains(t, out[0].Parts[0].(message.ToolResult).Content, "identical to a later result")
+	assert.Equal(t, body, out[0].Parts[0].(message.ToolResult).Content, "the earliest copy is the one kept")
 	assert.Equal(t, "different", out[1].Parts[0].(message.ToolResult).Content)
-	assert.Equal(t, body, out[2].Parts[0].(message.ToolResult).Content, "the latest copy is the one kept")
-	assert.Equal(t, body, msgs[0].Parts[0].(message.ToolResult).Content, "the input is not mutated")
+	assert.Contains(t, out[2].Parts[0].(message.ToolResult).Content, "identical to an earlier result")
+	assert.Equal(t, body, msgs[2].Parts[0].(message.ToolResult).Content, "the input is not mutated")
 
 	unique := []message.Message{msgs[1], msgs[2]}
 	assert.Equal(t, unique, dedupToolResults(unique), "nothing to dedup returns the input")
