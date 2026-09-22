@@ -311,6 +311,75 @@ func TestToolGroupRenderLevels(t *testing.T) {
 	})
 }
 
+// TestSelectionColorsToolNames pins the two-tone rule the transcript
+// lives by: tool names stay in the understated grey until the entry is
+// selected or expanded, then say their status in color (blue done,
+// green pending; failures were never grey).
+func TestSelectionColorsToolNames(t *testing.T) {
+	t.Parallel()
+	sty := groupStyles()
+	done := func(id string) ToolMessageItem {
+		item := bashTool(id, "go test", true)
+		item.SetResult(&message.ToolResult{ToolCallID: id, Name: "shell", Content: "ok"})
+		return item
+	}
+
+	t.Run("collapsed group colors the verb only while selected", func(t *testing.T) {
+		t.Parallel()
+		g := NewToolGroupMessageItem(sty, done("t1"))
+		g.AddTool(done("t2"))
+		require.Contains(t, g.Render(80), sty.Tool.NameNormal.Render("Ran"))
+		require.NotContains(t, g.Render(80), sty.Tool.NameNormalSelected.Render("Ran"))
+
+		g.SetFocused(true)
+		require.Contains(t, g.Render(80), sty.Tool.NameNormalSelected.Render("Ran"))
+	})
+
+	t.Run("selected singleton one-liner colors the name", func(t *testing.T) {
+		t.Parallel()
+		g := NewToolGroupMessageItem(sty, done("t1"))
+		require.Contains(t, g.Render(80), sty.Tool.NameNormal.Render("Shell"))
+
+		g.SetFocused(true)
+		require.Contains(t, g.Render(80), sty.Tool.NameNormalSelected.Render("Shell"))
+	})
+
+	t.Run("sub-cursor colors its child and returns the verb to grey", func(t *testing.T) {
+		t.Parallel()
+		g := NewToolGroupMessageItem(sty, done("t1"))
+		g.AddTool(done("t2"))
+		g.SetFocused(true)
+		g.ExpandAndDescend()
+		require.Equal(t, 0, g.SelectedChild())
+
+		out := g.Render(120)
+		assert.Contains(t, out, sty.Tool.NameNormalSelected.Render("Shell"))
+		assert.Contains(t, out, sty.Tool.NameNormal.Render("Shell"))
+		assert.NotContains(t, out, sty.Tool.NameNormalSelected.Render("Ran"))
+	})
+
+	t.Run("expanded call colors its header name regardless of focus", func(t *testing.T) {
+		t.Parallel()
+		g := NewToolGroupMessageItem(sty, done("t1"))
+		g.AddTool(done("t2"))
+		g.ExpandAndDescend()
+		g.DigIn()
+		require.True(t, isToolExpanded(g.ChildTool("t1")))
+
+		assert.Contains(t, g.Render(120), sty.Tool.NameNormalSelected.Render("Shell"))
+	})
+
+	t.Run("selected live run says pending in color", func(t *testing.T) {
+		t.Parallel()
+		g := NewToolGroupMessageItem(sty, done("t1"))
+		g.AddTool(bashTool("t2", "npm test", false))
+		require.Contains(t, g.Render(80), sty.Tool.NamePending.Render("Ran"))
+
+		g.SetFocused(true)
+		assert.Contains(t, g.Render(80), sty.Tool.NamePendingSelected.Render("Ran"))
+	})
+}
+
 func TestToolGroupChildResolution(t *testing.T) {
 	t.Parallel()
 	sty := groupStyles()

@@ -404,7 +404,7 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 			start := len(lines)
 			if isToolExpanded(t) {
 				for ln := range strings.SplitSeq(t.RawRender(contentWidth), "\n") {
-				lines = append(lines, subItemIndentString+ln)
+					lines = append(lines, subItemIndentString+ln)
 				}
 			} else {
 				lines = append(lines, subItemIndentString+g.oneLiner(t, contentWidth-subItemIndent, g.focused && i == g.selectedChild))
