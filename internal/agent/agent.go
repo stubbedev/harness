@@ -885,10 +885,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		systemPrompt += "\n\n<mcp-instructions>\n" + s + "\n</mcp-instructions>"
 	}
 
-	if len(agentTools) > 0 {
-		// Add Anthropic caching to the last tool.
-		agentTools[len(agentTools)-1].SetProviderOptions(a.getCacheControlOptions())
-	}
+	stampToolCacheControl(agentTools, a.getCacheControlOptions())
 
 	agent := fantasy.NewAgent(
 		largeModel.Model,
@@ -1111,6 +1108,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			// Use latest tools (updated by SetTools when MCP tools change).
 			prepared.Tools = a.tools.Copy()
+			// The tool palette can change mid-turn, so keep the breakpoint
+			// on the current tail instead of the one Run stamped.
+			stampToolCacheControl(prepared.Tools, a.getCacheControlOptions())
 
 			// Drain queued follow-up prompts for this step. Calls covered
 			// by a cancel recorded while they sat in the queue are dropped:
@@ -2095,6 +2095,22 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	a.messageQueue.Set(sessionID, queuedMessages[1:])
 	_, qErr := a.Run(ctx, firstQueuedMessage)
 	return qErr
+}
+
+// stampToolCacheControl moves the Anthropic-style cache breakpoint to the
+// last tool and clears it from the rest, so a request never carries more
+// than one tool breakpoint. The tool palette can change mid-session
+// (deferred tools loading, MCP servers joining): Run stamps the tail once,
+// but a refreshed palette leaves that stamp behind on an instance that is
+// no longer last, or on none at all once the palette is rebuilt.
+func stampToolCacheControl(tools []fantasy.AgentTool, opts fantasy.ProviderOptions) {
+	for _, tool := range tools {
+		tool.SetProviderOptions(fantasy.ProviderOptions{})
+	}
+	if len(tools) == 0 {
+		return
+	}
+	tools[len(tools)-1].SetProviderOptions(opts)
 }
 
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
