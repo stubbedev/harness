@@ -206,7 +206,14 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				return util.ReportError(err)
 			}
 		default:
-			cmd, _ := applyFilterInput(&m.input, m.list, msg)
+			cmd, _ := filterInput(&m.input, msg, func(query string) {
+				// The models list keeps its grouped, flat-indexed search;
+				// only the search differs, the typing path is shared.
+				m.list.Focus()
+				m.list.SetFilter(query)
+				m.list.SelectFirst()
+				m.list.ScrollToTop()
+			})
 			return ActionCmd{cmd}
 		}
 	}

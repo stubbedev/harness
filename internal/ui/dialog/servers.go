@@ -141,7 +141,7 @@ func (d *serversDialog) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, d.keyMap.Select):
 			return d.confirmSelection()
 		default:
-			cmd, _ := applyFilterInput(&d.input, d.list, msg)
+			cmd, _ := filterInput(&d.input, msg, applyListFilter(d.list))
 			return ActionCmd{cmd}
 		}
 	}

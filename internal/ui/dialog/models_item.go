@@ -121,24 +121,34 @@ func (m *ModelItem) Filter() string {
 	return m.model.Name
 }
 
+// Value implements PickerItem: the selected model as a
+// config.SelectedModel.
+func (m *ModelItem) Value() any {
+	return m.SelectedModel()
+}
+
+// Label implements PickerItem.
+func (m *ModelItem) Label() string {
+	return m.model.Name
+}
+
+// RightLabel implements PickerItem: the provider column.
+func (m *ModelItem) RightLabel() string {
+	if !m.showProvider {
+		return ""
+	}
+	return string(m.prov.Name)
+}
+
 // ID implements ListItem.
 func (m *ModelItem) ID() string {
 	return modelKey(string(m.prov.ID), m.model.ID)
 }
 
-// Render implements ListItem.
+// Render implements ListItem, flowing through the one shared row
+// path.
 func (m *ModelItem) Render(width int) string {
-	var providerInfo string
-	if m.showProvider {
-		providerInfo = string(m.prov.Name)
-	}
-	styles := ListItemStyles{
-		ItemBlurred:     m.t.Dialog.NormalItem,
-		ItemFocused:     m.t.Dialog.SelectedItem,
-		InfoTextBlurred: m.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: m.t.Dialog.ListItem.InfoFocused,
-	}
-	return renderItem(styles, m.model.Name, providerInfo, m.focused, width, m.cache, &m.m)
+	return renderItem(pickerItemStyles(m.t), m.Label(), m.RightLabel(), m.focused, width, m.cache, &m.m)
 }
 
 // SetFocused implements ListItem.
