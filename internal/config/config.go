@@ -290,7 +290,6 @@ type TUIOptions struct {
 	Theme       string `json:"theme,omitempty" jsonschema:"description=Color theme for the TUI. Overrides the provider-based default theme,example=charmtone,example=catppuccin-mocha,example=gruvbox-dark"`
 
 	Completions       Completions `json:"completions,omitzero" jsonschema:"description=Completions UI options"`
-	Transparent       *bool       `json:"transparent,omitempty" jsonschema:"description=Enable transparent background for the TUI interface,default=false"`
 	Scrollbar         string      `json:"scrollbar,omitempty" jsonschema:"description=Chat scrollbar visibility,enum=default,enum=always,enum=never,default=default"`
 	Mouse             *bool       `json:"mouse,omitempty" jsonschema:"description=Enable terminal mouse capture for selection\\, clicks\\, and scrolling in the TUI. Disable to let the terminal emulator or tmux handle text selection and copy/paste,default=true"`
 	ExitBanner        ExitBanner  `json:"exit_banner,omitempty" jsonschema:"description=Exit banner style after quitting Harness,enum=default,enum=compact,enum=none,default=default"`
@@ -316,13 +315,6 @@ func (t *TUIOptions) KeybindOverrides() map[string][]string {
 		overrides[action] = keys
 	}
 	return overrides
-}
-
-// IsTransparent reports whether the TUI draws a transparent background. The
-// nil receiver and the unset pointer both mean opaque, so callers can ask
-// without unwrapping either.
-func (t *TUIOptions) IsTransparent() bool {
-	return t != nil && t.Transparent != nil && *t.Transparent
 }
 
 // ShowGitStatus reports whether the compact header includes the git branch

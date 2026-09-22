@@ -241,8 +241,6 @@ type UI struct {
 	landingMarkSize image.Point
 	landingMarkView string
 
-	isTransparent bool
-
 	// mouseEnabled controls whether Bubble Tea mouse reporting is active.
 	// When false, the terminal emulator (or tmux) handles text selection,
 	// copy/paste, right-click, and scrolling instead of Harness.
@@ -628,8 +626,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	// disable indeterminate progress bar
 	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
-	// enable transparent mode
-	ui.isTransparent = opts.TUI.IsTransparent()
 	// enable mouse support (default on)
 	ui.mouseEnabled = opts.TUI.Mouse == nil || *opts.TUI.Mouse
 
@@ -2180,27 +2176,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			return util.NewInfoMsg("Thinking mode " + status)
 		}))
 		m.dialog.CloseDialog(dialog.CommandsID)
-	case dialog.ActionToggleTransparentBackground:
-		cmds = append(cmds, func() tea.Msg {
-			cfg := m.com.Config()
-			if cfg == nil {
-				return util.ReportError(errors.New("configuration not found"))()
-			}
-
-			isTransparent := cfg.Options != nil && cfg.Options.TUI.IsTransparent()
-			newValue := !isTransparent
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.transparent", newValue); err != nil {
-				return util.ReportError(err)()
-			}
-			m.isTransparent = newValue
-
-			status := "disabled"
-			if newValue {
-				status = "enabled"
-			}
-			return util.NewInfoMsg("Transparent background " + status)
-		})
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleMouseSupport:
 		cfg := m.com.Config()
 		if cfg == nil {
@@ -3224,9 +3199,8 @@ func mouseMode(enabled, inlineActive bool) tea.MouseMode {
 func (m *UI) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
-	if !m.isTransparent {
-		v.BackgroundColor = m.com.Styles.Background
-	}
+	// The background is always transparent: the terminal's own
+	// background shows through.
 	v.MouseMode = mouseMode(m.mouseEnabled, m.activeInline != nil)
 	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = home.Short(m.com.Workspace.WorkingDir())

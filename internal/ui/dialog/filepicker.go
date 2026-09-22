@@ -1,13 +1,11 @@
 package dialog
 
 import (
-	"fmt"
 	"image"
 	_ "image/jpeg" // register JPEG format
 	_ "image/png"  // register PNG format
 	"os"
 	"strings"
-	"sync"
 
 	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/key"
@@ -216,16 +214,19 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	styles := t.FilePicker
 	styles.File = styles.File.Width(innerWidth)
 	styles.Directory = styles.Directory.Width(innerWidth)
-	styles.Selected = styles.Selected.PaddingLeft(1).Width(innerWidth)
-	styles.DisabledSelected = styles.DisabledSelected.PaddingLeft(1).Width(innerWidth)
+	styles.Selected = styles.Selected.Width(innerWidth)
+	styles.DisabledSelected = styles.DisabledSelected.Width(innerWidth)
 	f.fp.Styles = styles
 
 	rc := NewRenderContext(t, width)
 	rc.Gap = 1
 	rc.Title = "Add Image"
 
-	if imgPrevHeight > 0 {
-		imgPreview := t.Dialog.ImagePreview.Align(lipgloss.Center).Width(innerWidth).Render(f.imagePreview(imgPrevWidth, imgPrevHeight))
+	// The preview renders only when an image is actually on screen; a
+	// placeholder block would read as a stray background panel.
+	if imgPrevHeight > 0 && f.previewingImage {
+		path := f.fp.HighlightedPath()
+		imgPreview := t.Dialog.ImagePreview.Align(lipgloss.Center).Width(innerWidth).Render(f.imgEnc.Render(path, imgPrevWidth, imgPrevHeight))
 		rc.AddPart(imgPreview)
 	}
 
@@ -236,47 +237,6 @@ func (f *FilePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	DrawCenter(scr, area, view)
 	return nil
-}
-
-var (
-	imagePreviewCache = map[string]string{}
-	imagePreviewMutex sync.RWMutex
-)
-
-// imagePreview returns the image preview section of the [FilePicker] dialog.
-func (f *FilePicker) imagePreview(imgPrevWidth, imgPrevHeight int) string {
-	if !f.previewingImage {
-		key := fmt.Sprintf("%dx%d", imgPrevWidth, imgPrevHeight)
-		imagePreviewMutex.RLock()
-		cached, ok := imagePreviewCache[key]
-		imagePreviewMutex.RUnlock()
-		if ok {
-			return cached
-		}
-
-		var sb strings.Builder
-		for y := range imgPrevHeight {
-			for range imgPrevWidth {
-				sb.WriteRune('█')
-			}
-			if y < imgPrevHeight-1 {
-				sb.WriteRune('\n')
-			}
-		}
-
-		imagePreviewMutex.Lock()
-		imagePreviewCache[key] = sb.String()
-		imagePreviewMutex.Unlock()
-
-		return sb.String()
-	}
-
-	if id := f.fp.HighlightedPath(); id != "" {
-		r := f.imgEnc.Render(id, imgPrevWidth, imgPrevHeight)
-		return r
-	}
-
-	return ""
 }
 
 func loadImage(path string) (img image.Image, err error) {

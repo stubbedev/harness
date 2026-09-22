@@ -603,15 +603,18 @@ func quickStyle(o quickStyleOpts) Styles {
 	}
 
 	s.FilePicker = filepicker.Styles{
-		DisabledCursor:   base.Foreground(o.fgMoreSubtle),
-		Cursor:           base.Foreground(o.fgBase),
-		Symlink:          base.Foreground(o.fgMostSubtle),
-		Directory:        base.Foreground(o.primary),
-		File:             base.Foreground(o.fgBase),
-		DisabledFile:     base.Foreground(o.fgMoreSubtle),
-		DisabledSelected: base.Background(o.bgMostVisible).Foreground(o.fgMoreSubtle),
+		DisabledCursor: base.Foreground(o.fgMoreSubtle),
+		Cursor:         base.Foreground(o.fgBase),
+		Symlink:        base.Foreground(o.fgMostSubtle),
+		// Rows share the dialog list item tokens (Dialog.NormalItem /
+		// Dialog.SelectedItem) so the file picker's list reads like every
+		// other picker's; directories keep the primary accent.
+		Directory:        base.Padding(0, 1).Foreground(o.primary),
+		File:             base.Padding(0, 1).Foreground(o.fgBase),
+		DisabledFile:     base.Padding(0, 1).Foreground(o.fgMoreSubtle),
+		DisabledSelected: base.Padding(0, 1).Background(o.bgMostVisible).Foreground(o.fgMoreSubtle),
 		Permission:       base.Foreground(o.fgMoreSubtle),
-		Selected:         base.Background(o.primary).Foreground(o.fgBase),
+		Selected:         base.Padding(0, 1).Background(o.primary).Foreground(o.onPrimary),
 		FileSize:         base.Foreground(o.fgMoreSubtle),
 		EmptyDirectory:   base.Foreground(o.fgMoreSubtle).PaddingLeft(2).SetString("Empty directory"),
 	}

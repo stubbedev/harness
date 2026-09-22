@@ -34,8 +34,6 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 	clone.RecentModels[SelectedModelTypeLarge] = []SelectedModel{{Provider: "anthropic", Model: "claude"}}
 	clone.MCP["b"] = MCPConfig{}
 	clone.Options.TUI.CompactMode = true
-	enabled := true
-	clone.Options.TUI.Transparent = &enabled
 	disabled := false
 	clone.Options.TUI.Mouse = &disabled
 
@@ -44,6 +42,5 @@ func TestCloneForWrite_Isolation(t *testing.T) {
 	require.Equal(t, "openai", orig.RecentModels[SelectedModelTypeLarge][0].Provider, "RecentModels leaked")
 	require.NotContains(t, orig.MCP, "b", "MCP leaked")
 	require.False(t, orig.Options.TUI.CompactMode, "Options.TUI.CompactMode leaked")
-	require.Nil(t, orig.Options.TUI.Transparent, "Options.TUI.Transparent leaked")
 	require.Nil(t, orig.Options.TUI.Mouse, "Options.TUI.Mouse leaked")
 }

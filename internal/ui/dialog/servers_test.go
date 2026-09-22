@@ -27,6 +27,11 @@ type serversWorkspace struct {
 
 func (w *serversWorkspace) Config() *config.Config { return w.cfg }
 
+// WorkingDir gives the embedded workspace interface a value without a
+// real workspace; dialogs that only need the path (e.g. the file
+// picker) work against the test's own directory.
+func (w *serversWorkspace) WorkingDir() string { return "." }
+
 // newServersTestCommon builds a Common over a config with three MCP
 // servers (stdio, remote, config-disabled) and two LSP entries.
 func newServersTestCommon() *common.Common {

@@ -541,14 +541,6 @@ func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
 	})
 }
 
-// SetTransparentBackground sets the transparent background setting and persists it.
-func (s *ConfigStore) SetTransparentBackground(scope Scope, enabled bool) error {
-	return s.update(scope, func(c *Config) map[string]any {
-		c.ensureTUI().Transparent = &enabled
-		return map[string]any{"options.tui.transparent": enabled}
-	})
-}
-
 // SetProviderAPIKey sets the API key for a provider and persists it.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
 	var providerConfig ProviderConfig

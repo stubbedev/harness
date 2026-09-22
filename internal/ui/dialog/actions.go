@@ -53,10 +53,9 @@ type (
 	ActionSelectNotificationStyle struct {
 		Style string
 	}
-	ActionToggleTransparentBackground struct{}
-	ActionToggleMouseSupport          struct{}
-	ActionInitializeProject           struct{}
-	ActionSummarize                   struct {
+	ActionToggleMouseSupport struct{}
+	ActionInitializeProject  struct{}
+	ActionSummarize          struct {
 		SessionID string
 	}
 	// ActionCompact compacts (summarizes) the session, optionally steered

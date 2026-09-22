@@ -100,11 +100,6 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
 	}
 
-	if isAppleTerminal() {
-		slog.Warn("Detected Apple Terminal, enabling transparent mode")
-		assignIfNil(&cfg.Options.TUI.Transparent, true)
-	}
-
 	// Load known providers, this loads the config from models.dev. A
 	// failed refresh still yields the cached or embedded catalog, so
 	// only an empty list is fatal: starting up without providers is
@@ -1374,8 +1369,6 @@ func ProjectSubagentsDir(workingDir string) []string {
 
 	return dirs
 }
-
-func isAppleTerminal() bool { return os.Getenv("TERM_PROGRAM") == "Apple_Terminal" }
 
 // knownHookEvents is the set of canonical hook event names accepted in
 // config. Mirrors hooks.EventNames(); config cannot import hooks (hooks

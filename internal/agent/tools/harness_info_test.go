@@ -185,7 +185,6 @@ func TestHarnessInfo_Options(t *testing.T) {
 func TestHarnessInfo_TUIOptions(t *testing.T) {
 	t.Parallel()
 
-	transparent := true
 	depth, items := 3, 42
 	cfg := config.NewTestStore(&config.Config{
 		Providers: csync.NewMap[string, config.ProviderConfig](),
@@ -195,7 +194,6 @@ func TestHarnessInfo_TUIOptions(t *testing.T) {
 				DiffMode:    config.DiffModeSplit,
 				Scrollbar:   config.ScrollbarNever,
 				ExitBanner:  config.ExitBannerCompact,
-				Transparent: &transparent,
 				Completions: config.Completions{MaxDepth: &depth, MaxItems: &items},
 			},
 		},
@@ -206,7 +204,6 @@ func TestHarnessInfo_TUIOptions(t *testing.T) {
 	require.Contains(t, output, "diff_mode = split")
 	require.Contains(t, output, "scrollbar = never")
 	require.Contains(t, output, "exit_banner = compact")
-	require.Contains(t, output, "transparent = true")
 	require.Contains(t, output, "completions_max_depth = 3")
 	require.Contains(t, output, "completions_max_items = 42")
 }
@@ -220,7 +217,6 @@ func TestHarnessInfo_TUIOptionsUnpinnedCompletionsOmitted(t *testing.T) {
 	})
 
 	output := buildHarnessInfo(cfg, nil, nil, nil, nil, nil)
-	require.Contains(t, output, "transparent = false")
 	require.NotContains(t, output, "completions_max_depth")
 	require.NotContains(t, output, "completions_max_items")
 }

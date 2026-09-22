@@ -557,13 +557,6 @@ func (c *Commands) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
 	)
 
-	// Add transparent background toggle.
-	transparentLabel := "Disable Background Color"
-	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.IsTransparent() {
-		transparentLabel = "Enable Background Color"
-	}
-	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_transparent", transparentLabel, "", ActionToggleTransparentBackground{}))
-
 	// Add mouse support toggle.
 	mouseLabel := "Disable Mouse"
 	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Mouse != nil && !*cfg.Options.TUI.Mouse {
