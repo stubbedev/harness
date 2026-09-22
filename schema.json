@@ -948,11 +948,6 @@
           "$ref": "#/$defs/Completions",
           "description": "Completions UI options"
         },
-        "transparent": {
-          "type": "boolean",
-          "description": "Enable transparent background for the TUI interface",
-          "default": false
-        },
         "scrollbar": {
           "type": "string",
           "enum": [
@@ -1050,11 +1045,6 @@
               "dialog.close",
               "dialog.commands.shift_tab",
               "dialog.commands.tab",
-              "dialog.file_picker.backward",
-              "dialog.file_picker.down",
-              "dialog.file_picker.forward",
-              "dialog.file_picker.select",
-              "dialog.file_picker.up",
               "dialog.lsp_servers.back",
               "dialog.lsp_servers.select",
               "dialog.mcp_auth.copy",
@@ -1092,12 +1082,12 @@
               "dialog.sessions.rename",
               "dialog.sessions.select",
               "dialog.up_down",
-              "editor.add_image",
               "editor.attachment_delete_mode",
               "editor.commands",
               "editor.copy_selection",
               "editor.cut_selection",
               "editor.delete_all_attachments",
+              "editor.delete_word_backward",
               "editor.escape",
               "editor.history_next",
               "editor.history_prev",
@@ -1105,8 +1095,7 @@
               "editor.mention_file",
               "editor.newline",
               "editor.open_editor",
-              "editor.paste_image",
-              "editor.paste_text",
+              "editor.paste",
               "editor.select_all",
               "editor.send_message",
               "editor.shell_mode",
