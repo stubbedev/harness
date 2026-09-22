@@ -1406,20 +1406,23 @@ func (m *Chat) ClearMouse() {
 // applyHighlightRange applies the current highlight range to the chat items.
 func (m *Chat) applyHighlightRange(idx, selectedIdx int, item list.Item) list.Item {
 	if hi, ok := item.(list.Highlightable); ok {
-		// Apply highlight
+		// Apply highlight. Columns cross from viewport space, which
+		// getHighlightRange speaks, into the item content space
+		// SetHighlight speaks; this is the only place that bridge
+		// happens.
 		startItemIdx, startLine, startCol, endItemIdx, endLine, endCol := m.getHighlightRange()
 		sLine, sCol, eLine, eCol := -1, -1, -1, -1
 		if idx >= startItemIdx && idx <= endItemIdx {
 			if idx == startItemIdx && idx == endItemIdx {
 				// Single item selection
 				sLine = startLine
-				sCol = startCol
+				sCol = chat.ContentCol(startCol)
 				eLine = endLine
-				eCol = endCol
+				eCol = chat.ContentCol(endCol)
 			} else if idx == startItemIdx {
 				// First item - from start position to end of item
 				sLine = startLine
-				sCol = startCol
+				sCol = chat.ContentCol(startCol)
 				eLine = -1
 				eCol = -1
 			} else if idx == endItemIdx {
@@ -1427,7 +1430,7 @@ func (m *Chat) applyHighlightRange(idx, selectedIdx int, item list.Item) list.It
 				sLine = 0
 				sCol = 0
 				eLine = endLine
-				eCol = endCol
+				eCol = chat.ContentCol(endCol)
 			} else {
 				// Middle item - fully highlighted
 				sLine = 0
@@ -1492,6 +1495,23 @@ func (m *Chat) getHighlightRange() (startItemIdx, startLine, startCol, endItemId
 	return startItemIdx, startLine, startCol, endItemIdx, endLine, endCol
 }
 
+// setSelectionCells records a selection spanning content columns
+// [firstCol, lastCol] inclusive on one line of one item, converting
+// into the viewport cells the stored mouse state and
+// getHighlightRange work with. Every programmatic selection (word,
+// line) stores through here, so the inclusive-cell contract has a
+// single definition; a range whose two ends coincide collapses to no
+// selection in getHighlightRange, which is the plain-click behavior.
+func (m *Chat) setSelectionCells(itemIdx, line, firstCol, lastCol int) {
+	m.mouseDown = true
+	m.mouseDownItem = itemIdx
+	m.mouseDownY = line
+	m.mouseDownX = chat.ViewportCol(firstCol)
+	m.mouseDragItem = itemIdx
+	m.mouseDragY = line
+	m.mouseDragX = chat.ViewportCol(lastCol)
+}
+
 // selectWord selects the word at the given position within an item.
 func (m *Chat) selectWord(itemIdx, x, itemY int) {
 	item := m.list.ItemAt(itemIdx)
@@ -1512,36 +1532,21 @@ func (m *Chat) selectWord(itemIdx, x, itemY int) {
 		return
 	}
 
-	// Adjust x for the item's left padding (border + padding) to get content column.
-	// The mouse x is in viewport space, but we need content space for boundary detection.
-	offset := chat.MessageLeftPaddingTotal
-	contentX := max(x-offset, 0)
-
+	// The click lands in viewport space; the rendered lines are item
+	// content, so convert once and stay in content space until the
+	// selection is stored.
 	line := ansi.Strip(lines[itemY])
-	startCol, endCol := findWordBoundaries(line, contentX)
+	startCol, endCol := findWordBoundaries(line, chat.ContentCol(x))
 	if startCol == endCol {
 		// No word found at position, fallback to single click behavior
-		m.mouseDown = true
-		m.mouseDownItem = itemIdx
-		m.mouseDownX = x
-		m.mouseDownY = itemY
-		m.mouseDragItem = itemIdx
-		m.mouseDragX = x
-		m.mouseDragY = itemY
+		// on the clicked cell.
+		cc := chat.ContentCol(x)
+		m.setSelectionCells(itemIdx, itemY, cc, cc)
 		return
 	}
 
-	// Set selection to the word boundaries (convert back to viewport
-	// space). The stored end coordinate names the word's last cell;
-	// getHighlightRange extends one past it, so the word is selected
-	// exactly. Keep mouseDown true so HandleMouseUp triggers the copy.
-	m.mouseDown = true
-	m.mouseDownItem = itemIdx
-	m.mouseDownX = startCol + offset
-	m.mouseDownY = itemY
-	m.mouseDragItem = itemIdx
-	m.mouseDragX = endCol + offset - 1
-	m.mouseDragY = itemY
+	// endCol is exclusive; the selection covers the word's last cell.
+	m.setSelectionCells(itemIdx, itemY, startCol, endCol-1)
 }
 
 // selectLine selects the entire line at the given position within an item.
@@ -1564,21 +1569,11 @@ func (m *Chat) selectLine(itemIdx, itemY int) {
 		return
 	}
 
-	// Get line length (stripped of ANSI codes) and account for padding.
-	// SetHighlight will subtract the offset, so we need to add it here.
-	offset := chat.MessageLeftPaddingTotal
+	// Get line length (stripped of ANSI codes); the rendered lines are
+	// item content, so the selection spans its first through last
+	// cell.
 	lineLen := ansi.StringWidth(lines[itemY])
-
-	// Set selection to the entire line. The end coordinate names the
-	// line's last cell; getHighlightRange extends one past it.
-	// Keep mouseDown true so HandleMouseUp triggers the copy.
-	m.mouseDown = true
-	m.mouseDownItem = itemIdx
-	m.mouseDownX = 0
-	m.mouseDownY = itemY
-	m.mouseDragItem = itemIdx
-	m.mouseDragX = lineLen + offset - 1
-	m.mouseDragY = itemY
+	m.setSelectionCells(itemIdx, itemY, 0, lineLen-1)
 }
 
 // findWordBoundaries finds the start and end column of the word at the given column.

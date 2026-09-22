@@ -27,9 +27,11 @@ func TestDragSelectionIncludesPointerCell(t *testing.T) {
 	u.updateLayoutAndSize()
 	c := u.chat
 
-	// "brown" starts at column 14 of the rendered line (border plus
-	// padding sit in front of it); the click lands on its first cell.
-	const brownCol = 14
+	// "brown" starts at content column 10 of the rendered line (the
+	// border and padding chrome sit in front of it); the click lands
+	// on its first cell, converted through the same helper the
+	// production code uses.
+	const brownCol = 10
 
 	// Drag across columns 10..12 of the item: cells 10, 11 and 12 all
 	// highlight.
@@ -61,7 +63,7 @@ func TestDragSelectionIncludesPointerCell(t *testing.T) {
 	// Word select still covers exactly the word: the stored end is the
 	// word's last cell and the extension lands one past it, so the
 	// copied text is the word alone.
-	c.selectWord(0, brownCol+chat.MessageLeftPaddingTotal, 0)
+	c.selectWord(0, chat.ViewportCol(brownCol), 0)
 	require.True(t, c.HasHighlight())
 	_ = renderToBuffer(t, c, 80, 20)
 	require.Equal(t, "brown", c.HighlightContent())

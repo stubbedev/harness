@@ -22,6 +22,24 @@ import (
 // padding. We also cap the width so text is readable to the maxTextWidth(120).
 const MessageLeftPaddingTotal = 2
 
+// ViewportCol converts an item-content column into a viewport column.
+// Mouse coordinates and the selection state built from them live in
+// viewport space, where each rendered message string starts at column
+// 0 with its border and padding inline; item content and the ranges
+// items highlight start after that chrome. These two functions are the
+// single definition of the relationship - every conversion flows
+// through them, so the spaces cannot drift apart.
+func ViewportCol(contentCol int) int {
+	return contentCol + MessageLeftPaddingTotal
+}
+
+// ContentCol converts a viewport column into an item-content column,
+// clamped at the content's left edge so a click on the chrome itself
+// maps to the first content cell rather than wrapping negative.
+func ContentCol(viewportCol int) int {
+	return max(viewportCol-MessageLeftPaddingTotal, 0)
+}
+
 // maxTextWidth is the maximum width text messages can be
 const maxTextWidth = 120
 
@@ -184,23 +202,17 @@ func (h *highlightableMessageItem) renderHighlighted(content string, width, heig
 	return list.Highlight(content, area, h.startLine, h.startCol, h.endLine, h.endCol, h.highlighter)
 }
 
-// SetHighlight implements list.Highlightable.
+// SetHighlight implements [list.Highlightable]. Columns are in item
+// content space, matching Highlight and renderHighlighted; the caller
+// converts from viewport columns via ContentCol.
 func (h *highlightableMessageItem) SetHighlight(startLine int, startCol int, endLine int, endCol int) {
-	// Adjust columns for the style's left inset (border + padding) since we
-	// highlight the content only.
-	offset := MessageLeftPaddingTotal
-	newStartCol := max(0, startCol-offset)
-	newEndCol := endCol
-	if endCol >= 0 {
-		newEndCol = max(0, endCol-offset)
-	}
-	if h.startLine == startLine && h.startCol == newStartCol && h.endLine == endLine && h.endCol == newEndCol {
+	if h.startLine == startLine && h.startCol == startCol && h.endLine == endLine && h.endCol == endCol {
 		return
 	}
 	h.startLine = startLine
-	h.startCol = newStartCol
+	h.startCol = startCol
 	h.endLine = endLine
-	h.endCol = newEndCol
+	h.endCol = endCol
 	if h.version != nil {
 		h.version.Bump()
 	}
