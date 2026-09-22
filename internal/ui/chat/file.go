@@ -39,7 +39,7 @@ type ViewToolRenderContext struct{}
 func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
+		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", cappedWidth)
 	}
 
 	var params tools.ViewParams
@@ -126,9 +126,9 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
-			return pendingToolDetail(sty, ToolDisplayName(opts.ToolCall), pendingDetail(fsext.PrettyPath(path), cappedWidth-24), opts.Anim, opts.Compact)
+			return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), fsext.PrettyPath(path), cappedWidth)
 		}
-		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
+		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", cappedWidth)
 	}
 
 	var params tools.WriteParams
@@ -198,9 +198,9 @@ func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// Edit tool uses full width for diffs.
 	if opts.IsPending() {
 		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
-			return pendingToolDetail(sty, ToolDisplayName(opts.ToolCall), pendingDetail(fsext.PrettyPath(path), width-24), opts.Anim, opts.Compact)
+			return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), fsext.PrettyPath(path), width)
 		}
-		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
+		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
 
 	var params tools.EditParams

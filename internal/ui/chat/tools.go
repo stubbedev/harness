@@ -89,10 +89,8 @@ func (d *DefaultToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 type ToolRenderOpts struct {
 	ToolCall        message.ToolCall
 	Result          *message.ToolResult
-	Anim            *anim.Anim
 	ExpandedContent bool
 	Compact         bool
-	IsSpinning      bool
 	Status          ToolStatus
 	// StartedAt is when the tool call started rendering live. Zero for
 	// items restored from history, where the real start time is unknown,
@@ -208,21 +206,13 @@ func newBaseToolMessageItem(
 		startedAt:                time.Now(),
 	}
 	t.anim = anim.New(anim.Settings{
-		ID:          toolCall.ID,
+		ID: toolCall.ID,
+		// The anim is the item's advance clock, not something rendered:
+		// a pending call shows no spinner, but its waiting state line
+		// reports elapsed time, so the item must keep re-rendering while
+		// it runs. Reads startedAt lazily: it is cleared for restored
+		// items, whose elapsed time stays unknown.
 		PulseGlyphs: anim.DefaultPulseGlyphs,
-		GradColorA:  sty.WorkingGradFromColor,
-		GradColorB:  sty.WorkingGradToColor,
-		LabelColor:  sty.WorkingLabelColor,
-		// Per-tool elapsed time on the pending spinner, so long-running
-		// tools (e.g. bash) show a timer from the moment they appear.
-		// Reads startedAt lazily: it is cleared for restored items.
-		Suffix: func() string {
-			if d := t.elapsed(); d > 0 {
-				return common.FormatDuration(d)
-			}
-			return ""
-		},
-		SuffixColor: sty.WorkingTimerColor,
 	})
 
 	return t
@@ -329,10 +319,9 @@ func (t *baseToolMessageItem) Spinning() bool {
 // Advance implements [Animatable].
 //
 // Bumps the F6 list-cache version so the next draw re-renders this
-// item: a spinner frame mutates anim's internal counter, which changes
-// the rendered output but is invisible to the per-item caches. Without
-// the bump the list cache would serve the previously rendered frame
-// indefinitely and the spinner would appear frozen.
+// item: a running call's waiting state line reports elapsed time, and
+// without the bump the list cache would serve the previously rendered
+// frame indefinitely and the timer would appear frozen.
 func (t *baseToolMessageItem) Advance() bool {
 	if !t.isSpinning() || !t.anim.Advance() {
 		return false
@@ -354,10 +343,8 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
 			ToolCall:        t.toolCall,
 			Result:          t.result,
-			Anim:            t.anim,
 			ExpandedContent: t.expandedContent,
 			Compact:         t.isCompact,
-			IsSpinning:      t.isSpinning(),
 			Status:          t.computeStatus(),
 			StartedAt:       t.startedAt,
 			Elapsed:         t.elapsed(),
@@ -557,31 +544,22 @@ func (t *baseToolMessageItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (b
 	return false, nil
 }
 
-// pendingTool renders a tool that is still in progress with an animation.
-func pendingTool(sty *styles.Styles, name string, anim *anim.Anim, nested bool) string {
-	toolName := toolNameStyle(sty, ToolStatusRunning, nested).Render(name)
-	var animView string
-	if anim != nil {
-		animView = anim.Render()
+// pendingToolView renders a tool call that has not finished yet. It
+// uses the standard header form - the status-colored name plus
+// whatever of the argument is known so far - so a running call reads
+// like a settled one and the working spinner never rides the header
+// line. Liveness comes from the waiting state line, which renders
+// exactly as it would for a finished call still awaiting its result,
+// so a call with no output yet remains expandable.
+func pendingToolView(sty *styles.Styles, opts *ToolRenderOpts, name, detail string, width int) string {
+	header := strings.TrimSuffix(toolHeader(sty, opts.Status, name, width, opts, detail), " ")
+	if opts.Compact {
+		return header
 	}
-	if animView == "" {
-		return toolName
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+		return joinToolParts(header, earlyState)
 	}
-	return fmt.Sprintf("%s %s", toolName, animView)
-}
-
-// pendingToolDetail is pendingTool with what is known of the call so
-// far beside the name: the command or path as the model is typing it.
-func pendingToolDetail(sty *styles.Styles, name, detail string, anim *anim.Anim, nested bool) string {
-	if detail == "" {
-		return pendingTool(sty, name, anim, nested)
-	}
-	nameStyle := toolNameStyle(sty, ToolStatusRunning, nested)
-	parts := []string{nameStyle.Render(name), sty.Tool.ParamMain.Render(detail)}
-	if anim != nil {
-		parts = append(parts, anim.Render())
-	}
-	return strings.Join(parts, " ")
+	return header
 }
 
 // waitingForToolMessage builds the "Waiting for tool response..." label,
@@ -636,10 +614,11 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 	return fmt.Sprintf("%s %s", errTag, sty.Tool.ErrorMessage.Render(errContent))
 }
 
-// toolNameStyle returns the tool-name style for a call's status: green
-// while running or awaiting permission, blue when done, red on
-// failure, and muted when canceled. Nested calls (rendered inside a
-// group) use NameNested for the done state.
+// toolNameStyle returns the tool-name style for a call's status:
+// understated grey while running, awaiting permission, or done; red on
+// failure; yellow for a partially failed run; muted when canceled.
+// Nested calls (rendered inside a group) use NameNested for the done
+// state.
 func toolNameStyle(sty *styles.Styles, status ToolStatus, nested bool) lipgloss.Style {
 	switch status {
 	case ToolStatusError:

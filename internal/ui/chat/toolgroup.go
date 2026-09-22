@@ -475,10 +475,9 @@ func (g *ToolGroupMessageItem) prefixKey() uint64 {
 
 // ToolOneLiner renders one tool call as a single line: tool name,
 // colored by status, and an argument summary, truncated to width. A
-// running call uses the green running color, not the tool's full
-// scrambled spinner (a 15-cell animation with its own timer would
-// crowd the line). Shared by the transcript's expanded groups and the
-// background task strip's nested lines.
+// running call uses the running color, matching the call's full
+// render, which carries no spinner either. Shared by the transcript's
+// expanded groups and the background task strip's nested lines.
 func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int) string {
 	status := ToolStatusSuccess
 	if a, ok := t.(Animatable); ok && a.Spinning() {

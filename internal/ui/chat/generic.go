@@ -34,7 +34,7 @@ func (g *GenericToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	name := humanizedToolName(opts.ToolCall.Name)
 
 	if opts.IsPending() {
-		return pendingTool(sty, name, opts.Anim, opts.Compact)
+		return pendingToolView(sty, opts, name, "", cappedWidth)
 	}
 
 	var params map[string]any

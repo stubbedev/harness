@@ -37,7 +37,7 @@ type DiagnosticsToolRenderContext struct{}
 func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingTool(sty, ToolDisplayName(opts.ToolCall), opts.Anim, opts.Compact)
+		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
 
 	var params tools.DiagnosticsParams

@@ -45,7 +45,7 @@ func (b *MCPToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *T
 	name := fmt.Sprintf("%s %s %s", mcpName, sty.Tool.MCPArrow.String(), toolName)
 
 	if opts.IsPending() {
-		return pendingTool(sty, name, opts.Anim, opts.Compact)
+		return pendingToolView(sty, opts, name, "", cappedWidth)
 	}
 
 	var params map[string]any

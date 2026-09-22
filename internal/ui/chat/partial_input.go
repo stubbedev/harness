@@ -3,8 +3,6 @@ package chat
 import (
 	"strconv"
 	"strings"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
 // A tool call's input arrives as a stream of JSON fragments; the UI sees
@@ -67,14 +65,4 @@ func partialStringField(input, key string) (string, bool) {
 		}
 	}
 	return sb.String(), true
-}
-
-// pendingDetail is the one-line form of a streaming input value:
-// whitespace collapsed to one space-joined line, cut to fit.
-func pendingDetail(value string, width int) string {
-	line := FirstLine(value)
-	if width <= 0 {
-		return line
-	}
-	return ansi.Truncate(line, width, "…")
 }
