@@ -45,6 +45,39 @@ func TestDiagnoseMismatch(t *testing.T) {
 		hint := diagnoseMismatch(content, old)
 		require.NotEmpty(t, hint)
 		require.Contains(t, hint, "Closest match")
+		require.Contains(t, hint, "×")
+		require.Contains(t, hint, "your line: qux()")
+	})
+
+	t.Run("single-line typo anchors a fuzzy hint", func(t *testing.T) {
+		t.Parallel()
+		content := "import (\n\t\"github.com/stubbedev/harness/internal/ui/dialog\"\n)\n"
+		old := "\t\"github.com/stubbeev/harness/internal/ui/dialog\""
+		hint := diagnoseMismatch(content, old)
+		require.NotEmpty(t, hint)
+		require.Contains(t, hint, "Closest match")
+		require.Contains(t, hint, "~")
+		require.Contains(t, hint, "stubbedev")
+	})
+
+	t.Run("fuzzy hint for mangled multi-line window", func(t *testing.T) {
+		t.Parallel()
+		content := "func f() {\n\tif a {\n\t\treturn 1\n\t}\n\tif b {\n\t\treturn 2\n\t}\n\treturn 0\n}\n"
+		old := "func f() {\n\tif a {\n\t\treturn 1\n\t}\n\tif b {\n\t\treturn 2\n\t}\n\treturn 3\n}"
+		hint := diagnoseMismatch(content, old)
+		require.NotEmpty(t, hint)
+		require.Contains(t, hint, "Closest match")
+	})
+
+	t.Run("ambiguous error lists occurrence lines", func(t *testing.T) {
+		t.Parallel()
+		content := "x := 1\ny := 2\nx := 1\nz := 3\nx := 1\n"
+		_, _, err := findAndReplace(content, "x := 1", "x := 9", false)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "appears multiple times")
+		require.Contains(t, err.Error(), "line 1")
+		require.Contains(t, err.Error(), "line 3")
+		require.Contains(t, err.Error(), "line 5")
 	})
 
 	t.Run("visualize whitespace", func(t *testing.T) {

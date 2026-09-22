@@ -38,7 +38,7 @@ func findAndReplace(content, old, new string, replaceAll bool) (string, bool, er
 		case index == -1:
 			// Fall through to the fuzzy fallback below.
 		case index != strings.LastIndex(content, old):
-			return "", false, fmt.Errorf("old_string appears multiple times in the file. Please provide more context to ensure a unique match, or set replace_all to true")
+			return "", false, fmt.Errorf("old_string appears multiple times in the file%s. Please provide more context to ensure a unique match, or set replace_all to true", ambiguityHint(content, old))
 		default:
 			return content[:index] + new + content[index+len(old):], false, nil
 		}
@@ -67,6 +67,37 @@ func notFoundError(content, old string) error {
 		msg += "\n\n" + hint
 	}
 	return errors.New(msg)
+}
+
+// ambiguityHint lists the line numbers of the first occurrences of old, so
+// the caller can add surrounding context instead of guessing where the
+// matches are. It returns "" when old occurs at most once.
+func ambiguityHint(content, old string) string {
+	line, offset := 1, 0
+	var found []int
+	for len(found) < 3 {
+		idx := strings.Index(content[offset:], old)
+		if idx < 0 {
+			break
+		}
+		pos := offset + idx
+		line += strings.Count(content[offset:pos], "\n")
+		found = append(found, line)
+		line += strings.Count(old, "\n")
+		offset = pos + len(old)
+	}
+	if len(found) < 2 {
+		return ""
+	}
+	list := make([]string, len(found))
+	for i, n := range found {
+		list[i] = fmt.Sprintf("line %d", n)
+	}
+	hint := fmt.Sprintf(" Found at %s", strings.Join(list, ", "))
+	if strings.Contains(content[offset:], old) {
+		hint += ", and more"
+	}
+	return hint
 }
 
 // commitFileChange writes newContent to filePath, updates the file history,

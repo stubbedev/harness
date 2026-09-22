@@ -11,6 +11,15 @@ import (
 // found in the file, so it can verify the outcome.
 const whitespaceCorrectedNote = "Note: old_string did not match exactly. The edit was applied to whitespace-equivalent text in the file and new_string was re-indented to match the file's style. Verify the result."
 
+const (
+	// nearLineThreshold is the per-line similarity that marks a line as a
+	// near miss (~) instead of a difference (×) in the mismatch hint.
+	nearLineThreshold = 0.75
+	// fuzzyMatchThreshold is the average per-line similarity a window must
+	// reach before it is reported as the closest match.
+	fuzzyMatchThreshold = 0.5
+)
+
 // normMatch is a line range in the original (un-normalized) content that
 // matches the search pattern after whitespace normalization.
 type normMatch struct{ startLine, endLine int }
@@ -277,38 +286,58 @@ func formatWhitespaceHint(contentLines []string, startLine, endLine int) string 
 }
 
 // diagnoseBestLineMatch finds the window of lines in contentLines that best
-// matches oldLines (compared after trimming leading/trailing whitespace).
+// matches the search pattern and reports where the caller's text differs.
+// The exact pass scores windows by trimmed-equal lines; when fewer than half
+// the lines match, the best window is rescored by line similarity and, if
+// still nothing, a similarity-anchored scan searches the whole file.
 func diagnoseBestLineMatch(contentLines, oldLines []string) string {
-	if len(oldLines) == 0 || len(contentLines) == 0 {
+	if len(contentLines) == 0 {
 		return ""
 	}
-
-	// Trimmed old lines for comparison.
-	trimmedOld := make([]string, len(oldLines))
-	for i, l := range oldLines {
-		trimmedOld[i] = strings.TrimSpace(l)
-	}
-
-	// Remove leading/trailing empty lines from the search pattern.
-	for len(trimmedOld) > 0 && trimmedOld[0] == "" {
-		trimmedOld = trimmedOld[1:]
-	}
-	for len(trimmedOld) > 0 && trimmedOld[len(trimmedOld)-1] == "" {
-		trimmedOld = trimmedOld[:len(trimmedOld)-1]
-	}
+	trimmedOld := trimmedSearchLines(oldLines)
 	if len(trimmedOld) == 0 {
 		return ""
 	}
 
+	start, matched := bestExactWindow(contentLines, trimmedOld)
+	if start >= 0 && matched >= (len(trimmedOld)+1)/2 {
+		return formatLineMatchHint(contentLines, trimmedOld, start, matched, false)
+	}
+	if start >= 0 && windowSimilarity(contentLines, trimmedOld, start) >= fuzzyMatchThreshold {
+		return formatLineMatchHint(contentLines, trimmedOld, start,
+			nearMatchedCount(contentLines, trimmedOld, start), true)
+	}
+	if start, near := bestFuzzyWindow(contentLines, trimmedOld); start >= 0 {
+		return formatLineMatchHint(contentLines, trimmedOld, start, near, true)
+	}
+	return ""
+}
+
+// trimmedSearchLines trims each line and strips empty edge lines, which no
+// file line should be required to match.
+func trimmedSearchLines(oldLines []string) []string {
+	trimmed := make([]string, len(oldLines))
+	for i, l := range oldLines {
+		trimmed[i] = strings.TrimSpace(l)
+	}
+	for len(trimmed) > 0 && trimmed[0] == "" {
+		trimmed = trimmed[1:]
+	}
+	for len(trimmed) > 0 && trimmed[len(trimmed)-1] == "" {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+	return trimmed
+}
+
+// bestExactWindow returns the window of contentLines most closely matching
+// trimmedOld, scored by trimmed-equal lines. Returns -1 when no line matches.
+func bestExactWindow(contentLines, trimmedOld []string) (int, int) {
 	bestScore := 0
 	bestStart := -1
-	window := len(trimmedOld)
-
-	for start := range len(contentLines) - window + 1 {
+	for start := range len(contentLines) - len(trimmedOld) + 1 {
 		score := 0
-		for j := range window {
-			candidate := strings.TrimSpace(contentLines[start+j])
-			if candidate == trimmedOld[j] {
+		for j, want := range trimmedOld {
+			if strings.TrimSpace(contentLines[start+j]) == want {
 				score++
 			}
 		}
@@ -317,26 +346,184 @@ func diagnoseBestLineMatch(contentLines, oldLines []string) string {
 			bestStart = start
 		}
 	}
+	return bestStart, bestScore
+}
 
-	// Require at least half the lines to match for a useful hint.
-	if bestStart == -1 || bestScore < (window+1)/2 {
-		return ""
+// bestFuzzyWindow searches contentLines for the window most similar to the
+// search pattern when no line matches exactly. It anchors on representative
+// pattern lines, evaluates the aligned window around each anchor's best hit,
+// and returns the window with the most closely matching lines.
+func bestFuzzyWindow(contentLines, trimmedOld []string) (int, int) {
+	if len(contentLines) < len(trimmedOld) {
+		return -1, 0
 	}
+	best, bestNear := -1, 0
+	for _, a := range anchorIndices(trimmedOld) {
+		c, _ := bestSimilarLine(contentLines, trimmedOld[a])
+		if c < 0 {
+			continue
+		}
+		start := min(max(c-a, 0), len(contentLines)-len(trimmedOld))
+		near := nearMatchedCount(contentLines, trimmedOld, start)
+		if near > bestNear {
+			best, bestNear = start, near
+		}
+	}
+	if best < 0 || 2*bestNear < len(trimmedOld) {
+		return -1, 0
+	}
+	return best, bestNear
+}
 
-	endLine := bestStart + window - 1
+// anchorIndices picks up to three representative lines of the search pattern
+// to anchor the fuzzy scan: the first, middle and last non-empty lines.
+func anchorIndices(lines []string) []int {
+	var anchors []int
+	seen := make(map[int]struct{}, 3)
+	for _, i := range []int{0, len(lines) / 2, len(lines) - 1} {
+		if lines[i] == "" {
+			continue
+		}
+		if _, dup := seen[i]; dup {
+			continue
+		}
+		seen[i] = struct{}{}
+		anchors = append(anchors, i)
+	}
+	return anchors
+}
 
-	// Show a bit of extra context (1 line before and after).
-	ctxStart := max(0, bestStart-1)
+// bestSimilarLine returns the content line most similar to pattern, and -1
+// when no line shares any bigrams with it.
+func bestSimilarLine(contentLines []string, pattern string) (int, float64) {
+	want := bigramSet([]rune(pattern))
+	best, bestSim := -1, 0.0
+	for i, line := range contentLines {
+		sim := bigramSimilarity(strings.TrimSpace(line), want)
+		if sim > bestSim {
+			best, bestSim = i, sim
+		}
+	}
+	return best, bestSim
+}
+
+// nearMatchedCount counts the aligned lines of the window at start that
+// equal the caller's line or are near misses of it.
+func nearMatchedCount(contentLines, trimmedOld []string, start int) int {
+	n := 0
+	for j, want := range trimmedOld {
+		cand := strings.TrimSpace(contentLines[start+j])
+		if cand == want || lineSimilarity(cand, want) >= nearLineThreshold {
+			n++
+		}
+	}
+	return n
+}
+
+// windowSimilarity averages line similarity over the aligned window at
+// start. It returns 0 for a window that extends past the end of content.
+func windowSimilarity(contentLines, trimmedOld []string, start int) float64 {
+	if start < 0 || start+len(trimmedOld) > len(contentLines) {
+		return 0
+	}
+	sum := 0.0
+	for j, want := range trimmedOld {
+		sum += lineSimilarity(strings.TrimSpace(contentLines[start+j]), want)
+	}
+	return sum / float64(len(trimmedOld))
+}
+
+// lineSimilarity scores two lines' resemblance as a 0..1 value: 1 for equal
+// trimmed text, otherwise the character-bigram overlap of the trimmed lines.
+// It only needs to rank candidates in the mismatch hint, not measure truth.
+func lineSimilarity(a, b string) float64 {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if a == b {
+		return 1
+	}
+	if len(a) < 2 || len(b) < 2 {
+		return 0
+	}
+	return bigramSimilarity(b, bigramSet([]rune(a)))
+}
+
+// bigramSimilarity scores a line against a precomputed bigram set as a
+// Sorensen-Dice coefficient. Empty or single-rune lines score 0.
+func bigramSimilarity(line string, want map[string]struct{}) float64 {
+	r := []rune(line)
+	if len(r) < 2 || len(want) == 0 {
+		return 0
+	}
+	seen := make(map[string]struct{}, len(r))
+	matched := 0
+	for i := 0; i+1 < len(r); i++ {
+		gram := string(r[i : i+2])
+		if _, dup := seen[gram]; dup {
+			continue
+		}
+		seen[gram] = struct{}{}
+		if _, ok := want[gram]; ok {
+			matched++
+		}
+	}
+	return 2 * float64(matched) / float64(len(want)+len(r)-1)
+}
+
+// bigramSet returns the set of adjacent character pairs of r.
+func bigramSet(r []rune) map[string]struct{} {
+	set := make(map[string]struct{}, len(r))
+	for i := 0; i+1 < len(r); i++ {
+		set[string(r[i:i+2])] = struct{}{}
+	}
+	return set
+}
+
+// formatLineMatchHint renders the closest-match hint. Lines of the window
+// that differ from the caller's old_string are marked (~ near miss, ×
+// different) and the caller's line shown, so the next attempt can copy the
+// file's text directly.
+func formatLineMatchHint(contentLines, trimmedOld []string, start, matched int, fuzzy bool) string {
+	endLine := start + len(trimmedOld) - 1
+	ctxStart := max(0, start-1)
 	ctxEnd := min(len(contentLines)-1, endLine+1)
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "No exact match found. Closest match at lines %d-%d (%d/%d lines match after trimming whitespace):\n",
-		bestStart+1, endLine+1, bestScore, window)
-	for i := ctxStart; i <= ctxEnd; i++ {
-		fmt.Fprintf(&b, "%6d|%s\n", i+1, visualizeWS(contentLines[i]))
+	kind := "lines match after trimming whitespace"
+	if fuzzy {
+		kind = "lines match closely"
 	}
-	b.WriteString("Use the exact text shown above (→ = tab, · = space).")
+	var b strings.Builder
+	fmt.Fprintf(&b, "No exact match found. Closest match at lines %d-%d (%d/%d %s):\n",
+		start+1, endLine+1, matched, len(trimmedOld), kind)
+	for i := ctxStart; i <= ctxEnd; i++ {
+		j := i - start
+		cand := strings.TrimSpace(contentLines[i])
+		if j < 0 || j >= len(trimmedOld) || cand == trimmedOld[j] {
+			fmt.Fprintf(&b, "%6d|%s\n", i+1, visualizeWS(contentLines[i]))
+			continue
+		}
+		mark := "×"
+		if lineSimilarity(cand, trimmedOld[j]) >= nearLineThreshold {
+			mark = "~"
+		}
+		fmt.Fprintf(&b, "%s %5d|%s\n         your line: %s\n", mark, i+1,
+			visualizeWS(contentLines[i]), elideLine(trimmedOld[j], 100))
+	}
+	if fuzzy {
+		b.WriteString("Copy the file's lines above into old_string (→ = tab, · = space); marked lines differ from your old_string. If the text is genuinely absent, re-read the region.")
+	} else {
+		b.WriteString("Use the exact text shown above (→ = tab, · = space).")
+	}
 	return b.String()
+}
+
+// elideLine shortens a line for display inside the mismatch hint, keeping
+// whole runes.
+func elideLine(s string, maxRunes int) string {
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes-3]) + "..."
 }
 
 // visualizeWS replaces tabs and leading spaces with visible markers so
