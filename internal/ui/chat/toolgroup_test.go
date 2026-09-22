@@ -134,7 +134,7 @@ func TestToolLabelsStableAcrossRenders(t *testing.T) {
 			group.AddTool(bashTool("t2", "go test", true))
 			require.True(t, group.ToggleExpanded())
 			require.True(t, group.Spinning())
-			wantGroup := "Ran (2 tool calls)\n " + tt.want + "\n Shell go test"
+			wantGroup := "Running (2 tool calls)\n " + tt.want + "\n Shell go test"
 
 			for range 100 {
 				require.Equal(t, tt.want, ansi.Strip(ToolOneLiner(sty, item, 120, false)))
@@ -257,10 +257,10 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		g := NewToolGroupMessageItem(sty, done("t1"))
 		g.AddTool(bashTool("t2", "npm test", false))
 		out := ansi.Strip(g.Render(80))
-		assert.Contains(t, out, "Ran (2 tool calls)")
+		assert.Contains(t, out, "Running (2 tool calls)")
 		assert.NotContains(t, out, "npm test")
 		// The color says the run is in flight.
-		assert.Contains(t, g.Render(80), sty.Tool.NamePending.Render("Ran"))
+		assert.Contains(t, g.Render(80), sty.Tool.NamePending.Render("Running"))
 	})
 
 	t.Run("all-failed run colors the verb red", func(t *testing.T) {
@@ -373,10 +373,10 @@ func TestSelectionColorsToolNames(t *testing.T) {
 		t.Parallel()
 		g := NewToolGroupMessageItem(sty, done("t1"))
 		g.AddTool(bashTool("t2", "npm test", false))
-		require.Contains(t, g.Render(80), sty.Tool.NamePending.Render("Ran"))
+		require.Contains(t, g.Render(80), sty.Tool.NamePending.Render("Running"))
 
 		g.SetFocused(true)
-		assert.Contains(t, g.Render(80), sty.Tool.NamePendingSelected.Render("Ran"))
+		assert.Contains(t, g.Render(80), sty.Tool.NamePendingSelected.Render("Running"))
 	})
 }
 
@@ -438,7 +438,7 @@ func TestCollapsedGroupHidesItsChildren(t *testing.T) {
 	require.Equal(t, -1, selStart)
 	require.Equal(t, -1, selEnd)
 	stripped := ansi.Strip(lines[0])
-	require.Contains(t, stripped, "Ran (3 tool calls)")
+	require.Contains(t, stripped, "Running (3 tool calls)")
 	require.NotContains(t, stripped, "first")
 	require.NotContains(t, stripped, "third")
 }

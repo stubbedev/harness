@@ -496,7 +496,7 @@ func (g *ToolGroupMessageItem) formatGroupForCopy() string {
 		return toolCopyText(g.tools[child], copyBaseDepth)
 	}
 
-	sections := []string{copyHeading(copyBaseDepth, fmt.Sprintf("Ran (%d tool calls)", len(g.tools)))}
+	sections := []string{copyHeading(copyBaseDepth, fmt.Sprintf("%s (%d tool calls)", g.groupVerb(), len(g.tools)))}
 	for _, t := range g.tools {
 		sections = append(sections, toolCopyText(t, copyBaseDepth+1))
 	}

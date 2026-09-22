@@ -17,8 +17,10 @@ import (
 )
 
 // ToolGroupMessageItem groups the consecutive tool calls of a turn into
-// one collapsed row - "Ran (N tool calls)" - so the transcript is not
-// dominated by tool bodies nobody asked for. Expansion has two levels:
+// one collapsed row - "Running (N tool calls)" while calls are in
+// flight, "Ran (N tool calls)" once the run has settled - so the
+// transcript is not dominated by tool bodies nobody asked for.
+// Expansion has two levels:
 // the first shows one line per call (status glyph, tool name, argument
 // summary), the second renders the calls' full output. A singleton group
 // renders as the bare one-liner; expanding it shows the full render.
@@ -394,7 +396,7 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 	// once it descends to a call the grey returns and the selected
 	// call's own name takes the color instead.
 	header := fmt.Sprintf("%s %s",
-		groupVerbStyle(g.sty, running, cancelled, failed, succeeded, g.focused && g.selectedChild < 0).Render("Ran"),
+		groupVerbStyle(g.sty, running, cancelled, failed, succeeded, g.focused && g.selectedChild < 0).Render(g.groupVerb()),
 		g.sty.Tool.Body.Render("("+calls+")"))
 
 	lines = append(lines, header)
@@ -465,7 +467,17 @@ func (g *ToolGroupMessageItem) prefixKey() uint64 {
 	return 0
 }
 
-// groupVerbStyle picks the style for a collapsed group's "Ran" verb
+// groupVerb names the run in the collapsed header and the copy header:
+// "Running" while any call is still in flight, "Ran" once it has
+// settled.
+func (g *ToolGroupMessageItem) groupVerb() string {
+	if g.Spinning() {
+		return "Running"
+	}
+	return "Ran"
+}
+
+// groupVerbStyle picks the style for a collapsed group's verb
 // from the run's outcome: pending while in flight, error when every
 // call failed, partial when some did, cancelled when nothing else
 // happened, normal otherwise. A selected group row carries the status
