@@ -42,6 +42,7 @@ import (
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/server"
 	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/shell"
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -945,6 +946,12 @@ func startDetachedServer(cmd *cobra.Command, hostURL *url.URL) error {
 	// DETACHED_PROCESS on windows) is what truly detaches the child from
 	// this process's lifetime.
 	c := exec.CommandContext(context.Background(), exe, cmdArgs...)
+	// The detached server outlives any pane it was started from.
+	// Strip the multiplexer pane vars so its per-workspace apps do not
+	// claim agent state on (and later unset options for) a pane the
+	// server is merely observing; the pane-bound client process owns
+	// reporting.
+	c.Env = shell.WithoutMultiplexerEnv(os.Environ())
 	stdoutPath := filepath.Join(chDir, "stdout.log")
 	stderrPath := filepath.Join(chDir, "stderr.log")
 	detachProcess(c)

@@ -1,4 +1,4 @@
-package herdr
+package agentstate
 
 import (
 	"testing"

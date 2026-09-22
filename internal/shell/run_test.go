@@ -309,41 +309,43 @@ func TestWithNonInteractiveEnv_SliceIndependence(t *testing.T) {
 	}
 }
 
-func TestWithoutHerdrEnv_StripsAllVars(t *testing.T) {
+func TestWithoutMultiplexerEnv_StripsAllVars(t *testing.T) {
 	t.Parallel()
 	env := []string{
 		"HERDR_ENV=1",
 		"HERDR_SOCKET_PATH=/tmp/herdr.sock",
 		"HERDR_PANE_ID=wA:p1",
+		"TMUX=/run/user/1000/tmux-1000/default,42,0",
+		"TMUX_PANE=%3",
 		"PATH=/usr/bin",
 		"HOME=/home/user",
 	}
-	result := withoutHerdrEnv(env)
+	result := WithoutMultiplexerEnv(env)
 	for _, e := range result {
-		if strings.HasPrefix(e, "HERDR_") {
-			t.Errorf("herdr var not stripped: %s", e)
+		if strings.HasPrefix(e, "HERDR_") || strings.HasPrefix(e, "TMUX") {
+			t.Errorf("multiplexer var not stripped: %s", e)
 		}
 	}
 	if !slices.Contains(result, "PATH=/usr/bin") {
-		t.Error("non-herdr var PATH was incorrectly removed")
+		t.Error("non-multiplexer var PATH was incorrectly removed")
 	}
 	if !slices.Contains(result, "HOME=/home/user") {
-		t.Error("non-herdr var HOME was incorrectly removed")
+		t.Error("non-multiplexer var HOME was incorrectly removed")
 	}
 }
 
-func TestWithoutHerdrEnv_EmptyInput(t *testing.T) {
+func TestWithoutMultiplexerEnv_EmptyInput(t *testing.T) {
 	t.Parallel()
-	result := withoutHerdrEnv(nil)
+	result := WithoutMultiplexerEnv(nil)
 	if len(result) != 0 {
 		t.Errorf("expected empty result for nil input, got %v", result)
 	}
 }
 
-func TestWithoutHerdrEnv_SliceIndependence(t *testing.T) {
+func TestWithoutMultiplexerEnv_SliceIndependence(t *testing.T) {
 	t.Parallel()
 	env := []string{"HERDR_ENV=1", "FOO=bar"}
-	result := withoutHerdrEnv(env)
+	result := WithoutMultiplexerEnv(env)
 	env[1] = "FOO=baz"
 	for _, e := range result {
 		if e == "FOO=baz" {

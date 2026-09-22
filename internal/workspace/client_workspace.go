@@ -32,6 +32,7 @@ import (
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/tmux"
 	"github.com/stubbedev/harness/internal/version"
 )
 
@@ -64,9 +65,11 @@ type ClientWorkspace struct {
 	subStarted atomic.Bool
 	subDone    chan struct{}
 
-	// herdrClient reports agent state to herdr when running inside
-	// a herdr-managed pane. Nil when not in a herdr environment.
+	// herdrClient and tmuxClient report agent state to the surrounding
+	// terminal multiplexer when Harness runs inside one of their panes.
+	// Nil outside their environments.
 	herdrClient *herdr.Client
+	tmuxClient  *tmux.Client
 }
 
 // SSE reconnect backoff bounds for the workspace event stream. Declared
@@ -100,6 +103,7 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 		subCancel:   subCancel,
 		subDone:     make(chan struct{}),
 		herdrClient: herdr.Init(),
+		tmuxClient:  tmux.Init(),
 	}
 }
 
@@ -974,9 +978,11 @@ func (w *ClientWorkspace) sleepOrDone(d time.Duration) bool {
 // are translated into domain types and forwarded to send.
 func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 	for ev := range evc {
-		// Forward events to herdr if running inside a herdr pane.
+		// Forward events to the multiplexer integrations when running
+		// inside a herdr or tmux pane.
 		if hev := herdr.Translate(ev); hev != nil {
 			w.herdrClient.HandleEvent(hev)
+			w.tmuxClient.HandleEvent(hev)
 		}
 
 		if _, ok := ev.(pubsub.Event[proto.ConfigChanged]); ok {

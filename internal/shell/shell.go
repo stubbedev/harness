@@ -92,10 +92,10 @@ func NewShell(opts *Options) *Shell {
 		env = os.Environ()
 	}
 
-	// Strip herdr pane-ownership vars so subprocesses (including test
-	// binaries and nested harness instances) can't attach to or release
-	// the parent pane's agent authority.
-	env = withoutHerdrEnv(env)
+	// Strip herdr and tmux pane-ownership vars so subprocesses
+	// (including test binaries and nested harness instances) can't
+	// attach to, release, or overwrite the parent pane's agent state.
+	env = WithoutMultiplexerEnv(env)
 
 	// Allow tools to detect execution by Harness.
 	env = append(env, HarnessEnvMarkers()...)

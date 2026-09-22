@@ -22,6 +22,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/agentstate"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/clipboard"
@@ -42,6 +43,7 @@ import (
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/subagents"
+	"github.com/stubbedev/harness/internal/tmux"
 	"github.com/stubbedev/harness/internal/ui/anim"
 	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/update"
@@ -95,9 +97,11 @@ type App struct {
 	// instead of guessing from message finish parts.
 	runCompletions *pubsub.Broker[notify.RunComplete]
 
-	// herdrClient reports agent state to herdr when running inside
-	// a herdr-managed pane. Nil when not in a herdr environment.
+	// herdrClient and tmuxClient report agent state to the surrounding
+	// terminal multiplexer when Harness runs inside one of their panes.
+	// Nil outside their environments.
 	herdrClient *herdr.Client
+	tmuxClient  *tmux.Client
 }
 
 // New initializes a new application instance. skillsMgr carries the
@@ -181,9 +185,15 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	mcp.ArmInit()
 	crash.Go("mcp.Initialize", func() { mcp.Initialize(ctx, store) })
 
-	// Start herdr integration when running inside a herdr pane.
+	// Start multiplexer integrations when running inside a herdr or
+	// tmux pane. One bridge feeds every reporter: the shared event
+	// translation is single-sourced in internal/agentstate.
 	app.herdrClient = herdr.Init()
-	herdr.BridgeLocal(ctx, app.herdrClient, herdr.BridgeSources{
+	app.tmuxClient = tmux.Init()
+	agentstate.BridgeLocal(ctx, func(ev agentstate.Event) {
+		app.herdrClient.HandleEvent(ev)
+		app.tmuxClient.HandleEvent(ev)
+	}, agentstate.BridgeSources{
 		RunCompletions: app.runCompletions,
 		Messages:       app.Messages,
 	})
@@ -265,6 +275,7 @@ func (app *App) RunCompletions() *pubsub.Broker[notify.RunComplete] {
 // new, or select).
 func (app *App) ReportCurrentSession(sessionID string) {
 	app.herdrClient.SetSessionID(sessionID)
+	app.tmuxClient.SetSessionID(sessionID)
 }
 
 // resolveSession resolves which session to use for a non-interactive run
@@ -874,8 +885,10 @@ func (app *App) Shutdown() {
 	// working directory open until it exits.
 	wg.Go(tools.CloseTerminalSessions)
 
-	// Close herdr client to stop its background writer.
+	// Close the multiplexer clients to release the pane and stop
+	// their background writers.
 	app.herdrClient.Close()
+	app.tmuxClient.Close()
 
 	// Release the subagent brokers and their subscriber goroutines. Agents were
 	// cancelled above, so nothing is still publishing. Both are per-workspace,

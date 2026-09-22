@@ -789,6 +789,26 @@ harness crashes 20260922-143005.123-tui.log
 
 The `HARNESS_CRASH_DIR` environment variable moves the reports elsewhere.
 
+## Multiplexer Status
+
+When Harness runs inside a [herdr](https://github.com/herdr) or tmux
+pane it reports agent state over the multiplexer's IPC (no hooks, no
+per-event subprocesses): `idle`, `working`, or `error`, plus the
+session ID. In tmux the state lands in pane user options
+(`@harness-state`, `@harness-session`) written through a single
+tmux control-mode client, so a status line can surface it:
+
+```tmux
+# in ~/.tmux.conf
+set -g status-right '#{?#{@harness-state},harness: #{@harness-state},}'
+
+# or per-pane borders
+set -g pane-border-status top
+set -g pane-border-format ' #{@harness-state} #{pane_title} '
+```
+
+The options are removed when Harness exits cleanly.
+
 ## Provider Auto-Updates
 
 By default, Harness automatically checks for the latest and greatest list of

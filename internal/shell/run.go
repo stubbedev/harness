@@ -256,24 +256,27 @@ func withNonInteractiveEnv(env []string) []string {
 	return append(result, nonInteractiveEnvVars...)
 }
 
-// herdrEnvVars are the environment variables herdr injects into panes
-// so agents can report state over its Unix socket API. Subprocesses
-// must not inherit these: a child process that calls herdr.Init()
-// would attach to the parent's pane and, on exit, release its agent
-// authority — making the status vanish. Stripping them here closes
-// that gap for every command the shell tool runs.
-var herdrEnvVars = []string{
+// multiplexerEnvVars are the environment variables herdr and tmux
+// inject into panes so agents can report state over their IPC. A
+// child process must not inherit them: a nested harness that calls
+// herdr.Init() or tmux.Init() would report on the parent's pane and,
+// on exit, release its agent authority or unset its pane options —
+// making the status vanish. Stripping them here closes that gap for
+// every command the shell tool runs.
+var multiplexerEnvVars = []string{
 	"HERDR_ENV",
 	"HERDR_SOCKET_PATH",
 	"HERDR_PANE_ID",
+	"TMUX",
+	"TMUX_PANE",
 }
 
-// withoutHerdrEnv returns env with all HERDR_* variables removed.
-// The returned slice is a new allocation safe to use concurrently
-// with the input.
-func withoutHerdrEnv(env []string) []string {
-	strip := make(map[string]bool, len(herdrEnvVars))
-	for _, k := range herdrEnvVars {
+// WithoutMultiplexerEnv returns env with the herdr and tmux pane
+// variables removed. The returned slice is a new allocation safe to
+// use concurrently with the input.
+func WithoutMultiplexerEnv(env []string) []string {
+	strip := make(map[string]bool, len(multiplexerEnvVars))
+	for _, k := range multiplexerEnvVars {
 		strip[k] = true
 	}
 	result := make([]string, 0, len(env))

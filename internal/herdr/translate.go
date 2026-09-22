@@ -1,132 +1,21 @@
 package herdr
 
-import (
-	"context"
-	"time"
+import "github.com/stubbedev/harness/internal/agentstate"
 
-	"github.com/stubbedev/harness/internal/agent/notify"
-	"github.com/stubbedev/harness/internal/crash"
-	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/proto"
-	"github.com/stubbedev/harness/internal/pubsub"
+// The herdr event vocabulary is the neutral agent-lifecycle vocabulary
+// from internal/agentstate; these aliases keep herdr's call sites and
+// tests stable while Translate and the pub/sub bridge live in one
+// place, shared with the tmux integration.
+type (
+	Event            = agentstate.Event
+	AssistantMessage = agentstate.AssistantMessage
+	RunComplete      = agentstate.RunComplete
+	Summarizing      = agentstate.Summarizing
 )
 
-// Translate converts a pub/sub event (domain or proto) into a herdr
-// Event. Returns nil for event types herdr doesn't care about. This
-// is the single translation point for all integration modes.
+// Translate converts a pub/sub event into a herdr Event. Returns nil
+// for event types herdr doesn't care about. Delegates to the shared
+// translation in internal/agentstate.
 func Translate(ev any) Event {
-	switch e := ev.(type) {
-	// Domain types (TUI / local headless).
-	case pubsub.Event[message.Message]:
-		return translateMessage(
-			e.Payload.Role == message.Assistant,
-			e.Payload.SessionID,
-			e.Payload.IsSummaryMessage,
-		)
-	case pubsub.Event[notify.RunComplete]:
-		return RunComplete{SessionID: e.Payload.SessionID}
-
-	// Proto types (client/server mode).
-	case pubsub.Event[proto.Message]:
-		return translateMessage(
-			e.Payload.Role == proto.Assistant,
-			e.Payload.SessionID,
-			false,
-		)
-	case pubsub.Event[proto.RunComplete]:
-		return RunComplete{SessionID: e.Payload.SessionID}
-	case pubsub.Event[proto.AgentEvent]:
-		if e.Payload.Type == proto.AgentEventTypeSummarize && !e.Payload.Done {
-			return Summarizing{}
-		}
-		return nil
-
-	default:
-		return nil
-	}
-}
-
-// translateMessage is the shared message-mapping logic for both domain
-// and proto message types.
-func translateMessage(isAssistant bool, sessionID string, isSummary bool) Event {
-	if !isAssistant {
-		return nil
-	}
-	if isSummary {
-		return Summarizing{}
-	}
-	return AssistantMessage{SessionID: sessionID}
-}
-
-// BridgeSources groups the pub/sub sources that BridgeLocal subscribes
-// to. Adding a new event type means adding a field here rather than
-// growing the function signature.
-type BridgeSources struct {
-	RunCompletions pubsub.Subscriber[notify.RunComplete]
-	Messages       pubsub.Subscriber[message.Message]
-}
-
-// BridgeLocal subscribes to local pub/sub brokers and forwards
-// translated events to the client. Used in TUI and local headless
-// modes where the agent runs in-process. Cancelling ctx stops the
-// bridge goroutines.
-//
-// The spawned goroutines are best-effort and may briefly outlive
-// Client.Close(). This is safe: HandleEvent is nil-safe, and the
-// unixSender drops messages on a full buffer rather than blocking.
-//
-// Each goroutine uses a resilient subscription loop that re-subscribes
-// if the channel closes unexpectedly, ensuring the bridge survives
-// transient pub/sub broker resets.
-func BridgeLocal(ctx context.Context, c *Client, src BridgeSources) {
-	if c == nil {
-		return
-	}
-	crash.Go("herdr.runCompletions", func() {
-		forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[notify.RunComplete] {
-			return src.RunCompletions.Subscribe(subCtx)
-		})
-	})
-	crash.Go("herdr.messages", func() {
-		forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[message.Message] {
-			return src.Messages.Subscribe(subCtx)
-		})
-	})
-}
-
-// forward reads from a pub/sub channel and forwards translated
-// events to the herdr client. If the channel closes (e.g., due to
-// broker reset), it re-subscribes after a brief delay. Runs until ctx
-// is cancelled.
-func forward[T any](ctx context.Context, c *Client, subscribe func(context.Context) <-chan pubsub.Event[T]) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		subCtx, cancel := context.WithCancel(ctx)
-		ch := subscribe(subCtx)
-
-	inner:
-		for {
-			select {
-			case <-ctx.Done():
-				cancel()
-				return
-			case ev, ok := <-ch:
-				if !ok {
-					// Channel closed — broker may have reset.
-					// Cancel the sub-context and re-subscribe.
-					cancel()
-					time.Sleep(100 * time.Millisecond)
-					break inner
-				}
-				if hev := Translate(ev); hev != nil {
-					c.HandleEvent(hev)
-				}
-			}
-		}
-	}
+	return agentstate.Translate(ev)
 }

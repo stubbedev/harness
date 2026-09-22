@@ -24,6 +24,7 @@ import (
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/tmux"
 	"github.com/stubbedev/harness/internal/ui/anim"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/workspace"
@@ -313,10 +314,14 @@ func runNonInteractive(
 		read:      make(map[string]int),
 	}
 
-	// Start herdr integration when running inside a herdr pane.
+	// Start multiplexer integrations when running inside a herdr or
+	// tmux pane.
 	hc := herdr.Init()
 	hc.SetSessionID(sess.ID)
 	defer hc.Close()
+	tc := tmux.Init()
+	tc.SetSessionID(sess.ID)
+	defer tc.Close()
 
 	defer func() {
 		if progress && stderrTTY {
@@ -337,9 +342,11 @@ func runNonInteractive(
 				return nil
 			}
 
-			// Forward events to herdr if running inside a herdr pane.
+			// Forward events to the multiplexer integrations when running
+			// inside a herdr or tmux pane.
 			if hev := herdr.Translate(ev); hev != nil {
 				hc.HandleEvent(hev)
+				tc.HandleEvent(hev)
 			}
 
 			done, err := stream.handle(ev, stopSpinner)

@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stubbedev/harness/internal/agentstate"
 	"github.com/stubbedev/harness/internal/crash"
 )
 
@@ -32,33 +33,9 @@ const (
 	stateBlocked = "blocked"
 )
 
-// Event is the herdr-specific event vocabulary. Each type maps to a
-// distinct state transition in the agent lifecycle. Callers translate
-// from proto or domain types into these before calling HandleEvent.
-type Event interface {
-	herdrEvent()
-}
-
-// AssistantMessage indicates the agent produced output. Transitions
-// to working if not already active.
-type AssistantMessage struct {
-	SessionID string
-}
-
-func (AssistantMessage) herdrEvent() {}
-
-// RunComplete indicates the agent finished a turn. Transitions to idle.
-type RunComplete struct {
-	SessionID string
-}
-
-func (RunComplete) herdrEvent() {}
-
-// Summarizing indicates the agent is compacting context. Transitions
-// to working if not already active.
-type Summarizing struct{}
-
-func (Summarizing) herdrEvent() {}
+// The herdr event vocabulary and its translation live in
+// internal/agentstate; see translate.go for the aliases that re-export
+// them here. The client consumes those shared types directly.
 
 // sender abstracts the transport layer for reporting state to herdr.
 // Production uses a Unix socket; tests use a recorder.
@@ -175,18 +152,18 @@ func (c *Client) releaseAgent() {
 	}
 }
 
-// HandleEvent processes a single herdr event and reports state changes.
-// Safe to call from any goroutine.
-func (c *Client) HandleEvent(ev Event) {
+// HandleEvent processes a single agent-lifecycle event and reports
+// state changes. Safe to call from any goroutine.
+func (c *Client) HandleEvent(ev agentstate.Event) {
 	if c == nil {
 		return
 	}
 	switch e := ev.(type) {
-	case AssistantMessage:
+	case agentstate.AssistantMessage:
 		c.onAssistantMessage(e.SessionID)
-	case RunComplete:
+	case agentstate.RunComplete:
 		c.onRunComplete(e.SessionID)
-	case Summarizing:
+	case agentstate.Summarizing:
 		c.onSummarizing()
 	}
 }
