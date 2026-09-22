@@ -5,7 +5,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/ultraviolet/layout"
-	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/logo"
 	"github.com/stubbedev/harness/internal/workspace"
 )
@@ -23,20 +22,16 @@ func (m *UI) selectedLargeModel() *workspace.AgentModel {
 	return nil
 }
 
-// landingView renders the landing page: the current working directory and
-// model information at the top, and the gradient block-letter mark centered
-// in the space between them and the editor.
+// landingView renders the landing page: the model information at the
+// top and the gradient block-letter mark centered in the space between
+// it and the editor. The working directory and git state are not here:
+// the compact status line above the editor is their single home, in
+// every state.
 func (m *UI) landingView() string {
 	t := m.com.Styles
 	width := m.layout.main.Dx()
-	cwd := common.PrettyPath(t, m.com.Workspace.WorkingDir(), width)
 
-	parts := []string{
-		cwd,
-	}
-
-	parts = append(parts, "", m.modelInfo(width))
-	infoSection := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	infoSection := m.modelInfo(width)
 
 	var remainingHeightArea image.Rectangle
 	layout.Vertical(

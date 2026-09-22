@@ -78,8 +78,10 @@ const sessionDetailsMaxHeight = 20
 // TextareaMaxHeight is the maximum height of the prompt textarea.
 const TextareaMaxHeight = 15
 
-// editorHeightMargin is the vertical margin added to the textarea height to
-// account for the attachments row above it.
+// editorHeightMargin is the height of the attachments strip rendered
+// above the textarea while it has pills; the editor reserves it only
+// then, so with no attachments the status line sits directly on the
+// editor.
 const editorHeightMargin = 1
 
 // TextareaMinHeight is the minimum height of the prompt textarea when
@@ -1667,6 +1669,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// should return all cmds anyway.
 	if m.attachments.Update(msg) {
 		m.invalidateFrames()
+		// The editor reserves a row for the attachments strip, so a
+		// count change is a layout change.
+		m.updateLayoutAndSize()
 	}
 	// Any update may have put a spinner on screen (new message, tool update,
 	// scroll, session load); make sure the clock is running. This is the
@@ -2759,6 +2764,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 
 			if ok := m.attachments.Update(msg); ok {
+				m.updateLayoutAndSize()
 				return tea.Batch(cmds...)
 			}
 
@@ -3786,9 +3792,13 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 
 	// The help height
 	helpHeight := 1
-	// The editor height: textarea height + margin for attachments and bottom spacing.
-	// When an inline editor is active, use its height instead.
-	editorHeight := m.textarea.Height() + editorHeightMargin
+	// The editor height: the textarea plus the attachments strip while
+	// it has pills; when an inline editor is active, use its height
+	// instead.
+	editorHeight := m.textarea.Height()
+	if m.attachments != nil && len(m.attachments.List()) > 0 {
+		editorHeight += editorHeightMargin
+	}
 	if m.activeInline != nil {
 		// The editor content width depends only on terminal width
 		// and layout (not on editor height), so passing the current
@@ -4269,15 +4279,13 @@ func (m *UI) drawEditorArea(scr uv.Screen, editorRect uv.Rectangle) {
 }
 
 // renderEditorView renders the editor view with attachments if any.
+// With no attachments the textarea is the whole area - no blank
+// placeholder row is reserved.
 func (m *UI) renderEditorView(width int) string {
-	var attachmentsView string
 	if len(m.attachments.List()) > 0 {
-		attachmentsView = m.attachments.Render(width)
+		return m.attachments.Render(width) + "\n" + m.textarea.View()
 	}
-	return strings.Join([]string{
-		attachmentsView,
-		m.textarea.View(),
-	}, "\n")
+	return m.textarea.View()
 }
 
 // applyThemeForProvider swaps the active theme to the one associated with
