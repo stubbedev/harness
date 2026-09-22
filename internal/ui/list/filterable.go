@@ -1,6 +1,8 @@
 package list
 
 import (
+	"slices"
+
 	"github.com/rivo/uniseg"
 	"github.com/sahilm/fuzzy"
 )
@@ -74,6 +76,10 @@ type FilterableList struct {
 	*List
 	items []FilterableItem
 	query string
+	// order re-ranks the filtered items after fuzzy matching (stable),
+	// so what renders and what selection walks are the same order. A
+	// nil order keeps fuzzy score order.
+	order func(a, b FilterableItem) int
 }
 
 // NewFilterableList creates a new filterable list.
@@ -115,6 +121,14 @@ func (f *FilterableList) PrependItems(items ...FilterableItem) {
 		itms[i] = item
 	}
 	f.List.SetItems(itms...)
+}
+
+// SetFilterOrder sets an optional stable re-ranking applied to the
+// fuzzy-matched items on every filter; nil restores fuzzy score order.
+// Match highlighting is unaffected.
+func (f *FilterableList) SetFilterOrder(cmp func(a, b FilterableItem) int) {
+	f.order = cmp
+	f.List.SetItems(f.FilteredItems()...)
 }
 
 // SetFilter sets the filter query and updates the list items.
@@ -164,6 +178,19 @@ func (f *FilterableList) FilteredItems() []Item {
 			item = ms.(FilterableItem)
 		}
 		matchedItems = append(matchedItems, item)
+	}
+
+	// A set filter order re-ranks the matched items after fuzzy
+	// matching; Render and every consumer below see the same order.
+	if f.order != nil {
+		filterable := make([]FilterableItem, len(matchedItems))
+		for i, item := range matchedItems {
+			filterable[i] = item.(FilterableItem)
+		}
+		slices.SortStableFunc(filterable, f.order)
+		for i, item := range filterable {
+			matchedItems[i] = item
+		}
 	}
 
 	return matchedItems

@@ -1,3 +1,8 @@
+// Package completions is the @-mention source: the value types the
+// editor inserts, the async loaders that fill them, and the tiered
+// name-priority filter that ranks file matches. The picker surface is
+// the shared dialog machinery (see dialog.MentionPicker); this package
+// owns what is picked, not how.
 package completions
 
 import (
@@ -7,67 +12,97 @@ import (
 	"strings"
 	"sync"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/exp/ordered"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/ui/list"
 )
 
+// Name-priority tiers: a match on the exact basename or its stem beats
+// a basename prefix, which beats a bare path-segment hit, which beats
+// everything else.
 const (
-	minHeight = 1
-	maxHeight = 10
-	minWidth  = 10
-	maxWidth  = 100
-
 	tierExactName = iota
 	tierPrefixName
 	tierPathSegment
 	tierFallback
 )
 
-// SelectionMsg is sent when a completion is selected.
-type SelectionMsg[T any] struct {
-	Value    T
-	KeepOpen bool // If true, insert without closing.
-}
-
-// ClosedMsg is sent when the completions are closed.
-type ClosedMsg struct{}
-
-// CompletionItemsLoadedMsg is sent when files have been loaded for completions.
+// CompletionItemsLoadedMsg is sent when the mention sources have
+// loaded.
 type CompletionItemsLoadedMsg struct {
 	Files     []FileCompletionValue
 	Resources []ResourceCompletionValue
 	Subagents []SubagentCompletionValue
 }
 
-// Completions represents the completions popup component.
-type Completions struct {
-	// Popup dimensions
-	width  int
-	height int
+// LoadItems loads the mention sources off-thread: files from the
+// working tree and MCP resources from the connected servers. Subagents
+// are already in memory and ride along.
+func LoadItems(depth, limit int, subagents []SubagentCompletionValue) tea.Cmd {
+	return func() tea.Msg {
+		var msg CompletionItemsLoadedMsg
+		msg.Subagents = subagents
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			msg.Files = loadFiles(depth, limit)
+		})
+		wg.Go(func() {
+			msg.Resources = loadMCPResources()
+		})
+		wg.Wait()
+		return msg
+	}
+}
 
-	// State
-	open  bool
-	query string
+// MentionItems builds the merged mention list: subagents first so they
+// sit at the top, then files, then MCP resources.
+func MentionItems(
+	normalStyle, focusedStyle, matchStyle lipgloss.Style,
+	files []FileCompletionValue,
+	resources []ResourceCompletionValue,
+	subagents []SubagentCompletionValue,
+) []list.FilterableItem {
+	items := make([]list.FilterableItem, 0, len(subagents)+len(files)+len(resources))
 
-	// Key bindings
-	keyMap KeyMap
+	// Subagents appear first.
+	for _, sa := range subagents {
+		items = append(items, NewCompletionItem(sa.Name, sa, normalStyle, focusedStyle, matchStyle))
+	}
 
-	// List component
-	list *list.FilterableList
+	// Files.
+	for _, file := range files {
+		items = append(items, NewCompletionItem(file.Path, file, normalStyle, focusedStyle, matchStyle))
+	}
 
-	// Styling
-	normalStyle  lipgloss.Style
-	focusedStyle lipgloss.Style
-	matchStyle   lipgloss.Style
+	// MCP resources.
+	for _, resource := range resources {
+		text := resource.MCPName + "/" + cmp.Or(resource.Title, resource.URI)
+		items = append(items, NewCompletionItem(text, resource, normalStyle, focusedStyle, matchStyle))
+	}
 
-	allItems []list.FilterableItem
-	filtered []list.FilterableItem
+	return items
+}
+
+// FilterMentionItems applies the tiered name-priority ranking to a
+// mention list: the fuzzy filter runs as usual (so matches highlight),
+// then the list re-ranks its own filtered items so basename and stem
+// hits render above deeper path matches - render order and selection
+// order are the same by construction. all holds the unfiltered items.
+func FilterMentionItems(l *list.FilterableList, all []list.FilterableItem, query string) {
+	l.SetFilterOrder(MentionOrder(query))
+	l.SetItems(all...)
+	l.SetFilter(query)
+}
+
+// MentionOrder returns the name-priority comparator for a query: a
+// stable re-ranking by tier, so equal tiers keep their fuzzy order.
+func MentionOrder(query string) func(a, b list.FilterableItem) int {
+	queryLower := strings.ToLower(strings.TrimSpace(query))
+	return func(a, b list.FilterableItem) int {
+		return namePriorityTier(a.Filter(), queryLower) - namePriorityTier(b.Filter(), queryLower)
+	}
 }
 
 type namePriorityRule struct {
@@ -96,176 +131,6 @@ var namePriorityRules = []namePriorityRule{
 	},
 }
 
-// New creates a new completions component.
-func New(normalStyle, focusedStyle, matchStyle lipgloss.Style) *Completions {
-	l := list.NewFilterableList()
-	l.SetGap(0)
-	l.SetReverse(true)
-
-	return &Completions{
-		keyMap:       DefaultKeyMap(),
-		list:         l,
-		normalStyle:  normalStyle,
-		focusedStyle: focusedStyle,
-		matchStyle:   matchStyle,
-	}
-}
-
-// SetStyles updates the styles used when rendering completion items.
-// Existing items are not restyled; subsequent SetItems calls pick up the
-// new styles.
-func (c *Completions) SetStyles(normalStyle, focusedStyle, matchStyle lipgloss.Style) {
-	c.normalStyle = normalStyle
-	c.focusedStyle = focusedStyle
-	c.matchStyle = matchStyle
-}
-
-// IsOpen returns whether the completions popup is open.
-func (c *Completions) IsOpen() bool {
-	return c.open
-}
-
-// Query returns the current filter query.
-func (c *Completions) Query() string {
-	return c.query
-}
-
-// Size returns the visible size of the popup.
-func (c *Completions) Size() (width, height int) {
-	visible := len(c.filtered)
-	return c.width, min(visible, c.height)
-}
-
-// KeyMap returns the key bindings.
-func (c *Completions) KeyMap() KeyMap {
-	return c.keyMap
-}
-
-// Open opens the completions with file items from the filesystem.
-// subagentItems are already in memory so they are passed directly rather than
-// loaded asynchronously.
-func (c *Completions) Open(depth, limit int, subagentItems []SubagentCompletionValue) tea.Cmd {
-	return func() tea.Msg {
-		var msg CompletionItemsLoadedMsg
-		msg.Subagents = subagentItems
-		var wg sync.WaitGroup
-		wg.Go(func() {
-			msg.Files = loadFiles(depth, limit)
-		})
-		wg.Go(func() {
-			msg.Resources = loadMCPResources()
-		})
-		wg.Wait()
-		return msg
-	}
-}
-
-// SetItems sets the subagents, files and MCP resources and rebuilds the
-// merged list. Subagents appear first so they sit at the top of the popup.
-func (c *Completions) SetItems(files []FileCompletionValue, resources []ResourceCompletionValue, subagents []SubagentCompletionValue) {
-	items := make([]list.FilterableItem, 0, len(subagents)+len(files)+len(resources))
-
-	// Subagents appear first.
-	for _, sa := range subagents {
-		item := NewCompletionItem(
-			sa.Name,
-			sa,
-			c.normalStyle,
-			c.focusedStyle,
-			c.matchStyle,
-		)
-		items = append(items, item)
-	}
-
-	// Files.
-	for _, file := range files {
-		item := NewCompletionItem(
-			file.Path,
-			file,
-			c.normalStyle,
-			c.focusedStyle,
-			c.matchStyle,
-		)
-		items = append(items, item)
-	}
-
-	// MCP resources.
-	for _, resource := range resources {
-		item := NewCompletionItem(
-			resource.MCPName+"/"+cmp.Or(resource.Title, resource.URI),
-			resource,
-			c.normalStyle,
-			c.focusedStyle,
-			c.matchStyle,
-		)
-		items = append(items, item)
-	}
-
-	c.open = true
-	c.query = ""
-	c.allItems = items
-	c.filtered = append([]list.FilterableItem(nil), items...)
-	c.list.SetItems(c.filtered...)
-	c.list.SetFilter("")
-	c.list.Focus()
-
-	c.width = maxWidth
-	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
-	c.list.SetSize(c.width, c.height)
-	c.list.SelectFirst()
-	c.list.ScrollToSelected()
-
-	c.updateSize()
-}
-
-// Close closes the completions popup.
-func (c *Completions) Close() {
-	c.open = false
-}
-
-// Filter filters the completions with the given query.
-func (c *Completions) Filter(query string) {
-	if !c.open {
-		return
-	}
-
-	if query == c.query {
-		return
-	}
-
-	c.query = query
-	c.applyNamePriorityFilter(query)
-
-	c.updateSize()
-}
-
-func (c *Completions) applyNamePriorityFilter(query string) {
-	if query == "" {
-		c.filtered = append([]list.FilterableItem(nil), c.allItems...)
-		c.list.SetItems(c.filtered...)
-		return
-	}
-
-	c.list.SetItems(c.allItems...)
-	c.list.SetFilter(query)
-	raw := c.list.FilteredItems()
-	filtered := make([]list.FilterableItem, 0, len(raw))
-	for _, item := range raw {
-		filterable, ok := item.(list.FilterableItem)
-		if !ok {
-			continue
-		}
-		filtered = append(filtered, filterable)
-	}
-
-	queryLower := strings.ToLower(strings.TrimSpace(query))
-	slices.SortStableFunc(filtered, func(a, b list.FilterableItem) int {
-		return namePriorityTier(a.Filter(), queryLower) - namePriorityTier(b.Filter(), queryLower)
-	})
-	c.filtered = filtered
-	c.list.SetItems(c.filtered...)
-}
-
 func namePriorityTier(path, queryLower string) int {
 	if queryLower == "" {
 		return tierFallback
@@ -286,144 +151,6 @@ func hasPathSegment(pathLower, queryLower string) bool {
 	return slices.Contains(strings.FieldsFunc(pathLower, func(r rune) bool {
 		return r == '/' || r == '\\'
 	}), queryLower)
-}
-
-func (c *Completions) updateSize() {
-	items := c.filtered
-	start, end := c.list.VisibleItemIndices()
-	width := 0
-	for i := start; i <= end; i++ {
-		item := c.list.ItemAt(i)
-		if item == nil {
-			continue
-		}
-		s := item.(interface{ Text() string }).Text()
-		width = max(width, ansi.StringWidth(s))
-	}
-	c.width = ordered.Clamp(width+2, int(minWidth), int(maxWidth))
-	c.height = ordered.Clamp(len(items), int(minHeight), int(maxHeight))
-	c.list.SetSize(c.width, c.height)
-	c.list.SelectFirst()
-	c.list.ScrollToSelected()
-}
-
-// HasItems returns whether there are visible items.
-func (c *Completions) HasItems() bool {
-	return len(c.filtered) > 0
-}
-
-// Update handles key events for the completions.
-func (c *Completions) Update(msg tea.KeyPressMsg) (tea.Msg, bool) {
-	if !c.open {
-		return nil, false
-	}
-
-	switch {
-	case key.Matches(msg, c.keyMap.Up):
-		c.selectPrev()
-		return nil, true
-
-	case key.Matches(msg, c.keyMap.Down):
-		c.selectNext()
-		return nil, true
-
-	case key.Matches(msg, c.keyMap.UpInsert):
-		c.selectPrev()
-		return c.selectCurrent(true), true
-
-	case key.Matches(msg, c.keyMap.DownInsert):
-		c.selectNext()
-		return c.selectCurrent(true), true
-
-	case key.Matches(msg, c.keyMap.Select):
-		return c.selectCurrent(false), true
-
-	case key.Matches(msg, c.keyMap.Cancel):
-		c.Close()
-		return ClosedMsg{}, true
-	}
-
-	return nil, false
-}
-
-// selectPrev selects the previous item with circular navigation.
-func (c *Completions) selectPrev() {
-	items := c.filtered
-	if len(items) == 0 {
-		return
-	}
-	if !c.list.SelectPrev() {
-		c.list.WrapToEnd()
-	}
-	c.list.ScrollToSelected()
-}
-
-// selectNext selects the next item with circular navigation.
-func (c *Completions) selectNext() {
-	items := c.filtered
-	if len(items) == 0 {
-		return
-	}
-	if !c.list.SelectNext() {
-		c.list.WrapToStart()
-	}
-	c.list.ScrollToSelected()
-}
-
-// selectCurrent returns a command with the currently selected item.
-func (c *Completions) selectCurrent(keepOpen bool) tea.Msg {
-	items := c.filtered
-	if len(items) == 0 {
-		return nil
-	}
-
-	selected := c.list.Selected()
-	if selected < 0 || selected >= len(items) {
-		return nil
-	}
-
-	item, ok := items[selected].(*CompletionItem)
-	if !ok {
-		return nil
-	}
-
-	if !keepOpen {
-		c.open = false
-	}
-
-	switch item := item.Value().(type) {
-	case ResourceCompletionValue:
-		return SelectionMsg[ResourceCompletionValue]{
-			Value:    item,
-			KeepOpen: keepOpen,
-		}
-	case FileCompletionValue:
-		return SelectionMsg[FileCompletionValue]{
-			Value:    item,
-			KeepOpen: keepOpen,
-		}
-	case SubagentCompletionValue:
-		return SelectionMsg[SubagentCompletionValue]{
-			Value:    item,
-			KeepOpen: keepOpen,
-		}
-	default:
-		return nil
-	}
-}
-
-// Render renders the completions popup.
-func (c *Completions) Render() string {
-	if !c.open {
-		return ""
-	}
-
-	items := c.filtered
-	if len(items) == 0 {
-		return ""
-	}
-
-	return c.list.List.Render()
 }
 
 func loadFiles(depth, limit int) []FileCompletionValue {

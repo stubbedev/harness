@@ -338,12 +338,10 @@ type UI struct {
 	readyPlaceholder   string
 	workingPlaceholder string
 
-	// Completions state
-	completions              *completions.Completions
-	completionsOpen          bool
-	completionsStartIndex    int
-	completionsQuery         string
-	completionsPositionStart image.Point // x,y where user typed '@'
+	// completionsStartIndex is the offset of the '@' that opened the
+	// mention picker; the picked mention replaces the query from there.
+	// The picker itself is the shared dialog (dialog.MentionPicker).
+	completionsStartIndex int
 
 	// Chat components
 	chat *Chat
@@ -532,12 +530,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		ScrollRight: keyMap.Chat.ScrollRight,
 	})
 
-	// Completions component
-	comp := completions.New(
-		com.Styles.Completions.Normal,
-		com.Styles.Completions.Focused,
-		com.Styles.Completions.Match,
-	)
 	todoSpinner := spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
 		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
@@ -573,7 +565,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		textarea:            ta,
 		chat:                ch,
 		header:              header,
-		completions:         comp,
 		attachments:         attachments,
 		todoSpinner:         todoSpinner,
 		taskSpinner:         taskSpinner,
@@ -1637,10 +1628,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleConnectionEvent(msg)...)
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
-	case completions.CompletionItemsLoadedMsg:
-		if m.completionsOpen {
-			m.completions.SetItems(msg.Files, msg.Resources, msg.Subagents)
-		}
 	case uv.KittyGraphicsEvent:
 		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
 			slog.Warn("Unexpected Kitty graphics response",
@@ -2294,6 +2281,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			},
 		))
 
+	case dialog.ActionMentionSelected:
+		m.dialog.CloseDialog(dialog.MentionPickerID)
+		m.closeCompletions()
+		switch value := msg.Value.(type) {
+		case completions.FileCompletionValue:
+			cmds = append(cmds, m.insertFileCompletion(value.Path))
+		case completions.ResourceCompletionValue:
+			cmds = append(cmds, m.insertMCPResourceCompletion(value))
+		case completions.SubagentCompletionValue:
+			cmds = append(cmds, m.insertSubagentCompletion(value.Name))
+		}
+
 	case dialog.ActionRunCustomCommand:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()
@@ -2758,32 +2757,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	case uiChat, uiLanding:
 		switch m.focus {
 		case uiFocusEditor:
-			// Handle completions if open.
-			if m.completionsOpen {
-				if msg, ok := m.completions.Update(msg); ok {
-					switch msg := msg.(type) {
-					case completions.SelectionMsg[completions.FileCompletionValue]:
-						cmds = append(cmds, m.insertFileCompletion(msg.Value.Path))
-						if !msg.KeepOpen {
-							m.closeCompletions()
-						}
-					case completions.SelectionMsg[completions.ResourceCompletionValue]:
-						cmds = append(cmds, m.insertMCPResourceCompletion(msg.Value))
-						if !msg.KeepOpen {
-							m.closeCompletions()
-						}
-					case completions.SelectionMsg[completions.SubagentCompletionValue]:
-						cmds = append(cmds, m.insertSubagentCompletion(msg.Value.Name))
-						if !msg.KeepOpen {
-							m.closeCompletions()
-						}
-					case completions.ClosedMsg:
-						m.completionsOpen = false
-					}
-					return tea.Batch(cmds...)
-				}
-			}
-
 			if ok := m.attachments.Update(msg); ok {
 				m.updateLayoutAndSize()
 				return tea.Batch(cmds...)
@@ -2959,16 +2932,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				curValue := m.textarea.Value()
 				curIdx := len(curValue)
 
-				// Trigger completions on the mention key.
-				if key.Matches(msg, m.keyMap.Editor.MentionFile) && !m.completionsOpen {
+				if key.Matches(msg, m.keyMap.Editor.MentionFile) && !m.dialog.ContainsDialog(dialog.MentionPickerID) {
 					// Only show if beginning of prompt or after whitespace.
 					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
-						m.completionsOpen = true
-						m.completionsQuery = ""
 						m.completionsStartIndex = curIdx
-						m.completionsPositionStart = m.completionsPosition()
-						depth, limit := m.com.Config().Options.TUI.Completions.Limits()
-						cmds = append(cmds, m.completions.Open(depth, limit, m.activeSubagentItems))
+						cmds = append(cmds, m.openMentionPicker())
 					}
 				}
 
@@ -3005,30 +2973,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				// Any text modification becomes the current draft.
 				m.updateHistoryDraft(curValue)
-
-				// After updating textarea, check if we need to filter completions.
-				// Skip filtering on the initial mention keystroke since items are loading async.
-				if m.completionsOpen && !key.Matches(msg, m.keyMap.Editor.MentionFile) {
-					newValue := m.textarea.Value()
-					newIdx := len(newValue)
-
-					// Close completions if cursor moved before start.
-					if newIdx <= m.completionsStartIndex {
-						m.closeCompletions()
-					} else if msg.String() == "space" {
-						// Close on space.
-						m.closeCompletions()
-					} else {
-						// Extract current word and filter.
-						word := m.textareaWord()
-						if strings.HasPrefix(word, "@") {
-							m.completionsQuery = word[1:]
-							m.completions.Filter(m.completionsQuery)
-						} else if m.completionsOpen {
-							m.closeCompletions()
-						}
-					}
-				}
 			}
 		case uiFocusMain:
 			switch {
@@ -3212,30 +3156,8 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		m.drawEditorArea(scr, layout.editor)
 	}
 
-	isOnboarding := m.state == uiOnboarding
-
 	// Add status and help layer
 	m.status.Draw(scr, layout.status)
-
-	// Draw completions popup if open
-	if !isOnboarding && m.completionsOpen && m.completions.HasItems() {
-		w, h := m.completions.Size()
-		x := m.completionsPositionStart.X
-		y := m.completionsPositionStart.Y - h
-
-		screenW := area.Dx()
-		if x+w > screenW {
-			x = screenW - w
-		}
-		x = max(0, x)
-		y = max(0, y+1) // Offset for attachments row
-
-		completionsView := uv.NewStyledString(m.completions.Render())
-		completionsView.Draw(scr, image.Rectangle{
-			Min: image.Pt(x, y),
-			Max: image.Pt(x+w, y+h),
-		})
-	}
 
 	// Debugging rendering (visually see when the tui rerenders)
 	if os.Getenv("HARNESS_UI_DEBUG") == "true" {
@@ -4089,12 +4011,10 @@ func (m *UI) bangPromptFunc(info textarea.PromptInfo) string {
 	return t.Editor.PromptBangDotsBlurred.Render()
 }
 
-// closeCompletions closes the completions popup and resets state.
+// closeCompletions resets the mention-insertion state; the picker
+// dialog itself closes through the overlay.
 func (m *UI) closeCompletions() {
-	m.completionsOpen = false
-	m.completionsQuery = ""
 	m.completionsStartIndex = 0
-	m.completions.Close()
 }
 
 // insertCompletionText replaces the @query in the textarea with the given text.
@@ -4226,16 +4146,6 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 		}
 	}
 	return tea.Batch(heightCmd, resourceCmd)
-}
-
-// completionsPosition returns the X and Y position for the completions popup.
-func (m *UI) completionsPosition() image.Point {
-	origin := m.textareaOrigin()
-	if cur := m.textarea.Cursor(); cur != nil {
-		origin.X += cur.X
-		origin.Y += cur.Y
-	}
-	return origin
 }
 
 // textareaWord returns the current word at the cursor position.
@@ -4420,7 +4330,6 @@ func (m *UI) refreshStyles() {
 	t := m.com.Styles
 	m.header.refresh()
 	m.textarea.SetStyles(t.Editor.Textarea)
-	m.completions.SetStyles(t.Completions.Normal, t.Completions.Focused, t.Completions.Match)
 	m.attachments.Renderer().SetStyles(
 		t.Attachments.Normal,
 		t.Attachments.Deleting,
@@ -4710,10 +4619,10 @@ func (m *UI) handleRewindEscape() (bool, tea.Cmd) {
 		m.rewindEscArmed = false
 		return false, nil
 	}
-	// A draft, open completions, or history browsing own the press. The
-	// messages-length guard keeps the zero value of index (0) from
-	// reading as "browsing" before any history has loaded.
-	if m.completionsOpen || (m.promptHistory.index >= 0 && len(m.promptHistory.messages) > 0) || m.textarea.Value() != "" {
+	// A draft or history browsing owns the press. The messages-length
+	// guard keeps the zero value of index (0) from reading as
+	// "browsing" before any history has loaded.
+	if (m.promptHistory.index >= 0 && len(m.promptHistory.messages) > 0) || m.textarea.Value() != "" {
 		m.rewindEscArmed = false
 		return false, nil
 	}
@@ -4765,6 +4674,10 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		}
 	case dialog.FilePickerID:
 		if cmd := m.openFilesDialog(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case dialog.MentionPickerID:
+		if cmd := m.openMentionPicker(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case dialog.MCPServersID:
@@ -4972,6 +4885,22 @@ func (m *UI) openFilesDialog() tea.Cmd {
 	m.dialog.OpenDialog(filePicker)
 	event.FilePickerOpened()
 
+	return cmd
+}
+
+// openMentionPicker opens the @-mention picker: the shared dialog
+// surface over the completions sources (files, MCP resources,
+// subagents). Replaces the cursor-anchored completions popup; picking
+// inserts through the same insert*Completion paths as before.
+func (m *UI) openMentionPicker() tea.Cmd {
+	if m.dialog.ContainsDialog(dialog.MentionPickerID) {
+		m.dialog.BringToFront(dialog.MentionPickerID)
+		return nil
+	}
+
+	depth, limit := m.com.Config().Options.TUI.Completions.Limits()
+	picker, cmd := dialog.NewMentionPicker(m.com, m.activeSubagentItems, depth, limit)
+	m.dialog.OpenDialog(picker)
 	return cmd
 }
 

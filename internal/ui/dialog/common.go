@@ -23,6 +23,18 @@ type filterableList interface {
 	ScrollToTop()
 }
 
+// updateFilterInput routes a key press to a dialog's filter input,
+// returning the command, the new value and whether it changed. The
+// input half of every filterable dialog's typing path; callers apply
+// the value with whichever ranking their list wants.
+func updateFilterInput(input *textinput.Model, msg tea.KeyPressMsg) (tea.Cmd, string, bool) {
+	prev := input.Value()
+	var cmd tea.Cmd
+	*input, cmd = input.Update(msg)
+	v := input.Value()
+	return cmd, v, v != prev
+}
+
 // applyFilterInput routes a key press to a dialog's filter input and
 // applies the new value to its list: a change re-focuses the list,
 // filters it and selects from the top. The single source for every
@@ -30,11 +42,8 @@ type filterableList interface {
 // apart. It reports whether the value changed, so callers can chain
 // their own follow-ups (e.g. the theme preview).
 func applyFilterInput(input *textinput.Model, l filterableList, msg tea.KeyPressMsg) (tea.Cmd, bool) {
-	prev := input.Value()
-	var cmd tea.Cmd
-	*input, cmd = input.Update(msg)
-	v := input.Value()
-	if v == prev {
+	cmd, v, changed := updateFilterInput(input, msg)
+	if !changed {
 		return cmd, false
 	}
 	l.Focus()
