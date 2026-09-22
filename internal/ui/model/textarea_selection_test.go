@@ -70,11 +70,13 @@ func TestTextareaMouseSelection(t *testing.T) {
 	}
 	u.textarea.CursorStart()
 
-	// The textarea renders one row below the editor top (the attachments
-	// row is always reserved, even when empty). The default prompt
-	// ("┃ ") is 2 cells wide.
-	startX := u.layout.editor.Min.X + 2
-	y := u.layout.editor.Min.Y + 1
+	// Click at the textarea's own first row, at the cell after the
+	// default prompt ("┃ " is 2 cells wide); the origin comes from the
+	// same helper the mouse path uses, so the test cannot drift from
+	// the real geometry.
+	origin := u.textareaOrigin()
+	startX := origin.X + 2
+	y := origin.Y
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{X: startX, Y: y, Button: uv.MouseLeft}))
 	require.True(t, u.textareaMouseSelecting)

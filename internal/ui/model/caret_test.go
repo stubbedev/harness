@@ -12,6 +12,7 @@ import (
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/dialog"
 )
 
@@ -21,6 +22,36 @@ func drawCursor(t *testing.T, m *UI) *tea.Cursor {
 	t.Helper()
 	scr := uv.NewScreenBuffer(m.width, m.height)
 	return m.Draw(scr, image.Rect(0, 0, m.width, m.height))
+}
+
+// TestCaretSitsOnTheTextareaRow pins the caret to the field itself:
+// on the editor area's top row with no attachments, and one row down
+// when the attachments strip occupies that row. The cursor offset
+// derives from the same predicate that reserves the strip's row in
+// the layout, so it cannot drift onto the legend again.
+func TestCaretSitsOnTheTextareaRow(t *testing.T) {
+	ui := newFrameTestUI(t)
+	ui.com.Workspace = &testWorkspace{cfg: &config.Config{Options: &config.Options{}}}
+	ui.state = uiChat
+	ui.session = &session.Session{ID: "s1"}
+	ui.focus = uiFocusEditor
+	// The frame-test helper builds the attachments component without a
+	// renderer; this test draws the strip, so it needs the real one.
+	sty := ui.com.Styles
+	ui.attachments = attachments.New(attachments.NewRenderer(
+		sty.Attachments.Normal, sty.Attachments.Deleting, sty.Attachments.Image,
+		sty.Attachments.Text, sty.Attachments.Skill, sty.Attachments.Remove,
+	), attachments.Keymap{})
+
+	cur := drawCursor(t, ui)
+	require.NotNil(t, cur)
+	require.Equal(t, ui.layout.editor.Min.Y, cur.Y, "with no attachments the caret sits on the field's first row")
+
+	ui.attachments.Update(message.Attachment{FileName: "a.txt"})
+	ui.updateLayoutAndSize()
+	cur = drawCursor(t, ui)
+	require.NotNil(t, cur)
+	require.Equal(t, ui.layout.editor.Min.Y+1, cur.Y, "the attachments strip pushes the caret down with the field")
 }
 
 // TestCaretAlwaysRendersWhileEditorFocused pins the caret-liveness

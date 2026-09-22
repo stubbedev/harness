@@ -3256,9 +3256,11 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		if m.textarea.Focused() {
-			// Editor may not start at the screen edge; offset for the
-			// attachments row above the textarea.
-			return common.OffsetCursor(m.textarea.Cursor(), m.layout.editor.Min.X, m.layout.editor.Min.Y, 0, 1)
+			// Editor may not start at the screen edge; the origin
+			// carries the attachments-strip offset so the cursor sits
+			// on the field itself.
+			origin := m.textareaOrigin()
+			return common.OffsetCursor(m.textarea.Cursor(), origin.X, origin.Y, 0, 0)
 		}
 	}
 	return nil
@@ -3700,18 +3702,29 @@ func (m *UI) updateTextarea(msg tea.Msg) tea.Cmd {
 	return m.updateTextareaWithPrevHeight(msg, m.textarea.Height())
 }
 
+// textareaOrigin returns the textarea's top-left cell in screen
+// space: the editor area's top-left, pushed down past the attachments
+// strip when there is one. The single source for everything that
+// translates between screen space and the textarea's local space -
+// cursor positioning, mouse forwarding, the completions popup - so
+// none of them can drift from what renderEditorView draws.
+func (m *UI) textareaOrigin() image.Point {
+	origin := image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y)
+	if m.hasAttachments() {
+		origin.Y += editorHeightMargin
+	}
+	return origin
+}
+
 // forwardMouseToTextarea forwards a mouse event to the textarea with
 // coordinates translated into the textarea's local space. It reports whether
 // the event landed within the textarea's rendered region and was forwarded.
 func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 	mouse := msg.Mouse()
 
-	// The textarea is rendered inside layout.editor below the attachments
-	// row. renderEditorView always reserves the first row for attachments
-	// (an empty line when there are none), so the textarea always starts
-	// one row below the editor top.
-	const attachmentsRow = 1
-	origin := image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y+attachmentsRow)
+	// The textarea is rendered inside layout.editor below the
+	// attachments strip when there is one.
+	origin := m.textareaOrigin()
 
 	// The textarea occupies its own height starting at the origin.
 	area := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(m.layout.editor.Dx(), m.textarea.Height()))}
@@ -4193,17 +4206,12 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 
 // completionsPosition returns the X and Y position for the completions popup.
 func (m *UI) completionsPosition() image.Point {
-	cur := m.textarea.Cursor()
-	if cur == nil {
-		return image.Point{
-			X: m.layout.editor.Min.X,
-			Y: m.layout.editor.Min.Y,
-		}
+	origin := m.textareaOrigin()
+	if cur := m.textarea.Cursor(); cur != nil {
+		origin.X += cur.X
+		origin.Y += cur.Y
 	}
-	return image.Point{
-		X: cur.X + m.layout.editor.Min.X,
-		Y: m.layout.editor.Min.Y + cur.Y,
-	}
+	return origin
 }
 
 // textareaWord returns the current word at the cursor position.
