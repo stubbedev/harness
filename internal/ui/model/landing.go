@@ -6,6 +6,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/ultraviolet/layout"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/logo"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
@@ -22,8 +23,9 @@ func (m *UI) selectedLargeModel() *workspace.AgentModel {
 	return nil
 }
 
-// landingView renders the landing page view showing the current working
-// directory, model information, and LSP/MCP status in a two-column layout.
+// landingView renders the landing page: the current working directory and
+// model information at the top, and the gradient block-letter mark centered
+// in the space between them and the editor.
 func (m *UI) landingView() string {
 	t := m.com.Styles
 	width := m.layout.main.Dx()
@@ -42,19 +44,18 @@ func (m *UI) landingView() string {
 		layout.Fill(1),
 	).Split(m.layout.main).Assign(new(image.Rectangle), &remainingHeightArea)
 
-	mcpLspSectionWidth := min(30, (width-2)/3)
-
-	lspSection := m.lspInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-	mcpSection := m.mcpInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-	skillsSection := m.skillsInfo(mcpLspSectionWidth, max(1, remainingHeightArea.Dy()), false)
-
-	content := lipgloss.JoinHorizontal(lipgloss.Left, lspSection, " ", mcpSection, " ", skillsSection)
+	mark := logo.RenderMark(t.Logo.GradCanvas, logo.Opts{
+		TitleColorA: t.Logo.TitleColorA,
+		TitleColorB: t.Logo.TitleColorB,
+		Width:       width,
+	})
+	content := lipgloss.Place(width, max(0, remainingHeightArea.Dy()), lipgloss.Center, lipgloss.Center, mark)
 
 	return lipgloss.NewStyle().
 		Width(width).
 		Height(m.layout.main.Dy() - 1).
 		PaddingTop(1).
 		Render(
-			lipgloss.JoinVertical(lipgloss.Left, infoSection, "", content),
+			lipgloss.JoinVertical(lipgloss.Left, infoSection, content),
 		)
 }

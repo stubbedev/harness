@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/ui/chat"
@@ -125,6 +126,31 @@ func TestEditorRectRunsFlushInEveryState(t *testing.T) {
 			t.Errorf("state %v: editor = [%d, %d), want [0, %d) - flush with the screen edges",
 				state, layout.editor.Min.X, layout.editor.Max.X, w)
 		}
+	}
+}
+
+// TestStatusLineSitsAboveEditorInEveryState pins the block order
+// [...main][status line][editor] in every state that has an editor: the
+// status line row is carved together with the editor rect by
+// splitOffEditor, so it must sit directly above it with identical
+// horizontal extent - the two can never drift apart.
+func TestStatusLineSitsAboveEditorInEveryState(t *testing.T) {
+	t.Parallel()
+
+	const w, h = 140, 45
+	for _, state := range []uiState{uiLanding, uiChat} {
+		u := newTestUI()
+		u.state = state
+		layout := u.generateLayout(w, h)
+		require.Equal(t, 1, layout.header.Dy(), "state %v: status line is one row", state)
+		require.Equal(t, layout.editor.Min.Y, layout.header.Max.Y,
+			"state %v: status line must sit directly above the editor", state)
+		require.Equal(t, layout.editor.Min.X, layout.header.Min.X,
+			"state %v: status line must share the editor's left edge", state)
+		require.Equal(t, layout.editor.Max.X, layout.header.Max.X,
+			"state %v: status line must share the editor's right edge", state)
+		require.LessOrEqual(t, layout.main.Max.Y, layout.header.Min.Y,
+			"state %v: transcript must end above the status line", state)
 	}
 }
 

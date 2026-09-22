@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -26,6 +28,26 @@ type gitSummary struct {
 	branch string // branch name or short SHA
 	dirty  string // "=2 !3 +1" style counts, empty when clean
 	remote string // "⇡2" / "⇣5" / "⇕", empty when in sync
+}
+
+// gitSegment renders the git segment of the compact status line for the
+// workspace's working directory, honoring the git_status option: branch in
+// the theme's primary color, working-tree counts in the warning color,
+// ahead/behind markers in the info color. Empty when disabled or outside a
+// repository. Single source for every surface that shows git state; the
+// status line draws it in every state, so the branch shows from the first
+// frame of a session.
+func gitSegment(com *common.Common) string {
+	var tuiOpts *config.TUIOptions
+	if cfg := com.Config(); cfg != nil && cfg.Options != nil {
+		tuiOpts = cfg.Options.TUI
+	}
+	if !tuiOpts.ShowGitStatus() {
+		return ""
+	}
+	// The segment reads a cache the git watcher refreshes in the
+	// background, so this never blocks on a subprocess.
+	return gitHeaderParts(com.Styles, com.Workspace.WorkingDir())
 }
 
 // gitHeaderParts renders the git segment of the compact status header,

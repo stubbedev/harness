@@ -83,9 +83,16 @@ func TestChat_MouseClickPinsManualSelection(t *testing.T) {
 	u.chat.ScrollToBottom()
 	u.chat.SelectLast()
 
-	// Items are two rows tall (message + gap); y=1 lands on an item
-	// body rather than the gap row beneath it.
-	handled, _ := u.chat.HandleMouseDown(2, 1)
+	// Items are two rows tall (message + gap); which viewport rows land
+	// on an item body depends on the viewport height's parity, so walk
+	// down from the top until a click lands on one.
+	var handled bool
+	for y := range 4 {
+		handled, _ = u.chat.HandleMouseDown(2, y)
+		if handled {
+			break
+		}
+	}
 	require.True(t, handled)
 	require.True(t, u.chat.HasManualSelection(), "clicking an older item must pin the selection")
 	require.NotEqual(t, u.chat.Len()-1, u.chat.Selected())

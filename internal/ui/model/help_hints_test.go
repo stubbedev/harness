@@ -152,6 +152,22 @@ func TestAttachmentHintsFollowDeleteMode(t *testing.T) {
 	require.True(t, hasDesc(m.ShortHelp(), "cancel delete mode"))
 }
 
+// TestDetailsHintOnHelpRowOnlyWithSession pins the ctrl+d hint to the
+// bottom help row, shown only in a chat session where the key routes;
+// the details dialog declares its own close/toggle hints while open.
+func TestDetailsHintOnHelpRowOnlyWithSession(t *testing.T) {
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+
+	require.True(t, hasDesc(m.ShortHelp(), "toggle details"))
+	require.True(t, hasDesc(flatHelp(m.FullHelp()), "toggle details"))
+
+	m.session = nil
+	require.False(t, hasDesc(m.ShortHelp(), "toggle details"))
+	require.False(t, hasDesc(flatHelp(m.FullHelp()), "toggle details"))
+}
+
 // stubInline is a minimal InlineEditor standing in for the question form.
 type stubInline struct {
 	help []key.Binding

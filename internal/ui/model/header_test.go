@@ -27,7 +27,7 @@ func drawHeaderLine(t *testing.T, com *common.Common, sess *session.Session, dia
 	t.Helper()
 	const w = 120
 	scr := uv.NewScreenBuffer(w, 1)
-	newHeader(com).drawHeader(scr, uv.Rect(0, 0, w, 1), sess, false, w, diagnostics, "")
+	newHeader(com).drawHeader(scr, uv.Rect(0, 0, w, 1), sess, w, diagnostics, "")
 	return strings.TrimRight(ansi.Strip(scr.Render()), " ")
 }
 
@@ -61,4 +61,27 @@ func TestHeaderDiagnosticsAllClearRendersNothing(t *testing.T) {
 	sess := &session.Session{ID: "s1"}
 	line := drawHeaderLine(t, headerTestCommon(), sess, lsp.DiagnosticCounts{})
 	require.NotContains(t, line, "E0")
+}
+
+// TestHeaderRendersWithoutSession pins the landing behavior: the status
+// line renders before any session exists, so the working directory and
+// git branch are on screen from the first frame instead of appearing
+// only after the first message creates a session.
+func TestHeaderRendersWithoutSession(t *testing.T) {
+	t.Parallel()
+
+	line := drawHeaderLine(t, headerTestCommon(), nil, lsp.DiagnosticCounts{Error: 1})
+	require.Contains(t, line, "E1", "the status line must render before a session exists")
+}
+
+// TestHeaderCarriesNoDetailsHint pins that the session-details toggle is
+// hinted on the bottom help row (see help_hints_test.go), never inside
+// the status line itself.
+func TestHeaderCarriesNoDetailsHint(t *testing.T) {
+	t.Parallel()
+
+	sess := &session.Session{ID: "s1"}
+	line := drawHeaderLine(t, headerTestCommon(), sess, lsp.DiagnosticCounts{})
+	require.NotContains(t, line, "ctrl+d")
+	require.NotContains(t, line, "details")
 }

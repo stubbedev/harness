@@ -3129,7 +3129,6 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		scr,
 		area,
 		m.session,
-		m.detailsOpen(),
 		area.Dx(),
 		m.lspDiagnosticTotals(),
 		parentBreadcrumbLine(m.com.Styles, m.subagentColor, m.parentTitle, area.Dx()),
@@ -3403,6 +3402,11 @@ func (m *UI) ShortHelp() []key.Binding {
 		binds = append(binds, tab, k.Commands)
 		binds = append(binds, editorPrefixHints(k, showEditorPalettes)...)
 		binds = append(binds, k.Models)
+		// Details only routes in a chat session, so it is only hinted there;
+		// the details dialog itself declares the close/toggle hints while open.
+		if m.hasSession() {
+			binds = append(binds, k.Chat.Details)
+		}
 
 		switch m.focus {
 		case uiFocusEditor:
@@ -3522,7 +3526,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			k.Themes,
 		)
 		if hasSession {
-			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.EndFollow, k.ExportConversation)
+			mainBinds = append(mainBinds, k.Chat.NewSession, k.Chat.EndFollow, k.ExportConversation, k.Chat.Details)
 		}
 
 		binds = append(binds, mainBinds)
@@ -3753,21 +3757,25 @@ func (m *UI) updateSize() {
 	m.renderPills()
 }
 
-// splitOffEditor slices editorHeight rows off the bottom of area for the
-// prompt textarea, then expands the result by sideMargin cells on each
-// side so the editor always runs flush to the screen edges - it must
-// cancel exactly the side inset the caller's state applied to area (via
-// its ancestor appRect), not a hardcoded guess, or the two drift apart
+// splitOffEditor slices the compact status line and the prompt textarea off
+// the bottom of area: one row for the status line with editorHeight rows of
+// editor directly beneath it, so the two can never drift apart. It then
+// expands both by sideMargin cells so they run flush to the screen edges -
+// it must cancel exactly the side inset the caller's state applied to area
+// (via its ancestor appRect), not a hardcoded guess, or the two drift apart
 // exactly as they did when uiLanding's extra padding went uncancelled.
 // Shared by every state with an editor so they can't diverge again.
-func splitOffEditor(area image.Rectangle, editorHeight, sideMargin int) (rest, editor image.Rectangle) {
+func splitOffEditor(area image.Rectangle, editorHeight, sideMargin int) (rest, header, editor image.Rectangle) {
 	layout.Vertical(
-		layout.Len(area.Dy()-editorHeight),
+		layout.Len(area.Dy()-editorHeight-1),
+		layout.Len(1),
 		layout.Fill(1),
-	).Split(area).Assign(&rest, &editor)
-	editor.Min.X -= sideMargin
-	editor.Max.X += sideMargin
-	return rest, editor
+	).Split(area).Assign(&rest, &header, &editor)
+	for _, r := range []*image.Rectangle{&header, &editor} {
+		r.Min.X -= sideMargin
+		r.Max.X += sideMargin
+	}
+	return rest, header, editor
 }
 
 // generateLayout calculates the layout rectangles for all UI components based
@@ -3856,19 +3864,13 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	case uiLanding:
 		// Layout
 		//
-		// header
-		// ------
 		// main
 		// ------
+		// header (compact status line)
 		// editor
 		// ------
 		// help
-		var headerRect, mainRect image.Rectangle
-		layout.Vertical(
-			layout.Len(landingHeaderHeight),
-			layout.Fill(1),
-		).Split(appRect).Assign(&headerRect, &mainRect)
-		mainRect, editorRect := splitOffEditor(mainRect, editorHeight, sideMargin)
+		mainRect, headerRect, editorRect := splitOffEditor(appRect, editorHeight, sideMargin)
 		uiLayout.header = headerRect
 		uiLayout.main = mainRect
 		uiLayout.editor = editorRect
@@ -3876,22 +3878,13 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	case uiChat:
 		// Layout
 		//
-		// header
-		// ------
 		// main
 		// ------
+		// header (compact status line)
 		// editor
 		// ------
 		// help
-		const headerHeight = 1
-		var headerRect, mainRect image.Rectangle
-		layout.Vertical(
-			layout.Len(headerHeight),
-			layout.Fill(1),
-		).Split(appRect).Assign(&headerRect, &mainRect)
-		// Add one line gap between header and main content
-		mainRect.Min.Y += 1
-		mainRect, editorRect := splitOffEditor(mainRect, editorHeight, sideMargin)
+		mainRect, headerRect, editorRect := splitOffEditor(appRect, editorHeight, sideMargin)
 		mainRect.Max.X -= 1 // Add padding right
 		uiLayout.header = headerRect
 		tasksHeight := m.tasksAreaHeight()
@@ -3931,7 +3924,9 @@ type uiLayout struct {
 	// area is the overall available area.
 	area uv.Rectangle
 
-	// header is the compact status header shown above the chat.
+	// header is the compact status line, one row directly above the
+	// editor in every state that has one. It is carved together with the
+	// editor rect (splitOffEditor) so the two cannot drift apart.
 	header uv.Rectangle
 
 	// main is the area for the main pane. (e.g. chat, landing)
