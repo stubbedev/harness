@@ -31,8 +31,12 @@ func TestSetupSubscriber_NormalFlow(t *testing.T) {
 	app := &App{serviceEventsWG: &wg, events: out}
 	app.subscribe(ctx, "test", src.Subscribe)
 
-	// Yield so the subscriber goroutine can call src.Subscribe before we publish.
-	time.Sleep(10 * time.Millisecond)
+	// Publish is lossy, so wait for the subscriber goroutine to actually
+	// register with the source broker before publishing. A fixed sleep is
+	// not enough on a loaded CI runner.
+	require.Eventually(t, func() bool {
+		return src.GetSubscriberCount() == 1
+	}, 5*time.Second, time.Millisecond, "subscriber never registered with the source broker")
 
 	src.Publish(pubsub.CreatedEvent, "hello")
 	src.Publish(pubsub.CreatedEvent, "world")
