@@ -1,97 +1,28 @@
 ---
 name: jq
-description: Use when the user needs to query, filter, reshape, extract, create, or construct JSON data — including API responses, config files, log output, or any structured data — or when helping the user write or debug JSON transformations.
+description: Use when invoking jq in the harness shell — the command is a built-in gojq, not the standard jq binary, and differs in supported flags and behavior.
 ---
 
-# jq — Built-in JSON Processor
+# jq — Built-in, Not the Standard Binary
 
-Harness ships a built-in `jq` command (via `github.com/itchyny/gojq`) available
-in the shell tool. No external binary is required.
+The shell tool's `jq` is Harness's built-in command (via
+`github.com/itchyny/gojq`). No external jq binary is involved — never install
+one, and expect the differences below rather than the man page.
 
-## Supported Flags
+## Differences from standard jq
 
-| Flag | Description |
-|------|-------------|
-| `-r`, `--raw-output` | Output strings without quotes |
-| `-j`, `--join-output` | Like `-r` but no trailing newline |
-| `-c`, `--compact-output` | One-line JSON output |
-| `-s`, `--slurp` | Read all inputs into an array |
-| `-n`, `--null-input` | Use `null` as input (ignore stdin) |
-| `-e`, `--exit-status` | Exit 1 if last output is `false` or `null` |
-| `-R`, `--raw-input` | Read each line as a string, not JSON |
-| `--arg name value` | Bind `$name` to a string value |
-| `--argjson name value` | Bind `$name` to a parsed JSON value |
+- Object keys are sorted by default; `keys_unsorted` and `-S` do not exist.
+- Integers are arbitrary precision — large ones keep full precision in
+  arithmetic.
+- String indexing works: `"abcde"[2]` returns `"c"`.
 
-File arguments after the filter are also supported: `jq '.foo' file.json`.
+Unsupported: `--ascii-output`, `--seq`, `--stream`, `--stream-errors`,
+`-f`/`--from-file`, `--slurpfile`, `--rawfile`, `--args`, `--jsonargs`,
+`input_line_number`, `$__loc__`, regex backreferences and look-around.
 
-## Differences from Standard jq
+Supported beyond the basics (`-r` `-j` `-c` `-s` `-n` `-e` `-R`):
+`--arg name value`, `--argjson name value`, and file arguments after the
+filter (`jq '.foo' file.json`).
 
-The built-in uses gojq, which is a pure-Go jq implementation. Key
-differences:
-
-- **No object key ordering** — keys are sorted by default; `keys_unsorted`
-  and `-S` are unavailable.
-- **Arbitrary-precision integers** — large integers keep full precision
-  (addition, subtraction, multiplication, modulo, division when divisible).
-- **String indexing** — `"abcde"[2]` returns `"c"`.
-- **Not supported** — `--ascii-output`, `--seq`, `--stream`,
-  `--stream-errors`, `-f`/`--from-file`, `--slurpfile`, `--rawfile`,
-  `--args`, `--jsonargs`, `input_line_number`, `$__loc__`, some regex
-  features (backreferences, look-around).
-- **YAML** — gojq supports `--yaml-input`/`--yaml-output` but the
-  built-in does not currently expose these flags.
-
-## Common Patterns
-
-Extract a field:
-```sh
-echo '{"name":"harness"}' | jq '.name'
-```
-
-Filter an array:
-```sh
-echo '[1,2,3,4,5]' | jq '[.[] | select(. > 3)]'
-```
-
-Reshape objects:
-```sh
-echo '{"first":"Ada","last":"Lovelace"}' | jq '{full: (.first + " " + .last)}'
-```
-
-Use variables:
-```sh
-echo '{}' | jq --arg host localhost --argjson port 8080 '{host: $host, port: $port}'
-```
-
-Slurp multiple JSON values:
-```sh
-echo '{"a":1}{"b":2}' | jq -s '.'
-```
-
-Compact output for piping:
-```sh
-echo '{"a":1}' | jq -c '.a += 1'
-```
-
-Raw string output:
-```sh
-echo '["one","two","three"]' | jq -r '.[]'
-```
-
-Process a file:
-```sh
-jq '.dependencies | keys' package.json
-```
-
-Null input for constructing JSON:
-```sh
-jq -n --arg msg hello '{"message": $msg}'
-```
-
-## Tips
-
-- Pipe jq output to other commands: `jq -r '.url' data.json | xargs curl`
-- Chain filters with `|` inside the expression, not shell pipes.
-- Use `try` to suppress errors on missing keys: `jq 'try .foo.bar'`
-- Use `// "default"` for fallback values: `jq '.name // "unknown"'`
-- Use `@csv`, `@tsv`, `@base64`, `@html`, `@uri` for format strings.
+gojq's `--yaml-input`/`--yaml-output` are not exposed here; use `yq` for
+YAML.

@@ -39,4 +39,4 @@ These are always available without user configuration.
 | -------------- | ----------------------- | ------------------------------------------ |
 | `harness-config` | `builtin/harness-config/` | Harness configuration help                   |
 | `harness-hooks`  | `builtin/harness-hooks/`  | Authoring, configuring and debugging hooks |
-| `jq`           | `builtin/jq/`           | jq JSON processor usage guide              |
+| `jq`           | `builtin/jq/`           | gojq-backed builtin jq: differences from standard jq |
