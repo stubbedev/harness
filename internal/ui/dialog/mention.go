@@ -25,6 +25,10 @@ type ActionMentionSelected struct {
 	Value any
 }
 
+// ActionMentionCancelled is emitted when the picker closes without a
+// selection; the model removes the "@" that opened it from the editor.
+type ActionMentionCancelled struct{}
+
 // MentionPicker is the @-mention picker: the same filter-input dialog
 // surface every picker uses, fed by the completions package's sources
 // and ranked by its name-priority filter.
@@ -84,8 +88,10 @@ func (p *MentionPicker) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case completions.CompletionItemsLoadedMsg:
 		t := p.com.Styles
+		// Rows use the shared dialog item tokens: transparent normal
+		// rows, selection background only on the focused row.
 		p.items = completions.MentionItems(
-			t.Completions.Normal, t.Completions.Focused, t.Completions.Match,
+			t.Dialog.NormalItem, t.Dialog.SelectedItem, t.Completions.Match,
 			msg.Files, msg.Resources, msg.Subagents,
 		)
 		p.list.SetItems(p.items...)
@@ -95,7 +101,7 @@ func (p *MentionPicker) HandleMsg(msg tea.Msg) Action {
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, p.keyMap.Close):
-			return ActionClose{}
+			return ActionMentionCancelled{}
 		case key.Matches(msg, p.keyMap.Previous):
 			if p.list.IsSelectedFirst() {
 				p.list.SelectLast()

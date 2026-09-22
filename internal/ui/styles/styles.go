@@ -585,11 +585,10 @@ type Styles struct {
 		SuccessMessage lipgloss.Style
 	}
 
-	// Completions popup styles
+	// MentionMatch highlights the fuzzy-matched runes inside a mention
+	// row; the rows themselves use the shared dialog item tokens.
 	Completions struct {
-		Normal  lipgloss.Style
-		Focused lipgloss.Style
-		Match   lipgloss.Style
+		Match lipgloss.Style
 	}
 
 	// Attachments styles

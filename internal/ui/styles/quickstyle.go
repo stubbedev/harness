@@ -1056,8 +1056,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(o.onPrimary).Background(o.error)
 
 	// Completions styles
-	s.Completions.Normal = base.Background(o.bgLessVisible).Foreground(o.fgBase)
-	s.Completions.Focused = base.Background(o.primary).Foreground(o.onPrimary)
 	s.Completions.Match = base.Underline(true)
 
 	// Attachments styles

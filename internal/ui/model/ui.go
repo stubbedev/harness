@@ -2268,6 +2268,18 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, m.insertSubagentCompletion(value.Name))
 		}
 
+	case dialog.ActionMentionCancelled:
+		m.dialog.CloseDialog(dialog.MentionPickerID)
+		// The "@" that opened the picker goes with it; only that rune,
+		// and only when it still sits where it was typed.
+		if value := m.textarea.Value(); m.completionsStartIndex < len(value) && value[m.completionsStartIndex] == '@' {
+			prevHeight := m.textarea.Height()
+			m.textarea.SetValue(value[:m.completionsStartIndex] + value[m.completionsStartIndex+1:])
+			m.textarea.MoveToEnd()
+			cmds = append(cmds, m.handleTextareaHeightChange(prevHeight))
+		}
+		m.closeCompletions()
+
 	case dialog.ActionRunCustomCommand:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()
