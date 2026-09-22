@@ -25,7 +25,7 @@ func buildSession(n int) []chat.MessageItem {
 	for i := range n {
 		um := &message.Message{ID: fmt.Sprintf("u%d", i), Role: message.User}
 		um.AppendContent(fmt.Sprintf("Question %d: can you walk me through how the cache invalidation works here?", i))
-		items = append(items, chat.NewUserMessageItem(sty, um, nil))
+		items = append(items, chat.NewUserMessageItem(sty, um))
 
 		am := &message.Message{ID: fmt.Sprintf("a%d", i), Role: message.Assistant}
 		for j := range 20 {

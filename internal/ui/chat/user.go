@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -21,6 +21,10 @@ type skillInvocation struct {
 	Instructions string `xml:"instructions"`
 }
 
+// attachmentHeadTailLines is how many lines a truncated text attachment
+// shows on each side of the rule.
+const attachmentHeadTailLines = 3
+
 // UserMessageItem represents a user message in the chat UI.
 type UserMessageItem struct {
 	*list.Versioned
@@ -28,20 +32,18 @@ type UserMessageItem struct {
 	*cachedMessageItem
 	*focusableMessageItem
 
-	attachments *attachments.Renderer
-	message     *message.Message
-	sty         *styles.Styles
+	message *message.Message
+	sty     *styles.Styles
 }
 
 // NewUserMessageItem creates a new UserMessageItem.
-func NewUserMessageItem(sty *styles.Styles, message *message.Message, attachments *attachments.Renderer) MessageItem {
+func NewUserMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
 	v := list.NewVersioned()
 	return &UserMessageItem{
 		Versioned:                v,
 		highlightableMessageItem: defaultHighlighter(sty, v),
 		cachedMessageItem:        &cachedMessageItem{},
 		focusableMessageItem:     newFocusableMessageItem(v),
-		attachments:              attachments,
 		message:                  message,
 		sty:                      sty,
 	}
@@ -159,18 +161,56 @@ func (m *UserMessageItem) ID() string {
 	return m.message.ID
 }
 
-// renderAttachments renders attachments.
+// renderAttachments renders the message's attachments as they read:
+// text attachments as their own text, truncated head-and-tail around a
+// rule when the paste is big, and everything else as numbered tags
+// ([Image #1], [File #2]) minted by the same FormatRef the editor's
+// inline tokens use. The tags count across the message, so the first
+// two non-text attachments render [Image #1] [File #2].
 func (m *UserMessageItem) renderAttachments(width int) string {
-	var attachments []message.Attachment
-	for _, at := range m.message.BinaryContent() {
-		attachments = append(attachments, message.Attachment{
-			FileName: at.Path,
-			MimeType: at.MIMEType,
-		})
+	var blocks, tags []string
+	for _, bc := range m.message.BinaryContent() {
+		att := message.Attachment{MimeType: bc.MIMEType, Content: bc.Data}
+		if att.IsText() {
+			blocks = append(blocks, renderTextAttachment(string(bc.Data), width, m.sty))
+			continue
+		}
+		tags = append(tags, m.sty.Messages.AttachmentTag.Render(
+			message.FormatRef(att.RefKind(), len(tags)+1, 0)))
 	}
-	// This message is already posted, so the attachment can't be removed;
-	// don't render the remove button.
-	return m.attachments.Render(attachments, false, false, width)
+	if len(tags) > 0 {
+		blocks = append(blocks, strings.Join(tags, " "))
+	}
+	return strings.Join(blocks, "\n")
+}
+
+// renderTextAttachment renders a text attachment as its own text. A
+// paste too big to have lived in the prompt shows its head and tail
+// lines around a rule line, the shape the editor's token stood in for;
+// every shown line is clamped to the width.
+func renderTextAttachment(text string, width int, sty *styles.Styles) string {
+	text = strings.TrimRight(text, "\n")
+	lines := strings.Split(text, "\n")
+	if len(lines) <= message.PasteLinesThreshold {
+		return text
+	}
+	head := lines[:attachmentHeadTailLines]
+	tail := lines[len(lines)-attachmentHeadTailLines:]
+	clamp := func(s string) string { return ansi.Truncate(s, width, "…") }
+	return strings.Join([]string{
+		strings.Join(mapLines(head, clamp), "\n"),
+		sty.Messages.PasteRule.Render(clamp(strings.Repeat("─", width))),
+		strings.Join(mapLines(tail, clamp), "\n"),
+	}, "\n")
+}
+
+// mapLines applies fn to every line.
+func mapLines(lines []string, fn func(string) string) []string {
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = fn(line)
+	}
+	return out
 }
 
 // HandleKeyEvent implements KeyEventHandler.

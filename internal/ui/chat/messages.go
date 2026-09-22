@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
@@ -519,15 +518,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 		if len(items) > 0 {
 			return items
 		}
-		r := attachments.NewRenderer(
-			sty.Attachments.Normal,
-			sty.Attachments.Deleting,
-			sty.Attachments.Image,
-			sty.Attachments.Text,
-			sty.Attachments.Skill,
-			sty.Attachments.Remove,
-		)
-		return []MessageItem{NewUserMessageItem(sty, msg, r)}
+		return []MessageItem{NewUserMessageItem(sty, msg)}
 	case message.Assistant:
 		// A summary written by an older compaction is bookkeeping, not
 		// conversation: the session resumes from it, the reader never

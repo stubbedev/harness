@@ -870,6 +870,12 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.ErrorTitle = lipgloss.NewStyle().Foreground(o.fgSubtle)
 	s.Messages.ErrorDetails = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
+	// Attachment references in the transcript: the [Image #1] tag for
+	// non-text attachments and the rule a truncated text block shows
+	// between its head and tail lines.
+	s.Messages.AttachmentTag = muted
+	s.Messages.PasteRule = muted
+
 	// Message item styles
 	s.Messages.ToolCallFocused = muted.PaddingLeft(1).
 		BorderStyle(messageFocussedBorder).

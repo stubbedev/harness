@@ -297,9 +297,14 @@ type Styles struct {
 		ErrorTag         lipgloss.Style
 		ErrorTitle       lipgloss.Style
 		ErrorDetails     lipgloss.Style
-		ToolCallFocused  lipgloss.Style
-		ToolCallCompact  lipgloss.Style
-		ToolCallBlurred  lipgloss.Style
+		// AttachmentTag renders a non-text attachment's transcript tag
+		// ([Image #1]); PasteRule the rule inside a truncated text
+		// attachment.
+		AttachmentTag   lipgloss.Style
+		PasteRule       lipgloss.Style
+		ToolCallFocused lipgloss.Style
+		ToolCallCompact lipgloss.Style
+		ToolCallBlurred lipgloss.Style
 
 		// Shell (bang mode) item styles.
 		ShellBarFocused    lipgloss.Style // Left vertical bar when focused.

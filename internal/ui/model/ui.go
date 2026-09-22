@@ -64,12 +64,6 @@ import (
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
-// If pasted text has more than 10 newlines, treat it as a file attachment.
-const pasteLinesThreshold = 10
-
-// If pasted text has more than 1000 columns, treat it as a file attachment.
-const pasteColsThreshold = 1000
-
 // Session details panel max height.
 const sessionDetailsMaxHeight = 20
 
@@ -2837,12 +2831,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Editor.CutSelection):
 				if m.textarea.HasSelection() {
+					// The cut copies what the user selected; a token the
+					// selection touches is then deleted whole.
 					cmds = append(cmds, common.CopyToClipboardWithCallback(
 						m.textarea.SelectedText(),
 						"Selection cut to clipboard",
 						nil,
 					))
-					m.textarea.DeleteSelection()
+					prevHeight := m.textarea.Height()
+					if !m.deleteSelectionAsUnits() {
+						m.textarea.DeleteSelection()
+					}
+					if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
 				}
 			case key.Matches(msg, m.keyMap.Editor.HistoryPrev):
 				cmd := m.handleHistoryUp(msg)
@@ -2884,6 +2886,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.bangMode = false
 					m.bangWasEmpty = false
 					m.setEditorPrompt()
+					break
+				}
+
+				// Every text deletion goes through the token-unit check
+				// first: a deletion whose range touches a paste token
+				// takes the token whole, whatever key issued it.
+				if handled, cmd := m.handleDeletionKey(msg); handled {
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
 					break
 				}
 
@@ -5225,7 +5237,7 @@ func hasPasteExceededThreshold(msg tea.PasteMsg) bool {
 		lineCount++
 		colCount = max(colCount, len(line))
 
-		if lineCount > pasteLinesThreshold || colCount > pasteColsThreshold {
+		if lineCount > message.PasteLinesThreshold || colCount > message.PasteColsThreshold {
 			return true
 		}
 	}

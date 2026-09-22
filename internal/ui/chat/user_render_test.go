@@ -19,9 +19,25 @@ func newTestUserItem(t *testing.T, text string) *UserMessageItem {
 		Role:  message.User,
 		Parts: []message.ContentPart{message.TextContent{Text: text}},
 	}
-	item := NewUserMessageItem(&sty, msg, nil)
+	item := NewUserMessageItem(&sty, msg)
 	userItem, ok := item.(*UserMessageItem)
 	require.True(t, ok, "NewUserMessageItem must return *UserMessageItem")
+	return userItem
+}
+
+// newTestAttachmentUserItem builds a UserMessageItem carrying text plus
+// the given binary content parts.
+func newTestAttachmentUserItem(t *testing.T, text string, parts ...message.ContentPart) *UserMessageItem {
+	t.Helper()
+	sty := styles.CharmtonePantera()
+	msg := &message.Message{
+		ID:    "user-1",
+		Role:  message.User,
+		Parts: append([]message.ContentPart{message.TextContent{Text: text}}, parts...),
+	}
+	item := NewUserMessageItem(&sty, msg)
+	userItem, ok := item.(*UserMessageItem)
+	require.True(t, ok)
 	return userItem
 }
 
@@ -129,4 +145,91 @@ func TestUserMessageMarkdownConstructsUnaffected(t *testing.T) {
 			}
 		})
 	}
+}
+
+// attachmentLines returns the rendered attachment block of a message
+// carrying text plus binary content, as stripped lines.
+func attachmentLines(t *testing.T, text string, parts ...message.ContentPart) []string {
+	t.Helper()
+	out := newTestAttachmentUserItem(t, text, parts...).RawRender(80)
+	lines := strings.Split(out, "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimSpace(ansi.Strip(l))
+	}
+	return lines
+}
+
+// TestUserMessageTextAttachmentShownAsText pins the transcript shape:
+// a text attachment's content is shown as its own text, not as a chip.
+func TestUserMessageTextAttachmentShownAsText(t *testing.T) {
+	t.Parallel()
+
+	lines := attachmentLines(t, "look at this",
+		message.BinaryContent{Path: "paste_1.txt", MIMEType: "text/plain", Data: []byte("a\nb\nc")})
+	require.Equal(t, []string{"look at this", "a", "b", "c"}, nonEmptyLines(lines))
+}
+
+// TestUserMessageBigTextAttachmentTruncatedAroundRule pins the big-paste
+// shape: head and tail lines around a rule, the shape the editor's
+// token stood in for, with every shown line clamped to the width.
+func TestUserMessageBigTextAttachmentTruncatedAroundRule(t *testing.T) {
+	t.Parallel()
+
+	content := "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12"
+	lines := attachmentLines(t, "see this",
+		message.BinaryContent{Path: "paste_1.txt", MIMEType: "text/plain", Data: []byte(content)})
+
+	require.Equal(t, []string{"see this", "l1", "l2", "l3", "l10", "l11", "l12"},
+		nonEmptyLinesWithoutRule(lines), "the middle lines must be gone")
+	rule := ruleLines(lines)
+	require.Len(t, rule, 1, "exactly one rule line")
+	require.True(t, strings.HasPrefix(rule[0], "──"), "the rule renders as a rule line, got %q", rule[0])
+}
+
+// TestUserMessageNonTextAttachmentTags pin the tag shape: non-text
+// attachments render as numbered tags minted by FormatRef, counting
+// across the message.
+func TestUserMessageNonTextAttachmentTags(t *testing.T) {
+	t.Parallel()
+
+	lines := attachmentLines(t, "",
+		message.BinaryContent{Path: "paste_1.png", MIMEType: "image/png", Data: []byte("png")},
+		message.BinaryContent{Path: "paste_2.pdf", MIMEType: "application/pdf", Data: []byte("pdf")},
+		message.BinaryContent{Path: "paste_3.png", MIMEType: "image/png", Data: []byte("png")},
+	)
+	require.Equal(t, []string{"[Image #1] [File #2] [Image #3]"}, nonEmptyLines(lines))
+}
+
+// nonEmptyLines drops empty lines.
+func nonEmptyLines(lines []string) []string {
+	var out []string
+	for _, l := range lines {
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// nonEmptyLinesWithoutRule drops empty lines and rule lines, so tests
+// can assert the surviving content around them.
+func nonEmptyLinesWithoutRule(lines []string) []string {
+	var out []string
+	for _, l := range lines {
+		if l != "" && !strings.HasPrefix(l, "─") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// ruleLines returns the rule lines among the rendered lines.
+func ruleLines(lines []string) []string {
+	var out []string
+	for _, l := range lines {
+		if strings.HasPrefix(l, "─") {
+			out = append(out, l)
+		}
+	}
+	return out
 }

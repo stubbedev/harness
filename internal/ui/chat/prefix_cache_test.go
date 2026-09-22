@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -111,15 +110,7 @@ func TestUserMessageItemRender_PrefixCacheFocusBlur(t *testing.T) {
 			message.TextContent{Text: "Hello from the user."},
 		},
 	}
-	r := attachments.NewRenderer(
-		sty.Attachments.Normal,
-		sty.Attachments.Deleting,
-		sty.Attachments.Image,
-		sty.Attachments.Text,
-		sty.Attachments.Skill,
-		sty.Attachments.Remove,
-	)
-	item := NewUserMessageItem(&sty, msg, r).(*UserMessageItem)
+	item := NewUserMessageItem(&sty, msg).(*UserMessageItem)
 
 	const width = 60
 

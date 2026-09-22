@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -82,14 +81,6 @@ func TestUserMessageItem_MutatorsBumpVersion(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	r := attachments.NewRenderer(
-		sty.Attachments.Normal,
-		sty.Attachments.Deleting,
-		sty.Attachments.Image,
-		sty.Attachments.Text,
-		sty.Attachments.Skill,
-		sty.Attachments.Remove,
-	)
 	msg := &message.Message{
 		ID:   "u-mut",
 		Role: message.User,
@@ -97,7 +88,7 @@ func TestUserMessageItem_MutatorsBumpVersion(t *testing.T) {
 			message.TextContent{Text: "Hello"},
 		},
 	}
-	item := NewUserMessageItem(&sty, msg, r).(*UserMessageItem)
+	item := NewUserMessageItem(&sty, msg).(*UserMessageItem)
 
 	requireBump(t, "SetFocused", item, func() {
 		item.SetFocused(true)
@@ -258,20 +249,12 @@ func TestUserMessageItem_FinishedAlwaysTrue(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	r := attachments.NewRenderer(
-		sty.Attachments.Normal,
-		sty.Attachments.Deleting,
-		sty.Attachments.Image,
-		sty.Attachments.Text,
-		sty.Attachments.Skill,
-		sty.Attachments.Remove,
-	)
 	msg := &message.Message{
 		ID:    "u-fin",
 		Role:  message.User,
 		Parts: []message.ContentPart{message.TextContent{Text: "hi"}},
 	}
-	item := NewUserMessageItem(&sty, msg, r).(*UserMessageItem)
+	item := NewUserMessageItem(&sty, msg).(*UserMessageItem)
 	require.True(t, item.Finished())
 }
 
