@@ -319,6 +319,10 @@ type UI struct {
 	// Attachment list
 	attachments *attachments.Attachments
 
+	// pastedAttachments holds pastes referenced by the editor's inline
+	// placeholder tokens, keyed by the token text. See paste.go.
+	pastedAttachments map[string]message.Attachment
+
 	readyPlaceholder   string
 	workingPlaceholder string
 
@@ -1318,7 +1322,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if the click landed on an attachment's remove button.
 		// The attachment chips are rendered on the first row of the
 		// editor layout area, above the textarea.
-		if m.activeInline == nil && msg.Button == uv.MouseLeft && len(m.attachments.List()) > 0 && msg.Y == m.layout.editor.Min.Y {
+		if m.activeInline == nil && msg.Button == uv.MouseLeft && m.hasAttachments() && msg.Y == m.layout.editor.Min.Y {
 			relX := msg.X - m.layout.editor.Min.X
 			if m.attachments.HandleClick(relX) {
 				return m, tea.Batch(cmds...)
@@ -1542,6 +1546,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handlePasteMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case pastedAttachmentMsg:
+		// A paste landed: reference it inline in the editor with a
+		// placeholder token instead of adding a pill to the attachments
+		// strip (see paste.go).
+		m.insertPastedAttachment(msg)
 	case openEditorMsg:
 		prevHeight := m.textarea.Height()
 		m.textarea.SetValue(msg.Text)
@@ -2818,6 +2827,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				attachments := m.attachments.List()
 				m.attachments.Reset()
+				// Pasted attachments ride inline tokens in the text; swap
+				// them for the payloads and strip the tokens.
+				value, pasted := m.resolvePastedAttachments(value)
+				attachments = append(attachments, pasted...)
 				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
 					return nil
 				}
@@ -3420,7 +3433,7 @@ func (m *UI) ShortHelp() []key.Binding {
 				binds,
 				k.Editor.Newline,
 			)
-			binds = append(binds, attachmentHelpBinds(k, len(m.attachments.List()) > 0, deleting, m.isAgentBusy())...)
+			binds = append(binds, attachmentHelpBinds(k, m.hasAttachments(), deleting, m.isAgentBusy())...)
 		case uiFocusMain:
 			binds = append(
 				binds,
@@ -3450,7 +3463,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		)
 		binds = append(binds, editorPrefixHints(k, showEditorPalettes)...)
 		if m.focus == uiFocusEditor {
-			binds = append(binds, attachmentHelpBinds(k, len(m.attachments.List()) > 0, deleting, m.isAgentBusy())...)
+			binds = append(binds, attachmentHelpBinds(k, m.hasAttachments(), deleting, m.isAgentBusy())...)
 		}
 	}
 
@@ -3486,7 +3499,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 	deleting := m.attachments.Deleting()
 	help := k.Help
 	help.SetHelp(keys.HelpKeys(help), "less")
-	hasAttachments := len(m.attachments.List()) > 0
+	hasAttachments := m.hasAttachments()
 	hasSession := m.hasSession()
 	// "!" enters shell mode and ":" and "/" open the command and skills
 	// palettes only as the editor's first character, so they are hinted
@@ -3796,7 +3809,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	// it has pills; when an inline editor is active, use its height
 	// instead.
 	editorHeight := m.textarea.Height()
-	if m.attachments != nil && len(m.attachments.List()) > 0 {
+	if m.hasAttachments() {
 		editorHeight += editorHeightMargin
 	}
 	if m.activeInline != nil {
@@ -4278,11 +4291,19 @@ func (m *UI) drawEditorArea(scr uv.Screen, editorRect uv.Rectangle) {
 	m.inlineCursor = nil
 }
 
+// hasAttachments reports whether the attachments strip has pills to
+// show. The single source for the layout row reservation, the strip
+// render, the mouse hit region and the help gating, so they cannot
+// drift apart.
+func (m *UI) hasAttachments() bool {
+	return m.attachments != nil && len(m.attachments.List()) > 0
+}
+
 // renderEditorView renders the editor view with attachments if any.
 // With no attachments the textarea is the whole area - no blank
 // placeholder row is reserved.
 func (m *UI) renderEditorView(width int) string {
-	if len(m.attachments.List()) > 0 {
+	if m.hasAttachments() {
 		return m.attachments.Render(width) + "\n" + m.textarea.View()
 	}
 	return m.textarea.View()
@@ -5241,11 +5262,14 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
 			mimeBufferSize := min(512, len(content))
 			mimeType := http.DetectContentType(content[:mimeBufferSize])
-			return message.Attachment{
-				FileName: name,
-				FilePath: name,
-				MimeType: mimeType,
-				Content:  content,
+			return pastedAttachmentMsg{
+				attachment: message.Attachment{
+					FileName: name,
+					FilePath: name,
+					MimeType: mimeType,
+					Content:  content,
+				},
+				lines: strings.Count(msg.Content, "\n") + 1,
 			}
 		}
 	}
@@ -5323,11 +5347,13 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 		mimeBufferSize := min(512, len(content))
 		mimeType := http.DetectContentType(content[:mimeBufferSize])
 		fileName := filepath.Base(path)
-		return message.Attachment{
-			FilePath: path,
-			FileName: fileName,
-			MimeType: mimeType,
-			Content:  content,
+		return pastedAttachmentMsg{
+			attachment: message.Attachment{
+				FilePath: path,
+				FileName: fileName,
+				MimeType: mimeType,
+				Content:  content,
+			},
 		}
 	}
 }
@@ -5361,11 +5387,13 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 	}
 	name := fmt.Sprintf("paste_%d.png", m.pasteIdx())
 	if err == nil {
-		return message.Attachment{
-			FilePath: name,
-			FileName: name,
-			MimeType: mimeOf(imageData),
-			Content:  imageData,
+		return pastedAttachmentMsg{
+			attachment: message.Attachment{
+				FilePath: name,
+				FileName: name,
+				MimeType: mimeOf(imageData),
+				Content:  imageData,
+			},
 		}
 	}
 
@@ -5406,11 +5434,13 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		}
 	}
 
-	return message.Attachment{
-		FilePath: path,
-		FileName: filepath.Base(path),
-		MimeType: mimeOf(content),
-		Content:  content,
+	return pastedAttachmentMsg{
+		attachment: message.Attachment{
+			FilePath: path,
+			FileName: filepath.Base(path),
+			MimeType: mimeOf(content),
+			Content:  content,
+		},
 	}
 }
 
@@ -5418,15 +5448,23 @@ var pasteRE = regexp.MustCompile(`paste_(\d+).txt`)
 
 func (m *UI) pasteIdx() int {
 	result := 0
-	for _, at := range m.attachments.List() {
-		found := pasteRE.FindStringSubmatch(at.FileName)
+	note := func(fileName string) {
+		found := pasteRE.FindStringSubmatch(fileName)
 		if len(found) == 0 {
-			continue
+			return
 		}
-		idx, err := strconv.Atoi(found[1])
-		if err == nil {
+		if idx, err := strconv.Atoi(found[1]); err == nil {
 			result = max(result, idx)
 		}
+	}
+	// Pastes live inline in the editor now, but names minted before a
+	// send can still sit in either store; scan both so numbering never
+	// collides.
+	for _, at := range m.attachments.List() {
+		note(at.FileName)
+	}
+	for _, at := range m.pastedAttachments {
+		note(at.FileName)
 	}
 	return result + 1
 }
