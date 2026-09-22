@@ -79,7 +79,6 @@ type Rewind struct {
 	input     textinput.Model
 	sessionID string
 	turns     []RewindTurn
-	choices   []rewindModeChoice
 	selected  RewindTurn
 	phase     rewindPhase
 
@@ -196,30 +195,36 @@ func (r *Rewind) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, r.keyMap.Select):
 			return r.confirmSelection()
 		default:
-			cmd, _ := applyFilterInput(&r.input, r.list, msg)
+			// The typing path flows through the shared input helper and
+			// the standard list filter.
+			cmd, _ := filterInput(&r.input, msg, applyListFilter(r.list))
 			return ActionCmd{cmd}
 		}
 	}
 	return nil
 }
 
+// confirmSelection advances the phases: picking a turn opens the
+// mode picker, picking a mode emits the confirmation. Both resolve
+// through the selected row's value, never a positional index into
+// the turns or choices: filtering reorders the list under the
+// selection.
 func (r *Rewind) confirmSelection() Action {
-	item := r.list.SelectedItem()
-	if item == nil {
+	item, ok := r.list.SelectedItem().(PickerItem)
+	if !ok || item == nil {
 		return nil
 	}
 	if r.phase == rewindPhaseTurns {
-		if turnItem, ok := item.(*rewindTurnItem); ok {
-			r.selected = turnItem.turn
+		if turn, ok := item.Value().(RewindTurn); ok {
+			r.selected = turn
 			r.enterModePhase()
 		}
 		return nil
 	}
-	choiceItem, ok := item.(*rewindModeItem)
+	choice, ok := item.Value().(rewindModeChoice)
 	if !ok {
 		return nil
 	}
-	choice := choiceItem.choice
 	return ActionRewindConfirmed{
 		SessionID: r.sessionID,
 		MessageID: r.selected.MessageID,
@@ -237,12 +242,8 @@ func (r *Rewind) enterTurnsPhase() {
 
 func (r *Rewind) enterModePhase() {
 	r.phase = rewindPhaseMode
-	r.choices = rewindModeChoices(r.selected.HasFiles)
-	items := make([]list.FilterableItem, len(r.choices))
-	for i, choice := range r.choices {
-		items[i] = newRewindModeItem(r.com.Styles, choice)
-	}
-	r.list.SetItems(items...)
+	choices := rewindModeChoices(r.selected.HasFiles)
+	r.list.SetItems(rewindModeItems(r.com.Styles, choices)...)
 	r.list.SetSelected(0)
 	r.list.ScrollToTop()
 }
@@ -295,137 +296,48 @@ func (r *Rewind) FullHelp() [][]key.Binding {
 	return [][]key.Binding{r.ShortHelp()}
 }
 
-// -- items --
-
-// rewindTurnItem renders one user turn row.
-type rewindTurnItem struct {
-	*list.Versioned
-	turn    RewindTurn
-	t       *styles.Styles
-	focused bool
-	cache   map[int]string
+// rewindTurnRightLabel is the right-hand info a turn row shows: when
+// it was sent, and whether a working-tree snapshot backs it.
+func rewindTurnRightLabel(turn RewindTurn) string {
+	info := humanize.Time(turn.CreatedAt)
+	if !turn.HasFiles {
+		info += " · no files"
+	}
+	return info
 }
 
+// rewindTurnItems builds the turn rows through the shared picker item:
+// the prompt is the label, the age and snapshot state sit on the right,
+// and the raw prompt stays the filter text.
 func rewindTurnItems(t *styles.Styles, turns []RewindTurn) []list.FilterableItem {
 	items := make([]list.FilterableItem, len(turns))
 	for i, turn := range turns {
-		items[i] = &rewindTurnItem{
-			Versioned: list.NewVersioned(),
-			turn:      turn,
-			t:         t,
-		}
+		label := strings.ReplaceAll(turn.Prompt, "\n", " ")
+		items[i] = NewPickerItem(t, turn, label, rewindTurnRightLabel(turn), turn.Prompt)
 	}
 	return items
 }
 
-var (
-	_ list.FilterableItem = (*rewindTurnItem)(nil)
-	_ list.Focusable      = (*rewindTurnItem)(nil)
-)
-
-// Filter implements list.FilterableItem.
-func (i *rewindTurnItem) Filter() string {
-	return i.turn.Prompt
-}
-
-// SetFocused implements list.Focusable.
-func (i *rewindTurnItem) SetFocused(focused bool) {
-	if i.focused == focused {
-		return
-	}
-	i.cache = nil
-	i.focused = focused
-	i.Bump()
-}
-
-// Finished implements list.Item.
-func (i *rewindTurnItem) Finished() bool {
-	return true
-}
-
-// Render implements list.Item.
-func (i *rewindTurnItem) Render(width int) string {
-	info := humanize.Time(i.turn.CreatedAt)
-	if !i.turn.HasFiles {
-		info += " · no files"
-	}
-	return renderItem(
-		ListItemStyles{
-			ItemBlurred:     i.t.Dialog.NormalItem,
-			ItemFocused:     i.t.Dialog.SelectedItem,
-			InfoTextBlurred: i.t.Dialog.ListItem.InfoBlurred,
-			InfoTextFocused: i.t.Dialog.ListItem.InfoFocused,
-		},
-		strings.ReplaceAll(i.turn.Prompt, "\n", " "),
-		info,
-		i.focused,
-		width,
-		i.cache,
-		nil,
-	)
-}
-
-// rewindModeItem renders one rewind mode row.
-type rewindModeItem struct {
-	*list.Versioned
-	choice  rewindModeChoice
-	t       *styles.Styles
-	focused bool
-	cache   map[int]string
-}
-
-func newRewindModeItem(t *styles.Styles, choice rewindModeChoice) *rewindModeItem {
-	return &rewindModeItem{Versioned: list.NewVersioned(), choice: choice, t: t}
-}
-
-var (
-	_ list.FilterableItem = (*rewindModeItem)(nil)
-	_ list.Focusable      = (*rewindModeItem)(nil)
-)
-
-// Filter implements list.FilterableItem.
-func (i *rewindModeItem) Filter() string {
-	return i.choice.label
-}
-
-// SetFocused implements list.Focusable.
-func (i *rewindModeItem) SetFocused(focused bool) {
-	if i.focused == focused {
-		return
-	}
-	i.cache = nil
-	i.focused = focused
-	i.Bump()
-}
-
-// Finished implements list.Item.
-func (i *rewindModeItem) Finished() bool {
-	return true
-}
-
-// Render implements list.Item.
-func (i *rewindModeItem) Render(width int) string {
-	info := ""
-	switch i.choice.mode {
+// rewindModeRightLabel is the right-hand info a mode row shows: what
+// the mode does to the transcript and the working tree.
+func rewindModeRightLabel(mode checkpoints.Mode) string {
+	switch mode {
 	case checkpoints.ModeBoth:
-		info = "delete turns and restore files"
+		return "delete turns and restore files"
 	case checkpoints.ModeConversation:
-		info = "delete turns only"
+		return "delete turns only"
 	case checkpoints.ModeFiles:
-		info = "restore files only"
+		return "restore files only"
 	}
-	return renderItem(
-		ListItemStyles{
-			ItemBlurred:     i.t.Dialog.NormalItem,
-			ItemFocused:     i.t.Dialog.SelectedItem,
-			InfoTextBlurred: i.t.Dialog.ListItem.InfoBlurred,
-			InfoTextFocused: i.t.Dialog.ListItem.InfoFocused,
-		},
-		i.choice.label,
-		info,
-		i.focused,
-		width,
-		i.cache,
-		nil,
-	)
+	return ""
+}
+
+// rewindModeItems builds the mode rows through the shared picker item;
+// the choice struct is the value a selection resolves to.
+func rewindModeItems(t *styles.Styles, choices []rewindModeChoice) []list.FilterableItem {
+	items := make([]list.FilterableItem, len(choices))
+	for i, choice := range choices {
+		items[i] = NewPickerItem(t, choice, choice.label, rewindModeRightLabel(choice.mode))
+	}
+	return items
 }

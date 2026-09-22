@@ -1,10 +1,10 @@
 package dialog
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/x/ansi"
-	"github.com/sahilm/fuzzy"
 	"github.com/stubbedev/harness/internal/ui/common"
-	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -19,84 +19,24 @@ type RunningSubagentItemData struct {
 	CompletionTokens int64
 }
 
-// RunningSubagentItem wraps [RunningSubagentItemData] to implement the
-// [ListItem] interface for display in the subagents dialog running tab.
-type RunningSubagentItem struct {
-	*list.Versioned
-	t       *styles.Styles
-	data    RunningSubagentItemData
-	m       fuzzy.Match
-	focused bool
-}
-
-var _ ListItem = &RunningSubagentItem{Versioned: list.NewVersioned()}
-
-// NewRunningSubagentItem creates a new [RunningSubagentItem].
-func NewRunningSubagentItem(t *styles.Styles, data RunningSubagentItemData) *RunningSubagentItem {
-	return &RunningSubagentItem{
-		Versioned: list.NewVersioned(),
-		t:         t,
-		data:      data,
+// NewRunningSubagentItem creates the running tab's picker row through the
+// shared picker item: the subagent's name is the label, and the model,
+// token count and status it showed on its single line become the
+// right-hand info. The data is the value a selection resolves to.
+func NewRunningSubagentItem(t *styles.Styles, data RunningSubagentItemData) PickerItem {
+	var info []string
+	if data.Model != "" {
+		info = append(info, data.Model)
 	}
-}
-
-// Finished implements list.Item. Running subagent items are considered stable
-// outside of explicit state mutations.
-func (r *RunningSubagentItem) Finished() bool {
-	return true
-}
-
-// Filter implements [list.FilterableItem].
-func (r *RunningSubagentItem) Filter() string {
-	return r.data.Name + " " + r.data.Model
-}
-
-// ID implements [ListItem].
-func (r *RunningSubagentItem) ID() string {
-	return r.data.ChildSessionID
-}
-
-// SetFocused implements [list.Focusable].
-func (r *RunningSubagentItem) SetFocused(focused bool) {
-	if r.focused == focused {
-		return
+	if count := common.FormatSubagentTokenCount(data.PromptTokens, data.CompletionTokens); count != "" {
+		info = append(info, count)
 	}
-	r.focused = focused
-	if r.Versioned != nil {
-		r.Bump()
+	// A live entry is "running"; anything else (retrying while
+	// credentials refresh) is worth spelling out. The shared suffix is
+	// styled for inline use; the picker row owns its right column's
+	// styling, so only the text carries over.
+	if suffix := ansi.Strip(common.SubagentStatusSuffix(t, data.Status)); suffix != "" {
+		info = append(info, suffix)
 	}
-}
-
-// SetMatch implements [list.MatchSettable].
-func (r *RunningSubagentItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(r.m, m) {
-		return
-	}
-	r.m = m
-	if r.Versioned != nil {
-		r.Bump()
-	}
-}
-
-// Render implements list.Item. It renders the running subagent as a single
-// line showing the colored dot, name, model, and total token count.
-func (r *RunningSubagentItem) Render(width int) string {
-	dot := r.t.SubagentDot(r.data.Color)
-
-	itemStyle := r.t.Dialog.NormalItem
-	if r.focused {
-		itemStyle = r.t.Dialog.SelectedItem
-	}
-
-	content := dot + " " + r.data.Name + "  " + r.data.Model
-	if count := common.FormatSubagentTokenCount(r.data.PromptTokens, r.data.CompletionTokens); count != "" {
-		content += "  " + count
-	}
-	// A live entry is "running"; anything else (retrying while credentials
-	// refresh) is worth spelling out.
-	if suffix := common.SubagentStatusSuffix(r.t, r.data.Status); suffix != "" {
-		content += "  " + suffix
-	}
-	content = ansi.Truncate(content, max(0, width-itemStyle.GetHorizontalFrameSize()), "…")
-	return itemStyle.Render(content)
+	return NewPickerItem(t, data, data.Name, strings.Join(info, "  "), data.Name+" "+data.Model)
 }
