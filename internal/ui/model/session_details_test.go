@@ -32,7 +32,7 @@ func TestSessionDetailsSharesPaletteFrameAndAnchor(t *testing.T) {
 						require.LessOrEqual(t, lipgloss.Height(view), max(0, size.Y-1))
 					}
 					actual := uv.NewScreenBuffer(area.Max.X+2, area.Max.Y+2)
-					ui.drawSessionDetails(actual, area)
+					(&sessionDetailsDialog{ui: ui}).Draw(actual, area)
 					expected := uv.NewScreenBuffer(area.Max.X+2, area.Max.Y+2)
 					if view != "" {
 						dialog.DrawCenter(expected, area, view)
@@ -65,19 +65,25 @@ func TestSessionDetailsTogglePreservesStatusAndChatLayout(t *testing.T) {
 	t.Cleanup(func() { dialog.InstallPlacement(config.DialogPlacementBottom) })
 	ui := newFrameTestUI(t)
 	ui.com.Workspace = &testWorkspace{cfg: &config.Config{Options: &config.Options{}}}
+	ui.state = uiChat
 	ui.session = &session.Session{ID: "session", Title: "Details toggle marker"}
 	before := ui.View()
 	beforeLayout := ui.layout
 	ui.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
-	require.True(t, ui.detailsOpen)
+	require.True(t, ui.detailsOpen())
+	require.True(t, ui.dialog.ContainsDialog(sessionDetailsID))
 	opened := viewChecked(t, ui, "details opened")
 	require.Equal(t, beforeLayout.main, ui.layout.main)
 	require.Equal(t, beforeLayout.editor, ui.layout.editor)
+	// The hint row follows the front dialog, so opening the window
+	// swaps the main hints for the dialog's: the dismiss key must be
+	// among them.
 	beforeRows := strings.Split(ansi.Strip(before.Content), "\n")
 	openedRows := strings.Split(ansi.Strip(opened.Content), "\n")
-	require.Equal(t, beforeRows[len(beforeRows)-1], openedRows[len(openedRows)-1])
+	require.NotEqual(t, beforeRows[len(beforeRows)-1], openedRows[len(openedRows)-1])
+	require.Contains(t, openedRows[len(openedRows)-1], ui.keyMap.Dialog.Close.Help().Key)
 	ui.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
-	require.False(t, ui.detailsOpen)
+	require.False(t, ui.detailsOpen())
 	closed := viewChecked(t, ui, "details closed")
 	require.Equal(t, before.Content, closed.Content)
 }
@@ -86,5 +92,7 @@ func TestSessionDetailsNilSessionDoesNotDraw(t *testing.T) {
 	t.Parallel()
 	ui := newTestUIWithConfig(t, &config.Config{Options: &config.Options{}})
 	screen := uv.NewScreenBuffer(80, 24)
-	require.NotPanics(t, func() { ui.drawSessionDetails(screen, screen.Bounds()) })
+	require.NotPanics(t, func() {
+		(&sessionDetailsDialog{ui: ui}).Draw(screen, screen.Bounds())
+	})
 }

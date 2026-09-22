@@ -7,54 +7,44 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/session"
-	"github.com/stubbedev/harness/internal/ui/completions"
 )
 
-// TestEscapeClosesAnyMenu pins the universal menu-close contract: the
-// dialog dismiss key closes whichever menu-like surface is on top,
-// regardless of where focus sits. Dialogs themselves are covered by the
-// dialog stack's own routing on the same binding.
+// TestEscapeClosesAnyMenu pins the universal menu-close contract: every
+// window flows through the dialog stack, so the dismiss key closes it
+// wherever focus sits, with no per-surface special cases.
 func TestEscapeClosesAnyMenu(t *testing.T) {
-	t.Run("details", func(t *testing.T) {
+	newUI := func(t *testing.T) *UI {
 		ui := newFrameTestUI(t)
 		ui.com.Workspace = &testWorkspace{cfg: &config.Config{Options: &config.Options{}}}
+		ui.state = uiChat
 		ui.session = &session.Session{ID: "session", Title: "Details"}
+		return ui
+	}
+
+	t.Run("details open and close on the dialog stack", func(t *testing.T) {
+		ui := newUI(t)
 		ui.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
-		require.True(t, ui.detailsOpen)
+		require.True(t, ui.detailsOpen())
 
 		ui.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-		require.False(t, ui.detailsOpen)
+		require.False(t, ui.detailsOpen())
 	})
 
-	t.Run("completions", func(t *testing.T) {
-		ui := newFrameTestUI(t)
-		ui.completions = completions.New(
-			ui.com.Styles.Completions.Normal,
-			ui.com.Styles.Completions.Focused,
-			ui.com.Styles.Completions.Match,
-		)
-		ui.completionsOpen = true
+	t.Run("ctrl+d toggles from inside the dialog", func(t *testing.T) {
+		ui := newUI(t)
+		ui.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+		require.True(t, ui.detailsOpen())
 
-		ui.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-		require.False(t, ui.completionsOpen)
+		ui.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+		require.False(t, ui.detailsOpen())
 	})
 
-	t.Run("expanded pills", func(t *testing.T) {
-		ui := newFrameTestUI(t)
-		ui.com.Workspace = &testWorkspace{cfg: &config.Config{Options: &config.Options{}}}
-		ui.session = &session.Session{ID: "session", Todos: []session.Todo{
-			{Content: "task", Status: session.TodoStatusInProgress},
-		}}
-		ui.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
-		require.True(t, ui.pillsExpanded)
+	t.Run("keys are routed to the dialog while open", func(t *testing.T) {
+		ui := newUI(t)
+		ui.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 
-		ui.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-		require.False(t, ui.pillsExpanded)
-	})
-
-	t.Run("escape with no menu leaves focus state alone", func(t *testing.T) {
-		ui := newFrameTestUI(t)
-		require.False(t, ui.closeTopMenu())
-		require.Equal(t, uiFocusMain, ui.focus)
+		ui.Update(tea.KeyPressMsg{Code: 'x', Mod: 0})
+		require.True(t, ui.detailsOpen())
+		require.Empty(t, ui.textarea.Value())
 	})
 }

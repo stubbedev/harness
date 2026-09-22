@@ -374,9 +374,6 @@ type UI struct {
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
 
-	// detailsOpen tracks whether the session details overlay is open
-	detailsOpen bool
-
 	// pills state
 	pillsExpanded     bool
 	pillsAutoExpanded bool
@@ -2622,8 +2619,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			return true
 		case key.Matches(msg, m.keyMap.Chat.Details):
-			m.detailsOpen = !m.detailsOpen
-			m.updateLayoutAndSize()
+			if m.state == uiChat && m.hasSession() {
+				m.toggleDetails()
+			}
 			return true
 		case key.Matches(msg, m.keyMap.Chat.EndFollow):
 			if m.state == uiChat && m.hasSession() {
@@ -2673,12 +2671,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	// Route all messages to dialog if one is open.
 	if m.dialog.HasDialogs() {
 		return m.handleDialogMsg(msg)
-	}
-
-	// The dialog dismiss key closes whatever menu is on top, not just
-	// dialogs; the transcript's overlays all answer to the same key.
-	if key.Matches(msg, m.keyMap.Dialog.Close) && m.closeTopMenu() {
-		return tea.Batch(cmds...)
 	}
 
 	// Tab always toggles focus between editor and chat, even when
@@ -2940,12 +2932,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					}
 				}
 
-				// remove the details if they are open when user starts typing
-				if m.detailsOpen {
-					m.detailsOpen = false
-					m.updateLayoutAndSize()
-				}
-
 				prevHeight := m.textarea.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 
@@ -3141,7 +3127,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 		scr,
 		area,
 		m.session,
-		m.detailsOpen,
+		m.detailsOpen(),
 		area.Dx(),
 		m.lspDiagnosticTotals(),
 		parentBreadcrumbLine(m.com.Styles, m.subagentColor, m.parentTitle, area.Dx()),
@@ -3232,9 +3218,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	// This needs to come last to overlay on top of everything. We always pass
 	// the full screen bounds because the dialogs will position themselves
 	// accordingly.
-	if m.state == uiChat && m.detailsOpen {
-		m.drawSessionDetails(scr, scr.Bounds())
-	}
 	if m.dialog.HasDialogs() {
 		return m.dialog.Draw(scr, scr.Bounds())
 	}
@@ -3243,10 +3226,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	case uiFocusEditor:
 		if m.layout.editor.Dy() <= 0 {
 			// Don't show cursor if editor is not visible
-			return nil
-		}
-		if m.detailsOpen {
-			// Don't show cursor if details overlay is open
 			return nil
 		}
 
@@ -4059,28 +4038,6 @@ func (m *UI) closeCompletions() {
 	m.completionsQuery = ""
 	m.completionsStartIndex = 0
 	m.completions.Close()
-}
-
-// closeTopMenu closes the topmost menu-like surface, mirroring the draw
-// order: the session details overlay sits above the completions popup,
-// which sits above the pills strip. Dialogs are absent from the list on
-// purpose: the dialog stack consumes keys itself and already dismisses
-// on the same binding, so every menu answers to one key by construction.
-// Reports whether a menu was open.
-func (m *UI) closeTopMenu() bool {
-	switch {
-	case m.detailsOpen:
-		m.detailsOpen = false
-		m.updateLayoutAndSize()
-		return true
-	case m.completionsOpen:
-		m.closeCompletions()
-		return true
-	case m.pillsExpanded:
-		m.collapsePills()
-		return true
-	}
-	return false
 }
 
 // insertCompletionText replaces the @query in the textarea with the given text.
@@ -5466,14 +5423,6 @@ func (m *UI) pasteIdx() int {
 		}
 	}
 	return result + 1
-}
-
-// drawSessionDetails draws the session details in compact mode.
-func (m *UI) drawSessionDetails(scr uv.Screen, area uv.Rectangle) {
-	if m.session == nil || area.Dx() <= 0 || area.Dy() <= 1 {
-		return
-	}
-	dialog.DrawCenter(scr, area, m.sessionDetailsView(area))
 }
 
 func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
