@@ -2,21 +2,14 @@ package dialog
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"os"
-	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/skills"
-	"github.com/stubbedev/harness/internal/ui/common"
-	"github.com/stubbedev/harness/internal/ui/util"
 )
 
 // ActionClose is a message to close the current dialog.
@@ -181,53 +174,4 @@ type ActionLoadSubagentSession struct {
 // Bubble Tea program loop.
 type ActionCmd struct {
 	Cmd tea.Cmd
-}
-
-// ActionFilePickerSelected is a message indicating a file has been selected in
-// the file picker dialog.
-type ActionFilePickerSelected struct {
-	Path string
-}
-
-// Cmd returns a command that reads the file at path and sends a
-// [message.Attachement] to the program.
-func (a ActionFilePickerSelected) Cmd() tea.Cmd {
-	path := a.Path
-	if path == "" {
-		return nil
-	}
-	return func() tea.Msg {
-		isFileLarge, err := common.IsFileTooBig(path, common.MaxAttachmentSize)
-		if err != nil {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("unable to read the image: %v", err),
-			}
-		}
-		if isFileLarge {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  "file too large, max 5MB",
-			}
-		}
-
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("unable to read the image: %v", err),
-			}
-		}
-
-		mimeBufferSize := min(512, len(content))
-		mimeType := http.DetectContentType(content[:mimeBufferSize])
-		fileName := filepath.Base(path)
-
-		return message.Attachment{
-			FilePath: path,
-			FileName: fileName,
-			MimeType: mimeType,
-			Content:  content,
-		}
-	}
 }
