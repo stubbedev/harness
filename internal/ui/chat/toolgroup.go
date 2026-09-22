@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -353,12 +354,13 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 
 	// A singleton renders as the call's own one-liner (or full render
 	// once expanded) - a "Ran (1 tool calls)" header says nothing the
-	// one-liner does not.
+	// one-liner does not. The row is the whole group, so focus on the
+	// group is selection of the call.
 	if len(g.tools) == 1 {
 		if g.expanded {
 			return strings.Split(g.tools[0].Render(contentWidth), "\n"), -1, -1
 		}
-		return []string{g.oneLiner(g.tools[0], contentWidth)}, -1, -1
+		return []string{g.oneLiner(g.tools[0], contentWidth, g.focused)}, -1, -1
 	}
 
 	running := false
@@ -377,21 +379,6 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 			succeeded++
 		}
 	}
-
-	// The color alone says the run is in flight: pending for a live
-	// run, normal once it has settled, error when it did not survive.
-	verb := "Ran"
-	verbStyle := g.sty.Tool.NameNormal
-	if cancelled && failed == 0 {
-		verbStyle = g.sty.Tool.NameCancelled
-	} else if failed > 0 && succeeded == 0 {
-		verbStyle = g.sty.Tool.NameError
-	} else if failed > 0 {
-		verbStyle = g.sty.Tool.NamePartial
-	}
-	if running {
-		verbStyle = g.sty.Tool.NamePending
-	}
 	calls := fmt.Sprintf("%d tool calls", len(g.tools))
 	if len(g.tools) == 1 {
 		calls = "1 tool call"
@@ -401,8 +388,13 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 		// says how much of the run to distrust without expanding it.
 		calls += fmt.Sprintf(", %d failed", failed)
 	}
+	// The verb color alone says how the run went: pending for a live
+	// run, normal once it has settled, error when it did not survive.
+	// While the cursor sits on the group row the verb says it in color;
+	// once it descends to a call the grey returns and the selected
+	// call's own name takes the color instead.
 	header := fmt.Sprintf("%s %s",
-		verbStyle.Render(verb),
+		groupVerbStyle(g.sty, running, cancelled, failed, succeeded, g.focused && g.selectedChild < 0).Render("Ran"),
 		g.sty.Tool.Body.Render("("+calls+")"))
 
 	lines = append(lines, header)
@@ -412,10 +404,10 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 			start := len(lines)
 			if isToolExpanded(t) {
 				for ln := range strings.SplitSeq(t.RawRender(contentWidth), "\n") {
-					lines = append(lines, subItemIndentString+ln)
+				lines = append(lines, subItemIndentString+ln)
 				}
 			} else {
-				lines = append(lines, subItemIndentString+g.oneLiner(t, contentWidth-subItemIndent))
+				lines = append(lines, subItemIndentString+g.oneLiner(t, contentWidth-subItemIndent, g.focused && i == g.selectedChild))
 			}
 			if g.focused && i == g.selectedChild {
 				selStart, selEnd = start, len(lines)-1
@@ -473,12 +465,41 @@ func (g *ToolGroupMessageItem) prefixKey() uint64 {
 	return 0
 }
 
+// groupVerbStyle picks the style for a collapsed group's "Ran" verb
+// from the run's outcome: pending while in flight, error when every
+// call failed, partial when some did, cancelled when nothing else
+// happened, normal otherwise. A selected group row carries the status
+// color; an unselected one stays in the understated grey.
+func groupVerbStyle(sty *styles.Styles, running, cancelled bool, failed, succeeded int, selected bool) lipgloss.Style {
+	var style lipgloss.Style
+	switch {
+	case cancelled && failed == 0:
+		return sty.Tool.NameCancelled
+	case failed > 0 && succeeded == 0:
+		return sty.Tool.NameError
+	case failed > 0:
+		return sty.Tool.NamePartial
+	case selected:
+		style = sty.Tool.NameNormalSelected
+	default:
+		style = sty.Tool.NameNormal
+	}
+	if running {
+		if selected {
+			return sty.Tool.NamePendingSelected
+		}
+		return sty.Tool.NamePending
+	}
+	return style
+}
+
 // ToolOneLiner renders one tool call as a single line: tool name,
-// colored by status, and an argument summary, truncated to width. A
-// running call uses the running color, matching the call's full
-// render, which carries no spinner either. Shared by the transcript's
-// expanded groups and the background task strip's nested lines.
-func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int) string {
+// colored by status when selected and understated grey otherwise, and
+// an argument summary, truncated to width. A running call uses the
+// running color, matching the call's full render, which carries no
+// spinner either. Shared by the transcript's expanded groups and the
+// background task strip's nested lines.
+func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int, selected bool) string {
 	status := ToolStatusSuccess
 	if a, ok := t.(Animatable); ok && a.Spinning() {
 		status = ToolStatusRunning
@@ -487,7 +508,7 @@ func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int) string {
 	} else if t.Status() == ToolStatusCanceled {
 		status = ToolStatusCanceled
 	}
-	name := toolNameStyle(sty, status, false).Render(ToolDisplayName(t.ToolCall()))
+	name := toolNameStyle(sty, status, false, selected).Render(ToolDisplayName(t.ToolCall()))
 	line := name
 	if summary := ToolCallSummary(t.ToolCall()); summary != "" {
 		line += " " + sty.Tool.Body.Render(summary)
@@ -496,8 +517,8 @@ func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int) string {
 }
 
 // oneLiner renders one tool call as a single line.
-func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int) string {
-	return ToolOneLiner(g.sty, t, width)
+func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int, selected bool) string {
+	return ToolOneLiner(g.sty, t, width, selected)
 }
 
 const (

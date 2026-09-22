@@ -647,10 +647,15 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Tool names are understated grey in every ordinary state so the
 	// calls recede behind the chat messages; only failure states keep
 	// a color (error red, partial yellow). Nested calls (rendered
-	// inside a group) use the same grey.
+	// inside a group) use the same grey. The *Selected variants give
+	// the selected or expanded entry its status color back (green
+	// pending, blue done).
 	s.Tool.NamePending = muted
 	s.Tool.NameNormal = muted
 	s.Tool.NameNested = muted
+	s.Tool.NamePendingSelected = base.Foreground(o.success)
+	s.Tool.NameNormalSelected = base.Foreground(o.info)
+	s.Tool.NameNestedSelected = base.Foreground(o.info)
 	s.Tool.NameError = base.Foreground(o.error)
 	s.Tool.NamePartial = base.Foreground(o.warning)
 	s.Tool.NameCancelled = muted

@@ -137,7 +137,7 @@ func TestToolLabelsStableAcrossRenders(t *testing.T) {
 			wantGroup := "Ran (2 tool calls)\n " + tt.want + "\n Shell go test"
 
 			for range 100 {
-				require.Equal(t, tt.want, ansi.Strip(ToolOneLiner(sty, item, 120)))
+				require.Equal(t, tt.want, ansi.Strip(ToolOneLiner(sty, item, 120, false)))
 				require.Equal(t, tt.want, ansi.Strip(singleton.RawRender(120)))
 				require.Equal(t, tt.want, strings.TrimSpace(ansi.Strip(singleton.Render(120))))
 				require.Equal(t, wantGroup, ansi.Strip(group.RawRender(120)))
@@ -148,7 +148,7 @@ func TestToolLabelsStableAcrossRenders(t *testing.T) {
 			call.Input = `{"query":"updated parameters"}`
 			item.SetToolCall(call)
 			wantUpdated := ToolDisplayName(call) + " updated parameters"
-			require.Equal(t, wantUpdated, ansi.Strip(ToolOneLiner(sty, item, 120)))
+			require.Equal(t, wantUpdated, ansi.Strip(ToolOneLiner(sty, item, 120, false)))
 			require.Contains(t, ansi.Strip(group.Render(120)), wantUpdated)
 		})
 	}

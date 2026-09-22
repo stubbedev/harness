@@ -12,7 +12,10 @@ import (
 // hierarchy to its single point of enforcement: chat message text
 // carries the base foreground, while tool-call text sits in the
 // understated grey so the calls cannot outshine the messages between
-// them. Failure states (error, partial) are exempt.
+// them. Failure states (error, partial) are exempt, and so are the
+// selected variants: the entry the cursor is on, or a call expanded
+// to its full view, says its status in color (green pending, blue
+// done) while every unselected row stays grey.
 func TestToolCallsRecedeBehindMessages(t *testing.T) {
 	t.Parallel()
 
@@ -24,6 +27,13 @@ func TestToolCallsRecedeBehindMessages(t *testing.T) {
 	require.Equal(t, muted.String(), s.Tool.NameNested.String())
 	require.Equal(t, muted.String(), s.Tool.Body.String())
 	require.Equal(t, muted.String(), s.Tool.ResultItemName.String())
+
+	require.Equal(t, lipgloss.NewStyle().Foreground(charmtone.Julep).String(),
+		s.Tool.NamePendingSelected.String())
+	require.Equal(t, lipgloss.NewStyle().Foreground(charmtone.Malibu).String(),
+		s.Tool.NameNormalSelected.String())
+	require.Equal(t, lipgloss.NewStyle().Foreground(charmtone.Malibu).String(),
+		s.Tool.NameNestedSelected.String())
 
 	require.NotEqual(t, lipgloss.NewStyle().Foreground(charmtone.Squid).String(),
 		s.Tool.NameError.String())

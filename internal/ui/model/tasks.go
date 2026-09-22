@@ -918,7 +918,7 @@ func (m *UI) renderTaskDetails(task *agentTask, width, subCursor int) []string {
 			}
 			continue
 		}
-		lines = append(lines, indent+chat.ToolOneLiner(t, nested, inner-2))
+		lines = append(lines, indent+chat.ToolOneLiner(t, nested, inner-2, j == subCursor))
 	}
 	if task.result != nil && task.result.Content != "" {
 		excerpt := chat.FirstLine(task.result.Content)

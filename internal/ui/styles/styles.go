@@ -346,6 +346,13 @@ type Styles struct {
 		NamePartial   lipgloss.Style // Group run with some failures (yellow)
 		NameCancelled lipgloss.Style // Canceled (muted)
 
+		// Selected variants of the ordinary name styles: the entry the
+		// cursor is on, or a call expanded to its full view, says its
+		// status in color again. Failure states keep the styles above.
+		NamePendingSelected lipgloss.Style // Running or awaiting permission (green)
+		NameNormalSelected  lipgloss.Style // Done/success, top-level tool name (blue)
+		NameNestedSelected  lipgloss.Style // Done/success, nested child tool name (blue)
+
 		// Parameter list styles
 		ParamMain lipgloss.Style
 		ParamKey  lipgloss.Style

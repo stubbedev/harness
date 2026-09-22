@@ -614,24 +614,36 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 	return fmt.Sprintf("%s %s", errTag, sty.Tool.ErrorMessage.Render(errContent))
 }
 
-// toolNameStyle returns the tool-name style for a call's status:
-// understated grey while running, awaiting permission, or done; red on
-// failure; yellow for a partially failed run; muted when canceled.
-// Nested calls (rendered inside a group) use NameNested for the done
-// state.
-func toolNameStyle(sty *styles.Styles, status ToolStatus, nested bool) lipgloss.Style {
+// toolNameStyle returns the tool-name style for a call's status and
+// selection. Unselected one-liners stay in the understated grey so
+// tool calls recede behind the chat messages; a selected call, and
+// every full render (which is the expanded view), carries its status
+// color - green while running or awaiting permission, blue when done,
+// red on failure, yellow for a partially failed run. Nested calls
+// (rendered inside a group) use the nested variants. Canceled stays
+// muted either way.
+func toolNameStyle(sty *styles.Styles, status ToolStatus, nested, selected bool) lipgloss.Style {
 	switch status {
 	case ToolStatusError:
 		return sty.Tool.NameError
 	case ToolStatusCanceled:
 		return sty.Tool.NameCancelled
 	case ToolStatusRunning, ToolStatusAwaitingPermission:
+		if selected {
+			return sty.Tool.NamePendingSelected
+		}
 		return sty.Tool.NamePending
 	default:
-		if nested {
+		switch {
+		case nested && selected:
+			return sty.Tool.NameNestedSelected
+		case nested:
 			return sty.Tool.NameNested
+		case selected:
+			return sty.Tool.NameNormalSelected
+		default:
+			return sty.Tool.NameNormal
 		}
-		return sty.Tool.NameNormal
 	}
 }
 
@@ -701,7 +713,9 @@ func isHTTPURL(s string) bool {
 // line, ellipsis-truncated to the remaining width.
 func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, opts *ToolRenderOpts, params ...string) string {
 	nested := opts != nil && opts.Compact
-	toolName := toolNameStyle(sty, status, nested).Render(name)
+	// The full render is the expanded view, so its name always says
+	// the status in color; the grey belongs to the collapsed rows.
+	toolName := toolNameStyle(sty, status, nested, true).Render(name)
 	prefix := toolName + " "
 	remainingWidth := width - lipgloss.Width(prefix)
 	return prefix + toolParamList(sty, params, remainingWidth)
