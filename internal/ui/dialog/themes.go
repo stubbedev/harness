@@ -133,16 +133,10 @@ func (t *Themes) HandleMsg(msg tea.Msg) Action {
 			}
 			return ActionSelectTheme{Name: item.name}
 		default:
-			prevValue := t.input.Value()
-			var cmd tea.Cmd
-			t.input, cmd = t.input.Update(msg)
-			value := t.input.Value()
-			if value == prevValue {
+			cmd, changed := applyFilterInput(&t.input, t.list, msg)
+			if !changed {
 				return ActionCmd{cmd}
 			}
-			t.list.SetFilter(value)
-			t.list.ScrollToTop()
-			t.list.SetSelected(0)
 			// Filtering moves the selection, so the preview follows it.
 			return t.previewAction(cmd)
 		}

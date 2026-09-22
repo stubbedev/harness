@@ -206,16 +206,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				return util.ReportError(err)
 			}
 		default:
-			prevValue := m.input.Value()
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			value := m.input.Value()
-			if value != prevValue {
-				m.list.Focus()
-				m.list.SetFilter(value)
-				m.list.SelectFirst()
-				m.list.ScrollToTop()
-			}
+			cmd, _ := applyFilterInput(&m.input, m.list, msg)
 			return ActionCmd{cmd}
 		}
 	}

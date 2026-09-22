@@ -127,14 +127,7 @@ func (c *Connect) HandleMsg(msg tea.Msg) Action {
 				ModelType: config.SelectedModelTypeLarge,
 			}
 		default:
-			prevValue := c.input.Value()
-			var cmd tea.Cmd
-			c.input, cmd = c.input.Update(msg)
-			if c.input.Value() != prevValue {
-				c.list.SetFilter(c.input.Value())
-				c.list.ScrollToTop()
-				c.list.SetSelected(0)
-			}
+			cmd, _ := applyFilterInput(&c.input, c.list, msg)
 			return ActionCmd{cmd}
 		}
 	}

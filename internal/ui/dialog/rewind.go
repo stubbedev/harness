@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -75,6 +76,7 @@ func rewindModeChoices(hasFiles bool) []rewindModeChoice {
 type Rewind struct {
 	com       *common.Common
 	list      *list.FilterableList
+	input     textinput.Model
 	sessionID string
 	turns     []RewindTurn
 	choices   []rewindModeChoice
@@ -129,6 +131,13 @@ func NewRewind(com *common.Common, sessionID string) (*Rewind, error) {
 
 	r.list = list.NewFilterableList(rewindTurnItems(com.Styles, r.turns)...)
 	r.list.Focus()
+
+	r.input = textinput.New()
+	r.input.SetVirtualCursor(false)
+	r.input.Prompt = "❯ "
+	r.input.Placeholder = "Filter turns"
+	r.input.SetStyles(com.Styles.TextInput)
+	r.input.Focus()
 
 	km := dialogKeys()
 	r.keyMap.Select = km.Rewind.Select
@@ -186,25 +195,31 @@ func (r *Rewind) HandleMsg(msg tea.Msg) Action {
 			r.list.ScrollToSelected()
 		case key.Matches(msg, r.keyMap.Select):
 			return r.confirmSelection()
+		default:
+			cmd, _ := applyFilterInput(&r.input, r.list, msg)
+			return ActionCmd{cmd}
 		}
 	}
 	return nil
 }
 
 func (r *Rewind) confirmSelection() Action {
-	idx := r.list.Selected()
+	item := r.list.SelectedItem()
+	if item == nil {
+		return nil
+	}
 	if r.phase == rewindPhaseTurns {
-		if idx < 0 || idx >= len(r.turns) {
-			return nil
+		if turnItem, ok := item.(*rewindTurnItem); ok {
+			r.selected = turnItem.turn
+			r.enterModePhase()
 		}
-		r.selected = r.turns[idx]
-		r.enterModePhase()
 		return nil
 	}
-	if idx < 0 || idx >= len(r.choices) {
+	choiceItem, ok := item.(*rewindModeItem)
+	if !ok {
 		return nil
 	}
-	choice := r.choices[idx]
+	choice := choiceItem.choice
 	return ActionRewindConfirmed{
 		SessionID: r.sessionID,
 		MessageID: r.selected.MessageID,
@@ -238,7 +253,8 @@ func (r *Rewind) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := DialogWidth(st, area)
 	innerWidth := DialogInnerWidth(st, width)
 
-	listHeight, listTotalHeight, _ := sizeDialogList(st, r.list, innerWidth, rewindDialogMaxHeight, false)
+	r.input.SetWidth(dialogInputTextWidth(st, r.input, innerWidth))
+	listHeight, listTotalHeight, _ := sizeDialogList(st, r.list, innerWidth, rewindDialogMaxHeight, true)
 
 	rc := NewRenderContext(st, width)
 	if r.phase == rewindPhaseTurns {
@@ -256,10 +272,12 @@ func (r *Rewind) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listView := st.Dialog.List.Height(r.list.Height()).Render(r.list.Render())
 	listView = joinScrollbar(st, listView, listHeight, listTotalHeight, listHeight, r.list.Offset())
 	rc.AddPart(listView)
+	rc.AddInput(r.input.View())
 
 	view := rc.Render()
-	DrawCenterCursor(scr, area, view, nil)
-	return nil
+	cur := DialogCursor(st, view, r.input.Cursor())
+	DrawCenterCursor(scr, area, view, cur)
+	return cur
 }
 
 // ShortHelp implements help.KeyMap.

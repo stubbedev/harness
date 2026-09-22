@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -70,6 +71,13 @@ func newServersDialog(com *common.Common, src serversSource, selectKey, backKey 
 
 	d.list = list.NewFilterableList()
 	d.list.Focus()
+
+	d.input = textinput.New()
+	d.input.SetVirtualCursor(false)
+	d.input.Prompt = "❯ "
+	d.input.Placeholder = "Filter servers"
+	d.input.SetStyles(com.Styles.TextInput)
+	d.input.Focus()
 	return d
 }
 
@@ -79,6 +87,7 @@ type serversDialog struct {
 	com    *common.Common
 	source serversSource
 	list   *list.FilterableList
+	input  textinput.Model
 	phase  serversPhase
 	// current is the server the detail phase shows.
 	current string
@@ -131,22 +140,25 @@ func (d *serversDialog) HandleMsg(msg tea.Msg) Action {
 			d.list.ScrollToSelected()
 		case key.Matches(msg, d.keyMap.Select):
 			return d.confirmSelection()
+		default:
+			cmd, _ := applyFilterInput(&d.input, d.list, msg)
+			return ActionCmd{cmd}
 		}
 	}
 	return nil
 }
 
 // confirmSelection opens the selected server's detail view, or runs
-// the selected action row within one.
+// the selected action row within one. The selected server resolves
+// through the selected item's title, not its position: filtering
+// reorders the list under the selection.
 func (d *serversDialog) confirmSelection() Action {
 	if d.phase == serversPhaseList {
-		idx := d.list.Selected()
-		if idx < 0 || idx >= len(d.listNames) {
-			return nil
+		if ci, ok := d.list.SelectedItem().(*CommandItem); ok && ci != nil && slices.Contains(d.listNames, ci.Title()) {
+			d.current = ci.Title()
+			d.phase = serversPhaseDetail
+			d.refreshDetail()
 		}
-		d.current = d.listNames[idx]
-		d.phase = serversPhaseDetail
-		d.refreshDetail()
 		return nil
 	}
 	item := d.list.SelectedItem()
@@ -180,9 +192,9 @@ func (d *serversDialog) refresh() {
 // refreshServers rebuilds the server list, keeping the selection on
 // the same server when the entries reorder.
 func (d *serversDialog) refreshServers() {
-	var keep string
-	if idx := d.list.Selected(); idx >= 0 && idx < len(d.listNames) {
-		keep = d.listNames[idx]
+	keep := ""
+	if ci, ok := d.list.SelectedItem().(*CommandItem); ok && ci != nil {
+		keep = ci.Title()
 	}
 
 	d.listNames = d.source.entries()
@@ -217,7 +229,7 @@ func (d *serversDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := DialogWidth(st, area)
 	innerWidth := DialogInnerWidth(st, width)
 
-	listHeight, listTotalHeight, _ := sizeDialogList(st, d.list, innerWidth, serversDialogMaxHeight, false)
+	listHeight, listTotalHeight, _ := sizeDialogList(st, d.list, innerWidth, serversDialogMaxHeight, true)
 
 	rc := NewRenderContext(st, width)
 	if d.phase == serversPhaseList {
@@ -233,10 +245,12 @@ func (d *serversDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	listView := st.Dialog.List.Height(d.list.Height()).Render(d.list.Render())
 	listView = joinScrollbar(st, listView, listHeight, listTotalHeight, listHeight, d.list.Offset())
 	rc.AddPart(listView)
+	rc.AddInput(d.input.View())
 
 	view := rc.Render()
-	DrawCenterCursor(scr, area, view, nil)
-	return nil
+	cur := DialogCursor(st, view, d.input.Cursor())
+	DrawCenterCursor(scr, area, view, cur)
+	return cur
 }
 
 // ShortHelp implements help.KeyMap.

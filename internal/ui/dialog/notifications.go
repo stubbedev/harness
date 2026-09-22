@@ -137,16 +137,7 @@ func (n *Notifications) HandleMsg(msg tea.Msg) Action {
 			}
 			return ActionSelectNotificationStyle{Style: notifItem.style.ID}
 		default:
-			prevValue := n.input.Value()
-			var cmd tea.Cmd
-			n.input, cmd = n.input.Update(msg)
-			value := n.input.Value()
-			if value != prevValue {
-				n.list.SetFilter(value)
-				n.list.ScrollToTop()
-				n.list.SetSelected(0)
-			}
-
+			cmd, _ := applyFilterInput(&n.input, n.list, msg)
 			return ActionCmd{cmd}
 		}
 	}

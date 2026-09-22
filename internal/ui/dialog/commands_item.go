@@ -76,6 +76,13 @@ func (c *CommandItem) ID() string {
 	return c.id
 }
 
+// Title returns the item's display title, so dialogs that map a
+// selection back to a name resolve it through the selected item
+// rather than a positional index (which filtering reorders).
+func (c *CommandItem) Title() string {
+	return c.title
+}
+
 // SetFocused implements ListItem.
 func (c *CommandItem) SetFocused(focused bool) {
 	if c.focused == focused {

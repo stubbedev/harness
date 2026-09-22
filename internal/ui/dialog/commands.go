@@ -186,14 +186,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 					}
 				}
 			}
-			prevValue := c.input.Value()
-			c.input, cmd = c.input.Update(msg)
-			value := c.input.Value()
-			if value != prevValue {
-				c.list.SetFilter(value)
-				c.list.ScrollToTop()
-				c.list.SetSelected(0)
-			}
+			cmd, _ = applyFilterInput(&c.input, c.list, msg)
 			return ActionCmd{cmd}
 		}
 	}

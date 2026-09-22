@@ -86,6 +86,30 @@ func TestMCPServersConstructAndBrowse(t *testing.T) {
 	drawServers(t, d)
 }
 
+// TestServersDialogFilterInput pins the filter input every dialog now
+// carries: typing filters the list, and enter resolves the selection
+// through the selected item - not its position - so opening the detail
+// still lands on the server the user sees after filtering.
+func TestServersDialogFilterInput(t *testing.T) {
+	t.Parallel()
+
+	d := NewMCPServers(newServersTestCommon(), map[string]mcp.ClientInfo{
+		"alpha": {Name: "alpha", State: mcp.StateConnected},
+		"beta":  {Name: "beta", State: mcp.StateError, Error: errors.New("boom")},
+	})
+
+	// Type a filter that only beta matches.
+	for _, r := range "beta" {
+		d.HandleMsg(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	require.Equal(t, "beta", d.input.Value())
+	require.Equal(t, 1, len(d.list.FilteredItems()), "the filter narrows the list")
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, serversPhaseDetail, d.phase)
+	require.Equal(t, "beta", d.current, "selection resolves through the item, not the pre-filter index")
+}
+
 // TestLSPServersConstructAndBrowse pins the same construction contract
 // for the LSP server manager, over the union of live states and config
 // entries.

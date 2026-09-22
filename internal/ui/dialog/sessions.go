@@ -183,15 +183,7 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 					return ActionSelectSession{sessionItem.Session}
 				}
 			default:
-				prevValue := s.input.Value()
-				var cmd tea.Cmd
-				s.input, cmd = s.input.Update(msg)
-				value := s.input.Value()
-				if value != prevValue {
-					s.list.SetFilter(value)
-					s.list.ScrollToTop()
-					s.list.SetSelected(0)
-				}
+				cmd, _ := applyFilterInput(&s.input, s.list, msg)
 				return ActionCmd{cmd}
 			}
 		}

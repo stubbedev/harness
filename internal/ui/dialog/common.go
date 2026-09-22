@@ -13,6 +13,37 @@ import (
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
+// filterableList is the filtering surface every filterable dialog
+// list satisfies; list.FilterableList and the models list both route
+// through it.
+type filterableList interface {
+	Focus()
+	SetFilter(q string)
+	SelectFirst() bool
+	ScrollToTop()
+}
+
+// applyFilterInput routes a key press to a dialog's filter input and
+// applies the new value to its list: a change re-focuses the list,
+// filters it and selects from the top. The single source for every
+// filterable dialog's typing path so their behavior cannot drift
+// apart. It reports whether the value changed, so callers can chain
+// their own follow-ups (e.g. the theme preview).
+func applyFilterInput(input *textinput.Model, l filterableList, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	prev := input.Value()
+	var cmd tea.Cmd
+	*input, cmd = input.Update(msg)
+	v := input.Value()
+	if v == prev {
+		return cmd, false
+	}
+	l.Focus()
+	l.SetFilter(v)
+	l.SelectFirst()
+	l.ScrollToTop()
+	return cmd, true
+}
+
 // ClampScroll bounds a scroll offset to [0, max(0, totalLines-viewport)].
 // Single source for the question dialogs, which re-derive the same
 // arithmetic per dialog type before their own keep-visible extras.
