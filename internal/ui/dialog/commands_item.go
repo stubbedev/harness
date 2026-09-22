@@ -64,14 +64,25 @@ func (c *CommandItem) WithDescription(desc string) *CommandItem {
 
 // Filter implements ListItem.
 func (c *CommandItem) Filter() string {
-	base := c.title
-	if len(c.aliases) > 0 {
-		base = c.title + " " + strings.Join(c.aliases, " ")
+	primary, rest := c.FilterFields()
+	switch {
+	case rest == "":
+		return primary
+	case primary == "":
+		return rest
+	default:
+		return primary + " " + rest
 	}
-	if c.description != "" {
-		base = base + " " + c.description
+}
+
+// FilterFields implements list.TieredFilterItem: the title and aliases
+// are the name tier; the description only matches, it never outranks a
+// title match.
+func (c *CommandItem) FilterFields() (primary, rest string) {
+	if len(c.aliases) == 0 {
+		return c.title, c.description
 	}
-	return base
+	return c.title + " " + strings.Join(c.aliases, " "), c.description
 }
 
 // ID implements ListItem.

@@ -233,6 +233,10 @@ github.com/jordanella/go-ansi-paintbrush v0.0.0-20240728195301-b7ad996ecf3d h1:o
 github.com/jordanella/go-ansi-paintbrush v0.0.0-20240728195301-b7ad996ecf3d/go.mod h1:SV0W0APWP9MZ1/gfDQ/NzzTlWdIgYZ/ZbpN4d/UXRYw=
 github.com/josharian/intern v1.0.0 h1:vlS4z54oSdjm0bgjRigI+G1HpF+tI+9rE5LLzOg8HmY=
 github.com/josharian/intern v1.0.0/go.mod h1:5DoeVV0s6jJacbCEi61lwdGj/aVlrQvzHFFd8Hwg//Y=
+github.com/junegunn/fzf v0.74.4 h1:DSqIW3ZxtkuuPzeLKrVnHdoWqT9VCIGRbjc/lXiGCso=
+github.com/junegunn/fzf v0.74.4/go.mod h1:TBRY54j3mGjAm4JcpDyiUIuDq38QlHvAzrB3GLKxQXM=
+github.com/junegunn/go-shellwords v0.0.0-20250127100254-2aa3b3277741 h1:7dYDtfMDfKzjT+DVfIS4iqknSEKtZpEcXtu6vuaasHs=
+github.com/junegunn/go-shellwords v0.0.0-20250127100254-2aa3b3277741/go.mod h1:6EILKtGpo5t+KLb85LNZLAF6P9LKp78hJI80PXMcn3c=
 github.com/kaptinlin/jsonpointer v0.4.28 h1:PyxOfdml9PGpxQz+JnNLGsyzQ+Rnm+OVNTGcgbVLqgg=
 github.com/kaptinlin/jsonpointer v0.4.28/go.mod h1:JzeIDw1+60bryzOFea9P3zjKg8pfJHd+UIA/zfZ70x8=
 github.com/kaptinlin/jsonschema v0.9.9 h1:1N00sHfrZcBwcHgI646PuIf1VaODHPsqRnNi0OY2ERw=

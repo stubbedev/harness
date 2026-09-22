@@ -27,6 +27,37 @@ func paletteTestCommands() []commands.CustomCommand {
 	}
 }
 
+// kontainerPaletteCommands mirrors the skill set of issue #59, where a
+// description that starts with the query word used to outrank the name
+// that contains it.
+func kontainerPaletteCommands() []commands.CustomCommand {
+	def := []struct{ name, desc string }{
+		{"kontainer-architecture", "Use when deciding where new code belongs, navigating the Kontainer codebase"},
+		{"kontainer-browser-test", "Use this skill to manually QA a Bitbucket PR in a real browser"},
+		{"kontainer-cut-release", "Cut a Kontainer release (release/X.Y.Z branch off develop)"},
+		{"kontainer-debugging", "Use when debugging a failure, investigating an exception"},
+		{"kontainer-git-workflow", "Use whenever committing, branching, opening or updating a PR"},
+		{"kontainer-php", "MANDATORY whenever writing, editing, or reviewing backend PHP"},
+		{"kontainer-pr-callstack-html", "Produce an interactive HTML call-stack map of a pull request"},
+		{"kontainer-pr", "Drive the open PR for the current branch. Use when the user says '/pr'"},
+		{"kontainer-prs", "Loop the kontainer-pr flow over every open PR you author or review"},
+		{"kontainer-sync-branch", "Pull the base branch into the current branch and resolve conflicts"},
+	}
+	cmds := make([]commands.CustomCommand, 0, len(def))
+	for _, d := range def {
+		cmds = append(cmds, commands.CustomCommand{
+			ID:   d.name,
+			Name: d.name,
+			Skill: &skills.Skill{
+				Name:          d.name,
+				Description:   d.desc,
+				SkillFilePath: "/skills/" + d.name + "/SKILL.md",
+			},
+		})
+	}
+	return cmds
+}
+
 func paletteTestCommon() *common.Common {
 	s := styles.CharmtonePantera()
 	return &common.Common{Workspace: &stubWorkspace{cfg: &config.Config{}}, Styles: &s}
@@ -72,4 +103,26 @@ func TestCommandsPaletteUserTabExcludesSkills(t *testing.T) {
 	assert.Equal(t, "review", item.title)
 	_, isAttach := item.Action().(ActionAttachSkill)
 	assert.False(t, isAttach, "the commands palette must not offer skills")
+}
+
+// TestSkillsPaletteQueryRanksNameAboveDescription pins the issue #59
+// ranking: typing "pr" must put the skill whose name contains "pr"
+// above skills whose only match is the description that starts with it.
+func TestSkillsPaletteQueryRanksNameAboveDescription(t *testing.T) {
+	t.Parallel()
+
+	c, err := NewSkills(paletteTestCommon(), kontainerPaletteCommands())
+	require.NoError(t, err)
+
+	c.list.SetFilter("pr")
+	items := c.list.FilteredItems()
+	require.NotEmpty(t, items)
+	got := make([]string, 0, len(items))
+	for _, it := range items {
+		item, ok := it.(*CommandItem)
+		require.True(t, ok)
+		got = append(got, item.title)
+	}
+	assert.Equal(t, "kontainer-pr", got[0], "got %v", got)
+	assert.Equal(t, "kontainer-prs", got[1], "got %v", got)
 }

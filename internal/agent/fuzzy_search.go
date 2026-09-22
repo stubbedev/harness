@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/sahilm/fuzzy"
+	"github.com/stubbedev/harness/internal/fuzzyrank"
 )
 
 // searchCandidate is one entry a defer-loading search tool can return: the
@@ -15,47 +15,31 @@ type searchCandidate struct {
 	desc string
 }
 
-// rankCandidates scores candidates with the fzf algorithm and returns the
-// top limit names plus how many matched in total. The query is split on
-// whitespace and every term must match somewhere, the way fzf's extended
-// search ANDs its terms. Each term scores against the name and the
-// description -- a name match counts double -- and a candidate's score is
-// the sum over terms; ties break in the order given.
+// rankCandidates scores candidates with fzf's FuzzyMatchV2 algorithm and
+// returns the top limit names plus how many matched in total. The query is
+// split on whitespace and every term must match somewhere, the way fzf's
+// extended search ANDs its terms. A term matched in the name always
+// outranks one matched only in the description, and equal scores break
+// toward the shorter name.
 func rankCandidates(query string, candidates []searchCandidate, limit int) ([]string, int) {
-	terms := strings.Fields(strings.ToLower(query))
 	type scored struct {
 		name  string
 		score int
 	}
 	var matches []scored
 	for _, c := range candidates {
-		name := strings.ToLower(c.name)
-		desc := strings.ToLower(c.desc)
-		total := 0
-		allTerms := true
-		for _, term := range terms {
-			best, found := 0, false
-			for _, m := range fuzzy.Find(term, []string{name}) {
-				if !found || m.Score*2 > best {
-					best, found = m.Score*2, true
-				}
-			}
-			for _, m := range fuzzy.Find(term, []string{desc}) {
-				if !found || m.Score > best {
-					best, found = m.Score, true
-				}
-			}
-			if !found {
-				allTerms = false
-				break
-			}
-			total += best
+		res, ok := fuzzyrank.Match(query, fuzzyrank.Fields{Primary: c.name, Rest: c.desc})
+		if !ok {
+			continue
 		}
-		if allTerms {
-			matches = append(matches, scored{name: c.name, score: total})
-		}
+		matches = append(matches, scored{name: c.name, score: res.Score})
 	}
-	slices.SortStableFunc(matches, func(a, b scored) int { return b.score - a.score })
+	slices.SortStableFunc(matches, func(a, b scored) int {
+		if a.score != b.score {
+			return b.score - a.score
+		}
+		return len(a.name) - len(b.name)
+	})
 	total := len(matches)
 	if total > limit {
 		matches = matches[:limit]
