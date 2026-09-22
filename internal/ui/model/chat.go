@@ -1444,7 +1444,14 @@ func (m *Chat) applyHighlightRange(idx, selectedIdx int, item list.Item) list.It
 	return item
 }
 
-// getHighlightRange returns the current highlight range.
+// getHighlightRange returns the current highlight range. The stored
+// mouse coordinates name cells, and both the pressed and the released
+// cell are inside the selection, the way terminal-native selection
+// behaves: the range's right edge is one past the stored end cell. A
+// range that covers a single cell is normalized to empty, so a plain
+// click neither paints nor copies and dragging within one cell
+// selects nothing. This is the single source of selection geometry
+// for painting, copying, and degeneracy checks alike.
 func (m *Chat) getHighlightRange() (startItemIdx, startLine, startCol, endItemIdx, endLine, endCol int) {
 	if m.mouseDownItem < 0 {
 		return -1, -1, -1, -1, -1, -1
@@ -1465,7 +1472,7 @@ func (m *Chat) getHighlightRange() (startItemIdx, startLine, startCol, endItemId
 		startCol = m.mouseDownX
 		endItemIdx = dragItemIdx
 		endLine = m.mouseDragY
-		endCol = m.mouseDragX
+		endCol = m.mouseDragX + 1
 	} else {
 		// Backward selection (dragging up)
 		startItemIdx = dragItemIdx
@@ -1473,7 +1480,13 @@ func (m *Chat) getHighlightRange() (startItemIdx, startLine, startCol, endItemId
 		startCol = m.mouseDragX
 		endItemIdx = downItemIdx
 		endLine = m.mouseDownY
-		endCol = m.mouseDownX
+		endCol = m.mouseDownX + 1
+	}
+
+	// Collapse a single-cell range: press and release sit on the same
+	// cell, so nothing is selected.
+	if startItemIdx == endItemIdx && startLine == endLine && endCol-startCol <= 1 {
+		return -1, -1, -1, -1, -1, -1
 	}
 
 	return startItemIdx, startLine, startCol, endItemIdx, endLine, endCol
@@ -1518,14 +1531,16 @@ func (m *Chat) selectWord(itemIdx, x, itemY int) {
 		return
 	}
 
-	// Set selection to the word boundaries (convert back to viewport space).
-	// Keep mouseDown true so HandleMouseUp triggers the copy.
+	// Set selection to the word boundaries (convert back to viewport
+	// space). The stored end coordinate names the word's last cell;
+	// getHighlightRange extends one past it, so the word is selected
+	// exactly. Keep mouseDown true so HandleMouseUp triggers the copy.
 	m.mouseDown = true
 	m.mouseDownItem = itemIdx
 	m.mouseDownX = startCol + offset
 	m.mouseDownY = itemY
 	m.mouseDragItem = itemIdx
-	m.mouseDragX = endCol + offset
+	m.mouseDragX = endCol + offset - 1
 	m.mouseDragY = itemY
 }
 
@@ -1554,14 +1569,15 @@ func (m *Chat) selectLine(itemIdx, itemY int) {
 	offset := chat.MessageLeftPaddingTotal
 	lineLen := ansi.StringWidth(lines[itemY])
 
-	// Set selection to the entire line.
+	// Set selection to the entire line. The end coordinate names the
+	// line's last cell; getHighlightRange extends one past it.
 	// Keep mouseDown true so HandleMouseUp triggers the copy.
 	m.mouseDown = true
 	m.mouseDownItem = itemIdx
 	m.mouseDownX = 0
 	m.mouseDownY = itemY
 	m.mouseDragItem = itemIdx
-	m.mouseDragX = lineLen + offset
+	m.mouseDragX = lineLen + offset - 1
 	m.mouseDragY = itemY
 }
 
