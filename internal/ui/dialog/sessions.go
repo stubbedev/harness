@@ -178,12 +178,16 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				}
 				s.list.ScrollToSelected()
 			case key.Matches(msg, s.keyMap.Select):
-				if item := s.list.SelectedItem(); item != nil {
-					sessionItem := item.(*SessionItem)
-					return ActionSelectSession{sessionItem.Session}
+				// The selection resolves through the selected item's value,
+				// not its position: filtering reorders the list under the
+				// selection.
+				if item, ok := s.list.SelectedItem().(PickerItem); ok && item != nil {
+					if sess, ok := item.Value().(session.Session); ok {
+						return ActionSelectSession{sess}
+					}
 				}
 			default:
-				cmd, _ := applyFilterInput(&s.input, s.list, msg)
+				cmd, _ := filterInput(&s.input, msg, applyListFilter(s.list))
 				return ActionCmd{cmd}
 			}
 		}

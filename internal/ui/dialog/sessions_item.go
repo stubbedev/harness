@@ -65,7 +65,10 @@ func (s *SessionItem) Finished() bool {
 	return true
 }
 
-var _ ListItem = &SessionItem{}
+var (
+	_ ListItem   = &SessionItem{}
+	_ PickerItem = (*SessionItem)(nil)
+)
 
 // Filter returns the filterable value of the session.
 func (s *SessionItem) Filter() string {
@@ -76,6 +79,17 @@ func (s *SessionItem) Filter() string {
 func (s *SessionItem) ID() string {
 	return s.Session.ID
 }
+
+// Value implements PickerItem; the payload the dialog resolves a
+// selection to is the wrapped session.
+func (s *SessionItem) Value() any { return s.Session }
+
+// Label implements PickerItem; the session title is the row's main text.
+func (s *SessionItem) Label() string { return s.Title }
+
+// RightLabel implements PickerItem; the relative timestamp is the
+// row's right-aligned info column.
+func (s *SessionItem) RightLabel() string { return s.InfoText() }
 
 // SetMatch sets the fuzzy match for the session item.
 func (s *SessionItem) SetMatch(m fuzzy.Match) {
@@ -147,13 +161,10 @@ func (s *SessionItem) Render(width int) string {
 	if s.hideInfo {
 		info = ""
 	}
-	styles := ListItemStyles{
-		ItemBlurred:     s.t.Dialog.NormalItem,
-		ItemFocused:     s.t.Dialog.SelectedItem,
-		InfoTextBlurred: s.t.Dialog.Sessions.InfoBlurred,
-		InfoTextFocused: s.t.Dialog.Sessions.InfoFocused,
-	}
+	styles := pickerItemStyles(s.t)
 
+	// The destructive and renaming modes restyle only the row styles
+	// on top of the shared picker assembly; the info column is shared.
 	switch s.sessionsMode {
 	case sessionsModeDeleting:
 		styles.ItemBlurred = s.t.Dialog.Sessions.DeletingItemBlurred

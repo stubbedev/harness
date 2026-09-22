@@ -176,18 +176,14 @@ func TestSessionItem_MutatorsBumpVersion(t *testing.T) {
 	})
 }
 
-// TestReasoningItem_MutatorsBumpVersion covers F6 §4.5 for the
-// reasoning effort dialog items.
-func TestReasoningItem_MutatorsBumpVersion(t *testing.T) {
+// TestPickerItem_MutatorsBumpVersion covers F6 §4.5 for the shared
+// picker rows every simple picker dialog lists through: SetFocused and
+// SetMatch bump Version() on observable change and dedupe otherwise.
+func TestPickerItem_MutatorsBumpVersion(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	item := &ReasoningItem{
-		Versioned: list.NewVersioned(),
-		effort:    "medium",
-		title:     "Medium",
-		t:         &sty,
-	}
+	item := NewPickerItem(&sty, "medium", "Medium", "")
 
 	requireBump(t, "SetFocused[true]", item, func() {
 		item.SetFocused(true)

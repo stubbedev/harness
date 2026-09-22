@@ -186,7 +186,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 					}
 				}
 			}
-			cmd, _ = applyFilterInput(&c.input, c.list, msg)
+			cmd, _ = filterInput(&c.input, msg, applyListFilter(c.list))
 			return ActionCmd{cmd}
 		}
 	}

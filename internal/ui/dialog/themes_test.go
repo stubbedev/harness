@@ -49,7 +49,9 @@ func TestThemesListsBuiltins(t *testing.T) {
 
 	names := make([]string, 0, len(items))
 	for _, it := range items {
-		names = append(names, it.(*ThemeItem).name)
+		name, ok := it.(PickerItem).Value().(string)
+		require.True(t, ok, "theme rows must carry the theme name as their value")
+		names = append(names, name)
 	}
 	require.Equal(t, styles.BuiltinThemeNames(), names)
 }
@@ -60,33 +62,35 @@ func TestThemesStartsOnConfiguredTheme(t *testing.T) {
 	t.Parallel()
 
 	d := newTestThemes(t, "gruvbox-dark")
-	item := d.selectedItem()
-	require.NotNil(t, item)
-	require.Equal(t, "gruvbox-dark", item.name)
-	require.True(t, item.isCurrent)
+	name, ok := d.selectedTheme()
+	require.True(t, ok)
+	require.Equal(t, "gruvbox-dark", name)
 }
 
 // TestThemesPreviewsOnMove verifies moving through the list asks the UI to
 // apply the newly highlighted theme, which is what makes the colors change
-// live, and that the moved-to item is re-rendered rather than served from
-// the stale cache.
+// live, and that the rows are rebuilt rather than served from caches the
+// incoming theme cannot see.
 func TestThemesPreviewsOnMove(t *testing.T) {
 	t.Parallel()
 
 	d := newTestThemes(t, "charmtone")
-	before := d.selectedItem()
-	require.NotNil(t, before)
-	versionBefore := before.Version()
+	before, ok := d.list.SelectedItem().(PickerItem)
+	require.True(t, ok)
+	beforeName, ok := before.Value().(string)
+	require.True(t, ok)
 
 	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyDown})
 	preview, ok := action.(ActionPreviewTheme)
 	require.True(t, ok, "moving down should preview a theme, got %T", action)
 
-	after := d.selectedItem()
-	require.NotNil(t, after)
-	require.Equal(t, after.name, preview.Name)
-	require.NotEqual(t, before.name, after.name)
-	require.Greater(t, before.Version(), versionBefore, "items must be invalidated so they re-render under the new theme")
+	after, ok := d.list.SelectedItem().(PickerItem)
+	require.True(t, ok)
+	afterName, ok := after.Value().(string)
+	require.True(t, ok)
+	require.Equal(t, afterName, preview.Name)
+	require.NotEqual(t, beforeName, afterName)
+	require.NotSame(t, before, after, "rows must be rebuilt so they re-render under the new theme")
 }
 
 // TestThemesWrapsAndPreviews verifies the wrap-around at the list edges
@@ -155,17 +159,4 @@ func TestThemeDisplayName(t *testing.T) {
 	require.Equal(t, "Charmtone", themeDisplayName("charmtone"))
 	require.Equal(t, "Catppuccin Mocha", themeDisplayName("catppuccin-mocha"))
 	require.Equal(t, "Gruvbox Dark", themeDisplayName("gruvbox_dark"))
-}
-
-// TestThemeSwatchUsesOwnPalette verifies each entry's swatch is painted
-// from that theme's colors, so two themes never look alike in the list.
-func TestThemeSwatchUsesOwnPalette(t *testing.T) {
-	t.Parallel()
-
-	charmtone := themeSwatch("charmtone")
-	gruvbox := themeSwatch("gruvbox-dark")
-	require.NotEmpty(t, charmtone)
-	require.NotEmpty(t, gruvbox)
-	require.NotEqual(t, charmtone, gruvbox)
-	require.Empty(t, themeSwatch("no-such-theme"))
 }

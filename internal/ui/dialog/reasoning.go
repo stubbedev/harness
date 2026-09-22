@@ -7,12 +7,10 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/sahilm/fuzzy"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
-	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 const (
@@ -37,28 +35,7 @@ type Reasoning struct {
 	}
 }
 
-// ReasoningItem represents a reasoning effort list item.
-type ReasoningItem struct {
-	*list.Versioned
-	effort    string
-	title     string
-	isCurrent bool
-	t         *styles.Styles
-	m         fuzzy.Match
-	cache     map[int]string
-	focused   bool
-}
-
-// Finished implements list.Item. Reasoning items are render-stable
-// outside of explicit SetFocused / SetMatch.
-func (r *ReasoningItem) Finished() bool {
-	return true
-}
-
-var (
-	_ Dialog   = (*Reasoning)(nil)
-	_ ListItem = (*ReasoningItem)(nil)
-)
+var _ Dialog = (*Reasoning)(nil)
 
 // NewReasoning creates a new reasoning effort dialog.
 func NewReasoning(com *common.Common) (*Reasoning, error) {
@@ -118,17 +95,13 @@ func (r *Reasoning) HandleMsg(msg tea.Msg) Action {
 			r.list.SelectNext()
 			r.list.ScrollToSelected()
 		case key.Matches(msg, r.keyMap.Select):
-			selectedItem := r.list.SelectedItem()
-			if selectedItem == nil {
-				break
+			if item, ok := r.list.SelectedItem().(PickerItem); ok && item != nil {
+				if effort, ok := item.Value().(string); ok {
+					return ActionSelectReasoningEffort{Effort: effort}
+				}
 			}
-			reasoningItem, ok := selectedItem.(*ReasoningItem)
-			if !ok {
-				break
-			}
-			return ActionSelectReasoningEffort{Effort: reasoningItem.effort}
 		default:
-			cmd, _ := applyFilterInput(&r.input, r.list, msg)
+			cmd, _ := filterInput(&r.input, msg, applyListFilter(r.list))
 			return ActionCmd{cmd}
 		}
 	}
@@ -229,14 +202,12 @@ func (r *Reasoning) setReasoningItems() error {
 	items := make([]list.FilterableItem, 0, len(model.ReasoningLevels))
 	selectedIndex := 0
 	for i, effort := range model.ReasoningLevels {
-		item := &ReasoningItem{
-			Versioned: list.NewVersioned(),
-			effort:    effort,
-			title:     common.FormatReasoningEffort(effort),
-			isCurrent: effort == currentEffort,
-			t:         r.com.Styles,
-		}
-		items = append(items, item)
+		items = append(items, NewPickerItem(
+			r.com.Styles,
+			effort,
+			common.FormatReasoningEffort(effort),
+			"",
+		))
 		if effort == currentEffort {
 			selectedIndex = i
 		}
@@ -246,53 +217,4 @@ func (r *Reasoning) setReasoningItems() error {
 	r.list.SetSelected(selectedIndex)
 	r.list.ScrollToSelected()
 	return nil
-}
-
-// Filter returns the filter value for the reasoning item.
-func (r *ReasoningItem) Filter() string {
-	return r.title
-}
-
-// ID returns the unique identifier for the reasoning effort.
-func (r *ReasoningItem) ID() string {
-	return r.effort
-}
-
-// SetFocused sets the focus state of the reasoning item.
-func (r *ReasoningItem) SetFocused(focused bool) {
-	if r.focused == focused {
-		return
-	}
-	r.cache = nil
-	r.focused = focused
-	if r.Versioned != nil {
-		r.Bump()
-	}
-}
-
-// SetMatch sets the fuzzy match for the reasoning item.
-func (r *ReasoningItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(r.m, m) {
-		return
-	}
-	r.cache = nil
-	r.m = m
-	if r.Versioned != nil {
-		r.Bump()
-	}
-}
-
-// Render returns the string representation of the reasoning item.
-func (r *ReasoningItem) Render(width int) string {
-	info := ""
-	if r.isCurrent {
-		info = "current"
-	}
-	styles := ListItemStyles{
-		ItemBlurred:     r.t.Dialog.NormalItem,
-		ItemFocused:     r.t.Dialog.SelectedItem,
-		InfoTextBlurred: r.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: r.t.Dialog.ListItem.InfoFocused,
-	}
-	return renderItem(styles, r.title, info, r.focused, width, r.cache, &r.m)
 }

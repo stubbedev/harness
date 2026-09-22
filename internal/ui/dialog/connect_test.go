@@ -47,7 +47,7 @@ func TestConnectListsOnlyUnconfiguredProviders(t *testing.T) {
 
 	var names []string
 	for _, item := range c.list.FilteredItems() {
-		names = append(names, item.(*ConnectItem).name())
+		names = append(names, item.(PickerItem).Label())
 	}
 	assert.Equal(t, []string{"Anthropic"}, names,
 		"OpenAI is configured, and Azure and Google Vertex cannot be authenticated from the TUI")

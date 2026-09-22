@@ -6,9 +6,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/sahilm/fuzzy"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
@@ -20,8 +18,6 @@ const (
 	ThemesID              = "themes"
 	themesDialogMinHeight = 8
 	themesDialogMaxHeight = 16
-	// themeSwatchBlock is the glyph painted once per swatch color.
-	themeSwatchBlock = "█"
 )
 
 // Themes represents a dialog for selecting the TUI color theme. Moving
@@ -42,30 +38,7 @@ type Themes struct {
 	}
 }
 
-// ThemeItem represents a theme list item.
-type ThemeItem struct {
-	*list.Versioned
-	name      string
-	title     string
-	swatch    string
-	isCurrent bool
-	t         *styles.Styles
-	m         fuzzy.Match
-	cache     map[int]string
-	focused   bool
-}
-
-// Finished implements list.Item. Theme items are render-stable outside of
-// explicit SetFocused / SetMatch / invalidate calls, all of which bump the
-// version and therefore drop the frozen cache entry.
-func (t *ThemeItem) Finished() bool {
-	return true
-}
-
-var (
-	_ Dialog   = (*Themes)(nil)
-	_ ListItem = (*ThemeItem)(nil)
-)
+var _ Dialog = (*Themes)(nil)
 
 // NewThemes creates a new theme picker dialog.
 func NewThemes(com *common.Common) *Themes {
@@ -127,13 +100,13 @@ func (t *Themes) HandleMsg(msg tea.Msg) Action {
 			}
 			return t.previewAction(nil)
 		case key.Matches(msg, t.keyMap.Select):
-			item := t.selectedItem()
-			if item == nil {
+			name, ok := t.selectedTheme()
+			if !ok {
 				break
 			}
-			return ActionSelectTheme{Name: item.name}
+			return ActionSelectTheme{Name: name}
 		default:
-			cmd, changed := applyFilterInput(&t.input, t.list, msg)
+			cmd, changed := filterInput(&t.input, msg, applyListFilter(t.list))
 			if !changed {
 				return ActionCmd{cmd}
 			}
@@ -148,38 +121,27 @@ func (t *Themes) HandleMsg(msg tea.Msg) Action {
 // theme, carrying cmd along so the caller doesn't have to choose between
 // the preview and a pending input command.
 func (t *Themes) previewAction(cmd tea.Cmd) Action {
-	item := t.selectedItem()
-	if item == nil {
+	name, ok := t.selectedTheme()
+	if !ok {
 		return ActionCmd{cmd}
 	}
-	// The styles this dialog renders with are about to be replaced in
-	// place, so every cached row is stale.
-	t.invalidateItems()
-	return ActionPreviewTheme{Name: item.name, Cmd: cmd}
+	// The styles every row renders through are about to be replaced in
+	// place, and the shared rows cache their renders, so rebuild them:
+	// fresh rows re-render under the incoming theme.
+	t.refreshItems()
+	return ActionPreviewTheme{Name: name, Cmd: cmd}
 }
 
-// selectedItem returns the selected theme item, or nil when the list is
-// empty (e.g. a filter that matches nothing).
-func (t *Themes) selectedItem() *ThemeItem {
-	selected := t.list.SelectedItem()
-	if selected == nil {
-		return nil
+// selectedTheme resolves the selected row to its theme name through the
+// shared picker item, or reports false when the list is empty (e.g. a
+// filter that matches nothing).
+func (t *Themes) selectedTheme() (string, bool) {
+	item, ok := t.list.SelectedItem().(PickerItem)
+	if !ok || item == nil {
+		return "", false
 	}
-	item, ok := selected.(*ThemeItem)
-	if !ok {
-		return nil
-	}
-	return item
-}
-
-// invalidateItems drops every item's render cache and bumps its version so
-// the list re-renders them under the incoming theme.
-func (t *Themes) invalidateItems() {
-	for _, it := range t.list.FilteredItems() {
-		if item, ok := it.(*ThemeItem); ok {
-			item.invalidate()
-		}
-	}
+	name, ok := item.Value().(string)
+	return name, ok
 }
 
 // Cursor returns the cursor position relative to the dialog.
@@ -243,30 +205,51 @@ func (t *Themes) FullHelp() [][]key.Binding {
 	}}
 }
 
+// setItems fills the list with one picker row per built-in theme, opening
+// with the configured theme selected.
 func (t *Themes) setItems() {
-	current := common.ThemeNameFromConfig(t.com.Config())
-
-	names := styles.BuiltinThemeNames()
-	items := make([]list.FilterableItem, 0, len(names))
-	selectedIndex := 0
-	for i, name := range names {
-		item := &ThemeItem{
-			Versioned: list.NewVersioned(),
-			name:      name,
-			title:     themeDisplayName(name),
-			swatch:    themeSwatch(name),
-			isCurrent: strings.EqualFold(name, current),
-			t:         t.com.Styles,
-		}
-		if item.isCurrent {
-			selectedIndex = i
-		}
-		items = append(items, item)
-	}
-
-	t.list.SetItems(items...)
-	t.list.SetSelected(selectedIndex)
+	t.buildItems()
+	t.selectTheme(common.ThemeNameFromConfig(t.com.Config()))
 	t.list.ScrollToSelected()
+}
+
+// refreshItems rebuilds every row after a preview replaced the styles the
+// rows render through, keeping the active filter and selection.
+func (t *Themes) refreshItems() {
+	keep, _ := t.selectedTheme()
+	t.buildItems()
+	t.list.SetFilter(t.input.Value())
+	t.selectTheme(keep)
+	t.list.ScrollToSelected()
+}
+
+// buildItems fills the list with one picker row per built-in theme. The
+// row's value is the theme identifier; its filter text covers both the
+// display title and the identifier, since the identifier is what ends up
+// in the config file.
+func (t *Themes) buildItems() {
+	names := styles.BuiltinThemeNames()
+	items := make([]list.FilterableItem, len(names))
+	for i, name := range names {
+		title := themeDisplayName(name)
+		items[i] = NewPickerItem(t.com.Styles, name, title, "", title+" "+name)
+	}
+	t.list.SetItems(items...)
+}
+
+// selectTheme moves the selection onto the named theme's row, keeping the
+// current selection when the filter hides that theme.
+func (t *Themes) selectTheme(name string) {
+	for i, it := range t.list.FilteredItems() {
+		item, ok := it.(PickerItem)
+		if !ok || item == nil {
+			continue
+		}
+		if n, ok := item.Value().(string); ok && n == name {
+			t.list.SetSelected(i)
+			return
+		}
+	}
 }
 
 // themeDisplayName turns a theme identifier into a title for the list:
@@ -279,85 +262,4 @@ func themeDisplayName(name string) string {
 		words[i] = strings.ToUpper(w[:1]) + w[1:]
 	}
 	return strings.Join(words, " ")
-}
-
-// themeSwatch renders the named theme's brand colors as colored blocks,
-// styled with that theme's own palette rather than the active one so each
-// row shows what it is offering.
-func themeSwatch(name string) string {
-	colors := styles.ThemeSwatch(name)
-	if len(colors) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, c := range colors {
-		b.WriteString(lipgloss.NewStyle().Foreground(c).Render(themeSwatchBlock))
-	}
-	return b.String()
-}
-
-// Filter returns the filter value for the theme item. Both the display
-// title and the raw identifier match, since the identifier is what ends up
-// in the config file.
-func (t *ThemeItem) Filter() string {
-	return t.title + " " + t.name
-}
-
-// ID returns the unique identifier for the theme.
-func (t *ThemeItem) ID() string {
-	return t.name
-}
-
-// SetFocused sets the focus state of the theme item.
-func (t *ThemeItem) SetFocused(focused bool) {
-	if t.focused == focused {
-		return
-	}
-	t.cache = nil
-	t.focused = focused
-	if t.Versioned != nil {
-		t.Bump()
-	}
-}
-
-// SetMatch sets the fuzzy match for the theme item.
-func (t *ThemeItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(t.m, m) {
-		return
-	}
-	t.cache = nil
-	t.m = m
-	if t.Versioned != nil {
-		t.Bump()
-	}
-}
-
-// invalidate drops the item's render cache and bumps its version. Called
-// when the active theme changes underneath the dialog: the item renders
-// through a shared [styles.Styles] pointer whose contents were replaced,
-// which no cache key can see.
-func (t *ThemeItem) invalidate() {
-	t.cache = nil
-	if t.Versioned != nil {
-		t.Bump()
-	}
-}
-
-// Render returns the string representation of the theme item.
-func (t *ThemeItem) Render(width int) string {
-	info := ""
-	if t.isCurrent {
-		info = "current"
-	}
-	title := t.title
-	if t.swatch != "" {
-		title += "  " + t.swatch
-	}
-	st := ListItemStyles{
-		ItemBlurred:     t.t.Dialog.NormalItem,
-		ItemFocused:     t.t.Dialog.SelectedItem,
-		InfoTextBlurred: t.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: t.t.Dialog.ListItem.InfoFocused,
-	}
-	return renderItem(st, title, info, t.focused, width, t.cache, &t.m)
 }

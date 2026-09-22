@@ -26,7 +26,10 @@ type CommandItem struct {
 	hideInfo    bool
 }
 
-var _ ListItem = &CommandItem{Versioned: list.NewVersioned()}
+var (
+	_ ListItem   = &CommandItem{Versioned: list.NewVersioned()}
+	_ PickerItem = &CommandItem{Versioned: list.NewVersioned()}
+)
 
 // NewCommandItem creates a new CommandItem.
 func NewCommandItem(t *styles.Styles, id, title, shortcut string, action Action) *CommandItem {
@@ -83,6 +86,17 @@ func (c *CommandItem) Title() string {
 	return c.title
 }
 
+// Value implements PickerItem; the payload the palette resolves a
+// selection to is the command's action.
+func (c *CommandItem) Value() any { return c.action }
+
+// Label implements PickerItem; the title is the row's main text.
+func (c *CommandItem) Label() string { return c.title }
+
+// RightLabel implements PickerItem; the shortcut hint is the row's
+// right-aligned info column.
+func (c *CommandItem) RightLabel() string { return c.shortcut }
+
 // SetFocused implements ListItem.
 func (c *CommandItem) SetFocused(focused bool) {
 	if c.focused == focused {
@@ -137,12 +151,7 @@ func (c *CommandItem) SetHideInfo(v bool) {
 
 // Render implements ListItem.
 func (c *CommandItem) Render(width int) string {
-	styles := ListItemStyles{
-		ItemBlurred:     c.t.Dialog.NormalItem,
-		ItemFocused:     c.t.Dialog.SelectedItem,
-		InfoTextBlurred: c.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: c.t.Dialog.ListItem.InfoFocused,
-	}
+	styles := pickerItemStyles(c.t)
 	shortcut := c.shortcut
 	if c.hideInfo {
 		shortcut = ""

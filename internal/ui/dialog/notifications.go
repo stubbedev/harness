@@ -5,11 +5,9 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/sahilm/fuzzy"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/notification"
-	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 const (
@@ -49,27 +47,7 @@ type Notifications struct {
 	}
 }
 
-// NotificationItem represents a notification style list item.
-type NotificationItem struct {
-	*list.Versioned
-	style     NotificationStyle
-	isCurrent bool
-	t         *styles.Styles
-	m         fuzzy.Match
-	cache     map[int]string
-	focused   bool
-}
-
-// Finished implements list.Item. Notification items are render-stable
-// outside of explicit SetFocused / SetMatch.
-func (n *NotificationItem) Finished() bool {
-	return true
-}
-
-var (
-	_ Dialog   = (*Notifications)(nil)
-	_ ListItem = (*NotificationItem)(nil)
-)
+var _ Dialog = (*Notifications)(nil)
 
 // NewNotifications creates a new notification style picker dialog.
 func NewNotifications(com *common.Common) *Notifications {
@@ -127,17 +105,13 @@ func (n *Notifications) HandleMsg(msg tea.Msg) Action {
 			n.list.SelectNext()
 			n.list.ScrollToSelected()
 		case key.Matches(msg, n.keyMap.Select):
-			selectedItem := n.list.SelectedItem()
-			if selectedItem == nil {
-				break
+			if item, ok := n.list.SelectedItem().(PickerItem); ok && item != nil {
+				if style, ok := item.Value().(string); ok {
+					return ActionSelectNotificationStyle{Style: style}
+				}
 			}
-			notifItem, ok := selectedItem.(*NotificationItem)
-			if !ok {
-				break
-			}
-			return ActionSelectNotificationStyle{Style: notifItem.style.ID}
 		default:
-			cmd, _ := applyFilterInput(&n.input, n.list, msg)
+			cmd, _ := filterInput(&n.input, msg, applyListFilter(n.list))
 			return ActionCmd{cmd}
 		}
 	}
@@ -221,68 +195,13 @@ func (n *Notifications) setItems() {
 		if style.ID == "native" && !notification.NativeSupported {
 			continue
 		}
-		item := &NotificationItem{
-			Versioned: list.NewVersioned(),
-			style:     style,
-			isCurrent: style.ID == currentStyle,
-			t:         n.com.Styles,
-		}
+		items = append(items, NewPickerItem(n.com.Styles, style.ID, style.Title, ""))
 		if style.ID == currentStyle {
 			selectedIndex = len(items)
 		}
-		items = append(items, item)
 	}
 
 	n.list.SetItems(items...)
 	n.list.SetSelected(selectedIndex)
 	n.list.ScrollToSelected()
-}
-
-// Filter returns the filter value for the notification item.
-func (n *NotificationItem) Filter() string {
-	return n.style.Title
-}
-
-// ID returns the unique identifier for the notification style.
-func (n *NotificationItem) ID() string {
-	return n.style.ID
-}
-
-// SetFocused sets the focus state of the notification item.
-func (n *NotificationItem) SetFocused(focused bool) {
-	if n.focused == focused {
-		return
-	}
-	n.cache = nil
-	n.focused = focused
-	if n.Versioned != nil {
-		n.Bump()
-	}
-}
-
-// SetMatch sets the fuzzy match for the notification item.
-func (n *NotificationItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(n.m, m) {
-		return
-	}
-	n.cache = nil
-	n.m = m
-	if n.Versioned != nil {
-		n.Bump()
-	}
-}
-
-// Render returns the string representation of the notification item.
-func (n *NotificationItem) Render(width int) string {
-	info := ""
-	if n.isCurrent {
-		info = "current"
-	}
-	st := ListItemStyles{
-		ItemBlurred:     n.t.Dialog.NormalItem,
-		ItemFocused:     n.t.Dialog.SelectedItem,
-		InfoTextBlurred: n.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: n.t.Dialog.ListItem.InfoFocused,
-	}
-	return renderItem(st, n.style.Title, info, n.focused, width, n.cache, &n.m)
 }

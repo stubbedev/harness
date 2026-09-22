@@ -11,13 +11,11 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/sahilm/fuzzy"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
-	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 const (
@@ -113,8 +111,8 @@ func (c *Connect) HandleMsg(msg tea.Msg) Action {
 				c.list.ScrollToSelected()
 			}
 		case key.Matches(msg, c.keyMap.Select):
-			item := c.selectedItem()
-			if item == nil {
+			provider, ok := c.selectedItem()
+			if !ok {
 				break
 			}
 			// The provider has no credentials, so this selection lands
@@ -122,12 +120,12 @@ func (c *Connect) HandleMsg(msg tea.Msg) Action {
 			// model outright. It carries the provider's default large
 			// model, which is what gets selected once the key verifies.
 			return ActionSelectModel{
-				Provider:  item.prov,
-				Model:     defaultSelectedModel(item.prov),
+				Provider:  provider,
+				Model:     defaultSelectedModel(provider),
 				ModelType: config.SelectedModelTypeLarge,
 			}
 		default:
-			cmd, _ := applyFilterInput(&c.input, c.list, msg)
+			cmd, _ := filterInput(&c.input, msg, applyListFilter(c.list))
 			return ActionCmd{cmd}
 		}
 	}
@@ -188,16 +186,15 @@ func (c *Connect) FullHelp() [][]key.Binding {
 	}}
 }
 
-func (c *Connect) selectedItem() *ConnectItem {
-	selected := c.list.SelectedItem()
-	if selected == nil {
-		return nil
+// selectedItem resolves the selected row to its provider through the
+// shared picker item, or reports false when the list is empty.
+func (c *Connect) selectedItem() (catalog.Provider, bool) {
+	item, ok := c.list.SelectedItem().(PickerItem)
+	if !ok || item == nil {
+		return catalog.Provider{}, false
 	}
-	item, ok := selected.(*ConnectItem)
-	if !ok {
-		return nil
-	}
-	return item
+	provider, ok := item.Value().(catalog.Provider)
+	return provider, ok
 }
 
 // setItems fills the list with the providers that are still unconnected.
@@ -208,11 +205,16 @@ func (c *Connect) setItems(providers []catalog.Provider) {
 		if !connectable(cfg, provider) {
 			continue
 		}
-		items = append(items, &ConnectItem{
-			Versioned: list.NewVersioned(),
-			prov:      provider,
-			t:         c.com.Styles,
-		})
+		name := connectItemName(provider)
+		// Both the display name and the provider ID match: the ID is
+		// what ends up in the config file.
+		items = append(items, NewPickerItem(
+			c.com.Styles,
+			provider,
+			name,
+			connectItemInfo(provider),
+			name+" "+string(provider.ID),
+		))
 	}
 	c.list.SetItems(items...)
 	c.list.SetSelected(0)
@@ -253,84 +255,22 @@ func defaultSelectedModel(provider catalog.Provider) config.SelectedModel {
 	}
 }
 
-// ConnectItem is one unconnected provider in the [Connect] list.
-type ConnectItem struct {
-	*list.Versioned
-
-	prov    catalog.Provider
-	t       *styles.Styles
-	m       fuzzy.Match
-	cache   map[int]string
-	focused bool
+// connectItemName is the provider's display name, falling back to its
+// ID when the catalog carries none.
+func connectItemName(provider catalog.Provider) string {
+	return cmp.Or(provider.Name, string(provider.ID))
 }
 
-var _ ListItem = (*ConnectItem)(nil)
-
-// Finished implements list.Item. Connect items are render-stable outside
-// of explicit SetFocused / SetMatch calls, which bump the version.
-func (c *ConnectItem) Finished() bool {
-	return true
-}
-
-// Filter implements ListItem. Both the display name and the provider ID
-// match: the ID is what ends up in the config file.
-func (c *ConnectItem) Filter() string {
-	return c.name() + " " + string(c.prov.ID)
-}
-
-// ID implements ListItem.
-func (c *ConnectItem) ID() string {
-	return string(c.prov.ID)
-}
-
-// SetFocused implements ListItem.
-func (c *ConnectItem) SetFocused(focused bool) {
-	if c.focused == focused {
-		return
-	}
-	c.cache = nil
-	c.focused = focused
-	if c.Versioned != nil {
-		c.Bump()
-	}
-}
-
-// SetMatch implements ListItem.
-func (c *ConnectItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(c.m, m) {
-		return
-	}
-	c.cache = nil
-	c.m = m
-	if c.Versioned != nil {
-		c.Bump()
-	}
-}
-
-// Render implements ListItem.
-func (c *ConnectItem) Render(width int) string {
-	st := ListItemStyles{
-		ItemBlurred:     c.t.Dialog.NormalItem,
-		ItemFocused:     c.t.Dialog.SelectedItem,
-		InfoTextBlurred: c.t.Dialog.ListItem.InfoBlurred,
-		InfoTextFocused: c.t.Dialog.ListItem.InfoFocused,
-	}
-	return renderItem(st, c.name(), c.info(), c.focused, width, c.cache, &c.m)
-}
-
-func (c *ConnectItem) name() string {
-	return cmp.Or(c.prov.Name, string(c.prov.ID))
-}
-
-// info says what connecting costs the user: an OAuth handshake for the
-// providers that have one, an API key for everyone else.
-func (c *ConnectItem) info() string {
-	if c.prov.ID == catalog.InferenceProviderCopilot {
+// connectItemInfo says what connecting costs the user: an OAuth
+// handshake for the providers that have one, an API key for everyone
+// else.
+func connectItemInfo(provider catalog.Provider) string {
+	if provider.ID == catalog.InferenceProviderCopilot {
 		return "sign in"
 	}
 	plural := "s"
-	if len(c.prov.Models) == 1 {
+	if len(provider.Models) == 1 {
 		plural = ""
 	}
-	return strings.TrimSpace(fmt.Sprintf("api key · %d model%s", len(c.prov.Models), plural))
+	return strings.TrimSpace(fmt.Sprintf("api key · %d model%s", len(provider.Models), plural))
 }
