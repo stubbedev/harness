@@ -26,6 +26,7 @@ import (
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/clipboard"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/extensions"
@@ -33,7 +34,6 @@ import (
 	"github.com/stubbedev/harness/internal/format"
 	"github.com/stubbedev/harness/internal/herdr"
 	"github.com/stubbedev/harness/internal/history"
-	"github.com/stubbedev/harness/internal/log"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/memory"
 	"github.com/stubbedev/harness/internal/message"
@@ -781,7 +781,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 
 // Subscribe sends events to the TUI as tea.Msgs.
 func (app *App) Subscribe(program *tea.Program) {
-	defer log.RecoverPanic("app.Subscribe", func() {
+	defer crash.Recover("app.Subscribe", func() {
 		slog.Info("TUI subscription panic: attempting graceful shutdown")
 		program.Quit()
 	})

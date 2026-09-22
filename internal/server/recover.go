@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+
+	"github.com/stubbedev/harness/internal/crash"
 )
 
 // recoverHandler wraps the next handler in a panic-recovery middleware.
@@ -24,6 +26,7 @@ func (s *Server) recoverHandler(next http.Handler) http.Handler {
 			if rec == http.ErrAbortHandler {
 				panic(rec)
 			}
+			crash.Capture("server.handler", rec)
 			s.logError(
 				r, "Panic in handler",
 				slog.Any("panic", rec),

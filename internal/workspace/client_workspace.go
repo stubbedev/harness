@@ -20,10 +20,10 @@ import (
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/herdr"
 	"github.com/stubbedev/harness/internal/history"
-	"github.com/stubbedev/harness/internal/log"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/oauth"
@@ -768,7 +768,7 @@ func (w *ClientWorkspace) MCPDisableForSession(ctx context.Context, name string)
 // -- Lifecycle --
 
 func (w *ClientWorkspace) Subscribe(program *tea.Program) {
-	defer log.RecoverPanic("ClientWorkspace.Subscribe", func() {
+	defer crash.Recover("ClientWorkspace.Subscribe", func() {
 		slog.Info("TUI subscription panic: attempting graceful shutdown")
 		program.Quit()
 	})

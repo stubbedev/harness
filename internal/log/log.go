@@ -1,17 +1,12 @@
 package log
 
 import (
-	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"runtime/debug"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/charmbracelet/x/term"
-	"github.com/stubbedev/harness/internal/event"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -65,29 +60,4 @@ func Setup(logFile string, debug bool, ws ...io.Writer) {
 
 func Initialized() bool {
 	return initialized.Load()
-}
-
-func RecoverPanic(name string, cleanup func()) {
-	if r := recover(); r != nil {
-		event.Error(r, "panic", true, "name", name)
-
-		// Create a timestamped panic log file
-		timestamp := time.Now().Format("20060102-150405")
-		filename := fmt.Sprintf("harness-panic-%s-%s.log", name, timestamp)
-
-		file, err := os.Create(filename)
-		if err == nil {
-			defer file.Close()
-
-			// Write panic information and stack trace
-			fmt.Fprintf(file, "Panic in %s: %v\n\n", name, r)
-			fmt.Fprintf(file, "Time: %s\n\n", time.Now().Format(time.RFC3339))
-			fmt.Fprintf(file, "Stack Trace:\n%s\n", debug.Stack())
-
-			// Execute cleanup function if provided
-			if cleanup != nil {
-				cleanup()
-			}
-		}
-	}
 }

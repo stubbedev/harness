@@ -26,6 +26,7 @@ import (
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/discover"
 	"github.com/stubbedev/harness/internal/extensions"
@@ -2236,7 +2237,7 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 		// A panic in the run or the hooks below must not kill the process
 		// or strand the wait tool on this handle: recover, record a failed
 		// result (finish is idempotent), and let the deferred cleanup run.
-		defer log.RecoverPanic("coordinator.runSubAgentBackground", func() {
+		defer crash.Recover("coordinator.runSubAgentBackground", func() {
 			run.finish(subagents.StatusFailed, fantasy.NewTextErrorResponse(
 				fmt.Sprintf("Background subagent %s panicked; see the panic log", params.AgentName)))
 		})

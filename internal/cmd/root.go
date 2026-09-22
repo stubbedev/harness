@@ -32,6 +32,7 @@ import (
 	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/filepathext"
@@ -70,6 +71,7 @@ func init() {
 		projectsCmd,
 		updateProvidersCmd,
 		logsCmd,
+		crashesCmd,
 		logoutCmd,
 		schemaCmd,
 		loginCmd,
@@ -131,7 +133,7 @@ harness --continue
 		inputFilter := ui.NewFilter()
 		var env uv.Environ = os.Environ()
 		program := tea.NewProgram(
-			model,
+			newPanicCapturingModel(model),
 			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
 			tea.WithFilter(inputFilter.Filter),
@@ -141,6 +143,9 @@ harness --continue
 		if _, err := program.Run(); err != nil {
 			event.Error(err)
 			slog.Error("TUI run error", "error", err)
+			if errors.Is(err, tea.ErrProgramPanic) {
+				return fmt.Errorf("Harness crashed; the panic report with the stack trace is in %s (see `harness crashes`)", crash.Dir()) //nolint:staticcheck
+			}
 			return errors.New("Harness crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/stubbedev/harness/issues/new?template=bug.yml") //nolint:staticcheck
 		}
 		var banner config.ExitBanner
@@ -175,11 +180,67 @@ func printSessionResume(model *ui.UI, banner config.ExitBanner, theme string) {
 	fmt.Fprintln(colorprofile.NewWriter(os.Stderr, os.Environ()), body)
 }
 
+// newPanicCapturingModel wraps the TUI model so a panic in Init, Update,
+// View, or a command they return is persisted with its stack trace before
+// bubbletea's own recovery swallows it: bubbletea restores the terminal and
+// kills the program, but the stack it prints to stderr is lost as soon as
+// the terminal closes. The panic is re-raised after capture so bubbletea's
+// graceful shutdown still runs.
+func newPanicCapturingModel(model tea.Model) tea.Model {
+	return panicCapturingModel{model}
+}
+
+type panicCapturingModel struct {
+	tea.Model
+}
+
+// captureTUIPanic is deferred around the wrapped model's methods and
+// commands. It persists the panic with its stack, then re-raises it.
+func captureTUIPanic() {
+	if r := recover(); r != nil {
+		crash.Capture("tui", r)
+		panic(r)
+	}
+}
+
+// captureTUICmd wraps a command so a panic while it runs in one of
+// bubbletea's command goroutines is captured too.
+func captureTUICmd(cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		defer captureTUIPanic()
+		return cmd()
+	}
+}
+
+func (m panicCapturingModel) Init() tea.Cmd {
+	defer captureTUIPanic()
+	return captureTUICmd(m.Model.Init())
+}
+
+func (m panicCapturingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	defer captureTUIPanic()
+	model, cmd := m.Model.Update(msg)
+	return panicCapturingModel{model}, captureTUICmd(cmd)
+}
+
+func (m panicCapturingModel) View() tea.View {
+	defer captureTUIPanic()
+	return m.Model.View()
+}
+
 // copied from cobra:
 const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
 `
 
 func Execute() {
+	// Panics that escape a command (anything outside the TUI's own
+	// recovery, which reports through the same package) get one last
+	// chance to leave a report before the process dies.
+	defer reportCLIPanic()
+
 	// config.Load uses slog internally during provider resolution, but
 	// the file-based logger isn't set up until after config is loaded
 	// (because the log path depends on the data directory from config).
@@ -211,6 +272,22 @@ func Execute() {
 	); err != nil {
 		os.Exit(1)
 	}
+}
+
+// reportCLIPanic is the last-chance recover in Execute: it persists a
+// report for a panic that escaped a command before the process dies.
+func reportCLIPanic() {
+	r := recover()
+	if r == nil {
+		return
+	}
+	path := crash.Capture("cli", r)
+	if path != "" {
+		fmt.Fprintf(os.Stderr, "Harness panicked; report saved to %s (see `harness crashes`)\n", path)
+	} else {
+		fmt.Fprintf(os.Stderr, "Harness panicked; no report could be written to %s\n", crash.Dir())
+	}
+	os.Exit(1)
 }
 
 // supportsProgressBar tries to determine whether the current terminal supports

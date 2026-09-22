@@ -770,6 +770,25 @@ options:
   debug_lsp: true
 ```
 
+## Crash Reports
+
+When Harness recovers from or dies on a panic, it persists a crash report
+with the panic value and its full stack trace to
+`~/.local/share/harness/crashes/` on Linux. The reports are plain text and
+also record the version, commit, and working directory, so a crash that
+closes the terminal still leaves something to debug. The newest 50 are
+kept:
+
+```bash
+# List crash reports, newest first
+harness crashes
+
+# Print one report in full
+harness crashes 20260922-143005.123-tui.log
+```
+
+The `HARNESS_CRASH_DIR` environment variable moves the reports elsewhere.
+
 ## Provider Auto-Updates
 
 By default, Harness automatically checks for the latest and greatest list of
