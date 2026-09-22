@@ -773,6 +773,23 @@ func (m *UI) setState(state uiState, focus uiFocusState) {
 	m.updateLayoutAndSize()
 }
 
+// focusEditor moves keyboard focus to the editor, textarea or inline
+// form, and returns the command that restarts the caret's blink
+// cycle. textarea.Focus produces that command and dropping it freezes
+// the caret in whatever blink phase it was in, including invisible,
+// until the next refocus, so every path into the editor flows through
+// here and threads the command back to Update.
+func (m *UI) focusEditor() tea.Cmd {
+	m.focus = uiFocusEditor
+	m.chat.Blur()
+	if m.activeInline != nil {
+		m.textarea.Blur()
+		m.activeInline.SetFocused(true)
+		return nil
+	}
+	return m.textarea.Focus()
+}
+
 // loadCustomCommands loads the custom commands asynchronously.
 func (m *UI) loadCustomCommands() tea.Cmd {
 	return func() tea.Msg {
@@ -1228,7 +1245,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case pubsub.Event[question.Notification]:
-		m.handleQuestionNotification(msg.Payload)
+		cmds = append(cmds, m.handleQuestionNotification(msg.Payload))
 	case cancelTimerExpiredMsg:
 		m.isCanceling = false
 		m.rewindEscArmed = false
@@ -1284,7 +1301,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
 					if done {
 						m.activeInline = nil
-						m.textarea.Focus()
+						cmds = append(cmds, m.focusEditor())
 						m.updateLayoutAndSize()
 					}
 					return m, tea.Batch(cmds...)
@@ -1854,13 +1871,7 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 		m.handleTaskClick(msg.X, msg.Y-m.layout.tasks.Min.Y)
 		return nil
 	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
-		m.focus = uiFocusEditor
-		if m.activeInline != nil {
-			m.activeInline.SetFocused(true)
-		} else {
-			cmd = m.textarea.Focus()
-		}
-		m.chat.Blur()
+		cmd = m.focusEditor()
 	case m.focus != uiFocusMain && image.Pt(msg.X, msg.Y).In(m.layout.main):
 		m.focus = uiFocusMain
 		m.textarea.Blur()
@@ -2005,7 +2016,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 
 		if m.focus == uiFocusEditor {
-			cmds = append(cmds, m.textarea.Focus())
+			cmds = append(cmds, m.focusEditor())
 		}
 	case dialog.ActionCmd:
 		if msg.Cmd != nil {
@@ -2682,9 +2693,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			m.activeInline.SetFocused(false)
 			cmds = append(cmds, m.chat.FocusRestoringSelection())
 		} else {
-			m.focus = uiFocusEditor
-			m.activeInline.SetFocused(true)
-			m.chat.Blur()
+			cmds = append(cmds, m.focusEditor())
 		}
 		m.updateLayoutAndSize()
 		return tea.Batch(cmds...)
@@ -2694,7 +2703,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	if m.activeInline != nil && m.focus == uiFocusEditor {
 		if done, cmd := m.activeInline.HandleKey(msg); done {
 			m.activeInline = nil
-			m.textarea.Focus()
+			cmds = append(cmds, m.focusEditor())
 			m.updateLayoutAndSize()
 		} else {
 			if cmd != nil {
@@ -2998,14 +3007,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					m.chat.Blur()
 					m.focusTasks()
 				} else {
-					m.focus = uiFocusEditor
-					cmds = append(cmds, m.textarea.Focus())
-					m.chat.Blur()
+					cmds = append(cmds, m.focusEditor())
 				}
 			case key.Matches(msg, m.keyMap.ShiftTab):
-				m.focus = uiFocusEditor
-				cmds = append(cmds, m.textarea.Focus())
-				m.chat.Blur()
+				cmds = append(cmds, m.focusEditor())
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
@@ -3014,10 +3019,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
 					break
 				}
-				m.focus = uiFocusEditor
-				if cmd := m.newSession(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
+				cmds = append(cmds, m.focusEditor(), m.newSession())
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
 			case key.Matches(msg, m.keyMap.Chat.DigIn):
@@ -4920,22 +4922,23 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 		m.com.Workspace.QuestionCancel()
 	}
 	m.activeInline = form
-	m.textarea.Blur()
-	m.focus = uiFocusEditor
-	m.activeInline.SetFocused(true)
+	m.focusEditor()
 	m.updateLayoutAndSize()
 }
 
 // handleQuestionNotification dismisses an open question form when
 // any client resolved the pending batch. Only one question can be
 // pending at a time, so any notification means the current form
-// is stale regardless of BatchID.
-func (m *UI) handleQuestionNotification(_ question.Notification) {
+// is stale regardless of BatchID. Returns the command that restarts
+// the editor caret's blink cycle.
+func (m *UI) handleQuestionNotification(_ question.Notification) tea.Cmd {
 	if _, ok := m.activeInline.(*dialog.QuestionForm); ok {
 		m.activeInline = nil
-		m.textarea.Focus()
+		cmd := m.focusEditor()
 		m.updateLayoutAndSize()
+		return cmd
 	}
+	return nil
 }
 
 // editorContentWidth returns the content width available to the
@@ -5104,8 +5107,7 @@ func (m *UI) newSession() tea.Cmd {
 	m.parentTitle = ""
 	m.subagentColor = ""
 	m.setState(uiLanding, uiFocusEditor)
-	m.textarea.Focus()
-	m.chat.Blur()
+	cmd := m.focusEditor()
 	m.chat.ClearMessages()
 	m.pillsExpanded = false
 	m.pillsAutoExpanded = false
@@ -5124,6 +5126,7 @@ func (m *UI) newSession() tea.Cmd {
 		},
 		m.loadPromptHistory(),
 		m.reportCurrentSession(""),
+		cmd,
 	)
 }
 

@@ -141,7 +141,11 @@ func (m *UI) resolveAgentTaskResult(tr message.ToolResult) bool {
 
 // reapAgentTask removes a finished task from the strip and marks the
 // dispatch as settled so late assistant-message updates for the same
-// tool call cannot re-register it.
+// tool call cannot re-register it. When the strip empties while it
+// held focus, focus falls back to the editor through the single
+// focusEditor path, otherwise the caret would vanish with the strip
+// (Draw only draws a cursor for the editor) and keys would route to a
+// dead surface until the user tabbed away and back.
 func (m *UI) reapAgentTask(toolCallID string) {
 	if m.reapedAgentTasks == nil {
 		m.reapedAgentTasks = make(map[string]bool)
@@ -158,6 +162,9 @@ func (m *UI) reapAgentTask(toolCallID string) {
 		m.taskSubCursor = -1
 	}
 	m.clampTaskCursor()
+	if m.focus == uiFocusTasks && len(m.agentTasks) == 0 {
+		m.focusEditor()
+	}
 }
 
 // subagentDisplayName is the strip title for a dispatch that did not
@@ -769,8 +776,7 @@ func (m *UI) handleTaskKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 }
 
 func (m *UI) focusEditorFromTasks() tea.Cmd {
-	m.focus = uiFocusEditor
-	return m.textarea.Focus()
+	return m.focusEditor()
 }
 
 func (m *UI) focusChatFromTasks() tea.Cmd {
@@ -786,8 +792,7 @@ func (m *UI) focusBelowChat() tea.Cmd {
 		m.focusTasks()
 		return nil
 	}
-	m.focus = uiFocusEditor
-	return m.textarea.Focus()
+	return m.focusEditor()
 }
 
 // focusAboveEditor moves focus out of the editor to the region above
