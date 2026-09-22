@@ -13,7 +13,7 @@ import (
 // set, so tests exercise selection without the async loaders.
 func newMentionPickerForTest(t *testing.T) *MentionPicker {
 	t.Helper()
-	p, _ := NewMentionPicker(newFilePickerTestCommon(), nil, 0, 0)
+	p, _ := NewMentionPicker(newMentionTestCommon(), nil, 0, 0)
 	p.HandleMsg(completions.CompletionItemsLoadedMsg{
 		Files: []completions.FileCompletionValue{
 			{Path: "internal/ui/model/landing.go"},
@@ -72,7 +72,7 @@ func TestMentionPickerRowsUseDialogItemStyles(t *testing.T) {
 func TestMentionPickerItemsOrder(t *testing.T) {
 	t.Parallel()
 
-	st := newFilePickerTestCommon().Styles
+	st := newMentionTestCommon().Styles
 	items := mentionPickerItems(st, completions.CompletionItemsLoadedMsg{
 		Files:     []completions.FileCompletionValue{{Path: "a.go"}},
 		Resources: []completions.ResourceCompletionValue{{MCPName: "m", URI: "u", Title: "t"}},

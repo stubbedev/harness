@@ -420,11 +420,6 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `dialog.close` | `esc` |
 | `dialog.commands.shift_tab` | `shift+tab` |
 | `dialog.commands.tab` | `tab` |
-| `dialog.file_picker.backward` | `left`, `h` |
-| `dialog.file_picker.down` | `down`, `j` |
-| `dialog.file_picker.forward` | `right`, `l` |
-| `dialog.file_picker.select` | `enter` |
-| `dialog.file_picker.up` | `up`, `k` |
 | `dialog.lsp_servers.back` | `esc`, `h`, `backspace` |
 | `dialog.lsp_servers.select` | `enter`, `tab`, `ctrl+y` |
 | `dialog.mcp_auth.copy` | `c`, `u` |
@@ -462,12 +457,12 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `dialog.sessions.rename` | `ctrl+r` |
 | `dialog.sessions.select` | `enter`, `tab`, `ctrl+y` |
 | `dialog.up_down` | `up`, `down` |
-| `editor.add_image` | `ctrl+f` |
 | `editor.attachment_delete_mode` | `ctrl+r` |
 | `editor.commands` | `:` |
 | `editor.copy_selection` | `ctrl+shift+c` |
 | `editor.cut_selection` | `ctrl+shift+x` |
 | `editor.delete_all_attachments` | `r` |
+| `editor.delete_word_backward` | `ctrl+backspace`, `ctrl+w` |
 | `editor.escape` | `esc` |
 | `editor.history_next` | `down` |
 | `editor.history_prev` | `up` |
@@ -475,8 +470,7 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `editor.mention_file` | `@` |
 | `editor.newline` | `shift+enter`, `ctrl+j` |
 | `editor.open_editor` | `ctrl+o` |
-| `editor.paste_image` | `ctrl+v` |
-| `editor.paste_text` | `ctrl+shift+v` |
+| `editor.paste` | `ctrl+v`, `ctrl+shift+v` |
 | `editor.select_all` | `ctrl+shift+a` |
 | `editor.send_message` | `enter` |
 | `editor.shell_mode` | `!` |

@@ -41,7 +41,6 @@ import (
 	"github.com/stubbedev/harness/internal/clipboard"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/home"
@@ -58,7 +57,6 @@ import (
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/completions"
 	"github.com/stubbedev/harness/internal/ui/dialog"
-	fimage "github.com/stubbedev/harness/internal/ui/image"
 	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/notification"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -515,6 +513,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// to "ctrl+shift+a" instead (line-start is also available via "home").
 	ta.KeyMap.LineStart = keyMap.Editor.LineStart
 	ta.KeyMap.SelectAll = keyMap.Editor.SelectAll
+	// Word deletion flows through the rebindable keymap like every
+	// other editor binding.
+	ta.KeyMap.DeleteWordBackward = keyMap.Editor.DeleteWordBackward
 	// Copying is handled by harness's keymap (Editor.CopySelection) so it can
 	// use harness's clipboard backend and user feedback; disable the
 	// textarea's built-in copy binding.
@@ -2012,10 +2013,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.revertThemePreview()
 		}
 
-		if m.dialog.ContainsDialog(dialog.FilePickerID) {
-			defer fimage.ResetCache()
-		}
-
 		m.dialog.CloseFrontDialog()
 
 		if isOnboarding {
@@ -2243,18 +2240,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.commitThemePreview()
 		cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Theme set to: "+msg.Name)))
 		m.dialog.CloseDialog(dialog.ThemesID)
-	case dialog.ActionFilePickerSelected:
-		cmds = append(cmds, tea.Sequence(
-			msg.Cmd(),
-			func() tea.Msg {
-				m.dialog.CloseDialog(dialog.FilePickerID)
-				return nil
-			},
-			func() tea.Msg {
-				fimage.ResetCache()
-				return nil
-			},
-		))
 
 	case dialog.ActionMentionSelected:
 		m.dialog.CloseDialog(dialog.MentionPickerID)
@@ -2750,21 +2735,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 
 			switch {
-			case key.Matches(msg, m.keyMap.Editor.AddImage):
-				if !m.currentModelSupportsImages() {
-					break
-				}
-				if cmd := m.openFilesDialog(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-
-			case key.Matches(msg, m.keyMap.Editor.PasteImage):
-				if !m.currentModelSupportsImages() {
-					break
-				}
-				cmds = append(cmds, m.pasteImageFromClipboard)
-			case key.Matches(msg, m.keyMap.Editor.PasteText):
-				cmds = append(cmds, m.pasteTextFromClipboard)
+			case key.Matches(msg, m.keyMap.Editor.Paste):
+				cmds = append(cmds, m.pasteFromClipboard)
 
 			case key.Matches(msg, m.keyMap.Editor.SendMessage):
 				prevHeight := m.textarea.Height()
@@ -3480,13 +3452,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.Newline,
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
-				k.Editor.PasteText,
 				k.Editor.SelectAll,
 				k.Editor.CopySelection,
 				k.Editor.CutSelection,
 			}
 			if m.currentModelSupportsImages() {
-				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
+				editorBinds = append(editorBinds, k.Editor.Paste)
 			}
 			binds = append(binds, editorBinds)
 			if attBinds := attachmentHelpBinds(k, hasAttachments, deleting, m.isAgentBusy()); len(attBinds) > 0 {
@@ -3545,13 +3516,12 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.Newline,
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
-				k.Editor.PasteText,
 				k.Editor.SelectAll,
 				k.Editor.CopySelection,
 				k.Editor.CutSelection,
 			}
 			if m.currentModelSupportsImages() {
-				editorBinds = append(editorBinds, k.Editor.AddImage, k.Editor.PasteImage)
+				editorBinds = append(editorBinds, k.Editor.Paste)
 			}
 			binds = append(binds, editorBinds)
 			if attBinds := attachmentHelpBinds(k, hasAttachments, deleting, m.isAgentBusy()); len(attBinds) > 0 {
@@ -4658,10 +4628,6 @@ func (m *UI) openDialog(id string) tea.Cmd {
 		if cmd := m.openNotificationsDialog(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case dialog.FilePickerID:
-		if cmd := m.openFilesDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
 	case dialog.MentionPickerID:
 		if cmd := m.openMentionPicker(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -4853,25 +4819,6 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(dialog)
 	return nil
-}
-
-// openFilesDialog opens the file picker dialog.
-func (m *UI) openFilesDialog() tea.Cmd {
-	if !m.currentModelSupportsImages() {
-		return util.ReportWarn("The current model does not support image attachments")
-	}
-	if m.dialog.ContainsDialog(dialog.FilePickerID) {
-		// Bring to front
-		m.dialog.BringToFront(dialog.FilePickerID)
-		return nil
-	}
-
-	filePicker, cmd := dialog.NewFilePicker(m.com)
-	filePicker.SetImageCapabilities(&m.caps)
-	m.dialog.OpenDialog(filePicker)
-	event.FilePickerOpened()
-
-	return cmd
 }
 
 // openMentionPicker opens the @-mention picker: the shared dialog
@@ -5404,7 +5351,21 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 	}
 }
 
-var pasteRE = regexp.MustCompile(`paste_(\d+).txt`)
+var pasteRE = regexp.MustCompile(`paste_(\d+)`)
+
+// pasteFromClipboard pastes whatever the clipboard holds, just like
+// text paste: an image becomes an inline [Image #N] token, clipboard
+// text naming an image file attaches that file, and anything else
+// re-enters the text paste pipeline (which itself turns big pastes
+// into inline tokens).
+func (m *UI) pasteFromClipboard() tea.Msg {
+	if m.currentModelSupportsImages() {
+		if msg := m.pasteImageFromClipboard(); msg != nil {
+			return msg
+		}
+	}
+	return m.pasteTextFromClipboard()
+}
 
 func (m *UI) pasteIdx() int {
 	result := 0

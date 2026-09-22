@@ -18,8 +18,6 @@ type KeyMap struct {
 		SendMessage key.Binding
 		OpenEditor  key.Binding
 		Newline     key.Binding
-		AddImage    key.Binding
-		PasteImage  key.Binding
 		MentionFile key.Binding
 		Commands    key.Binding
 		Skills      key.Binding
@@ -47,9 +45,14 @@ type KeyMap struct {
 		// SelectAll selects all text in the textarea.
 		SelectAll key.Binding
 
-		// PasteText pastes clipboard text into the textarea, as an
-		// alternative to bracketed paste.
-		PasteText key.Binding
+		// Paste pastes the clipboard into the textarea: an image
+		// becomes an inline attachment token, text flows through the
+		// text paste pipeline.
+		Paste key.Binding
+
+		// DeleteWordBackward deletes from the cursor back to the start
+		// of the word.
+		DeleteWordBackward key.Binding
 
 		// LineStart moves the cursor to the start of the line.
 		LineStart key.Binding
@@ -115,15 +118,14 @@ type DialogKeys struct {
 	UpDown   key.Binding
 	Close    key.Binding
 
-	Models     ModelsDialogKeys
-	Commands   CommandsDialogKeys
-	Sessions   SessionsDialogKeys
-	Rewind     RewindDialogKeys
-	FilePicker FilePickerDialogKeys
-	Arguments  ArgumentsDialogKeys
-	OAuth      OAuthDialogKeys
-	MCPAuth    MCPAuthDialogKeys
-	Question   QuestionDialogKeys
+	Models    ModelsDialogKeys
+	Commands  CommandsDialogKeys
+	Sessions  SessionsDialogKeys
+	Rewind    RewindDialogKeys
+	Arguments ArgumentsDialogKeys
+	OAuth     OAuthDialogKeys
+	MCPAuth   MCPAuthDialogKeys
+	Question  QuestionDialogKeys
 
 	MCPServers MCPServersDialogKeys
 	LSPServers LSPServersDialogKeys
@@ -159,22 +161,6 @@ type SessionsDialogKeys struct {
 type RewindDialogKeys struct {
 	Select key.Binding
 	Back   key.Binding
-}
-
-// FilePickerDialogKeys are the file browser's own bindings.
-type FilePickerDialogKeys struct {
-	Select   key.Binding
-	Up       key.Binding
-	Down     key.Binding
-	Forward  key.Binding
-	Backward key.Binding
-}
-
-// Navigate reports the union of the four movement keys, which the file
-// picker shows as one help entry.
-func (f FilePickerDialogKeys) Navigate() key.Binding {
-	return Merge("navigate", key.NewBinding(key.WithHelp("↑↓←→", "navigate")),
-		f.Forward, f.Backward, f.Up, f.Down)
 }
 
 // ArgumentsDialogKeys are the command-arguments form's own bindings.
@@ -302,17 +288,13 @@ func DefaultKeyMap() KeyMap {
 		// "shift+enter", so the hint names the key users actually press.
 		key.WithHelp("shift+enter", "newline"),
 	)
-	km.Editor.AddImage = key.NewBinding(
-		key.WithKeys("ctrl+f"),
-		key.WithHelp("ctrl+f", "add image"),
+	km.Editor.Paste = key.NewBinding(
+		key.WithKeys("ctrl+v", "ctrl+shift+v"),
+		key.WithHelp("ctrl+v", "paste"),
 	)
-	km.Editor.PasteImage = key.NewBinding(
-		key.WithKeys("ctrl+v"),
-		key.WithHelp("ctrl+v", "paste image from clipboard"),
-	)
-	km.Editor.PasteText = key.NewBinding(
-		key.WithKeys("ctrl+shift+v"),
-		key.WithHelp("ctrl+shift+v", "paste text"),
+	km.Editor.DeleteWordBackward = key.NewBinding(
+		key.WithKeys("ctrl+backspace", "ctrl+w"),
+		key.WithHelp("ctrl+backspace", "delete word"),
 	)
 	km.Editor.MentionFile = key.NewBinding(
 		key.WithKeys("@"),
@@ -568,27 +550,6 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("esc", "back"),
 	)
 
-	km.Dialog.FilePicker.Select = key.NewBinding(
-		key.WithKeys("enter"),
-		key.WithHelp("enter", "accept"),
-	)
-	km.Dialog.FilePicker.Down = key.NewBinding(
-		key.WithKeys("down", "j"),
-		key.WithHelp("down/j", "move down"),
-	)
-	km.Dialog.FilePicker.Up = key.NewBinding(
-		key.WithKeys("up", "k"),
-		key.WithHelp("up/k", "move up"),
-	)
-	km.Dialog.FilePicker.Forward = key.NewBinding(
-		key.WithKeys("right", "l"),
-		key.WithHelp("right/l", "move forward"),
-	)
-	km.Dialog.FilePicker.Backward = key.NewBinding(
-		key.WithKeys("left", "h"),
-		key.WithHelp("left/h", "move backward"),
-	)
-
 	km.Dialog.Arguments.Confirm = key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "confirm"),
@@ -747,9 +708,6 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"editor.send_message":           &km.Editor.SendMessage,
 		"editor.open_editor":            &km.Editor.OpenEditor,
 		"editor.newline":                &km.Editor.Newline,
-		"editor.add_image":              &km.Editor.AddImage,
-		"editor.paste_image":            &km.Editor.PasteImage,
-		"editor.paste_text":             &km.Editor.PasteText,
 		"editor.mention_file":           &km.Editor.MentionFile,
 		"editor.commands":               &km.Editor.Commands,
 		"editor.skills":                 &km.Editor.Skills,
@@ -762,6 +720,8 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"editor.copy_selection":         &km.Editor.CopySelection,
 		"editor.cut_selection":          &km.Editor.CutSelection,
 		"editor.select_all":             &km.Editor.SelectAll,
+		"editor.paste":                  &km.Editor.Paste,
+		"editor.delete_word_backward":   &km.Editor.DeleteWordBackward,
 		"editor.line_start":             &km.Editor.LineStart,
 		"chat.new_session":              &km.Chat.NewSession,
 		"chat.cancel":                   &km.Chat.Cancel,
@@ -808,11 +768,6 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"dialog.sessions.cancel_delete":  &km.Dialog.Sessions.CancelDelete,
 		"dialog.rewind.select":           &km.Dialog.Rewind.Select,
 		"dialog.rewind.back":             &km.Dialog.Rewind.Back,
-		"dialog.file_picker.select":      &km.Dialog.FilePicker.Select,
-		"dialog.file_picker.up":          &km.Dialog.FilePicker.Up,
-		"dialog.file_picker.down":        &km.Dialog.FilePicker.Down,
-		"dialog.file_picker.forward":     &km.Dialog.FilePicker.Forward,
-		"dialog.file_picker.backward":    &km.Dialog.FilePicker.Backward,
 		"dialog.arguments.confirm":       &km.Dialog.Arguments.Confirm,
 		"dialog.arguments.next":          &km.Dialog.Arguments.Next,
 		"dialog.arguments.previous":      &km.Dialog.Arguments.Previous,

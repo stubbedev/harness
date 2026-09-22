@@ -523,17 +523,6 @@ func (c *Commands) defaultCommands() []*CommandItem {
 			}
 		}
 	}
-	if c.hasSession {
-		cfgPrime := c.com.Config()
-		agentCfg := cfgPrime.Agents[config.AgentCoder]
-		model := cfgPrime.GetModelByType(agentCfg.Model)
-		if model != nil && model.SupportsImages {
-			commands = append(commands, NewCommandItem(c.com.Styles, "file_picker", "Open File Picker", km.Editor.AddImage.Help().Key, ActionOpenDialog{
-				DialogID: FilePickerID,
-			}))
-		}
-	}
-
 	// Add external editor command if $EDITOR is available.
 	//
 	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv;

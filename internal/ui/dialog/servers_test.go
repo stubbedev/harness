@@ -50,6 +50,13 @@ func newServersTestCommon() *common.Common {
 	return &common.Common{Styles: &st, Workspace: &serversWorkspace{cfg: cfg}}
 }
 
+// newMentionTestCommon builds a Common over an empty config; dialogs
+// that need no workspace state (e.g. the mention picker) use it.
+func newMentionTestCommon() *common.Common {
+	st := styles.CharmtonePantera()
+	return &common.Common{Styles: &st, Workspace: &serversWorkspace{cfg: &config.Config{}}}
+}
+
 // drawServers draws a dialog once at a typical terminal size, so any
 // panic on the render path fails the test.
 func drawServers(t *testing.T, d Dialog) {

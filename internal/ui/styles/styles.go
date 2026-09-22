@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"charm.land/bubbles/v2/filepicker"
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
@@ -138,9 +137,6 @@ type Styles struct {
 
 	// Diff
 	Diff diffview.Style
-
-	// FilePicker
-	FilePicker filepicker.Styles
 
 	// Buttons
 	Button struct {

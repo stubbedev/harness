@@ -33,10 +33,6 @@ func SessionSwitched() {
 	send("session switched")
 }
 
-func FilePickerOpened() {
-	send("filepicker opened")
-}
-
 func PromptSent(props ...any) {
 	send(
 		"prompt sent",
