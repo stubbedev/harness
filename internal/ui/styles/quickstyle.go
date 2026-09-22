@@ -159,7 +159,10 @@ func quickStyle(o quickStyleOpts) Styles {
 			StylePrimitive: ansi.StylePrimitive{
 				// BlockPrefix: "\n",
 				// BlockSuffix: "\n",
-				Color: hex(o.fgSubtle),
+				// Chat messages are the primary reading surface and carry the
+				// clearest foreground; tool calls sit around them in the
+				// understated greys (see the Tool styles below).
+				Color: hex(o.fgBase),
 			},
 			// Margin: new(uint(defaultMargin)),
 		},
@@ -641,9 +644,13 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.IconCancelled = muted.SetString(ToolPending)
 	s.Tool.IconPartial = base.Foreground(o.warning).SetString(ToolSuccess)
 
-	s.Tool.NamePending = base.Foreground(o.success)
-	s.Tool.NameNormal = base.Foreground(o.info)
-	s.Tool.NameNested = base.Foreground(o.info)
+	// Tool names are understated grey in every ordinary state so the
+	// calls recede behind the chat messages; only failure states keep
+	// a color (error red, partial yellow). Nested calls (rendered
+	// inside a group) use the same grey.
+	s.Tool.NamePending = muted
+	s.Tool.NameNormal = muted
+	s.Tool.NameNested = muted
 	s.Tool.NameError = base.Foreground(o.error)
 	s.Tool.NamePartial = base.Foreground(o.warning)
 	s.Tool.NameCancelled = muted
@@ -654,10 +661,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Content rendering - prepared styles that accept width parameter
 	s.Tool.ContentLine = muted.Background(o.bgLeastVisible)
 	s.Tool.ContentTruncation = muted.Background(o.bgLeastVisible)
-	s.Tool.ContentCodeLine = base.Background(o.bgBase)
+	s.Tool.ContentCodeLine = muted.Background(o.bgBase)
 	s.Tool.ContentCodeTruncation = muted.Background(o.bgBase)
 	s.Tool.ContentCodeBg = o.bgBase
-	s.Tool.Body = base
+	s.Tool.Body = muted
 
 	// Deprecated - kept for backward compatibility
 	s.Tool.ContentBg = muted.Background(o.bgLeastVisible)
@@ -707,16 +714,16 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Loading indicators for images, skills
 	s.Tool.ResourceLoadedText = base.Foreground(o.success)
 	s.Tool.ResourceLoadedIndicator = base.Foreground(o.successMostSubtle)
-	s.Tool.ResourceName = base
-	s.Tool.MediaType = base
-	s.Tool.ResourceSize = base.Foreground(o.fgMoreSubtle)
+	s.Tool.ResourceName = muted
+	s.Tool.MediaType = muted
+	s.Tool.ResourceSize = muted
 
 	// Hook styles
 	s.Tool.HookLabel = base.Foreground(o.successMoreSubtle)
-	s.Tool.HookName = base
-	s.Tool.HookMatcher = base.Foreground(o.fgMoreSubtle)
+	s.Tool.HookName = muted
+	s.Tool.HookMatcher = muted
 	s.Tool.HookArrow = base.Foreground(o.successMoreSubtle)
-	s.Tool.HookDetail = base.Foreground(o.fgMoreSubtle)
+	s.Tool.HookDetail = muted
 	s.Tool.HookOK = base.Foreground(o.successMostSubtle)
 	s.Tool.HookDenied = base.Foreground(o.error)
 	s.Tool.HookDeniedLabel = base.Foreground(o.destructive)
@@ -728,7 +735,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.ActionDestroy = lipgloss.NewStyle().Foreground(o.destructive)
 	s.Tool.ResultEmpty = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Tool.ResultTruncation = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Tool.ResultItemName = lipgloss.NewStyle().Foreground(o.fgBase)
+	s.Tool.ResultItemName = muted
 	s.Tool.ResultItemDesc = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Buttons

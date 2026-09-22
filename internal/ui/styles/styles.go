@@ -336,12 +336,12 @@ type Styles struct {
 		IconCancelled lipgloss.Style
 		IconPartial   lipgloss.Style // Yellow checkmark when some calls in a group failed
 
-		// Tool name styles, colored by call status. The done/success
-		// color stays on NameNormal/NameNested; the others encode the
-		// states the status glyph used to signal.
-		NamePending   lipgloss.Style // Running or awaiting permission (green)
-		NameNormal    lipgloss.Style // Done/success, top-level tool name (blue)
-		NameNested    lipgloss.Style // Done/success, nested child tool name (blue)
+		// Tool name styles, colored by call status. Ordinary states
+		// (running, done) share the understated grey so tool calls recede
+		// behind the chat messages; only failure states keep a color.
+		NamePending   lipgloss.Style // Running or awaiting permission (grey)
+		NameNormal    lipgloss.Style // Done/success, top-level tool name (grey)
+		NameNested    lipgloss.Style // Done/success, nested child tool name (grey)
 		NameError     lipgloss.Style // Failed (red)
 		NamePartial   lipgloss.Style // Group run with some failures (yellow)
 		NameCancelled lipgloss.Style // Canceled (muted)
