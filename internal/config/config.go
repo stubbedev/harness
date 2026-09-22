@@ -359,6 +359,46 @@ func (t *TUIOptions) MinTextareaHeight() int {
 	return max(1, *t.TextareaMinHeight)
 }
 
+// Placement returns the dialog placement (see the DialogPlacement*
+// constants), defaulting to the bottom-anchored panel. Callers must use
+// this instead of reading the field: TUI may be nil.
+func (t *TUIOptions) Placement() string {
+	if t == nil || t.DialogPlacement == "" {
+		return DialogPlacementBottom
+	}
+	return t.DialogPlacement
+}
+
+// ScrollbarMode returns the chat scrollbar visibility setting; the nil
+// receiver means the default ("" - decide from content). Callers must
+// use this instead of reading the field: TUI may be nil.
+func (t *TUIOptions) ScrollbarMode() string {
+	if t == nil {
+		return ""
+	}
+	return t.Scrollbar
+}
+
+// Banner returns the exit banner style; the nil receiver means the
+// default. Callers must use this instead of reading the field: TUI may
+// be nil.
+func (t *TUIOptions) Banner() ExitBanner {
+	if t == nil {
+		return ExitBannerDefault
+	}
+	return t.ExitBanner
+}
+
+// ThemeName returns the configured theme name; the nil receiver means
+// no theme override. Callers must use this instead of reading the
+// field: TUI may be nil.
+func (t *TUIOptions) ThemeName() string {
+	if t == nil {
+		return ""
+	}
+	return t.Theme
+}
+
 // Completions defines options for the completions UI.
 type Completions struct {
 	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
@@ -369,6 +409,17 @@ type Completions struct {
 // pinned that limit, and callers fall back to their own built-in cap.
 func (c Completions) Limits() (depth, items int) {
 	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
+}
+
+// CompletionLimits returns the configured completion limits, nil-safe:
+// a missing options.tui section means nothing is pinned, so callers
+// apply their own built-in caps. Callers must go through this method,
+// never read Options.TUI.Completions directly - TUI may be nil.
+func (t *TUIOptions) CompletionLimits() (depth, items int) {
+	if t == nil {
+		return 0, 0
+	}
+	return t.Completions.Limits()
 }
 
 // MemoryOptions configures the agent's durable cross-session memory.

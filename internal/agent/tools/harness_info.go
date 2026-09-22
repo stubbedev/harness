@@ -386,8 +386,8 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 		opts = append(opts, kv{"scrollbar", c.Options.TUI.Scrollbar})
 		opts = append(opts, kv{"exit_banner", string(c.Options.TUI.ExitBanner)})
 		// Report the completion limits only once the user has pinned them;
-		// see Completions.Limits for what zero means.
-		if depth, items := c.Options.TUI.Completions.Limits(); depth != 0 || items != 0 {
+		// see CompletionLimits for what zero means.
+		if depth, items := c.Options.TUI.CompletionLimits(); depth != 0 || items != 0 {
 			opts = append(opts, kv{"completions_max_depth", fmt.Sprintf("%d", depth)})
 			opts = append(opts, kv{"completions_max_items", fmt.Sprintf("%d", items)})
 		}

@@ -145,6 +145,10 @@ func (w *testWorkspace) AgentIsReady() bool {
 	return false
 }
 
+// AgentCancelTurn satisfies the busy-cancel path; the embedded nil
+// Workspace would panic, and stress tests press escape while busy.
+func (w *testWorkspace) AgentCancelTurn(string) {}
+
 func (w *testWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
 	return nil, nil
 }

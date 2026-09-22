@@ -498,7 +498,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	keyMap := *com.KeyMap()
 	// Floating dialogs anchor to the bottom edge (which-key style) unless
 	// the user asked for the top-floating noice.nvim placement.
-	dialog.InstallPlacement(com.Config().Options.TUI.DialogPlacement)
+	dialog.InstallPlacement(com.Config().Options.TUI.Placement())
 
 	// Editor components
 	ta := textarea.New()
@@ -522,7 +522,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.KeyMap.CopySelection = key.NewBinding()
 	ta.Focus()
 
-	ch := NewChat(com, com.Config().Options.TUI.Scrollbar)
+	ch := NewChat(com, com.Config().Options.TUI.ScrollbarMode())
 	ch.SetItemKeymap(chat.ItemKeymap{
 		Copy:        keyMap.Chat.Copy,
 		ScrollLeft:  keyMap.Chat.ScrollLeft,
@@ -4831,7 +4831,7 @@ func (m *UI) openMentionPicker() tea.Cmd {
 		return nil
 	}
 
-	depth, limit := m.com.Config().Options.TUI.Completions.Limits()
+	depth, limit := m.com.Config().Options.TUI.CompletionLimits()
 	picker, cmd := dialog.NewMentionPicker(m.com, m.activeSubagentItems, depth, limit)
 	m.dialog.OpenDialog(picker)
 	return cmd
