@@ -117,6 +117,20 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	return nil
 }
 
+// collapsePills closes the pills panel if it is open, keeping the
+// chat glued to the bottom when it was following. Shared by the
+// toggle binding and the universal menu-close key.
+func (m *UI) collapsePills() {
+	if !m.pillsExpanded {
+		return
+	}
+	m.pillsExpanded = false
+	m.updateLayoutAndSize()
+	if m.chat.Follow() {
+		m.chat.ScrollToBottom()
+	}
+}
+
 // togglePillsExpanded toggles the pills panel expansion state.
 func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !m.hasSession() {
@@ -125,7 +139,11 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if !hasIncompleteTodos(m.session.Todos) {
 		return nil
 	}
-	m.pillsExpanded = !m.pillsExpanded
+	if m.pillsExpanded {
+		m.collapsePills()
+		return nil
+	}
+	m.pillsExpanded = true
 	m.updateLayoutAndSize()
 
 	// Make sure to follow scroll if follow is enabled when toggling pills.

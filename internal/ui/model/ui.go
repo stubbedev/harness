@@ -2675,6 +2675,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleDialogMsg(msg)
 	}
 
+	// The dialog dismiss key closes whatever menu is on top, not just
+	// dialogs; the transcript's overlays all answer to the same key.
+	if key.Matches(msg, m.keyMap.Dialog.Close) && m.closeTopMenu() {
+		return tea.Batch(cmds...)
+	}
+
 	// Tab always toggles focus between editor and chat, even when
 	// an inline editor is active. This lets users collapse the
 	// question form to view chat.
@@ -4053,6 +4059,28 @@ func (m *UI) closeCompletions() {
 	m.completionsQuery = ""
 	m.completionsStartIndex = 0
 	m.completions.Close()
+}
+
+// closeTopMenu closes the topmost menu-like surface, mirroring the draw
+// order: the session details overlay sits above the completions popup,
+// which sits above the pills strip. Dialogs are absent from the list on
+// purpose: the dialog stack consumes keys itself and already dismisses
+// on the same binding, so every menu answers to one key by construction.
+// Reports whether a menu was open.
+func (m *UI) closeTopMenu() bool {
+	switch {
+	case m.detailsOpen:
+		m.detailsOpen = false
+		m.updateLayoutAndSize()
+		return true
+	case m.completionsOpen:
+		m.closeCompletions()
+		return true
+	case m.pillsExpanded:
+		m.collapsePills()
+		return true
+	}
+	return false
 }
 
 // insertCompletionText replaces the @query in the textarea with the given text.
