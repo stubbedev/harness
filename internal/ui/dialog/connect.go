@@ -154,15 +154,12 @@ func (c *Connect) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	c.input.SetWidth(dialogInputTextWidth(st, c.input, innerWidth))
 
-	heightOffset := st.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		ActiveInput(st).GetVerticalFrameSize() + inputContentHeight +
-		st.Dialog.HelpView.GetVerticalFrameSize() +
-		ActiveFrame(st).GetVerticalFrameSize()
+	heightOffset := dialogChromeHeight(st, st.Dialog.HelpView)
 	desiredHeight := heightOffset + c.list.TotalHeight()
 	maxAvailable := DialogHeightCeiling(st, area, connectDialogMaxHeight)
 	height := max(connectDialogMinHeight, min(connectDialogMaxHeight, desiredHeight, maxAvailable))
 
-	listHeight, listTotalHeight, _ := sizeDialogList(st, c.list, innerWidth, height)
+	listHeight, listTotalHeight, _ := sizeDialogList(st, c.list, innerWidth, height, true)
 
 	rc := NewRenderContext(st, width)
 	rc.Title = "Connect Provider"

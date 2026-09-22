@@ -61,7 +61,7 @@ func TestAttachmentClickIgnoredWhileInlineEditorIsActive(t *testing.T) {
 
 	_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{
 		X:      u.layout.editor.Min.X + removeX,
-		Y:      u.layout.editor.Min.Y,
+		Y:      u.editorContentOrigin().Y,
 		Button: uv.MouseLeft,
 	}))
 
@@ -88,7 +88,7 @@ func TestAttachmentClickRequiresLeftMouseButton(t *testing.T) {
 			u, removeX := newAttachmentClickTestUI(t)
 			_, _ = u.Update(tea.MouseClickMsg(tea.Mouse{
 				X:      u.layout.editor.Min.X + removeX,
-				Y:      u.layout.editor.Min.Y,
+				Y:      u.editorContentOrigin().Y,
 				Button: tt.button,
 			}))
 

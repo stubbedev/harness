@@ -2,10 +2,12 @@ package model
 
 import (
 	"image"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
@@ -24,6 +26,60 @@ func drawCursor(t *testing.T, m *UI) *tea.Cursor {
 	return m.Draw(scr, image.Rect(0, 0, m.width, m.height))
 }
 
+// useAttachmentRenderer swaps in the real attachments renderer; the
+// frame-test helper builds the component without one, so any test
+// that draws with pills present needs it.
+func useAttachmentRenderer(ui *UI) {
+	sty := ui.com.Styles.Attachments
+	ui.attachments = attachments.New(
+		attachments.NewRenderer(sty.Normal, sty.Deleting, sty.Image, sty.Text, sty.Skill, sty.Remove),
+		attachments.Keymap{},
+	)
+}
+
+// drawScreen renders a frame and returns the flattened, ANSI-stripped
+// screen text.
+func drawScreen(t *testing.T, m *UI) string {
+	t.Helper()
+	scr := uv.NewScreenBuffer(m.width, m.height)
+	m.Draw(scr, image.Rect(0, 0, m.width, m.height))
+	return scr.String()
+}
+
+// TestEditorFrameWrapsContent pins the editor frame: a rule line on
+// the editor area's top and bottom rows, with the content (textarea,
+// or attachments strip then textarea) strictly between them - all
+// derived from the same helpers the draw path uses.
+func TestEditorFrameWrapsContent(t *testing.T) {
+	t.Parallel()
+
+	ui := newFrameTestUI(t)
+	ui.com.Workspace = &testWorkspace{cfg: &config.Config{Options: &config.Options{}}}
+	ui.state = uiChat
+	ui.session = &session.Session{ID: "s1"}
+	ui.focus = uiFocusEditor
+
+	screen := ansi.Strip(drawScreen(t, ui))
+	lines := strings.Split(screen, "\n")
+	top := ui.layout.editor.Min.Y
+	bottom := ui.layout.editor.Max.Y - 1
+
+	require.Equal(t, strings.Repeat("─", ui.layout.editor.Dx()), strings.TrimRight(lines[top], " "),
+		"the top frame row must be a full-width rule")
+	require.Equal(t, strings.Repeat("─", ui.layout.editor.Dx()), strings.TrimRight(lines[bottom], " "),
+		"the bottom frame row must be a full-width rule")
+	require.Contains(t, lines[ui.textareaOrigin().Y], "┃", "the prompt renders on the textarea's first row, inside the frame")
+
+	useAttachmentRenderer(ui)
+	ui.attachments.Update(message.Attachment{FileName: "a.txt"})
+	ui.updateLayoutAndSize()
+	screen = ansi.Strip(drawScreen(t, ui))
+	lines = strings.Split(screen, "\n")
+	require.Equal(t, strings.Repeat("─", ui.layout.editor.Dx()), strings.TrimRight(lines[ui.layout.editor.Min.Y], " "))
+	require.Contains(t, lines[ui.editorContentOrigin().Y], "a.txt", "the attachments strip renders below the top rule")
+	require.Contains(t, lines[ui.textareaOrigin().Y], "┃", "the textarea renders below the strip, above the bottom rule")
+}
+
 // TestCaretSitsOnTheTextareaRow pins the caret to the field itself:
 // on the editor area's top row with no attachments, and one row down
 // when the attachments strip occupies that row. The cursor offset
@@ -35,23 +91,17 @@ func TestCaretSitsOnTheTextareaRow(t *testing.T) {
 	ui.state = uiChat
 	ui.session = &session.Session{ID: "s1"}
 	ui.focus = uiFocusEditor
-	// The frame-test helper builds the attachments component without a
-	// renderer; this test draws the strip, so it needs the real one.
-	sty := ui.com.Styles
-	ui.attachments = attachments.New(attachments.NewRenderer(
-		sty.Attachments.Normal, sty.Attachments.Deleting, sty.Attachments.Image,
-		sty.Attachments.Text, sty.Attachments.Skill, sty.Attachments.Remove,
-	), attachments.Keymap{})
+	useAttachmentRenderer(ui)
 
 	cur := drawCursor(t, ui)
 	require.NotNil(t, cur)
-	require.Equal(t, ui.layout.editor.Min.Y, cur.Y, "with no attachments the caret sits on the field's first row")
+	require.Equal(t, ui.textareaOrigin().Y, cur.Y, "with no attachments the caret sits on the field's first row")
 
 	ui.attachments.Update(message.Attachment{FileName: "a.txt"})
 	ui.updateLayoutAndSize()
 	cur = drawCursor(t, ui)
 	require.NotNil(t, cur)
-	require.Equal(t, ui.layout.editor.Min.Y+1, cur.Y, "the attachments strip pushes the caret down with the field")
+	require.Equal(t, ui.textareaOrigin().Y, cur.Y, "the attachments strip pushes the caret down with the field")
 }
 
 // TestCaretAlwaysRendersWhileEditorFocused pins the caret-liveness

@@ -154,6 +154,9 @@ type Styles struct {
 	Editor struct {
 		Textarea textarea.Styles
 
+		// Frame lines drawn above and below the editor content.
+		Frame lipgloss.Style
+
 		// Normal mode prompt (default "::: ").
 		PromptNormalFocused lipgloss.Style
 		PromptNormalBlurred lipgloss.Style
@@ -462,7 +465,10 @@ type Styles struct {
 		SecondaryText lipgloss.Style
 		// HelpView is the line that contains the help.
 		HelpView lipgloss.Style
-		Help     struct {
+		// Rule is the horizontal separator drawn between the input row
+		// and the dialog content.
+		Rule lipgloss.Style
+		Help struct {
 			Ellipsis       lipgloss.Style
 			ShortKey       lipgloss.Style
 			ShortDesc      lipgloss.Style

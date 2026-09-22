@@ -748,6 +748,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Button.Negative = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.error)
 
 	// Editor
+	s.Editor.Frame = base.Foreground(o.fgMostSubtle)
 	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
 	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(o.fgMoreSubtle)
 	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" Y ")
@@ -981,7 +982,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.NormalItem = base.Padding(0, 1).Foreground(o.fgBase)
 	s.Dialog.SelectedItem = base.Padding(0, 1).Background(o.primary).Foreground(o.onPrimary)
 	s.Dialog.InputPrompt = base.Margin(1, 1)
-	s.Dialog.InputBottom = base.Margin(1, 1, 0, 1)
+	// No top margin: the separator rule renders directly above the
+	// input in the bottom-anchored panel and provides the spacing.
+	s.Dialog.InputBottom = base.Margin(0, 1, 0, 1)
+	s.Dialog.Rule = base.Foreground(o.fgMostSubtle)
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
 	s.Dialog.ContentPanel = base.Background(o.bgLessVisible).Foreground(o.fgBase).Padding(1, 2)

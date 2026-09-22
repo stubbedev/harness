@@ -17,8 +17,9 @@ func paletteStyles() *styles.Styles {
 	return &s
 }
 
-// The bottom-anchored panel is full width with a top border only, and the
-// input is the last line: the options sit above it and nothing follows.
+// The bottom-anchored panel is full width with a top border only. The
+// input sits above the closing rule: the panel frames the input between
+// the content separator and the closing rule, and nothing follows it.
 func TestRenderBottomAnchoredPutsInputLast(t *testing.T) {
 	t.Cleanup(func() { InstallPlacement(config.DialogPlacementBottom) })
 	InstallPlacement(config.DialogPlacementBottom)
@@ -36,8 +37,10 @@ func TestRenderBottomAnchoredPutsInputLast(t *testing.T) {
 	require.True(t, strings.HasPrefix(lines[0], "──"), "panel opens with a top border:\n%s", view)
 	require.False(t, strings.Contains(lines[0], "╭"), "no rounded floating corners:\n%s", view)
 	last := lines[len(lines)-1]
-	require.Contains(t, last, "> query", "input is the bottommost line:\n%s", view)
-	require.NotEqual(t, "", strings.TrimSpace(last), "no trailing blank line under the input:\n%s", view)
+	require.Empty(t, strings.Trim(strings.TrimSpace(last), "─"), "panel closes with a rule under the input:\n%s", view)
+	input := lines[len(lines)-2]
+	require.Contains(t, input, "> query", "input is the last content row, above the closing rule:\n%s", view)
+	require.Contains(t, lines[len(lines)-3], "─", "the separator rule sits directly above the input, no margin row between:\n%s", view)
 	for _, l := range lines[1:] {
 		require.False(t, strings.HasPrefix(l, "│"), "no side borders:\n%s", view)
 		require.False(t, strings.Contains(l, "╰"), "no bottom corner:\n%s", view)

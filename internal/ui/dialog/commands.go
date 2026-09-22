@@ -242,10 +242,7 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 
 	innerWidth := DialogInnerWidth(t, width)
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		ActiveInput(t).GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		ActiveFrame(t).GetVerticalFrameSize()
+	heightOffset := dialogChromeHeight(t, t.Dialog.HelpView)
 	// Hug the content: the list viewport never exceeds its item count, so
 	// a short list shrinks the panel instead of padding blank rows.
 	listHeight := min(max(0, height-heightOffset), c.list.TotalHeight())

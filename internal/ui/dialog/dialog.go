@@ -25,6 +25,10 @@ const (
 	titleContentHeight = 1
 	// inputContentHeight is the height of the input content line.
 	inputContentHeight = 1
+	// separatorContentHeight is the height of the rule line
+	// RenderContext.Render draws between the input row and the
+	// content.
+	separatorContentHeight = 1
 )
 
 // dialogKeys returns the bindings dialogs consult, already merged with the

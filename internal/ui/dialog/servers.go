@@ -217,7 +217,7 @@ func (d *serversDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := DialogWidth(st, area)
 	innerWidth := DialogInnerWidth(st, width)
 
-	listHeight, listTotalHeight, _ := sizeDialogList(st, d.list, innerWidth, serversDialogMaxHeight)
+	listHeight, listTotalHeight, _ := sizeDialogList(st, d.list, innerWidth, serversDialogMaxHeight, false)
 
 	rc := NewRenderContext(st, width)
 	if d.phase == serversPhaseList {

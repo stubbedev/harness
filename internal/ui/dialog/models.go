@@ -262,7 +262,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	}
 	m.input.SetWidth(dialogInputTextWidth(t, m.input, innerWidth))
 
-	listHeight, listTotalHeight, _ := sizeDialogList(t, m.list, innerWidth, height)
+	listHeight, listTotalHeight, _ := sizeDialogList(t, m.list, innerWidth, height, true)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Switch Model"

@@ -158,15 +158,12 @@ func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// Size the dialog to fit the list content, clamped to min/max bounds.
 	listTotalHeight := r.list.TotalHeight()
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		ActiveInput(t).GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		ActiveFrame(t).GetVerticalFrameSize()
+	heightOffset := dialogChromeHeight(t, t.Dialog.HelpView)
 	desiredHeight := heightOffset + listTotalHeight
 	maxAvailable := DialogHeightCeiling(t, area, reasoningDialogMaxHeight)
 	height := max(reasoningDialogMinHeight, min(reasoningDialogMaxHeight, desiredHeight, maxAvailable))
 
-	listHeight, listTotalHeight, _ := sizeDialogList(t, r.list, innerWidth, height)
+	listHeight, listTotalHeight, _ := sizeDialogList(t, r.list, innerWidth, height, true)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = "Select Reasoning Effort"

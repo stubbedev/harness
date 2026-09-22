@@ -41,10 +41,40 @@ type sizer interface {
 	SetSize(width, height int)
 }
 
+// dialogChromeHeight returns the rendered height of an input dialog's
+// chrome: the title, the input row, the separator rule between input
+// and content, the placement frame, and any extra sections (e.g. the
+// help row). The single source for every dialog that sizes its list
+// against the available height, so adding a chrome row resizes them
+// all together instead of drifting.
+func dialogChromeHeight(t *styles.Styles, extra ...lipgloss.Style) int {
+	height := dialogTitleHeight(t) + dialogInputHeight(t) +
+		ActiveFrame(t).GetVerticalFrameSize()
+	for _, section := range extra {
+		height += section.GetVerticalFrameSize()
+	}
+	return height
+}
+
+// dialogTitleHeight returns the rendered height of the title row.
+func dialogTitleHeight(t *styles.Styles) int {
+	return t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight
+}
+
+// dialogInputHeight returns the rendered height of the input row and
+// the separator rule RenderContext.Render draws beneath (or above) it.
+// Input-less dialogs render neither and must not reserve them.
+func dialogInputHeight(t *styles.Styles) int {
+	return ActiveInput(t).GetVerticalFrameSize() + inputContentHeight +
+		separatorContentHeight
+}
+
 // sizeDialogList computes the list dimensions within a dialog and calls
-// l.SetSize. It accounts for the title, input, and view frame sizes so
-// callers don't have to repeat the arithmetic. The scrollbar column is
-// reserved only when content overflows the viewport.
+// l.SetSize. It accounts for the title, the input row and its rule
+// (withInput, exactly what RenderContext renders for dialogs with a
+// filter input), and the view frame, so callers don't have to repeat
+// the arithmetic. The scrollbar column is reserved only when content
+// overflows the viewport.
 //
 // Returns listHeight, listTotalHeight, and listWidth for callers that need
 // them (e.g. to pass to joinScrollbar or applyInfoColumnVisibility).
@@ -54,12 +84,14 @@ type sizer interface {
 //   - l: the list to size.
 //   - innerWidth: dialog content width (total minus View horizontal frame).
 //   - dialogHeight: total dialog content height (already clamped).
-func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int) (listHeight, listTotalHeight, listWidth int) {
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		ActiveInput(t).GetVerticalFrameSize() + inputContentHeight +
-		ActiveFrame(t).GetVerticalFrameSize()
-
-	listHeight = max(0, dialogHeight-heightOffset)
+//   - withInput: whether the dialog renders an input row (and thus the
+//     separator rule around it).
+func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int, withInput bool) (listHeight, listTotalHeight, listWidth int) {
+	chrome := dialogTitleHeight(t) + ActiveFrame(t).GetVerticalFrameSize()
+	if withInput {
+		chrome += dialogInputHeight(t)
+	}
+	listHeight = max(0, dialogHeight-chrome)
 	listTotalHeight = l.TotalHeight()
 	// Hug the content: a short list shrinks its viewport — and with it the
 	// panel — instead of padding blank rows out to the height cap.
@@ -216,10 +248,19 @@ func DialogHeightCeiling(t *styles.Styles, area uv.Rectangle, maxHeight int) int
 	return max(0, min(maxHeight, area.Dy()-t.Dialog.ViewBottom.GetVerticalBorderSize()))
 }
 
+// closesWithRule reports whether a rendered dialog view closes with a
+// rule line beneath the input row: bottom-anchored dialogs frame the
+// input between two rules; floating dialogs close with the rounded
+// border instead. Render draws it and DialogCursor counts it, so the
+// cursor row can never drift off the input.
+func closesWithRule() bool {
+	return anchoredAtBottom()
+}
+
 // DialogCursor positions a text-input cursor for the active placement.
 // Floating: the input sits under the title, and InputCursor's frame
-// arithmetic applies. Bottom-anchored: the input is the panel's last
-// line, so the cursor lands on the final row of the rendered view.
+// arithmetic applies. Bottom-anchored: the input sits on the row above
+// the closing rule, which is the rendered view's final row.
 func DialogCursor(t *styles.Styles, view string, cur *tea.Cursor) *tea.Cursor {
 	if cur == nil {
 		return nil
@@ -230,6 +271,9 @@ func DialogCursor(t *styles.Styles, view string, cur *tea.Cursor) *tea.Cursor {
 	input := t.Dialog.InputBottom
 	frame := t.Dialog.ViewBottom
 	cur.Y = lipgloss.Height(view) - 1
+	if closesWithRule() {
+		cur.Y--
+	}
 	return common.OffsetCursor(cur, 0, 0,
 		input.GetMarginLeft()+input.GetPaddingLeft()+input.GetBorderLeftSize()+
 			frame.GetMarginLeft()+frame.GetPaddingLeft()+frame.GetBorderLeftSize(),
@@ -302,11 +346,33 @@ func (rc *RenderContext) AddPart(part string) {
 }
 
 // Render renders the dialog using the provided context.
+//
+// Rows come in two kinds: gutter rows (title, content parts), which
+// the active frame wraps with the content gutter, and self-spaced rows
+// (the separator rules and the input row, whose style carries its own
+// margins). In the bottom-anchored panel the rules run edge to edge
+// and the panel opens with the border row rendered by the frame style
+// itself, so the hand assembly cannot drift from it; the floating box
+// wraps everything in its rounded border instead.
 func (rc *RenderContext) Render() string {
 	titleStyle := rc.TitleStyle
 	dialogStyle := rc.ViewStyle.Width(rc.Width)
 
-	var parts []string
+	type row struct {
+		text   string
+		gutter bool
+	}
+	var rows []row
+	addGutter := func(texts ...string) {
+		for _, text := range texts {
+			rows = append(rows, row{text: text, gutter: true})
+		}
+	}
+	addSpaced := func(text string) {
+		if text != "" {
+			rows = append(rows, row{text: text})
+		}
+	}
 
 	if len(rc.Title) > 0 {
 		contentWidth := rc.Width - dialogStyle.GetHorizontalFrameSize() -
@@ -326,53 +392,109 @@ func (rc *RenderContext) Render() string {
 		if len(titleInfo) > 0 {
 			title += titleInfo
 		}
-		parts = append(parts, titleStyle.Render(title))
+		addGutter(titleStyle.Render(title))
 		if rc.Gap > 0 {
-			parts = append(parts, make([]string, rc.Gap)...)
+			addGutter(make([]string, rc.Gap)...)
 		}
 	}
 
 	// Input placement follows the anchoring: floating dialogs put the
 	// input directly under the title; the bottom-anchored panel puts it on
-	// the last line, below the options and help. Onboarding keeps the
-	// classic order and margins wherever it is drawn.
+	// the last line, below the options and help, framed by the rules.
+	// Onboarding keeps the classic order and margins wherever it is
+	// drawn.
 	inputStyle := ActiveInput(rc.Styles)
-	inputLast := anchoredAtBottom()
+	inputLast := anchoredAtBottom() && !rc.IsOnboarding
 	if rc.IsOnboarding {
 		inputStyle = rc.Styles.Dialog.InputPrompt
-		inputLast = false
+	}
+	// The separator rule sits between the input row and the content,
+	// whichever side of the panel the placement puts them on. When it
+	// renders it also replaces the input's breathing-room margin, so the
+	// input is framed flush against the rules. Panel rules run edge to
+	// edge; the floating box insets them to its content width.
+	rule := ""
+	if rc.Input != "" && len(rc.Parts) > 0 {
+		ruleWidth := max(0, rc.Width-dialogStyle.GetHorizontalFrameSize())
+		if inputLast {
+			ruleWidth = rc.Width
+		}
+		rule = rc.Styles.Dialog.Rule.Render(strings.Repeat("─", ruleWidth))
+		inputStyle = inputStyle.MarginBottom(0)
 	}
 	inputRow := ""
 	if rc.Input != "" {
 		inputRow = inputStyle.Render(rc.Input)
 	}
+
 	if inputRow != "" && !inputLast {
-		parts = append(parts, inputRow)
+		addSpaced(inputRow)
+		addSpaced(rule)
 	}
 
 	if rc.Gap <= 0 {
-		parts = append(parts, rc.Parts...)
+		addGutter(rc.Parts...)
 	} else {
 		for i, p := range rc.Parts {
 			if len(p) > 0 {
-				parts = append(parts, p)
+				addGutter(p)
 			}
 			if i < len(rc.Parts)-1 {
-				parts = append(parts, make([]string, rc.Gap)...)
+				addGutter(make([]string, rc.Gap)...)
 			}
 		}
 	}
 
 	if inputRow != "" && inputLast {
-		if rc.Gap > 0 {
-			parts = append(parts, make([]string, rc.Gap)...)
+		addSpaced(rule)
+		addSpaced(inputRow)
+		// The bottom-anchored panel closes with a rule beneath the
+		// input; the floating box closes with its rounded border.
+		if closesWithRule() {
+			addSpaced(rule)
 		}
-		parts = append(parts, inputRow)
 	}
 
-	content := strings.Join(parts, "\n")
-	if rc.IsOnboarding {
-		return content
+	// Flatten: gutter runs are wrapped by the frame style in one go;
+	// self-spaced rows pass through untouched.
+	var lines []string
+	var run []string
+	flush := func() {
+		if len(run) == 0 {
+			return
+		}
+		if rc.IsOnboarding || placementTop() {
+			lines = append(lines, run...)
+		} else {
+			padded := dialogStyle.Border(lipgloss.Border{}, false, false, false, false)
+			lines = append(lines, strings.Split(padded.Render(strings.Join(run, "\n")), "\n")...)
+		}
+		run = nil
 	}
-	return dialogStyle.Render(content)
+	for _, r := range rows {
+		if r.gutter {
+			run = append(run, r.text)
+			continue
+		}
+		flush()
+		lines = append(lines, r.text)
+	}
+	flush()
+
+	switch {
+	case rc.IsOnboarding:
+		return strings.Join(lines, "\n")
+	case placementTop():
+		return dialogStyle.Render(strings.Join(lines, "\n"))
+	default:
+		return topBorderRow(rc.Styles, rc.Width) + "\n" + strings.Join(lines, "\n")
+	}
+}
+
+// topBorderRow renders the bottom-anchored panel's top border row from
+// the frame style itself, so hand-assembled panels cannot drift from
+// the style that defines the border.
+func topBorderRow(t *styles.Styles, width int) string {
+	line, _, _ := strings.Cut(t.Dialog.ViewBottom.Width(width).Render(" "), "\n")
+	return line
 }

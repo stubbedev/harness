@@ -164,10 +164,7 @@ func (n *Notifications) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	width := DialogWidth(t, area)
 	height := DialogHeightCeiling(t, area, notificationsDialogMaxHeight)
 	innerWidth := DialogInnerWidth(t, width)
-	heightOffset := t.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		ActiveInput(t).GetVerticalFrameSize() + inputContentHeight +
-		t.Dialog.HelpView.GetVerticalFrameSize() +
-		ActiveFrame(t).GetVerticalFrameSize()
+	heightOffset := dialogChromeHeight(t, t.Dialog.HelpView)
 
 	n.input.SetWidth(dialogInputTextWidth(t, n.input, innerWidth))
 	n.list.SetSize(innerWidth, max(0, height-heightOffset))

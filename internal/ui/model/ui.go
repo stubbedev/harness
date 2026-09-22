@@ -80,9 +80,14 @@ const TextareaMaxHeight = 15
 
 // editorHeightMargin is the height of the attachments strip rendered
 // above the textarea while it has pills; the editor reserves it only
-// then, so with no attachments the status line sits directly on the
-// editor.
+// then, so with no attachments the frame hugs the textarea.
 const editorHeightMargin = 1
+
+// editorFrameRows is the height of the editor's frame: one rule line
+// above the content and one below it. drawEditorArea draws them and
+// generateLayout reserves them; editorContentOrigin derives the
+// content's top from the same knowledge.
+const editorFrameRows = 2
 
 // TextareaMinHeight is the minimum height of the prompt textarea when
 // options.tui.textarea_min_height is unset; the live value comes from
@@ -1320,9 +1325,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Check if the click landed on an attachment's remove button.
-		// The attachment chips are rendered on the first row of the
-		// editor layout area, above the textarea.
-		if m.activeInline == nil && msg.Button == uv.MouseLeft && m.hasAttachments() && msg.Y == m.layout.editor.Min.Y {
+		// The attachment chips are rendered on the content's first row
+		// (editorContentOrigin), above the textarea.
+		if m.activeInline == nil && msg.Button == uv.MouseLeft && m.hasAttachments() && msg.Y == m.editorContentOrigin().Y {
 			relX := msg.X - m.layout.editor.Min.X
 			if m.attachments.HandleClick(relX) {
 				return m, tea.Batch(cmds...)
@@ -3251,8 +3256,10 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 		if m.activeInline != nil {
 			// Editor may not start at the screen edge; the inline
-			// editor draws from area top.
-			return common.OffsetCursor(m.inlineCursor, m.layout.editor.Min.X, m.layout.editor.Min.Y, 0, 0)
+			// editor draws from the content origin, below the top
+			// frame line.
+			origin := m.editorContentOrigin()
+			return common.OffsetCursor(m.inlineCursor, origin.X, origin.Y, 0, 0)
 		}
 
 		if m.textarea.Focused() {
@@ -3702,14 +3709,22 @@ func (m *UI) updateTextarea(msg tea.Msg) tea.Cmd {
 	return m.updateTextareaWithPrevHeight(msg, m.textarea.Height())
 }
 
-// textareaOrigin returns the textarea's top-left cell in screen
-// space: the editor area's top-left, pushed down past the attachments
-// strip when there is one. The single source for everything that
-// translates between screen space and the textarea's local space -
-// cursor positioning, mouse forwarding, the completions popup - so
-// none of them can drift from what renderEditorView draws.
+// editorContentOrigin returns the top-left cell of the editor's
+// content - the attachments strip, or without pills the textarea -
+// directly below the top frame line. Together with textareaOrigin it
+// is the single source for everything that translates between screen
+// space and the editor's local space (cursor positioning, mouse
+// forwarding, the completions popup, the strip's hit-testing), so none
+// of them can drift from what drawEditorArea draws.
+func (m *UI) editorContentOrigin() image.Point {
+	return image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y+1) // +1: top frame line
+}
+
+// textareaOrigin returns the textarea's top-left cell in screen space:
+// the content origin, pushed down past the attachments strip when
+// there is one.
 func (m *UI) textareaOrigin() image.Point {
-	origin := image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y)
+	origin := m.editorContentOrigin()
 	if m.hasAttachments() {
 		origin.Y += editorHeightMargin
 	}
@@ -3818,9 +3833,10 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 
 	// The help height
 	helpHeight := 1
-	// The editor height: the textarea plus the attachments strip while
-	// it has pills; when an inline editor is active, use its height
-	// instead.
+	// The editor height: its content (the textarea plus the
+	// attachments strip while it has pills; an active inline editor's
+	// height instead) wrapped in the frame lines drawn above and below
+	// it.
 	editorHeight := m.textarea.Height()
 	if m.hasAttachments() {
 		editorHeight += editorHeightMargin
@@ -3839,6 +3855,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			editorHeight = m.activeInline.Height(editorWidth)
 		}
 	}
+	editorHeight += editorFrameRows
 	// The header height
 	const landingHeaderHeight = 0
 
@@ -4276,12 +4293,25 @@ func (m *UI) randomizePlaceholders() {
 	m.readyPlaceholder = readyPlaceholders[rand.Intn(len(readyPlaceholders))]
 }
 
-// drawEditorArea draws whatever occupies the editor region: the active
-// inline editor (or its collapsed form, when focus has moved away and it
-// asks to collapse) if one is present, otherwise the prompt textarea and
-// its attachments. Shared by every state with an editor region so they
-// draw it identically and can't drift apart.
+// drawEditorArea draws whatever occupies the editor region - the
+// active inline editor (or its collapsed form, when focus has moved
+// away and it asks to collapse) if one is present, otherwise the
+// prompt textarea and its attachments - framed by a rule line above
+// and below. Shared by every state with an editor region so they draw
+// it identically and can't drift apart; generateLayout reserves the
+// frame rows (editorFrameRows) and editorContentOrigin derives the
+// content's top from the same knowledge.
 func (m *UI) drawEditorArea(scr uv.Screen, editorRect uv.Rectangle) {
+	if editorRect.Dy() > editorFrameRows {
+		frame := uv.NewStyledString(m.com.Styles.Editor.Frame.Render(
+			strings.Repeat("─", editorRect.Dx())))
+		frame.Draw(scr, image.Rect(editorRect.Min.X, editorRect.Min.Y, editorRect.Max.X, editorRect.Min.Y+1))
+		frame.Draw(scr, image.Rect(editorRect.Min.X, editorRect.Max.Y-1, editorRect.Max.X, editorRect.Max.Y))
+		content := editorRect
+		content.Min.Y++
+		content.Max.Y--
+		editorRect = content
+	}
 	if m.activeInline != nil {
 		m.activeInline.SetFocused(m.focus == uiFocusEditor)
 		if m.focus == uiFocusEditor {

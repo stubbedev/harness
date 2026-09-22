@@ -202,15 +202,12 @@ func (t *Themes) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t.input.SetWidth(dialogInputTextWidth(st, t.input, innerWidth))
 
 	// Size the dialog to fit the list content, clamped to min/max bounds.
-	heightOffset := st.Dialog.Title.GetVerticalFrameSize() + titleContentHeight +
-		ActiveInput(st).GetVerticalFrameSize() + inputContentHeight +
-		st.Dialog.HelpView.GetVerticalFrameSize() +
-		ActiveFrame(st).GetVerticalFrameSize()
+	heightOffset := dialogChromeHeight(st, st.Dialog.HelpView)
 	desiredHeight := heightOffset + t.list.TotalHeight()
 	maxAvailable := DialogHeightCeiling(st, area, themesDialogMaxHeight)
 	height := max(themesDialogMinHeight, min(themesDialogMaxHeight, desiredHeight, maxAvailable))
 
-	listHeight, listTotalHeight, _ := sizeDialogList(st, t.list, innerWidth, height)
+	listHeight, listTotalHeight, _ := sizeDialogList(st, t.list, innerWidth, height, true)
 
 	rc := NewRenderContext(st, width)
 	rc.Title = "Switch Theme"
