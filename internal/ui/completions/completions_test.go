@@ -3,27 +3,39 @@ package completions
 import (
 	"testing"
 
-	"charm.land/lipgloss/v2"
+	"github.com/sahilm/fuzzy"
 	"github.com/stretchr/testify/require"
 
 	"github.com/stubbedev/harness/internal/ui/list"
 )
 
-// newMentionList builds the merged mention items and a filterable list
-// holding them, the same way the mention picker dialog does.
-func newMentionList(t *testing.T, files []FileCompletionValue, resources []ResourceCompletionValue, subagents []SubagentCompletionValue) (*list.FilterableList, []list.FilterableItem) {
-	t.Helper()
-	items := MentionItems(lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), files, resources, subagents)
-	l := list.NewFilterableList()
-	l.SetItems(items...)
-	return l, items
+// mentionRow is a minimal filterable row the ranking tests filter with;
+// the real rows are dialog.PickerItem values.
+type mentionRow struct {
+	*list.Versioned
+	filter string
+	match  fuzzy.Match
 }
 
-func itemTexts(l *list.FilterableList) []string {
+func (m *mentionRow) Render(int) string      { return "" }
+func (m *mentionRow) ID() string             { return m.filter }
+func (m *mentionRow) Filter() string         { return m.filter }
+func (m *mentionRow) SetMatch(f fuzzy.Match) { m.match = f }
+func (m *mentionRow) Finished() bool         { return true }
+
+func rows(paths ...string) []list.FilterableItem {
+	items := make([]list.FilterableItem, len(paths))
+	for i, p := range paths {
+		items[i] = &mentionRow{Versioned: list.NewVersioned(), filter: p}
+	}
+	return items
+}
+
+func rowTexts(l *list.FilterableList) []string {
 	texts := make([]string, 0, l.Len())
 	for _, item := range l.FilteredItems() {
-		if ci, ok := item.(*CompletionItem); ok {
-			texts = append(texts, ci.Text())
+		if r, ok := item.(*mentionRow); ok {
+			texts = append(texts, r.filter)
 		}
 	}
 	return texts
@@ -32,37 +44,25 @@ func itemTexts(l *list.FilterableList) []string {
 func TestFilterPrefersExactBasenameStem(t *testing.T) {
 	t.Parallel()
 
-	l, items := newMentionList(t, []FileCompletionValue{
-		{Path: "internal/ui/chat/search.go"},
-		{Path: "internal/ui/chat/user.go"},
-	}, nil, nil)
-
+	l := list.NewFilterableList()
+	items := rows("internal/ui/chat/search.go", "internal/ui/chat/user.go")
 	FilterMentionItems(l, items, "user")
 
-	filtered := l.FilteredItems()
+	filtered := rowTexts(l)
 	require.NotEmpty(t, filtered)
-	first, ok := filtered[0].(*CompletionItem)
-	require.True(t, ok)
-	require.Equal(t, "internal/ui/chat/user.go", first.Text())
-	require.NotEmpty(t, first.match.MatchedIndexes)
+	require.Equal(t, "internal/ui/chat/user.go", filtered[0])
 }
 
 func TestFilterPrefersBasenamePrefix(t *testing.T) {
 	t.Parallel()
 
-	l, items := newMentionList(t, []FileCompletionValue{
-		{Path: "internal/ui/chat/mcp.go"},
-		{Path: "internal/ui/model/chat.go"},
-	}, nil, nil)
-
+	l := list.NewFilterableList()
+	items := rows("internal/ui/chat/mcp.go", "internal/ui/model/chat.go")
 	FilterMentionItems(l, items, "chat.g")
 
-	filtered := l.FilteredItems()
+	filtered := rowTexts(l)
 	require.NotEmpty(t, filtered)
-	first, ok := filtered[0].(*CompletionItem)
-	require.True(t, ok)
-	require.Equal(t, "internal/ui/model/chat.go", first.Text())
-	require.NotEmpty(t, first.match.MatchedIndexes)
+	require.Equal(t, "internal/ui/model/chat.go", filtered[0])
 }
 
 func TestNamePriorityTier(t *testing.T) {
@@ -103,8 +103,7 @@ func TestNamePriorityTier(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := namePriorityTier(tt.path, tt.query)
-			require.Equal(t, tt.wantTier, got)
+			require.Equal(t, tt.wantTier, namePriorityTier(tt.path, tt.query))
 		})
 	}
 }
@@ -112,70 +111,11 @@ func TestNamePriorityTier(t *testing.T) {
 func TestFilterPrefersPathSegmentExact(t *testing.T) {
 	t.Parallel()
 
-	l, items := newMentionList(t, []FileCompletionValue{
-		{Path: "internal/ui/model/xychat.go"},
-		{Path: "internal/ui/chat/mcp.go"},
-	}, nil, nil)
-
+	l := list.NewFilterableList()
+	items := rows("internal/ui/model/xychat.go", "internal/ui/chat/mcp.go")
 	FilterMentionItems(l, items, "chat")
 
-	filtered := l.FilteredItems()
+	filtered := rowTexts(l)
 	require.NotEmpty(t, filtered)
-	first, ok := filtered[0].(*CompletionItem)
-	require.True(t, ok)
-	require.Equal(t, "internal/ui/chat/mcp.go", first.Text())
-}
-
-// TestMentionItems_SubagentsAppearsInList verifies that a subagent is
-// represented in the merged list as an item whose text equals the
-// subagent name.
-func TestMentionItems_SubagentsAppearsInList(t *testing.T) {
-	t.Parallel()
-
-	l, _ := newMentionList(t, nil, nil, []SubagentCompletionValue{
-		{Name: "code-reviewer", Description: "reviews code"},
-	})
-
-	require.Contains(t, itemTexts(l), "code-reviewer")
-}
-
-// TestMentionItems_SubagentAndFilesCoexist verifies that both file and
-// subagent entries appear in the merged list.
-func TestMentionItems_SubagentAndFilesCoexist(t *testing.T) {
-	t.Parallel()
-
-	l, _ := newMentionList(t,
-		[]FileCompletionValue{{Path: "cmd/main.go"}},
-		nil,
-		[]SubagentCompletionValue{{Name: "tester", Description: "writes tests"}},
-	)
-
-	texts := itemTexts(l)
-	require.Contains(t, texts, "cmd/main.go", "file item must appear in merged list")
-	require.Contains(t, texts, "tester", "subagent item must appear in merged list")
-}
-
-// TestMentionItems_NilSubagents_NoError verifies that nil subagents
-// does not panic and still populates file items normally.
-func TestMentionItems_NilSubagents_NoError(t *testing.T) {
-	t.Parallel()
-
-	l, _ := newMentionList(t, []FileCompletionValue{{Path: "internal/foo.go"}}, nil, nil)
-
-	require.Contains(t, itemTexts(l), "internal/foo.go")
-}
-
-// TestMentionItems_PreservesSubagentOrder verifies that multiple
-// subagents appear in the merged list in the order they were passed,
-// pinning the ordering contract so display matches input order.
-func TestMentionItems_PreservesSubagentOrder(t *testing.T) {
-	t.Parallel()
-
-	l, _ := newMentionList(t, nil, nil, []SubagentCompletionValue{
-		{Name: "zeta"},
-		{Name: "alpha"},
-		{Name: "mu"},
-	})
-
-	require.Equal(t, []string{"zeta", "alpha", "mu"}, itemTexts(l))
+	require.Equal(t, "internal/ui/chat/mcp.go", filtered[0])
 }

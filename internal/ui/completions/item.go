@@ -1,20 +1,17 @@
+// Package completions is the @-mention source: the value types the
+// editor inserts, the async loaders that fill them, and the tiered
+// name-priority filter that ranks file matches. The picker surface is
+// the shared dialog machinery (see dialog.MentionPicker and
+// dialog.PickerItem); this package owns what is picked, not how it
+// renders.
 package completions
 
-import (
-	"slices"
-
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/sahilm/fuzzy"
-	"github.com/stubbedev/harness/internal/ui/list"
-)
-
-// FileCompletionValue represents a file path completion value.
+// FileCompletionValue represents a file path mention value.
 type FileCompletionValue struct {
 	Path string
 }
 
-// ResourceCompletionValue represents a MCP resource completion value.
+// ResourceCompletionValue represents an MCP resource mention value.
 type ResourceCompletionValue struct {
 	MCPName  string
 	URI      string
@@ -22,163 +19,8 @@ type ResourceCompletionValue struct {
 	MIMEType string
 }
 
-// SubagentCompletionValue represents a subagent @-mention completion value.
+// SubagentCompletionValue represents a subagent @-mention value.
 type SubagentCompletionValue struct {
 	Name        string
 	Description string
 }
-
-// CompletionItem represents an item in the completions list.
-type CompletionItem struct {
-	*list.Versioned
-
-	text    string
-	value   any
-	match   fuzzy.Match
-	focused bool
-	cache   map[int]string
-
-	// Styles
-	normalStyle  lipgloss.Style
-	focusedStyle lipgloss.Style
-	matchStyle   lipgloss.Style
-}
-
-// NewCompletionItem creates a new completion item.
-func NewCompletionItem(text string, value any, normalStyle, focusedStyle, matchStyle lipgloss.Style) *CompletionItem {
-	return &CompletionItem{
-		Versioned:    list.NewVersioned(),
-		text:         text,
-		value:        value,
-		normalStyle:  normalStyle,
-		focusedStyle: focusedStyle,
-		matchStyle:   matchStyle,
-	}
-}
-
-// Finished implements list.Item. Completion items render purely from
-// (text, match, focus); any mutation (SetMatch / SetFocused) bumps
-// Version() so the frozen cache entry invalidates on the next
-// render. Marking them finished lets the F6 list memo skip the
-// per-line work for the steady completions popup.
-func (c *CompletionItem) Finished() bool {
-	return true
-}
-
-// Text returns the display text of the item.
-func (c *CompletionItem) Text() string {
-	return c.text
-}
-
-// Value returns the value of the item.
-func (c *CompletionItem) Value() any {
-	return c.value
-}
-
-// Filter implements [list.FilterableItem].
-func (c *CompletionItem) Filter() string {
-	return c.text
-}
-
-// SetMatch implements [list.MatchSettable].
-func (c *CompletionItem) SetMatch(m fuzzy.Match) {
-	if sameFuzzyMatch(c.match, m) {
-		return
-	}
-	c.cache = nil
-	c.match = m
-	c.Bump()
-}
-
-// sameFuzzyMatch reports whether two fuzzy.Match values are
-// observably equal. Because Match contains a slice (MatchedIndexes)
-// it is not directly comparable with ==; we compare the scalar
-// fields and then walk the indexes. SetMatch uses this to skip
-// gratuitous version bumps when the same match is reapplied.
-func sameFuzzyMatch(a, b fuzzy.Match) bool {
-	return a.Str == b.Str &&
-		a.Index == b.Index &&
-		a.Score == b.Score &&
-		slices.Equal(a.MatchedIndexes, b.MatchedIndexes)
-}
-
-// SetFocused implements [list.Focusable].
-func (c *CompletionItem) SetFocused(focused bool) {
-	if c.focused == focused {
-		return
-	}
-	c.cache = nil
-	c.focused = focused
-	c.Bump()
-}
-
-// Render implements [list.Item].
-func (c *CompletionItem) Render(width int) string {
-	return renderItem(
-		c.normalStyle,
-		c.focusedStyle,
-		c.matchStyle,
-		c.text,
-		c.focused,
-		width,
-		c.cache,
-		&c.match,
-	)
-}
-
-func renderItem(
-	normalStyle, focusedStyle, matchStyle lipgloss.Style,
-	text string,
-	focused bool,
-	width int,
-	cache map[int]string,
-	match *fuzzy.Match,
-) string {
-	if cache == nil {
-		cache = make(map[int]string)
-	}
-
-	cached, ok := cache[width]
-	if ok {
-		return cached
-	}
-
-	innerWidth := width - 2 // Account for padding
-	// Truncate if needed.
-	if ansi.StringWidth(text) > innerWidth {
-		text = ansi.Truncate(text, innerWidth, "…")
-	}
-
-	// Select base style.
-	style := normalStyle
-	matchStyle = matchStyle.Background(style.GetBackground())
-	if focused {
-		style = focusedStyle
-		matchStyle = matchStyle.Background(style.GetBackground())
-	}
-
-	// Render full-width text with background.
-	content := style.Padding(0, 1).Width(width).Render(text)
-
-	// Apply match highlighting using StyleRanges.
-	if len(match.MatchedIndexes) > 0 {
-		var ranges []lipgloss.Range
-		for _, rng := range list.MatchedRanges(match.MatchedIndexes) {
-			start, stop := list.BytePosToVisibleCharPos(text, rng)
-			// Offset by 1 for the padding space.
-			ranges = append(ranges, lipgloss.NewRange(start+1, stop+2, matchStyle))
-		}
-		content = lipgloss.StyleRanges(content, ranges...)
-	}
-
-	cache[width] = content
-	return content
-}
-
-// Ensure CompletionItem implements the required interfaces.
-var (
-	_ list.Item           = (*CompletionItem)(nil)
-	_ list.FilterableItem = (*CompletionItem)(nil)
-	_ list.MatchSettable  = (*CompletionItem)(nil)
-	_ list.Focusable      = (*CompletionItem)(nil)
-)

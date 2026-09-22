@@ -34,10 +34,10 @@ func TestMentionPickerFilterRanksNamePriority(t *testing.T) {
 		p.HandleMsg(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 
-	row, ok := p.list.SelectedItem().(*completions.CompletionItem)
+	row, ok := p.list.SelectedItem().(PickerItem)
 	require.True(t, ok)
 	require.NotNil(t, row)
-	require.Equal(t, "internal/ui/chat/mcp.go", row.Text())
+	require.Equal(t, "internal/ui/chat/mcp.go", row.Label())
 }
 
 // TestMentionPickerEscapeCancels pins that closing the picker reports a
@@ -58,11 +58,31 @@ func TestMentionPickerRowsUseDialogItemStyles(t *testing.T) {
 	t.Parallel()
 
 	p := newMentionPickerForTest(t)
-	row := p.list.FilteredItems()[0].(*completions.CompletionItem)
+	row := p.list.FilteredItems()[0].(PickerItem)
 
 	row.SetFocused(false)
 	require.NotContains(t, row.Render(60), "\x1b[48", "a normal row must not paint a background")
 
 	row.SetFocused(true)
 	require.Contains(t, row.Render(60), "\x1b[48", "the focused row takes the shared selection background")
+}
+
+// TestMentionPickerItemsOrder pins the source order: subagents first,
+// then files, then MCP resources, each kind labeled on the right.
+func TestMentionPickerItemsOrder(t *testing.T) {
+	t.Parallel()
+
+	st := newFilePickerTestCommon().Styles
+	items := mentionPickerItems(st, completions.CompletionItemsLoadedMsg{
+		Files:     []completions.FileCompletionValue{{Path: "a.go"}},
+		Resources: []completions.ResourceCompletionValue{{MCPName: "m", URI: "u", Title: "t"}},
+		Subagents: []completions.SubagentCompletionValue{{Name: "zeta"}},
+	})
+
+	labels := make([]string, len(items))
+	for i, item := range items {
+		row := item.(PickerItem)
+		labels[i] = row.Label()
+	}
+	require.Equal(t, []string{"zeta", "a.go", "m/t"}, labels)
 }

@@ -6,14 +6,12 @@
 package completions
 
 import (
-	"cmp"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/ui/list"
@@ -54,35 +52,6 @@ func LoadItems(depth, limit int, subagents []SubagentCompletionValue) tea.Cmd {
 		wg.Wait()
 		return msg
 	}
-}
-
-// MentionItems builds the merged mention list: subagents first so they
-// sit at the top, then files, then MCP resources.
-func MentionItems(
-	normalStyle, focusedStyle, matchStyle lipgloss.Style,
-	files []FileCompletionValue,
-	resources []ResourceCompletionValue,
-	subagents []SubagentCompletionValue,
-) []list.FilterableItem {
-	items := make([]list.FilterableItem, 0, len(subagents)+len(files)+len(resources))
-
-	// Subagents appear first.
-	for _, sa := range subagents {
-		items = append(items, NewCompletionItem(sa.Name, sa, normalStyle, focusedStyle, matchStyle))
-	}
-
-	// Files.
-	for _, file := range files {
-		items = append(items, NewCompletionItem(file.Path, file, normalStyle, focusedStyle, matchStyle))
-	}
-
-	// MCP resources.
-	for _, resource := range resources {
-		text := resource.MCPName + "/" + cmp.Or(resource.Title, resource.URI)
-		items = append(items, NewCompletionItem(text, resource, normalStyle, focusedStyle, matchStyle))
-	}
-
-	return items
 }
 
 // FilterMentionItems applies the tiered name-priority ranking to a

@@ -1,6 +1,8 @@
 package dialog
 
 import (
+	"cmp"
+
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -9,6 +11,7 @@ import (
 	"github.com/stubbedev/harness/internal/ui/completions"
 	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // MentionPickerID is the identifier for the @-mention picker dialog.
@@ -87,13 +90,7 @@ func (p *MentionPicker) ID() string {
 func (p *MentionPicker) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
 	case completions.CompletionItemsLoadedMsg:
-		t := p.com.Styles
-		// Rows use the shared dialog item tokens: transparent normal
-		// rows, selection background only on the focused row.
-		p.items = completions.MentionItems(
-			t.Dialog.NormalItem, t.Dialog.SelectedItem, t.Completions.Match,
-			msg.Files, msg.Resources, msg.Subagents,
-		)
+		p.items = mentionPickerItems(p.com.Styles, msg)
 		p.list.SetItems(p.items...)
 		p.list.SelectFirst()
 		p.list.ScrollToSelected()
@@ -117,16 +114,15 @@ func (p *MentionPicker) HandleMsg(msg tea.Msg) Action {
 			}
 			p.list.ScrollToSelected()
 		case key.Matches(msg, p.keyMap.Select):
-			if item, ok := p.list.SelectedItem().(*completions.CompletionItem); ok && item != nil {
+			if item, ok := p.list.SelectedItem().(PickerItem); ok && item != nil {
 				return ActionMentionSelected{Value: item.Value()}
 			}
 		default:
-			cmd, value, changed := updateFilterInput(&p.input, msg)
-			if changed {
-				// Mentions keep the tiered name-priority ranking on
-				// top of the plain fuzzy filter.
-				completions.FilterMentionItems(p.list, p.items, value)
-			}
+			// The typing path flows through the shared input helper; only
+			// the search differs - mentions rank by name priority.
+			cmd, _ := filterInput(&p.input, msg, func(query string) {
+				completions.FilterMentionItems(p.list, p.items, query)
+			})
 			return ActionCmd{cmd}
 		}
 	}
@@ -163,6 +159,24 @@ func (p *MentionPicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	cur := DialogCursor(st, view, p.input.Cursor())
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
+}
+
+// mentionPickerItems builds the mention rows through the shared
+// picker item: subagents first (they sit at the top), then files, then
+// MCP resources, each labeled with its kind on the right.
+func mentionPickerItems(t *styles.Styles, msg completions.CompletionItemsLoadedMsg) []list.FilterableItem {
+	items := make([]list.FilterableItem, 0, len(msg.Subagents)+len(msg.Files)+len(msg.Resources))
+	for _, sa := range msg.Subagents {
+		items = append(items, NewPickerItem(t, sa, sa.Name, "agent"))
+	}
+	for _, file := range msg.Files {
+		items = append(items, NewPickerItem(t, file, file.Path, "file"))
+	}
+	for _, res := range msg.Resources {
+		label := res.MCPName + "/" + cmp.Or(res.Title, res.URI)
+		items = append(items, NewPickerItem(t, res, label, "resource"))
+	}
+	return items
 }
 
 // ShortHelp implements help.KeyMap.
