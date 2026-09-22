@@ -259,8 +259,10 @@ func closesWithRule() bool {
 
 // DialogCursor positions a text-input cursor for the active placement.
 // Floating: the input sits under the title, and InputCursor's frame
-// arithmetic applies. Bottom-anchored: the input sits on the row above
-// the closing rule, which is the rendered view's final row.
+// arithmetic applies. Bottom-anchored: the input row is self-spaced in
+// the hand-assembled panel - it carries its own gutter, the frame's
+// padding does not wrap it - so the offset reads the input style alone,
+// and the input sits on the row above the closing rule.
 func DialogCursor(t *styles.Styles, view string, cur *tea.Cursor) *tea.Cursor {
 	if cur == nil {
 		return nil
@@ -269,14 +271,12 @@ func DialogCursor(t *styles.Styles, view string, cur *tea.Cursor) *tea.Cursor {
 		return InputCursor(t, cur)
 	}
 	input := t.Dialog.InputBottom
-	frame := t.Dialog.ViewBottom
 	cur.Y = lipgloss.Height(view) - 1
 	if closesWithRule() {
 		cur.Y--
 	}
 	return common.OffsetCursor(cur, 0, 0,
-		input.GetMarginLeft()+input.GetPaddingLeft()+input.GetBorderLeftSize()+
-			frame.GetMarginLeft()+frame.GetPaddingLeft()+frame.GetBorderLeftSize(),
+		input.GetMarginLeft()+input.GetPaddingLeft()+input.GetBorderLeftSize(),
 		0)
 }
 

@@ -27,24 +27,32 @@ func (m *UI) selectedLargeModel() *workspace.AgentModel {
 // it and the editor. The working directory and git state are not here:
 // the compact status line above the editor is their single home, in
 // every state.
+//
+// The mark's placement is cached against the terminal size: typing
+// grows the editor and shrinks the main area, and the mark must not
+// re-center on every keystroke - only a resize recomputes it.
 func (m *UI) landingView() string {
 	t := m.com.Styles
 	width := m.layout.main.Dx()
 
 	infoSection := m.modelInfo(width)
 
-	var remainingHeightArea image.Rectangle
-	layout.Vertical(
-		layout.Len(lipgloss.Height(infoSection)+1),
-		layout.Fill(1),
-	).Split(m.layout.main).Assign(new(image.Rectangle), &remainingHeightArea)
+	if size := image.Pt(m.width, m.height); m.landingMarkSize != size {
+		m.landingMarkSize = size
+		var remainingHeightArea image.Rectangle
+		layout.Vertical(
+			layout.Len(lipgloss.Height(infoSection)+1),
+			layout.Fill(1),
+		).Split(m.layout.main).Assign(new(image.Rectangle), &remainingHeightArea)
 
-	mark := logo.RenderMark(t.Logo.GradCanvas, logo.Opts{
-		TitleColorA: t.Logo.TitleColorA,
-		TitleColorB: t.Logo.TitleColorB,
-		Width:       width,
-	})
-	content := lipgloss.Place(width, max(0, remainingHeightArea.Dy()), lipgloss.Center, lipgloss.Center, mark)
+		mark := logo.RenderMark(t.Logo.GradCanvas, logo.Opts{
+			TitleColorA: t.Logo.TitleColorA,
+			TitleColorB: t.Logo.TitleColorB,
+			Width:       width,
+		})
+		m.landingMarkView = lipgloss.Place(width, max(0, remainingHeightArea.Dy()), lipgloss.Center, lipgloss.Center, mark)
+	}
+	content := m.landingMarkView
 
 	return lipgloss.NewStyle().
 		Width(width).

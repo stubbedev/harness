@@ -983,8 +983,12 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.SelectedItem = base.Padding(0, 1).Background(o.primary).Foreground(o.onPrimary)
 	s.Dialog.InputPrompt = base.Margin(1, 1)
 	// No top margin: the separator rule renders directly above the
-	// input in the bottom-anchored panel and provides the spacing.
-	s.Dialog.InputBottom = base.Margin(0, 1, 0, 1)
+	// input and provides the spacing. The input row is self-spaced in
+	// the hand-assembled panel - the frame's padding does not wrap it -
+	// so its own margins carry the full content gutter (frame padding
+	// plus the old input margin), keeping the prompt aligned with the
+	// padded content rows and the cursor arithmetic in DialogCursor.
+	s.Dialog.InputBottom = base.Margin(0, 2, 0, 2)
 	s.Dialog.Rule = base.Foreground(o.fgMostSubtle)
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)

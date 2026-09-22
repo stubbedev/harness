@@ -234,6 +234,13 @@ type UI struct {
 	height int
 	layout uiLayout
 
+	// landingMark caches the landing page's placed letter mark against
+	// the terminal size: typing grows the editor and shrinks the main
+	// area, and the mark must not re-center on every keystroke - only a
+	// resize recomputes its position. See landing.go.
+	landingMarkSize image.Point
+	landingMarkView string
+
 	isTransparent bool
 
 	// mouseEnabled controls whether Bubble Tea mouse reporting is active.
