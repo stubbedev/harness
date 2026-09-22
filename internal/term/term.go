@@ -27,6 +27,7 @@ import (
 
 	"github.com/aymanbagabas/go-pty"
 	"github.com/hinshun/vt10x"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/procgroup"
 )
 
@@ -323,7 +324,7 @@ func newSession(p pty.Pty, proc *os.Process, rows, cols int) *Session {
 		cols:     cols,
 	}
 	replies.session = s
-	go s.readLoop()
+	crash.Go("term.readLoop", s.readLoop)
 	return s
 }
 
@@ -345,13 +346,13 @@ type replyWriter struct {
 
 func newReplyWriter() *replyWriter {
 	w := &replyWriter{replies: make(chan []byte, 64)}
-	go func() {
+	crash.Go("term.replyWriter", func() {
 		for b := range w.replies {
 			if w.session != nil {
 				_ = w.session.Send(b)
 			}
 		}
-	}()
+	})
 	return w
 }
 

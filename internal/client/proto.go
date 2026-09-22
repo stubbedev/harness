@@ -15,6 +15,7 @@ import (
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
@@ -125,6 +126,7 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 	}
 
 	go func() {
+		defer crash.Recover("client.eventStream", nil)
 		defer rsp.Body.Close()
 		defer close(events)
 

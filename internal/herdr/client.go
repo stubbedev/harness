@@ -21,6 +21,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/stubbedev/harness/internal/crash"
 )
 
 // State values matching herdr's PaneAgentState enum.
@@ -297,7 +299,7 @@ func newUnixSender(socketPath string) *unixSender {
 		ch:         make(chan reportRequest, 16),
 		cancel:     cancel,
 	}
-	go s.writeLoop(ctx)
+	crash.Go("herdr.writeLoop", func() { s.writeLoop(ctx) })
 	return s
 }
 

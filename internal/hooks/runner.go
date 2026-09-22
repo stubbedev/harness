@@ -3,6 +3,7 @@ package hooks
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/shell"
 )
 
@@ -140,6 +142,7 @@ func (r *Runner) results(ctx context.Context, ec EventContext) ([]HookResult, []
 	for i, h := range deduped {
 		go func(idx int, hook config.HookConfig) {
 			defer wg.Done()
+			defer crash.Recover("hooks.runOne", nil)
 			results[idx] = r.runOne(ctx, hook, envVars, payload)
 		}(i, h)
 	}
@@ -195,6 +198,10 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 	var stdout, stderr bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
+		// A panic must still unblock runOne's select below.
+		defer crash.Recover("hooks.runShell", func() {
+			done <- fmt.Errorf("hook shell panicked; see the crash report")
+		})
 		done <- runShell(ctx, shell.RunOptions{
 			Command: hook.Command,
 			Cwd:     r.cwd,

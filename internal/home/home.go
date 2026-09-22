@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -41,6 +42,29 @@ func AppData() string {
 		filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Local"),
 	)
 }
+
+// DataDir returns the application's global data directory: the single
+// per-user root for state that outlives any one workspace. Kept here,
+// next to the other directory lookups and below every consumer, so
+// leaf packages (crash reporting among them) can resolve it without
+// importing config.
+func DataDir() string {
+	if harnessData := os.Getenv("HARNESS_GLOBAL_DATA"); harnessData != "" {
+		return harnessData
+	}
+	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
+		return filepath.Join(xdgDataHome, appName)
+	}
+	// On Windows the data lives in `%LOCALAPPDATA%/harness/`; on Linux
+	// and macOS it is `$HOME/.local/share/harness/`.
+	if runtime.GOOS == "windows" {
+		return filepath.Join(AppData(), appName)
+	}
+	return filepath.Join(Dir(), ".local", "share", appName)
+}
+
+// appName is the directory name under the user-level roots.
+const appName = "harness"
 
 // Short replaces the actual home path from [Dir] with `~`.
 func Short(p string) string {

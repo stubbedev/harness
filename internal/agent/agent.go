@@ -42,6 +42,7 @@ import (
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/hooks"
@@ -920,7 +921,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// goroutine survives Run's cancel.
 	if !hasUserTextMessage(msgs) {
 		titleCtx := context.WithoutCancel(ctx)
-		go a.GenerateTitle(titleCtx, call.SessionID, call.Prompt)
+		crash.Go("agent.generateTitle", func() { a.GenerateTitle(titleCtx, call.SessionID, call.Prompt) })
 	}
 
 	// Fire the pre-prompt hooks: SessionStart on the first turn of a

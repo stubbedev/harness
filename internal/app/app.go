@@ -169,7 +169,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// Check for updates in the background, unless the binary is managed
 	// externally (nix, package manager) and the check was disabled.
 	if !app.config.Config().Options.DisableUpdateCheck {
-		go app.checkForUpdates(ctx)
+		crash.Go("app.checkForUpdates", func() { app.checkForUpdates(ctx) })
 	}
 
 	// Arm initialization synchronously before launching it so WaitForInit
@@ -179,7 +179,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	// installed.
 	wireMCPElicitation(app.Questions)
 	mcp.ArmInit()
-	go mcp.Initialize(ctx, store)
+	crash.Go("mcp.Initialize", func() { mcp.Initialize(ctx, store) })
 
 	// Start herdr integration when running inside a herdr pane.
 	app.herdrClient = herdr.Init()
@@ -219,7 +219,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 	// TrackConfigured must run after SetCallback so the callback is already
 	// installed when configured-but-not-yet-started LSPs are announced.
-	go app.LSPManager.TrackConfigured(ctx)
+	crash.Go("lsp.TrackConfigured", func() { app.LSPManager.TrackConfigured(ctx) })
 
 	return app, nil
 }
@@ -418,6 +418,11 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	done := make(chan response, 1)
 
 	go func(ctx context.Context, sessionID, prompt string) {
+		// A panic in the run must still unblock the caller below, which
+		// waits on done with no timeout of its own.
+		defer crash.Recover("app.cliAgentRun", func() {
+			done <- response{err: errors.New("agent run panicked; see the crash report")}
+		})
 		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
 		if err != nil {
 			done <- response{
@@ -799,6 +804,7 @@ func (app *App) Subscribe(program *tea.Program) {
 	if app.SubagentRuntime != nil {
 		rtEvents := app.SubagentRuntime.Subscribe(tuiCtx)
 		go func() {
+			defer crash.Recover("app.subagentRuntimeEvents", nil)
 			for ev := range rtEvents {
 				program.Send(ev)
 			}
@@ -808,6 +814,7 @@ func (app *App) Subscribe(program *tea.Program) {
 	if app.Subagents != nil {
 		discEvents := app.Subagents.SubscribeEvents(tuiCtx)
 		go func() {
+			defer crash.Recover("app.subagentDiscoveryEvents", nil)
 			for ev := range discEvents {
 				program.Send(ev)
 			}

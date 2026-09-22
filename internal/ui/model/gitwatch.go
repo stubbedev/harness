@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/fsnotify/fsnotify"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/message"
 )
 
@@ -163,7 +164,7 @@ func (w *gitWatcher) start() {
 			slog.Debug("Git segment: filesystem watching unavailable, falling back to periodic refresh", "error", err)
 		}
 		w.fw = fw
-		go w.run()
+		crash.Go("ui.gitwatch", w.run)
 	})
 }
 

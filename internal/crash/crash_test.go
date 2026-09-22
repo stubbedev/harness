@@ -119,6 +119,34 @@ func TestPruneKeepsNewestReports(t *testing.T) {
 	require.Equal(t, maxReports, logs)
 }
 
+func TestGoCapturesPanicAndSurvives(t *testing.T) {
+	setupTestDir(t)
+
+	done := Go("pump", func() {
+		panic("pump blew up")
+	})
+	<-done
+
+	reports, err := List()
+	require.NoError(t, err)
+	require.Len(t, reports, 1)
+	require.Equal(t, "pump", reports[0].Component)
+	require.Equal(t, "pump blew up", reports[0].Panic)
+}
+
+func TestGoPassesValueThrough(t *testing.T) {
+	setupTestDir(t)
+
+	var got int
+	done := Go("calm", func() { got = 42 })
+	<-done
+	require.Equal(t, 42, got)
+
+	reports, err := List()
+	require.NoError(t, err)
+	require.Empty(t, reports)
+}
+
 func TestListReturnsNewestFirstWithHeaders(t *testing.T) {
 	setupTestDir(t)
 

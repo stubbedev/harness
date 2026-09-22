@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/version"
 )
 
@@ -44,7 +44,7 @@ func Dir() string {
 	if dir := os.Getenv("HARNESS_CRASH_DIR"); dir != "" {
 		return dir
 	}
-	return filepath.Join(config.GlobalWorkspaceDir(), "crashes")
+	return filepath.Join(home.DataDir(), "crashes")
 }
 
 // Capture writes a report describing r and returns its path, or an empty
@@ -109,6 +109,22 @@ func Recover(component string, cleanup func()) {
 	if cleanup != nil {
 		cleanup()
 	}
+}
+
+// Go runs fn in a goroutine whose panics are captured as reports
+// instead of killing the process. The goroutine still dies after a
+// panic; use it for long-lived loops and other routines whose crash
+// should be recorded and contained rather than take the whole app down.
+// It returns the started goroutine's completion as a channel so callers
+// that need to join can.
+func Go(component string, fn func()) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer Recover(component, nil)
+		fn()
+	}()
+	return done
 }
 
 // pruneLocked removes the oldest reports beyond maxReports. It is called

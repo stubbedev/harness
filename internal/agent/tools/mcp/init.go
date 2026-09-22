@@ -19,6 +19,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/oauth"
@@ -283,6 +284,7 @@ func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 	filtered := make(chan pubsub.Event[Event], 64)
 	go func() {
 		defer close(filtered)
+		defer crash.Recover("mcp.eventFilter", nil)
 		for ev := range raw {
 			if ev.Payload.Type == EventChannelMessage {
 				continue

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stubbedev/harness/internal/crash"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -129,6 +130,11 @@ func (r *jobRunner) start(ext *Extension, name string, args any, timeout time.Du
 	go func() {
 		defer cancel()
 		defer close(job.done)
+		// A panic in the job must still finish it, or a caller waiting
+		// on the job's result hangs.
+		defer crash.Recover("extensions.job", func() {
+			r.finish(job, "", errors.New("extension job panicked; see the crash report"))
+		})
 
 		select {
 		case r.slots <- struct{}{}:

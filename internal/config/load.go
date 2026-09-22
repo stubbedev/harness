@@ -1167,21 +1167,7 @@ func ProjectConfigs(cwd string) []string {
 // GlobalConfigData returns the path to the main data directory for the application.
 // this config is used when the app overrides configurations instead of updating the global config.
 func GlobalConfigData() string {
-	if harnessData := os.Getenv("HARNESS_GLOBAL_DATA"); harnessData != "" {
-		return filepath.Join(harnessData, stateConfigFile)
-	}
-	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
-		return filepath.Join(xdgDataHome, appName, stateConfigFile)
-	}
-
-	// return the path to the main data directory
-	// for windows, it should be in `%LOCALAPPDATA%/harness/`
-	// for linux and macOS, it should be in `$HOME/.local/share/harness/`
-	if runtime.GOOS == "windows" {
-		return filepath.Join(home.AppData(), appName, stateConfigFile)
-	}
-
-	return filepath.Join(home.Dir(), ".local", "share", appName, stateConfigFile)
+	return filepath.Join(home.DataDir(), stateConfigFile)
 }
 
 // GlobalWorkspaceDir returns the path to the global server workspace

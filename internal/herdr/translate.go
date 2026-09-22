@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stubbedev/harness/internal/agent/notify"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
@@ -81,11 +82,15 @@ func BridgeLocal(ctx context.Context, c *Client, src BridgeSources) {
 	if c == nil {
 		return
 	}
-	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[notify.RunComplete] {
-		return src.RunCompletions.Subscribe(subCtx)
+	crash.Go("herdr.runCompletions", func() {
+		forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[notify.RunComplete] {
+			return src.RunCompletions.Subscribe(subCtx)
+		})
 	})
-	go forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[message.Message] {
-		return src.Messages.Subscribe(subCtx)
+	crash.Go("herdr.messages", func() {
+		forward(ctx, c, func(subCtx context.Context) <-chan pubsub.Event[message.Message] {
+			return src.Messages.Subscribe(subCtx)
+		})
 	})
 }
 

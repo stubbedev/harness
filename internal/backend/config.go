@@ -7,6 +7,7 @@ import (
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
@@ -27,7 +28,7 @@ func publishConfigChanged(ws *Workspace) {
 	// triggered the write. Run async so unrelated config writes (model
 	// switches, API keys) don't block on MCP reconciliation. Bound to the
 	// workspace ctx so teardown cancels any in-flight init.
-	go mcptools.Reinitialize(ws.ctx, ws.Cfg)
+	crash.Go("mcp.Reinitialize", func() { mcptools.Reinitialize(ws.ctx, ws.Cfg) })
 
 	ws.SendEvent(pubsub.Event[proto.ConfigChanged]{
 		Type:    pubsub.UpdatedEvent,

@@ -17,6 +17,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/term"
@@ -493,13 +494,13 @@ func closeTerminalSessions(keep func(*ptyRunner) bool) {
 // ptyReaperStart launches the background sweeper once per process.
 func ptyReaperStart() {
 	ptyReaperOnce.Do(func() {
-		go func() {
+		crash.Go("pty.reaper", func() {
 			for range time.Tick(ptyReapInterval) {
 				ptyRunnersMu.Lock()
 				ptyReap()
 				ptyRunnersMu.Unlock()
 			}
-		}()
+		})
 	})
 }
 

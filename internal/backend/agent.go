@@ -8,6 +8,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/shell"
@@ -73,7 +74,30 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 	ws.runWG.Add(1)
 	ws.runMu.Unlock()
 
-	go b.runAgent(ws, msg, sessionID, runID, accept)
+	go func() {
+		// Mirror runAgent's error fallback so a RunID waiter blocked on
+		// the terminal RunComplete observes a deterministic failure
+		// instead of hanging when the run panics.
+		defer crash.Recover("backend.agentRun", func() {
+			ws.AgentNotifications().Publish(pubsub.CreatedEvent, notify.Notification{
+				SessionID: sessionID,
+				RunID:     runID,
+				Type:      notify.TypeAgentError,
+				Message:   "agent run panicked; see the crash report",
+			})
+			if runID == "" {
+				return
+			}
+			if rc := ws.RunCompletions(); rc != nil {
+				rc.PublishMustDeliver(ws.ctx, pubsub.UpdatedEvent, notify.RunComplete{
+					SessionID: sessionID,
+					RunID:     runID,
+					Error:     "agent run panicked; see the crash report",
+				})
+			}
+		})
+		b.runAgent(ws, msg, sessionID, runID, accept)
+	}()
 	return nil
 }
 

@@ -18,6 +18,7 @@ import (
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/sourcegraph/jsonrpc2"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/fsext"
 )
@@ -171,7 +172,7 @@ func (s *Manager) StartAsync(ctx context.Context, path string) {
 	if !s.shouldFanout(path) {
 		return
 	}
-	go s.Start(ctx, path)
+	crash.Go("lsp.start", func() { s.Start(ctx, path) })
 }
 
 // shouldFanout reports whether StartAsync should walk the server list for

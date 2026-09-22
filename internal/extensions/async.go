@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/stubbedev/harness/internal/crash"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -85,6 +86,7 @@ func (in *instance) pushPending(L *lua.LState, kind string, run func(*pendingCal
 			in.pending.Add(-1)
 			close(p.done)
 		}()
+		defer crash.Recover("extensions.async", nil)
 		run(p, ctx)
 	}()
 

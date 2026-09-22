@@ -20,6 +20,7 @@ import (
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/fsext"
@@ -340,6 +341,7 @@ func gatherStatsFromDBPaths(ctx context.Context, dbPaths []struct {
 		wg.Add(1)
 		go func(dbPath, projectDir string) {
 			defer wg.Done()
+			defer crash.Recover("stats.project", nil)
 
 			sem <- struct{}{}
 			defer func() { <-sem }()

@@ -6,6 +6,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/stubbedev/harness/internal/crash"
 )
 
 // Stream hardening bounds: silence is not proof of life. A run that
@@ -139,6 +141,7 @@ func RunAndCaptureStream(ctx context.Context, opts RunOptions, onProgress func(s
 	stopped := make(chan struct{})
 	defer close(stopped)
 	go func() {
+		defer crash.Recover("shell.watchdog", nil)
 		tick := time.NewTicker(250 * time.Millisecond)
 		defer tick.Stop()
 		for {
