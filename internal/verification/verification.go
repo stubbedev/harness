@@ -192,38 +192,54 @@ func (r *Runner) Current(ctx context.Context, changedPaths []string, result Resu
 	return err == nil && revision == result.RevisionAfter, err
 }
 
+// Action is what the completion gate asks of the agent.
+type Action string
+
+const (
+	// ActionComplete lets the turn finish.
+	ActionComplete Action = "complete"
+	// ActionVerify asks for the applicable checks to run first.
+	ActionVerify Action = "verify"
+	// ActionRepair asks the agent to fix failing checks.
+	ActionRepair Action = "repair"
+	// ActionBlocked stops the turn: the checks cannot pass.
+	ActionBlocked Action = "blocked"
+)
+
 type Decision struct {
-	Allow  bool   `json:"allow"`
-	Action string `json:"action"`
+	Action Action `json:"action"`
 	Reason string `json:"reason,omitempty"`
 }
 
+// Allow reports whether the turn may complete.
+func (d Decision) Allow() bool { return d.Action == ActionComplete }
+
 func (r *Runner) Gate(ctx context.Context, changedPaths []string, result *Result, repairAttempts int) Decision {
 	if !r.config.RequireOnCompletion {
-		return Decision{Allow: true, Action: "complete"}
+		return Decision{Action: ActionComplete}
 	}
 	rules, _, err := r.selectRules(changedPaths)
 	if err != nil {
-		return Decision{Action: "blocked", Reason: err.Error()}
+		return Decision{Action: ActionBlocked, Reason: err.Error()}
 	}
 	if len(rules) == 0 {
-		return Decision{Allow: true, Action: "complete", Reason: "no configured rules apply"}
+		return Decision{Action: ActionComplete, Reason: "no configured rules apply"}
 	}
 	if result == nil {
-		return Decision{Action: "verify", Reason: "applicable checks have not run"}
+		return Decision{Action: ActionVerify, Reason: "applicable checks have not run"}
 	}
 	current, err := r.Current(ctx, changedPaths, *result)
 	if err != nil {
-		return Decision{Action: "blocked", Reason: err.Error()}
+		return Decision{Action: ActionBlocked, Reason: err.Error()}
 	}
 	if !current {
-		return Decision{Action: "verify", Reason: "verification is stale"}
+		return Decision{Action: ActionVerify, Reason: "verification is stale"}
 	}
 	if result.Status == Passed {
-		return Decision{Allow: true, Action: "complete"}
+		return Decision{Action: ActionComplete}
 	}
 	if result.Status == Failed && repairAttempts >= 0 && repairAttempts < r.config.MaxRepairAttempts {
-		return Decision{Action: "repair", Reason: "applicable checks failed"}
+		return Decision{Action: ActionRepair, Reason: "applicable checks failed"}
 	}
-	return Decision{Action: "blocked", Reason: "verification did not pass or repair budget exhausted"}
+	return Decision{Action: ActionBlocked, Reason: "verification did not pass or repair budget exhausted"}
 }

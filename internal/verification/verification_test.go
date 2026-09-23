@@ -265,21 +265,21 @@ func TestCompletionGate(t *testing.T) {
 	r, err := New(root, cfg)
 	require.NoError(t, err)
 	paths := []string{"src/main.go"}
-	require.Equal(t, "verify", r.Gate(t.Context(), paths, nil, 0).Action)
-	require.True(t, r.Gate(t.Context(), nil, nil, 0).Allow)
+	require.Equal(t, ActionVerify, r.Gate(t.Context(), paths, nil, 0).Action)
+	require.True(t, r.Gate(t.Context(), nil, nil, 0).Allow())
 	result := r.Run(t.Context(), paths)
-	require.True(t, r.Gate(t.Context(), paths, &result, 0).Allow)
+	require.True(t, r.Gate(t.Context(), paths, &result, 0).Allow())
 	result.Status = Failed
-	require.Equal(t, "repair", r.Gate(t.Context(), paths, &result, 0).Action)
-	require.Equal(t, "blocked", r.Gate(t.Context(), paths, &result, 1).Action)
+	require.Equal(t, ActionRepair, r.Gate(t.Context(), paths, &result, 0).Action)
+	require.Equal(t, ActionBlocked, r.Gate(t.Context(), paths, &result, 1).Action)
 	result.Status = Blocked
-	require.Equal(t, "blocked", r.Gate(t.Context(), paths, &result, 0).Action)
+	require.Equal(t, ActionBlocked, r.Gate(t.Context(), paths, &result, 0).Action)
 	require.NoError(t, os.WriteFile(filepath.Join(root, "src", "main.go"), []byte("changed"), 0o644))
-	require.Equal(t, "verify", r.Gate(t.Context(), paths, &result, 0).Action)
+	require.Equal(t, ActionVerify, r.Gate(t.Context(), paths, &result, 0).Action)
 	cfg.RequireOnCompletion = false
 	r, err = New(root, cfg)
 	require.NoError(t, err)
-	require.True(t, r.Gate(t.Context(), paths, nil, 0).Allow)
+	require.True(t, r.Gate(t.Context(), paths, nil, 0).Allow())
 }
 
 func TestValidate(t *testing.T) {

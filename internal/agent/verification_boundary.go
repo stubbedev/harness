@@ -92,7 +92,7 @@ func latestVerification(msgs []message.Message) *verification.Result {
 
 func (a *sessionAgent) completionVerification(ctx context.Context, sessionID string, repairAttempts int) (verification.Decision, error) {
 	if a.isSubAgent || a.cfg == nil || !a.cfg.Config().Verification.RequireOnCompletion {
-		return verification.Decision{Allow: true}, nil
+		return verification.Decision{Action: verification.ActionComplete}, nil
 	}
 	runner, err := verification.New(a.cfg.WorkingDir(), a.cfg.Config().Verification)
 	if err != nil {

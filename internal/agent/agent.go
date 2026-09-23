@@ -51,6 +51,7 @@ import (
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/stringext"
+	"github.com/stubbedev/harness/internal/verification"
 	"github.com/stubbedev/harness/internal/version"
 )
 
@@ -1697,19 +1698,19 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			err = gateErr
 			break
 		}
-		if decision.Allow {
+		if decision.Allow() {
 			break
 		}
-		if decision.Action == "verify" {
+		if decision.Action == verification.ActionVerify {
 			if err = a.runCompletionVerification(genCtx, call.SessionID); err != nil {
 				break
 			}
 			decision, err = a.completionVerification(genCtx, call.SessionID, repairs)
-			if err != nil || decision.Allow {
+			if err != nil || decision.Allow() {
 				break
 			}
 		}
-		if decision.Action != "repair" {
+		if decision.Action != verification.ActionRepair {
 			err = fmt.Errorf("completion blocked: %s", decision.Reason)
 			break
 		}
