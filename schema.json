@@ -391,9 +391,6 @@
           },
           "type": "array"
         },
-        "default_reasoning_effort": {
-          "type": "string"
-        },
         "supports_attachments": {
           "type": "boolean"
         },
