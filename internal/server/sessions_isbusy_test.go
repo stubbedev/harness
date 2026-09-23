@@ -354,7 +354,7 @@ func (s *stubSessions) Rename(_ context.Context, id, title string) error {
 func TestSessionRenameKeepsStoredFields(t *testing.T) {
 	t.Parallel()
 	c, ws := buildMultiSessionWorkspace(t, "S1")
-	stub := ws.App.Sessions.(*stubSessions)
+	stub := ws.Sessions.(*stubSessions)
 	stub.all[0].PromptTokens = 42
 	stub.all[0].SummaryMessageID = "sum"
 
