@@ -150,14 +150,7 @@ func (r *Runner) results(ctx context.Context, ec EventContext) ([]HookResult, []
 
 	infos := make([]HookInfo, len(deduped))
 	for i, h := range deduped {
-		infos[i] = HookInfo{
-			Name:         h.DisplayName(),
-			Matcher:      h.Matcher,
-			Decision:     results[i].Decision.String(),
-			Halt:         results[i].Halt,
-			Reason:       results[i].Reason,
-			InputRewrite: results[i].UpdatedInput != "",
-		}
+		infos[i] = DispatchResult{Name: h.DisplayName(), Matcher: h.Matcher, Result: results[i]}.info()
 	}
 	return results, infos
 }

@@ -17,26 +17,6 @@ import (
 // an older version. Unknown higher versions are still parsed but logged.
 const SupportedOutputVersion = 1
 
-// Payload is the JSON structure piped to hook commands via stdin.
-// ToolInput is emitted as a parsed JSON object for compatibility with
-// Claude Code hooks (which expect tool_input to be an object, not a
-// string). Fields beyond the common envelope are event-specific and
-// omitted when empty.
-type Payload struct {
-	Event            string          `json:"event"`
-	SessionID        string          `json:"session_id"`
-	CWD              string          `json:"cwd"`
-	ToolName         string          `json:"tool_name,omitempty"`
-	ToolInput        json.RawMessage `json:"tool_input,omitempty"`
-	ToolResponse     *ToolResponse   `json:"tool_response,omitempty"`
-	Prompt           string          `json:"prompt,omitempty"`
-	Attachments      []string        `json:"attachments,omitempty"`
-	SubagentType     string          `json:"subagent_type,omitempty"`
-	Trigger          string          `json:"trigger,omitempty"`
-	NotificationType string          `json:"notification_type,omitempty"`
-	Message          string          `json:"message,omitempty"`
-}
-
 // ToolResponse describes the completed tool call included in
 // PostToolUse payloads.
 type ToolResponse struct {
@@ -44,22 +24,47 @@ type ToolResponse struct {
 	IsError bool   `json:"is_error"`
 }
 
-// EventContext carries everything needed to fire one hook event: the
-// payload fields plus the working directory used for env vars. Zero
-// fields are omitted from the payload.
+// EventContext carries everything needed to fire one hook event. Its
+// JSON form (see MarshalJSON) is the payload piped to hook commands via
+// stdin; fields beyond the common envelope are event-specific and omitted
+// when empty.
 type EventContext struct {
-	Event            string
-	SessionID        string
-	CWD              string
-	ToolName         string
-	ToolInput        string // Raw JSON string as the model sent it.
-	ToolResponse     *ToolResponse
-	Prompt           string
-	Attachments      []string
-	SubagentType     string
-	Trigger          string
-	NotificationType string
-	Message          string
+	Event            string        `json:"event"`
+	SessionID        string        `json:"session_id"`
+	CWD              string        `json:"cwd"`
+	ToolName         string        `json:"tool_name,omitempty"`
+	ToolInput        string        `json:"-"` // Raw JSON string as the model sent it.
+	ToolResponse     *ToolResponse `json:"tool_response,omitempty"`
+	Prompt           string        `json:"prompt,omitempty"`
+	Attachments      []string      `json:"attachments,omitempty"`
+	SubagentType     string        `json:"subagent_type,omitempty"`
+	Trigger          string        `json:"trigger,omitempty"`
+	NotificationType string        `json:"notification_type,omitempty"`
+	Message          string        `json:"message,omitempty"`
+}
+
+// MarshalJSON renders the hook payload. ToolInput is emitted as a parsed
+// JSON object for compatibility with Claude Code hooks, which expect
+// tool_input to be an object, not a string; invalid input becomes {}.
+// The cwd always uses forward slashes, since the payload is
+// cross-platform data parsed by hook scripts; the env vars keep the
+// platform-native form for shells.
+func (ec EventContext) MarshalJSON() ([]byte, error) {
+	type fields EventContext
+	// json.RawMessage is a slice, so omitempty drops only a nil value:
+	// non-tool events leave ToolInput unset and the key disappears.
+	var toolInput json.RawMessage
+	if ec.ToolInput != "" {
+		toolInput = json.RawMessage(ec.ToolInput)
+		if !json.Valid(toolInput) {
+			toolInput = json.RawMessage("{}")
+		}
+	}
+	ec.CWD = filepath.ToSlash(ec.CWD)
+	return json.Marshal(struct {
+		fields
+		ToolInput json.RawMessage `json:"tool_input,omitempty"`
+	}{fields(ec), toolInput})
 }
 
 // Subject returns the string a hook matcher is tested against: the tool
@@ -74,71 +79,17 @@ func (ec EventContext) Subject() string {
 	}
 }
 
-func (ec EventContext) payload() Payload {
-	// json.RawMessage is a slice, so omitempty drops only a nil value:
-	// non-tool events leave ToolInput unset and the key disappears.
-	var toolInput json.RawMessage
-	if ec.ToolInput != "" {
-		toolInput = json.RawMessage(ec.ToolInput)
-		if !json.Valid(toolInput) {
-			toolInput = json.RawMessage("{}")
-		}
-	}
-	return Payload{
-		Event:     ec.Event,
-		SessionID: ec.SessionID,
-		// The JSON payload is cross-platform data parsed by hook
-		// scripts, so the path always uses forward slashes. The env
-		// vars keep the platform-native form for shells.
-		CWD:              filepath.ToSlash(ec.CWD),
-		ToolName:         ec.ToolName,
-		ToolInput:        toolInput,
-		ToolResponse:     ec.ToolResponse,
-		Prompt:           ec.Prompt,
-		Attachments:      ec.Attachments,
-		SubagentType:     ec.SubagentType,
-		Trigger:          ec.Trigger,
-		NotificationType: ec.NotificationType,
-		Message:          ec.Message,
-	}
-}
-
 // BuildEventPayload constructs the JSON stdin payload for an event.
 func BuildEventPayload(ec EventContext) []byte {
-	data, err := json.Marshal(ec.payload())
+	data, err := json.Marshal(ec)
 	if err != nil {
 		return []byte("{}")
 	}
 	return data
 }
 
-// BuildPayload constructs the JSON stdin payload for a hook command.
-// Prefer BuildEventPayload for events that carry more than tool fields.
-func BuildPayload(eventName, sessionID, cwd, toolName, toolInputJSON string) []byte {
-	return BuildEventPayload(EventContext{
-		Event:     eventName,
-		SessionID: sessionID,
-		CWD:       cwd,
-		ToolName:  toolName,
-		ToolInput: toolInputJSON,
-	})
-}
-
-// BuildEnv constructs the environment variable slice for a hook command.
-// It includes all current process env vars plus hook-specific ones.
-func BuildEnv(eventName, toolName, sessionID, cwd, projectDir, toolInputJSON string) []string {
-	return BuildEventEnv(EventContext{
-		Event:     eventName,
-		SessionID: sessionID,
-		CWD:       cwd,
-		ToolName:  toolName,
-		ToolInput: toolInputJSON,
-	}, projectDir)
-}
-
-// BuildEventEnv constructs the environment for an event, including the
-// event-specific variables (prompt, trigger, notification) that the
-// legacy BuildEnv wrapper cannot express.
+// BuildEventEnv constructs the environment for a hook command: the
+// process environment plus the event's HARNESS_* variables.
 func BuildEventEnv(ec EventContext, projectDir string) []string {
 	env := os.Environ()
 	env = append(env, shell.HarnessEnvMarkers()...)

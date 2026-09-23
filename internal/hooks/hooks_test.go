@@ -179,7 +179,13 @@ func TestParseStdout(t *testing.T) {
 func TestBuildEnv(t *testing.T) {
 	t.Parallel()
 
-	env := BuildEnv(EventPreToolUse, "shell", "sess-1", "/work", "/project", `{"command":"ls","file_path":"/tmp/f.txt"}`)
+	env := BuildEventEnv(EventContext{
+		Event:     EventPreToolUse,
+		ToolName:  "shell",
+		SessionID: "sess-1",
+		CWD:       "/work",
+		ToolInput: `{"command":"ls","file_path":"/tmp/f.txt"}`,
+	}, "/project")
 
 	envMap := make(map[string]string)
 	for _, e := range env {
@@ -215,7 +221,13 @@ func splitFirst(s, sep string) []string {
 
 func TestBuildPayload(t *testing.T) {
 	t.Parallel()
-	payload := BuildPayload(EventPreToolUse, "sess-1", "/work", "shell", `{"command":"ls"}`)
+	payload := BuildEventPayload(EventContext{
+		Event:     EventPreToolUse,
+		SessionID: "sess-1",
+		CWD:       "/work",
+		ToolName:  "shell",
+		ToolInput: `{"command":"ls"}`,
+	})
 	s := string(payload)
 	require.Contains(t, s, `"event":"`+EventPreToolUse+`"`)
 	require.Contains(t, s, `"tool_name":"shell"`)

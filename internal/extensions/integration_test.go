@@ -26,8 +26,7 @@ end)
 	host := newHost(t, []string{root})
 	cfg := &config.Config{}
 	require.NoError(t, cfg.ValidateHooks())
-	registry := hooks.NewRegistry(config.NewTestStore(cfg), t.TempDir(), t.TempDir()).
-		WithDispatchers(host)
+	registry := hooks.NewRegistry(config.NewTestStore(cfg), t.TempDir(), t.TempDir(), host)
 
 	require.True(t, registry.Has(hooks.EventPreToolUse))
 

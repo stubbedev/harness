@@ -33,7 +33,7 @@ func TestRegistryRunsDispatcherWithoutConfiguredHooks(t *testing.T) {
 	}
 	cfg := &config.Config{}
 	require.NoError(t, cfg.ValidateHooks())
-	r := NewRegistry(config.NewTestStore(cfg), t.TempDir(), t.TempDir()).WithDispatchers(dispatcher)
+	r := NewRegistry(config.NewTestStore(cfg), t.TempDir(), t.TempDir(), dispatcher)
 
 	require.True(t, r.Has(EventPreToolUse))
 	require.False(t, r.Has(EventStop))
@@ -67,7 +67,7 @@ func TestRegistryAggregatesShellHooksAndDispatchers(t *testing.T) {
 		name:   "guard:PreToolUse",
 		result: HookResult{Decision: DecisionDeny, Reason: "denied in lua"},
 	}
-	r := NewRegistry(config.NewTestStore(cfg), t.TempDir(), t.TempDir()).WithDispatchers(dispatcher)
+	r := NewRegistry(config.NewTestStore(cfg), t.TempDir(), t.TempDir(), dispatcher)
 
 	res, err := r.Run(context.Background(), EventContext{Event: EventPreToolUse, ToolName: "shell"})
 	require.NoError(t, err)
@@ -80,15 +80,12 @@ func TestRegistryAggregatesShellHooksAndDispatchers(t *testing.T) {
 	require.Equal(t, "from a shell hook", res.Context)
 }
 
-func TestWithDispatchersIgnoresNil(t *testing.T) {
+func TestNewRegistryIgnoresNilDispatcher(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
 	require.NoError(t, cfg.ValidateHooks())
-	r := NewRegistry(config.NewTestStore(cfg), t.TempDir(), t.TempDir()).WithDispatchers(nil)
+	r := NewRegistry(config.NewTestStore(cfg), t.TempDir(), t.TempDir(), nil)
 
 	require.False(t, r.Has(EventPreToolUse))
-
-	var nilRegistry *Registry
-	require.Nil(t, nilRegistry.WithDispatchers(&stubDispatcher{}))
 }

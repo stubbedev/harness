@@ -25,23 +25,16 @@ type Registry struct {
 
 // NewRegistry builds a Registry over the config store. cwd is the working
 // directory hook commands run in; projectDir is exposed to them as
-// HARNESS_PROJECT_DIR.
-func NewRegistry(cfg *config.ConfigStore, cwd, projectDir string) *Registry {
-	return &Registry{cfg: cfg, cwd: cwd, projectDir: projectDir}
-}
-
-// WithDispatchers returns the registry with the given in-process
-// dispatchers attached. Nil dispatchers are ignored, so callers can pass
-// an optional extension host straight through.
-func (r *Registry) WithDispatchers(dispatchers ...Dispatcher) *Registry {
-	if r == nil {
-		return nil
-	}
+// HARNESS_PROJECT_DIR. dispatchers are the in-process handlers answering
+// the same events; they are fixed at construction so Run never races a
+// late attachment. Nil interface values are dropped; a typed nil (such as
+// an absent *extensions.Host) is kept and must be nil-safe itself.
+func NewRegistry(cfg *config.ConfigStore, cwd, projectDir string, dispatchers ...Dispatcher) *Registry {
+	r := &Registry{cfg: cfg, cwd: cwd, projectDir: projectDir}
 	for _, d := range dispatchers {
-		if d == nil {
-			continue
+		if d != nil {
+			r.dispatchers = append(r.dispatchers, d)
 		}
-		r.dispatchers = append(r.dispatchers, d)
 	}
 	return r
 }
