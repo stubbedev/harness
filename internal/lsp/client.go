@@ -287,7 +287,7 @@ func (c *Client) Restart() error {
 
 	var openFiles []string
 	for uri := range c.openFiles.Seq2() {
-		openFiles = append(openFiles, string(uri))
+		openFiles = append(openFiles, uri)
 	}
 
 	// Cancel the old long-lived context and create a fresh one so that
@@ -632,7 +632,7 @@ func (c *Client) NotifyWorkspaceChange(ctx context.Context) error {
 		return nil
 	}
 	return c.pn().NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
-		{URI: protocol.DocumentURI(protocol.URIFromPath(c.cwd)), Type: protocol.Changed},
+		{URI: protocol.URIFromPath(c.cwd), Type: protocol.Changed},
 	})
 }
 
