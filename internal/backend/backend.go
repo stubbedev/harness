@@ -48,6 +48,8 @@ var (
 	ErrServerNotIdle           = errors.New("server is hosting live workspaces")
 	ErrClientRetired           = errors.New("client has been retired")
 	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
+	ErrSessionBusy             = errors.New("the agent is running in this session")
+	ErrInvalidArgument         = errors.New("invalid argument")
 )
 
 // workspacePathPattern matches the absolute path shapes a client may

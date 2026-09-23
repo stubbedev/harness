@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/stubbedev/harness/internal/checkpoints"
@@ -163,7 +162,7 @@ func (b *Backend) Rewind(ctx context.Context, workspaceID, sessionID, messageID 
 	}
 
 	if ws.AgentCoordinator != nil && ws.AgentCoordinator.IsSessionBusy(sessionID) {
-		return errors.New("cannot rewind while the agent is running")
+		return fmt.Errorf("cannot rewind: %w", ErrSessionBusy)
 	}
 	mode, err = normalizeRewindMode(mode)
 	if err != nil {
@@ -176,9 +175,9 @@ func normalizeRewindMode(mode checkpoints.Mode) (checkpoints.Mode, error) {
 	if mode == "" {
 		return checkpoints.ModeBoth, nil
 	}
-	if m, err := checkpoints.ParseMode(string(mode)); err == nil {
-		return m, nil
-	} else {
-		return mode, fmt.Errorf("invalid rewind mode %q", string(mode))
+	m, err := checkpoints.ParseMode(string(mode))
+	if err != nil {
+		return mode, fmt.Errorf("%w: rewind mode %q", ErrInvalidArgument, string(mode))
 	}
+	return m, nil
 }

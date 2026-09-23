@@ -438,19 +438,6 @@ func (c *Client) SendMessage(ctx context.Context, id string, sessionID, runID, p
 	return nil
 }
 
-// decodeErrorMessage attempts to decode the response body as a
-// proto.Error and returns its message. It returns an empty string
-// when the body is empty or cannot be decoded into a proto.Error
-// with a non-empty message, letting callers fall back to a
-// status-only error.
-func decodeErrorMessage(body io.Reader) string {
-	var e proto.Error
-	if err := json.NewDecoder(body).Decode(&e); err != nil {
-		return ""
-	}
-	return e.Message
-}
-
 // RunShellCommand runs a shell command in the workspace without triggering the agent.
 func (c *Client) RunShellCommand(ctx context.Context, id, sessionID, command string, termWidth int) (proto.ShellCommandResponse, error) {
 	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/shell", id, sessionID), nil, jsonBody(proto.ShellCommandRequest{

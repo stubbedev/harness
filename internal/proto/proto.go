@@ -30,9 +30,35 @@ type Workspace struct {
 	Skills []SkillState `json:"skills,omitempty"`
 }
 
-// Error represents an error response.
+// ErrorCode classifies an error response so clients can react to what
+// failed rather than to an HTTP status several failures share. In
+// particular a 404 alone cannot tell "this workspace is gone, re-register"
+// from "this session or LSP server does not exist".
+type ErrorCode string
+
+const (
+	// ErrorCodeWorkspaceNotFound means the server no longer knows the
+	// workspace; the client should re-register it.
+	ErrorCodeWorkspaceNotFound ErrorCode = "workspace_not_found"
+	// ErrorCodeNotFound means some other named resource does not exist.
+	ErrorCodeNotFound ErrorCode = "not_found"
+	// ErrorCodeInvalidArgument means the request itself was malformed.
+	ErrorCodeInvalidArgument ErrorCode = "invalid_argument"
+	// ErrorCodeConflict means the request is valid but the current state
+	// forbids it, such as rewinding a busy session.
+	ErrorCodeConflict ErrorCode = "conflict"
+	// ErrorCodeUnavailable means the server is going away; retry against
+	// its replacement.
+	ErrorCodeUnavailable ErrorCode = "unavailable"
+	// ErrorCodeInternal is any other server-side failure.
+	ErrorCodeInternal ErrorCode = "internal"
+)
+
+// Error represents an error response. Code is empty from servers that
+// predate it.
 type Error struct {
-	Message string `json:"message"`
+	Message string    `json:"message"`
+	Code    ErrorCode `json:"code,omitempty"`
 }
 
 // ConfigChanged is published whenever the workspace's configuration is

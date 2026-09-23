@@ -52,6 +52,20 @@ func TestCheckStatus_TypesActionableStatuses(t *testing.T) {
 			wantMsg: "workspace not found",
 		},
 		{
+			name:    "workspace code triggers recovery",
+			status:  http.StatusNotFound,
+			body:    `{"message":"workspace not found","code":"workspace_not_found"}`,
+			wantErr: ErrNotFound,
+		},
+		{
+			// A missing session or LSP server inside a live workspace
+			// must not send the client off to re-register it.
+			name:        "other not-found codes are ordinary failures",
+			status:      http.StatusNotFound,
+			body:        `{"message":"LSP client not found","code":"not_found"}`,
+			wantUntyped: true,
+		},
+		{
 			name:        "conflict carries no lifecycle meaning",
 			status:      http.StatusConflict,
 			wantUntyped: true,

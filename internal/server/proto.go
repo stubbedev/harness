@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1185,45 +1186,70 @@ func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter,
 // subscribers instead. The remaining callers pass synchronous backend
 // errors, so context.Canceled gets no special case and would fall through
 // to the default 500 like any other unexpected error.
-func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err error) {
-	status := http.StatusInternalServerError
-	switch {
-	case errors.Is(err, backend.ErrWorkspaceNotFound):
-		status = http.StatusNotFound
-	case errors.Is(err, backend.ErrLSPClientNotFound):
-		status = http.StatusNotFound
-	case errors.Is(err, backend.ErrAgentNotInitialized):
-		status = http.StatusBadRequest
-	case errors.Is(err, backend.ErrPathRequired):
-		status = http.StatusBadRequest
-	case errors.Is(err, backend.ErrInvalidPermissionAction):
-		status = http.StatusBadRequest
-	case errors.Is(err, backend.ErrUnknownCommand):
-		status = http.StatusBadRequest
-	case errors.Is(err, backend.ErrInvalidClientID):
-		status = http.StatusBadRequest
-	case errors.Is(err, backend.ErrInvalidWorkspacePath),
-		errors.Is(err, backend.ErrInvalidSessionID),
-		errors.Is(err, backend.ErrInvalidRunID),
-		errors.Is(err, backend.ErrInvalidDataDir):
-		status = http.StatusBadRequest
-	case errors.Is(err, backend.ErrClientNotAttached):
-		// 409, not 404: the workspace exists, the caller just has no live
-		// stream yet. A 404 here is indistinguishable from "workspace
-		// gone" and would trip clients that treat 404 as the trigger for
-		// workspace recovery.
-		status = http.StatusConflict
-	case errors.Is(err, backend.ErrWorkspaceClosing),
-		errors.Is(err, backend.ErrServerNotIdle),
-		errors.Is(err, backend.ErrClientRetired):
-		status = http.StatusConflict
-	case errors.Is(err, backend.ErrServerShuttingDown):
-		// 503, not 409: the request is not wrong, this process is just
-		// leaving. Clients retry against its replacement.
-		status = http.StatusServiceUnavailable
+// errorClass is the response an error maps to.
+type errorClass struct {
+	status int
+	code   proto.ErrorCode
+}
+
+var (
+	classWorkspaceGone = errorClass{http.StatusNotFound, proto.ErrorCodeWorkspaceNotFound}
+	classNotFound      = errorClass{http.StatusNotFound, proto.ErrorCodeNotFound}
+	classInvalid       = errorClass{http.StatusBadRequest, proto.ErrorCodeInvalidArgument}
+	classConflict      = errorClass{http.StatusConflict, proto.ErrorCodeConflict}
+	classUnavailable   = errorClass{http.StatusServiceUnavailable, proto.ErrorCodeUnavailable}
+	classInternal      = errorClass{http.StatusInternalServerError, proto.ErrorCodeInternal}
+)
+
+// errorClasses maps backend sentinels to responses; the first match
+// wins and anything unlisted is an internal error.
+var errorClasses = []struct {
+	err   error
+	class errorClass
+}{
+	{backend.ErrWorkspaceNotFound, classWorkspaceGone},
+	{backend.ErrLSPClientNotFound, classNotFound},
+	{sql.ErrNoRows, classNotFound},
+	{backend.ErrAgentNotInitialized, classInvalid},
+	{backend.ErrPathRequired, classInvalid},
+	{backend.ErrInvalidPermissionAction, classInvalid},
+	{backend.ErrUnknownCommand, classInvalid},
+	{backend.ErrInvalidClientID, classInvalid},
+	{backend.ErrInvalidWorkspacePath, classInvalid},
+	{backend.ErrInvalidSessionID, classInvalid},
+	{backend.ErrInvalidRunID, classInvalid},
+	{backend.ErrInvalidDataDir, classInvalid},
+	{backend.ErrInvalidArgument, classInvalid},
+	// 409, not 404: the workspace exists, the caller just has no live
+	// stream yet.
+	{backend.ErrClientNotAttached, classConflict},
+	{backend.ErrWorkspaceClosing, classConflict},
+	{backend.ErrServerNotIdle, classConflict},
+	{backend.ErrClientRetired, classConflict},
+	{backend.ErrSessionBusy, classConflict},
+	{backend.ErrChannelOptInMismatch, classConflict},
+	// 503, not 409: the request is not wrong, this process is just
+	// leaving. Clients retry against its replacement.
+	{backend.ErrServerShuttingDown, classUnavailable},
+}
+
+func classifyError(err error) errorClass {
+	for _, e := range errorClasses {
+		if errors.Is(err, e.err) {
+			return e.class
+		}
 	}
-	c.server.logError(r, err.Error())
-	jsonError(w, status, err.Error())
+	return classInternal
+}
+
+func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err error) {
+	class := classifyError(err)
+	if class.status >= http.StatusInternalServerError {
+		c.server.logError(r, err.Error())
+	} else {
+		c.server.logDebug(r, err.Error())
+	}
+	writeError(w, class.status, class.code, err.Error())
 }
 
 func jsonEncode(w http.ResponseWriter, v any) {
@@ -1231,10 +1257,26 @@ func jsonEncode(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// jsonError writes an error response whose code follows from status.
 func jsonError(w http.ResponseWriter, status int, message string) {
+	code := proto.ErrorCodeInternal
+	switch status {
+	case http.StatusBadRequest:
+		code = proto.ErrorCodeInvalidArgument
+	case http.StatusNotFound:
+		code = proto.ErrorCodeNotFound
+	case http.StatusConflict:
+		code = proto.ErrorCodeConflict
+	case http.StatusServiceUnavailable:
+		code = proto.ErrorCodeUnavailable
+	}
+	writeError(w, status, code, message)
+}
+
+func writeError(w http.ResponseWriter, status int, code proto.ErrorCode, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(proto.Error{Message: message})
+	_ = json.NewEncoder(w).Encode(proto.Error{Message: message, Code: code})
 }
 
 // handleGetWorkspaceSessionCheckpoints returns a session's rewind

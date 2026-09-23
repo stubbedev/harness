@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"slices"
+
+	"github.com/stubbedev/harness/internal/proto"
 )
 
 // Typed outcomes callers need to distinguish from ordinary transport
@@ -50,19 +52,29 @@ func checkStatus(rsp *http.Response, ok ...int) error {
 	if slices.Contains(ok, rsp.StatusCode) {
 		return nil
 	}
+	var body proto.Error
+	_ = json.NewDecoder(rsp.Body).Decode(&body)
 	var err error
-	if msg := decodeErrorMessage(rsp.Body); msg != "" {
-		err = fmt.Errorf("status code %d: %s", rsp.StatusCode, msg)
+	if body.Message != "" {
+		err = fmt.Errorf("status code %d: %s", rsp.StatusCode, body.Message)
 	} else {
 		err = fmt.Errorf("status code %d", rsp.StatusCode)
 	}
-	switch rsp.StatusCode {
-	case http.StatusNotFound:
+	switch {
+	case rsp.StatusCode == http.StatusNotFound && isWorkspaceGone(body.Code):
 		return fmt.Errorf("%w: %w", ErrNotFound, err)
-	case http.StatusServiceUnavailable:
+	case rsp.StatusCode == http.StatusServiceUnavailable:
 		return fmt.Errorf("%w: %w", ErrServerShuttingDown, err)
 	}
 	return err
+}
+
+// isWorkspaceGone reports whether a 404 means the workspace (or, for a
+// route the server does not know, the endpoint) is missing, as opposed
+// to a session or LSP server inside a live workspace. Servers that
+// predate error codes send none, so an empty code keeps the old reading.
+func isWorkspaceGone(code proto.ErrorCode) bool {
+	return code == "" || code == proto.ErrorCodeWorkspaceNotFound
 }
 
 // okOrError closes rsp and returns nil when its status is OK.
