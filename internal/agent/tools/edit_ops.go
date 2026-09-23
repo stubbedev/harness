@@ -104,13 +104,13 @@ func ambiguityHint(content, old string) string {
 // commitFileChange writes newContent to filePath, updates the file history,
 // and records the read in the file tracker. Callers must convert line endings
 // before calling this function.
-func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf ...bool) error {
+func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf bool) error {
 	current, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
 	expected := oldContent
-	if len(crlf) > 0 && crlf[0] {
+	if crlf {
 		expected, _ = fsext.ToWindowsLineEndings(oldContent)
 	}
 	if string(current) != expected {
@@ -169,37 +169,43 @@ func recordFileVersion(ctx context.Context, files history.Service, sessionID, fi
 	return nil
 }
 
-func loadExistingFile(edit editContext, filePath, sessionError string, hints ...string) (sessionID, oldContent string, isCrlf bool, resp fantasy.ToolResponse, err error) {
+// loadExistingFile reads a file the edit tool is about to change, in Unix
+// line endings, and checks the session's evidence for it. A problem the
+// model should hear about comes back as toolErr; err is for failures the
+// tool cannot report as a result. hint is text the edit expects to find,
+// which positions a conflict report near it.
+func loadExistingFile(edit editContext, filePath, hint string) (sessionID, oldContent string, isCrlf bool, toolErr *fantasy.ToolResponse, err error) {
+	reject := func(msg string) (string, string, bool, *fantasy.ToolResponse, error) {
+		resp := fantasy.NewTextErrorResponse(msg)
+		return "", "", false, &resp, nil
+	}
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("file not found: %s", filePath)), nil
+			return reject(fmt.Sprintf("file not found: %s", filePath))
 		}
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return "", "", false, nil, fmt.Errorf("failed to access file: %w", err)
 	}
 
 	if fileInfo.IsDir() {
-		return "", "", false, fantasy.NewTextErrorResponse(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
+		return reject(fmt.Sprintf("path is a directory, not a file: %s", filePath))
 	}
 
-	sessionID = GetSessionFromContext(edit.ctx)
-	if sessionID == "" {
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("%s", sessionError)
+	sessionID, err = SessionIDOrError(edit.ctx, "editing a file")
+	if err != nil {
+		return "", "", false, nil, err
 	}
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", "", false, fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
+		return "", "", false, nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	if checkErr := checkFileEvidence(edit.ctx, edit.filetracker, sessionID, filePath, content, nil); checkErr != nil {
-		at := 0
-		if len(hints) > 0 {
-			at = max(0, strings.Index(string(content), hints[0]))
-		}
-		return "", "", false, fantasy.NewTextErrorResponse(conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, content, at, checkErr).Error()), nil
+		at := max(0, strings.Index(string(content), hint))
+		return reject(conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, content, at, checkErr).Error())
 	}
 
 	oldContent, isCrlf = fsext.ToUnixLineEndings(string(content))
-	return sessionID, oldContent, isCrlf, fantasy.ToolResponse{}, nil
+	return sessionID, oldContent, isCrlf, nil, nil
 }

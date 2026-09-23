@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/pubsub"
@@ -237,7 +236,7 @@ func TestProcessMultiEditExistingFilePartialFailure(t *testing.T) {
 		},
 	}
 
-	resp, err := processEditExistingFile(edit, params, fantasy.ToolCall{ID: "call"})
+	resp, err := processEditExistingFile(edit, params)
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "Applied 1 of 2 edits")
@@ -276,7 +275,7 @@ func TestProcessMultiEditWithCreationPartialFailure(t *testing.T) {
 		},
 	}
 
-	resp, err := processEditWithCreation(edit, params, fantasy.ToolCall{ID: "call"})
+	resp, err := processEditWithCreation(edit, params)
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "File created with 2 of 3 edits")

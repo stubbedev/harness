@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,7 +46,7 @@ func TestEditPreservesCRLFAndMetadata(t *testing.T) {
 	resp, err := processEditExistingFile(edit, EditParams{
 		FilePath: filePath,
 		Edits:    []EditOperation{{OldString: "beta", NewString: "BETA"}},
-	}, fantasy.ToolCall{ID: "call"})
+	})
 	require.NoError(t, err)
 	require.False(t, resp.IsError)
 
@@ -79,7 +78,7 @@ func TestEditRejectsMultipleMatchesWithoutReplaceAll(t *testing.T) {
 	resp, err := processEditExistingFile(edit, EditParams{
 		FilePath: filePath,
 		Edits:    []EditOperation{{OldString: "alpha\n", NewString: ""}},
-	}, fantasy.ToolCall{ID: "call"})
+	})
 	require.NoError(t, err)
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "all 1 edit(s) failed")

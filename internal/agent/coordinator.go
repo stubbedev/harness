@@ -1103,8 +1103,6 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 			return nil, err
 		}
 		allTools = append(allTools, agentTool)
-		// The wait tool is the sync point for background dispatches; it is
-		// useless without the dispatcher, so they share a gate.
 	}
 
 	if slices.Contains(agent.AllowedTools, tools.ResearchToolName) {

@@ -56,7 +56,7 @@ func NewEditTool(
 	return fantasy.NewParallelAgentTool(
 		EditToolName,
 		editDescription,
-		func(ctx context.Context, params EditParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		func(ctx context.Context, params EditParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			if params.FilePath == "" {
 				return fantasy.NewTextErrorResponse("file_path is required"), nil
 			}
@@ -79,10 +79,10 @@ func NewEditTool(
 			defer unlock()
 			editCtx := editContext{ctx, files, filetracker, workingDir}
 			// Handle file creation case (first edit has empty old_string)
-			if len(params.Edits) > 0 && params.Edits[0].OldString == "" {
-				response, err = processEditWithCreation(editCtx, params, call)
+			if params.Edits[0].OldString == "" {
+				response, err = processEditWithCreation(editCtx, params)
 			} else {
-				response, err = processEditExistingFile(editCtx, params, call)
+				response, err = processEditExistingFile(editCtx, params)
 			}
 
 			if err != nil {
@@ -149,12 +149,10 @@ func applyEditsToContent(currentContent string, edits []EditOperation, startInde
 	return currentContent, failedEdits, whitespaceCorrected, nil
 }
 
-func processEditWithCreation(edit editContext, params EditParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	// First edit creates the file
+// processEditWithCreation creates the file from the first edit, whose
+// old_string is empty, and applies the rest to it.
+func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolResponse, error) {
 	firstEdit := params.Edits[0]
-	if firstEdit.OldString != "" {
-		return fantasy.NewTextErrorResponse("first edit must have empty old_string for file creation"), nil
-	}
 
 	// Check if file already exists
 	if _, err := os.Stat(params.FilePath); err == nil {
@@ -218,13 +216,13 @@ func processEditWithCreation(edit editContext, params EditParams, _ fantasy.Tool
 	), nil
 }
 
-func processEditExistingFile(edit editContext, params EditParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, resp, err := loadExistingFile(edit, params.FilePath, "session ID is required for editing a file", params.Edits[0].OldString)
+func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolResponse, error) {
+	sessionID, oldContent, isCrlf, toolErr, err := loadExistingFile(edit, params.FilePath, params.Edits[0].OldString)
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
-	if resp.Content != "" || resp.IsError {
-		return resp, nil
+	if toolErr != nil {
+		return *toolErr, nil
 	}
 
 	if err := validateEditSizes(oldContent, params.Edits); err != nil {
