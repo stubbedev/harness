@@ -6,12 +6,16 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/stubbedev/harness/internal/db"
 )
@@ -376,25 +380,49 @@ func fromDB(row db.Memory) Item {
 // ASCII letters and digits, everything else collapsed to single hyphens,
 // trimmed and truncated. Saving without an ID slugs the title, so
 // re-saving under the same title updates the same memory.
+//
+// A title whose letters or digits are not all ASCII would lose them in
+// the slug, so two different titles ("日本 notes", "中国 notes") could
+// share an ID and overwrite each other. Such a slug carries a short hash
+// of the whole title instead, keeping it stable and distinct.
 func Slug(title string) string {
 	var b strings.Builder
 	lastHyphen := false
+	dropped := false
 	for _, r := range strings.ToLower(title) {
 		switch {
 		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
 			b.WriteRune(r)
 			lastHyphen = false
-		case !lastHyphen && b.Len() > 0:
+			continue
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			dropped = true
+		}
+		if !lastHyphen && b.Len() > 0 {
 			b.WriteByte('-')
 			lastHyphen = true
 		}
 	}
-	return truncate(strings.Trim(b.String(), "-"), MaxIDLen)
+	slug := strings.Trim(b.String(), "-")
+	if !dropped {
+		return strings.TrimRight(truncate(slug, MaxIDLen), "-")
+	}
+	sum := sha256.Sum256([]byte(title))
+	suffix := "m-" + hex.EncodeToString(sum[:6])
+	if slug == "" {
+		return suffix
+	}
+	slug = strings.TrimRight(truncate(slug, MaxIDLen-len(suffix)-1), "-")
+	return slug + "-" + suffix
 }
 
+// truncate cuts s to at most max bytes without splitting a rune.
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
 	}
 	return s[:max]
 }

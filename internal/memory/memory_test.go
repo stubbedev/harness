@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/db"
@@ -245,4 +246,20 @@ func TestSlug(t *testing.T) {
 
 	long := strings.Repeat("a very long title ", 10)
 	require.LessOrEqual(t, len(Slug(long)), MaxIDLen)
+
+	// Titles whose letters the ASCII slug would drop must still get
+	// distinct, stable, non-empty IDs.
+	ja, zh := Slug("日本 notes"), Slug("中国 notes")
+	require.NotEqual(t, ja, zh)
+	require.Equal(t, ja, Slug("日本 notes"))
+	require.True(t, strings.HasPrefix(ja, "notes-m-"), ja)
+	require.NotEmpty(t, Slug("日本語メモ"))
+	require.LessOrEqual(t, len(Slug(strings.Repeat("日本 notes ", 20))), MaxIDLen)
+}
+
+func TestTruncateKeepsRunes(t *testing.T) {
+	t.Parallel()
+	got := truncate("aé", 2)
+	require.Equal(t, "a", got)
+	require.True(t, utf8.ValidString(got))
 }
