@@ -66,6 +66,14 @@ func RelWithin(dir, path string) (rel string, ok bool) {
 	return rel, true
 }
 
+// Within reports whether path is dir itself or lexically inside it. It
+// does not resolve symlinks; use [SameOrInside] when either side may
+// reach the directory through one.
+func Within(dir, path string) bool {
+	_, ok := RelWithin(dir, path)
+	return ok
+}
+
 // SameOrInside reports whether path is dir itself or inside it, after
 // resolving both sides to their canonical form. The resolution matters:
 // a cwd can reach the same directory through a symlink (TMPDIR on macOS)

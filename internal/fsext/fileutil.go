@@ -93,17 +93,6 @@ func DirTrim(pwd string, lim int) string {
 	return out
 }
 
-// HasPrefix checks if the given path starts with the specified prefix.
-// Uses filepath.Rel to determine if path is within prefix.
-func HasPrefix(path, prefix string) bool {
-	rel, err := filepath.Rel(prefix, path)
-	if err != nil {
-		return false
-	}
-	// If path is within prefix, Rel will not return a path starting with ".."
-	return !strings.HasPrefix(rel, "..")
-}
-
 // ToUnixLineEndings converts Windows line endings (CRLF) to Unix line endings (LF).
 func ToUnixLineEndings(content string) (string, bool) {
 	if strings.Contains(content, "\r\n") {

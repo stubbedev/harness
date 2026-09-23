@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/tidwall/sjson"
 )
 
@@ -26,7 +26,7 @@ func (c *coordinator) prepareIsolatedDispatch(ctx context.Context) (*isolatedDis
 		return nil, err
 	}
 	root := worktree.Path
-	if relative, err := filepath.Rel(worktree.SourceRoot, c.cfg.WorkingDir()); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+	if relative, ok := filepathext.RelWithin(worktree.SourceRoot, c.cfg.WorkingDir()); ok {
 		root = filepath.Join(root, relative)
 	}
 	return &isolatedDispatch{worktree: worktree, workspace: c.newAgentWorkspace(root)}, nil

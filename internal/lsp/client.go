@@ -17,7 +17,7 @@ import (
 	"github.com/charmbracelet/x/powernap/pkg/transport"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
-	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/home"
 )
 
@@ -441,7 +441,7 @@ func (c *Client) HandlesFile(path string) bool {
 	if c == nil {
 		return false
 	}
-	if !fsext.HasPrefix(path, c.cwd) {
+	if !filepathext.Within(c.cwd, path) {
 		slog.Debug("File outside workspace", "name", c.name, "file", path, "workDir", c.cwd)
 		return false
 	}

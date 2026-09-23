@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
+	"github.com/stubbedev/harness/internal/filepathext"
 )
 
 type ActivationRules struct {
@@ -123,8 +124,8 @@ func activationPath(workingDir, file string) (string, bool) {
 	if !filepath.IsAbs(file) {
 		file = filepath.Join(root, file)
 	}
-	rel, err := filepath.Rel(root, filepath.Clean(file))
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, ok := filepathext.RelWithin(root, filepath.Clean(file))
+	if !ok {
 		return "", false
 	}
 	return filepath.ToSlash(rel), true

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/stubbedev/harness/internal/filepathext"
 )
 
 type AgentWorktree struct {
@@ -95,7 +97,7 @@ func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *Age
 	if err != nil {
 		return nil, err
 	}
-	if rel, relErr := filepath.Rel(root, parentDir); relErr != nil || rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+	if _, inside := filepathext.RelWithin(root, parentDir); inside {
 		return nil, errors.New("worktree storage must be outside the source checkout")
 	}
 	if err = os.MkdirAll(parentDir, 0o700); err != nil {

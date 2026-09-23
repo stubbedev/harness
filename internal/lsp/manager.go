@@ -20,7 +20,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/csync"
-	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/filepathext"
 )
 
 const (
@@ -151,7 +151,7 @@ func (s *Manager) Start(ctx context.Context, path string) {
 	if abs, err := filepath.Abs(path); err == nil {
 		path = abs
 	}
-	if !fsext.HasPrefix(path, s.cfg.WorkingDir()) {
+	if !filepathext.Within(s.cfg.WorkingDir(), path) {
 		return
 	}
 

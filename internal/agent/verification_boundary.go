@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/history"
 
 	"github.com/stubbedev/harness/internal/message"
@@ -28,8 +29,7 @@ func verificationChangedPaths(ctx context.Context, root, sessionID string, files
 		}
 		for _, file := range changed {
 			if filepath.IsAbs(file.Path) {
-				relative, err := filepath.Rel(root, file.Path)
-				if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				if _, ok := filepathext.RelWithin(root, file.Path); !ok {
 					continue
 				}
 			}

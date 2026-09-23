@@ -18,7 +18,7 @@ import (
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/extensions"
-	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
@@ -592,17 +592,17 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 // subagentScope classifies a subagent definition path: "builtin" (no file),
 // "project" for files under the working directory or any project discovery
 // dir (which includes the git worktree root for monorepo-level subagents),
-// and "user" otherwise. Comparison uses fsext.HasPrefix (filepath.Rel-based)
+// and "user" otherwise. Comparison uses filepathext.Within (filepath.Rel-based)
 // so it works with either path separator.
 func subagentScope(filePath, workingDir string, projectDirs []string) string {
 	if filePath == "" {
 		return "builtin"
 	}
-	if workingDir != "" && fsext.HasPrefix(filePath, workingDir) {
+	if workingDir != "" && filepathext.Within(workingDir, filePath) {
 		return "project"
 	}
 	for _, dir := range projectDirs {
-		if fsext.HasPrefix(filePath, dir) {
+		if filepathext.Within(dir, filePath) {
 			return "project"
 		}
 	}

@@ -1,6 +1,7 @@
 package filepathext
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,5 +34,25 @@ func TestSplitGlobPrefix(t *testing.T) {
 			require.Equal(t, tc.wantPrefix, gotPrefix, "prefix")
 			require.Equal(t, tc.wantRest, gotRest, "rest")
 		})
+	}
+}
+
+func TestWithin(t *testing.T) {
+	t.Parallel()
+	root := filepath.FromSlash("/repo")
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/repo", true},
+		{"/repo/a/b.go", true},
+		// A child whose name merely starts with ".." is still inside.
+		{"/repo/..cache/x", true},
+		{"/repo/../other", false},
+		{"/other", false},
+		{"/repository/x", false},
+	}
+	for _, c := range cases {
+		require.Equal(t, c.want, Within(root, filepath.FromSlash(c.path)), c.path)
 	}
 }

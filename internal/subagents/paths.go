@@ -2,7 +2,7 @@ package subagents
 
 import (
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/filepathext"
 )
 
 // InGlobalDir reports whether path lies inside one of the global (user-scope)
@@ -15,7 +15,7 @@ func InGlobalDir(path string) bool {
 		return false
 	}
 	for _, dir := range config.GlobalSubagentsDirs() {
-		if fsext.HasPrefix(path, dir) {
+		if filepathext.Within(dir, path) {
 			return true
 		}
 	}
