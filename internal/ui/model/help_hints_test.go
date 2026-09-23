@@ -147,7 +147,7 @@ func TestAttachmentHintsFollowDeleteMode(t *testing.T) {
 	// Armed with rewind armed: esc leaves delete mode first, so the
 	// rewind hint yields instead.
 	warmCaches(m, false)
-	m.rewindEscArmed = true
+	m.esc.set(escRewind)
 	require.False(t, hasDesc(m.ShortHelp(), "press again to rewind"))
 	require.True(t, hasDesc(m.ShortHelp(), "cancel delete mode"))
 }

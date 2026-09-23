@@ -24,12 +24,12 @@ func TestIdleDoubleEscapeOpensRewind(t *testing.T) {
 	consumed, cmd := m.handleRewindEscape()
 	require.True(t, consumed, "an unowned idle escape is consumed to arm")
 	require.NotNil(t, cmd, "arming starts the shared cancel timer")
-	require.True(t, m.rewindEscArmed)
+	require.Equal(t, escRewind, m.esc.state)
 
 	// Second press opens the picker.
 	consumed, _ = m.handleRewindEscape()
 	require.True(t, consumed)
-	require.False(t, m.rewindEscArmed, "firing disarms")
+	require.Equal(t, escNone, m.esc.state, "firing disarms")
 	require.True(t, m.dialog.ContainsDialog(dialog.RewindID), "the rewind picker opens")
 }
 
@@ -46,14 +46,14 @@ func TestRewindEscapeDeclinesWhenOwned(t *testing.T) {
 	// Busy: never arms.
 	consumed, _ := m.handleRewindEscape()
 	require.False(t, consumed, "busy escape belongs to the turn cancel")
-	require.False(t, m.rewindEscArmed)
+	require.Equal(t, escNone, m.esc.state)
 
 	// Idle again, but a draft owns the press.
 	warmCaches(m, false)
 	m.textarea.InsertString("draft")
 	consumed, _ = m.handleRewindEscape()
 	require.False(t, consumed, "a draft swallows the escape")
-	require.False(t, m.rewindEscArmed)
+	require.Equal(t, escNone, m.esc.state)
 	m.textarea.Reset()
 
 	// History browsing owns it too.
@@ -61,17 +61,17 @@ func TestRewindEscapeDeclinesWhenOwned(t *testing.T) {
 	m.promptHistory.index = 0
 	consumed, _ = m.handleRewindEscape()
 	require.False(t, consumed, "history browsing swallows the escape")
-	require.False(t, m.rewindEscArmed)
+	require.Equal(t, escNone, m.esc.state)
 	m.promptHistory.index = -1
 
 	// Arm, then a busy edge disarms.
 	consumed, _ = m.handleRewindEscape()
 	require.True(t, consumed)
-	require.True(t, m.rewindEscArmed)
+	require.Equal(t, escRewind, m.esc.state)
 	warmCaches(m, true)
 	consumed, _ = m.handleRewindEscape()
 	require.False(t, consumed, "a run starting mid-window stops the rewind arm")
-	require.False(t, m.rewindEscArmed)
+	require.Equal(t, escNone, m.esc.state)
 }
 
 // TestCancelArmingSuppressesRewindArm pins the mutual exclusion: the
@@ -84,14 +84,13 @@ func TestCancelArmingSuppressesRewindArm(t *testing.T) {
 	m := newBusyUI(ws)
 	warmCaches(m, true)
 
-	m.rewindEscArmed = true
+	m.esc.set(escRewind)
 	m.cancelAgent()
-	require.False(t, m.rewindEscArmed, "cancel arming clears the rewind arm")
+	require.Equal(t, escCancel, m.esc.state, "cancel arming replaces the rewind arm")
 
-	// And the rewind arm clears a stale cancel arm.
+	// And the rewind arm replaces a stale cancel arm.
 	warmCaches(m, false)
-	m.isCanceling = true
+	m.esc.set(escCancel)
 	m.handleRewindEscape()
-	require.False(t, m.isCanceling, "rewind arming clears the cancel arm")
-	assert.True(t, m.rewindEscArmed)
+	assert.Equal(t, escRewind, m.esc.state, "rewind arming replaces the cancel arm")
 }

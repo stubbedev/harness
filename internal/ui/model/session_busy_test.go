@@ -538,7 +538,7 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 	// arms the double-press cancel.
 	require.Zero(t, m.promptQueue)
 	m.cancelAgent()
-	require.True(t, m.isCanceling, "first esc press must arm cancellation")
+	require.Equal(t, escCancel, m.esc.state, "first esc press must arm cancellation")
 
 	// Second press must actually cancel.
 	m.cancelAgent()
@@ -559,7 +559,7 @@ func TestCancelAgentCancelsTurnNotQueue(t *testing.T) {
 	ws.resetCounters()
 
 	require.NotNil(t, m.cancelAgent(), "first esc press arms the double-press cancel")
-	require.True(t, m.isCanceling, "first esc press must arm cancellation")
+	require.Equal(t, escCancel, m.esc.state, "first esc press must arm cancellation")
 	require.Zero(t, ws.clearQueueCalls, "esc must not clear the queue")
 	require.Zero(t, ws.cancelTurnCalls, "the armed press cancels nothing yet")
 

@@ -148,10 +148,6 @@ type shellStreamMsg struct {
 }
 
 type (
-	// cancelTimerExpiredMsg is sent when the cancel timer expires.
-	cancelTimerExpiredMsg struct{}
-	// quitTimerExpiredMsg is sent when the quit timer expires.
-	quitTimerExpiredMsg struct{}
 	// userCommandsLoadedMsg is sent when user commands are loaded.
 	userCommandsLoadedMsg struct {
 		Commands []commands.CustomCommand
@@ -272,18 +268,12 @@ type UI struct {
 	dialog *dialog.Overlay
 	status *Status
 
-	// isCanceling tracks whether the user has pressed escape once to cancel.
-	isCanceling bool
-	// rewindEscArmed tracks the first escape of the idle double-escape
-	// that opens the rewind picker (the cancel-last-message path). It
-	// shares the cancel timer window and is mutually exclusive with
-	// isCanceling: while the agent is busy escape cancels the turn
-	// instead.
-	rewindEscArmed bool
-
-	// isQuitting tracks whether the user has pressed the quit key once,
-	// arming the double-press quit window.
-	isQuitting bool
+	// esc is what the first press of a double-escape armed: a turn
+	// cancel while busy, the rewind picker while idle.
+	esc timedArm[escArm]
+	// quitArm is set once the quit key has been pressed, arming the
+	// double-press quit window.
+	quitArm timedArm[bool]
 
 	// bangMode tracks whether the editor is in bang (!) shell mode.
 	bangMode     bool
@@ -1269,10 +1259,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pubsub.Event[question.Notification]:
 		cmds = append(cmds, m.handleQuestionNotification(msg.Payload))
 	case cancelTimerExpiredMsg:
-		m.isCanceling = false
-		m.rewindEscArmed = false
+		m.esc.expire(msg.gen)
 	case quitTimerExpiredMsg:
-		m.isQuitting = false
+		m.quitArm.expire(msg.gen)
 	case tea.TerminalVersionMsg:
 		termVersion := strings.ToLower(msg.Name)
 		// Only enable progress bar for the following terminals.
@@ -3322,23 +3311,8 @@ func (m *UI) ShortHelp() []key.Binding {
 
 	switch m.state {
 	case uiChat:
-		// Show cancel binding if agent is busy. Esc cancels only from
-		// the editor, so hint it only there. The cancel check runs
-		// before attachment delete mode consumes esc, so the hint stays
-		// accurate while that mode is armed.
-		if m.isAgentBusy() && m.focus == uiFocusEditor {
-			cancelBinding := k.Chat.Cancel
-			if m.isCanceling {
-				cancelBinding.SetHelp(keys.HelpKeys(cancelBinding), "press again to cancel")
-			}
-			binds = append(binds, cancelBinding)
-		} else if m.focus == uiFocusEditor && m.rewindEscArmed && !deleting {
-			// Idle with the first escape pressed: the next one opens the
-			// rewind picker. Armed delete mode consumes esc first, so the
-			// rewind hint yields while it is up.
-			rewindBinding := k.Chat.Cancel
-			rewindBinding.SetHelp(keys.HelpKeys(rewindBinding), "press again to rewind")
-			binds = append(binds, rewindBinding)
+		if b, ok := m.escHintBinding(); ok {
+			binds = append(binds, b)
 		}
 
 		switch m.focus {
@@ -3397,13 +3371,9 @@ func (m *UI) ShortHelp() []key.Binding {
 		}
 	}
 
-	quit := k.Quit
-	if m.isQuitting {
-		quit.SetHelp(keys.HelpKeys(quit), "press again to quit")
-	}
 	binds = append(
 		binds,
-		quit,
+		m.quitHintBinding(),
 		k.Help,
 	)
 
@@ -3438,19 +3408,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 	switch m.state {
 	case uiChat:
-		// Show cancel binding if agent is busy; esc cancels only from
-		// the editor, and the cancel check runs before delete mode can
-		// consume esc, so the hint stays accurate either way.
-		if m.isAgentBusy() && m.focus == uiFocusEditor {
-			cancelBinding := k.Chat.Cancel
-			if m.isCanceling {
-				cancelBinding.SetHelp(keys.HelpKeys(cancelBinding), "press again to cancel")
-			}
-			binds = append(binds, []key.Binding{cancelBinding})
-		} else if m.focus == uiFocusEditor && m.rewindEscArmed && !deleting {
-			rewindBinding := k.Chat.Cancel
-			rewindBinding.SetHelp(keys.HelpKeys(rewindBinding), "press again to rewind")
-			binds = append(binds, []key.Binding{rewindBinding})
+		if b, ok := m.escHintBinding(); ok {
+			binds = append(binds, []key.Binding{b})
 		}
 
 		mainBinds := []key.Binding{}
@@ -3564,15 +3523,11 @@ func (m *UI) FullHelp() [][]key.Binding {
 		}
 	}
 
-	quit := k.Quit
-	if m.isQuitting {
-		quit.SetHelp(keys.HelpKeys(quit), "press again to quit")
-	}
 	binds = append(
 		binds,
 		[]key.Binding{
 			help,
-			quit,
+			m.quitHintBinding(),
 		},
 	)
 
@@ -4519,47 +4474,27 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 	return tea.Batch(cmds...)
 }
 
-const (
-	cancelTimerDuration = 2 * time.Second
-	quitTimerDuration   = 1 * time.Second
-)
-
-// cancelTimerCmd creates a command that expires the cancel timer.
-func cancelTimerCmd() tea.Cmd {
-	return tea.Tick(cancelTimerDuration, func(time.Time) tea.Msg {
-		return cancelTimerExpiredMsg{}
-	})
-}
-
-// quitTimerCmd creates a command that expires the quit timer.
-func quitTimerCmd() tea.Cmd {
-	return tea.Tick(quitTimerDuration, func(time.Time) tea.Msg {
-		return quitTimerExpiredMsg{}
-	})
-}
-
 // quit handles the quit key press: the first press arms a short window and
 // hints the user; a second press within the window quits the application
 // without a confirmation dialog.
 func (m *UI) quit() tea.Cmd {
-	if m.isQuitting {
-		m.isQuitting = false
+	if m.quitArm.state {
+		m.quitArm.clear()
 		return tea.Quit
 	}
 
-	m.isQuitting = true
 	keyHint := "ctrl+c"
 	if keys := m.keyMap.Quit.Keys(); len(keys) > 0 {
 		keyHint = keys[0]
 	}
 	return tea.Batch(
 		util.ReportWarn("Press "+keyHint+" again to quit"),
-		quitTimerCmd(),
+		m.armQuit(),
 	)
 }
 
 // cancelAgent handles the cancel key press while the agent is busy. The
-// first press sets isCanceling to true and starts a timer. The second
+// first press arms the escape window for a cancel. The second
 // press (before the timer expires) interrupts the running turn — the
 // turn only: queued prompts survive it (they stay rendered in the
 // transcript and run once the interrupted turn unwinds), so escape never
@@ -4575,10 +4510,9 @@ func (m *UI) cancelAgent() tea.Cmd {
 		return nil
 	}
 
-	if m.isCanceling {
+	if m.esc.state == escCancel {
 		// Second escape press — interrupt the running turn.
-		m.isCanceling = false
-		m.rewindEscArmed = false
+		m.esc.clear()
 
 		// Cancel a running bang command if one is in progress.
 		if m.bangCancel != nil {
@@ -4598,10 +4532,8 @@ func (m *UI) cancelAgent() tea.Cmd {
 		return m.dispatchBusyRefresh()
 	}
 
-	// First escape press - set canceling state and start timer.
-	m.isCanceling = true
-	m.rewindEscArmed = false
-	return cancelTimerCmd()
+	// First escape press - arm the cancel window.
+	return m.armEsc(escCancel)
 }
 
 // handleRewindEscape implements the idle half of the escape contract:
@@ -4612,24 +4544,28 @@ func (m *UI) cancelAgent() tea.Cmd {
 // and while the agent is busy escape stays the turn cancel.
 func (m *UI) handleRewindEscape() (bool, tea.Cmd) {
 	if m.state != uiChat || m.focus != uiFocusEditor || m.isAgentBusy() || !m.hasSession() {
-		m.rewindEscArmed = false
+		m.disarmRewind()
 		return false, nil
 	}
 	// A draft or history browsing owns the press. The messages-length
 	// guard keeps the zero value of index (0) from reading as
 	// "browsing" before any history has loaded.
 	if (m.promptHistory.index >= 0 && len(m.promptHistory.messages) > 0) || m.textarea.Value() != "" {
-		m.rewindEscArmed = false
+		m.disarmRewind()
 		return false, nil
 	}
-	if m.rewindEscArmed {
-		m.rewindEscArmed = false
-		m.isCanceling = false
+	if m.esc.state == escRewind {
+		m.esc.clear()
 		return true, m.openRewindDialog()
 	}
-	m.rewindEscArmed = true
-	m.isCanceling = false
-	return true, cancelTimerCmd()
+	return true, m.armEsc(escRewind)
+}
+
+// disarmRewind drops a pending rewind arm, leaving a cancel arm alone.
+func (m *UI) disarmRewind() {
+	if m.esc.state == escRewind {
+		m.esc.clear()
+	}
 }
 
 // openDialog opens a dialog by its ID.

@@ -33,12 +33,12 @@ func TestQuitRequiresDoublePress(t *testing.T) {
 
 	// First press: armed, nothing quit yet.
 	_, cmd := m.Update(ctrlC())
-	require.True(t, m.isQuitting, "first ctrl+c must arm the quit window")
+	require.True(t, m.quitArm.state, "first ctrl+c must arm the quit window")
 	require.False(t, isQuitCmd(cmd), "first ctrl+c must not quit")
 
 	// Second press within the window quits.
 	_, cmd = m.Update(ctrlC())
-	require.False(t, m.isQuitting, "second ctrl+c must disarm after quitting")
+	require.False(t, m.quitArm.state, "second ctrl+c must disarm after quitting")
 	require.True(t, isQuitCmd(cmd), "second ctrl+c must quit")
 }
 
@@ -52,11 +52,11 @@ func TestQuitTimerExpiryDisarms(t *testing.T) {
 	warmCaches(m, false)
 
 	m.Update(ctrlC())
-	m.Update(quitTimerExpiredMsg{})
-	require.False(t, m.isQuitting, "timer expiry must disarm the quit window")
+	m.Update(quitTimerExpiredMsg{gen: m.quitArm.gen})
+	require.False(t, m.quitArm.state, "timer expiry must disarm the quit window")
 
 	_, cmd := m.Update(ctrlC())
-	require.True(t, m.isQuitting, "a press after expiry must re-arm, not quit")
+	require.True(t, m.quitArm.state, "a press after expiry must re-arm, not quit")
 	require.False(t, isQuitCmd(cmd))
 }
 
@@ -71,7 +71,7 @@ func TestQuitHintFollowsRebind(t *testing.T) {
 	m.keyMap.ApplyKeybinds(map[string][]string{"quit": {"ctrl+q"}})
 
 	m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModCtrl})
-	require.True(t, m.isQuitting)
+	require.True(t, m.quitArm.state)
 
 	for _, b := range m.ShortHelp() {
 		if b.Help().Desc == "press again to quit" {
@@ -80,4 +80,23 @@ func TestQuitHintFollowsRebind(t *testing.T) {
 		}
 	}
 	t.Fatal("armed quit binding not present in short help")
+}
+
+// TestStaleQuitTimerKeepsNewerArm: a timer left over from an earlier arming
+// must not disarm a press made after it was started.
+func TestStaleQuitTimerKeepsNewerArm(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+
+	m.Update(ctrlC())
+	stale := m.quitArm.gen
+	m.Update(quitTimerExpiredMsg{gen: stale})
+	m.Update(ctrlC())
+	require.True(t, m.quitArm.state)
+
+	m.Update(quitTimerExpiredMsg{gen: stale})
+	require.True(t, m.quitArm.state, "a stale timer must not disarm a newer press")
 }
