@@ -448,17 +448,10 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	}
 
 	model := c.currentAgent.Model()
-	maxTokens := model.CatalogCfg.DefaultMaxTokens
-	if model.ModelCfg.MaxTokens != 0 {
-		maxTokens = model.ModelCfg.MaxTokens
-	}
-
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		return nil, errModelProviderNotConfigured
 	}
-
-	mergedOptions, temp, topP, topK, freqPenalty, presPenalty := mergeCallOptions(model, providerCfg)
 
 	if err := c.refreshTokenIfExpired(ctx, providerCfg); err != nil {
 		// NOTE(@andreynering): We don't return here because the event handling to ask the user to reauthenticate
@@ -486,42 +479,21 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// Propagate the caller-supplied RunID (set via agent.WithRunID
 	// at the HTTP boundary in backend.SendMessage) onto the
 	// SessionAgentCall so the terminal RunComplete event echoes it
-	// back. Both attempts in the retry chain reuse the same RunID;
-	// the coalesce closure publishes the final outcome under that
-	// same correlator.
-	runID := RunIDFromContext(ctx)
-	run := func() (*fantasy.AgentResult, error) {
-		return c.currentAgent.Run(ctx, SessionAgentCall{
-			SessionID:        sessionID,
-			RunID:            runID,
-			Prompt:           prompt,
-			Attachments:      attachments,
-			MaxOutputTokens:  maxTokens,
-			ProviderOptions:  mergedOptions,
-			Temperature:      temp,
-			TopP:             topP,
-			TopK:             callTopK(providerCfg, topK),
-			FrequencyPenalty: freqPenalty,
-			PresencePenalty:  presPenalty,
-			OnComplete:       onComplete,
-			Accepted:         accept,
-			OnAuthRefresh:    c.makeAuthRefreshCallback(providerCfg),
-		})
-	}
+	// back. Every attempt fantasy makes after an auth refresh reuses
+	// the same RunID; the coalesce closure publishes the final outcome
+	// under that same correlator.
+	call := newModelCall(model, providerCfg)
+	call.SessionID = sessionID
+	call.RunID = RunIDFromContext(ctx)
+	call.Prompt = prompt
+	call.Attachments = attachments
+	call.OnComplete = onComplete
+	call.Accepted = accept
+	call.OnAuthRefresh = c.makeAuthRefreshCallback(providerCfg)
 	beforeLoaded := c.skillTracker.LoadedNames()
-	result, originalErr := run()
+	result, originalErr := c.currentAgent.Run(ctx, call)
 	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
-
-	// Notify only if still unauthorized after retry — a successful
-	// retry means the user doesn't need to re-authenticate. AWS SSO is
-	// handled transparently inside OnAuthRefresh, so it needs no post-run
-	// notification here.
-	if originalErr != nil && isUnauthorized(originalErr) && c.notify != nil {
-		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-			Type:       notify.TypeReAuthenticate,
-			ProviderID: model.ModelCfg.Provider,
-		})
-	}
+	c.notifyIfUnauthorized(originalErr, model.ModelCfg.Provider)
 
 	if hasLatest && c.runComplete != nil {
 		c.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, latest)
@@ -843,14 +815,38 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 	return options
 }
 
-func mergeCallOptions(model Model, cfg config.ProviderConfig) (fantasy.ProviderOptions, *float64, *float64, *int64, *float64, *float64) {
-	modelOptions := getProviderOptions(model, cfg)
-	temp := cmp.Or(model.ModelCfg.Temperature, model.CatalogCfg.Options.Temperature)
-	topP := cmp.Or(model.ModelCfg.TopP, model.CatalogCfg.Options.TopP)
-	topK := cmp.Or(model.ModelCfg.TopK, model.CatalogCfg.Options.TopK)
-	freqPenalty := cmp.Or(model.ModelCfg.FrequencyPenalty, model.CatalogCfg.Options.FrequencyPenalty)
-	presPenalty := cmp.Or(model.ModelCfg.PresencePenalty, model.CatalogCfg.Options.PresencePenalty)
-	return modelOptions, temp, topP, topK, freqPenalty, presPenalty
+// newModelCall returns a call carrying everything the model and its
+// provider decide: the output-token budget, the merged provider options
+// and the sampling parameters, each falling back from the user's model
+// config to the catalog's defaults. The main run and sub-agent runs both
+// start from it so neither can drop a setting the other applies.
+func newModelCall(model Model, providerCfg config.ProviderConfig) SessionAgentCall {
+	maxTokens := model.CatalogCfg.DefaultMaxTokens
+	if model.ModelCfg.MaxTokens != 0 {
+		maxTokens = model.ModelCfg.MaxTokens
+	}
+	return SessionAgentCall{
+		MaxOutputTokens:  maxTokens,
+		ProviderOptions:  getProviderOptions(model, providerCfg),
+		Temperature:      cmp.Or(model.ModelCfg.Temperature, model.CatalogCfg.Options.Temperature),
+		TopP:             cmp.Or(model.ModelCfg.TopP, model.CatalogCfg.Options.TopP),
+		TopK:             callTopK(providerCfg, cmp.Or(model.ModelCfg.TopK, model.CatalogCfg.Options.TopK)),
+		FrequencyPenalty: cmp.Or(model.ModelCfg.FrequencyPenalty, model.CatalogCfg.Options.FrequencyPenalty),
+		PresencePenalty:  cmp.Or(model.ModelCfg.PresencePenalty, model.CatalogCfg.Options.PresencePenalty),
+	}
+}
+
+// notifyIfUnauthorized asks the user to re-authenticate when a run still
+// failed as unauthorized after OnAuthRefresh had its chance. A successful
+// retry means there is nothing to ask; AWS SSO is refreshed inside
+// OnAuthRefresh and needs no notice.
+func (c *coordinator) notifyIfUnauthorized(err error, providerID string) {
+	if err != nil && isUnauthorized(err) && c.notify != nil {
+		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
+			Type:       notify.TypeReAuthenticate,
+			ProviderID: providerID,
+		})
+	}
 }
 
 // activeSubagentsList returns the current active subagents. It reads the live
@@ -2103,11 +2099,6 @@ func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, sess
 	}
 	// Get model configuration
 	model := params.Agent.Model()
-	maxTokens := model.CatalogCfg.DefaultMaxTokens
-	if model.ModelCfg.MaxTokens != 0 {
-		maxTokens = model.ModelCfg.MaxTokens
-	}
-
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)
 	if !ok {
 		// A tool-error response, not a bare error: the provider set can
@@ -2128,31 +2119,13 @@ func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, sess
 		}
 	}
 
-	// Run the agent
-	run := func() (*fantasy.AgentResult, error) {
-		return params.Agent.Run(runCtx, SessionAgentCall{
-			SessionID:        session.ID,
-			Prompt:           params.Prompt,
-			MaxOutputTokens:  maxTokens,
-			ProviderOptions:  getProviderOptions(model, providerCfg),
-			Temperature:      model.ModelCfg.Temperature,
-			TopP:             model.ModelCfg.TopP,
-			TopK:             callTopK(providerCfg, model.ModelCfg.TopK),
-			FrequencyPenalty: model.ModelCfg.FrequencyPenalty,
-			PresencePenalty:  model.ModelCfg.PresencePenalty,
-			NonInteractive:   true,
-			OnAuthRefresh:    authRefresh,
-		})
-	}
-	result, err := run()
-	// Notify only if still unauthorized after retry. AWS SSO is handled
-	// transparently inside OnAuthRefresh, so it needs no post-run notice.
-	if err != nil && isUnauthorized(err) && c.notify != nil {
-		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
-			Type:       notify.TypeReAuthenticate,
-			ProviderID: model.ModelCfg.Provider,
-		})
-	}
+	call := newModelCall(model, providerCfg)
+	call.SessionID = session.ID
+	call.Prompt = params.Prompt
+	call.NonInteractive = true
+	call.OnAuthRefresh = authRefresh
+	result, err := params.Agent.Run(runCtx, call)
+	c.notifyIfUnauthorized(err, model.ModelCfg.Provider)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return fantasy.NewTextErrorResponse("Subagent cancelled by user"), subagents.StatusCancelled
