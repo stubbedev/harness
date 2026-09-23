@@ -419,7 +419,7 @@ type choiceItemRenderer func(index int, choice question.Choice, active bool, inn
 // len(buildLines), the single source of truth for layout, and a
 // pure function of the width passed in so it always agrees with
 // the width drawContent will use this frame.
-func (c *choiceList) height(width int) int {
+func (c *choiceList) Height(width int) int {
 	if width <= 0 {
 		width = c.lastWidth
 	}
@@ -429,11 +429,11 @@ func (c *choiceList) height(width int) int {
 	}))
 }
 
-func (c *choiceList) heightChanged() bool {
+func (c *choiceList) HeightChanged() bool {
 	return false // height is deterministic
 }
 
-func (c *choiceList) setFocused(focused bool) {
+func (c *choiceList) SetFocused(focused bool) {
 	c.focused = focused
 }
 
@@ -444,7 +444,7 @@ func (c *choiceList) setFocused(focused bool) {
 // that would disrupt editing are suppressed elsewhere (keyboard
 // nav ignores hover while editing, and the committed selection is
 // not re-styled).
-func (c *choiceList) setHover(x, y int) {
+func (c *choiceList) SetHover(x, y int) {
 	c.hoverX = x
 	c.hoverY = y
 	c.mouseActive = true

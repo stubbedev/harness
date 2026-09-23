@@ -178,9 +178,6 @@ func (d *YesNo) SetFocused(focused bool) { d.focused = focused }
 // SetHover updates the hover position for button highlighting.
 func (d *YesNo) SetHover(x, y int) { d.hoverX = x; d.hoverY = y }
 
-// HandlePaste forwards paste events to the note editor textarea.
-func (d *YesNo) HandlePaste(msg tea.PasteMsg) tea.Cmd { return d.handlePaste(msg) }
-
 // HandleMouseClick checks if the click landed on a button and
 // triggers the corresponding answer.
 func (d *YesNo) HandleMouseClick(x, y int) (bool, bool) {

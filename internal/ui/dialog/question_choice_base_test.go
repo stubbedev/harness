@@ -98,7 +98,7 @@ func TestHoverStaysLiveWhileFillInFocused(t *testing.T) {
 	scr := uv.NewScreenBuffer(40, 20)
 	d.Draw(scr, image.Rect(0, 0, 40, 20))
 
-	d.setHover(2, 6) // somewhere over a choice row
+	d.SetHover(2, 6) // somewhere over a choice row
 
 	require.True(t, d.mouseActive, "hover should stay live while editing the fill-in")
 	require.GreaterOrEqual(t, d.hoveredChoice, 0, "the hovered choice should be resolved")
@@ -136,7 +136,7 @@ func TestHoverActiveWhenFillInBlurred(t *testing.T) {
 	d.cursorIdx = 0
 	d.fillIn.Blur()
 
-	d.setHover(3, 3)
+	d.SetHover(3, 3)
 
 	require.True(t, d.mouseActive, "hover should activate when no textarea is focused")
 }

@@ -139,10 +139,10 @@ func (e *questionEditor) handleNoteKey(msg tea.KeyPressMsg, closeKey key.Binding
 	}
 }
 
-// handlePaste forwards a paste message to the currently focused
+// HandlePaste forwards a paste message to the currently focused
 // textarea (note editor or fill-in). Returns nil if no textarea
 // is focused.
-func (e *questionEditor) handlePaste(msg tea.PasteMsg) tea.Cmd {
+func (e *questionEditor) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	if e.activeNoteKey != "" && e.noteEditor.Focused() {
 		var cmd tea.Cmd
 		e.noteEditor, cmd = e.noteEditor.Update(msg)

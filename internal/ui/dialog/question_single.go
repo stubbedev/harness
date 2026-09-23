@@ -154,14 +154,6 @@ func (d *SingleChoice) ShortHelp() []key.Binding {
 	return []key.Binding{d.keyUp, d.keyDown, d.keyEnter, numKeyBinding(len(d.Request.Choices)), d.keyNote, d.keyClose}
 }
 
-func (d *SingleChoice) Height(width int) int { return d.height(width) }
-func (d *SingleChoice) HeightChanged() bool  { return d.heightChanged() }
-func (d *SingleChoice) SetFocused(f bool)    { d.setFocused(f) }
-func (d *SingleChoice) SetHover(x, y int)    { d.setHover(x, y) }
-func (d *SingleChoice) HandlePaste(msg tea.PasteMsg) tea.Cmd {
-	return d.handlePaste(msg)
-}
-
 // HandleMouseClick checks if the click landed on a choice item and
 // selects it. Does not advance — user can change their selection
 // before pressing Enter or clicking another option.
