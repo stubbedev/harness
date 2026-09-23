@@ -457,7 +457,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 
 	cfg.SetEnabledChannels(args.Channels)
 
-	if err := createDotHarnessDir(cfg.Config().Options.DataDirectory); err != nil {
+	if err := config.EnsureDataDir(cfg.Config().Options.DataDirectory); err != nil {
 		return nil, proto.Workspace{}, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
