@@ -128,17 +128,16 @@ func NewReplaceSymbolTool(
 			if err := checkFileEvidence(ctx, tracker, sessionID, params.FilePath, content, []filetracker.Range{affected}); err != nil {
 				return fantasy.NewTextErrorResponse(conflictEvidence(ctx, tracker, sessionID, params.FilePath, content, affected.Start, err).Error()), nil
 			}
-			if files != nil && sessionID != "" {
-				if _, err := files.CreateVersion(ctx, sessionID, params.FilePath, string(content)); err != nil {
-					slog.Warn("Failed to create file version before replace", "path", params.FilePath, "error", err)
-				}
-			}
-
 			if err := guardedWrite(params.FilePath, content, []byte(newContent), false); err != nil {
 				if current, readErr := os.ReadFile(params.FilePath); readErr == nil {
 					err = conflictEvidence(ctx, tracker, sessionID, params.FilePath, current, affected.Start, err)
 				}
 				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			if files != nil && sessionID != "" {
+				if err := recordFileVersion(ctx, files, sessionID, params.FilePath, string(content), newContent); err != nil {
+					slog.Warn("Failed to record file history for replace", "path", params.FilePath, "error", err)
+				}
 			}
 
 			filetracker.Advance(ctx, tracker, sessionID, params.FilePath, content, []byte(newContent))

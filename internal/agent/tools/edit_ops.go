@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -143,16 +144,20 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 // recordFileVersion stores filePath in the session's file history: the
 // initial entry when the path is untracked, an intermediate version
 // when the tracked content differs from oldContent (the user edited the
-// file out of band), and a version holding newContent. Version
-// failures are logged, not fatal; only the initial Create is.
+// file out of band), and a version holding newContent. Every tool that
+// changes a file records it through here, so rewind sees the same
+// history whichever tool made the change. Version failures are logged,
+// not fatal; failing to read or create the entry is.
 func recordFileVersion(ctx context.Context, files history.Service, sessionID, filePath, oldContent, newContent string) error {
 	file, err := files.GetByPathAndSession(ctx, filePath, sessionID)
-	if err != nil {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		if _, err := files.Create(ctx, sessionID, filePath, oldContent); err != nil {
 			return fmt.Errorf("error creating file history: %w", err)
 		}
-	}
-	if file.Content != oldContent {
+	case err != nil:
+		return fmt.Errorf("error reading file history: %w", err)
+	case file.Content != oldContent:
 		// User manually changed the content; store an intermediate version.
 		if _, err := files.CreateVersion(ctx, sessionID, filePath, oldContent); err != nil {
 			slog.Error("Error creating file history version", "error", err)

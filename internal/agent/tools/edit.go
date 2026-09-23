@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -192,15 +191,8 @@ func processEditWithCreation(edit editContext, params EditParams, _ fantasy.Tool
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	// Update file history
-	_, err = edit.files.Create(edit.ctx, sessionID, params.FilePath, "")
-	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
-	}
-
-	_, err = edit.files.CreateVersion(edit.ctx, sessionID, params.FilePath, currentContent)
-	if err != nil {
-		slog.Error("Error creating file history version", "error", err)
+	if err := recordFileVersion(edit.ctx, edit.files, sessionID, params.FilePath, "", currentContent); err != nil {
+		return fantasy.ToolResponse{}, err
 	}
 
 	filetracker.Observe(edit.ctx, edit.filetracker, sessionID, params.FilePath, []byte(currentContent), []filetracker.Range{{Start: 0, End: len(currentContent)}})

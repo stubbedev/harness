@@ -56,22 +56,33 @@ func NewRenameTool(
 			sessionID := GetSessionFromContext(ctx)
 			affectedFiles := collectAffectedFiles(edit)
 
-			if files != nil && sessionID != "" {
+			recordHistory := files != nil && sessionID != ""
+			before := make(map[string]string, len(affectedFiles))
+			if recordHistory {
 				for _, path := range affectedFiles {
 					content, err := os.ReadFile(path)
 					if err != nil {
 						slog.Warn("Failed to read file for version tracking", "path", path, "error", err)
 						continue
 					}
-					if _, err := files.CreateVersion(ctx, sessionID, path, string(content)); err != nil {
-						slog.Warn("Failed to create file version", "path", path, "error", err)
-					}
+					before[path] = string(content)
 				}
 			}
 
 			encoding := resolved.client.GetOffsetEncoding()
 			if err := lsputil.ApplyWorkspaceEdit(*edit, encoding); err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to apply rename edits: %s", err)), nil
+			}
+
+			for path, old := range before {
+				after, err := os.ReadFile(path)
+				if err != nil {
+					slog.Warn("Failed to read renamed file for version tracking", "path", path, "error", err)
+					continue
+				}
+				if err := recordFileVersion(ctx, files, sessionID, path, old, string(after)); err != nil {
+					slog.Warn("Failed to record file history for rename", "path", path, "error", err)
+				}
 			}
 
 			if tracker != nil && sessionID != "" {
