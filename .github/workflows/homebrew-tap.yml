@@ -4,8 +4,6 @@ on:
   workflow_run:
     workflows: [Publish]
     types: [completed]
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -33,13 +31,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           latest="$(gh release list -R stubbedev/harness --limit 1 --json tagName --jq '.[0].tagName')"
           if [ -n "$INPUT_TAG" ]; then
             tag="$INPUT_TAG"
-          elif [ -n "$RELEASE_TAG" ]; then
-            tag="$RELEASE_TAG"
           elif [[ "$HEAD_BRANCH" == v* ]]; then
             tag="$HEAD_BRANCH"
           else
@@ -58,10 +53,20 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
         run: |
           dir="$(mktemp -d)"
-          gh release download "$TAG" -R stubbedev/harness \
-            -p harness_darwin_amd64 -p harness_darwin_arm64 \
-            -p harness_linux_amd64 -p harness_linux_arm64 \
-            --dir "$dir"
+          # workflow_run fires only after Publish fully succeeds, so the
+          # assets exist; the retries cover a workflow_dispatch racing a
+          # release whose assets are still uploading.
+          for _ in 1 2 3 4 5; do
+            if gh release download "$TAG" -R stubbedev/harness \
+              -p harness_darwin_amd64 -p harness_darwin_arm64 \
+              -p harness_linux_amd64 -p harness_linux_arm64 \
+              --dir "$dir"; then
+              break
+            fi
+            echo "Assets for $TAG not ready yet; retrying in 15s..."
+            sleep 15
+          done
+          [ -n "$(ls -A "$dir")" ] || { echo "No assets to download for $TAG" >&2; exit 1; }
           echo "ASSET_DIR=$dir" >> "$GITHUB_ENV"
 
       - name: Push formula to the tap

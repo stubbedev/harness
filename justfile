@@ -193,10 +193,22 @@ release level:
     # vendorHash commit that .github/workflows/flake.yml pushes ("chore(nix):
     # update vendorHash [skip ci]") creates the tag and the release quietly
     # never builds. Put an empty commit under the tag in that case.
-    if git log -1 --format=%B | grep -qiE '\[(skip ci|ci skip)\]'; then
-        git commit --allow-empty -m "chore: release $new"
-    fi
-    git tag --annotate -m "$new" "$new"
-    git push origin HEAD
-    git push origin "$new"
-    echo "released $new"
+    # The flake workflow can push its own vendorHash commit to main while
+    # this recipe runs; both commits carry the same content, so rebasing
+    # onto theirs drops ours as empty and both sides converge instead of
+    # a push being rejected. Re-checking the guard and re-tagging every
+    # iteration keeps the tag on the head that actually lands.
+    for _ in 1 2 3 4 5; do
+        git fetch origin main --quiet
+        git rebase origin/main
+        if git log -1 --format=%B | grep -qiE '\[(skip ci|ci skip)\]'; then
+            git commit --allow-empty -m "chore: release $new"
+        fi
+        git tag -f --annotate -m "$new" "$new"
+        if git push origin HEAD && git push origin "$new"; then
+            echo "released $new"
+            exit 0
+        fi
+    done
+    echo "could not push $new after 5 attempts" >&2
+    exit 1
