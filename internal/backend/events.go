@@ -113,19 +113,32 @@ func (b *Backend) LSPSetSessionDisabled(ctx context.Context, workspaceID, name s
 	return nil
 }
 
-// MCPGetStates returns the current state of all MCP clients.
-func (b *Backend) MCPGetStates(_ string) map[string]mcptools.ClientInfo {
-	return mcptools.GetStates()
+// MCPGetStates returns the current state of all MCP clients. MCP state
+// is process-wide, but the workspace is still resolved so a client
+// polling with a stale ID gets the 404 that triggers its recovery.
+func (b *Backend) MCPGetStates(workspaceID string) (map[string]mcptools.ClientInfo, error) {
+	if _, err := b.GetWorkspace(workspaceID); err != nil {
+		return nil, err
+	}
+	return mcptools.GetStates(), nil
 }
 
 // MCPRefreshPrompts refreshes prompts for a named MCP client.
-func (b *Backend) MCPRefreshPrompts(ctx context.Context, _ string, name string) {
+func (b *Backend) MCPRefreshPrompts(ctx context.Context, workspaceID, name string) error {
+	if _, err := b.GetWorkspace(workspaceID); err != nil {
+		return err
+	}
 	mcptools.RefreshPrompts(ctx, name)
+	return nil
 }
 
 // MCPRefreshResources refreshes resources for a named MCP client.
-func (b *Backend) MCPRefreshResources(ctx context.Context, _ string, name string) {
+func (b *Backend) MCPRefreshResources(ctx context.Context, workspaceID, name string) error {
+	if _, err := b.GetWorkspace(workspaceID); err != nil {
+		return err
+	}
 	mcptools.RefreshResources(ctx, name)
+	return nil
 }
 
 // MCPPendingAuth returns the MCP servers awaiting OAuth authentication,
@@ -141,8 +154,11 @@ func (b *Backend) MCPPendingAuth(workspaceID string) ([]mcptools.PendingAuthServ
 
 // MCPAuthURL returns the current OAuth authorization URL for a named
 // server, if a flow is in progress.
-func (b *Backend) MCPAuthURL(name string) string {
-	return mcptools.MCPAuthURL(name)
+func (b *Backend) MCPAuthURL(workspaceID, name string) (string, error) {
+	if _, err := b.GetWorkspace(workspaceID); err != nil {
+		return "", err
+	}
+	return mcptools.MCPAuthURL(name), nil
 }
 
 // MCPAuthenticate runs the OAuth flow for a named MCP server with the

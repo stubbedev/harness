@@ -401,7 +401,11 @@ func (c *controllerV1) handlePostWorkspaceMCPGetPrompt(w http.ResponseWriter, r 
 //	@Router			/workspaces/{id}/mcp/states [get]
 func (c *controllerV1) handleGetWorkspaceMCPStates(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	states := c.backend.MCPGetStates(id)
+	states, err := c.backend.MCPGetStates(id)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
 	result := make(map[string]proto.MCPClientInfo, len(states))
 	for k, v := range states {
 		result[k] = proto.MCPClientInfo{
@@ -452,6 +456,7 @@ func (c *controllerV1) handleGetWorkspaceMCPPendingAuth(w http.ResponseWriter, r
 //	@Param			name	query	string	true	"MCP server name"
 //	@Success		200		{object}	proto.MCPAuthResponse
 //	@Failure		400		{object}	proto.Error
+//	@Failure		404		{object}	proto.Error
 //	@Router			/workspaces/{id}/mcp/auth-url [get]
 func (c *controllerV1) handleGetWorkspaceMCPAuthURL(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
@@ -459,7 +464,12 @@ func (c *controllerV1) handleGetWorkspaceMCPAuthURL(w http.ResponseWriter, r *ht
 		jsonError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	jsonEncode(w, proto.MCPAuthResponse{AuthURL: c.backend.MCPAuthURL(name)})
+	u, err := c.backend.MCPAuthURL(r.PathValue("id"), name)
+	if err != nil {
+		c.handleError(w, r, err)
+		return
+	}
+	jsonEncode(w, proto.MCPAuthResponse{AuthURL: u})
 }
 
 // handlePostWorkspaceMCPAuth runs the OAuth flow for a named MCP server.
@@ -524,7 +534,10 @@ func (c *controllerV1) handlePostWorkspaceMCPRefreshPrompts(w http.ResponseWrite
 		return
 	}
 
-	c.backend.MCPRefreshPrompts(r.Context(), id, req.Name)
+	if err := c.backend.MCPRefreshPrompts(r.Context(), id, req.Name); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -610,7 +623,10 @@ func (c *controllerV1) handlePostWorkspaceMCPRefreshResources(w http.ResponseWri
 		return
 	}
 
-	c.backend.MCPRefreshResources(r.Context(), id, req.Name)
+	if err := c.backend.MCPRefreshResources(r.Context(), id, req.Name); err != nil {
+		c.handleError(w, r, err)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
