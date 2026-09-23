@@ -26,7 +26,7 @@ func TestHistoryBangCommandStripsPrefixWhileAlreadyInBangMode(t *testing.T) {
 	u := newTestUI()
 	u.com.Workspace = historyWorkspace{}
 	u.promptHistory.messages = []string{"!echo one", "!echo two"}
-	u.promptHistory.index = -1
+	u.promptHistory.pos = 0
 
 	require.True(t, u.historyPrev())
 	require.True(t, u.bangMode)

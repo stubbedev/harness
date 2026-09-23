@@ -427,7 +427,6 @@ func (m *Chat) InvalidateRenderCaches() {
 // SetMessages sets the chat messages to the provided list of message items.
 // Consecutive tool calls are folded into collapsed groups.
 func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
-	m.idInxMap = make(map[string]int)
 	m.scrollbarVisible = false // Reset scrollbar visibility on new session load
 
 	items := m.foldToolGroups(msgs)

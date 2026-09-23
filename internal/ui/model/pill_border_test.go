@@ -70,7 +70,7 @@ func TestPillsViewOmitsQueue(t *testing.T) {
 	u.session = &session.Session{ID: "s1", Todos: []session.Todo{
 		{Content: "a", Status: session.TodoStatusPending},
 	}}
-	u.promptQueue = 2
+	u.promptQueueItems = make([]string, 2)
 	u.pillsExpanded = true
 	u.updateLayoutAndSize()
 	u.renderPills()

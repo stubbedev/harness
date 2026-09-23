@@ -424,10 +424,8 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 			succeeded++
 		}
 	}
+	// A single call returned above, so the count is always plural.
 	calls := fmt.Sprintf("%d tool calls", len(g.tools))
-	if len(g.tools) == 1 {
-		calls = "1 tool call"
-	}
 	if failed > 0 {
 		// The verb color already signals a partial failure; the count
 		// says how much of the run to distrust without expanding it.

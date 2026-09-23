@@ -10,7 +10,7 @@ package model
 // ready/model caches synchronously so the first frame has values to
 // render; Init then refreshes them off-thread.)
 //
-//   - Reads (isAgentBusy, promptQueue, selectedLargeModel,
+//   - Reads (isAgentBusy, promptQueueItems, selectedLargeModel,
 //     lspInfo) always return the memoized value, stale or not.
 //   - State edges (message created, agent finished/errored, prompt
 //     submitted, cancel, session switch, model change, LSP
@@ -214,14 +214,14 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 		return nil
 	}
 	if !m.hasSession() {
+		hadQueue := len(m.promptQueueItems) > 0
 		m.promptQueueItems = nil
 		m.promptQueueCheckedAt = time.Now()
 		// Bump the generation so any in-flight fetch scoped to the
 		// now-departed session is discarded rather than repopulating the
 		// queue.
 		m.invalidatePromptQueue()
-		if m.promptQueue != 0 {
-			m.promptQueue = 0
+		if hadQueue {
 			m.updateLayoutAndSize()
 		}
 		return nil
@@ -255,9 +255,8 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	}
 	m.promptQueueCheckedAt = time.Now()
 	itemsChanged := !slices.Equal(m.promptQueueItems, msg.prompts)
-	countChanged := len(msg.prompts) != m.promptQueue
+	countChanged := len(msg.prompts) != len(m.promptQueueItems)
 	m.promptQueueItems = msg.prompts
-	m.promptQueue = len(msg.prompts)
 	// The authoritative queue drives the transcript's queued-prompt
 	// placeholders: entries that left it drop out, entries not yet shown
 	// appear.

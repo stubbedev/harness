@@ -320,7 +320,7 @@ func TestMessageCreatedEventRefreshesBusyAndQueue(t *testing.T) {
 
 	runCmds(m, cmd)
 	require.True(t, m.isAgentBusy(), "refreshed busy state must land in the cache")
-	require.Equal(t, 1, m.promptQueue, "refreshed queue count must land in the cache")
+	require.Equal(t, 1, len(m.promptQueueItems), "refreshed queue count must land in the cache")
 	require.False(t, m.busyFetchInFlight)
 	require.False(t, m.promptQueueInFlight)
 }
@@ -363,17 +363,17 @@ func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 	ws := &countingWorkspace{ready: true, queued: []string{"a", "b"}}
 	m := newBusyUI(ws)
 	warmCaches(m, true)
-	m.promptQueue = 5 // stale queue pill from the previous session
+	m.promptQueueItems = make([]string, 5) // stale queue pill from the previous session
 	m.promptQueueItems = []string{"x", "y", "z", "w", "v"}
 	ws.resetCounters()
 
 	_, cmd := m.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
-	require.Zero(t, m.promptQueue, "switching sessions must drop the old session's queue pill")
+	require.Zero(t, len(m.promptQueueItems), "switching sessions must drop the old session's queue pill")
 	require.True(t, m.promptQueueInFlight, "session switch must schedule a queue refresh")
 	require.True(t, m.busyFetchInFlight, "session switch must schedule a busy refresh")
 
 	runCmds(m, cmd)
-	require.Equal(t, 2, m.promptQueue, "the new session's queue must be fetched")
+	require.Equal(t, 2, len(m.promptQueueItems), "the new session's queue must be fetched")
 	require.Equal(t, []string{"a", "b"}, m.promptQueueItems)
 }
 
@@ -536,7 +536,7 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 
 	// esc right after enter: isAgentBusy gates cancelAgent, first press
 	// arms the double-press cancel.
-	require.Zero(t, m.promptQueue)
+	require.Zero(t, len(m.promptQueueItems))
 	m.cancelAgent()
 	require.Equal(t, escCancel, m.esc.state, "first esc press must arm cancellation")
 
@@ -554,7 +554,7 @@ func TestCancelAgentCancelsTurnNotQueue(t *testing.T) {
 	ws := &countingWorkspace{ready: true, agentBusy: true, queued: []string{"a"}}
 	m := newBusyUI(ws)
 	warmCaches(m, true)
-	m.promptQueue = 1
+	m.promptQueueItems = make([]string, 1)
 	m.promptQueueItems = []string{"a"}
 	ws.resetCounters()
 
@@ -567,7 +567,7 @@ func TestCancelAgentCancelsTurnNotQueue(t *testing.T) {
 	require.Equal(t, 1, ws.cancelTurnCalls, "second esc press interrupts the turn")
 	require.Zero(t, ws.cancelCalls, "the TUI esc path never issues a full cancel")
 	require.Zero(t, ws.clearQueueCalls, "the queue must survive a turn cancel")
-	require.Equal(t, 1, m.promptQueue, "the cached queue count is untouched")
+	require.Equal(t, 1, len(m.promptQueueItems), "the cached queue count is untouched")
 	require.Equal(t, []string{"a"}, m.promptQueueItems)
 }
 
@@ -690,7 +690,7 @@ func TestStalePromptQueueDiscardedAndReDispatched(t *testing.T) {
 	ws := &countingWorkspace{ready: true, queued: []string{"real"}}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
-	m.promptQueue = 1
+	m.promptQueueItems = make([]string, 1)
 	m.promptQueueItems = []string{"real"}
 
 	// A fetch is in flight; capture its generation, then a newer transition
@@ -698,7 +698,7 @@ func TestStalePromptQueueDiscardedAndReDispatched(t *testing.T) {
 	m.promptQueueInFlight = true
 	staleGen := m.promptQueueGen
 	m.invalidatePromptQueue()
-	m.promptQueue = 0
+	m.promptQueueItems = make([]string, 0)
 	m.promptQueueItems = nil
 
 	// The stale fetch (still saw one prompt) lands for the same session.
@@ -707,7 +707,7 @@ func TestStalePromptQueueDiscardedAndReDispatched(t *testing.T) {
 		gen:        staleGen,
 		prompts:    []string{"stale"},
 	})
-	require.Zero(t, m.promptQueue,
+	require.Zero(t, len(m.promptQueueItems),
 		"a stale queue result must not repopulate the cleared queue")
 	require.Empty(t, m.promptQueueItems)
 	require.NotEmpty(t, cmds,
@@ -733,7 +733,7 @@ func TestStalePromptQueuePreservesSessionScoping(t *testing.T) {
 		gen:        gen,
 		prompts:    []string{"from other session"},
 	})
-	require.Zero(t, m.promptQueue,
+	require.Zero(t, len(m.promptQueueItems),
 		"a result from a different session must never populate the queue")
 	require.NotEmpty(t, cmds, "a session-mismatched result must re-fetch for the current session")
 }

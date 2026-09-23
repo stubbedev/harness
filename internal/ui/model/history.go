@@ -97,8 +97,8 @@ func (m *UI) handleHistoryDown(msg tea.Msg) tea.Cmd {
 func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 	prevHeight := m.textarea.Height()
 	// Return to current draft when browsing history.
-	if m.promptHistory.index >= 0 {
-		m.promptHistory.index = -1
+	if m.promptHistory.pos > 0 {
+		m.promptHistory.pos = 0
 		m.textarea.Reset()
 		m.textarea.InsertString(m.promptHistory.draft)
 		m.syncBangModeFromTextarea()
@@ -113,7 +113,7 @@ func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 func (m *UI) updateHistoryDraft(oldValue string) {
 	if m.textarea.Value() != oldValue {
 		m.promptHistory.draft = m.textarea.Value()
-		m.promptHistory.index = -1
+		m.promptHistory.pos = 0
 	}
 }
 
@@ -141,19 +141,16 @@ func (m *UI) syncBangModeFromTextarea() {
 // historyPrev changes the text area content to the previous message in the history
 // it returns false if it could not find the previous message.
 func (m *UI) historyPrev() bool {
-	if len(m.promptHistory.messages) == 0 {
+	h := &m.promptHistory
+	if h.pos >= len(h.messages) {
 		return false
 	}
-	if m.promptHistory.index == -1 {
-		m.promptHistory.draft = m.textarea.Value()
+	if h.pos == 0 {
+		h.draft = m.textarea.Value()
 	}
-	nextIndex := m.promptHistory.index + 1
-	if nextIndex >= len(m.promptHistory.messages) {
-		return false
-	}
-	m.promptHistory.index = nextIndex
+	h.pos++
 	m.textarea.Reset()
-	m.textarea.InsertString(m.promptHistory.messages[nextIndex])
+	m.textarea.InsertString(h.messages[h.pos-1])
 	m.textarea.MoveToBegin()
 	m.syncBangModeFromTextarea()
 	return true
@@ -162,20 +159,17 @@ func (m *UI) historyPrev() bool {
 // historyNext changes the text area content to the next message in the history
 // it returns false if it could not find the next message.
 func (m *UI) historyNext() bool {
-	if m.promptHistory.index < 0 {
+	h := &m.promptHistory
+	if h.pos == 0 {
 		return false
 	}
-	nextIndex := m.promptHistory.index - 1
-	if nextIndex < 0 {
-		m.promptHistory.index = -1
-		m.textarea.Reset()
-		m.textarea.InsertString(m.promptHistory.draft)
-		m.syncBangModeFromTextarea()
-		return true
-	}
-	m.promptHistory.index = nextIndex
+	h.pos--
 	m.textarea.Reset()
-	m.textarea.InsertString(m.promptHistory.messages[nextIndex])
+	if h.pos == 0 {
+		m.textarea.InsertString(h.draft)
+	} else {
+		m.textarea.InsertString(h.messages[h.pos-1])
+	}
 	m.syncBangModeFromTextarea()
 	return true
 }
@@ -183,7 +177,7 @@ func (m *UI) historyNext() bool {
 // historyReset resets the history, but does not clear the message
 // it just sets the current draft to empty and the position in the history.
 func (m *UI) historyReset() {
-	m.promptHistory.index = -1
+	m.promptHistory.pos = 0
 	m.promptHistory.draft = ""
 }
 

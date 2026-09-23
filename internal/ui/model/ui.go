@@ -413,11 +413,9 @@ type UI struct {
 	// strip was focused, so focus can return to it after reaps shift
 	// the indices.
 	lastTaskFocusID string
-	// promptQueue / promptQueueItems mirror the session's queued prompts.
-	// They are event-driven with a TTL backstop, fetched off-thread by
-	// dispatchPromptQueueRefresh (see workspace_cache.go); promptQueue is
-	// always len(promptQueueItems).
-	promptQueue          int
+	// promptQueueItems mirrors the session's queued prompts. It is
+	// event-driven with a TTL backstop, fetched off-thread by
+	// dispatchPromptQueueRefresh (see workspace_cache.go).
 	promptQueueItems     []string
 	promptQueueCheckedAt time.Time
 	promptQueueInFlight  bool
@@ -473,8 +471,11 @@ type UI struct {
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
 		messages []string
-		index    int
-		draft    string
+		// pos is the browsing position: 0 is the draft (not browsing),
+		// n > 0 shows messages[n-1]. The zero value is therefore "not
+		// browsing" before any history has loaded.
+		pos   int
+		draft string
 	}
 
 	// parentTitle holds the resolved parent session title for the breadcrumb.
@@ -912,7 +913,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// session instead of a stale one.
 		m.invalidateBusyCaches()
 		m.invalidatePromptQueue()
-		m.promptQueue = 0
 		m.promptQueueItems = nil
 		m.promptQueueCheckedAt = time.Time{}
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
@@ -1042,8 +1042,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.promptHistory.messages = msg.messages
-		m.promptHistory.index = -1
-		m.promptHistory.draft = ""
+		m.historyReset()
 
 	case closeDialogMsg:
 		m.dialog.CloseFrontDialog()
@@ -4356,7 +4355,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	// Capture the pre-send state: a prompt submitted while the agent is
 	// busy (or behind an existing queue) is enqueued server-side, so show
 	// it in the transcript right away as a queued placeholder.
-	willQueue := m.isAgentBusy() || m.promptQueue > 0
+	willQueue := m.isAgentBusy() || len(m.promptQueueItems) > 0
 	// Optimistically mark the agent busy: the prompt we are about to submit
 	// either starts a run or is enqueued behind one. This keeps esc pressed
 	// right after enter routing to cancelAgent instead of reading a stale
@@ -4547,10 +4546,8 @@ func (m *UI) handleRewindEscape() (bool, tea.Cmd) {
 		m.disarmRewind()
 		return false, nil
 	}
-	// A draft or history browsing owns the press. The messages-length
-	// guard keeps the zero value of index (0) from reading as
-	// "browsing" before any history has loaded.
-	if (m.promptHistory.index >= 0 && len(m.promptHistory.messages) > 0) || m.textarea.Value() != "" {
+	// A draft or history browsing owns the press.
+	if m.promptHistory.pos > 0 || m.textarea.Value() != "" {
 		m.disarmRewind()
 		return false, nil
 	}
@@ -5018,7 +5015,6 @@ func (m *UI) newSession() tea.Cmd {
 	m.chat.ClearMessages()
 	m.pillsExpanded = false
 	m.pillsAutoExpanded = false
-	m.promptQueue = 0
 	m.promptQueueItems = nil
 	m.promptQueueCheckedAt = time.Now()
 	m.invalidateBusyCaches()

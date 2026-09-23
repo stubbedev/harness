@@ -58,11 +58,11 @@ func TestRewindEscapeDeclinesWhenOwned(t *testing.T) {
 
 	// History browsing owns it too.
 	m.promptHistory.messages = []string{"older prompt"}
-	m.promptHistory.index = 0
+	m.promptHistory.pos = 1
 	consumed, _ = m.handleRewindEscape()
 	require.False(t, consumed, "history browsing swallows the escape")
 	require.Equal(t, escNone, m.esc.state)
-	m.promptHistory.index = -1
+	m.promptHistory.pos = 0
 
 	// Arm, then a busy edge disarms.
 	consumed, _ = m.handleRewindEscape()
