@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/stubbedev/harness/internal/stringext"
 )
 
 // whitespaceCorrectedNote tells the caller that old_string did not match
@@ -519,11 +521,7 @@ func formatLineMatchHint(contentLines, trimmedOld []string, start, matched int, 
 // elideLine shortens a line for display inside the mismatch hint, keeping
 // whole runes.
 func elideLine(s string, maxRunes int) string {
-	r := []rune(s)
-	if len(r) <= maxRunes {
-		return s
-	}
-	return string(r[:maxRunes-3]) + "..."
+	return stringext.Truncate(s, maxRunes, "...")
 }
 
 // visualizeWS replaces tabs and leading spaces with visible markers so

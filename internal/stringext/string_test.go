@@ -97,3 +97,24 @@ func TestEscapeXML(t *testing.T) {
 		})
 	}
 }
+
+func TestTruncate(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in     string
+		max    int
+		marker string
+		want   string
+	}{
+		{"short", 10, "…", "short"},
+		{"exactly10!", 10, "…", "exactly10!"},
+		{"hello world", 6, "…", "hello…"},
+		{"日本語のテキスト", 4, "…", "日本語…"},
+		{"abcdef", 5, "...", "ab..."},
+		{"abcdef", 2, "...", "..."},
+		{"", 0, "…", ""},
+	}
+	for _, c := range cases {
+		require.Equal(t, c.want, Truncate(c.in, c.max, c.marker), c.in)
+	}
+}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/stringext"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -63,16 +64,9 @@ func questionSummary(params tools.QuestionParams) string {
 		return ""
 	}
 	if n == 1 {
-		text := params.Questions[0].Question
-		if len(text) > 60 {
-			text = text[:59] + "…"
-		}
-		return text
+		return stringext.Truncate(params.Questions[0].Question, 60, "…")
 	}
-	first := params.Questions[0].Question
-	if len(first) > 40 {
-		first = first[:39] + "…"
-	}
+	first := stringext.Truncate(params.Questions[0].Question, 40, "…")
 	return fmt.Sprintf("%s (+%d more)", first, n-1)
 }
 

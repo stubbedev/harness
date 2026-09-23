@@ -18,6 +18,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/question"
+	"github.com/stubbedev/harness/internal/stringext"
 	"github.com/stubbedev/harness/internal/term"
 )
 
@@ -171,13 +172,7 @@ func shellLabel(p ShellParams) string {
 // its first line, shortened to something that fits a label.
 func firstLine(s string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
-	const max = 60
-	// Counted in runes, not bytes: a label cut mid-rune renders as a
-	// replacement character.
-	if runes := []rune(line); len(runes) > max {
-		return string(runes[:max-1]) + "…"
-	}
-	return line
+	return stringext.Truncate(line, 60, "…")
 }
 
 // NewShellTool builds the shell tool, or returns nil when no shell

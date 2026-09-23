@@ -12,9 +12,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/stringext"
 )
 
 // ErrCancelled is returned by Ask when the user cancels the question.
@@ -104,20 +106,20 @@ func (r Request) Validate() error {
 // are written for LLM consumption: specific and actionable.
 func (q Question) Validate() error {
 	label := q.identifier()
-	if len(q.Label) > MaxLabelLength {
-		return fmt.Errorf("%s: label exceeds %d characters (got %d)", label, MaxLabelLength, len(q.Label))
+	if utf8.RuneCountInString(q.Label) > MaxLabelLength {
+		return fmt.Errorf("%s: label exceeds %d characters (got %d)", label, MaxLabelLength, utf8.RuneCountInString(q.Label))
 	}
 	if q.Text == "" {
 		return fmt.Errorf("%s: question text is required", label)
 	}
-	if len(q.Text) > MaxQuestionLength {
-		return fmt.Errorf("%s: text exceeds %d characters (got %d)", label, MaxQuestionLength, len(q.Text))
+	if utf8.RuneCountInString(q.Text) > MaxQuestionLength {
+		return fmt.Errorf("%s: text exceeds %d characters (got %d)", label, MaxQuestionLength, utf8.RuneCountInString(q.Text))
 	}
 	if q.Description == "" {
 		return fmt.Errorf("%s: description is required", label)
 	}
-	if len(q.Description) > MaxDescriptionLength {
-		return fmt.Errorf("%s: description exceeds %d characters (got %d)", label, MaxDescriptionLength, len(q.Description))
+	if utf8.RuneCountInString(q.Description) > MaxDescriptionLength {
+		return fmt.Errorf("%s: description exceeds %d characters (got %d)", label, MaxDescriptionLength, utf8.RuneCountInString(q.Description))
 	}
 	switch q.Type {
 	case TypeYesNo, TypeFreeText:
@@ -141,11 +143,11 @@ func (q Question) Validate() error {
 			if c.Label == "" {
 				return fmt.Errorf("%s: choice %d (%s) must have a \"label\" field", label, i+1, c.ID)
 			}
-			if len(c.Label) > MaxChoiceLabelLength {
-				return fmt.Errorf("%s: choice %d label exceeds %d characters (got %d)", label, i+1, MaxChoiceLabelLength, len(c.Label))
+			if utf8.RuneCountInString(c.Label) > MaxChoiceLabelLength {
+				return fmt.Errorf("%s: choice %d label exceeds %d characters (got %d)", label, i+1, MaxChoiceLabelLength, utf8.RuneCountInString(c.Label))
 			}
-			if len(c.Description) > MaxChoiceDescriptionLength {
-				return fmt.Errorf("%s: choice %d description exceeds %d characters (got %d)", label, i+1, MaxChoiceDescriptionLength, len(c.Description))
+			if utf8.RuneCountInString(c.Description) > MaxChoiceDescriptionLength {
+				return fmt.Errorf("%s: choice %d description exceeds %d characters (got %d)", label, i+1, MaxChoiceDescriptionLength, utf8.RuneCountInString(c.Description))
 			}
 		}
 	default:
@@ -161,11 +163,7 @@ func (q Question) identifier() string {
 		return fmt.Sprintf("[%s]", q.Label)
 	}
 	if q.Text != "" {
-		t := q.Text
-		if len(t) > 40 {
-			t = t[:40] + "…"
-		}
-		return fmt.Sprintf("[%s]", t)
+		return fmt.Sprintf("[%s]", stringext.Truncate(q.Text, 41, "…"))
 	}
 	return "[unnamed question]"
 }

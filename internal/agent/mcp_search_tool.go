@@ -9,6 +9,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/stringext"
 )
 
 // mcpSearchTool implements defer-loaded MCP tool discovery for one server.
@@ -115,9 +116,7 @@ func (s *mcpSearchTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy
 func (s *mcpSearchTool) writeMatches(b *strings.Builder, names []string) {
 	for _, name := range names {
 		desc := s.coord.mcpToolDescription(s.server, name)
-		if len(desc) > 200 {
-			desc = desc[:200] + "…"
-		}
+		desc = stringext.Truncate(desc, 201, "…")
 		fmt.Fprintf(b, "- %s: %s\n", name, desc)
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/stringext"
 )
 
 // deferredBuiltinTools are the built-in tools whose schemas do not ride
@@ -99,10 +100,7 @@ func firstSentence(s string, limit int) string {
 	if i := strings.IndexAny(s, ".\n"); i > 0 {
 		s = s[:i]
 	}
-	if runes := []rune(s); len(runes) > limit {
-		s = string(runes[:limit-1]) + "…"
-	}
-	return s
+	return stringext.Truncate(s, limit, "…")
 }
 
 // builtinToolExpanded reports whether a deferred built-in tool has been

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -84,4 +85,21 @@ var xmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"
 // <available_skills>/<available_subagents> prompt blocks.
 func EscapeXML(s string) string {
 	return xmlEscaper.Replace(s)
+}
+
+// Truncate shortens s to at most maxRunes runes, replacing the tail
+// with marker when it has to cut. The marker counts toward maxRunes, so
+// the result never exceeds it. Runes are never split, so the result is
+// always valid UTF-8 when s is.
+func Truncate(s string, maxRunes int, marker string) string {
+	if utf8.RuneCountInString(s) <= maxRunes {
+		return s
+	}
+	keep := max(maxRunes-utf8.RuneCountInString(marker), 0)
+	i := 0
+	for range keep {
+		_, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+	}
+	return s[:i] + marker
 }

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/stringext"
 )
 
 const (
@@ -107,13 +108,7 @@ func renderExecutionSummary(summary string) string {
 }
 
 func executionClip(text string, limit int) string {
-	if len(text) <= limit {
-		return text
-	}
-	for limit > 0 && (text[limit]&0xc0) == 0x80 {
-		limit--
-	}
-	return text[:limit] + "…"
+	return stringext.Truncate(text, limit+1, "…")
 }
 
 func executionKey(tool, input string) string {
