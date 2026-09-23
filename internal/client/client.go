@@ -86,9 +86,9 @@ func (c *Client) VersionInfo(ctx context.Context) (*proto.VersionInfo, error) {
 // [ErrUnsupported]; it must be left running, since the shutdown request
 // it does understand is unconditional and would take its sessions down.
 func (c *Client) ShutdownServerIfIdle(ctx context.Context) error {
-	rsp, err := c.post(ctx, "/control", nil, jsonBody(proto.ServerControl{
+	rsp, err := c.send(ctx, post("/control", proto.ServerControl{
 		Command: proto.ServerControlShutdownIfIdle,
-	}), nil)
+	}))
 	if err != nil {
 		return err
 	}
@@ -118,9 +118,9 @@ func (c *Client) ShutdownServerIfIdle(ctx context.Context) error {
 // New servers apply the same idleness check to this command as they do
 // to [ServerControlShutdownIfIdle], so it is never more dangerous.
 func (c *Client) ShutdownServer(ctx context.Context) error {
-	rsp, err := c.post(ctx, "/control", nil, jsonBody(proto.ServerControl{
+	rsp, err := c.send(ctx, post("/control", proto.ServerControl{
 		Command: proto.ServerControlShutdown,
-	}), nil)
+	}))
 	if err != nil {
 		return err
 	}
@@ -201,11 +201,19 @@ func (c *Client) put(ctx context.Context, path string, query url.Values, body io
 }
 
 func (c *Client) sendReq(ctx context.Context, method, path string, query url.Values, body io.Reader, headers http.Header) (*http.Response, error) {
-	url := (&url.URL{
-		Path:     stdpath.Join("/v1", path),
+	// path arrives escaped (see apiPath), so it is the raw path and the
+	// decoded form is derived from it rather than escaped a second time.
+	rawPath := stdpath.Join("/v1", path)
+	decoded, err := url.PathUnescape(rawPath)
+	if err != nil {
+		return nil, err
+	}
+	target := (&url.URL{
+		Path:     decoded,
+		RawPath:  rawPath,
 		RawQuery: query.Encode(),
 	}).String()
-	req, err := c.buildReq(ctx, method, url, body, headers)
+	req, err := c.buildReq(ctx, method, target, body, headers)
 	if err != nil {
 		return nil, err
 	}

@@ -152,5 +152,5 @@ func TestListMCPPromptsMalformedBody(t *testing.T) {
 	c := captureClient(t, srv)
 	_, err := c.ListMCPPrompts(t.Context(), "ws1")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "failed to decode MCP prompts")
+	require.Contains(t, err.Error(), "failed to decode list MCP prompts response")
 }
