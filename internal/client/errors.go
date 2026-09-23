@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 
@@ -77,18 +76,6 @@ func isWorkspaceGone(code proto.ErrorCode) bool {
 	return code == "" || code == proto.ErrorCodeWorkspaceNotFound
 }
 
-// okOrError closes rsp and returns nil when its status is OK.
-// Otherwise it returns a checkStatus error prefixed with op, so callers
-// get the sentinel mapping (ErrNotFound, ErrServerShuttingDown) for
-// free and every method phrases the failure the same way.
-func okOrError(rsp *http.Response, op string) error {
-	defer rsp.Body.Close()
-	if err := checkStatus(rsp); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-	return nil
-}
-
 // decodeJSON closes rsp, verifies the status is OK with checkStatus,
 // and decodes the body into v. op prefixes the status failure; decodeOp
 // names the payload in the decode failure.
@@ -98,20 +85,6 @@ func decodeJSON(rsp *http.Response, v any, op, decodeOp string) error {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	if err := json.NewDecoder(rsp.Body).Decode(v); err != nil {
-		return fmt.Errorf("failed to decode %s: %w", decodeOp, err)
-	}
-	return nil
-}
-
-// decodeJSONAllowEmpty behaves like decodeJSON but accepts an empty
-// body on a successful status, leaving v unchanged. Endpoints that
-// legitimately answer 200 with no payload need this.
-func decodeJSONAllowEmpty(rsp *http.Response, v any, op, decodeOp string) error {
-	defer rsp.Body.Close()
-	if err := checkStatus(rsp); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-	if err := json.NewDecoder(rsp.Body).Decode(v); err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("failed to decode %s: %w", decodeOp, err)
 	}
 	return nil

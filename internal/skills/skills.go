@@ -170,12 +170,6 @@ func ParseContent(content []byte) (*Skill, error) {
 	return &skill, nil
 }
 
-// Discover finds all valid skills in the given paths.
-func Discover(paths []string) []*Skill {
-	skills, _ := DiscoverWithStates(paths)
-	return skills
-}
-
 // DiscoverWithStates finds all valid skills in the given paths and also
 // returns a per-file state slice describing parse/validation outcomes. Useful
 // for diagnostics and UI reporting. Results keep the caller's path order,

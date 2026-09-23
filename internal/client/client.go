@@ -188,16 +188,8 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, headers
 	return c.sendReq(ctx, http.MethodGet, path, query, nil, headers)
 }
 
-func (c *Client) post(ctx context.Context, path string, query url.Values, body io.Reader, headers http.Header) (*http.Response, error) {
-	return c.sendReq(ctx, http.MethodPost, path, query, body, headers)
-}
-
 func (c *Client) delete(ctx context.Context, path string, query url.Values, headers http.Header) (*http.Response, error) {
 	return c.sendReq(ctx, http.MethodDelete, path, query, nil, headers)
-}
-
-func (c *Client) put(ctx context.Context, path string, query url.Values, body io.Reader, headers http.Header) (*http.Response, error) {
-	return c.sendReq(ctx, http.MethodPut, path, query, body, headers)
 }
 
 func (c *Client) sendReq(ctx context.Context, method, path string, query url.Values, body io.Reader, headers http.Header) (*http.Response, error) {
