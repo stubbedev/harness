@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,9 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/proto"
-	"github.com/stubbedev/harness/internal/server"
 )
 
 // DummyHost is used to satisfy the http.Client's requirement for a URL.
@@ -29,15 +26,6 @@ type Client struct {
 	network  string
 	addr     string
 	clientID string
-}
-
-// DefaultClient creates a new [Client] connected to the default server address.
-func DefaultClient(path string) (*Client, error) {
-	host, err := server.ParseHostURL(server.DefaultHost())
-	if err != nil {
-		return nil, err
-	}
-	return NewClient(path, host.Scheme, host.Host)
 }
 
 // NewClient creates a new [Client] connected to the server at the given
@@ -75,42 +63,14 @@ func (c *Client) ClientID() string {
 	return c.clientID
 }
 
-// GetGlobalConfig retrieves the server's configuration.
-func (c *Client) GetGlobalConfig(ctx context.Context) (*config.Config, error) {
-	var cfg config.Config
-	rsp, err := c.get(ctx, "/config", nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer rsp.Body.Close()
-	if err := json.NewDecoder(rsp.Body).Decode(&cfg); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
-}
-
-// Health checks the server's health status.
-func (c *Client) Health(ctx context.Context) error {
-	rsp, err := c.get(ctx, "/health", nil, nil)
-	if err != nil {
-		return err
-	}
-	defer rsp.Body.Close()
-	if rsp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server health check failed: %s", rsp.Status)
-	}
-	return nil
-}
-
 // VersionInfo retrieves the server's version information.
 func (c *Client) VersionInfo(ctx context.Context) (*proto.VersionInfo, error) {
-	var vi proto.VersionInfo
 	rsp, err := c.get(ctx, "version", nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer rsp.Body.Close()
-	if err := json.NewDecoder(rsp.Body).Decode(&vi); err != nil {
+	var vi proto.VersionInfo
+	if err := decodeJSON(rsp, &vi, "failed to get version", "version"); err != nil {
 		return nil, err
 	}
 	return &vi, nil

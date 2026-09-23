@@ -23,7 +23,7 @@ harness dirs
 	Run: func(cmd *cobra.Command, args []string) {
 		entries := collectDirs(cmd)
 		if stdoutIsTTY() {
-			printDirs(cmd, entries)
+			printDirs(entries)
 			return
 		}
 		for _, e := range entries {
@@ -55,7 +55,7 @@ func collectDirs(cmd *cobra.Command) []string {
 	return dirs
 }
 
-func printDirs(cmd *cobra.Command, dirs []string) {
+func printDirs(dirs []string) {
 	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(charmtone.Charple)
 
 	labels := make([]string, len(dirs))

@@ -76,17 +76,6 @@ func (c *controllerV1) handlePostControl(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// handleGetConfig returns global server configuration.
-//
-//	@Summary		Get server config
-//	@Tags			system
-//	@Produce		json
-//	@Success		200	{object}	object
-//	@Router			/config [get]
-func (c *controllerV1) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
-	jsonEncode(w, c.backend.Config())
-}
-
 // handleGetWorkspaces lists all workspaces.
 //
 //	@Summary		List workspaces
@@ -248,26 +237,6 @@ func (c *controllerV1) handleGetWorkspaceConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 	jsonEncode(w, cfg)
-}
-
-// handleGetWorkspaceProviders lists available providers for a workspace.
-//
-//	@Summary		Get workspace providers
-//	@Tags			workspaces
-//	@Produce		json
-//	@Param			id	path		string	true	"Workspace ID"
-//	@Success		200	{object}	object
-//	@Failure		404	{object}	proto.Error
-//	@Failure		500	{object}	proto.Error
-//	@Router			/workspaces/{id}/providers [get]
-func (c *controllerV1) handleGetWorkspaceProviders(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	providers, err := c.backend.GetWorkspaceProviders(id)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, providers)
 }
 
 // handleGetWorkspaceEvents streams workspace events as Server-Sent Events.
@@ -1059,9 +1028,15 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseW
 	id := r.PathValue("id")
 	sid := r.PathValue("sid")
 	// Optional focus instructions from /compact.
+	// An empty body means no instructions; anything else must decode.
 	var body proto.SummarizeRequest
 	if r.Body != nil {
-		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
+		err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
+		if err != nil && !errors.Is(err, io.EOF) {
+			c.server.logError(r, "Failed to decode request", "error", err)
+			jsonError(w, http.StatusBadRequest, "failed to decode request")
+			return
+		}
 	}
 	if err := c.backend.SummarizeSession(r.Context(), id, sid, body.Instructions); err != nil {
 		c.handleError(w, r, err)

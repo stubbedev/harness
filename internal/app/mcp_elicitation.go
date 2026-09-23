@@ -61,11 +61,7 @@ func elicitationHandler(questions question.Service) harnessmcp.ElicitationHandle
 		if isBareConfirmation(params) {
 			return bareConfirmationResult(answers), nil
 		}
-		content, contentErr := elicitationContent(answers, params.RequestedSchema)
-		if contentErr != nil {
-			return nil, contentErr
-		}
-		return &mcpsdk.ElicitResult{Action: "accept", Content: content}, nil
+		return &mcpsdk.ElicitResult{Action: "accept", Content: elicitationContent(answers, params.RequestedSchema)}, nil
 	}
 }
 
@@ -301,7 +297,7 @@ func parseEnum(raw json.RawMessage) ([]string, bool) {
 // elicitationContent converts answered questions back into the
 // map[string]any the server expects, coercing to the schema's declared
 // types where they are parseable.
-func elicitationContent(answers []question.Answer, rawSchema any) (map[string]any, error) {
+func elicitationContent(answers []question.Answer, rawSchema any) map[string]any {
 	schema := parseElicitationSchema(rawSchema)
 
 	content := make(map[string]any, len(answers))
@@ -328,7 +324,7 @@ func elicitationContent(answers []question.Answer, rawSchema any) (map[string]an
 			}
 		}
 	}
-	return content, nil
+	return content
 }
 
 // coerceElicitationValue parses a textual answer into the declared

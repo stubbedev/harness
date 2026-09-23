@@ -59,18 +59,6 @@ func (b *Backend) GetWorkspaceConfig(workspaceID string) (*config.Config, error)
 	return ws.Cfg.Config(), nil
 }
 
-// GetWorkspaceProviders returns the configured providers for a
-// workspace.
-func (b *Backend) GetWorkspaceProviders(workspaceID string) (any, error) {
-	ws, err := b.GetWorkspace(workspaceID)
-	if err != nil {
-		return nil, err
-	}
-
-	providers, _ := config.Providers(ws.Cfg.Config())
-	return providers, nil
-}
-
 // LSPStart starts an LSP server for the given path.
 func (b *Backend) LSPStart(ctx context.Context, workspaceID, path string) error {
 	ws, err := b.GetWorkspace(workspaceID)

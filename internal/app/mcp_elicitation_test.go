@@ -316,9 +316,7 @@ func TestElicitationContent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			content, err := elicitationContent(tt.answers, tt.schema)
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, content)
+			assert.Equal(t, tt.want, elicitationContent(tt.answers, tt.schema))
 		})
 	}
 }

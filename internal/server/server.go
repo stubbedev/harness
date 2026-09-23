@@ -93,8 +93,7 @@ type Server struct {
 	Addr    string
 	network string
 
-	h  *http.Server
-	ln net.Listener
+	h *http.Server
 
 	backend *backend.Backend
 	logger  *slog.Logger
@@ -110,15 +109,6 @@ func (s *Server) SetLogger(logger *slog.Logger) {
 // HTTP surface.
 func (s *Server) Backend() *backend.Backend {
 	return s.backend
-}
-
-// DefaultServer returns a new [Server] with the default address.
-func DefaultServer(cfg *config.ConfigStore) *Server {
-	hostURL, err := ParseHostURL(DefaultHost())
-	if err != nil {
-		panic("invalid default host")
-	}
-	return NewServer(cfg, hostURL.Scheme, hostURL.Host)
 }
 
 // NewServer creates a new [Server] with the given network and address.
@@ -157,7 +147,6 @@ func (s *Server) installHandler() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", c.handleGetHealth)
 	mux.HandleFunc("GET /v1/version", c.handleGetVersion)
-	mux.HandleFunc("GET /v1/config", c.handleGetConfig)
 	mux.HandleFunc("POST /v1/control", c.handlePostControl)
 	mux.HandleFunc("DELETE /v1/clients/{client_id}", c.handleDeleteClient)
 	mux.HandleFunc("GET /v1/workspaces", c.handleGetWorkspaces)
@@ -167,7 +156,6 @@ func (s *Server) installHandler() {
 	mux.HandleFunc("GET /v1/workspaces/{id}", c.handleGetWorkspace)
 	mux.HandleFunc("GET /v1/workspaces/{id}/config", c.handleGetWorkspaceConfig)
 	mux.HandleFunc("GET /v1/workspaces/{id}/events", c.handleGetWorkspaceEvents)
-	mux.HandleFunc("GET /v1/workspaces/{id}/providers", c.handleGetWorkspaceProviders)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions", c.handleGetWorkspaceSessions)
 	mux.HandleFunc("POST /v1/workspaces/{id}/sessions", c.handlePostWorkspaceSessions)
 	mux.HandleFunc("GET /v1/workspaces/{id}/sessions/{sid}", c.handleGetWorkspaceSession)
@@ -249,9 +237,6 @@ func (s *Server) Serve(ln net.Listener) error {
 
 // ListenAndServe starts the server and begins accepting connections.
 func (s *Server) ListenAndServe() error {
-	if s.ln != nil {
-		return fmt.Errorf("server already started")
-	}
 	ln, removedStale, err := listen(s.network, s.Addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", s.Addr, err)
@@ -262,23 +247,14 @@ func (s *Server) ListenAndServe() error {
 	return s.Serve(ln)
 }
 
-func (s *Server) closeListener() {
-	if s.ln != nil {
-		s.ln.Close()
-		s.ln = nil
-	}
-}
-
 // Close force closes all listeners and connections.
 func (s *Server) Close() error {
-	defer func() { s.closeListener() }()
 	return s.h.Close()
 }
 
 // Shutdown gracefully shuts down the server without interrupting active
-// connections.
+// connections. The http.Server closes the listeners Serve was given.
 func (s *Server) Shutdown(ctx context.Context) error {
-	defer func() { s.closeListener() }()
 	return s.h.Shutdown(ctx)
 }
 

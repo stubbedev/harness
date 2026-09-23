@@ -272,6 +272,3 @@ func TestMessageToProtoPrismModel(t *testing.T) {
 	require.NotNil(t, got.PrismDollarSavings)
 	require.Equal(t, 0.002, *got.PrismDollarSavings)
 }
-
-//go:fix inline
-func ptrFloat(v float64) *float64 { return new(v) }

@@ -161,19 +161,6 @@ func TestRefreshOAuthToken_NoEventOnError(t *testing.T) {
 	}
 }
 
-// drainEvents reads from evc until quiet for the given window. Used
-// to flush events emitted by setup steps so the assertion can target
-// the event from the action under test.
-func drainEvents(evc <-chan pubsub.Event[tea.Msg], quiet time.Duration) {
-	for {
-		select {
-		case <-evc:
-		case <-time.After(quiet):
-			return
-		}
-	}
-}
-
 // TestPublishConfigChanged_NilWorkspaceSafe documents that the helper
 // is safe to call on workspaces without an *app.App (e.g. synthetic
 // test workspaces).

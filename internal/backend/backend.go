@@ -1035,22 +1035,6 @@ func (b *Backend) VersionInfo() proto.VersionInfo {
 	}
 }
 
-// Config returns the server-level configuration.
-func (b *Backend) Config() *config.ConfigStore {
-	return b.cfg
-}
-
-// Shutdown initiates a graceful server shutdown.
-func (b *Backend) Shutdown() {
-	b.mu.Lock()
-	b.closing = true
-	fn := b.shutdownFn
-	b.mu.Unlock()
-	if fn != nil {
-		fn()
-	}
-}
-
 // ShutdownIfIdle shuts the server down only when it is hosting no
 // workspaces and has no creates in flight, reporting false when it declined
 // because work is live.
