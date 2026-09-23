@@ -98,7 +98,7 @@ func NewWriteTool(
 
 			filetracker.Observe(ctx, tracker, sessionID, filePath, []byte(params.Content), []filetracker.Range{{Start: 0, End: len(params.Content)}})
 
-			lspManager.NotifyChangeAsync(ctx, params.FilePath)
+			lspManager.NotifyChangeAsync(ctx, filePath)
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
