@@ -246,3 +246,44 @@ harness.register_tool({
 	require.True(t, rsp.IsError)
 	require.Contains(t, rsp.Content, `registers no job "nope"`)
 }
+
+// One extension must not see, collect or cancel another's jobs.
+func TestJobsAreScopedToTheirExtension(t *testing.T) {
+	t.Parallel()
+
+	owner := writeExtension(t, "owner", `
+harness.register_job({ name = "work", handler = function() return "done" end })
+harness.register_tool({
+  name = "start_work",
+  handler = function() return harness.jobs.start("work", {}) end,
+})
+`)
+	other := writeExtension(t, "other", `
+harness.register_tool({
+  name = "peek",
+  parameters = { id = { type = "string", description = "job id" } },
+  handler = function(input)
+    local status = harness.jobs.status(input.id)
+    return string.format("results=%d status=%s cancel=%s",
+      #harness.jobs.results(), tostring(status), tostring(harness.jobs.cancel(input.id)))
+  end,
+})
+`)
+
+	host := newHost(t, []string{owner, other})
+	id := runTool(t, host, "start_work").Content
+	require.NotEmpty(t, id)
+	require.Eventually(t, func() bool {
+		jobs := host.Jobs()
+		return len(jobs) == 1 && jobs[0].State != extensions.JobRunning
+	}, 10*time.Second, 10*time.Millisecond)
+
+	rsp, err := findTool(t, host, "peek").Run(t.Context(), fantasy.ToolCall{
+		ID: "p", Name: "peek", Input: `{"id":"` + id + `"}`,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "results=0 status=nil cancel=false", rsp.Content)
+
+	drained := runJobTool(t, host, extensions.JobToolParams{Action: "result"})
+	require.Contains(t, drained.Content, "done", "the other extension must not have collected the result")
+}

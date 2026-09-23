@@ -91,7 +91,7 @@ func (t *jobTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolR
 // result collects one job, or drains every finished one.
 func (t *jobTool) result(ctx context.Context, params JobToolParams) (fantasy.ToolResponse, error) {
 	if params.ID == "" {
-		finished := t.host.jobs.drain()
+		finished := t.host.jobs.drain("")
 		if len(finished) == 0 {
 			return fantasy.NewTextResponse("No finished jobs are waiting to be collected."), nil
 		}

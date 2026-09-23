@@ -267,7 +267,9 @@ func (r *jobRunner) list() []Job {
 // drain returns every finished job whose result has not been collected
 // yet, marking them collected. This is the queue: slow work finishes on
 // its own schedule and the results wait here until something asks.
-func (r *jobRunner) drain() []Job {
+// A non-empty extension limits the drain to that extension's jobs, so one
+// extension cannot collect, and so hide, another's results.
+func (r *jobRunner) drain(extension string) []Job {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -275,6 +277,9 @@ func (r *jobRunner) drain() []Job {
 	for _, id := range r.order {
 		job, ok := r.jobs[id]
 		if !ok || job.State == JobRunning || job.Collected {
+			continue
+		}
+		if extension != "" && job.Extension != extension {
 			continue
 		}
 		job.Collected = true

@@ -429,9 +429,19 @@ func (in *instance) luaJobsStart(L *lua.LState) int {
 	return 1
 }
 
+// ownJob returns one of this extension's jobs. Another extension's job
+// reads as absent: extensions see and steer only the work they started.
+func (in *instance) ownJob(id string) (Job, bool) {
+	job, ok := in.host.jobs.get(id)
+	if !ok || job.Extension != in.ext.Name {
+		return Job{}, false
+	}
+	return job, true
+}
+
 // luaJobsStatus implements harness.jobs.status.
 func (in *instance) luaJobsStatus(L *lua.LState) int {
-	job, ok := in.host.jobs.get(L.CheckString(1))
+	job, ok := in.ownJob(L.CheckString(1))
 	if !ok {
 		L.Push(lua.LNil)
 		return 1
@@ -443,7 +453,7 @@ func (in *instance) luaJobsStatus(L *lua.LState) int {
 // luaJobsResults implements harness.jobs.results: it drains the finished
 // jobs whose results nothing has collected yet.
 func (in *instance) luaJobsResults(L *lua.LState) int {
-	finished := in.host.jobs.drain()
+	finished := in.host.jobs.drain(in.ext.Name)
 	tbl := L.CreateTable(len(finished), 0)
 	for _, job := range finished {
 		tbl.Append(jobToLua(L, job))
@@ -454,7 +464,9 @@ func (in *instance) luaJobsResults(L *lua.LState) int {
 
 // luaJobsCancel implements harness.jobs.cancel.
 func (in *instance) luaJobsCancel(L *lua.LState) int {
-	L.Push(lua.LBool(in.host.jobs.cancel(L.CheckString(1))))
+	id := L.CheckString(1)
+	_, own := in.ownJob(id)
+	L.Push(lua.LBool(own && in.host.jobs.cancel(id)))
 	return 1
 }
 
