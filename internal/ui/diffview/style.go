@@ -1,6 +1,8 @@
 package diffview
 
 import (
+	"image/color"
+
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
 )
@@ -24,118 +26,69 @@ type Style struct {
 	Filename    LineStyle
 }
 
-// DefaultLightStyle provides a default light theme style for the diff view.
-func DefaultLightStyle() Style {
+// palette holds the colors a diff [Style] is built from; the light and
+// dark defaults differ only in these.
+type palette struct {
+	dividerFg, dividerBg         color.Color // Hunk and file-name gutter.
+	dividerCodeFg, dividerCodeBg color.Color // Hunk header text.
+	gutterFg, gutterBg           color.Color // Line numbers of unchanged lines.
+	text, textBg                 color.Color // Code of unchanged lines.
+	insertNumBg, insertBg        color.Color
+	deleteNumBg, deleteBg        color.Color
+}
+
+func (p palette) style() Style {
+	s := lipgloss.NewStyle
 	return Style{
 		DividerLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Iron).
-				Background(charmtone.Thunder),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Oyster).
-				Background(charmtone.Anchovy),
+			LineNumber: s().Foreground(p.dividerFg).Background(p.dividerBg),
+			Code:       s().Foreground(p.dividerCodeFg).Background(p.dividerCodeBg),
 		},
 		MissingLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Background(charmtone.Sash),
-			Code: lipgloss.NewStyle().
-				Background(charmtone.Sash),
+			LineNumber: s().Background(p.gutterBg),
+			Code:       s().Background(p.gutterBg),
 		},
 		EqualLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Char).
-				Background(charmtone.Sash),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Pepper).
-				Background(charmtone.Salt),
+			LineNumber: s().Foreground(p.gutterFg).Background(p.gutterBg),
+			Code:       s().Foreground(p.text).Background(p.textBg),
 		},
 		InsertLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Turtle).
-				Background(lipgloss.Color("#c8e6c9")),
-			Symbol: lipgloss.NewStyle().
-				Foreground(charmtone.Turtle).
-				Background(lipgloss.Color("#e8f5e9")),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Pepper).
-				Background(lipgloss.Color("#e8f5e9")),
+			LineNumber: s().Foreground(charmtone.Turtle).Background(p.insertNumBg),
+			Symbol:     s().Foreground(charmtone.Turtle).Background(p.insertBg),
+			Code:       s().Foreground(p.text).Background(p.insertBg),
 		},
 		DeleteLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Cherry).
-				Background(lipgloss.Color("#ffcdd2")),
-			Symbol: lipgloss.NewStyle().
-				Foreground(charmtone.Cherry).
-				Background(lipgloss.Color("#ffebee")),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Pepper).
-				Background(lipgloss.Color("#ffebee")),
+			LineNumber: s().Foreground(charmtone.Cherry).Background(p.deleteNumBg),
+			Symbol:     s().Foreground(charmtone.Cherry).Background(p.deleteBg),
+			Code:       s().Foreground(p.text).Background(p.deleteBg),
 		},
 		Filename: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Iron).
-				Background(charmtone.Thunder),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Iron).
-				Background(charmtone.Thunder),
+			LineNumber: s().Foreground(p.dividerFg).Background(p.dividerBg),
+			Code:       s().Foreground(p.dividerFg).Background(p.dividerBg),
 		},
 	}
 }
 
+// DefaultLightStyle provides a default light theme style for the diff view.
+func DefaultLightStyle() Style {
+	return palette{
+		dividerFg: charmtone.Iron, dividerBg: charmtone.Thunder,
+		dividerCodeFg: charmtone.Oyster, dividerCodeBg: charmtone.Anchovy,
+		gutterFg: charmtone.Char, gutterBg: charmtone.Sash,
+		text: charmtone.Pepper, textBg: charmtone.Salt,
+		insertNumBg: lipgloss.Color("#c8e6c9"), insertBg: lipgloss.Color("#e8f5e9"),
+		deleteNumBg: lipgloss.Color("#ffcdd2"), deleteBg: lipgloss.Color("#ffebee"),
+	}.style()
+}
+
 // DefaultDarkStyle provides a default dark theme style for the diff view.
 func DefaultDarkStyle() Style {
-	return Style{
-		DividerLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Smoke).
-				Background(charmtone.Sapphire),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Smoke).
-				Background(charmtone.Ox),
-		},
-		MissingLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Background(charmtone.Char),
-			Code: lipgloss.NewStyle().
-				Background(charmtone.Char),
-		},
-		EqualLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Sash).
-				Background(charmtone.Char),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Salt).
-				Background(charmtone.Pepper),
-		},
-		InsertLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Turtle).
-				Background(lipgloss.Color("#293229")),
-			Symbol: lipgloss.NewStyle().
-				Foreground(charmtone.Turtle).
-				Background(lipgloss.Color("#303a30")),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Salt).
-				Background(lipgloss.Color("#303a30")),
-		},
-		DeleteLine: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Cherry).
-				Background(lipgloss.Color("#332929")),
-			Symbol: lipgloss.NewStyle().
-				Foreground(charmtone.Cherry).
-				Background(lipgloss.Color("#3a3030")),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Salt).
-				Background(lipgloss.Color("#3a3030")),
-		},
-		Filename: LineStyle{
-			LineNumber: lipgloss.NewStyle().
-				Foreground(charmtone.Smoke).
-				Background(charmtone.Sapphire),
-			Code: lipgloss.NewStyle().
-				Foreground(charmtone.Smoke).
-				Background(charmtone.Sapphire),
-		},
-	}
+	return palette{
+		dividerFg: charmtone.Smoke, dividerBg: charmtone.Sapphire,
+		dividerCodeFg: charmtone.Smoke, dividerCodeBg: charmtone.Ox,
+		gutterFg: charmtone.Sash, gutterBg: charmtone.Char,
+		text: charmtone.Salt, textBg: charmtone.Pepper,
+		insertNumBg: lipgloss.Color("#293229"), insertBg: lipgloss.Color("#303a30"),
+		deleteNumBg: lipgloss.Color("#332929"), deleteBg: lipgloss.Color("#3a3030"),
+	}.style()
 }
