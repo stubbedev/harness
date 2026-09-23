@@ -713,18 +713,27 @@ func TestPendingStateDoesNotRetainPayload(t *testing.T) {
 
 	msg.AppendReasoningContent(strings.Repeat("x", 64*1024))
 	msg.AddToolCall(ToolCall{ID: "tc-1", Name: "shell", Finished: true})
-	msg.AddFinish(FinishReasonEndTurn, "", "")
 	require.NoError(t, svc.Update(t.Context(), msg))
 	require.NoError(t, svc.Flush(t.Context(), msg.ID))
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	p := s.pending[msg.ID]
 	require.NotNil(t, p)
 	require.False(t, p.dirty)
 	require.Empty(t, p.latest.Parts, "flushed pending state still pins the message parts")
 	require.True(t, p.hasFlushed)
 	require.Equal(t, []bool{true}, p.baseline.toolCallsFinished)
+	s.mu.Unlock()
+
+	// A finished message takes no more deltas, so its entry goes
+	// entirely rather than lingering for the life of the service.
+	msg.AddFinish(FinishReasonEndTurn, "", "")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	require.NoError(t, svc.Flush(t.Context(), msg.ID))
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	require.NotContains(t, s.pending, msg.ID)
 }
 
 // TestShouldFlushNow_AgainstCompactBaseline pins terminal detection to the

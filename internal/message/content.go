@@ -220,37 +220,11 @@ func (m *Message) ContextNotesOnly() bool {
 	return notes > 0
 }
 
-// HasShellCommand reports whether the message contains any ShellCommand parts.
-func (m *Message) HasShellCommand() bool {
-	for _, part := range m.Parts {
-		if _, ok := part.(ShellCommand); ok {
-			return true
-		}
-	}
-	return false
-}
-
 // ShellCommands returns all ShellCommand parts from the message.
-func (m *Message) ShellCommands() []ShellCommand {
-	var cmds []ShellCommand
-	for _, part := range m.Parts {
-		if sc, ok := part.(ShellCommand); ok {
-			cmds = append(cmds, sc)
-		}
-	}
-	return cmds
-}
+func (m *Message) ShellCommands() []ShellCommand { return PartsOf[ShellCommand](m) }
 
 // SubagentNotes returns all SubagentNote parts from the message.
-func (m *Message) SubagentNotes() []SubagentNote {
-	var notes []SubagentNote
-	for _, part := range m.Parts {
-		if sn, ok := part.(SubagentNote); ok {
-			notes = append(notes, sn)
-		}
-	}
-	return notes
-}
+func (m *Message) SubagentNotes() []SubagentNote { return PartsOf[SubagentNote](m) }
 
 // PartOf returns the first part of m with type T, if any. Single source
 // for the part-type scans the UI re-typed per call site.
@@ -273,12 +247,13 @@ func HasPart[T ContentPart](m *Message) bool {
 	return ok
 }
 
-// PartsOf returns every part of m with type T.
+// PartsOf returns every part of m with type T: an empty, non-nil slice
+// when there are none (nil only for a nil message).
 func PartsOf[T ContentPart](m *Message) []T {
 	if m == nil {
 		return nil
 	}
-	var out []T
+	out := []T{}
 	for _, part := range m.Parts {
 		if t, ok := part.(T); ok {
 			out = append(out, t)
@@ -360,62 +335,22 @@ func appendTo(builder **strings.Builder, current, delta string) string {
 }
 
 func (m *Message) Content() TextContent {
-	for _, part := range m.Parts {
-		if c, ok := part.(TextContent); ok {
-			return c
-		}
-	}
-	return TextContent{}
+	c, _ := PartOf[TextContent](m)
+	return c
 }
 
 func (m *Message) ReasoningContent() ReasoningContent {
-	for _, part := range m.Parts {
-		if c, ok := part.(ReasoningContent); ok {
-			return c
-		}
-	}
-	return ReasoningContent{}
+	c, _ := PartOf[ReasoningContent](m)
+	return c
 }
 
-func (m *Message) ImageURLContent() []ImageURLContent {
-	imageURLContents := make([]ImageURLContent, 0)
-	for _, part := range m.Parts {
-		if c, ok := part.(ImageURLContent); ok {
-			imageURLContents = append(imageURLContents, c)
-		}
-	}
-	return imageURLContents
-}
+func (m *Message) ImageURLContent() []ImageURLContent { return PartsOf[ImageURLContent](m) }
 
-func (m *Message) BinaryContent() []BinaryContent {
-	binaryContents := make([]BinaryContent, 0)
-	for _, part := range m.Parts {
-		if c, ok := part.(BinaryContent); ok {
-			binaryContents = append(binaryContents, c)
-		}
-	}
-	return binaryContents
-}
+func (m *Message) BinaryContent() []BinaryContent { return PartsOf[BinaryContent](m) }
 
-func (m *Message) ToolCalls() []ToolCall {
-	toolCalls := make([]ToolCall, 0)
-	for _, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			toolCalls = append(toolCalls, c)
-		}
-	}
-	return toolCalls
-}
+func (m *Message) ToolCalls() []ToolCall { return PartsOf[ToolCall](m) }
 
-func (m *Message) ToolResults() []ToolResult {
-	toolResults := make([]ToolResult, 0)
-	for _, part := range m.Parts {
-		if c, ok := part.(ToolResult); ok {
-			toolResults = append(toolResults, c)
-		}
-	}
-	return toolResults
-}
+func (m *Message) ToolResults() []ToolResult { return PartsOf[ToolResult](m) }
 
 func (m *Message) IsFinished() bool {
 	for _, part := range m.Parts {

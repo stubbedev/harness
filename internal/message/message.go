@@ -58,7 +58,6 @@ type Service interface {
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	GetLastAssistantMessage(ctx context.Context, sessionID string) (Message, error)
 	Delete(ctx context.Context, id string) error
-	DeleteSessionMessages(ctx context.Context, sessionID string) error
 
 	// Flush synchronously drains any pending debounced state for the
 	// given message ID, performs the SQL write, and publishes the
@@ -226,22 +225,6 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 	return message, nil
 }
 
-func (s *service) DeleteSessionMessages(ctx context.Context, sessionID string) error {
-	messages, err := s.List(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	for _, message := range messages {
-		if message.SessionID == sessionID {
-			err = s.Delete(ctx, message.ID)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 // Update accepts a new state for a message and either flushes
 // synchronously (terminal updates, debounce <= 0) or buffers it until
 // the next debounce tick. See [Service] for the contract.
@@ -399,11 +382,15 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		// caller, the user expects that delta to land too.
 		wasDirty := p.dirty
 		if !wasDirty {
-			// Nothing left to write, so drop the snapshot. Pending
-			// entries outlive the streams that created them; holding
-			// latest here would pin every finished message's parts
-			// for the life of the process.
-			p.latest = Message{}
+			// Nothing left to write, so drop the snapshot: holding
+			// latest would pin the message's parts. A finished message
+			// takes no more deltas, so its whole entry goes; a later
+			// update simply starts a fresh one.
+			if snap.IsFinished() {
+				delete(s.pending, id)
+			} else {
+				p.latest = Message{}
+			}
 		}
 		s.mu.Unlock()
 
