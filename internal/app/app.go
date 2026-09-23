@@ -116,7 +116,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	files := history.NewService(q, conn)
 	// Memory reads its reap limit lazily so live config reloads of
 	// options.memory.max_memories are honored without rebuilding.
-	memories := memory.NewService(q, memory.WithReapLimit(func() int {
+	memories := memory.NewService(q, conn, memory.WithReapLimit(func() int {
 		if cfg := store.Config(); cfg != nil && cfg.Options != nil {
 			return cfg.Options.Memory.GetMaxMemories()
 		}

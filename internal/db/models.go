@@ -26,6 +26,11 @@ type File struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type MemoriesFt struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
 type Memory struct {
 	ID         string `json:"id"`
 	Category   string `json:"category"`
@@ -36,6 +41,7 @@ type Memory struct {
 	LastUsedAt int64  `json:"last_used_at"`
 	CreatedAt  int64  `json:"created_at"`
 	UpdatedAt  int64  `json:"updated_at"`
+	Embedding  []byte `json:"embedding"`
 }
 
 type Message struct {

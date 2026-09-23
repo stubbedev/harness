@@ -66,7 +66,6 @@ type Querier interface {
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
 	SaveModelCatalog(ctx context.Context, data string) (ModelCatalog, error)
-	SearchMemories(ctx context.Context, arg SearchMemoriesParams) ([]Memory, error)
 	TouchMemory(ctx context.Context, id string) error
 	UpdateMemory(ctx context.Context, arg UpdateMemoryParams) (Memory, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error

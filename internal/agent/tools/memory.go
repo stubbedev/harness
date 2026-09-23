@@ -229,9 +229,15 @@ func renderIndex(items []memory.Item) string {
 	if len(items) == 0 {
 		return "No memories found."
 	}
-	lines := make([]string, 0, len(items))
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d memories:", len(items))
 	for _, item := range items {
-		lines = append(lines, item.IndexLine())
+		b.WriteString("\n")
+		b.WriteString(item.IndexLine())
+		if item.Snippet != "" {
+			b.WriteString("\n    ")
+			b.WriteString(item.Snippet)
+		}
 	}
-	return fmt.Sprintf("%d memories:\n%s", len(items), strings.Join(lines, "\n"))
+	return b.String()
 }

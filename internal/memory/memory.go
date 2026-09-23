@@ -76,6 +76,9 @@ type Item struct {
 	LastUsedAt int64    `json:"last_used_at"`
 	CreatedAt  int64    `json:"created_at"`
 	UpdatedAt  int64    `json:"updated_at"`
+	// Snippet carries a matched-content excerpt on search results; it
+	// is empty everywhere else.
+	Snippet string `json:"snippet,omitempty"`
 }
 
 // IndexLine renders the compact one-line form used in the tool's
@@ -130,6 +133,7 @@ type Service interface {
 
 type service struct {
 	q       *db.Queries
+	conn    *sql.DB
 	reapFn  func() int
 	scrubFn func(string) (string, int)
 }
@@ -149,10 +153,16 @@ func WithScrubber(fn func(string) (string, int)) Option {
 	return func(s *service) { s.scrubFn = fn }
 }
 
-// NewService returns a Service backed by the given queries.
-func NewService(q *db.Queries, opts ...Option) Service {
+// NewService returns a Service backed by the given queries. The raw
+// connection backs the full-text search query, which sqlc cannot
+// manage because it cannot parse the FTS5 virtual table.
+func NewService(q *db.Queries, conn *sql.DB, opts ...Option) Service {
+	if conn == nil {
+		panic("memory service requires a database connection")
+	}
 	s := &service{
 		q:       q,
+		conn:    conn,
 		reapFn:  func() int { return 0 },
 		scrubFn: Scrub,
 	}
@@ -194,6 +204,7 @@ func (s *service) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 	if redactions > 0 {
 		slog.Warn("Redacted likely secrets from saved memory", "title", input.Title, "count", redactions)
 	}
+	embedding := encodeEmbedding(Embed(input.Title + "\n" + content))
 
 	id := input.ID
 	if id == "" {
@@ -205,11 +216,12 @@ func (s *service) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		row, err := s.q.CreateMemory(ctx, db.CreateMemoryParams{
-			ID:       id,
-			Category: string(category),
-			Title:    input.Title,
-			Content:  content,
-			Pinned:   boolToInt(pinned),
+			ID:        id,
+			Category:  string(category),
+			Title:     input.Title,
+			Content:   content,
+			Pinned:    boolToInt(pinned),
+			Embedding: embedding,
 		})
 		if err != nil {
 			return SaveResult{}, err
@@ -225,11 +237,12 @@ func (s *service) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 		newPinned = *input.Pinned
 	}
 	row, err := s.q.UpdateMemory(ctx, db.UpdateMemoryParams{
-		Category: string(category),
-		Title:    input.Title,
-		Content:  content,
-		Pinned:   boolToInt(newPinned),
-		ID:       id,
+		Category:  string(category),
+		Title:     input.Title,
+		Content:   content,
+		Pinned:    boolToInt(newPinned),
+		Embedding: embedding,
+		ID:        id,
 	})
 	if err != nil {
 		return SaveResult{}, err
@@ -260,30 +273,6 @@ func (s *service) Get(ctx context.Context, id string) (Item, error) {
 	item.UseCount++
 	item.LastUsedAt = time.Now().Unix()
 	return item, nil
-}
-
-func (s *service) Search(ctx context.Context, query string) ([]Item, error) {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil, errors.New("search query is required")
-	}
-	rows, err := s.q.SearchMemories(ctx, db.SearchMemoriesParams{
-		Column1: sql.NullString{String: query, Valid: true},
-		Column2: sql.NullString{String: query, Valid: true},
-	})
-	if err != nil {
-		return nil, err
-	}
-	items := make([]Item, 0, len(rows))
-	now := time.Now().Unix()
-	for _, row := range rows {
-		item := fromDB(row)
-		item.UseCount++
-		item.LastUsedAt = now
-		items = append(items, item)
-		s.touch(ctx, row.ID)
-	}
-	return items, nil
 }
 
 func (s *service) List(ctx context.Context) ([]Item, error) {

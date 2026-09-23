@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"database/sql"
 )
 
 const countMemories = `-- name: CountMemories :one
@@ -23,18 +22,19 @@ func (q *Queries) CountMemories(ctx context.Context) (int64, error) {
 
 const createMemory = `-- name: CreateMemory :one
 INSERT INTO memories (
-    id, category, title, content, pinned, created_at, updated_at
+    id, category, title, content, pinned, embedding, created_at, updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
-) RETURNING id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at
+    ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+) RETURNING id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at, embedding
 `
 
 type CreateMemoryParams struct {
-	ID       string `json:"id"`
-	Category string `json:"category"`
-	Title    string `json:"title"`
-	Content  string `json:"content"`
-	Pinned   int64  `json:"pinned"`
+	ID        string `json:"id"`
+	Category  string `json:"category"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	Pinned    int64  `json:"pinned"`
+	Embedding []byte `json:"embedding"`
 }
 
 func (q *Queries) CreateMemory(ctx context.Context, arg CreateMemoryParams) (Memory, error) {
@@ -44,6 +44,7 @@ func (q *Queries) CreateMemory(ctx context.Context, arg CreateMemoryParams) (Mem
 		arg.Title,
 		arg.Content,
 		arg.Pinned,
+		arg.Embedding,
 	)
 	var i Memory
 	err := row.Scan(
@@ -56,6 +57,7 @@ func (q *Queries) CreateMemory(ctx context.Context, arg CreateMemoryParams) (Mem
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Embedding,
 	)
 	return i, err
 }
@@ -73,7 +75,7 @@ func (q *Queries) DeleteMemory(ctx context.Context, id string) (int64, error) {
 }
 
 const getMemory = `-- name: GetMemory :one
-SELECT id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at FROM memories WHERE id = ? LIMIT 1
+SELECT id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at, embedding FROM memories WHERE id = ? LIMIT 1
 `
 
 func (q *Queries) GetMemory(ctx context.Context, id string) (Memory, error) {
@@ -89,12 +91,13 @@ func (q *Queries) GetMemory(ctx context.Context, id string) (Memory, error) {
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Embedding,
 	)
 	return i, err
 }
 
 const getMemoryByTitle = `-- name: GetMemoryByTitle :one
-SELECT id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at FROM memories WHERE lower(title) = lower(?) LIMIT 1
+SELECT id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at, embedding FROM memories WHERE lower(title) = lower(?) LIMIT 1
 `
 
 func (q *Queries) GetMemoryByTitle(ctx context.Context, lower string) (Memory, error) {
@@ -110,12 +113,13 @@ func (q *Queries) GetMemoryByTitle(ctx context.Context, lower string) (Memory, e
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Embedding,
 	)
 	return i, err
 }
 
 const listMemories = `-- name: ListMemories :many
-SELECT id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at FROM memories
+SELECT id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at, embedding FROM memories
 ORDER BY pinned DESC, updated_at DESC, id ASC
 `
 
@@ -142,6 +146,7 @@ func (q *Queries) ListMemories(ctx context.Context) ([]Memory, error) {
 			&i.LastUsedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Embedding,
 		); err != nil {
 			return nil, err
 		}
@@ -174,50 +179,6 @@ func (q *Queries) ReapMemories(ctx context.Context, limit int64) (int64, error) 
 	return result.RowsAffected()
 }
 
-const searchMemories = `-- name: SearchMemories :many
-SELECT id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at FROM memories
-WHERE title LIKE '%' || ? || '%' OR content LIKE '%' || ? || '%'
-ORDER BY pinned DESC, updated_at DESC, id ASC
-`
-
-type SearchMemoriesParams struct {
-	Column1 sql.NullString `json:"column_1"`
-	Column2 sql.NullString `json:"column_2"`
-}
-
-func (q *Queries) SearchMemories(ctx context.Context, arg SearchMemoriesParams) ([]Memory, error) {
-	rows, err := q.query(ctx, q.searchMemoriesStmt, searchMemories, arg.Column1, arg.Column2)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Memory{}
-	for rows.Next() {
-		var i Memory
-		if err := rows.Scan(
-			&i.ID,
-			&i.Category,
-			&i.Title,
-			&i.Content,
-			&i.Pinned,
-			&i.UseCount,
-			&i.LastUsedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const touchMemory = `-- name: TouchMemory :exec
 UPDATE memories SET use_count = use_count + 1, last_used_at = strftime('%s', 'now')
 WHERE id = ?
@@ -234,17 +195,19 @@ UPDATE memories SET
     title = ?,
     content = ?,
     pinned = ?,
+    embedding = ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?
-RETURNING id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at
+RETURNING id, category, title, content, pinned, use_count, last_used_at, created_at, updated_at, embedding
 `
 
 type UpdateMemoryParams struct {
-	Category string `json:"category"`
-	Title    string `json:"title"`
-	Content  string `json:"content"`
-	Pinned   int64  `json:"pinned"`
-	ID       string `json:"id"`
+	Category  string `json:"category"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	Pinned    int64  `json:"pinned"`
+	Embedding []byte `json:"embedding"`
+	ID        string `json:"id"`
 }
 
 func (q *Queries) UpdateMemory(ctx context.Context, arg UpdateMemoryParams) (Memory, error) {
@@ -253,6 +216,7 @@ func (q *Queries) UpdateMemory(ctx context.Context, arg UpdateMemoryParams) (Mem
 		arg.Title,
 		arg.Content,
 		arg.Pinned,
+		arg.Embedding,
 		arg.ID,
 	)
 	var i Memory
@@ -266,6 +230,7 @@ func (q *Queries) UpdateMemory(ctx context.Context, arg UpdateMemoryParams) (Mem
 		&i.LastUsedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Embedding,
 	)
 	return i, err
 }

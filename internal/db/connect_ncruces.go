@@ -8,11 +8,12 @@ import (
 
 	"github.com/ncruces/go-sqlite3"
 	"github.com/ncruces/go-sqlite3/driver"
+	"github.com/ncruces/go-sqlite3/ext/fts5"
 )
 
 func openDBReadOnly(dbPath string) (*sql.DB, error) {
 	dsn := fmt.Sprintf("file:%s?mode=ro&_txlock=immediate", dbPath)
-	db, err := driver.Open(dsn, nil)
+	db, err := driver.Open(dsn, registerExtensions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -33,11 +34,21 @@ func openDB(dbPath string) (*sql.DB, error) {
 				return fmt.Errorf("failed to set pragma %q: %w", name, err)
 			}
 		}
-		return nil
+		return registerExtensions(c)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	return db, nil
+}
+
+// registerExtensions loads the SQLite extensions compiled into the
+// standard build of the modernc driver. FTS5 backs memories full-text
+// search; without it the memories_fts virtual table is unusable.
+func registerExtensions(c *sqlite3.Conn) error {
+	if err := fts5.Register(c); err != nil {
+		return fmt.Errorf("failed to register fts5: %w", err)
+	}
+	return nil
 }

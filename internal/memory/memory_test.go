@@ -24,7 +24,7 @@ func newTestService(t *testing.T, reap func() int) Service {
 	if reap != nil {
 		opts = append(opts, WithReapLimit(reap))
 	}
-	return NewService(db.New(conn), opts...)
+	return NewService(db.New(conn), conn, opts...)
 }
 
 func TestSaveCreatesThenUpdatesByTitle(t *testing.T) {
@@ -198,7 +198,7 @@ func TestSaveScrubsSecrets(t *testing.T) {
 	})
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	svc := NewService(db.New(conn))
+	svc := NewService(db.New(conn), conn)
 
 	result, err := svc.Save(t.Context(), SaveInput{
 		Title:   "Creds",

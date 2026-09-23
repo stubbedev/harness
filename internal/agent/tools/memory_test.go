@@ -18,7 +18,7 @@ func newMemoryToolForTest(t *testing.T) fantasy.AgentTool {
 	})
 	conn, err := db.Connect(t.Context(), dataDir)
 	require.NoError(t, err)
-	return NewMemoryTool(memory.NewService(db.New(conn)))
+	return NewMemoryTool(memory.NewService(db.New(conn), conn))
 }
 
 func runMemoryTool(t *testing.T, tool fantasy.AgentTool, input string) fantasy.ToolResponse {
@@ -118,13 +118,14 @@ func TestMemoryToolReadByQuery(t *testing.T) {
 	one := runMemoryTool(t, tool, `{"action":"read","query":"build"}`)
 	require.Contains(t, one.Content, "just build")
 
-	// A query matching several memories returns the index, so the
-	// follow-up read can name an id.
+	// A query matching several memories returns the index with content
+	// snippets, so the follow-up read can name the right id without
+	// extra calls.
 	many := runMemoryTool(t, tool, `{"action":"read","query":"commands"}`)
 	require.Contains(t, many.Content, "2 memories")
 	require.Contains(t, many.Content, "[build-commands]")
 	require.Contains(t, many.Content, "[test-commands]")
-	require.NotContains(t, many.Content, "just build")
+	require.Contains(t, many.Content, "just build")
 
 	// A title works the same way as a query.
 	byTitle := runMemoryTool(t, tool, `{"action":"read","title":"Build commands"}`)

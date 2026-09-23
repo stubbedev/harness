@@ -1,8 +1,8 @@
 -- name: CreateMemory :one
 INSERT INTO memories (
-    id, category, title, content, pinned, created_at, updated_at
+    id, category, title, content, pinned, embedding, created_at, updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 ) RETURNING *;
 
 -- name: GetMemory :one
@@ -19,17 +19,13 @@ SELECT * FROM memories WHERE lower(title) = lower(?) LIMIT 1;
 SELECT * FROM memories
 ORDER BY pinned DESC, updated_at DESC, id ASC;
 
--- name: SearchMemories :many
-SELECT * FROM memories
-WHERE title LIKE '%' || ? || '%' OR content LIKE '%' || ? || '%'
-ORDER BY pinned DESC, updated_at DESC, id ASC;
-
 -- name: UpdateMemory :one
 UPDATE memories SET
     category = ?,
     title = ?,
     content = ?,
     pinned = ?,
+    embedding = ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?
 RETURNING *;
