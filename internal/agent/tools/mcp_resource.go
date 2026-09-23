@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 
 	"charm.land/fantasy"
@@ -26,31 +25,20 @@ type MCPResourceParams struct {
 // NewMCPResourceTool folds listing and reading MCP resources into one
 // tool, forwarding to the implementation each action had on its own.
 func NewMCPResourceTool(cfg *config.ConfigStore) fantasy.AgentTool {
-	list, read := NewListMCPResourcesTool(cfg), NewReadMCPResourceTool(cfg)
+	list, read := listMCPResourcesAction(cfg), readMCPResourceAction(cfg)
 	return fantasy.NewParallelAgentTool(
 		MCPResourceToolName,
 		mcpResourceDescription,
-		func(ctx context.Context, params MCPResourceParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			var (
-				tool  fantasy.AgentTool
-				input any
-			)
+		func(ctx context.Context, params MCPResourceParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			switch params.Action {
 			case "list":
-				tool, input = list, ListMCPResourcesParams{MCPName: params.MCPName}
+				return list(ctx, ListMCPResourcesParams{MCPName: params.MCPName})
 			case "read":
-				tool, input = read, ReadMCPResourceParams{MCPName: params.MCPName, URI: params.URI}
+				return read(ctx, ReadMCPResourceParams{MCPName: params.MCPName, URI: params.URI})
 			default:
 				return fantasy.NewTextErrorResponse(fmt.Sprintf(
 					"unknown action %q. Available: list, read", params.Action)), nil
 			}
-			encoded, err := json.Marshal(input)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("mcp_resource %s: %w", params.Action, err)
-			}
-			call.Input = string(encoded)
-			call.Name = tool.Info().Name
-			return tool.Run(ctx, call)
 		},
 	)
 }

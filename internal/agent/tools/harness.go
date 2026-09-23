@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 
 	"charm.land/fantasy"
@@ -37,31 +36,20 @@ func NewHarnessTool(
 	host *extensions.Host,
 	logFile string,
 ) fantasy.AgentTool {
-	info, logs := NewHarnessInfoTool(cfg, lspManager, skillLists, skillTracker, host), NewHarnessLogsTool(logFile)
 	return fantasy.NewParallelAgentTool(
 		HarnessToolName,
 		harnessDescription,
 		func(ctx context.Context, params HarnessParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			var (
-				tool  fantasy.AgentTool
-				input any
-			)
 			switch params.Action {
 			case "state":
-				tool, input = info, HarnessInfoParams{}
+				allSkills, activeSkills := skillLists()
+				return fantasy.NewTextResponse(buildHarnessInfo(cfg, lspManager, allSkills, activeSkills, skillTracker, host)), nil
 			case "logs":
-				tool, input = logs, HarnessLogsParams{Lines: params.Lines}
+				return fantasy.NewTextResponse(runHarnessLogs(logFile, HarnessLogsParams{Lines: params.Lines})), nil
 			default:
 				return fantasy.NewTextErrorResponse(fmt.Sprintf(
 					"unknown action %q. Available: state, logs", params.Action)), nil
 			}
-			encoded, err := json.Marshal(input)
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("harness %s: %w", params.Action, err)
-			}
-			call.Input = string(encoded)
-			call.Name = tool.Info().Name
-			return tool.Run(ctx, call)
 		},
 	)
 }

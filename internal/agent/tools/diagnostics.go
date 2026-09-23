@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -32,34 +31,27 @@ const sweepGrace = 250 * time.Millisecond
 // all of them buys nothing the count does not already say.
 const maxReportedDiagnostics = 10
 
-//go:embed diagnostics.md
-var diagnosticsDescription string
+func diagnosticsAction(lspManager *lsp.Manager) func(context.Context, DiagnosticsParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params DiagnosticsParams) (fantasy.ToolResponse, error) {
+		// The one caller that exists to report diagnostics and nothing
+		// else, so it is the one that waits: for a cold server to come up
+		// rather than answering "no problems" because nothing is running,
+		// and for the servers to finish answering rather than reporting
+		// what they happened to have said so far.
+		if params.FilePath != "" && lspManager != nil {
+			lspManager.Start(ctx, params.FilePath)
+			lspManager.NotifyChangeAsync(ctx, params.FilePath)
+		} else {
+			lspManager.NotifyWorkspaceChangeAsync(ctx)
+		}
+		lspManager.AwaitSettled(ctx, lsp.SettleTimeout)
 
-func NewDiagnosticsTool(lspManager *lsp.Manager) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
-		DiagnosticsToolName,
-		diagnosticsDescription,
-		func(ctx context.Context, params DiagnosticsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			// The one caller that exists to report diagnostics and nothing
-			// else, so it is the one that waits: for a cold server to come up
-			// rather than answering "no problems" because nothing is running,
-			// and for the servers to finish answering rather than reporting
-			// what they happened to have said so far.
-			if params.FilePath != "" && lspManager != nil {
-				lspManager.Start(ctx, params.FilePath)
-				lspManager.NotifyChangeAsync(ctx, params.FilePath)
-			} else {
-				lspManager.NotifyWorkspaceChangeAsync(ctx)
-			}
-			lspManager.AwaitSettled(ctx, lsp.SettleTimeout)
-
-			output := fullDiagnosticsReport(ctx, lspManager, params.FilePath)
-			if output == "" {
-				output = "No diagnostics reported."
-			}
-			return fantasy.NewTextResponse(output), nil
-		},
-	)
+		output := fullDiagnosticsReport(ctx, lspManager, params.FilePath)
+		if output == "" {
+			output = "No diagnostics reported."
+		}
+		return fantasy.NewTextResponse(output), nil
+	}
 }
 
 // DiagnosticsSweep reports whatever the language servers have worked out since

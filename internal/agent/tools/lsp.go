@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -36,64 +35,62 @@ type LSPParams struct {
 	Name        string `json:"name,omitempty" description:"restart only: one client to restart; all of them when omitted"`
 }
 
-// lspAction is one action's underlying tool and the parameters it takes,
-// so a call can be forwarded with exactly the fields that action reads.
-type lspAction struct {
-	tool   fantasy.AgentTool
-	params func(LSPParams) map[string]any
+// lspActionFunc runs one language-server action with the fields of the
+// combined parameters that action reads.
+type lspActionFunc func(context.Context, LSPParams) (fantasy.ToolResponse, error)
+
+// adapt turns an action that takes its own parameter type into an
+// lspActionFunc, picking its fields out of the combined parameters.
+func adapt[P any](run func(context.Context, P) (fantasy.ToolResponse, error), pick func(LSPParams) P) lspActionFunc {
+	return func(ctx context.Context, p LSPParams) (fantasy.ToolResponse, error) {
+		return run(ctx, pick(p))
+	}
 }
 
-// NewLSPTool folds the language-server actions into one tool. Each action
-// forwards to the implementation that used to be its own tool: the model
+// NewLSPTool folds the language-server actions into one tool: the model
 // sees one schema, the code keeps one behaviour per action.
 func NewLSPTool(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service) fantasy.AgentTool {
-	actions := map[string]lspAction{
-		"diagnostics": {NewDiagnosticsTool(lspManager), func(p LSPParams) map[string]any {
-			return map[string]any{"file_path": p.FilePath}
-		}},
-		"symbols": {NewSymbolsTool(lspManager), func(p LSPParams) map[string]any {
-			return map[string]any{"file_path": p.FilePath}
-		}},
-		"definition": {NewDefinitionTool(lspManager), func(p LSPParams) map[string]any {
-			return map[string]any{"symbol": p.Symbol, "path": p.Path}
-		}},
-		"references": {NewReferencesTool(lspManager), func(p LSPParams) map[string]any {
-			return map[string]any{"symbol": p.Symbol, "path": p.Path}
-		}},
-		"call_hierarchy": {NewCallHierarchyTool(lspManager), func(p LSPParams) map[string]any {
-			return map[string]any{"symbol": p.Symbol, "direction": p.Direction, "path": p.Path}
-		}},
-		"rename": {NewRenameTool(lspManager, files, filetracker), func(p LSPParams) map[string]any {
-			return map[string]any{"symbol": p.Symbol, "new_name": p.NewName, "path": p.Path}
-		}},
-		// The inner tool calls this "action" too; the outer name would
-		// shadow it, so the model sends it as "mode".
-		"replace_symbol": {NewReplaceSymbolTool(lspManager, files, filetracker), func(p LSPParams) map[string]any {
-			return map[string]any{"symbol": p.Symbol, "file_path": p.FilePath, "replacement": p.Replacement, "action": p.Mode}
-		}},
-		"restart": {NewLSPRestartTool(lspManager), func(p LSPParams) map[string]any {
-			return map[string]any{"name": p.Name}
-		}},
+	actions := map[string]lspActionFunc{
+		"diagnostics": adapt(diagnosticsAction(lspManager), func(p LSPParams) DiagnosticsParams {
+			return DiagnosticsParams{FilePath: p.FilePath}
+		}),
+		"symbols": adapt(symbolsAction(lspManager), func(p LSPParams) SymbolsParams {
+			return SymbolsParams{FilePath: p.FilePath}
+		}),
+		"definition": adapt(definitionAction(lspManager), func(p LSPParams) DefinitionParams {
+			return DefinitionParams{Symbol: p.Symbol, Path: p.Path}
+		}),
+		"references": adapt(referencesAction(lspManager), func(p LSPParams) ReferencesParams {
+			return ReferencesParams{Symbol: p.Symbol, Path: p.Path}
+		}),
+		"call_hierarchy": adapt(callHierarchyAction(lspManager), func(p LSPParams) CallHierarchyParams {
+			return CallHierarchyParams{Symbol: p.Symbol, Direction: p.Direction, Path: p.Path}
+		}),
+		"rename": adapt(renameAction(lspManager, files, filetracker), func(p LSPParams) RenameParams {
+			return RenameParams{Symbol: p.Symbol, NewName: p.NewName, Path: p.Path}
+		}),
+		// The action parameter would shadow replace_symbol's own "action",
+		// so the model sends that one as "mode".
+		"replace_symbol": adapt(replaceSymbolAction(lspManager, files, filetracker), func(p LSPParams) ReplaceSymbolParams {
+			return ReplaceSymbolParams{Symbol: p.Symbol, FilePath: p.FilePath, Replacement: p.Replacement, Action: p.Mode}
+		}),
+		"restart": adapt(lspRestartAction(lspManager), func(p LSPParams) LSPRestartParams {
+			return LSPRestartParams{Name: p.Name}
+		}),
 	}
 	known := slices.Sorted(maps.Keys(actions))
 
 	return fantasy.NewAgentTool(
 		LSPToolName,
 		lspDescription,
-		func(ctx context.Context, params LSPParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+		func(ctx context.Context, params LSPParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			action, ok := actions[params.Action]
 			if !ok {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf(
 					"unknown action %q. Available: %s", params.Action, strings.Join(known, ", "))), nil
 			}
-			input, err := json.Marshal(action.params(params))
-			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("lsp %s: %w", params.Action, err)
-			}
-			call.Input = string(input)
-			call.Name = action.tool.Info().Name
 			ctx = context.WithValue(ctx, sourceEvidenceKey{}, filetracker)
-			return action.tool.Run(ctx, call)
+			return action(ctx, params)
 		},
 	)
 }

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"log/slog"
 	"strings"
 
@@ -16,58 +15,49 @@ type ReadMCPResourceParams struct {
 	URI     string `json:"uri" description:"The resource URI to read, as returned by list_mcp_resources"`
 }
 
-const ReadMCPResourceToolName = "read_mcp_resource"
+func readMCPResourceAction(cfg *config.ConfigStore) func(context.Context, ReadMCPResourceParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params ReadMCPResourceParams) (fantasy.ToolResponse, error) {
+		params.MCPName = strings.TrimSpace(params.MCPName)
+		params.URI = strings.TrimSpace(params.URI)
+		if params.MCPName == "" {
+			return fantasy.NewTextErrorResponse("mcp_name parameter is required"), nil
+		}
+		if params.URI == "" {
+			return fantasy.NewTextErrorResponse("uri parameter is required"), nil
+		}
 
-//go:embed read_mcp_resource.md
-var readMCPResourceDescription string
+		if _, err := SessionIDOrError(ctx, "reading MCP resources"); err != nil {
+			return fantasy.ToolResponse{}, err
+		}
 
-func NewReadMCPResourceTool(cfg *config.ConfigStore) fantasy.AgentTool {
-	return fantasy.NewParallelAgentTool(
-		ReadMCPResourceToolName,
-		readMCPResourceDescription,
-		func(ctx context.Context, params ReadMCPResourceParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			params.MCPName = strings.TrimSpace(params.MCPName)
-			params.URI = strings.TrimSpace(params.URI)
-			if params.MCPName == "" {
-				return fantasy.NewTextErrorResponse("mcp_name parameter is required"), nil
-			}
-			if params.URI == "" {
-				return fantasy.NewTextErrorResponse("uri parameter is required"), nil
-			}
+		contents, err := mcp.ReadResource(ctx, cfg, params.MCPName, params.URI)
+		if err != nil {
+			return fantasy.NewTextErrorResponse(err.Error()), nil
+		}
+		if len(contents) == 0 {
+			return fantasy.NewTextResponse(""), nil
+		}
 
-			if _, err := SessionIDOrError(ctx, "reading MCP resources"); err != nil {
-				return fantasy.ToolResponse{}, err
+		var textParts []string
+		for _, content := range contents {
+			if content == nil {
+				continue
 			}
+			if content.Text != "" {
+				textParts = append(textParts, content.Text)
+				continue
+			}
+			if len(content.Blob) > 0 {
+				textParts = append(textParts, string(content.Blob))
+				continue
+			}
+			slog.Debug("MCP resource content missing text/blob", "uri", content.URI)
+		}
 
-			contents, err := mcp.ReadResource(ctx, cfg, params.MCPName, params.URI)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(err.Error()), nil
-			}
-			if len(contents) == 0 {
-				return fantasy.NewTextResponse(""), nil
-			}
+		if len(textParts) == 0 {
+			return fantasy.NewTextResponse(""), nil
+		}
 
-			var textParts []string
-			for _, content := range contents {
-				if content == nil {
-					continue
-				}
-				if content.Text != "" {
-					textParts = append(textParts, content.Text)
-					continue
-				}
-				if len(content.Blob) > 0 {
-					textParts = append(textParts, string(content.Blob))
-					continue
-				}
-				slog.Debug("MCP resource content missing text/blob", "uri", content.URI)
-			}
-
-			if len(textParts) == 0 {
-				return fantasy.NewTextResponse(""), nil
-			}
-
-			return fantasy.NewTextResponse(strings.Join(textParts, "\n")), nil
-		},
-	)
+		return fantasy.NewTextResponse(strings.Join(textParts, "\n")), nil
+	}
 }

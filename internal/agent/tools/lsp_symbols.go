@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"strings"
 
@@ -15,37 +14,28 @@ type SymbolsParams struct {
 	FilePath string `json:"file_path" description:"The path to the file to get symbols for"`
 }
 
-const SymbolsToolName = "lsp_symbols"
+func symbolsAction(lspManager *lsp.Manager) func(context.Context, SymbolsParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params SymbolsParams) (fantasy.ToolResponse, error) {
+		if params.FilePath == "" {
+			return fantasy.NewTextErrorResponse("file_path is required"), nil
+		}
+		lspManager.Start(ctx, params.FilePath)
 
-//go:embed lsp_symbols.md
-var symbolsDescription string
+		client := findLSPClient(lspManager, params.FilePath)
+		if client == nil {
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("no LSP client handles file: %s", params.FilePath)), nil
+		}
 
-func NewSymbolsTool(lspManager *lsp.Manager) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
-		SymbolsToolName,
-		symbolsDescription,
-		func(ctx context.Context, params SymbolsParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if params.FilePath == "" {
-				return fantasy.NewTextErrorResponse("file_path is required"), nil
-			}
-			lspManager.Start(ctx, params.FilePath)
+		symbols, err := client.DocumentSymbols(ctx, params.FilePath)
+		if err != nil {
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get document symbols: %s", err)), nil
+		}
+		if len(symbols) == 0 {
+			return fantasy.NewTextResponse(fmt.Sprintf("No symbols found in %s", params.FilePath)), nil
+		}
 
-			client := findLSPClient(lspManager, params.FilePath)
-			if client == nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("no LSP client handles file: %s", params.FilePath)), nil
-			}
-
-			symbols, err := client.DocumentSymbols(ctx, params.FilePath)
-			if err != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get document symbols: %s", err)), nil
-			}
-			if len(symbols) == 0 {
-				return fantasy.NewTextResponse(fmt.Sprintf("No symbols found in %s", params.FilePath)), nil
-			}
-
-			return fantasy.NewTextResponse(formatSymbols(symbols, 0)), nil
-		},
-	)
+		return fantasy.NewTextResponse(formatSymbols(symbols, 0)), nil
+	}
 }
 
 func formatSymbols(symbols []protocol.DocumentSymbolResult, indent int) string {

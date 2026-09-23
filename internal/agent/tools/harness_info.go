@@ -2,13 +2,10 @@ package tools
 
 import (
 	"cmp"
-	"context"
-	_ "embed"
 	"fmt"
 	"slices"
 	"strings"
 
-	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/extensions"
@@ -16,34 +13,10 @@ import (
 	"github.com/stubbedev/harness/internal/skills"
 )
 
-const HarnessInfoToolName = "harness_info"
-
-//go:embed harness_info.md
-var harnessInfoDescription string
-
-type HarnessInfoParams struct{}
-
 // SkillLists returns the skills discovered (after dedup) and the subset
 // that is active, read at call time so a skills reload shows up without
 // rebuilding the tool.
 type SkillLists func() (all, active []*skills.Skill)
-
-func NewHarnessInfoTool(
-	cfg *config.ConfigStore,
-	lspManager *lsp.Manager,
-	skillLists SkillLists,
-	skillTracker *skills.Tracker,
-	host *extensions.Host,
-) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
-		HarnessInfoToolName,
-		harnessInfoDescription,
-		func(ctx context.Context, _ HarnessInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			allSkills, activeSkills := skillLists()
-			return fantasy.NewTextResponse(buildHarnessInfo(cfg, lspManager, allSkills, activeSkills, skillTracker, host)), nil
-		},
-	)
-}
 
 func buildHarnessInfo(cfg *config.ConfigStore, lspManager *lsp.Manager, allSkills []*skills.Skill, activeSkills []*skills.Skill, skillTracker *skills.Tracker, host *extensions.Host) string {
 	var b strings.Builder

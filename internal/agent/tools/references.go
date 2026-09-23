@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,51 +20,42 @@ type ReferencesParams struct {
 	Path   string `json:"path,omitempty" description:"The directory to search in. Use a directory/file to narrow down the symbol search. Defaults to the current working directory."`
 }
 
-const ReferencesToolName = "lsp_references"
+func referencesAction(lspManager *lsp.Manager) func(context.Context, ReferencesParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params ReferencesParams) (fantasy.ToolResponse, error) {
+		results, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbolResults)
+		if !ok {
+			return resp, nil
+		}
 
-//go:embed references.md
-var referencesDescription string
-
-func NewReferencesTool(lspManager *lsp.Manager) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
-		ReferencesToolName,
-		referencesDescription,
-		func(ctx context.Context, params ReferencesParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			results, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbolResults)
-			if !ok {
-				return resp, nil
-			}
-
-			var allLocations []protocol.Location
-			var allErrs error
-			for _, r := range results {
-				locations, err := r.client.FindReferences(ctx, r.path, r.line, r.char, true)
-				if err != nil {
-					if isNoIdentifierError(err) {
-						continue
-					}
-					slog.Error("Failed to find references", "error", err, "symbol", params.Symbol, "path", r.path, "line", r.line)
-					allErrs = errors.Join(allErrs, err)
+		var allLocations []protocol.Location
+		var allErrs error
+		for _, r := range results {
+			locations, err := r.client.FindReferences(ctx, r.path, r.line, r.char, true)
+			if err != nil {
+				if isNoIdentifierError(err) {
 					continue
 				}
-				allLocations = append(allLocations, locations...)
-				// LSP returns all references for the symbol, not just from this file.
-				if len(locations) > 0 {
-					break
-				}
+				slog.Error("Failed to find references", "error", err, "symbol", params.Symbol, "path", r.path, "line", r.line)
+				allErrs = errors.Join(allErrs, err)
+				continue
 			}
+			allLocations = append(allLocations, locations...)
+			// LSP returns all references for the symbol, not just from this file.
+			if len(locations) > 0 {
+				break
+			}
+		}
 
-			if len(allLocations) > 0 {
-				output := formatReferences(cleanupLocations(allLocations))
-				return fantasy.NewTextResponse(output), nil
-			}
+		if len(allLocations) > 0 {
+			output := formatReferences(cleanupLocations(allLocations))
+			return fantasy.NewTextResponse(output), nil
+		}
 
-			if allErrs != nil {
-				return fantasy.NewTextErrorResponse(allErrs.Error()), nil
-			}
-			return fantasy.NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
-		},
-	)
+		if allErrs != nil {
+			return fantasy.NewTextErrorResponse(allErrs.Error()), nil
+		}
+		return fantasy.NewTextResponse(fmt.Sprintf("No references found for symbol '%s'", params.Symbol)), nil
+	}
 }
 
 func groupByFilename(locations []protocol.Location) map[string][]protocol.Location {

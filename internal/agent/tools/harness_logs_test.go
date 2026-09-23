@@ -48,13 +48,6 @@ func makeLogEntry(level, msg, source string, line int, extra map[string]any) map
 	return entry
 }
 
-func TestNewHarnessLogsTool(t *testing.T) {
-	t.Parallel()
-	tool := NewHarnessLogsTool("/tmp/test.log")
-	require.NotNil(t, tool)
-	require.Equal(t, HarnessLogsToolName, tool.Info().Name)
-}
-
 func TestHarnessLogs_HappyPath(t *testing.T) {
 	t.Parallel()
 	entries := []map[string]any{

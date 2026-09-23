@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,11 +18,6 @@ type DefinitionParams struct {
 	Path   string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
 }
 
-const DefinitionToolName = "lsp_definition"
-
-//go:embed lsp_definition.md
-var definitionDescription string
-
 // DefinitionResponseMetadata carries structured data for the renderer.
 type DefinitionResponseMetadata struct {
 	FilePath string `json:"file_path"`
@@ -31,37 +25,33 @@ type DefinitionResponseMetadata struct {
 	Content  string `json:"content"`
 }
 
-func NewDefinitionTool(lspManager *lsp.Manager) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
-		DefinitionToolName,
-		definitionDescription,
-		func(ctx context.Context, params DefinitionParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			resolved, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbol)
-			if !ok {
-				return resp, nil
-			}
+func definitionAction(lspManager *lsp.Manager) func(context.Context, DefinitionParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params DefinitionParams) (fantasy.ToolResponse, error) {
+		resolved, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbol)
+		if !ok {
+			return resp, nil
+		}
 
-			locations, err := resolved.client.Definition(ctx, resolved.path, resolved.line, resolved.char)
-			if err != nil {
-				if isNoIdentifierError(err) {
-					return fantasy.NewTextResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
-				}
-				slog.Error("Failed to find definition", "error", err, "symbol", params.Symbol)
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("definition lookup failed: %s", err)), nil
+		locations, err := resolved.client.Definition(ctx, resolved.path, resolved.line, resolved.char)
+		if err != nil {
+			if isNoIdentifierError(err) {
+				return fantasy.NewTextResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
 			}
+			slog.Error("Failed to find definition", "error", err, "symbol", params.Symbol)
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("definition lookup failed: %s", err)), nil
+		}
 
-			if len(locations) == 0 {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
-			}
+		if len(locations) == 0 {
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("No definition found for symbol '%s'", params.Symbol)), nil
+		}
 
-			text, meta := formatDefinitions(locations, ctx)
-			response := fantasy.NewTextResponse(text)
-			if meta != nil {
-				response = fantasy.WithResponseMetadata(response, meta)
-			}
-			return response, nil
-		},
-	)
+		text, meta := formatDefinitions(locations, ctx)
+		response := fantasy.NewTextResponse(text)
+		if meta != nil {
+			response = fantasy.WithResponseMetadata(response, meta)
+		}
+		return response, nil
+	}
 }
 
 func formatDefinitions(locations []protocol.Location, contexts ...context.Context) (string, *DefinitionResponseMetadata) {

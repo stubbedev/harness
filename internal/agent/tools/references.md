@@ -1,1 +1,0 @@
-Find all references to a symbol by name via LSP; more accurate than a text search for code symbols.
