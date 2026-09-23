@@ -5,10 +5,11 @@ import (
 	"github.com/stubbedev/harness/internal/ui/notification"
 )
 
+// NotificationsID is the identifier for the notification style picker dialog.
+const NotificationsID ID = "notifications"
+
 const (
-	// NotificationsID is the identifier for the notification style picker dialog.
-	NotificationsID              ID = "notifications"
-	notificationsDialogMaxHeight    = 12
+	notificationsDialogMaxHeight = 12
 )
 
 // NotificationStyle represents a notification backend option.

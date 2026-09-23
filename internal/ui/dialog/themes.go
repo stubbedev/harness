@@ -13,11 +13,12 @@ import (
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
+// ThemesID is the identifier for the theme picker dialog.
+const ThemesID ID = "themes"
+
 const (
-	// ThemesID is the identifier for the theme picker dialog.
-	ThemesID              ID = "themes"
-	themesDialogMinHeight    = 8
-	themesDialogMaxHeight    = 16
+	themesDialogMinHeight = 8
+	themesDialogMaxHeight = 16
 )
 
 // Themes represents a dialog for selecting the TUI color theme. Moving

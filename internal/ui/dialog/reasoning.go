@@ -8,11 +8,12 @@ import (
 	"github.com/stubbedev/harness/internal/ui/common"
 )
 
+// ReasoningID is the identifier for the reasoning effort dialog.
+const ReasoningID ID = "reasoning"
+
 const (
-	// ReasoningID is the identifier for the reasoning effort dialog.
-	ReasoningID              ID = "reasoning"
-	reasoningDialogMinHeight    = 8
-	reasoningDialogMaxHeight    = 16
+	reasoningDialogMinHeight = 8
+	reasoningDialogMaxHeight = 16
 )
 
 // NewReasoning creates a new reasoning effort dialog for the coder

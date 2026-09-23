@@ -18,11 +18,12 @@ import (
 	"github.com/stubbedev/harness/internal/ui/list"
 )
 
+// ConnectID is the identifier for the provider connection dialog.
+const ConnectID ID = "connect"
+
 const (
-	// ConnectID is the identifier for the provider connection dialog.
-	ConnectID              ID = "connect"
-	connectDialogMinHeight    = 8
-	connectDialogMaxHeight    = 20
+	connectDialogMinHeight = 8
+	connectDialogMaxHeight = 20
 )
 
 // Connect lists the catalog providers that have no credentials yet. The
