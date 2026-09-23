@@ -37,9 +37,6 @@ WHERE id = ?;
 -- name: DeleteMemory :execrows
 DELETE FROM memories WHERE id = ?;
 
--- name: CountMemories :one
-SELECT COUNT(*) FROM memories;
-
 -- name: ReapMemories :execrows
 DELETE FROM memories
 WHERE pinned = 0 AND id NOT IN (

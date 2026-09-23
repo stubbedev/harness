@@ -34,7 +34,7 @@ type CreateFileParams struct {
 }
 
 func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, error) {
-	row := q.queryRow(ctx, q.createFileStmt, createFile,
+	row := q.db.QueryRowContext(ctx, createFile,
 		arg.ID,
 		arg.SessionID,
 		arg.Path,
@@ -54,26 +54,6 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, e
 	return i, err
 }
 
-const deleteFile = `-- name: DeleteFile :exec
-DELETE FROM files
-WHERE id = ?
-`
-
-func (q *Queries) DeleteFile(ctx context.Context, id string) error {
-	_, err := q.exec(ctx, q.deleteFileStmt, deleteFile, id)
-	return err
-}
-
-const deleteSessionFiles = `-- name: DeleteSessionFiles :exec
-DELETE FROM files
-WHERE session_id = ?
-`
-
-func (q *Queries) DeleteSessionFiles(ctx context.Context, sessionID string) error {
-	_, err := q.exec(ctx, q.deleteSessionFilesStmt, deleteSessionFiles, sessionID)
-	return err
-}
-
 const getFile = `-- name: GetFile :one
 SELECT id, session_id, path, content, version, created_at, updated_at
 FROM files
@@ -81,7 +61,7 @@ WHERE id = ? LIMIT 1
 `
 
 func (q *Queries) GetFile(ctx context.Context, id string) (File, error) {
-	row := q.queryRow(ctx, q.getFileStmt, getFile, id)
+	row := q.db.QueryRowContext(ctx, getFile, id)
 	var i File
 	err := row.Scan(
 		&i.ID,
@@ -109,7 +89,7 @@ type GetFileByPathAndSessionParams struct {
 }
 
 func (q *Queries) GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error) {
-	row := q.queryRow(ctx, q.getFileByPathAndSessionStmt, getFileByPathAndSession, arg.Path, arg.SessionID)
+	row := q.db.QueryRowContext(ctx, getFileByPathAndSession, arg.Path, arg.SessionID)
 	var i File
 	err := row.Scan(
 		&i.ID,
@@ -123,80 +103,19 @@ func (q *Queries) GetFileByPathAndSession(ctx context.Context, arg GetFileByPath
 	return i, err
 }
 
-const listFilesByPath = `-- name: ListFilesByPath :many
-SELECT id, session_id, path, content, version, created_at, updated_at
+const getLatestFileVersion = `-- name: GetLatestFileVersion :one
+SELECT version
 FROM files
 WHERE path = ?
-ORDER BY version DESC, created_at DESC
+ORDER BY version DESC
+LIMIT 1
 `
 
-func (q *Queries) ListFilesByPath(ctx context.Context, path string) ([]File, error) {
-	rows, err := q.query(ctx, q.listFilesByPathStmt, listFilesByPath, path)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []File{}
-	for rows.Next() {
-		var i File
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.Path,
-			&i.Content,
-			&i.Version,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listFilesBySession = `-- name: ListFilesBySession :many
-SELECT id, session_id, path, content, version, created_at, updated_at
-FROM files
-WHERE session_id = ?
-ORDER BY version ASC, created_at ASC
-`
-
-func (q *Queries) ListFilesBySession(ctx context.Context, sessionID string) ([]File, error) {
-	rows, err := q.query(ctx, q.listFilesBySessionStmt, listFilesBySession, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []File{}
-	for rows.Next() {
-		var i File
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.Path,
-			&i.Content,
-			&i.Version,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) GetLatestFileVersion(ctx context.Context, path string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getLatestFileVersion, path)
+	var version int64
+	err := row.Scan(&version)
+	return version, err
 }
 
 const listFilesBySessionWithChildren = `-- name: ListFilesBySessionWithChildren :many
@@ -213,88 +132,7 @@ type ListFilesBySessionWithChildrenParams struct {
 }
 
 func (q *Queries) ListFilesBySessionWithChildren(ctx context.Context, arg ListFilesBySessionWithChildrenParams) ([]File, error) {
-	rows, err := q.query(ctx, q.listFilesBySessionWithChildrenStmt, listFilesBySessionWithChildren, arg.SessionID, arg.ParentSessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []File{}
-	for rows.Next() {
-		var i File
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.Path,
-			&i.Content,
-			&i.Version,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listLatestSessionFiles = `-- name: ListLatestSessionFiles :many
-SELECT f.id, f.session_id, f.path, f.content, f.version, f.created_at, f.updated_at
-FROM files f
-INNER JOIN (
-    SELECT path, MAX(version) as max_version, MAX(created_at) as max_created_at
-    FROM files
-    GROUP BY path
-) latest ON f.path = latest.path AND f.version = latest.max_version AND f.created_at = latest.max_created_at
-WHERE f.session_id = ?
-ORDER BY f.path
-`
-
-func (q *Queries) ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error) {
-	rows, err := q.query(ctx, q.listLatestSessionFilesStmt, listLatestSessionFiles, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []File{}
-	for rows.Next() {
-		var i File
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.Path,
-			&i.Content,
-			&i.Version,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listNewFiles = `-- name: ListNewFiles :many
-SELECT id, session_id, path, content, version, created_at, updated_at
-FROM files
-WHERE is_new = 1
-ORDER BY version DESC, created_at DESC
-`
-
-func (q *Queries) ListNewFiles(ctx context.Context) ([]File, error) {
-	rows, err := q.query(ctx, q.listNewFilesStmt, listNewFiles)
+	rows, err := q.db.QueryContext(ctx, listFilesBySessionWithChildren, arg.SessionID, arg.ParentSessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -38,7 +38,7 @@ type CreateMessageParams struct {
 }
 
 func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error) {
-	row := q.queryRow(ctx, q.createMessageStmt, createMessage,
+	row := q.db.QueryRowContext(ctx, createMessage,
 		arg.ID,
 		arg.SessionID,
 		arg.Role,
@@ -73,17 +73,7 @@ WHERE id = ?
 `
 
 func (q *Queries) DeleteMessage(ctx context.Context, id string) error {
-	_, err := q.exec(ctx, q.deleteMessageStmt, deleteMessage, id)
-	return err
-}
-
-const deleteSessionMessages = `-- name: DeleteSessionMessages :exec
-DELETE FROM messages
-WHERE session_id = ?
-`
-
-func (q *Queries) DeleteSessionMessages(ctx context.Context, sessionID string) error {
-	_, err := q.exec(ctx, q.deleteSessionMessagesStmt, deleteSessionMessages, sessionID)
+	_, err := q.db.ExecContext(ctx, deleteMessage, id)
 	return err
 }
 
@@ -96,7 +86,7 @@ LIMIT 1
 `
 
 func (q *Queries) GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (Message, error) {
-	row := q.queryRow(ctx, q.getLastAssistantMessageBySessionStmt, getLastAssistantMessageBySession, sessionID)
+	row := q.db.QueryRowContext(ctx, getLastAssistantMessageBySession, sessionID)
 	var i Message
 	err := row.Scan(
 		&i.ID,
@@ -124,7 +114,7 @@ WHERE id = ? LIMIT 1
 `
 
 func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
-	row := q.queryRow(ctx, q.getMessageStmt, getMessage, id)
+	row := q.db.QueryRowContext(ctx, getMessage, id)
 	var i Message
 	err := row.Scan(
 		&i.ID,
@@ -153,7 +143,7 @@ ORDER BY created_at DESC
 `
 
 func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
-	rows, err := q.query(ctx, q.listAllUserMessagesStmt, listAllUserMessages)
+	rows, err := q.db.QueryContext(ctx, listAllUserMessages)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +188,7 @@ ORDER BY created_at ASC
 `
 
 func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
-	rows, err := q.query(ctx, q.listMessagesBySessionStmt, listMessagesBySession, sessionID)
+	rows, err := q.db.QueryContext(ctx, listMessagesBySession, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +239,7 @@ type ListMessagesBySessionFromParams struct {
 }
 
 func (q *Queries) ListMessagesBySessionFrom(ctx context.Context, arg ListMessagesBySessionFromParams) ([]Message, error) {
-	rows, err := q.query(ctx, q.listMessagesBySessionFromStmt, listMessagesBySessionFrom, arg.SessionID, arg.ID)
+	rows, err := q.db.QueryContext(ctx, listMessagesBySessionFrom, arg.SessionID, arg.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +284,7 @@ ORDER BY created_at DESC
 `
 
 func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
-	rows, err := q.query(ctx, q.listUserMessagesBySessionStmt, listUserMessagesBySession, sessionID)
+	rows, err := q.db.QueryContext(ctx, listUserMessagesBySession, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +345,7 @@ type UpdateMessageParams struct {
 }
 
 func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) error {
-	_, err := q.exec(ctx, q.updateMessageStmt, updateMessage,
+	_, err := q.db.ExecContext(ctx, updateMessage,
 		arg.Parts,
 		arg.PrismModelID,
 		arg.PrismModelName,

@@ -32,7 +32,7 @@ type CreateCheckpointParams struct {
 }
 
 func (q *Queries) CreateCheckpoint(ctx context.Context, arg CreateCheckpointParams) (Checkpoint, error) {
-	row := q.queryRow(ctx, q.createCheckpointStmt, createCheckpoint,
+	row := q.db.QueryRowContext(ctx, createCheckpoint,
 		arg.ID,
 		arg.SessionID,
 		arg.MessageID,
@@ -49,16 +49,6 @@ func (q *Queries) CreateCheckpoint(ctx context.Context, arg CreateCheckpointPara
 	return i, err
 }
 
-const deleteSessionCheckpoints = `-- name: DeleteSessionCheckpoints :exec
-DELETE FROM checkpoints
-WHERE session_id = ?
-`
-
-func (q *Queries) DeleteSessionCheckpoints(ctx context.Context, sessionID string) error {
-	_, err := q.exec(ctx, q.deleteSessionCheckpointsStmt, deleteSessionCheckpoints, sessionID)
-	return err
-}
-
 const getCheckpointByMessage = `-- name: GetCheckpointByMessage :one
 SELECT id, session_id, message_id, commit_sha, created_at
 FROM checkpoints
@@ -66,7 +56,7 @@ WHERE message_id = ? LIMIT 1
 `
 
 func (q *Queries) GetCheckpointByMessage(ctx context.Context, messageID string) (Checkpoint, error) {
-	row := q.queryRow(ctx, q.getCheckpointByMessageStmt, getCheckpointByMessage, messageID)
+	row := q.db.QueryRowContext(ctx, getCheckpointByMessage, messageID)
 	var i Checkpoint
 	err := row.Scan(
 		&i.ID,
@@ -86,7 +76,7 @@ ORDER BY created_at ASC
 `
 
 func (q *Queries) ListCheckpointsBySession(ctx context.Context, sessionID string) ([]Checkpoint, error) {
-	rows, err := q.query(ctx, q.listCheckpointsBySessionStmt, listCheckpointsBySession, sessionID)
+	rows, err := q.db.QueryContext(ctx, listCheckpointsBySession, sessionID)
 	if err != nil {
 		return nil, err
 	}

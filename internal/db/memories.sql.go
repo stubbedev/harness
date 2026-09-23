@@ -9,17 +9,6 @@ import (
 	"context"
 )
 
-const countMemories = `-- name: CountMemories :one
-SELECT COUNT(*) FROM memories
-`
-
-func (q *Queries) CountMemories(ctx context.Context) (int64, error) {
-	row := q.queryRow(ctx, q.countMemoriesStmt, countMemories)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createMemory = `-- name: CreateMemory :one
 INSERT INTO memories (
     id, category, title, content, pinned, embedding, created_at, updated_at
@@ -38,7 +27,7 @@ type CreateMemoryParams struct {
 }
 
 func (q *Queries) CreateMemory(ctx context.Context, arg CreateMemoryParams) (Memory, error) {
-	row := q.queryRow(ctx, q.createMemoryStmt, createMemory,
+	row := q.db.QueryRowContext(ctx, createMemory,
 		arg.ID,
 		arg.Category,
 		arg.Title,
@@ -67,7 +56,7 @@ DELETE FROM memories WHERE id = ?
 `
 
 func (q *Queries) DeleteMemory(ctx context.Context, id string) (int64, error) {
-	result, err := q.exec(ctx, q.deleteMemoryStmt, deleteMemory, id)
+	result, err := q.db.ExecContext(ctx, deleteMemory, id)
 	if err != nil {
 		return 0, err
 	}
@@ -79,7 +68,7 @@ SELECT id, category, title, content, pinned, use_count, last_used_at, created_at
 `
 
 func (q *Queries) GetMemory(ctx context.Context, id string) (Memory, error) {
-	row := q.queryRow(ctx, q.getMemoryStmt, getMemory, id)
+	row := q.db.QueryRowContext(ctx, getMemory, id)
 	var i Memory
 	err := row.Scan(
 		&i.ID,
@@ -101,7 +90,7 @@ SELECT id, category, title, content, pinned, use_count, last_used_at, created_at
 `
 
 func (q *Queries) GetMemoryByTitle(ctx context.Context, lower string) (Memory, error) {
-	row := q.queryRow(ctx, q.getMemoryByTitleStmt, getMemoryByTitle, lower)
+	row := q.db.QueryRowContext(ctx, getMemoryByTitle, lower)
 	var i Memory
 	err := row.Scan(
 		&i.ID,
@@ -128,7 +117,7 @@ ORDER BY pinned DESC, updated_at DESC, id ASC
 // whatever order SQLite chose, and the index the model reads would
 // reshuffle between runs.
 func (q *Queries) ListMemories(ctx context.Context) ([]Memory, error) {
-	rows, err := q.query(ctx, q.listMemoriesStmt, listMemories)
+	rows, err := q.db.QueryContext(ctx, listMemories)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +161,7 @@ WHERE pinned = 0 AND id NOT IN (
 `
 
 func (q *Queries) ReapMemories(ctx context.Context, limit int64) (int64, error) {
-	result, err := q.exec(ctx, q.reapMemoriesStmt, reapMemories, limit)
+	result, err := q.db.ExecContext(ctx, reapMemories, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -185,7 +174,7 @@ WHERE id = ?
 `
 
 func (q *Queries) TouchMemory(ctx context.Context, id string) error {
-	_, err := q.exec(ctx, q.touchMemoryStmt, touchMemory, id)
+	_, err := q.db.ExecContext(ctx, touchMemory, id)
 	return err
 }
 
@@ -211,7 +200,7 @@ type UpdateMemoryParams struct {
 }
 
 func (q *Queries) UpdateMemory(ctx context.Context, arg UpdateMemoryParams) (Memory, error) {
-	row := q.queryRow(ctx, q.updateMemoryStmt, updateMemory,
+	row := q.db.QueryRowContext(ctx, updateMemory,
 		arg.Category,
 		arg.Title,
 		arg.Content,

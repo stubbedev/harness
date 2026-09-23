@@ -42,10 +42,6 @@ WHERE id = ?;
 DELETE FROM messages
 WHERE id = ?;
 
--- name: DeleteSessionMessages :exec
-DELETE FROM messages
-WHERE session_id = ?;
-
 -- name: ListUserMessagesBySession :many
 SELECT *
 FROM messages

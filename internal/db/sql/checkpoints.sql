@@ -22,7 +22,3 @@ SELECT *
 FROM checkpoints
 WHERE session_id = ?
 ORDER BY created_at ASC;
-
--- name: DeleteSessionCheckpoints :exec
-DELETE FROM checkpoints
-WHERE session_id = ?;

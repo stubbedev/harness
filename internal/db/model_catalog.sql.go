@@ -14,7 +14,7 @@ SELECT id, data, fetched_at FROM model_catalog WHERE id = 1
 `
 
 func (q *Queries) GetModelCatalog(ctx context.Context) (ModelCatalog, error) {
-	row := q.queryRow(ctx, q.getModelCatalogStmt, getModelCatalog)
+	row := q.db.QueryRowContext(ctx, getModelCatalog)
 	var i ModelCatalog
 	err := row.Scan(&i.ID, &i.Data, &i.FetchedAt)
 	return i, err
@@ -30,7 +30,7 @@ RETURNING id, data, fetched_at
 `
 
 func (q *Queries) SaveModelCatalog(ctx context.Context, data string) (ModelCatalog, error) {
-	row := q.queryRow(ctx, q.saveModelCatalogStmt, saveModelCatalog, data)
+	row := q.db.QueryRowContext(ctx, saveModelCatalog, data)
 	var i ModelCatalog
 	err := row.Scan(&i.ID, &i.Data, &i.FetchedAt)
 	return i, err

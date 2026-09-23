@@ -20,7 +20,7 @@ WHERE role = 'assistant'
 `
 
 func (q *Queries) GetAverageResponseTime(ctx context.Context) (int64, error) {
-	row := q.queryRow(ctx, q.getAverageResponseTimeStmt, getAverageResponseTime)
+	row := q.db.QueryRowContext(ctx, getAverageResponseTime)
 	var avg_response_seconds int64
 	err := row.Scan(&avg_response_seconds)
 	return avg_response_seconds, err
@@ -44,7 +44,7 @@ type GetHourDayHeatmapRow struct {
 }
 
 func (q *Queries) GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error) {
-	rows, err := q.query(ctx, q.getHourDayHeatmapStmt, getHourDayHeatmap)
+	rows, err := q.db.QueryContext(ctx, getHourDayHeatmap)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ type GetRecentActivityRow struct {
 }
 
 func (q *Queries) GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error) {
-	rows, err := q.query(ctx, q.getRecentActivityStmt, getRecentActivity)
+	rows, err := q.db.QueryContext(ctx, getRecentActivity)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ type GetToolUsageRow struct {
 }
 
 func (q *Queries) GetToolUsage(ctx context.Context) ([]GetToolUsageRow, error) {
-	rows, err := q.query(ctx, q.getToolUsageStmt, getToolUsage)
+	rows, err := q.db.QueryContext(ctx, getToolUsage)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ type GetTotalStatsRow struct {
 }
 
 func (q *Queries) GetTotalStats(ctx context.Context) (GetTotalStatsRow, error) {
-	row := q.queryRow(ctx, q.getTotalStatsStmt, getTotalStats)
+	row := q.db.QueryRowContext(ctx, getTotalStats)
 	var i GetTotalStatsRow
 	err := row.Scan(
 		&i.TotalSessions,
@@ -213,7 +213,7 @@ type GetUsageByDayRow struct {
 }
 
 func (q *Queries) GetUsageByDay(ctx context.Context) ([]GetUsageByDayRow, error) {
-	rows, err := q.query(ctx, q.getUsageByDayStmt, getUsageByDay)
+	rows, err := q.db.QueryContext(ctx, getUsageByDay)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +261,7 @@ type GetUsageByDayOfWeekRow struct {
 }
 
 func (q *Queries) GetUsageByDayOfWeek(ctx context.Context) ([]GetUsageByDayOfWeekRow, error) {
-	rows, err := q.query(ctx, q.getUsageByDayOfWeekStmt, getUsageByDayOfWeek)
+	rows, err := q.db.QueryContext(ctx, getUsageByDayOfWeek)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +304,7 @@ type GetUsageByHourRow struct {
 }
 
 func (q *Queries) GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error) {
-	rows, err := q.query(ctx, q.getUsageByHourStmt, getUsageByHour)
+	rows, err := q.db.QueryContext(ctx, getUsageByHour)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +344,7 @@ type GetUsageByModelRow struct {
 }
 
 func (q *Queries) GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error) {
-	rows, err := q.query(ctx, q.getUsageByModelStmt, getUsageByModel)
+	rows, err := q.db.QueryContext(ctx, getUsageByModel)
 	if err != nil {
 		return nil, err
 	}

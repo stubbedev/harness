@@ -20,7 +20,7 @@ type GetFileReadParams struct {
 }
 
 func (q *Queries) GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error) {
-	row := q.queryRow(ctx, q.getFileReadStmt, getFileRead, arg.SessionID, arg.Path)
+	row := q.db.QueryRowContext(ctx, getFileRead, arg.SessionID, arg.Path)
 	var i ReadFile
 	err := row.Scan(&i.SessionID, &i.Path, &i.ReadAt)
 	return i, err
@@ -33,7 +33,7 @@ ORDER BY read_at DESC
 `
 
 func (q *Queries) ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error) {
-	rows, err := q.query(ctx, q.listSessionReadFilesStmt, listSessionReadFiles, sessionID)
+	rows, err := q.db.QueryContext(ctx, listSessionReadFiles, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +74,6 @@ type RecordFileReadParams struct {
 }
 
 func (q *Queries) RecordFileRead(ctx context.Context, arg RecordFileReadParams) error {
-	_, err := q.exec(ctx, q.recordFileReadStmt, recordFileRead, arg.SessionID, arg.Path)
+	_, err := q.db.ExecContext(ctx, recordFileRead, arg.SessionID, arg.Path)
 	return err
 }

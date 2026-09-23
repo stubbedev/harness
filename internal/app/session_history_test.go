@@ -28,7 +28,7 @@ func newTestAppWithHistory(t *testing.T) *App {
 	q := db.New(conn)
 	return &App{
 		Sessions: session.NewService(q, conn),
-		History:  history.NewService(q, conn),
+		History:  history.NewService(q),
 	}
 }
 

@@ -11,19 +11,14 @@ import (
 
 type Querier interface {
 	AddSessionCost(ctx context.Context, arg AddSessionCostParams) (int64, error)
-	CountMemories(ctx context.Context) (int64, error)
 	CreateCheckpoint(ctx context.Context, arg CreateCheckpointParams) (Checkpoint, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateMemory(ctx context.Context, arg CreateMemoryParams) (Memory, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
-	DeleteFile(ctx context.Context, id string) error
 	DeleteMemory(ctx context.Context, id string) (int64, error)
 	DeleteMessage(ctx context.Context, id string) error
 	DeleteSession(ctx context.Context, id string) error
-	DeleteSessionCheckpoints(ctx context.Context, sessionID string) error
-	DeleteSessionFiles(ctx context.Context, sessionID string) error
-	DeleteSessionMessages(ctx context.Context, sessionID string) error
 	GetAverageResponseTime(ctx context.Context) (int64, error)
 	GetCheckpointByMessage(ctx context.Context, messageID string) (Checkpoint, error)
 	GetFile(ctx context.Context, id string) (File, error)
@@ -32,6 +27,7 @@ type Querier interface {
 	GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error)
 	GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (Message, error)
 	GetLastSession(ctx context.Context) (Session, error)
+	GetLatestFileVersion(ctx context.Context, path string) (int64, error)
 	GetMemory(ctx context.Context, id string) (Memory, error)
 	GetMemoryByTitle(ctx context.Context, lower string) (Memory, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
@@ -47,10 +43,7 @@ type Querier interface {
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
 	ListCheckpointsBySession(ctx context.Context, sessionID string) ([]Checkpoint, error)
 	ListChildSessions(ctx context.Context, parentSessionID sql.NullString) ([]Session, error)
-	ListFilesByPath(ctx context.Context, path string) ([]File, error)
-	ListFilesBySession(ctx context.Context, sessionID string) ([]File, error)
 	ListFilesBySessionWithChildren(ctx context.Context, arg ListFilesBySessionWithChildrenParams) ([]File, error)
-	ListLatestSessionFiles(ctx context.Context, sessionID string) ([]File, error)
 	// The id tie-breaks: updated_at has whole-second resolution, so
 	// memories saved in the same second would otherwise come back in
 	// whatever order SQLite chose, and the index the model reads would
@@ -58,7 +51,6 @@ type Querier interface {
 	ListMemories(ctx context.Context) ([]Memory, error)
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListMessagesBySessionFrom(ctx context.Context, arg ListMessagesBySessionFromParams) ([]Message, error)
-	ListNewFiles(ctx context.Context) ([]File, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context) ([]Session, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)

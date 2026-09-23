@@ -24,7 +24,7 @@ type AddSessionCostParams struct {
 }
 
 func (q *Queries) AddSessionCost(ctx context.Context, arg AddSessionCostParams) (int64, error) {
-	result, err := q.exec(ctx, q.addSessionCostStmt, addSessionCost, arg.Cost, arg.ID)
+	result, err := q.db.ExecContext(ctx, addSessionCost, arg.Cost, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -68,7 +68,7 @@ type CreateSessionParams struct {
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
-	row := q.queryRow(ctx, q.createSessionStmt, createSession,
+	row := q.db.QueryRowContext(ctx, createSession,
 		arg.ID,
 		arg.ParentSessionID,
 		arg.Title,
@@ -103,7 +103,7 @@ WHERE id = ?
 `
 
 func (q *Queries) DeleteSession(ctx context.Context, id string) error {
-	_, err := q.exec(ctx, q.deleteSessionStmt, deleteSession, id)
+	_, err := q.db.ExecContext(ctx, deleteSession, id)
 	return err
 }
 
@@ -116,7 +116,7 @@ LIMIT 1
 `
 
 func (q *Queries) GetLastSession(ctx context.Context) (Session, error) {
-	row := q.queryRow(ctx, q.getLastSessionStmt, getLastSession)
+	row := q.db.QueryRowContext(ctx, getLastSession)
 	var i Session
 	err := row.Scan(
 		&i.ID,
@@ -144,7 +144,7 @@ WHERE id = ? LIMIT 1
 `
 
 func (q *Queries) GetSessionByID(ctx context.Context, id string) (Session, error) {
-	row := q.queryRow(ctx, q.getSessionByIDStmt, getSessionByID, id)
+	row := q.db.QueryRowContext(ctx, getSessionByID, id)
 	var i Session
 	err := row.Scan(
 		&i.ID,
@@ -173,7 +173,7 @@ ORDER BY updated_at DESC
 `
 
 func (q *Queries) ListChildSessions(ctx context.Context, parentSessionID sql.NullString) ([]Session, error) {
-	rows, err := q.query(ctx, q.listChildSessionsStmt, listChildSessions, parentSessionID)
+	rows, err := q.db.QueryContext(ctx, listChildSessions, parentSessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +218,7 @@ ORDER BY updated_at DESC
 `
 
 func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
-	rows, err := q.query(ctx, q.listSessionsStmt, listSessions)
+	rows, err := q.db.QueryContext(ctx, listSessions)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +268,7 @@ type RenameSessionParams struct {
 }
 
 func (q *Queries) RenameSession(ctx context.Context, arg RenameSessionParams) error {
-	_, err := q.exec(ctx, q.renameSessionStmt, renameSession, arg.Title, arg.ID)
+	_, err := q.db.ExecContext(ctx, renameSession, arg.Title, arg.ID)
 	return err
 }
 
@@ -302,7 +302,7 @@ type UpdateSessionParams struct {
 }
 
 func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error) {
-	row := q.queryRow(ctx, q.updateSessionStmt, updateSession,
+	row := q.db.QueryRowContext(ctx, updateSession,
 		arg.Title,
 		arg.PromptTokens,
 		arg.CompletionTokens,
@@ -354,7 +354,7 @@ type UpdateSessionTitleAndUsageParams struct {
 }
 
 func (q *Queries) UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error {
-	_, err := q.exec(ctx, q.updateSessionTitleAndUsageStmt, updateSessionTitleAndUsage,
+	_, err := q.db.ExecContext(ctx, updateSessionTitleAndUsage,
 		arg.Title,
 		arg.PromptTokens,
 		arg.CompletionTokens,
