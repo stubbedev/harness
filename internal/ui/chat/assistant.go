@@ -280,7 +280,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 	a := &AssistantMessageItem{
 		Versioned:                v,
 		highlightableMessageItem: defaultHighlighter(sty, v),
-		cachedMessageItem:        &cachedMessageItem{},
+		cachedMessageItem:        newCachedMessageItem(v),
 		focusableMessageItem:     newFocusableMessageItem(v),
 		message:                  message,
 		sty:                      sty,

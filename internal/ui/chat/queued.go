@@ -33,7 +33,7 @@ func NewQueuedMessageItem(sty *styles.Styles, id, text string) *QueuedMessageIte
 	v := list.NewVersioned()
 	return &QueuedMessageItem{
 		Versioned:            v,
-		cachedMessageItem:    &cachedMessageItem{},
+		cachedMessageItem:    newCachedMessageItem(v),
 		focusableMessageItem: newFocusableMessageItem(v),
 		id:                   id,
 		text:                 text,
@@ -52,8 +52,7 @@ func (q *QueuedMessageItem) UpdateText(text string) {
 		return
 	}
 	q.text = text
-	q.clearCache()
-	q.Bump()
+	q.invalidate()
 }
 
 // ID implements [Identifiable].

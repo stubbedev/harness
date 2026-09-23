@@ -42,7 +42,7 @@ func NewUserMessageItem(sty *styles.Styles, message *message.Message) MessageIte
 	return &UserMessageItem{
 		Versioned:                v,
 		highlightableMessageItem: defaultHighlighter(sty, v),
-		cachedMessageItem:        &cachedMessageItem{},
+		cachedMessageItem:        newCachedMessageItem(v),
 		focusableMessageItem:     newFocusableMessageItem(v),
 		message:                  message,
 		sty:                      sty,

@@ -280,6 +280,10 @@ func ClearItemCaches(items []MessageItem) {
 // THOUGHT(kujtim): we should consider if its efficient to store the render for different widths
 // the issue with that could be memory usage
 type cachedMessageItem struct {
+	// ver is the owning item's version counter; invalidate bumps it so
+	// dropping the render and announcing the change stay one step.
+	ver *list.Versioned
+
 	// rendered is the cached rendered string
 	rendered string
 	// width and height are the dimensions of the cached render
@@ -331,6 +335,19 @@ func (c *cachedMessageItem) setCachedPrefixedRender(rendered string, width int, 
 	c.prefixedRendered = rendered
 	c.prefixedWidth = width
 	c.prefixedKey = key
+}
+
+// newCachedMessageItem returns an empty cache owned by the item whose
+// version counter is ver.
+func newCachedMessageItem(ver *list.Versioned) *cachedMessageItem {
+	return &cachedMessageItem{ver: ver}
+}
+
+// invalidate drops the cached render and bumps the item's version: the
+// one call a mutator that changes the rendered output makes.
+func (c *cachedMessageItem) invalidate() {
+	c.clearCache()
+	c.ver.Bump()
 }
 
 // clearCache clears the cached render.
@@ -401,9 +418,10 @@ type AssistantInfoItem struct {
 
 // NewAssistantInfoItem creates a new AssistantInfoItem.
 func NewAssistantInfoItem(sty *styles.Styles, message *message.Message, cfg *config.Config, lastUserMessageTime time.Time) MessageItem {
+	v := list.NewVersioned()
 	return &AssistantInfoItem{
-		Versioned:           list.NewVersioned(),
-		cachedMessageItem:   &cachedMessageItem{},
+		Versioned:           v,
+		cachedMessageItem:   newCachedMessageItem(v),
 		id:                  AssistantInfoID(message.ID),
 		message:             message,
 		sty:                 sty,

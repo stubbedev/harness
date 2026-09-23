@@ -55,8 +55,7 @@ func (d *LSPToolMessageItem) SetLiveDiagnostics(live map[string]lsp.DiagnosticCo
 	// Only a diagnostics run draws the overlay; other actions keep their
 	// cached render.
 	if _, ok := d.renderer.pick(d.toolCall).(*DiagnosticsToolRenderContext); ok {
-		d.clearCache()
-		d.Bump()
+		d.invalidate()
 	}
 }
 

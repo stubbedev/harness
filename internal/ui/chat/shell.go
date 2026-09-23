@@ -57,7 +57,7 @@ func NewShellItem(sty *styles.Styles, command, output string, exitCode int) Mess
 	s := &ShellItem{
 		Versioned:                v,
 		highlightableMessageItem: defaultHighlighter(sty, v),
-		cachedMessageItem:        &cachedMessageItem{},
+		cachedMessageItem:        newCachedMessageItem(v),
 		focusableMessageItem:     newFocusableMessageItem(v),
 		id:                       fmt.Sprintf("shell-%d-%s", shellSeq.Add(1), command),
 		command:                  command,
@@ -76,7 +76,7 @@ func NewPendingShellItem(sty *styles.Styles, command string) *ShellItem {
 	s := &ShellItem{
 		Versioned:                v,
 		highlightableMessageItem: defaultHighlighter(sty, v),
-		cachedMessageItem:        &cachedMessageItem{},
+		cachedMessageItem:        newCachedMessageItem(v),
 		focusableMessageItem:     newFocusableMessageItem(v),
 		id:                       id,
 		command:                  command,

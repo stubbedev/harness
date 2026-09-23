@@ -78,7 +78,7 @@ func NewToolGroupMessageItem(sty *styles.Styles, first ToolMessageItem) *ToolGro
 	v := list.NewVersioned()
 	g := &ToolGroupMessageItem{
 		Versioned:            v,
-		cachedMessageItem:    &cachedMessageItem{},
+		cachedMessageItem:    newCachedMessageItem(v),
 		focusableMessageItem: newFocusableMessageItem(v),
 		sty:                  sty,
 		id:                   "toolgroup-" + first.ID(),
@@ -131,8 +131,7 @@ func (g *ToolGroupMessageItem) SelectChildNext() bool {
 		return false
 	}
 	g.selectedChild++
-	g.clearCache()
-	g.Bump()
+	g.invalidate()
 	return true
 }
 
@@ -144,8 +143,7 @@ func (g *ToolGroupMessageItem) SelectChildPrev() bool {
 		return false
 	}
 	g.selectedChild--
-	g.clearCache()
-	g.Bump()
+	g.invalidate()
 	return true
 }
 
@@ -160,16 +158,14 @@ func (g *ToolGroupMessageItem) ToggleSelectedChild() bool {
 	if e, ok := child.(Expandable); ok {
 		_ = e.ToggleExpanded()
 	}
-	g.clearCache()
-	g.Bump()
+	g.invalidate()
 	return true
 }
 
 // AddTool adds a tool call to the group.
 func (g *ToolGroupMessageItem) AddTool(tool ToolMessageItem) {
 	g.tools = append(g.tools, tool)
-	g.clearCache()
-	g.Bump()
+	g.invalidate()
 }
 
 // ChildTool returns the child tool call with the given ID, or nil.
@@ -239,8 +235,7 @@ func (g *ToolGroupMessageItem) ToggleExpanded() bool {
 			}
 		}
 	}
-	g.clearCache()
-	g.Bump()
+	g.invalidate()
 	return g.expanded
 }
 
@@ -258,8 +253,7 @@ func (g *ToolGroupMessageItem) ExpandAndDescend() {
 	if len(g.tools) > 1 {
 		g.selectedChild = 0
 	}
-	g.clearCache()
-	g.Bump()
+	g.invalidate()
 }
 
 // DigIn implements the enter key from anywhere inside the group: with
@@ -273,8 +267,7 @@ func (g *ToolGroupMessageItem) DigIn() {
 				_ = e.ToggleExpanded()
 			}
 		}
-		g.clearCache()
-		g.Bump()
+		g.invalidate()
 		return
 	}
 	g.ExpandAndDescend()
@@ -296,8 +289,7 @@ func (g *ToolGroupMessageItem) Ascend() bool {
 	default:
 		return false
 	}
-	g.clearCache()
-	g.Bump()
+	g.invalidate()
 	return true
 }
 

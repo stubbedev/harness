@@ -162,7 +162,7 @@ func newBaseToolMessageItem(
 	t := &baseToolMessageItem{
 		Versioned:                v,
 		highlightableMessageItem: defaultHighlighter(sty, v),
-		cachedMessageItem:        &cachedMessageItem{},
+		cachedMessageItem:        newCachedMessageItem(v),
 		focusableMessageItem:     newFocusableMessageItem(v),
 		sty:                      sty,
 		toolRenderer:             toolRenderer,
@@ -267,8 +267,7 @@ func (t *baseToolMessageItem) SetCompact(compact bool) {
 		return
 	}
 	t.isCompact = compact
-	t.clearCache()
-	t.Bump()
+	t.invalidate()
 }
 
 // IsCompact reports whether the item renders in compact (one-line) mode.
@@ -410,8 +409,7 @@ func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
 		t.finishedAt = time.Now()
 	}
 	t.toolCall = tc
-	t.clearCache()
-	t.Bump()
+	t.invalidate()
 }
 
 // elapsed returns how long the tool call has been (or was) running. Zero
@@ -430,8 +428,7 @@ func (t *baseToolMessageItem) elapsed() time.Duration {
 // SetResult sets the tool result associated with this message item.
 func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
 	t.result = res
-	t.clearCache()
-	t.Bump()
+	t.invalidate()
 }
 
 // Result returns the tool result recorded for this call, if any.
@@ -480,8 +477,7 @@ func (t *baseToolMessageItem) isSpinning() bool {
 // ToggleExpanded toggles the expanded state of the thinking box.
 func (t *baseToolMessageItem) ToggleExpanded() bool {
 	t.expandedContent = !t.expandedContent
-	t.clearCache()
-	t.Bump()
+	t.invalidate()
 	return t.expandedContent
 }
 
