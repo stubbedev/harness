@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,7 +15,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/envtools"
 	"github.com/stubbedev/harness/internal/filepathext"
-	"github.com/stubbedev/harness/internal/home"
+	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/shell"
 	"github.com/stubbedev/harness/internal/skills"
 )
@@ -242,25 +241,12 @@ func processContextPath(p string, store *config.ConfigStore) []ContextFile {
 	return contexts
 }
 
-// expandPath expands ~ and environment variables in file paths
-func expandPath(path string, store *config.ConfigStore) string {
-	path = home.Long(path)
-	// Handle environment variable expansion using the same pattern as config
-	if strings.HasPrefix(path, "$") {
-		if expanded, err := store.Resolver().ResolveValue(path); err == nil {
-			path = expanded
-		}
-	}
-
-	return path
-}
-
 // loadContextFiles loads and deduplicates context files from a list of paths.
 func loadContextFiles(paths []string, store *config.ConfigStore) []ContextFile {
 	var files []ContextFile
 	seen := make(map[string]bool, len(paths))
 	for _, pth := range paths {
-		expanded := expandPath(pth, store)
+		expanded := fsext.ResolveConfigPath(pth, store.ResolverFunc())
 		pathKey := strings.ToLower(expanded)
 		if seen[pathKey] {
 			continue
@@ -293,36 +279,12 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	case p.availSkillXMLSet:
 		availSkillXML = p.availSkillXML
 	default:
-		// Start with builtin skills.
-		allSkills := skills.DiscoverBuiltin()
-		builtinNames := make(map[string]bool, len(allSkills))
-		for _, s := range allSkills {
-			builtinNames[s.Name] = true
-		}
-
-		// Discover user skills from configured paths.
-		if len(cfg.Options.SkillsPaths) > 0 {
-			expandedPaths := make([]string, 0, len(cfg.Options.SkillsPaths))
-			for _, pth := range cfg.Options.SkillsPaths {
-				expandedPaths = append(expandedPaths, expandPath(pth, store))
-			}
-			for _, userSkill := range skills.Discover(expandedPaths) {
-				if builtinNames[userSkill.Name] {
-					slog.Warn("User skill overrides builtin skill", "name", userSkill.Name)
-				}
-				allSkills = append(allSkills, userSkill)
-			}
-		}
-
-		// Deduplicate: user skills override builtins with the same name.
-		allSkills = skills.Deduplicate(allSkills)
-
-		// Filter out disabled skills.
-		allSkills = skills.Filter(allSkills, cfg.Options.DisabledSkills)
-
-		if len(allSkills) > 0 {
-			availSkillXML = skills.ToPromptXML(allSkills)
-		}
+		_, active, _ := skills.DiscoverFromConfig(skills.DiscoveryConfig{
+			SkillsPaths:    cfg.Options.SkillsPaths,
+			DisabledSkills: cfg.Options.DisabledSkills,
+			Resolver:       store.ResolverFunc(),
+		})
+		availSkillXML = skills.ToPromptXML(active)
 	}
 
 	isGit := isGitRepo(store.WorkingDir())
