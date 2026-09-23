@@ -629,6 +629,16 @@ func (c *Config) NormalizeOptions() {
 	}
 }
 
+// appendMissing appends each of items not already in dst, keeping order.
+func appendMissing(dst []string, items ...string) []string {
+	for _, item := range items {
+		if !slices.Contains(dst, item) {
+			dst = append(dst, item)
+		}
+	}
+	return dst
+}
+
 func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.NormalizeOptions()
 	if len(c.Options.GlobalContextPaths) == 0 {
@@ -683,40 +693,16 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	slices.Sort(c.Options.ContextPaths)
 	c.Options.ContextPaths = slices.Compact(c.Options.ContextPaths)
 
-	// Add the default skills directories if not already present.
-	for _, dir := range GlobalSkillsDirs() {
-		if !slices.Contains(c.Options.SkillsPaths, dir) {
-			c.Options.SkillsPaths = append(c.Options.SkillsPaths, dir)
-		}
-	}
-
-	// Project specific skills dirs.
-	c.Options.SkillsPaths = append(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
-
-	// Add the default subagents directories if not already present.
-	for _, dir := range GlobalSubagentsDirs() {
-		if !slices.Contains(c.Options.SubagentsPaths, dir) {
-			c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, dir)
-		}
-	}
-	// Project specific subagents dirs. Guarded like the global loop above:
-	// setDefaults runs twice per config reload (ConfigStore.reloadFromDiskLocked
-	// calls it once on the freshly-loaded config and again after merging
-	// workspace-scope overrides), so an unconditional append would duplicate
-	// these entries on every reload and grow SubagentsPaths unbounded over a
-	// session.
-	for _, dir := range ProjectSubagentsDir(workingDir) {
-		if !slices.Contains(c.Options.SubagentsPaths, dir) {
-			c.Options.SubagentsPaths = append(c.Options.SubagentsPaths, dir)
-		}
-	}
-
-	// Extension directories, global then project, guarded the same way.
-	for _, dir := range append(GlobalExtensionsDirs(), ProjectExtensionsDir(workingDir)...) {
-		if !slices.Contains(c.Options.ExtensionsPaths, dir) {
-			c.Options.ExtensionsPaths = append(c.Options.ExtensionsPaths, dir)
-		}
-	}
+	// Default skill, subagent and extension directories, global then
+	// project so project entries win. setDefaults runs a second time after
+	// the workspace state file is merged, so only missing entries are added;
+	// an unconditional append would list every directory twice.
+	c.Options.SkillsPaths = appendMissing(c.Options.SkillsPaths, GlobalSkillsDirs()...)
+	c.Options.SkillsPaths = appendMissing(c.Options.SkillsPaths, ProjectSkillsDir(workingDir)...)
+	c.Options.SubagentsPaths = appendMissing(c.Options.SubagentsPaths, GlobalSubagentsDirs()...)
+	c.Options.SubagentsPaths = appendMissing(c.Options.SubagentsPaths, ProjectSubagentsDir(workingDir)...)
+	c.Options.ExtensionsPaths = appendMissing(c.Options.ExtensionsPaths, GlobalExtensionsDirs()...)
+	c.Options.ExtensionsPaths = appendMissing(c.Options.ExtensionsPaths, ProjectExtensionsDir(workingDir)...)
 
 	if str, ok := os.LookupEnv("HARNESS_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)

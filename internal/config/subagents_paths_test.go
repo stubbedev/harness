@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -199,6 +200,23 @@ func TestSetDefaults_ProjectSubagentsDirNotDuplicated(t *testing.T) {
 	for p, count := range seen {
 		require.Equal(t, 1, count, "path %q appeared %d times; expected exactly 1", p, count)
 	}
+}
+
+// TestSetDefaults_ProjectDirsNotDuplicated covers the skills and extension
+// lists the same way: the project skill dirs used to be appended without a
+// guard.
+func TestSetDefaults_ProjectDirsNotDuplicated(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	cfg := &Config{Options: &Options{}}
+	cfg.setDefaults(workingDir, "")
+	skills := slices.Clone(cfg.Options.SkillsPaths)
+	extensions := slices.Clone(cfg.Options.ExtensionsPaths)
+
+	cfg.setDefaults(workingDir, "")
+	require.Equal(t, skills, cfg.Options.SkillsPaths)
+	require.Equal(t, extensions, cfg.Options.ExtensionsPaths)
 }
 
 func TestOptions_SubagentsPaths_JSONRoundtrip(t *testing.T) {
