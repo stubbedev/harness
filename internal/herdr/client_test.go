@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stubbedev/harness/internal/agentstate"
 )
 
 // recordingSender captures state transitions without connecting to a
@@ -23,10 +24,7 @@ func (r *recordingSender) close() {}
 // without connecting to a real Unix socket.
 func newTestClient() *Client {
 	rec := &recordingSender{states: make([]string, 0, 16)}
-	return &Client{
-		state: stateIdle,
-		snd:   rec,
-	}
+	return newClient("", "", 0, rec)
 }
 
 // reportedStates returns the states recorded by the test sender.
@@ -39,11 +37,11 @@ func TestBasicLifecycle(t *testing.T) {
 	c := newTestClient()
 
 	// Assistant message starts working.
-	c.HandleEvent(AssistantMessage{SessionID: "sess-1"})
+	c.HandleEvent(agentstate.AssistantMessage{SessionID: "sess-1"})
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 
 	// Run complete returns to idle.
-	c.HandleEvent(RunComplete{SessionID: "sess-1"})
+	c.HandleEvent(agentstate.RunComplete{SessionID: "sess-1"})
 	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
 }
 
@@ -56,7 +54,7 @@ func TestSessionIDPropagation(t *testing.T) {
 	assert.Equal(t, "early-session", c.sessionID)
 
 	// RunComplete also updates session ID.
-	c.HandleEvent(RunComplete{SessionID: "final-session"})
+	c.HandleEvent(agentstate.RunComplete{SessionID: "final-session"})
 	assert.Equal(t, "final-session", c.sessionID)
 }
 
@@ -65,8 +63,8 @@ func TestDedupSkipsRedundantState(t *testing.T) {
 	c := newTestClient()
 
 	// Two assistant messages in a row should only report working once.
-	c.HandleEvent(AssistantMessage{SessionID: "s1"})
-	c.HandleEvent(AssistantMessage{SessionID: "s1"})
+	c.HandleEvent(agentstate.AssistantMessage{SessionID: "s1"})
+	c.HandleEvent(agentstate.AssistantMessage{SessionID: "s1"})
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 }
 
@@ -75,12 +73,23 @@ func TestSummarizingTriggersWorking(t *testing.T) {
 	c := newTestClient()
 
 	// Summarizing event should trigger working.
-	c.HandleEvent(Summarizing{})
+	c.HandleEvent(agentstate.Summarizing{})
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
 
 	// Second summarizing should not trigger another state change.
-	c.HandleEvent(Summarizing{})
+	c.HandleEvent(agentstate.Summarizing{})
 	assert.Equal(t, []string{stateWorking}, reportedStates(c))
+}
+
+func TestFailedRunReportsIdle(t *testing.T) {
+	t.Parallel()
+	c := newTestClient()
+
+	// herdr has no error state: a failed run is waiting for input again.
+	c.HandleEvent(agentstate.AssistantMessage{SessionID: "s1"})
+	c.HandleEvent(agentstate.RunComplete{SessionID: "s1", Error: "boom"})
+	c.HandleEvent(agentstate.RunComplete{SessionID: "s1"})
+	assert.Equal(t, []string{stateWorking, stateIdle}, reportedStates(c))
 }
 
 func TestNilClientSafe(t *testing.T) {
@@ -88,19 +97,15 @@ func TestNilClientSafe(t *testing.T) {
 	var c *Client
 	// These should not panic on a nil receiver.
 	c.SetSessionID("s1")
-	c.HandleEvent(AssistantMessage{SessionID: "s1"})
-	c.HandleEvent(RunComplete{SessionID: "s1"})
-	c.HandleEvent(Summarizing{})
+	c.HandleEvent(agentstate.AssistantMessage{SessionID: "s1"})
+	c.HandleEvent(agentstate.RunComplete{SessionID: "s1"})
+	c.HandleEvent(agentstate.Summarizing{})
 }
 
 func TestRegisterInitial(t *testing.T) {
 	t.Parallel()
 	rec := &recordingSender{states: make([]string, 0, 16)}
-	c := &Client{
-		state: stateIdle,
-		seq:   100,
-		snd:   rec,
-	}
+	c := newClient("", "", 100, rec)
 	c.registerInitial()
 	assert.Equal(t, []string{stateIdle}, rec.states)
 	// seq must strictly increase so herdr accepts the report.

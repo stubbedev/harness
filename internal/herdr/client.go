@@ -4,9 +4,10 @@
 // herdr's Unix socket API so herdr can display accurate status without
 // screen scraping.
 //
-// The client consumes a small, herdr-specific event vocabulary rather
-// than accepting raw proto or domain types. Callers translate their
-// events into herdr.Event before forwarding. This keeps the client
+// The client consumes the neutral agent-lifecycle vocabulary from
+// internal/agentstate rather than raw proto or domain types: callers
+// translate with agentstate.Translate before forwarding, and the shared
+// agentstate.Tracker decides the transitions. This keeps the client
 // decoupled from both the proto and internal domain layers.
 package herdr
 
@@ -33,10 +34,6 @@ const (
 	stateBlocked = "blocked"
 )
 
-// The herdr event vocabulary and its translation live in
-// internal/agentstate; see translate.go for the aliases that re-export
-// them here. The client consumes those shared types directly.
-
 // sender abstracts the transport layer for reporting state to herdr.
 // Production uses a Unix socket; tests use a recorder.
 type sender interface {
@@ -48,11 +45,13 @@ type sender interface {
 type Client struct {
 	socketPath string
 	paneID     string
+	tracker    *agentstate.Tracker
 
+	// mu guards the request fields below: every request carries the
+	// current session and a strictly increasing seq.
 	mu        sync.Mutex
 	sessionID string
 	state     string
-	runActive bool
 	seq       uint64
 
 	snd sender
@@ -97,14 +96,22 @@ func newFromEnv() *Client {
 		)
 		return nil
 	}
+	c := newClient(socketPath, paneID, uint64(time.Now().UnixNano()), newUnixSender(socketPath))
+	c.registerInitial()
+	return c
+}
+
+// newClient returns a Client reporting on paneID over snd, numbering
+// requests from seq.
+func newClient(socketPath, paneID string, seq uint64, snd sender) *Client {
 	c := &Client{
 		socketPath: socketPath,
 		paneID:     paneID,
 		state:      stateIdle,
-		seq:        uint64(time.Now().UnixNano()),
-		snd:        newUnixSender(socketPath),
+		seq:        seq,
+		snd:        snd,
 	}
-	c.registerInitial()
+	c.tracker = agentstate.NewTracker(c)
 	return c
 }
 
@@ -158,14 +165,7 @@ func (c *Client) HandleEvent(ev agentstate.Event) {
 	if c == nil {
 		return
 	}
-	switch e := ev.(type) {
-	case agentstate.AssistantMessage:
-		c.onAssistantMessage(e.SessionID)
-	case agentstate.RunComplete:
-		c.onRunComplete(e.SessionID)
-	case agentstate.Summarizing:
-		c.onSummarizing()
-	}
+	c.tracker.Handle(ev)
 }
 
 // SetSessionID sets the session ID for reporting. Call this when the
@@ -174,40 +174,34 @@ func (c *Client) SetSessionID(id string) {
 	if c == nil {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.sessionID = id
+	c.tracker.SetSessionID(id)
 }
 
-func (c *Client) onAssistantMessage(sessionID string) {
+// ReportState implements [agentstate.Reporter] as a pane.report_agent
+// request. herdr's pane states have no error, so a failed run reports
+// idle: the agent is waiting for input again either way.
+func (c *Client) ReportState(state agentstate.State, sessionID string) {
+	herdrState := stateWorking
+	if state != agentstate.StateWorking {
+		herdrState = stateIdle
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if sessionID != "" {
-		c.sessionID = sessionID
+	c.sessionID = sessionID
+	if herdrState == c.state {
+		return
 	}
-	if !c.runActive {
-		c.runActive = true
-		c.reportLocked(stateWorking)
-	}
+	c.state = herdrState
+	c.snd.send(c.newRequestLocked("pane.report_agent", "report", herdrState))
 }
 
-func (c *Client) onRunComplete(sessionID string) {
+// ReportSession implements [agentstate.Reporter]. herdr carries the
+// session on every request rather than as a report of its own, so it is
+// only recorded.
+func (c *Client) ReportSession(sessionID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.runActive = false
-	if sessionID != "" {
-		c.sessionID = sessionID
-	}
-	c.reportLocked(stateIdle)
-}
-
-func (c *Client) onSummarizing() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.runActive {
-		c.runActive = true
-	}
-	c.reportLocked(stateWorking)
+	c.sessionID = sessionID
 }
 
 // newRequestLocked builds a seq-stamped JSON-RPC request to herdr.
@@ -229,17 +223,6 @@ func (c *Client) newRequestLocked(method, idPrefix, state string) reportRequest 
 			AgentSessionID: c.sessionID,
 		},
 	}
-}
-
-// reportLocked sends a pane.report_agent request to herdr. Must be
-// called with c.mu held. Skips redundant reports when the state has
-// not changed.
-func (c *Client) reportLocked(state string) {
-	if state == c.state {
-		return
-	}
-	c.state = state
-	c.snd.send(c.newRequestLocked("pane.report_agent", "report", state))
 }
 
 // reportRequest is the JSON-RPC envelope sent to herdr.

@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"github.com/stubbedev/harness/internal/agentstate"
 	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/config"
@@ -344,7 +345,7 @@ func runNonInteractive(
 
 			// Forward events to the multiplexer integrations when running
 			// inside a herdr or tmux pane.
-			if hev := herdr.Translate(ev); hev != nil {
+			if hev := agentstate.Translate(ev); hev != nil {
 				hc.HandleEvent(hev)
 				tc.HandleEvent(hev)
 			}

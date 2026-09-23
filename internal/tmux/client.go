@@ -30,13 +30,6 @@ import (
 	"github.com/stubbedev/harness/internal/crash"
 )
 
-// State values written to the @harness-state pane option.
-const (
-	stateIdle    = "idle"
-	stateWorking = "working"
-	stateError   = "error"
-)
-
 // Pane options written by this package.
 const (
 	stateOption   = "@harness-state"
@@ -54,13 +47,11 @@ type sender interface {
 // pane Harness is running in. Nil-safe: every method can be called on
 // a nil Client, which is what Init returns outside tmux.
 type Client struct {
-	paneID string
+	paneID  string
+	tracker *agentstate.Tracker
 
-	mu        sync.Mutex
-	sessionID string
-	state     string
-	runActive bool
-
+	// mu serializes commands to snd.
+	mu  sync.Mutex
 	snd sender
 }
 
@@ -125,11 +116,9 @@ func parseEnv(tmux, tmuxPane string) (socket, sessionID, paneID string, ok bool)
 
 // newClient returns a Client reporting on paneID over snd.
 func newClient(paneID string, snd sender) *Client {
-	return &Client{
-		paneID: paneID,
-		state:  stateIdle,
-		snd:    snd,
-	}
+	c := &Client{paneID: paneID, snd: snd}
+	c.tracker = agentstate.NewTracker(c)
+	return c
 }
 
 // registerInitial reports idle state immediately so the pane knows
@@ -140,7 +129,7 @@ func (c *Client) registerInitial() {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.sendfLocked(stateOption, c.state)
+	c.sendfLocked(stateOption, string(c.tracker.State()))
 }
 
 // Close unsets the pane options this client wrote and shuts down the
@@ -159,16 +148,10 @@ func (c *Client) Close() {
 // SetSessionID records which Harness session the pane is running and
 // publishes it as the @harness-session pane option.
 func (c *Client) SetSessionID(id string) {
-	if c == nil || id == "" {
+	if c == nil {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if id == c.sessionID {
-		return
-	}
-	c.sessionID = id
-	c.sendfLocked(sessionOption, id)
+	c.tracker.SetSessionID(id)
 }
 
 // HandleEvent processes a single agent-lifecycle event and reports
@@ -177,60 +160,23 @@ func (c *Client) HandleEvent(ev agentstate.Event) {
 	if c == nil {
 		return
 	}
-	switch e := ev.(type) {
-	case agentstate.AssistantMessage:
-		c.onAssistantMessage(e.SessionID)
-	case agentstate.RunComplete:
-		c.onRunComplete(e.SessionID, e.Error)
-	case agentstate.Summarizing:
-		c.onSummarizing()
-	}
+	c.tracker.Handle(ev)
 }
 
-func (c *Client) onAssistantMessage(sessionID string) {
+// ReportState implements [agentstate.Reporter] as the @harness-state
+// pane option.
+func (c *Client) ReportState(state agentstate.State, _ string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if sessionID != "" && sessionID != c.sessionID {
-		c.sessionID = sessionID
-		c.sendfLocked(sessionOption, sessionID)
-	}
-	if !c.runActive {
-		c.runActive = true
-		c.reportLocked(stateWorking)
-	}
+	c.sendfLocked(stateOption, string(state))
 }
 
-func (c *Client) onRunComplete(sessionID, runError string) {
+// ReportSession implements [agentstate.Reporter] as the
+// @harness-session pane option.
+func (c *Client) ReportSession(sessionID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.runActive = false
-	if sessionID != "" && sessionID != c.sessionID {
-		c.sessionID = sessionID
-		c.sendfLocked(sessionOption, sessionID)
-	}
-	if runError != "" {
-		c.reportLocked(stateError)
-		return
-	}
-	c.reportLocked(stateIdle)
-}
-
-func (c *Client) onSummarizing() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.runActive = true
-	c.reportLocked(stateWorking)
-}
-
-// reportLocked publishes a state transition, skipping redundant
-// reports when the state has not changed. Must be called with c.mu
-// held.
-func (c *Client) reportLocked(state string) {
-	if state == c.state {
-		return
-	}
-	c.state = state
-	c.sendfLocked(stateOption, state)
+	c.sendfLocked(sessionOption, sessionID)
 }
 
 // sendfLocked writes "set-option -p -t <pane> <option> <value>" as a

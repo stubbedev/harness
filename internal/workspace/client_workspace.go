@@ -15,6 +15,7 @@ import (
 	"github.com/pkg/browser"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/agentstate"
 	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/client"
@@ -1016,7 +1017,7 @@ func (w *ClientWorkspace) consumeEvents(evc <-chan any, send func(tea.Msg)) {
 	for ev := range evc {
 		// Forward events to the multiplexer integrations when running
 		// inside a herdr or tmux pane.
-		if hev := herdr.Translate(ev); hev != nil {
+		if hev := agentstate.Translate(ev); hev != nil {
 			w.herdrClient.HandleEvent(hev)
 			w.tmuxClient.HandleEvent(hev)
 		}
