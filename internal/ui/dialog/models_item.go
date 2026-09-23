@@ -137,7 +137,7 @@ func (m *ModelItem) RightLabel() string {
 	if !m.showProvider {
 		return ""
 	}
-	return string(m.prov.Name)
+	return m.prov.Name
 }
 
 // ID implements ListItem.

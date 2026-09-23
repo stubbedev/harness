@@ -950,9 +950,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.restoreModelFromSession(msgs); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		if cmd := m.autoExpandPillsIfReasonable(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		m.autoExpandPillsIfReasonable()
 		// If a bang command was issued before the session finished
 		// loading, start it now that the chat list is stable.
 		if m.pendingBangCommand != "" {
@@ -2141,9 +2139,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		cmds = append(cmds, m.openEditor(editorValue))
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionTogglePills:
-		if cmd := m.togglePillsExpanded(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
+		m.togglePillsExpanded()
 		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
@@ -2637,9 +2633,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		case key.Matches(msg, m.keyMap.Chat.TogglePills):
 			if m.state == uiChat && m.hasSession() {
-				if cmd := m.togglePillsExpanded(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
+				m.togglePillsExpanded()
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Suspend):

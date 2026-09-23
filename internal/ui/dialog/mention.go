@@ -128,7 +128,7 @@ func (p *MentionPicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	p.input.SetWidth(dialogInputTextWidth(st, p.input, innerWidth))
 
-	listHeight, listTotalHeight, _ := sizeDialogList(st, p.list, innerWidth, height, true)
+	listHeight, listTotalHeight, _ := sizeDialogList(st, p.list, innerWidth, height)
 
 	rc := NewRenderContext(st, width)
 	rc.Title = "Mention"

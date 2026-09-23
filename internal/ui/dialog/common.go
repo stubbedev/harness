@@ -86,13 +86,11 @@ func dialogInputHeight(t *styles.Styles) int {
 //   - l: the list to size.
 //   - innerWidth: dialog content width (total minus View horizontal frame).
 //   - dialogHeight: total dialog content height (already clamped).
-//   - withInput: whether the dialog renders an input row (and thus the
-//     separator rule around it).
-func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int, withInput bool) (listHeight, listTotalHeight, listWidth int) {
-	chrome := dialogTitleHeight(t) + ActiveFrame(t).GetVerticalFrameSize()
-	if withInput {
-		chrome += dialogInputHeight(t)
-	}
+//
+// Every list dialog renders an input row, so its height is always part
+// of the chrome.
+func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int) (listHeight, listTotalHeight, listWidth int) {
+	chrome := dialogTitleHeight(t) + ActiveFrame(t).GetVerticalFrameSize() + dialogInputHeight(t)
 	listHeight = max(0, dialogHeight-chrome)
 	listTotalHeight = l.TotalHeight()
 	// Hug the content: a short list shrinks its viewport — and with it the

@@ -3,7 +3,6 @@ package model
 import (
 	"fmt"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/session"
@@ -89,24 +88,24 @@ const pillsHeightReasonableTerminalHeight = 40
 
 // autoExpandPillsIfReasonable expands the pills panel if the terminal has
 // enough vertical space to show the expanded list comfortably.
-func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
+func (m *UI) autoExpandPillsIfReasonable() {
 	if !m.hasSession() {
-		return nil
+		return
 	}
 	if m.activeInline != nil {
-		return nil
+		return
 	}
 	if m.height < pillsHeightReasonableTerminalHeight {
-		return nil
+		return
 	}
 	if !hasIncompleteTodos(m.session.Todos) {
-		return nil
+		return
 	}
 	if m.pillsExpanded {
-		return nil
+		return
 	}
 	if m.pillsAutoExpanded {
-		return nil
+		return
 	}
 	m.pillsExpanded = true
 	m.pillsAutoExpanded = true
@@ -114,16 +113,15 @@ func (m *UI) autoExpandPillsIfReasonable() tea.Cmd {
 	if m.chat.Follow() {
 		m.chat.ScrollToBottom()
 	}
-	return nil
 }
 
 // togglePillsExpanded toggles the pills panel expansion state.
-func (m *UI) togglePillsExpanded() tea.Cmd {
+func (m *UI) togglePillsExpanded() {
 	if !m.hasSession() {
-		return nil
+		return
 	}
 	if !hasIncompleteTodos(m.session.Todos) {
-		return nil
+		return
 	}
 	m.pillsExpanded = !m.pillsExpanded
 	m.updateLayoutAndSize()
@@ -134,8 +132,6 @@ func (m *UI) togglePillsExpanded() tea.Cmd {
 	if m.chat.Follow() {
 		m.chat.ScrollToBottom()
 	}
-
-	return nil
 }
 
 // pillsAreaHeight calculates the total height needed for the pills area.

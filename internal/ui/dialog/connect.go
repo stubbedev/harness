@@ -138,7 +138,7 @@ func (c *Connect) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	maxAvailable := DialogHeightCeiling(st, area, connectDialogMaxHeight)
 	height := max(connectDialogMinHeight, min(connectDialogMaxHeight, desiredHeight, maxAvailable))
 
-	listHeight, listTotalHeight, _ := sizeDialogList(st, c.list, innerWidth, height, true)
+	listHeight, listTotalHeight, _ := sizeDialogList(st, c.list, innerWidth, height)
 
 	rc := NewRenderContext(st, width)
 	rc.Title = "Connect Provider"

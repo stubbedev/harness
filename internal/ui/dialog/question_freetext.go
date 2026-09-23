@@ -93,7 +93,8 @@ func (d *FreeText) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return false, nil
 	default:
 		if d.Request.Secret {
-			return false, d.handleSecretKey(msg)
+			d.handleSecretKey(msg)
+			return false, nil
 		}
 		var cmd tea.Cmd
 		d.editor, cmd = d.editor.Update(msg)
@@ -103,22 +104,21 @@ func (d *FreeText) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 
 // handleSecretKey accumulates a masked single-line answer: printable
 // runes append, backspace deletes. Everything else is ignored.
-func (d *FreeText) handleSecretKey(msg tea.KeyPressMsg) tea.Cmd {
+func (d *FreeText) handleSecretKey(msg tea.KeyPressMsg) {
 	switch msg.Code {
 	case tea.KeyBackspace:
 		if len(d.secret) > 0 {
 			_, size := utf8.DecodeLastRuneInString(d.secret)
 			d.secret = d.secret[:len(d.secret)-size]
 		}
-		return nil
+		return
 	case tea.KeyDelete, tea.KeyLeft, tea.KeyRight, tea.KeyUp, tea.KeyDown,
 		tea.KeyHome, tea.KeyEnd, tea.KeyPgUp, tea.KeyPgDown:
-		return nil
+		return
 	}
 	if msg.Text != "" {
 		d.secret += msg.Text
 	}
-	return nil
 }
 
 func (d *FreeText) answer(resp question.Answer) {

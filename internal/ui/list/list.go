@@ -265,7 +265,7 @@ func (l *List) Offset() int {
 
 // lastOffsetItem returns the index and line offsets of the last item that can
 // be partially visible in the viewport.
-func (l *List) lastOffsetItem() (int, int, int) {
+func (l *List) lastOffsetItem() (int, int) {
 	var totalHeight int
 	var idx int
 	for idx = len(l.items) - 1; idx >= 0; idx-- {
@@ -284,7 +284,7 @@ func (l *List) lastOffsetItem() (int, int, int) {
 	lineOffset := max(totalHeight-l.height, 0)
 	idx = max(idx, 0)
 
-	return idx, lineOffset, totalHeight
+	return idx, lineOffset
 }
 
 // getItem renders (if needed) and returns the item at the given index.
@@ -509,7 +509,7 @@ func (l *List) ScrollBy(lines int) {
 			currentItem = l.getItem(l.offsetIdx)
 		}
 
-		lastOffsetIdx, lastOffsetLine, _ := l.lastOffsetItem()
+		lastOffsetIdx, lastOffsetLine := l.lastOffsetItem()
 		if l.offsetIdx > lastOffsetIdx || (l.offsetIdx == lastOffsetIdx && l.offsetLine > lastOffsetLine) {
 			// Clamp to bottom
 			l.offsetIdx = lastOffsetIdx
@@ -741,7 +741,7 @@ func (l *List) ScrollToBottom() {
 		return
 	}
 
-	lastOffsetIdx, lastOffsetLine, _ := l.lastOffsetItem()
+	lastOffsetIdx, lastOffsetLine := l.lastOffsetItem()
 	l.offsetIdx = lastOffsetIdx
 	l.offsetLine = lastOffsetLine
 }

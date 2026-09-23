@@ -238,7 +238,7 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	height := DialogHeightCeiling(t, area, defaultDialogHeight)
 	innerWidth := DialogInnerWidth(t, width)
 	s.input.SetWidth(dialogInputTextWidth(t, s.input, innerWidth))
-	listHeight, listTotalHeight, listWidth := sizeDialogList(t, s.list, innerWidth, height, true)
+	listHeight, listTotalHeight, listWidth := sizeDialogList(t, s.list, innerWidth, height)
 
 	// Hide the timestamps uniformly when the widest would crowd the title.
 	applyInfoColumnVisibility(s.list.FilteredItems(), listWidth, sessionInfoMaxPercent)

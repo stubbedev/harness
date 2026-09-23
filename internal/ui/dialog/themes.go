@@ -151,7 +151,7 @@ func (t *Themes) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	maxAvailable := DialogHeightCeiling(st, area, themesDialogMaxHeight)
 	height := max(themesDialogMinHeight, min(themesDialogMaxHeight, desiredHeight, maxAvailable))
 
-	listHeight, listTotalHeight, _ := sizeDialogList(st, t.list, innerWidth, height, true)
+	listHeight, listTotalHeight, _ := sizeDialogList(st, t.list, innerWidth, height)
 
 	rc := NewRenderContext(st, width)
 	rc.Title = "Switch Theme"

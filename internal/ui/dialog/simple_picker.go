@@ -142,7 +142,7 @@ func (p *simplePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	maxAvailable := DialogHeightCeiling(t, area, p.maxHeight)
 	height := max(p.minHeight, min(p.maxHeight, desiredHeight, maxAvailable))
 
-	listHeight, listTotalHeight, _ := sizeDialogList(t, p.list, innerWidth, height, true)
+	listHeight, listTotalHeight, _ := sizeDialogList(t, p.list, innerWidth, height)
 
 	rc := NewRenderContext(t, width)
 	rc.Title = p.title

@@ -245,7 +245,7 @@ func (r *Rewind) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	innerWidth := DialogInnerWidth(st, width)
 
 	r.input.SetWidth(dialogInputTextWidth(st, r.input, innerWidth))
-	listHeight, listTotalHeight, _ := sizeDialogList(st, r.list, innerWidth, rewindDialogMaxHeight, true)
+	listHeight, listTotalHeight, _ := sizeDialogList(st, r.list, innerWidth, rewindDialogMaxHeight)
 
 	rc := NewRenderContext(st, width)
 	if r.phase == rewindPhaseTurns {
