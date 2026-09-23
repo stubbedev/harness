@@ -32,13 +32,12 @@ type HarnessParams struct {
 func NewHarnessTool(
 	cfg *config.ConfigStore,
 	lspManager *lsp.Manager,
-	allSkills []*skills.Skill,
-	activeSkills []*skills.Skill,
+	skillLists SkillLists,
 	skillTracker *skills.Tracker,
 	host *extensions.Host,
 	logFile string,
 ) fantasy.AgentTool {
-	info, logs := NewHarnessInfoTool(cfg, lspManager, allSkills, activeSkills, skillTracker, host), NewHarnessLogsTool(logFile)
+	info, logs := NewHarnessInfoTool(cfg, lspManager, skillLists, skillTracker, host), NewHarnessLogsTool(logFile)
 	return fantasy.NewParallelAgentTool(
 		HarnessToolName,
 		harnessDescription,

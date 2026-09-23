@@ -23,11 +23,15 @@ var harnessInfoDescription string
 
 type HarnessInfoParams struct{}
 
+// SkillLists returns the skills discovered (after dedup) and the subset
+// that is active, read at call time so a skills reload shows up without
+// rebuilding the tool.
+type SkillLists func() (all, active []*skills.Skill)
+
 func NewHarnessInfoTool(
 	cfg *config.ConfigStore,
 	lspManager *lsp.Manager,
-	allSkills []*skills.Skill,
-	activeSkills []*skills.Skill,
+	skillLists SkillLists,
 	skillTracker *skills.Tracker,
 	host *extensions.Host,
 ) fantasy.AgentTool {
@@ -35,6 +39,7 @@ func NewHarnessInfoTool(
 		HarnessInfoToolName,
 		harnessInfoDescription,
 		func(ctx context.Context, _ HarnessInfoParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			allSkills, activeSkills := skillLists()
 			return fantasy.NewTextResponse(buildHarnessInfo(cfg, lspManager, allSkills, activeSkills, skillTracker, host)), nil
 		},
 	)

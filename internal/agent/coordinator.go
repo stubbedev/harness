@@ -492,7 +492,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	call.OnAuthRefresh = c.makeAuthRefreshCallback(providerCfg)
 	beforeLoaded := c.skillTracker.LoadedNames()
 	result, originalErr := c.currentAgent.Run(ctx, call)
-	logTurnSkillUsage(sessionID, prompt, c.activeSkills, c.skillTracker, beforeLoaded)
+	logTurnSkillUsage(sessionID, prompt, c.activeSkillsList(), c.skillTracker, beforeLoaded)
 	c.notifyIfUnauthorized(originalErr, model.ModelCfg.Provider)
 
 	if hasLatest && c.runComplete != nil {
@@ -872,6 +872,15 @@ func (c *coordinator) activeSkillsList() []*skills.Skill {
 	return c.activeSkills
 }
 
+// skillLists returns every discovered skill and the active subset, live
+// from the manager when there is one, like activeSkillsList.
+func (c *coordinator) skillLists() (all, active []*skills.Skill) {
+	if c.skillsMgr != nil {
+		return c.skillsMgr.AllSkills(), c.skillsMgr.ActiveSkills()
+	}
+	return c.allSkills, c.activeSkills
+}
+
 // modelInvocableSkillCount reports how many active skills the model may
 // reach. Skills marked disable-model-invocation are the user's alone, so a
 // workspace holding only those gets no skill_search tool and no skills
@@ -1129,7 +1138,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	allTools = append(
 		allTools,
-		tools.NewHarnessTool(store, manager, c.allSkills, c.activeSkills, c.skillTracker, c.extensions, logFile),
+		tools.NewHarnessTool(store, manager, c.skillLists, c.skillTracker, c.extensions, logFile),
 		tools.NewEditTool(manager, c.history, c.filetracker, store.WorkingDir()),
 		tools.NewFetchTool(nil),
 		tools.NewWebSearchTool(nil),
