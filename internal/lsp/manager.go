@@ -55,6 +55,17 @@ type Manager struct {
 	// diagnostics uses them to give an in-flight wait a moment to land.
 	settleMu      sync.Mutex
 	settlePending []chan struct{}
+	// startLocks holds one mutex per server name, serialising
+	// startServer for that name.
+	startLocks sync.Map
+}
+
+// lockStart takes the start lock for one server and returns its release.
+func (s *Manager) lockStart(name string) func() {
+	mu, _ := s.startLocks.LoadOrStore(name, &sync.Mutex{})
+	m := mu.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
 }
 
 // NewManager creates a new LSP manager service.
@@ -242,13 +253,9 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		return
 	}
 
-	if client, ok := s.clients.Get(name); ok {
-		switch client.GetServerState() {
-		case StateReady, StateStarting, StateDisabled:
-			s.callback(name, client)
-			// already done, return
-			return
-		}
+	if client, ok := s.clients.Get(name); ok && client.GetServerState().isLive() {
+		s.callback(name, client)
+		return
 	}
 
 	if isUserConfigured {
@@ -259,13 +266,15 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		return
 	}
 
-	// Check again in case another goroutine started it in the meantime.
-	if client, ok := s.clients.Get(name); ok {
-		switch client.GetServerState() {
-		case StateReady, StateStarting, StateDisabled:
-			s.callback(name, client)
-			return
-		}
+	// Starts of one server are serialised, so two callers racing for the
+	// same name cannot both spawn a process or tear down each other's
+	// client. The loser waits, then finds the winner's client live.
+	unlock := s.lockStart(name)
+	defer unlock()
+
+	if client, ok := s.clients.Get(name); ok && client.GetServerState().isLive() {
+		s.callback(name, client)
+		return
 	}
 
 	client, err := New(
@@ -279,32 +288,16 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
 		return
 	}
-	// Only store non-nil clients. If another goroutine raced us,
-	// prefer the already-stored client; if the stored one is in a dead
-	// state (error or stopped), replace it — after shutting it down, so
-	// a restart never orphans the old server's process.
+	// A stored client here is dead (error or stopped); shut it down
+	// before replacing it so a restart never orphans its process.
 	if existing, ok := s.clients.Get(name); ok {
-		switch existing.GetServerState() {
-		case StateReady, StateStarting, StateDisabled:
-			client.Shutdown()
-			s.callback(name, existing)
-			return
-		default:
-			existing.Shutdown()
-		}
+		existing.Shutdown()
 	}
+	client.SetServerState(StateStarting)
 	s.clients.Set(name, client)
 	defer func() {
 		s.callback(name, client)
 	}()
-
-	switch client.GetServerState() {
-	case StateReady, StateStarting, StateDisabled:
-		// already done, return
-		return
-	}
-
-	client.serverState.Store(StateStarting)
 
 	// Use an independent context for initialization so that the LSP server
 	// startup is not tied to the caller's request context. The caller's
@@ -317,7 +310,7 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
 		client.Shutdown()
-		s.clients.Del(name)
+		s.clients.CompareAndDelete(name, client)
 		return
 	}
 
@@ -501,7 +494,7 @@ func (s *Manager) stopClient(ctx context.Context, name string, client *Client) {
 		err.Error() != "signal: killed" {
 		slog.Warn("Failed to stop LSP client", "name", name, "error", err)
 	}
-	client.cancelCtx()
+	client.cancelLife()
 	client.SetServerState(StateStopped)
 }
 

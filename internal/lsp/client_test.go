@@ -116,7 +116,7 @@ func newTestClient() *Client {
 		diagnostics: csync.NewVersionedMap[protocol.DocumentURI, []protocol.Diagnostic](),
 		openFiles:   csync.NewMap[string, *OpenFileInfo](),
 	}
-	c.serverState.Store(StateStopped)
+	c.SetServerState(StateStopped)
 	return c
 }
 

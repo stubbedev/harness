@@ -30,9 +30,11 @@ type DiagnosticCounts struct {
 }
 
 type Client struct {
-	client *powernap.Client
-	name   string
-	debug  bool
+	// conn is the powernap connection. Restart swaps it while other
+	// goroutines are mid-request, so it is only reached through pn.
+	conn  atomic.Pointer[powernap.Client]
+	name  string
+	debug bool
 
 	// Working directory this LSP is scoped to.
 	cwd string
@@ -46,6 +48,8 @@ type Client struct {
 	// Long-lived context for the client's lifetime, independent of any
 	// request-scoped context. Used for restart and other operations that
 	// must survive beyond the initial tool call that created the client.
+	// Restart replaces both, so they are guarded by lifeMu.
+	lifeMu    sync.Mutex
 	ctx       context.Context
 	cancelCtx context.CancelFunc
 	resolver  config.VariableResolver
@@ -64,8 +68,39 @@ type Client struct {
 	// Files are currently opened by the LSP
 	openFiles *csync.Map[string, *OpenFileInfo]
 
-	// Server state
-	serverState atomic.Value
+	// Server state, a ServerState.
+	serverState atomic.Int32
+}
+
+// pn returns the current powernap connection.
+func (c *Client) pn() *powernap.Client { return c.conn.Load() }
+
+// cancelLife cancels the client's long-lived context.
+func (c *Client) cancelLife() {
+	c.lifeMu.Lock()
+	defer c.lifeMu.Unlock()
+	if c.cancelCtx != nil {
+		c.cancelCtx()
+	}
+}
+
+// renewLife cancels the long-lived context and starts a fresh one,
+// returning it.
+func (c *Client) renewLife() context.Context {
+	c.lifeMu.Lock()
+	defer c.lifeMu.Unlock()
+	if c.cancelCtx != nil {
+		c.cancelCtx()
+	}
+	c.ctx, c.cancelCtx = context.WithCancel(context.Background())
+	return c.ctx
+}
+
+// lifeContext returns the client's long-lived context.
+func (c *Client) lifeContext() context.Context {
+	c.lifeMu.Lock()
+	defer c.lifeMu.Unlock()
+	return c.ctx
 }
 
 // New creates a new LSP client using the powernap implementation.
@@ -92,7 +127,7 @@ func New(
 		resolver:    resolver,
 		cwd:         cwd,
 	}
-	client.serverState.Store(StateStopped)
+	client.SetServerState(StateStopped)
 
 	if err := client.createPowernapClient(); err != nil {
 		return nil, err
@@ -110,12 +145,12 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 	// late for those — the server treats an unhandled response as fatal.
 	c.registerHandlers()
 
-	if err := c.client.Initialize(ctx, false); err != nil {
+	if err := c.pn().Initialize(ctx, false); err != nil {
 		return nil, fmt.Errorf("failed to initialize the lsp client: %w", err)
 	}
 
 	// Convert powernap capabilities to protocol capabilities
-	caps := c.client.GetCapabilities()
+	caps := c.pn().GetCapabilities()
 	protocolCaps := protocol.ServerCapabilities{
 		TextDocumentSync: caps.TextDocumentSync,
 		CompletionProvider: func() *protocol.CompletionOptions {
@@ -141,19 +176,19 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 const closeTimeout = 5 * time.Second
 
 // Kill kills the client without doing anything else.
-func (c *Client) Kill() { c.client.Kill() }
+func (c *Client) Kill() { c.pn().Kill() }
 
 // Shutdown permanently cancels the client's long-lived context and kills the
 // underlying process. Unlike Restart, this is terminal: the client cannot be
 // reused after Shutdown.
 func (c *Client) Shutdown() {
-	c.cancelCtx()
-	c.client.Kill()
+	c.cancelLife()
+	c.pn().Kill()
 }
 
 // GetOffsetEncoding returns the negotiated offset encoding for this client.
 func (c *Client) GetOffsetEncoding() powernap.OffsetEncoding {
-	return c.client.GetOffsetEncoding()
+	return c.pn().GetOffsetEncoding()
 }
 
 // Close closes all open files in the client, then shuts down gracefully.
@@ -169,17 +204,17 @@ func (c *Client) Close(ctx context.Context) error {
 
 	done := make(chan error, 1)
 	go func() {
-		if err := c.client.Shutdown(closeCtx); err != nil {
+		if err := c.pn().Shutdown(closeCtx); err != nil {
 			slog.Warn("Failed to shutdown LSP client", "error", err)
 		}
-		done <- c.client.Exit()
+		done <- c.pn().Exit()
 	}()
 
 	select {
 	case err := <-done:
 		return err
 	case <-closeCtx.Done():
-		c.client.Kill()
+		c.pn().Kill()
 		return closeCtx.Err()
 	}
 }
@@ -223,13 +258,13 @@ func (c *Client) createPowernapClient() error {
 		return fmt.Errorf("failed to create lsp client: %w", err)
 	}
 
-	c.client = powernapClient
+	c.conn.Store(powernapClient)
 	return nil
 }
 
 // registerHandlers registers the standard LSP notification and request handlers.
 func (c *Client) registerHandlers() {
-	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.client.GetOffsetEncoding()))
+	c.RegisterServerRequestHandler("workspace/applyEdit", HandleApplyEdit(c.pn().GetOffsetEncoding()))
 	c.RegisterServerRequestHandler("workspace/configuration", HandleWorkspaceConfiguration)
 	c.RegisterServerRequestHandler("client/registerCapability", HandleRegisterCapability)
 	c.RegisterServerRequestHandler("window/workDoneProgress/create", HandleWorkDoneProgressCreate)
@@ -248,7 +283,7 @@ func (c *Client) Restart() error {
 	// Files renamed or deleted since they were opened can never be
 	// reopened; drop them and their stale diagnostics instead of carrying
 	// the phantom entries into the new session.
-	c.closeVanishedFiles(c.ctx)
+	c.closeVanishedFiles(c.lifeContext())
 
 	var openFiles []string
 	for uri := range c.openFiles.Seq2() {
@@ -257,10 +292,9 @@ func (c *Client) Restart() error {
 
 	// Cancel the old long-lived context and create a fresh one so that
 	// reinitialization is not affected by any prior cancellation.
-	c.cancelCtx()
-	c.ctx, c.cancelCtx = context.WithCancel(context.Background())
+	lifeCtx := c.renewLife()
 
-	closeCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+	closeCtx, cancel := context.WithTimeout(lifeCtx, 10*time.Second)
 	defer cancel()
 
 	if err := c.Close(closeCtx); err != nil {
@@ -269,14 +303,16 @@ func (c *Client) Restart() error {
 
 	c.SetServerState(StateStopped)
 
+	c.diagCountsMu.Lock()
 	c.diagCountsCache = DiagnosticCounts{}
 	c.diagCountsVersion = 0
+	c.diagCountsMu.Unlock()
 
 	if err := c.createPowernapClient(); err != nil {
 		return err
 	}
 
-	initCtx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	initCtx, cancel := context.WithTimeout(lifeCtx, 30*time.Second)
 	defer cancel()
 
 	c.SetServerState(StateStarting)
@@ -286,7 +322,7 @@ func (c *Client) Restart() error {
 	// don't crash on an unhandled response.
 	c.registerHandlers()
 
-	if err := c.client.Initialize(initCtx, false); err != nil {
+	if err := c.pn().Initialize(initCtx, false); err != nil {
 		c.SetServerState(StateError)
 		return fmt.Errorf("failed to initialize lsp client: %w", err)
 	}
@@ -317,17 +353,24 @@ const (
 	StateDisabled
 )
 
+// isLive reports whether a client in this state is running, on its way
+// up, or deliberately off, so a start request should leave it be.
+func (s ServerState) isLive() bool {
+	switch s {
+	case StateReady, StateStarting, StateDisabled:
+		return true
+	}
+	return false
+}
+
 // GetServerState returns the current state of the LSP server
 func (c *Client) GetServerState() ServerState {
-	if val := c.serverState.Load(); val != nil {
-		return val.(ServerState)
-	}
-	return StateStarting
+	return ServerState(c.serverState.Load())
 }
 
 // SetServerState sets the current state of the LSP server
 func (c *Client) SetServerState(state ServerState) {
-	c.serverState.Store(state)
+	c.serverState.Store(int32(state))
 }
 
 // GetName returns the name of the LSP client
@@ -369,7 +412,7 @@ func (c *Client) WaitForServerReady(ctx context.Context) error {
 			return fmt.Errorf("timeout waiting for LSP server to be ready")
 		case <-ticker.C:
 			// Check if client is running
-			if !c.client.IsRunning() {
+			if !c.pn().IsRunning() {
 				if c.debug {
 					slog.Debug("LSP server not ready yet", "server", c.name)
 				}
@@ -424,7 +467,7 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	}
 
 	// Notify the server about the opened document
-	if err = c.client.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
+	if err = c.pn().NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
 		return err
 	}
 
@@ -465,7 +508,7 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 		},
 	}
 
-	return c.client.NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes)
+	return c.pn().NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes)
 }
 
 // IsFileOpen checks if a file is currently open.
@@ -481,7 +524,7 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 		if c.debug {
 			slog.Debug("Closing file", "file", uri)
 		}
-		if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
+		if err := c.pn().NotifyDidCloseTextDocument(ctx, uri); err != nil {
 			slog.Warn("Error closing file", "uri", uri, "error", err)
 			continue
 		}
@@ -556,12 +599,12 @@ func (c *Client) OpenFileOnDemand(ctx context.Context, filepath string) error {
 
 // RegisterNotificationHandler registers a notification handler.
 func (c *Client) RegisterNotificationHandler(method string, handler transport.NotificationHandler) {
-	c.client.RegisterNotificationHandler(method, handler)
+	c.pn().RegisterNotificationHandler(method, handler)
 }
 
 // RegisterServerRequestHandler handles server requests.
 func (c *Client) RegisterServerRequestHandler(method string, handler transport.Handler) {
-	c.client.RegisterHandler(method, handler)
+	c.pn().RegisterHandler(method, handler)
 }
 
 // openKeyConfigFiles opens important configuration files that help initialize the server.
@@ -588,7 +631,7 @@ func (c *Client) NotifyWorkspaceChange(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
-	return c.client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
+	return c.pn().NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
 		{URI: protocol.DocumentURI(protocol.URIFromPath(c.cwd)), Type: protocol.Changed},
 	})
 }
@@ -619,7 +662,7 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 				},
 			},
 		}
-		if err := c.client.NotifyDidChangeTextDocument(ctx, uri, int(info.Version), changes); err != nil {
+		if err := c.pn().NotifyDidChangeTextDocument(ctx, uri, int(info.Version), changes); err != nil {
 			slog.Warn("Failed to notify file change", "uri", uri, "error", err)
 		}
 	}
@@ -723,7 +766,7 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 
 	// NOTE: line and character should be 0-based.
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
-	return c.client.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
+	return c.pn().FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
 }
 
 // Rename renames the symbol at the given position across all files.
@@ -735,7 +778,7 @@ func (c *Client) Rename(ctx context.Context, filepath string, line, character in
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.client.RequestRename(ctx, filepath, line-1, character-1, newName) //nolint:wrapcheck
+	return c.pn().RequestRename(ctx, filepath, line-1, character-1, newName) //nolint:wrapcheck
 }
 
 // DocumentSymbols returns the document symbols for the given file.
@@ -747,7 +790,7 @@ func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protoc
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.client.RequestDocumentSymbols(ctx, filepath) //nolint:wrapcheck
+	return c.pn().RequestDocumentSymbols(ctx, filepath) //nolint:wrapcheck
 }
 
 // Definition finds the definition of the symbol at the given position.
@@ -759,7 +802,7 @@ func (c *Client) Definition(ctx context.Context, filepath string, line, characte
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.client.RequestDefinition(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+	return c.pn().RequestDefinition(ctx, filepath, line-1, character-1) //nolint:wrapcheck
 }
 
 // PrepareCallHierarchy prepares a call hierarchy item at the given position.
@@ -771,7 +814,7 @@ func (c *Client) PrepareCallHierarchy(ctx context.Context, filepath string, line
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.client.PrepareCallHierarchy(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+	return c.pn().PrepareCallHierarchy(ctx, filepath, line-1, character-1) //nolint:wrapcheck
 }
 
 // IncomingCalls returns all callers of the given call hierarchy item.
@@ -779,7 +822,7 @@ func (c *Client) IncomingCalls(ctx context.Context, item protocol.CallHierarchyI
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.client.IncomingCalls(ctx, item) //nolint:wrapcheck
+	return c.pn().IncomingCalls(ctx, item) //nolint:wrapcheck
 }
 
 // OutgoingCalls returns all callees of the given call hierarchy item.
@@ -787,5 +830,5 @@ func (c *Client) OutgoingCalls(ctx context.Context, item protocol.CallHierarchyI
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.client.OutgoingCalls(ctx, item) //nolint:wrapcheck
+	return c.pn().OutgoingCalls(ctx, item) //nolint:wrapcheck
 }

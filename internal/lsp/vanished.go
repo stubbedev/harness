@@ -30,8 +30,8 @@ func (c *Client) closeVanishedFiles(ctx context.Context) {
 		vanished = append(vanished, uri)
 	}
 	for _, uri := range vanished {
-		if c.client != nil {
-			if err := c.client.NotifyDidCloseTextDocument(ctx, uri); err != nil {
+		if c.pn() != nil {
+			if err := c.pn().NotifyDidCloseTextDocument(ctx, uri); err != nil {
 				slog.Debug("Failed to close vanished file with server", "uri", uri, "error", err)
 			}
 		}
