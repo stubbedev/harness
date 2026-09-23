@@ -1098,12 +1098,17 @@ func (c *Config) SetupAgents() {
 }
 
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
-	var (
-		providerID = catalog.InferenceProvider(c.ID)
-		testURL    = ""
-		headers    = make(map[string]string)
-		apiKey, _  = resolver.ResolveValue(c.APIKey)
-	)
+	providerID := catalog.InferenceProvider(c.ID)
+	apiKey, err := resolver.ResolveValue(c.APIKey)
+	if err != nil {
+		return fmt.Errorf("resolving API key for provider %s: %w", c.ID, err)
+	}
+	baseURL, err := resolver.ResolveValue(c.BaseURL)
+	if err != nil {
+		return fmt.Errorf("resolving base URL for provider %s: %w", c.ID, err)
+	}
+	var testURL string
+	headers := make(map[string]string)
 
 	switch providerID {
 	case catalog.InferenceProviderMiniMax, catalog.InferenceProviderMiniMaxChina:
@@ -1120,7 +1125,6 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 
 	switch c.Type {
 	case catalog.TypeOpenAI, catalog.TypeOpenAICompat, catalog.TypeOpenRouter:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
 
 		switch providerID {
@@ -1134,7 +1138,6 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 
 		headers["Authorization"] = "Bearer " + apiKey
 	case catalog.TypeAnthropic:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")
 
 		switch providerID {
@@ -1147,7 +1150,6 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 		headers["x-api-key"] = apiKey
 		headers["anthropic-version"] = "2023-06-01"
 	case catalog.TypeGoogle:
-		baseURL, _ := resolver.ResolveValue(c.BaseURL)
 		baseURL = cmp.Or(baseURL, "https://generativelanguage.googleapis.com")
 		testURL = baseURL + "/v1beta/models?key=" + url.QueryEscape(apiKey)
 	case catalog.TypeBedrock:
@@ -1183,7 +1185,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to create request for provider %s: %w", c.ID, err)
+		return fmt.Errorf("failed to reach provider %s: %w", c.ID, err)
 	}
 	defer resp.Body.Close()
 
