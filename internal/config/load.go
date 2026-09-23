@@ -1227,30 +1227,55 @@ func projectBoundary(dir string) string {
 // Skills in these directories are auto-discovered and their files can be read
 // without permission prompts.
 func GlobalSkillsDirs() []string {
-	if harnessSkills := os.Getenv("HARNESS_SKILLS_DIR"); harnessSkills != "" {
-		return []string{harnessSkills}
+	// Per the Agent Skills spec, also scan ~/.agents/skills.
+	return globalDirs("HARNESS_SKILLS_DIR", "skills", ".agents", ".claude")
+}
+
+// globalDirs returns the global directories for one kind of definition
+// (skills, subagents, extensions). A non-empty envVar overrides the list
+// entirely. Otherwise it is the harness and shared agents directories
+// under the config home, then name under each of homeDirs in the home
+// directory, then on Windows the same pair under app data, kept mostly
+// for backwards compatibility.
+func globalDirs(envVar, name string, homeDirs ...string) []string {
+	if dir := os.Getenv(envVar); dir != "" {
+		return []string{dir}
 	}
 
 	paths := []string{
-		filepath.Join(home.Config(), appName, "skills"),
-		filepath.Join(home.Config(), "agents", "skills"),
-		// Per the Agent Skills spec, scan ~/.agents/skills
-		filepath.Join(home.Dir(), ".agents", "skills"),
-		filepath.Join(home.Dir(), ".claude", "skills"),
+		filepath.Join(home.Config(), appName, name),
+		filepath.Join(home.Config(), "agents", name),
 	}
-
-	// On Windows, also load from app data on top of `$HOME/.config/harness`.
-	// This is here mostly for backwards compatibility.
+	for _, dir := range homeDirs {
+		paths = append(paths, filepath.Join(home.Dir(), dir, name))
+	}
 	if runtime.GOOS == "windows" {
 		appData := home.AppData()
-		paths = append(
-			paths,
-			filepath.Join(appData, appName, "skills"),
-			filepath.Join(appData, "agents", "skills"),
+		paths = append(paths,
+			filepath.Join(appData, appName, name),
+			filepath.Join(appData, "agents", name),
 		)
 	}
-
 	return paths
+}
+
+// projectDirs returns subdirs under the git working tree root and then
+// under workingDir, so monorepo-level definitions are found from inside a
+// subdirectory. Discovery keeps the last definition of a name, so listing
+// the working directory last lets a local definition override a
+// repository-root one with the same name.
+func projectDirs(workingDir string, subdirs []string) []string {
+	bases := []string{workingDir}
+	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
+		bases = []string{root, workingDir}
+	}
+	dirs := make([]string, 0, len(subdirs)*len(bases))
+	for _, base := range bases {
+		for _, sub := range subdirs {
+			dirs = append(dirs, filepath.Join(base, sub))
+		}
+	}
+	return dirs
 }
 
 // projectSkillSubdirs lists the conventional subdirectories where
@@ -1263,51 +1288,19 @@ var projectSkillSubdirs = []string{
 	".cursor/skills",
 }
 
-// ProjectSkillsDir returns the default project directories for which Harness
-// will look for skills. In addition to the working directory, it also
-// checks the git working tree root so that monorepo-level skills are
-// discovered when the user is inside a subdirectory.
-// Working-directory paths come first so local skills take precedence
-// over monorepo-level ones.
+// ProjectSkillsDir returns the default project directories in which Harness
+// looks for skills: the git working tree root first, then the working
+// directory, so a local skill overrides a monorepo-level one with the same
+// name (skills.Deduplicate keeps the last occurrence).
 func ProjectSkillsDir(workingDir string) []string {
-	dirs := make([]string, 0, len(projectSkillSubdirs)*2)
-	for _, sub := range projectSkillSubdirs {
-		dirs = append(dirs, filepath.Join(workingDir, sub))
-	}
-
-	// When the working directory is inside a git repository, also look at
-	// the repository root so monorepo-level .agents/skills are found.
-	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
-		for _, sub := range projectSkillSubdirs {
-			dirs = append(dirs, filepath.Join(root, sub))
-		}
-	}
-
-	return dirs
+	return projectDirs(workingDir, projectSkillSubdirs)
 }
 
 // GlobalSubagentsDirs returns the default global directories for subagent
 // definitions. The HARNESS_SUBAGENTS_DIR environment variable, when set to a
 // non-empty value, overrides the default list entirely.
 func GlobalSubagentsDirs() []string {
-	if harnessSubagents := os.Getenv("HARNESS_SUBAGENTS_DIR"); harnessSubagents != "" {
-		return []string{harnessSubagents}
-	}
-
-	paths := []string{
-		filepath.Join(home.Config(), appName, "subagents"),
-		filepath.Join(home.Config(), "agents", "subagents"),
-		filepath.Join(home.Dir(), ".agents", "subagents"),
-	}
-	if runtime.GOOS == "windows" {
-		appData := home.AppData()
-		paths = append(
-			paths,
-			filepath.Join(appData, appName, "subagents"),
-			filepath.Join(appData, "agents", "subagents"),
-		)
-	}
-	return paths
+	return globalDirs("HARNESS_SUBAGENTS_DIR", "subagents", ".agents")
 }
 
 // projectSubagentSubdirs lists the conventional subdirectories where
@@ -1319,32 +1312,10 @@ var projectSubagentSubdirs = []string{
 }
 
 // ProjectSubagentsDir returns the default project directories in which
-// Harness looks for subagent definitions. In addition to the working
-// directory, it also checks the git working tree root so that
-// monorepo-level subagents are discovered when the user is inside a
-// subdirectory.
-//
-// Unlike ProjectSkillsDir, repository-root paths come first and
-// working-directory paths come last. subagents.Deduplicate keeps the last
-// occurrence of a given name, so listing the working directory last means
-// a working-directory subagent definition overrides a monorepo-root
-// definition with the same name.
+// Harness looks for subagent definitions, repository root first; see
+// projectDirs.
 func ProjectSubagentsDir(workingDir string) []string {
-	dirs := make([]string, 0, len(projectSubagentSubdirs)*2)
-
-	// When the working directory is inside a git repository, also look at
-	// the repository root so monorepo-level .agents/subagents are found.
-	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
-		for _, sub := range projectSubagentSubdirs {
-			dirs = append(dirs, filepath.Join(root, sub))
-		}
-	}
-
-	for _, sub := range projectSubagentSubdirs {
-		dirs = append(dirs, filepath.Join(workingDir, sub))
-	}
-
-	return dirs
+	return projectDirs(workingDir, projectSubagentSubdirs)
 }
 
 // knownHookEvents is the set of canonical hook event names accepted in
@@ -1428,23 +1399,7 @@ func (c *Config) ValidateHooks() error {
 // extensions. The HARNESS_EXTENSIONS_DIR environment variable, when set
 // to a non-empty value, overrides the default list entirely.
 func GlobalExtensionsDirs() []string {
-	if dir := os.Getenv("HARNESS_EXTENSIONS_DIR"); dir != "" {
-		return []string{dir}
-	}
-
-	paths := []string{
-		filepath.Join(home.Config(), appName, "extensions"),
-		filepath.Join(home.Config(), "agents", "extensions"),
-	}
-	if runtime.GOOS == "windows" {
-		appData := home.AppData()
-		paths = append(
-			paths,
-			filepath.Join(appData, appName, "extensions"),
-			filepath.Join(appData, "agents", "extensions"),
-		)
-	}
-	return paths
+	return globalDirs("HARNESS_EXTENSIONS_DIR", "extensions")
 }
 
 // projectExtensionSubdirs lists the conventional subdirectories where
@@ -1455,22 +1410,7 @@ var projectExtensionSubdirs = []string{
 }
 
 // ProjectExtensionsDir returns the default project directories in which
-// Harness looks for extensions. Repository-root paths come first and
-// working-directory paths last: extensions.Discover keeps the last
-// occurrence of a name, so a working-directory extension overrides a
-// monorepo-root one with the same name.
+// Harness looks for extensions, repository root first; see projectDirs.
 func ProjectExtensionsDir(workingDir string) []string {
-	dirs := make([]string, 0, len(projectExtensionSubdirs)*2)
-
-	if root := worktreeRoot(workingDir); root != "" && root != workingDir {
-		for _, sub := range projectExtensionSubdirs {
-			dirs = append(dirs, filepath.Join(root, sub))
-		}
-	}
-
-	for _, sub := range projectExtensionSubdirs {
-		dirs = append(dirs, filepath.Join(workingDir, sub))
-	}
-
-	return dirs
+	return projectDirs(workingDir, projectExtensionSubdirs)
 }
