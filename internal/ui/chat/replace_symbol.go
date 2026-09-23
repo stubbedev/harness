@@ -13,7 +13,6 @@ type ReplaceSymbolToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	// Replace symbol uses full width for diffs, like edit.
 	if opts.IsPending() {
 		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
@@ -37,7 +36,7 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 
 	// Try to render as a diff using metadata.
 	var meta tools.ReplaceSymbolResponseMetadata
-	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.OldContent != "" || meta.NewContent != "" {
+	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && (meta.OldContent != "" || meta.NewContent != "") {
 		diff := toolOutputDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.ExpandedContent)
 
 		// On error, show error above the diff.
@@ -50,7 +49,6 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 	}
 
 	// Fallback to plain text if no metadata.
-	bodyWidth := width
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, width, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

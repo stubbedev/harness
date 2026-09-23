@@ -12,7 +12,6 @@ type CallHierarchyToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *CallHierarchyToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
@@ -24,12 +23,12 @@ func (r *CallHierarchyToolRenderContext) RenderTool(sty *styles.Styles, width in
 	if params.Direction == "outgoing" {
 		direction = "outgoing"
 	}
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, params.Symbol, direction)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, params.Symbol, direction)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -37,7 +36,6 @@ func (r *CallHierarchyToolRenderContext) RenderTool(sty *styles.Styles, width in
 		return header
 	}
 
-	bodyWidth := cappedWidth
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, width, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

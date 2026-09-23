@@ -15,36 +15,18 @@ import (
 // View Tool
 // -----------------------------------------------------------------------------
 
-// ViewToolMessageItem is a message item that represents a view tool call.
-type ViewToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*ViewToolMessageItem)(nil)
-
-// NewViewToolMessageItem creates a new [ViewToolMessageItem].
-func NewViewToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &ViewToolRenderContext{}, canceled)
-}
-
 // ViewToolRenderContext renders view tool messages.
 type ViewToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
-		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", cappedWidth)
+		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
 
 	var params tools.ViewParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
@@ -56,12 +38,12 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "offset", fmt.Sprintf("%d", params.Offset))
 	}
 
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -93,7 +75,7 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	}
 
 	// Render code content with syntax highlighting.
-	body := toolOutputCodeContent(sty, params.FilePath, content, params.Offset, cappedWidth, opts.ExpandedContent)
+	body := toolOutputCodeContent(sty, params.FilePath, content, params.Offset, width, opts.ExpandedContent)
 	return joinToolParts(header, body)
 }
 
@@ -101,49 +83,31 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 // Write Tool
 // -----------------------------------------------------------------------------
 
-// WriteToolMessageItem is a message item that represents a write tool call.
-type WriteToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*WriteToolMessageItem)(nil)
-
-// NewWriteToolMessageItem creates a new [WriteToolMessageItem].
-func NewWriteToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &WriteToolRenderContext{}, canceled)
-}
-
 // WriteToolRenderContext renders write tool messages.
 type WriteToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
-			return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), fsext.PrettyPath(path), cappedWidth)
+			return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), fsext.PrettyPath(path), width)
 		}
-		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", cappedWidth)
+		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
 
 	var params tools.WriteParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, file)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, file)
 	if opts.Compact {
 		return header
 	}
 
 	if !opts.HasResult() {
-		if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+		if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 			return joinToolParts(header, earlyState)
 		}
 		return header
@@ -153,16 +117,16 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if opts.Result.IsError {
 		var meta tools.WriteResponseMetadata
 		if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.Diff != "" {
-			errLine := toolErrorContent(sty, opts.Result, cappedWidth)
-			diff := toolOutputDiffContentFromUnified(sty, meta.Diff, cappedWidth, opts.ExpandedContent)
+			errLine := toolErrorContent(sty, opts.Result, width)
+			diff := toolOutputDiffContentFromUnified(sty, meta.Diff, width, opts.ExpandedContent)
 			return strings.Join([]string{header, "", errLine, "", diff}, "\n")
 		}
-		return joinToolParts(header, toolErrorContent(sty, opts.Result, cappedWidth))
+		return joinToolParts(header, toolErrorContent(sty, opts.Result, width))
 	}
 
 	// Render code content with syntax highlighting.
 	if params.Content != "" {
-		body := toolOutputCodeContent(sty, params.FilePath, params.Content, 0, cappedWidth, opts.ExpandedContent)
+		body := toolOutputCodeContent(sty, params.FilePath, params.Content, 0, width, opts.ExpandedContent)
 		return joinToolParts(header, body)
 	}
 
@@ -172,23 +136,6 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 // -----------------------------------------------------------------------------
 // Edit Tool
 // -----------------------------------------------------------------------------
-
-// EditToolMessageItem is a message item that represents an edit tool call.
-type EditToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*EditToolMessageItem)(nil)
-
-// NewEditToolMessageItem creates a new [EditToolMessageItem].
-func NewEditToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &EditToolRenderContext{}, canceled)
-}
 
 // EditToolRenderContext renders multi-edit tool messages.
 type EditToolRenderContext struct{}
@@ -229,8 +176,7 @@ func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// Get diff content from metadata.
 	var meta tools.EditResponseMetadata
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err != nil {
-		bodyWidth := width
-		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+		body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, width, opts.ExpandedContent))
 		return joinToolParts(header, body)
 	}
 

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -14,24 +13,6 @@ import (
 // Shell Tool
 // -----------------------------------------------------------------------------
 
-// ShellToolMessageItem is a message item that represents a shell tool call.
-type ShellToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*ShellToolMessageItem)(nil)
-
-// NewShellToolMessageItem creates a new [ShellToolMessageItem].
-func NewShellToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-	workingDir string,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &ShellToolRenderContext{workingDir: workingDir}, canceled)
-}
-
 // ShellToolRenderContext renders shell tool messages.
 type ShellToolRenderContext struct {
 	workingDir string
@@ -39,13 +20,12 @@ type ShellToolRenderContext struct {
 
 // RenderTool implements the [ToolRenderer] interface.
 func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		// The command shows as the model types it.
 		if cmd, ok := partialStringField(opts.ToolCall.Input, "command"); ok && strings.TrimSpace(cmd) != "" {
-			return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), cmd, cappedWidth)
+			return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), cmd, width)
 		}
-		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", cappedWidth)
+		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
 
 	var params tools.ShellParams
@@ -75,12 +55,12 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		toolParams = append(toolParams, "took", common.FormatDuration(opts.Elapsed))
 	}
 
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -96,8 +76,7 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return header
 	}
 
-	bodyWidth := cappedWidth
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, output, bodyWidth, opts.ExpandedContent))
+	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, output, width, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }
 

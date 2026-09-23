@@ -11,23 +11,6 @@ import (
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
-// QuestionToolMessageItem renders question tool calls in the chat.
-type QuestionToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*QuestionToolMessageItem)(nil)
-
-// NewQuestionToolMessageItem creates a new [QuestionToolMessageItem].
-func NewQuestionToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &QuestionToolRenderContext{}, canceled)
-}
-
 // QuestionToolRenderContext renders question tool messages. Parsed
 // input and result are cached because chat items re-render on every
 // resize and animation frame while visible, but the tool call input
@@ -62,23 +45,22 @@ func (q *QuestionToolRenderContext) parseBlocks(content string) []questionBlock 
 
 // RenderTool implements the [ToolRenderer] interface.
 func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
 
 	params, ok := q.parseParams(opts.ToolCall.Input)
 	if !ok {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	headerText := questionSummary(params)
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, headerText)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, headerText)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -86,7 +68,7 @@ func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, op
 		return header
 	}
 
-	body := formatQuestionAnswers(sty, q.parseBlocks(opts.Result.Content), cappedWidth)
+	body := formatQuestionAnswers(sty, q.parseBlocks(opts.Result.Content), width)
 	if body == "" {
 		return header
 	}

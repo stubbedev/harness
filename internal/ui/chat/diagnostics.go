@@ -107,7 +107,6 @@ type DiagnosticsToolRenderContext struct {
 
 // RenderTool implements the [ToolRenderer] interface.
 func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
@@ -121,12 +120,12 @@ func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		mainParam = fsext.PrettyPath(params.FilePath)
 	}
 
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, mainParam)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, mainParam)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -134,8 +133,7 @@ func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		return header
 	}
 
-	bodyWidth := cappedWidth
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, width, opts.ExpandedContent))
 	if note := d.liveNote(params.FilePath); note != "" {
 		body = joinToolParts(body, sty.Tool.TodoStatusNote.Render(note))
 	}

@@ -13,7 +13,6 @@ type RenameToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *RenameToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
@@ -26,12 +25,12 @@ func (r *RenameToolRenderContext) RenderTool(sty *styles.Styles, width int, opts
 		toolParams = append(toolParams, "path", fsext.PrettyPath(params.Path))
 	}
 
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -39,7 +38,6 @@ func (r *RenameToolRenderContext) RenderTool(sty *styles.Styles, width int, opts
 		return header
 	}
 
-	bodyWidth := cappedWidth
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, width, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

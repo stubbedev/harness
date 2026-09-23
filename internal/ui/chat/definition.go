@@ -12,7 +12,6 @@ type DefinitionToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *DefinitionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
@@ -20,12 +19,12 @@ func (r *DefinitionToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 	var params tools.DefinitionParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, params.Symbol)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, params.Symbol)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -36,12 +35,11 @@ func (r *DefinitionToolRenderContext) RenderTool(sty *styles.Styles, width int, 
 	// Try to render code with syntax highlighting using metadata.
 	var meta tools.DefinitionResponseMetadata
 	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && meta.Content != "" {
-		body := toolOutputCodeContent(sty, meta.FilePath, meta.Content, 0, cappedWidth, opts.ExpandedContent)
+		body := toolOutputCodeContent(sty, meta.FilePath, meta.Content, 0, width, opts.ExpandedContent)
 		return joinToolParts(header, body)
 	}
 
 	// Fallback to plain text.
-	bodyWidth := cappedWidth
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, bodyWidth, opts.ExpandedContent))
+	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, width, opts.ExpandedContent))
 	return joinToolParts(header, body)
 }

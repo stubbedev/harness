@@ -164,9 +164,6 @@ type baseToolMessageItem struct {
 	result       *message.ToolResult
 	messageID    string
 	status       ToolStatus
-	// we use this so we can efficiently cache
-	// tools that have a capped width (e.x bash.. and others)
-	hasCappedWidth bool
 	// isCompact indicates this tool should render in compact mode.
 	isCompact bool
 	// spinningFunc allows tools to override the default spinning logic.
@@ -200,9 +197,6 @@ func newBaseToolMessageItem(
 	toolRenderer ToolRenderer,
 	canceled bool,
 ) *baseToolMessageItem {
-	// we only do full width for diffs (as far as I know)
-	hasCappedWidth := toolCall.Name != tools.EditToolName
-
 	status := ToolStatusRunning
 	if canceled {
 		status = ToolStatusCanceled
@@ -219,7 +213,6 @@ func newBaseToolMessageItem(
 		toolCall:                 toolCall,
 		result:                   result,
 		status:                   status,
-		hasCappedWidth:           hasCappedWidth,
 		startedAt:                time.Now(),
 	}
 	t.anim = anim.New(anim.Settings{
@@ -250,31 +243,37 @@ func NewToolMessageItem(
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch toolCall.Name {
-	case tools.ShellToolName:
-		item = NewShellToolMessageItem(sty, toolCall, result, canceled, workingDir)
-	case tools.ViewToolName:
-		item = NewViewToolMessageItem(sty, toolCall, result, canceled)
-	case tools.WriteToolName:
-		item = NewWriteToolMessageItem(sty, toolCall, result, canceled)
-	case tools.EditToolName:
-		item = NewEditToolMessageItem(sty, toolCall, result, canceled)
-	case tools.FetchToolName:
-		item = NewFetchToolMessageItem(sty, toolCall, result, canceled)
 	case tools.DiagnosticsToolName, tools.LSPToolName:
 		item = newLSPToolMessageItem(sty, toolCall, result, canceled)
-	case tools.WebSearchToolName:
-		item = NewWebSearchToolMessageItem(sty, toolCall, result, canceled)
-	case tools.QuestionToolName:
-		item = NewQuestionToolMessageItem(sty, toolCall, result, canceled)
 	default:
-		if strings.HasPrefix(toolCall.Name, "mcp_") {
-			item = NewMCPToolMessageItem(sty, toolCall, result, canceled)
-		} else {
-			item = NewGenericToolMessageItem(sty, toolCall, result, canceled)
-		}
+		item = newBaseToolMessageItem(sty, toolCall, result, toolRendererFor(toolCall.Name, workingDir), canceled)
 	}
 	item.SetMessageID(messageID)
 	return item
+}
+
+// toolRendererFor returns the renderer for a tool, by name.
+func toolRendererFor(name, workingDir string) ToolRenderer {
+	switch name {
+	case tools.ShellToolName:
+		return &ShellToolRenderContext{workingDir: workingDir}
+	case tools.ViewToolName:
+		return &ViewToolRenderContext{}
+	case tools.WriteToolName:
+		return &WriteToolRenderContext{}
+	case tools.EditToolName:
+		return &EditToolRenderContext{}
+	case tools.FetchToolName:
+		return &FetchToolRenderContext{}
+	case tools.WebSearchToolName:
+		return &WebSearchToolRenderContext{}
+	case tools.QuestionToolName:
+		return &QuestionToolRenderContext{}
+	}
+	if strings.HasPrefix(name, "mcp_") {
+		return &MCPToolRenderContext{}
+	}
+	return &GenericToolRenderContext{}
 }
 
 // IsSubagentTool reports whether a tool call dispatches a subagent
@@ -349,18 +348,32 @@ func (t *baseToolMessageItem) Advance() bool {
 // top-level body width, the focus bar Render would draw in front of
 // it removed.
 func (t *baseToolMessageItem) RawRender(width int) string {
-	body := ToolBodyWidth(width, 0)
-	if t.hasCappedWidth {
-		body = cappedMessageWidth(width)
-	}
-	return t.BodyRender(body)
+	return t.BodyRender(ToolBodyWidth(width, 0))
 }
 
-// BodyRender renders the call's full view at exactly the given body
-// width, with no left chrome of its own: the bar and any group indent
-// around it belong to the caller, which derives the width from
-// [ToolBodyWidth] for the call's nesting level.
+// toolFullWidth reports whether a call renders at the full body width.
+// Only diffs do; everything else is capped at [maxTextWidth] for
+// readability. The action of an lsp call is only known once its input
+// has streamed in, so this is decided per render.
+func toolFullWidth(tc message.ToolCall) bool {
+	switch tc.Name {
+	case tools.EditToolName:
+		return true
+	case tools.LSPToolName:
+		return lspAction(tc) == "replace_symbol"
+	}
+	return false
+}
+
+// BodyRender renders the call's full view in the given body width, with
+// no left chrome of its own: the bar and any group indent around it
+// belong to the caller, which derives the width from [ToolBodyWidth] for
+// the call's nesting level. This is the one place the readability cap is
+// applied, so renderers treat the width they get as final.
 func (t *baseToolMessageItem) BodyRender(bodyWidth int) string {
+	if !toolFullWidth(t.toolCall) {
+		bodyWidth = min(bodyWidth, maxTextWidth)
+	}
 	content, height, ok := t.getCachedRender(bodyWidth)
 	// if we are spinning or there is no cache rerender
 	if !ok || t.isSpinning() {

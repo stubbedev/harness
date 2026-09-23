@@ -12,36 +12,18 @@ import (
 // Fetch Tool
 // -----------------------------------------------------------------------------
 
-// FetchToolMessageItem is a message item that represents a fetch tool call.
-type FetchToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*FetchToolMessageItem)(nil)
-
-// NewFetchToolMessageItem creates a new [FetchToolMessageItem].
-func NewFetchToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &FetchToolRenderContext{}, canceled)
-}
-
 // FetchToolRenderContext renders fetch tool messages.
 type FetchToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
 
 	var params tools.FetchParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	toolParams := []string{params.URL}
@@ -52,12 +34,12 @@ func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		toolParams = append(toolParams, "timeout", formatTimeout(params.Timeout))
 	}
 
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -67,7 +49,7 @@ func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 
 	// Determine file extension for syntax highlighting based on format.
 	file := getFileExtensionForFormat(params.Format)
-	body := toolOutputCodeContent(sty, file, opts.Result.Content, 0, cappedWidth, opts.ExpandedContent)
+	body := toolOutputCodeContent(sty, file, opts.Result.Content, 0, width, opts.ExpandedContent)
 	return joinToolParts(header, body)
 }
 
@@ -87,45 +69,27 @@ func getFileExtensionForFormat(format string) string {
 // WebSearch Tool
 // -----------------------------------------------------------------------------
 
-// WebSearchToolMessageItem is a message item that represents a web_search tool call.
-type WebSearchToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*WebSearchToolMessageItem)(nil)
-
-// NewWebSearchToolMessageItem creates a new [WebSearchToolMessageItem].
-func NewWebSearchToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &WebSearchToolRenderContext{}, canceled)
-}
-
 // WebSearchToolRenderContext renders web_search tool messages.
 type WebSearchToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
 
 	var params tools.WebSearchParams
 	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, cappedWidth)
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
 	toolParams := []string{params.Query}
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, toolParams...)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -133,6 +97,6 @@ func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, o
 		return header
 	}
 
-	body := toolOutputMarkdownContent(sty, opts.Result.Content, cappedWidth, opts.ExpandedContent)
+	body := toolOutputMarkdownContent(sty, opts.Result.Content, width, opts.ExpandedContent)
 	return joinToolParts(header, body)
 }

@@ -12,7 +12,6 @@ type SymbolsToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *SymbolsToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	cappedWidth := cappedMessageWidth(width)
 	if opts.IsPending() {
 		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
@@ -20,12 +19,12 @@ func (r *SymbolsToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	var params tools.SymbolsParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), cappedWidth, opts, params.FilePath)
+	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, params.FilePath)
 	if opts.Compact {
 		return header
 	}
 
-	if earlyState, ok := toolEarlyStateContent(sty, opts, cappedWidth); ok {
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
 		return joinToolParts(header, earlyState)
 	}
 
@@ -34,6 +33,6 @@ func (r *SymbolsToolRenderContext) RenderTool(sty *styles.Styles, width int, opt
 	}
 
 	// Render as code to preserve tree indentation.
-	body := toolOutputCodeContent(sty, params.FilePath, opts.Result.Content, 0, cappedWidth, opts.ExpandedContent)
+	body := toolOutputCodeContent(sty, params.FilePath, opts.Result.Content, 0, width, opts.ExpandedContent)
 	return joinToolParts(header, body)
 }
