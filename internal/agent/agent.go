@@ -1726,7 +1726,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// about -- but it was recovered from, so there is nothing to
 		// report. The user message goes with it because the requeued turn
 		// writes the prompt again on the far side of the summary; keeping
-		// both would show it twice.
+		// both would show it twice. Whether the turn had started calling
+		// tools decides the requeued prompt's framing, so read it before
+		// the assistant goes.
+		hadToolCalls := currentAssistant != nil && len(currentAssistant.ToolCalls()) > 0
 		if currentAssistant != nil {
 			if delErr := a.messages.Delete(ctx, currentAssistant.ID); delErr != nil {
 				slog.Warn("Failed to remove the overflowed assistant message", "error", delErr)
@@ -1741,7 +1744,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		requeued := call
 		requeued.OverflowRecovered = true
-		if currentAssistant != nil && len(currentAssistant.ToolCalls()) > 0 {
+		if hadToolCalls {
 			requeued.Prompt = fmt.Sprintf("The previous session was interrupted because it exceeded the context window and the history was summarized. The initial user request was: `%s`", requeued.Prompt)
 		}
 		existing, ok := a.messageQueue.Get(call.SessionID)
