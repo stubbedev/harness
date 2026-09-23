@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"testing"
 
@@ -43,15 +44,26 @@ func init() {
 }
 
 // connEntry holds a shared database connection, its reference count,
-// and the data-directory lock that gates access to this entry. The
-// lock is acquired exactly once when the entry is created and released
-// when the last reference is dropped, which lets the same process open
-// the same data directory concurrently while still blocking a second
-// harness process from racing the storage.
+// and the release for the data-directory lock that gates access to
+// this entry. The lock is acquired at most once per entry (when the
+// first Connect that asks for it arrives) and released when the last
+// reference is dropped, which lets the same process open the same data
+// directory concurrently while still blocking a second harness process
+// from racing the storage.
 type connEntry struct {
 	db       *sql.DB
 	refCount int
-	lock     *dataDirLock
+	// unlock releases the data-dir lock, or is nil when none is held.
+	unlock func()
+}
+
+// close closes the connection and drops the data-dir lock, if held.
+func (e *connEntry) close() error {
+	err := e.db.Close()
+	if e.unlock != nil {
+		e.unlock()
+	}
+	return err
 }
 
 var (
@@ -82,6 +94,9 @@ func WithDataDirLock(enable bool) ConnectOption {
 // file already exists, the existing connection is returned with its
 // reference count incremented. Callers must pair each Connect with a
 // [Release] when they no longer need the connection.
+//
+// A Connect that asks for the data-dir lock always ends up holding it,
+// even when an earlier unlocked Connect already opened the entry.
 func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.DB, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("data.dir is not set")
@@ -91,50 +106,53 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	wantLock := cfg.lockDataDir && !skipDataDirLock()
 
 	dbPath := filepath.Join(dataDir, "harness.db")
-
-	// Resolve to an absolute path so that different relative paths to
-	// the same file share a single connection.
-	absPath, err := filepath.Abs(dbPath)
-	if err != nil {
-		absPath = dbPath
-	}
+	absPath := poolKey(dbPath)
 
 	poolMu.Lock()
 	defer poolMu.Unlock()
 
 	if entry, ok := pool[absPath]; ok {
+		if wantLock && entry.unlock == nil {
+			unlock, err := acquireDataDirLock(dataDir)
+			if err != nil {
+				return nil, err
+			}
+			entry.unlock = unlock
+		}
 		entry.refCount++
 		return entry.db, nil
 	}
 
 	// Take the per-data-directory lock before opening the database so
 	// we fail fast and with a clear error rather than racing another
-	// harness process on the same SQLite file. The lock is released when
-	// the matching Release call drops the refcount to zero. Ensuring
-	// the data directory exists is required because the lock file
-	// lives inside it. Locking is opt-in via WithDataDirLock so that
-	// local-mode invocations do not refuse a second harness against the
-	// same data dir until client/server becomes the default.
+	// harness process on the same SQLite file. Ensuring the data
+	// directory exists is required because the lock file lives inside
+	// it. Locking is opt-in via WithDataDirLock so that local-mode
+	// invocations do not refuse a second harness against the same data
+	// dir until client/server becomes the default.
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create data directory %q: %w", dataDir, err)
 	}
-	var lock *dataDirLock
-	if cfg.lockDataDir && !skipDataDirLock() {
-		lock, err = acquireDataDirLock(dataDir)
+	entry := &connEntry{refCount: 1}
+	if wantLock {
+		unlock, err := acquireDataDirLock(dataDir)
 		if err != nil {
 			return nil, err
 		}
+		entry.unlock = unlock
 	}
 
 	conn, err := openDB(dbPath)
 	if err != nil {
-		if lock != nil {
-			lock.release()
+		if entry.unlock != nil {
+			entry.unlock()
 		}
 		return nil, err
 	}
+	entry.db = conn
 
 	// Serialize all access through a single connection. SQLite
 	// serializes writes at the file level anyway, and allowing multiple
@@ -143,28 +161,19 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 	// resulting in SQLITE_NOTADB (26) on the next open.
 	conn.SetMaxOpenConns(1)
 
-	releaseLock := func() {
-		if lock != nil {
-			lock.release()
-		}
-	}
-
 	if err = conn.PingContext(ctx); err != nil {
-		conn.Close()
-		releaseLock()
+		entry.close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	if err := initGoose(); err != nil {
-		conn.Close()
-		releaseLock()
+		entry.close()
 		slog.Error("Failed to initialize goose", "error", err)
 		return nil, fmt.Errorf("failed to initialize goose: %w", err)
 	}
 
 	if err := goose.Up(conn, "migrations"); err != nil {
-		conn.Close()
-		releaseLock()
+		entry.close()
 		slog.Error("Failed to apply migrations", "error", err)
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
@@ -172,19 +181,31 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 	runtime.GC()
 	debug.FreeOSMemory()
 
-	pool[absPath] = &connEntry{db: conn, refCount: 1, lock: lock}
+	pool[absPath] = entry
 	return conn, nil
+}
+
+// poolKey resolves dbPath to an absolute path so that different
+// relative paths to the same file share a single connection.
+func poolKey(dbPath string) string {
+	if abs, err := filepath.Abs(dbPath); err == nil {
+		return abs
+	}
+	return dbPath
+}
+
+// uriPath escapes the characters that would end or corrupt the path
+// part of a SQLite "file:" URI, so a data directory containing '?',
+// '#' or '%' opens the file it names.
+func uriPath(path string) string {
+	return strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(path)
 }
 
 // Release decrements the reference count for the database at the given
 // data directory. When the count reaches zero the underlying connection
 // is closed and removed from the pool.
 func Release(dataDir string) error {
-	dbPath := filepath.Join(dataDir, "harness.db")
-	absPath, err := filepath.Abs(dbPath)
-	if err != nil {
-		absPath = dbPath
-	}
+	absPath := poolKey(filepath.Join(dataDir, "harness.db"))
 
 	poolMu.Lock()
 	defer poolMu.Unlock()
@@ -200,11 +221,7 @@ func Release(dataDir string) error {
 	}
 
 	delete(pool, absPath)
-	closeErr := entry.db.Close()
-	if entry.lock != nil {
-		entry.lock.release()
-	}
-	return closeErr
+	return entry.close()
 }
 
 // ResetPool closes all pooled connections and clears the pool. This is
@@ -213,10 +230,7 @@ func ResetPool() {
 	poolMu.Lock()
 	defer poolMu.Unlock()
 	for path, entry := range pool {
-		entry.db.Close()
-		if entry.lock != nil {
-			entry.lock.release()
-		}
+		entry.close()
 		delete(pool, path)
 	}
 }

@@ -208,3 +208,41 @@ func TestConnect_ServerPathFailsWhenDataDirLocked(t *testing.T) {
 	require.Error(t, err, "server-path Connect must refuse to open a locked data dir")
 	require.ErrorIs(t, err, ErrDataDirLocked)
 }
+
+// TestConnect_LockedConnectAfterUnlockedTakesLock: an unlocked Connect
+// that opened the entry first must not let a later locked Connect skip
+// the data-dir lock.
+func TestConnect_LockedConnectAfterUnlockedTakesLock(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	dataDir := t.TempDir()
+	lockPath := filepath.Join(dataDir, dataDirLockFile)
+
+	_, err := Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	_, err = Connect(context.Background(), dataDir, WithDataDirLock(true))
+	require.NoError(t, err)
+
+	_, lockErr := lock.TryFile(lockPath)
+	require.ErrorIs(t, lockErr, lock.ErrContended, "the locked Connect must hold the lock")
+
+	require.NoError(t, Release(dataDir))
+	require.NoError(t, Release(dataDir))
+	release, err := lock.TryFile(lockPath)
+	require.NoError(t, err, "the final Release must drop the lock")
+	release()
+}
+
+// TestConnect_DataDirWithURIMetacharacters: a data directory whose name
+// holds characters that delimit a file: URI still opens the file it
+// names rather than a truncated path.
+func TestConnect_DataDirWithURIMetacharacters(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	dataDir := filepath.Join(t.TempDir(), "odd?name#with%25")
+	conn, err := Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	require.NoError(t, conn.PingContext(context.Background()))
+	require.FileExists(t, filepath.Join(dataDir, "harness.db"))
+	require.NoError(t, Release(dataDir))
+}

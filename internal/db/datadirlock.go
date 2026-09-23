@@ -32,27 +32,18 @@ type dataDirOwnerInfo struct {
 	StartedAt string `json:"started_at,omitempty"`
 }
 
-// dataDirLock represents an acquired exclusive lock on a data
-// directory. release closes the underlying file descriptor which the
-// kernel uses to drop the OS-level lock.
-type dataDirLock struct {
-	release func()
-}
-
 // acquireDataDirLock takes an exclusive non-blocking lock on
-// {dataDir}/harness.lock. If the lock is already held by another
-// process, it returns ErrDataDirLocked wrapped with a diagnostic that
-// includes whatever owner info that process wrote.
+// {dataDir}/harness.lock and returns its release, which closes the
+// underlying file descriptor the kernel uses to hold the OS-level lock.
+// If the lock is already held by another process, it returns
+// ErrDataDirLocked wrapped with a diagnostic that includes whatever
+// owner info that process wrote.
 //
-// Acquisition is skipped (returning a no-op lock) when
-// HARNESS_SKIP_DATADIR_LOCK is set to a truthy value. This is intended
-// as an escape hatch for hostile filesystems that do not implement
-// advisory locking; it should not be used in normal operation.
-func acquireDataDirLock(dataDir string) (*dataDirLock, error) {
-	if skipDataDirLock() {
-		return &dataDirLock{release: func() {}}, nil
-	}
-
+// Callers skip acquisition when HARNESS_SKIP_DATADIR_LOCK is set to a
+// truthy value (see [skipDataDirLock]). That is an escape hatch for
+// hostile filesystems that do not implement advisory locking; it should
+// not be used in normal operation.
+func acquireDataDirLock(dataDir string) (func(), error) {
 	path := filepath.Join(dataDir, dataDirLockFile)
 	release, err := lock.TryFile(path)
 	if err != nil {
@@ -76,7 +67,7 @@ func acquireDataDirLock(dataDir string) (*dataDirLock, error) {
 	// can each hold a flock on a different inode that lives at the
 	// same path. Leaving the file in place lets every acquirer see
 	// the same inode and lets the kernel arbitrate correctly.
-	return &dataDirLock{release: release}, nil
+	return release, nil
 }
 
 // skipDataDirLock reports whether the data-dir lock should be bypassed.
