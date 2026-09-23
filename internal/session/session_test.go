@@ -131,3 +131,34 @@ func TestListChildSessions_NoChildren(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, children, 0)
 }
+
+func TestDelete_RemovesDescendantsAndGetLastSkipsChildren(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn)
+
+	parent, err := sessions.Create(t.Context(), "parent title")
+	require.NoError(t, err)
+	child, err := sessions.CreateTaskSession(t.Context(), "tool-call-1", parent.ID, "child")
+	require.NoError(t, err)
+	grandchild, err := sessions.CreateTaskSession(t.Context(), "tool-call-2", child.ID, "grandchild")
+	require.NoError(t, err)
+
+	// The newest session is a child; "continue last" must not resume it.
+	last, err := sessions.GetLast(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, parent.ID, last.ID)
+
+	require.NoError(t, sessions.Delete(t.Context(), parent.ID))
+	for _, id := range []string{parent.ID, child.ID, grandchild.ID} {
+		_, err := sessions.Get(t.Context(), id)
+		require.Error(t, err, id)
+	}
+}

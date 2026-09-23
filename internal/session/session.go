@@ -88,7 +88,6 @@ type Session struct {
 type Service interface {
 	pubsub.Subscriber[Session]
 	Create(ctx context.Context, title string) (Session, error)
-	CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error)
 	CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error)
 	Get(ctx context.Context, id string) (Session, error)
 	GetLast(ctx context.Context) (Session, error)
@@ -140,17 +139,9 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 	}, false)
 }
 
-func (s *service) CreateTitleSession(ctx context.Context, parentSessionID string) (Session, error) {
-	return s.createSession(ctx, db.CreateSessionParams{
-		ID:              "title-" + parentSessionID,
-		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
-		Title:           "Generate a title",
-	}, false)
-}
-
 // createSession inserts a session row, converts it, and publishes the
 // created event. Only user-created sessions count in telemetry: task
-// and title sessions are internal children.
+// sessions are internal children.
 func (s *service) createSession(ctx context.Context, params db.CreateSessionParams, countTelemetry bool) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, params)
 	if err != nil {
@@ -177,14 +168,12 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if err = qtx.DeleteSessionMessages(ctx, dbSession.ID); err != nil {
-		return fmt.Errorf("deleting session messages: %w", err)
-	}
-	if err = qtx.DeleteSessionFiles(ctx, dbSession.ID); err != nil {
-		return fmt.Errorf("deleting session files: %w", err)
-	}
-	if err = qtx.DeleteSession(ctx, dbSession.ID); err != nil {
-		return fmt.Errorf("deleting session: %w", err)
+	// Child (task) sessions have no foreign key to their parent, so they
+	// go explicitly or they are orphaned: hidden from every listing, yet
+	// holding their messages forever. Messages, files and checkpoints
+	// cascade from each session row.
+	if err = deleteSessionTree(ctx, qtx, dbSession.ID); err != nil {
+		return err
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
@@ -194,6 +183,23 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	s.clearEstimatedUsageState(dbSession.ID)
 	s.Publish(pubsub.DeletedEvent, session)
 	event.SessionDeleted()
+	return nil
+}
+
+// deleteSessionTree deletes id and, depth first, every session below it.
+func deleteSessionTree(ctx context.Context, q *db.Queries, id string) error {
+	children, err := q.ListChildSessions(ctx, sql.NullString{String: id, Valid: true})
+	if err != nil {
+		return fmt.Errorf("listing child sessions: %w", err)
+	}
+	for _, child := range children {
+		if err := deleteSessionTree(ctx, q, child.ID); err != nil {
+			return err
+		}
+	}
+	if err := q.DeleteSession(ctx, id); err != nil {
+		return fmt.Errorf("deleting session: %w", err)
+	}
 	return nil
 }
 

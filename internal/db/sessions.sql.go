@@ -110,6 +110,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 const getLastSession = `-- name: GetLastSession :one
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, compaction_summary, compaction_boundary_id, compaction_aged_id
 FROM sessions
+WHERE parent_session_id IS NULL
 ORDER BY updated_at DESC
 LIMIT 1
 `
