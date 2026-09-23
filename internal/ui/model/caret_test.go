@@ -143,6 +143,18 @@ func TestCaretAlwaysRendersWhileEditorFocused(t *testing.T) {
 		require.NotNil(t, drawCursor(t, ui))
 	})
 
+	t.Run("subagent toolbox key leaves the toolbox", func(t *testing.T) {
+		ui := newUI(t)
+		_ = ui.upsertAgentTask(&message.Message{ID: "m1", Role: message.Assistant}, agentToolCall("a1"))
+		require.NotEmpty(t, ui.agentTasks)
+
+		ui.focusTasks()
+		ui.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+		require.Equal(t, uiFocusEditor, ui.focus)
+		require.True(t, ui.textarea.Focused(), "leaving a non-empty strip through esc must refocus the textarea")
+		require.NotNil(t, drawCursor(t, ui))
+	})
+
 	t.Run("question form opens and dismisses", func(t *testing.T) {
 		ui := newUI(t)
 		ui.Update(pubsub.Event[question.Request]{Payload: question.Request{

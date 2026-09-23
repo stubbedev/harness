@@ -679,10 +679,9 @@ func (m *UI) enterTaskAtCursor() {
 // selection already collapsed (or on the task row), the task itself
 // collapses. With nothing left to leave, the strip hands focus back to
 // the editor.
-func (m *UI) ascendTaskAtCursor() {
+func (m *UI) ascendTaskAtCursor() tea.Cmd {
 	if len(m.agentTasks) == 0 {
-		m.focusEditorFromTasks()
-		return
+		return m.focusEditorFromTasks()
 	}
 	m.clampTaskCursor()
 	task := m.agentTasks[m.taskCursor]
@@ -691,16 +690,16 @@ func (m *UI) ascendTaskAtCursor() {
 		if chat.ShowsFullView(nested) {
 			chat.ToggleFullView(nested)
 			m.updateLayoutAndSize()
-			return
+			return nil
 		}
 	}
 	if m.expandedTaskID == task.toolCallID {
 		m.expandedTaskID = ""
 		m.taskSubCursor = -1
 		m.updateLayoutAndSize()
-		return
+		return nil
 	}
-	m.focusEditorFromTasks()
+	return m.focusEditorFromTasks()
 }
 
 // handleTaskKey processes a keypress while the strip is focused. Arrows
@@ -735,8 +734,7 @@ func (m *UI) handleTaskKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		m.toggleTaskAtCursor()
 		return true, nil
 	case key.Matches(msg, m.keyMap.Chat.ClearHighlight):
-		m.ascendTaskAtCursor()
-		return true, nil
+		return true, m.ascendTaskAtCursor()
 	case key.Matches(msg, m.keyMap.Tab):
 		return true, m.focusEditorFromTasks()
 	case key.Matches(msg, m.keyMap.ShiftTab):
