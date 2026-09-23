@@ -78,22 +78,10 @@ func (r *Reasoning) HandleMsg(msg tea.Msg) Action {
 			return ActionClose{}
 		case key.Matches(msg, r.keyMap.Previous):
 			r.list.Focus()
-			if r.list.IsSelectedFirst() {
-				r.list.SelectLast()
-				r.list.ScrollToBottom()
-				break
-			}
-			r.list.SelectPrev()
-			r.list.ScrollToSelected()
+			selectPrevWrap(r.list)
 		case key.Matches(msg, r.keyMap.Next):
 			r.list.Focus()
-			if r.list.IsSelectedLast() {
-				r.list.SelectFirst()
-				r.list.ScrollToTop()
-				break
-			}
-			r.list.SelectNext()
-			r.list.ScrollToSelected()
+			selectNextWrap(r.list)
 		case key.Matches(msg, r.keyMap.Select):
 			if item, ok := r.list.SelectedItem().(PickerItem); ok && item != nil {
 				if effort, ok := item.Value().(string); ok {

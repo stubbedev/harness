@@ -179,19 +179,9 @@ func (r *Rewind) HandleMsg(msg tea.Msg) Action {
 			r.enterTurnsPhase()
 			return nil
 		case key.Matches(msg, r.keyMap.Previous):
-			if r.list.IsSelectedFirst() {
-				r.list.SelectLast()
-			} else {
-				r.list.SelectPrev()
-			}
-			r.list.ScrollToSelected()
+			selectPrevWrap(r.list)
 		case key.Matches(msg, r.keyMap.Next):
-			if r.list.IsSelectedLast() {
-				r.list.SelectFirst()
-			} else {
-				r.list.SelectNext()
-			}
-			r.list.ScrollToSelected()
+			selectNextWrap(r.list)
 		case key.Matches(msg, r.keyMap.Select):
 			return r.confirmSelection()
 		default:

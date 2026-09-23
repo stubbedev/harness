@@ -163,20 +163,10 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)
 			case key.Matches(msg, s.keyMap.Previous):
 				s.list.Focus()
-				if s.list.IsSelectedFirst() {
-					s.list.SelectLast()
-				} else {
-					s.list.SelectPrev()
-				}
-				s.list.ScrollToSelected()
+				selectPrevWrap(s.list)
 			case key.Matches(msg, s.keyMap.Next):
 				s.list.Focus()
-				if s.list.IsSelectedLast() {
-					s.list.SelectFirst()
-				} else {
-					s.list.SelectNext()
-				}
-				s.list.ScrollToSelected()
+				selectNextWrap(s.list)
 			case key.Matches(msg, s.keyMap.Select):
 				// The selection resolves through the selected item's value,
 				// not its position: filtering reorders the list under the

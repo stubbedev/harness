@@ -94,22 +94,10 @@ func (c *Connect) HandleMsg(msg tea.Msg) Action {
 			return ActionClose{}
 		case key.Matches(msg, c.keyMap.Previous):
 			c.list.Focus()
-			if c.list.IsSelectedFirst() {
-				c.list.SelectLast()
-				c.list.ScrollToBottom()
-			} else {
-				c.list.SelectPrev()
-				c.list.ScrollToSelected()
-			}
+			selectPrevWrap(c.list)
 		case key.Matches(msg, c.keyMap.Next):
 			c.list.Focus()
-			if c.list.IsSelectedLast() {
-				c.list.SelectFirst()
-				c.list.ScrollToTop()
-			} else {
-				c.list.SelectNext()
-				c.list.ScrollToSelected()
-			}
+			selectNextWrap(c.list)
 		case key.Matches(msg, c.keyMap.Select):
 			provider, ok := c.selectedItem()
 			if !ok {

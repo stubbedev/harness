@@ -153,20 +153,10 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			return ActionClose{}
 		case key.Matches(msg, c.keyMap.Previous):
 			c.list.Focus()
-			if c.list.IsSelectedFirst() {
-				c.list.SelectLast()
-			} else {
-				c.list.SelectPrev()
-			}
-			c.list.ScrollToSelected()
+			selectPrevWrap(c.list)
 		case key.Matches(msg, c.keyMap.Next):
 			c.list.Focus()
-			if c.list.IsSelectedLast() {
-				c.list.SelectFirst()
-			} else {
-				c.list.SelectNext()
-			}
-			c.list.ScrollToSelected()
+			selectNextWrap(c.list)
 		case key.Matches(msg, c.keyMap.Select):
 			if selectedItem := c.list.SelectedItem(); selectedItem != nil {
 				if item, ok := selectedItem.(*CommandItem); ok && item != nil {

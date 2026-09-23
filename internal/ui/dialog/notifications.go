@@ -88,22 +88,10 @@ func (n *Notifications) HandleMsg(msg tea.Msg) Action {
 			return ActionClose{}
 		case key.Matches(msg, n.keyMap.Previous):
 			n.list.Focus()
-			if n.list.IsSelectedFirst() {
-				n.list.SelectLast()
-				n.list.ScrollToBottom()
-				break
-			}
-			n.list.SelectPrev()
-			n.list.ScrollToSelected()
+			selectPrevWrap(n.list)
 		case key.Matches(msg, n.keyMap.Next):
 			n.list.Focus()
-			if n.list.IsSelectedLast() {
-				n.list.SelectFirst()
-				n.list.ScrollToTop()
-				break
-			}
-			n.list.SelectNext()
-			n.list.ScrollToSelected()
+			selectNextWrap(n.list)
 		case key.Matches(msg, n.keyMap.Select):
 			if item, ok := n.list.SelectedItem().(PickerItem); ok && item != nil {
 				if style, ok := item.Value().(string); ok {

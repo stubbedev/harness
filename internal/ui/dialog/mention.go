@@ -100,19 +100,9 @@ func (p *MentionPicker) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, p.keyMap.Close):
 			return ActionMentionCancelled{}
 		case key.Matches(msg, p.keyMap.Previous):
-			if p.list.IsSelectedFirst() {
-				p.list.SelectLast()
-			} else {
-				p.list.SelectPrev()
-			}
-			p.list.ScrollToSelected()
+			selectPrevWrap(p.list)
 		case key.Matches(msg, p.keyMap.Next):
-			if p.list.IsSelectedLast() {
-				p.list.SelectFirst()
-			} else {
-				p.list.SelectNext()
-			}
-			p.list.ScrollToSelected()
+			selectNextWrap(p.list)
 		case key.Matches(msg, p.keyMap.Select):
 			if item, ok := p.list.SelectedItem().(PickerItem); ok && item != nil {
 				return ActionMentionSelected{Value: item.Value()}

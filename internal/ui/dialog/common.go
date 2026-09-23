@@ -500,3 +500,40 @@ func topBorderRow(t *styles.Styles, width int) string {
 	line, _, _ := strings.Cut(t.Dialog.ViewBottom.Width(width).Render(" "), "\n")
 	return line
 }
+
+// wrapNavigable is a dialog list that circular selection can walk.
+type wrapNavigable interface {
+	IsSelectedFirst() bool
+	IsSelectedLast() bool
+	SelectFirst() bool
+	SelectLast() bool
+	SelectPrev() bool
+	SelectNext() bool
+	ScrollToTop()
+	ScrollToBottom()
+	ScrollToSelected()
+}
+
+// selectPrevWrap moves the selection up one item, wrapping from the first
+// item to the last.
+func selectPrevWrap(l wrapNavigable) {
+	if l.IsSelectedFirst() {
+		l.SelectLast()
+		l.ScrollToBottom()
+		return
+	}
+	l.SelectPrev()
+	l.ScrollToSelected()
+}
+
+// selectNextWrap moves the selection down one item, wrapping from the last
+// item to the first.
+func selectNextWrap(l wrapNavigable) {
+	if l.IsSelectedLast() {
+		l.SelectFirst()
+		l.ScrollToTop()
+		return
+	}
+	l.SelectNext()
+	l.ScrollToSelected()
+}

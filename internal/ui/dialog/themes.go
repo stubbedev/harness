@@ -81,23 +81,11 @@ func (t *Themes) HandleMsg(msg tea.Msg) Action {
 			return ActionClose{}
 		case key.Matches(msg, t.keyMap.Previous):
 			t.list.Focus()
-			if t.list.IsSelectedFirst() {
-				t.list.SelectLast()
-				t.list.ScrollToBottom()
-			} else {
-				t.list.SelectPrev()
-				t.list.ScrollToSelected()
-			}
+			selectPrevWrap(t.list)
 			return t.previewAction(nil)
 		case key.Matches(msg, t.keyMap.Next):
 			t.list.Focus()
-			if t.list.IsSelectedLast() {
-				t.list.SelectFirst()
-				t.list.ScrollToTop()
-			} else {
-				t.list.SelectNext()
-				t.list.ScrollToSelected()
-			}
+			selectNextWrap(t.list)
 			return t.previewAction(nil)
 		case key.Matches(msg, t.keyMap.Select):
 			name, ok := t.selectedTheme()

@@ -125,19 +125,9 @@ func (d *serversDialog) HandleMsg(msg tea.Msg) Action {
 			d.enterListPhase()
 			return nil
 		case key.Matches(msg, d.keyMap.Previous):
-			if d.list.IsSelectedFirst() {
-				d.list.SelectLast()
-			} else {
-				d.list.SelectPrev()
-			}
-			d.list.ScrollToSelected()
+			selectPrevWrap(d.list)
 		case key.Matches(msg, d.keyMap.Next):
-			if d.list.IsSelectedLast() {
-				d.list.SelectFirst()
-			} else {
-				d.list.SelectNext()
-			}
-			d.list.ScrollToSelected()
+			selectNextWrap(d.list)
 		case key.Matches(msg, d.keyMap.Select):
 			return d.confirmSelection()
 		default:
