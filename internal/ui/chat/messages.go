@@ -21,6 +21,25 @@ import (
 // padding. We also cap the width so text is readable to the maxTextWidth(120).
 const MessageLeftPaddingTotal = 2
 
+// toolNestIndent is the extra left column a tool call gains per level
+// of nesting inside an expanded tool group, under the group's bar.
+const toolNestIndent = 1
+
+// toolNestIndentString is the per-level indent rendered in front of a
+// nested tool call's lines.
+var toolNestIndentString = strings.Repeat(" ", toolNestIndent)
+
+// ToolBodyWidth returns the width a tool call's body renders at when
+// its row is given width at the given nesting level. Level 0 is a
+// top-level call, whose bar the call itself (or its singleton group)
+// draws; each level below is a call nested inside an expanded group,
+// which gains one indent column per level on top of the bar. Every
+// tool body width - a call's own render and every group child's -
+// derives here, so the chrome math cannot drift between call sites.
+func ToolBodyWidth(width, level int) int {
+	return max(width-MessageLeftPaddingTotal-level*toolNestIndent, 1)
+}
+
 // ViewportCol converts an item-content column into a viewport column.
 // Mouse coordinates and the selection state built from them live in
 // viewport space, where each rendered message string starts at column

@@ -175,6 +175,39 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		assert.Equal(t, 1, strings.Count(out, "\n")+1)
 	})
 
+	t.Run("expanded singleton renders as the bare call", func(t *testing.T) {
+		t.Parallel()
+		child := done("t1")
+		g := NewToolGroupMessageItem(sty, child)
+		require.True(t, g.ToggleExpanded())
+
+		// The singleton's full view is the call itself: the group bar is
+		// the call's own bar, so the render equals the top-level call's
+		// render, with no group indent column on top.
+		assert.Equal(t, ansi.Strip(child.Render(80)), ansi.Strip(g.Render(80)))
+	})
+
+	t.Run("group children sit one indent column inside the bar", func(t *testing.T) {
+		t.Parallel()
+		child := done("t1")
+		g := NewToolGroupMessageItem(sty, child)
+		g.AddTool(done("t2"))
+		g.ExpandAndDescend()
+		g.ToggleSelectedChild()
+
+		// Each nesting level is one indent column narrower than the top
+		// level, and each expanded child line is its full body under the
+		// group bar plus that one indent column.
+		require.Equal(t, 78, ToolBodyWidth(80, 0))
+		require.Equal(t, 77, ToolBodyWidth(80, 1))
+		bodyLines := strings.Split(ansi.Strip(child.BodyRender(ToolBodyWidth(80, 1))), "\n")
+		out := strings.Split(ansi.Strip(g.Render(80)), "\n")
+		require.Greater(t, len(out), len(bodyLines)+1)
+		for i, ln := range bodyLines {
+			assert.Equal(t, "   "+ln, out[i+1], "child line %d", i)
+		}
+	})
+
 	t.Run("collapsed pair shows one ran row", func(t *testing.T) {
 		t.Parallel()
 		g := NewToolGroupMessageItem(sty, done("t1"))

@@ -40,6 +40,11 @@ const (
 type ToolMessageItem interface {
 	MessageItem
 
+	// BodyRender renders the call's full view at exactly the given
+	// body width, with no left chrome of its own; callers derive the
+	// width from ToolBodyWidth for the call's nesting level.
+	BodyRender(bodyWidth int) string
+
 	ToolCall() message.ToolCall
 	SetToolCall(tc message.ToolCall)
 	SetResult(res *message.ToolResult)
@@ -330,17 +335,26 @@ func (t *baseToolMessageItem) Advance() bool {
 	return true
 }
 
-// RawRender implements [MessageItem].
+// RawRender implements [MessageItem]: the call's full view at the
+// top-level body width, the focus bar Render would draw in front of
+// it removed.
 func (t *baseToolMessageItem) RawRender(width int) string {
-	toolItemWidth := width - MessageLeftPaddingTotal
+	body := ToolBodyWidth(width, 0)
 	if t.hasCappedWidth {
-		toolItemWidth = cappedMessageWidth(width)
+		body = cappedMessageWidth(width)
 	}
+	return t.BodyRender(body)
+}
 
-	content, height, ok := t.getCachedRender(toolItemWidth)
+// BodyRender renders the call's full view at exactly the given body
+// width, with no left chrome of its own: the bar and any group indent
+// around it belong to the caller, which derives the width from
+// [ToolBodyWidth] for the call's nesting level.
+func (t *baseToolMessageItem) BodyRender(bodyWidth int) string {
+	content, height, ok := t.getCachedRender(bodyWidth)
 	// if we are spinning or there is no cache rerender
 	if !ok || t.isSpinning() {
-		content = t.toolRenderer.RenderTool(t.sty, toolItemWidth, &ToolRenderOpts{
+		content = t.toolRenderer.RenderTool(t.sty, bodyWidth, &ToolRenderOpts{
 			ToolCall:        t.toolCall,
 			Result:          t.result,
 			ExpandedContent: t.expandedContent,
@@ -352,17 +366,17 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 
 		// Prepend hook indicator if hooks ran for this tool call.
 		if t.result != nil {
-			if hookLine := toolOutputHookIndicator(t.sty, t.result.Metadata, toolItemWidth); hookLine != "" {
+			if hookLine := toolOutputHookIndicator(t.sty, t.result.Metadata, bodyWidth); hookLine != "" {
 				content = hookLine + "\n\n" + content
 			}
 		}
 
 		height = lipgloss.Height(content)
 		// cache the rendered content
-		t.setCachedRender(content, toolItemWidth, height)
+		t.setCachedRender(content, bodyWidth, height)
 	}
 
-	return t.renderHighlighted(content, toolItemWidth, height)
+	return t.renderHighlighted(content, bodyWidth, height)
 }
 
 // Render renders the tool message item at the given width.

@@ -347,22 +347,22 @@ func (g *ToolGroupMessageItem) RawRender(width int) string {
 // renderLines builds the group's output lines and reports the inclusive
 // line range occupied by the sub-cursor's child (-1s when the cursor
 // sits on the group row or the group is unfocused), so Render can
-// recolor that child's focus bar. Children render at the one-liner
-// indentation whether collapsed or expanded: the expanded view uses
-// RawRender, which omits the per-item left prefix Render would add.
+// recolor that child's focus bar. Children live at the nesting level
+// ToolBodyWidth defines: one indent column inside the group's bar,
+// whether their one-liner or their full view.
 func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart, selEnd int) {
-	contentWidth := max(width-MessageLeftPaddingTotal, 1)
 	selStart, selEnd = -1, -1
 
-	// A singleton renders as the call's own one-liner (or full render
-	// once expanded) - a "Ran (1 tool calls)" header says nothing the
-	// one-liner does not. The row is the whole group, so focus on the
-	// group is selection of the call.
+	// A singleton renders as the call itself: the one-liner collapsed,
+	// the full view at the chrome of a top-level call expanded - the
+	// group's bar is that call's bar. A "Ran (1 tool calls)" header
+	// says nothing the one-liner does not, and focus on the group is
+	// selection of the call.
 	if len(g.tools) == 1 {
 		if g.expanded {
-			return strings.Split(g.tools[0].Render(contentWidth), "\n"), -1, -1
+			return strings.Split(g.tools[0].RawRender(width), "\n"), -1, -1
 		}
-		return []string{g.oneLiner(g.tools[0], contentWidth, g.focused)}, -1, -1
+		return []string{g.oneLiner(g.tools[0], ToolBodyWidth(width, 0), g.focused)}, -1, -1
 	}
 
 	running := false
@@ -402,14 +402,16 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 	lines = append(lines, header)
 
 	if g.expanded {
+		// Children live one indent column inside the group's bar.
+		bodyWidth := ToolBodyWidth(width, 1)
 		for i, t := range g.tools {
 			start := len(lines)
 			if isToolExpanded(t) {
-				for ln := range strings.SplitSeq(t.RawRender(contentWidth), "\n") {
-					lines = append(lines, subItemIndentString+ln)
+				for ln := range strings.SplitSeq(t.BodyRender(bodyWidth), "\n") {
+					lines = append(lines, toolNestIndentString+ln)
 				}
 			} else {
-				lines = append(lines, subItemIndentString+g.oneLiner(t, contentWidth-subItemIndent, g.focused && i == g.selectedChild))
+				lines = append(lines, toolNestIndentString+g.oneLiner(t, bodyWidth, g.focused && i == g.selectedChild))
 			}
 			if g.focused && i == g.selectedChild {
 				selStart, selEnd = start, len(lines)-1
@@ -532,11 +534,6 @@ func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int, selected boo
 func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int, selected bool) string {
 	return ToolOneLiner(g.sty, t, width, selected)
 }
-
-const (
-	subItemIndent       = 1
-	subItemIndentString = " "
-)
 
 // ToolCallSummary extracts a one-line argument summary from a tool call
 // for display inside a collapsed group.
