@@ -1,9 +1,52 @@
 package agent
 
-import (
-	"sync"
-	"sync/atomic"
-)
+import "sync"
+
+// signalMap is a per-key close-and-replace wakeup channel. A waiter
+// fetches the key's channel before reading the state it waits on and
+// selects on it after; broadcast closes and replaces the channel under
+// the same lock, so a change landing between the read and the select
+// still wakes the waiter.
+type signalMap struct {
+	mu    sync.Mutex
+	chans map[string]chan struct{}
+}
+
+// Chan returns the key's current wakeup channel.
+func (s *signalMap) Chan(key string) chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.chanLocked(key)
+}
+
+// Broadcast wakes everyone waiting on the key.
+func (s *signalMap) Broadcast(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.broadcastLocked(key)
+}
+
+func (s *signalMap) chanLocked(key string) chan struct{} {
+	if s.chans == nil {
+		s.chans = map[string]chan struct{}{}
+	}
+	ch := s.chans[key]
+	if ch == nil {
+		ch = make(chan struct{})
+		s.chans[key] = ch
+	}
+	return ch
+}
+
+func (s *signalMap) broadcastLocked(key string) {
+	if ch := s.chans[key]; ch != nil {
+		close(ch)
+	}
+	if s.chans == nil {
+		s.chans = map[string]chan struct{}{}
+	}
+	s.chans[key] = make(chan struct{})
+}
 
 // queueArrivalSignals carries two facts about prompts queued for a busy
 // session, both keyed by session:
@@ -11,20 +54,18 @@ import (
 //   - a monotonic epoch, bumped once per queued prompt, so a tool call
 //     can tell "a prompt arrived while I ran" from a stable queue by
 //     comparing snapshots taken around its execution;
-//   - a close-and-replace wakeup channel (the pattern liveInbox uses),
-//     so a wait blocked on the session returns the moment a prompt
-//     lands instead of sleeping to its timeout.
+//   - a wakeup channel, so a wait blocked on the session returns the
+//     moment a prompt lands instead of sleeping to its timeout.
+//
+// Both change under the signal map's lock, so a waiter that reads the
+// epoch after fetching the channel never misses an arrival.
 type queueArrivalSignals struct {
-	mu     sync.Mutex
-	chans  map[string]chan struct{}
-	epochs map[string]*atomic.Uint64
+	signalMap
+	epochs map[string]uint64
 }
 
 func newQueueArrivalSignals() *queueArrivalSignals {
-	return &queueArrivalSignals{
-		chans:  map[string]chan struct{}{},
-		epochs: map[string]*atomic.Uint64{},
-	}
+	return &queueArrivalSignals{epochs: map[string]uint64{}}
 }
 
 // notify records one queued prompt for the session and wakes every
@@ -32,31 +73,14 @@ func newQueueArrivalSignals() *queueArrivalSignals {
 func (q *queueArrivalSignals) notify(sessionID string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	e := q.epochs[sessionID]
-	if e == nil {
-		e = &atomic.Uint64{}
-		q.epochs[sessionID] = e
-	}
-	e.Add(1)
-	if ch := q.chans[sessionID]; ch != nil {
-		close(ch)
-	}
-	q.chans[sessionID] = make(chan struct{})
+	q.epochs[sessionID]++
+	q.broadcastLocked(sessionID)
 }
 
 // chanFor returns the session's current wakeup channel. Fetch it before
-// reading the epoch and select on it after: notify closes and replaces
-// under the same lock, so an arrival between the epoch read and the
-// select still wakes the waiter.
+// reading the epoch and select on it after.
 func (q *queueArrivalSignals) chanFor(sessionID string) chan struct{} {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	ch := q.chans[sessionID]
-	if ch == nil {
-		ch = make(chan struct{})
-		q.chans[sessionID] = ch
-	}
-	return ch
+	return q.Chan(sessionID)
 }
 
 // epoch returns how many prompts have been queued for the session since
@@ -64,8 +88,5 @@ func (q *queueArrivalSignals) chanFor(sessionID string) chan struct{} {
 func (q *queueArrivalSignals) epoch(sessionID string) uint64 {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if e := q.epochs[sessionID]; e != nil {
-		return e.Load()
-	}
-	return 0
+	return q.epochs[sessionID]
 }

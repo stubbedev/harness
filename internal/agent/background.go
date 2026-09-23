@@ -59,37 +59,24 @@ type QueueArrivalNotifier interface {
 type liveInbox struct {
 	mu      sync.Mutex
 	items   map[string][]SubagentInboxMessage
-	signals map[string]chan struct{}
+	signals signalMap
 }
 
 func newLiveInbox() *liveInbox {
 	return &liveInbox{
-		items:   make(map[string][]SubagentInboxMessage),
-		signals: make(map[string]chan struct{}),
+		items: make(map[string][]SubagentInboxMessage),
 	}
 }
 
 // signalChan returns the current wakeup channel for a session. Fetch it
 // before draining state; see the type comment for the ordering argument.
 func (in *liveInbox) signalChan(parentSessionID string) chan struct{} {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	ch, ok := in.signals[parentSessionID]
-	if !ok {
-		ch = make(chan struct{})
-		in.signals[parentSessionID] = ch
-	}
-	return ch
+	return in.signals.Chan(parentSessionID)
 }
 
 // notify wakes everyone waiting on the session's inbox.
 func (in *liveInbox) notify(parentSessionID string) {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	if ch, ok := in.signals[parentSessionID]; ok {
-		close(ch)
-	}
-	in.signals[parentSessionID] = make(chan struct{})
+	in.signals.Broadcast(parentSessionID)
 }
 
 // record appends a message to a session's inbox, refusing once the cap is
