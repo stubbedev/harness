@@ -13,8 +13,13 @@ import (
 // CommandItem wraps a uicmd.Command to implement the ListItem interface.
 type CommandItem struct {
 	*list.Versioned
-	id          string
-	title       string
+	id    string
+	title string
+	// filterTitle is the searchable form of the title when it differs
+	// from it, e.g. a skill's name with its source prefix stripped. It
+	// must be a suffix of the title: match indexes are shifted into the
+	// title for highlighting.
+	filterTitle string
 	shortcut    string
 	description string
 	action      Action
@@ -62,6 +67,14 @@ func (c *CommandItem) WithDescription(desc string) *CommandItem {
 	return c
 }
 
+// WithFilterTitle sets the text fuzzy matching sees as the item's
+// name. It must be a suffix of the title: matches are highlighted on
+// the title by shifting the indexes past the hidden prefix.
+func (c *CommandItem) WithFilterTitle(filterTitle string) *CommandItem {
+	c.filterTitle = filterTitle
+	return c
+}
+
 // Filter implements ListItem.
 func (c *CommandItem) Filter() string {
 	primary, rest := c.FilterFields()
@@ -79,10 +92,14 @@ func (c *CommandItem) Filter() string {
 // are the name tier; the description only matches, it never outranks a
 // title match.
 func (c *CommandItem) FilterFields() (primary, rest string) {
-	if len(c.aliases) == 0 {
-		return c.title, c.description
+	title := c.title
+	if c.filterTitle != "" {
+		title = c.filterTitle
 	}
-	return c.title + " " + strings.Join(c.aliases, " "), c.description
+	if len(c.aliases) == 0 {
+		return title, c.description
+	}
+	return title + " " + strings.Join(c.aliases, " "), c.description
 }
 
 // ID implements ListItem.
@@ -167,7 +184,8 @@ func (c *CommandItem) Render(width int) string {
 	if c.hideInfo {
 		shortcut = ""
 	}
-	rendered := renderItem(styles, c.title, shortcut, c.focused, width, c.cache, &c.m)
+	match := c.matchForTitle()
+	rendered := renderItem(styles, c.title, shortcut, c.focused, width, c.cache, &match)
 	if c.description != "" {
 		descStyle := c.t.Dialog.SecondaryText
 		if c.focused {
@@ -183,4 +201,22 @@ func (c *CommandItem) Render(width int) string {
 		rendered = lipgloss.JoinVertical(lipgloss.Left, rendered, descStyle.Render(description+gap))
 	}
 	return rendered
+}
+
+// matchForTitle returns the item's match with its indexes shifted into
+// the title, for items whose filter text is a suffix of it. The fuzzy
+// indexes are offsets into the filter text, but the highlighter maps
+// them onto the rendered title.
+func (c *CommandItem) matchForTitle() fuzzy.Match {
+	if c.filterTitle == "" || len(c.m.MatchedIndexes) == 0 {
+		return c.m
+	}
+	offset := len(c.title) - len(c.filterTitle)
+	indexes := make([]int, len(c.m.MatchedIndexes))
+	for i, idx := range c.m.MatchedIndexes {
+		indexes[i] = idx + offset
+	}
+	m := c.m
+	m.MatchedIndexes = indexes
+	return m
 }

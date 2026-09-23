@@ -126,3 +126,38 @@ func TestSkillsPaletteQueryRanksNameAboveDescription(t *testing.T) {
 	assert.Equal(t, "kontainer-pr", got[0], "got %v", got)
 	assert.Equal(t, "kontainer-prs", got[1], "got %v", got)
 }
+
+// TestSkillsPaletteIgnoresSourcePrefix pins that a skill's source
+// prefix (project:/user:/system:) is display only: it is not part of
+// the filter text, and matches on the name after it highlight on the
+// title at the right offset.
+func TestSkillsPaletteIgnoresSourcePrefix(t *testing.T) {
+	t.Parallel()
+
+	cmds := []commands.CustomCommand{{
+		ID:   "commit",
+		Name: "project:commit",
+		Skill: &skills.Skill{
+			Name:          "commit",
+			Description:   "Commit guidance",
+			SkillFilePath: "/skills/commit/SKILL.md",
+		},
+	}}
+	c, err := NewSkills(paletteTestCommon(), cmds)
+	require.NoError(t, err)
+
+	// The prefix is not searchable: "pro" matches nothing even though
+	// the label starts with it.
+	c.list.SetFilter("pro")
+	assert.Empty(t, c.list.FilteredItems())
+
+	// The name after the prefix is searchable, still renders under its
+	// full label, and highlights land on the name in the title.
+	c.list.SetFilter("co")
+	items := c.list.FilteredItems()
+	require.Len(t, items, 1)
+	item, ok := items[0].(*CommandItem)
+	require.True(t, ok)
+	assert.Equal(t, "project:commit", item.title)
+	assert.Equal(t, []int{8, 9}, item.matchForTitle().MatchedIndexes)
+}

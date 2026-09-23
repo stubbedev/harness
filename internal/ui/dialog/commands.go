@@ -395,6 +395,11 @@ func (m skillsMenu) items() []*CommandItem {
 		action := ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
 		item := NewCommandItem(m.c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
 		item = item.WithDescription(cmd.Skill.Description)
+		// The source prefix (project:/user:/system:) labels where the
+		// skill lives, not its name; match on the name after it.
+		if _, name, ok := strings.Cut(cmd.Name, ":"); ok {
+			item = item.WithFilterTitle(name)
+		}
 		items = append(items, item)
 	}
 	return items
