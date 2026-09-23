@@ -121,68 +121,6 @@ func (s *Shell) Exec(ctx context.Context, command string) (string, string, error
 	return s.exec(ctx, command)
 }
 
-// ExecStream executes a command in the shell with streaming output to provided writers
-func (s *Shell) ExecStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.execStream(ctx, command, stdout, stderr)
-}
-
-// GetWorkingDir returns the current working directory
-func (s *Shell) GetWorkingDir() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.cwd
-}
-
-// SetWorkingDir sets the working directory
-func (s *Shell) SetWorkingDir(dir string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Verify the directory exists
-	if _, err := os.Stat(dir); err != nil {
-		return fmt.Errorf("directory does not exist: %w", err)
-	}
-
-	s.cwd = dir
-	return nil
-}
-
-// GetEnv returns a copy of the environment variables
-func (s *Shell) GetEnv() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	env := make([]string, len(s.env))
-	copy(env, s.env)
-	return env
-}
-
-// SetEnv sets an environment variable
-func (s *Shell) SetEnv(key, value string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Update or add the environment variable
-	keyPrefix := key + "="
-	for i, env := range s.env {
-		if strings.HasPrefix(env, keyPrefix) {
-			s.env[i] = keyPrefix + value
-			return
-		}
-	}
-	s.env = append(s.env, keyPrefix+value)
-}
-
-// SetBlockFuncs sets the command block functions for the shell
-func (s *Shell) SetBlockFuncs(blockFuncs []BlockFunc) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.blockFuncs = blockFuncs
-}
-
 // newInterp creates a new interpreter with the current shell state. A nil
 // stdin is equivalent to an empty input stream.
 func (s *Shell) newInterp(stdin io.Reader, stdout, stderr io.Writer) (*interp.Runner, error) {
@@ -232,11 +170,6 @@ func (s *Shell) exec(ctx context.Context, command string) (string, string, error
 	var stdout, stderr bytes.Buffer
 	err := s.execCommon(ctx, command, &stdout, &stderr)
 	return stdout.String(), stderr.String(), err
-}
-
-// execStream executes commands using POSIX shell emulation with streaming output
-func (s *Shell) execStream(ctx context.Context, command string, stdout, stderr io.Writer) error {
-	return s.execCommon(ctx, command, stdout, stderr)
 }
 
 // IsInterrupt checks if an error is due to interruption

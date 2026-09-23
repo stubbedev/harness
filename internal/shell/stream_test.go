@@ -115,3 +115,18 @@ func TestRunAndCaptureStream_CompletesNormally(t *testing.T) {
 	require.Contains(t, result.Output, "xxxxxxxxxx")
 	require.NotContains(t, result.Output, "killed")
 }
+
+// TestProgressWriter_NoConsumerHoldsNoPending: without onProgress
+// nothing drains the batch, so nothing may be batched - otherwise a
+// flood bypasses maxCaptureBytes.
+func TestProgressWriter_NoConsumerHoldsNoPending(t *testing.T) {
+	t.Parallel()
+
+	w := &progressWriter{}
+	chunk := make([]byte, 1<<20)
+	for range 20 {
+		_, _ = w.Write(chunk)
+	}
+	require.Empty(t, w.pending)
+	require.LessOrEqual(t, len(w.buf), maxCaptureBytes+maxCaptureBytes/8)
+}

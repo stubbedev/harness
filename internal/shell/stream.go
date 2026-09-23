@@ -56,8 +56,13 @@ func (w *progressWriter) Write(p []byte) (int, error) {
 		w.dropped += int64(excess)
 	}
 	w.lastWrite = time.Now()
+	// Without a consumer nothing ever drains pending, so batching into
+	// it would hold the whole run in memory past the capture cap.
+	if w.onProgress == nil {
+		return len(p), nil
+	}
 	w.pending = append(w.pending, p...)
-	if w.onProgress != nil && (w.lastPush.IsZero() || w.lastWrite.Sub(w.lastPush) >= streamChunkInterval) {
+	if w.lastPush.IsZero() || w.lastWrite.Sub(w.lastPush) >= streamChunkInterval {
 		w.flushLocked()
 	}
 	return len(p), nil

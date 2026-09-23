@@ -1,12 +1,10 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 
@@ -122,63 +120,14 @@ func RunAndPersist(ctx context.Context, opts RunOptions, persist PersistFunc) (C
 	return result, nil
 }
 
-// RunAndCapture executes a shell command and returns its combined
-// stdout/stderr output along with the exit code. It inherits the
-// current process environment when opts.Env is nil.
-func RunAndCapture(ctx context.Context, opts RunOptions) (CaptureResult, error) {
-	if opts.Env == nil {
-		opts.Env = os.Environ()
-	}
-
-	var stdout, stderr bytes.Buffer
-	opts.Stdout = &stdout
-	opts.Stderr = &stderr
-
-	runErr := Run(ctx, opts)
-
-	exitCode := 0
-	if runErr != nil {
-		exitCode = ExitCode(runErr)
-	}
-
-	output := stdout.String()
-	if stderr.Len() > 0 {
-		if output != "" {
-			output += "\n"
-		}
-		output += stderr.String()
-	}
-
-	return CaptureResult{
-		Output:   output,
-		ExitCode: exitCode,
-	}, nil
-}
-
-// ptyColorEnvVars force color output for programs running inside a
-// PTY. These are only applied in RunAndCapturePTY, not in the plain
-// Run/RunAndCapture paths where ANSI codes would be noise.
+// ptyColorEnvVars force color output for captured runs: programs that
+// respect FORCE_COLOR or CLICOLOR_FORCE emit ANSI color sequences even
+// without a real PTY. The plain [Run] path does not set them, since
+// there ANSI codes would be noise.
 var ptyColorEnvVars = []string{
 	"COLORTERM=truecolor",
 	"CLICOLOR_FORCE=1",
 	"FORCE_COLOR=1",
-}
-
-// RunAndCapturePTY executes a shell command through the mvdan.cc/sh
-// interpreter with color-forcing environment variables set. Programs
-// that respect FORCE_COLOR or CLICOLOR_FORCE (git, cargo, npm, eza,
-// bat, ripgrep, etc.) will emit ANSI color sequences even without a
-// real PTY. This approach is fully cross-platform — no /bin/sh or
-// unix PTY required.
-//
-// The name is preserved for API compatibility; the PTY path has been
-// replaced by the portable interpreter + env-var approach.
-func RunAndCapturePTY(ctx context.Context, opts RunOptions) (CaptureResult, error) {
-	if opts.Env == nil {
-		opts.Env = os.Environ()
-	}
-	opts.Env = append(opts.Env, ptyColorEnvVars...)
-	return RunAndCapture(ctx, opts)
 }
 
 // newRunner constructs an [interp.Runner] configured with the standard
