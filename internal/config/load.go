@@ -221,37 +221,42 @@ func mustMarshalConfig(cfg *Config) []byte {
 	return data
 }
 
-func PushPopHarnessEnv() func() {
-	var found []string
+// pushHarnessEnv makes every HARNESS_<NAME> variable visible as <NAME> for
+// the duration of provider configuration, and returns the function that
+// restores the previous environment. A variable that was unset before is
+// unset again, not left behind as an empty string, so ${VAR-default} and
+// LookupEnv checks still see it as absent.
+func pushHarnessEnv() func() {
+	type backup struct {
+		value string
+		set   bool
+	}
+	backups := make(map[string]backup)
 	for _, ev := range os.Environ() {
-		if strings.HasPrefix(ev, "HARNESS_") {
-			pair := strings.SplitN(ev, "=", 2)
-			if len(pair) != 2 {
-				continue
+		key, value, ok := strings.Cut(ev, "=")
+		name, harness := strings.CutPrefix(key, "HARNESS_")
+		if !ok || !harness || name == "" {
+			continue
+		}
+		prev, set := os.LookupEnv(name)
+		backups[name] = backup{value: prev, set: set}
+		os.Setenv(name, value)
+	}
+
+	return func() {
+		for name, b := range backups {
+			if b.set {
+				os.Setenv(name, b.value)
+			} else {
+				os.Unsetenv(name)
 			}
-			found = append(found, strings.TrimPrefix(pair[0], "HARNESS_"))
 		}
 	}
-	backups := make(map[string]string)
-	for _, ev := range found {
-		backups[ev] = os.Getenv(ev)
-	}
-
-	for _, ev := range found {
-		os.Setenv(ev, os.Getenv("HARNESS_"+ev))
-	}
-
-	restore := func() {
-		for k, v := range backups {
-			os.Setenv(k, v)
-		}
-	}
-	return restore
 }
 
 func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catalog.Provider) error {
 	knownProviderNames := make(map[string]bool)
-	restore := PushPopHarnessEnv()
+	restore := pushHarnessEnv()
 	defer restore()
 
 	// When disable_default_providers is enabled, skip all default/embedded

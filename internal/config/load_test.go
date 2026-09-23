@@ -2643,3 +2643,20 @@ func TestConfig_LoadFromBytes_EnvMerge(t *testing.T) {
 	require.Equal(t, "second", loadedConfig.Env["AWS_PROFILE"])
 	require.Equal(t, "us-east-1", loadedConfig.Env["AWS_REGION"])
 }
+
+func TestPushHarnessEnv_RestoresUnsetVariables(t *testing.T) {
+	t.Setenv("HARNESS_TEST_ONLY_KEY", "overlay")
+	t.Setenv("HARNESS_TEST_PRESET_KEY", "overlay")
+	t.Setenv("TEST_PRESET_KEY", "original")
+	t.Setenv("TEST_ONLY_KEY", "")
+	os.Unsetenv("TEST_ONLY_KEY")
+
+	restore := pushHarnessEnv()
+	require.Equal(t, "overlay", os.Getenv("TEST_ONLY_KEY"))
+	require.Equal(t, "overlay", os.Getenv("TEST_PRESET_KEY"))
+	restore()
+
+	_, set := os.LookupEnv("TEST_ONLY_KEY")
+	require.False(t, set, "a variable unset before must be unset again")
+	require.Equal(t, "original", os.Getenv("TEST_PRESET_KEY"))
+}
