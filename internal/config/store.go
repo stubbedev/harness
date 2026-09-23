@@ -184,11 +184,20 @@ func (s *ConfigStore) SetupAgents() {
 	s.Config().SetupAgents()
 }
 
-// Overrides returns the runtime overrides for this store.
-func (s *ConfigStore) Overrides() *RuntimeOverrides {
+// Overrides returns a copy of the runtime overrides for this store. Use
+// SetEnabledChannels to change them.
+func (s *ConfigStore) Overrides() RuntimeOverrides {
 	s.writeMu.RLock()
 	defer s.writeMu.RUnlock()
-	return &s.overrides
+	return s.overrides
+}
+
+// SetEnabledChannels records the MCP servers opted in as channels for this
+// session.
+func (s *ConfigStore) SetEnabledChannels(channels []string) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.overrides.EnabledChannels = channels
 }
 
 // LoadedPaths returns the config file paths that were successfully loaded.
@@ -1028,6 +1037,10 @@ type StalenessResult struct {
 // missing, along with sorted lists of affected paths. Stat errors are
 // captured in Errors map but still treated as non-existence for dirty detection.
 func (s *ConfigStore) ConfigStaleness() StalenessResult {
+	// Snapshots are rewritten under writeMu by every write and reload.
+	s.writeMu.RLock()
+	defer s.writeMu.RUnlock()
+
 	var result StalenessResult
 	result.Errors = make(map[string]error)
 

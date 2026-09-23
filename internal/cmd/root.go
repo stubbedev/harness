@@ -357,7 +357,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	}
 
 	cfg := store.Config()
-	store.Overrides().EnabledChannels = channels
+	store.SetEnabledChannels(channels)
 
 	if err := createDotHarnessDir(cfg.Options.DataDirectory); err != nil {
 		return nil, nil, err
