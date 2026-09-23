@@ -24,6 +24,7 @@ import (
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/fsext"
+	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/projects"
 )
 
@@ -213,7 +214,7 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to get current directory: %w", err)
 		}
-		projName = strings.Replace(project, currentUser.HomeDir, "~", 1)
+		projName = home.Short(project)
 	}
 
 	outputDataDir := dataDir

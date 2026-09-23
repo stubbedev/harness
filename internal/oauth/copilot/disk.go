@@ -33,6 +33,6 @@ func tokenFilePath() string {
 	case "windows":
 		return filepath.Join(home.AppData(), "github-copilot/apps.json")
 	default:
-		return filepath.Join(os.Getenv("HOME"), ".config/github-copilot/apps.json")
+		return filepath.Join(home.Dir(), ".config/github-copilot/apps.json")
 	}
 }
