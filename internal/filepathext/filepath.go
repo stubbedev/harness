@@ -1,6 +1,8 @@
 package filepathext
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -109,4 +111,24 @@ func Canonicalize(path string) string {
 		return Canonicalize(filepath.Clean(dir))
 	}
 	return filepath.Join(Canonicalize(filepath.Clean(dir)), rest)
+}
+
+// Resolve is the strict form of [Canonicalize]: it resolves symlinks in
+// the longest existing prefix of path, walking up only past elements
+// that do not exist, and reports any other resolution failure (a
+// permission error, a symlink loop) instead of guessing.
+func Resolve(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
+		return resolved, err
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		return "", err
+	}
+	resolved, err = Resolve(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolved, filepath.Base(path)), nil
 }

@@ -299,7 +299,7 @@ func (d *DirectoryInstructions) activate(ctx context.Context, paths []string) (s
 
 func (d *DirectoryInstructions) scope(path string) (string, error) {
 	path = filepath.Clean(filepathext.SmartJoin(d.root, path))
-	resolved, err := directoryInstructionResolve(path)
+	resolved, err := filepathext.Resolve(path)
 	if err != nil {
 		return "", fmt.Errorf("resolve instruction scope %q: %w", path, err)
 	}
@@ -314,22 +314,6 @@ func (d *DirectoryInstructions) scope(path string) (string, error) {
 		resolved = filepath.Dir(resolved)
 	}
 	return resolved, nil
-}
-
-func directoryInstructionResolve(path string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err == nil || !errors.Is(err, os.ErrNotExist) {
-		return resolved, err
-	}
-	parent := filepath.Dir(path)
-	if parent == path {
-		return "", err
-	}
-	resolved, err = directoryInstructionResolve(parent)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(resolved, filepath.Base(path)), nil
 }
 
 // directoryInstructionName resolves a configured instruction name against

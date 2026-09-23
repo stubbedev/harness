@@ -93,7 +93,7 @@ func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *Age
 	if err != nil {
 		return nil, err
 	}
-	parentDir, err = worktreeStoragePath(parentDir)
+	parentDir, err = filepathext.Resolve(parentDir)
 	if err != nil {
 		return nil, err
 	}
@@ -316,21 +316,6 @@ func (w *AgentWorktree) snapshotTree(ctx context.Context, path string) (string, 
 	}
 	out, err := worktreeGit(ctx, path, pin, "write-tree")
 	return strings.TrimSpace(string(out)), err
-}
-
-func worktreeStoragePath(path string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		return resolved, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) || filepath.Dir(path) == path {
-		return "", err
-	}
-	parent, err := worktreeStoragePath(filepath.Dir(path))
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(parent, filepath.Base(path)), nil
 }
 
 func worktreeGit(ctx context.Context, root string, pin []string, args ...string) ([]byte, error) {
