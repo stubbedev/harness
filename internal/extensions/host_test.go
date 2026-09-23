@@ -330,3 +330,24 @@ harness.register_tool({ name = "toolonly", handler = function() return "" end })
 	require.Len(t, tools, 1)
 	require.Equal(t, "toolonly", tools[0].Info().Name)
 }
+
+func TestToolAfterCloseIsRefused(t *testing.T) {
+	t.Parallel()
+
+	root := writeExtension(t, "late", `
+harness.register_tool({
+  name = "late",
+  handler = function() return "ok" end,
+})
+`)
+
+	host := newHost(t, []string{root})
+	tools := host.Tools()
+	require.Len(t, tools, 1)
+	host.Close()
+
+	rsp, err := tools[0].Run(t.Context(), fantasy.ToolCall{ID: "1", Name: "late", Input: "{}"})
+	require.NoError(t, err)
+	require.True(t, rsp.IsError)
+	require.Contains(t, rsp.Content, "closed")
+}

@@ -3,8 +3,10 @@ package extensions
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
@@ -48,6 +50,10 @@ type instance struct {
 	// seen.
 	loading bool
 
+	// closed is set once close has begun tearing the VM down. A call that
+	// wins the VM lock after that refuses to run rather than touching a
+	// closed state, whose stack is gone.
+	closed    atomic.Bool
 	closeOnce sync.Once
 }
 
@@ -198,17 +204,36 @@ func (in *instance) callWithin(ctx context.Context, timeout time.Duration, fn *l
 func (in *instance) acquire(ctx context.Context) error {
 	select {
 	case in.sem <- struct{}{}:
-		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("extension %q is busy: %w", in.ext.Name, ctx.Err())
 	}
+	if in.closed.Load() {
+		in.release()
+		return fmt.Errorf("extension %q is closed", in.ext.Name)
+	}
+	return nil
 }
 
 func (in *instance) release() { <-in.sem }
 
-// close tears the VM down. Safe to call more than once.
+// closeWait bounds how long close waits for a running call to leave the
+// VM. Calls are bounded by their own timeout and honour cancellation, so
+// the wait only runs out on a handler that ignores both.
+const closeWait = 5 * time.Second
+
+// close tears the VM down. Safe to call more than once. It takes the VM
+// lock first so a running call is never pulled out from under itself; if
+// that call will not finish, the VM is left to the garbage collector
+// rather than closed while in use.
 func (in *instance) close() {
 	in.closeOnce.Do(func() {
-		in.L.Close()
+		in.closed.Store(true)
+		select {
+		case in.sem <- struct{}{}:
+			in.L.Close()
+			in.release()
+		case <-time.After(closeWait):
+			slog.Warn("Extension still busy at shutdown, leaving its VM open", "extension", in.ext.Name)
+		}
 	})
 }
