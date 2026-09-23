@@ -164,6 +164,7 @@ type ToolResult struct {
 	MIMEType   string `json:"mime_type,omitempty"`
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
+	Canceled   bool   `json:"canceled,omitempty"`
 }
 
 func (ToolResult) isPart() {}
