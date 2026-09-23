@@ -13,6 +13,7 @@ import (
 	"github.com/clipperhouse/displaywidth"
 	"github.com/clipperhouse/uax29/v2/words"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/ui/anim"
 	"github.com/stubbedev/harness/internal/ui/chat"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -613,6 +614,37 @@ func (m *Chat) UpdateToolItem(id string, fn func(chat.ToolMessageItem)) {
 func (m *Chat) InvalidateToolItem(id string) {
 	if idx, ok := m.idInxMap[id]; ok {
 		item := m.list.ItemAt(idx)
+		if v, ok := item.(interface{ Bump() }); ok {
+			v.Bump()
+		}
+		m.list.Invalidate(item)
+	}
+}
+
+// SetLiveDiagnostics pushes the language servers' current per-file counts
+// into every diagnostics item in the transcript. A diagnostics report is a
+// point in time; without this push a file the agent has since fixed keeps
+// showing its resolved errors as the last word. Groups are invalidated as
+// containers: a child's own version bump is invisible to the list cache.
+func (m *Chat) SetLiveDiagnostics(live map[string]lsp.DiagnosticCounts) {
+	for i := range m.list.Len() {
+		item := m.list.ItemAt(i)
+		var setters []chat.LiveDiagnosticsSetter
+		if container, ok := item.(chat.ToolGroupContainer); ok {
+			for _, child := range container.ToolChildren() {
+				if setter, ok := child.(chat.LiveDiagnosticsSetter); ok {
+					setters = append(setters, setter)
+				}
+			}
+		} else if setter, ok := item.(chat.LiveDiagnosticsSetter); ok {
+			setters = append(setters, setter)
+		}
+		if len(setters) == 0 {
+			continue
+		}
+		for _, setter := range setters {
+			setter.SetLiveDiagnostics(live)
+		}
 		if v, ok := item.(interface{ Bump() }); ok {
 			v.Bump()
 		}

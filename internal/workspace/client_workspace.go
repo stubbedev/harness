@@ -459,6 +459,42 @@ func (w *ClientWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCoun
 	return counts
 }
 
+// LSPFileDiagnostics folds every server's diagnostics into per-file severity
+// counts, mirroring [AppWorkspace.LSPFileDiagnostics] over the RPC boundary.
+// A server that fails to answer contributes nothing; a file no running
+// server reports is genuinely clean.
+func (w *ClientWorkspace) LSPFileDiagnostics() map[string]lsp.DiagnosticCounts {
+	counts := make(map[string]lsp.DiagnosticCounts)
+	for name := range w.LSPGetStates() {
+		diags, err := w.client.GetLSPDiagnostics(context.Background(), w.workspaceID(), name)
+		if err != nil {
+			continue
+		}
+		for uri, fileDiags := range diags {
+			path, err := uri.Path()
+			if err != nil {
+				slog.Error("Failed to convert diagnostic URI to path", "uri", uri, "error", err)
+				continue
+			}
+			file := counts[path]
+			for _, d := range fileDiags {
+				switch d.Severity {
+				case protocol.SeverityError:
+					file.Error++
+				case protocol.SeverityWarning:
+					file.Warning++
+				case protocol.SeverityInformation:
+					file.Information++
+				case protocol.SeverityHint:
+					file.Hint++
+				}
+			}
+			counts[path] = file
+		}
+	}
+	return counts
+}
+
 func (w *ClientWorkspace) LSPRestartSingle(ctx context.Context, name string) error {
 	return w.client.LSPRestartSingle(ctx, w.workspaceID(), name)
 }

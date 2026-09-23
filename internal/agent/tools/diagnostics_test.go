@@ -1,10 +1,13 @@
 package tools
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/lsp"
 )
 
 func diag(line uint32, severity protocol.DiagnosticSeverity, message string) protocol.Diagnostic {
@@ -167,6 +170,50 @@ func TestReportingWithoutAManager(t *testing.T) {
 		t.Errorf("DiagnosticsSweep = %q", got)
 	}
 	ForgetReportedDiagnostics(nil, "s1")
+	DiagnosticsFinalSweep(t.Context(), nil, "s1", func(string) {
+		t.Error("a nil manager must not produce a final report")
+	})
+}
+
+// Resolution lines are marked so a consumer can tell a retired problem from
+// a standing one, and a problem the servers still hold at a new position is
+// named there rather than at its stale one.
+func TestResolvedLinesMarkAndRelocate(t *testing.T) {
+	t.Parallel()
+	stillLive := fingerprint("/x/f.go", diag(50, protocol.SeverityError, "boom"), "gopls")
+	gone := fingerprint("/x/g.go", diag(10, protocol.SeverityWarning, "meh"), "gopls")
+	resolved := []lsp.ResolvedDiagnostic{
+		{Fingerprint: stillLive, Line: "Error: /x/f.go:10:1 [gopls] boom"},
+		{Fingerprint: gone, Line: "Warn: /x/g.go:1:1 [gopls] meh"},
+	}
+	live := map[string]diagnosticEntry{
+		stillLive: {line: "Error: /x/f.go:51:1 [gopls] boom", path: "/x/f.go"},
+	}
+
+	lines := resolvedLines(resolved, live)
+	if len(lines) != 2 {
+		t.Fatalf("lines = %v", lines)
+	}
+	wantRelocated := "Resolved: Error: /x/f.go:51:1 [gopls] boom"
+	wantStored := "Resolved: Warn: /x/g.go:1:1 [gopls] meh"
+	if !slices.Contains(lines, wantRelocated) {
+		t.Errorf("missing relocated line %q in %v", wantRelocated, lines)
+	}
+	if !slices.Contains(lines, wantStored) {
+		t.Errorf("missing stored line %q in %v", wantStored, lines)
+	}
+}
+
+// DiagnosticsFinalSweep persists only a non-empty report, verbatim in the
+// system_reminder shape the step sweep uses, so the note reads the same
+// wherever it lands.
+func TestDiagnosticsFinalSweepSkipsEmptyReports(t *testing.T) {
+	t.Parallel()
+	// A manager with nothing in it reports nothing, so persist must not run.
+	manager := lsp.NewManager(config.NewTestStore(&config.Config{}))
+	DiagnosticsFinalSweep(t.Context(), manager, "s1", func(text string) {
+		t.Errorf("empty report persisted: %q", text)
+	})
 }
 
 func TestFormatDiagnosticNamesSeverityAndPosition(t *testing.T) {

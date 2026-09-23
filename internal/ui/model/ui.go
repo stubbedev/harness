@@ -340,10 +340,13 @@ type UI struct {
 	// per-server severity counts (each probe behind them is a synchronous
 	// HTTP round-trip in client/server mode, and the sidebar, landing view,
 	// and compact header render them every frame). LSP events refresh them
-	// off-thread with a TTL backstop; see lsp.go.
-	lspStates        map[string]workspace.LSPClientInfo
-	lspDiagnostics   map[string]lsp.DiagnosticCounts
-	lspFetchInFlight bool
+	// off-thread with a TTL backstop; see lsp.go. lspFileDiagnostics adds
+	// the per-file breakdown that the transcript's diagnostics items
+	// overlay onto their reports.
+	lspStates          map[string]workspace.LSPClientInfo
+	lspDiagnostics     map[string]lsp.DiagnosticCounts
+	lspFileDiagnostics map[string]lsp.DiagnosticCounts
+	lspFetchInFlight   bool
 	// lspRefreshQueued records that an LSP event arrived while a fetch was
 	// already in flight; applyLSPStates re-dispatches so the freshest state
 	// still lands.
@@ -937,6 +940,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingModelAction = nil
 		cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
+		// Restored diagnostics items render their live overlay from the
+		// memoized per-file state; fetch it for the new session instead of
+		// waiting for an event that may never come.
+		if cmd := m.requestLSPRefresh(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
 		if err != nil {
 			cmds = append(cmds, util.ReportError(err))

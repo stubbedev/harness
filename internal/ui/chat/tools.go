@@ -14,6 +14,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/hooks"
+	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/stringext"
 	"github.com/stubbedev/harness/internal/ui/anim"
@@ -60,6 +61,16 @@ type ToolMessageItem interface {
 type Compactable interface {
 	SetCompact(compact bool)
 	IsCompact() bool
+}
+
+// LiveDiagnosticsSetter is implemented by tool items whose view depends on
+// the language servers' current state. The UI model pushes the freshest
+// per-file counts whenever an LSP event or the TTL backstop refreshes its
+// memoized state, and the item invalidates its cached render, so a report
+// shown in the transcript never claims a problem still stands after the
+// servers have said it is gone.
+type LiveDiagnosticsSetter interface {
+	SetLiveDiagnostics(live map[string]lsp.DiagnosticCounts)
 }
 
 // SpinningState contains the state passed to SpinningFunc for custom spinning logic.

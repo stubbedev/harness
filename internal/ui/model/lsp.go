@@ -26,10 +26,12 @@ import (
 var lspStatesTTL = 5 * time.Second
 
 // lspStatesMsg delivers LSP states and per-server diagnostic counts fetched
-// off-thread.
+// off-thread, plus the per-file counts the transcript's live diagnostics
+// overlay renders from.
 type lspStatesMsg struct {
-	states      map[string]workspace.LSPClientInfo
-	diagnostics map[string]lsp.DiagnosticCounts
+	states          map[string]workspace.LSPClientInfo
+	diagnostics     map[string]lsp.DiagnosticCounts
+	fileDiagnostics map[string]lsp.DiagnosticCounts
 }
 
 // LSPInfo wraps LSP client information with diagnostic counts by severity.
@@ -49,11 +51,11 @@ func (m *UI) requestLSPRefresh() tea.Cmd {
 	return m.dispatchLSPRefresh()
 }
 
-// dispatchLSPRefresh returns a command that fetches the LSP states and
-// per-server diagnostic counts off the Update goroutine (each a synchronous
-// HTTP round-trip in client/server mode), delivering an lspStatesMsg. It
-// returns nil while a fetch is already in flight. The closure captures only
-// locals (never m) so it is safe off-thread.
+// dispatchLSPRefresh returns a command that fetches the LSP states, per-server
+// diagnostic counts and per-file diagnostic counts off the Update goroutine
+// (each a synchronous HTTP round-trip in client/server mode), delivering an
+// lspStatesMsg. It returns nil while a fetch is already in flight. The closure
+// captures only locals (never m) so it is safe off-thread.
 func (m *UI) dispatchLSPRefresh() tea.Cmd {
 	if m.lspFetchInFlight || m.com == nil || m.com.Workspace == nil {
 		return nil
@@ -69,7 +71,11 @@ func (m *UI) dispatchLSPRefresh() tea.Cmd {
 		for name := range states {
 			diagnostics[name] = ws.LSPGetDiagnosticCounts(name)
 		}
-		return lspStatesMsg{states: states, diagnostics: diagnostics}
+		return lspStatesMsg{
+			states:          states,
+			diagnostics:     diagnostics,
+			fileDiagnostics: ws.LSPFileDiagnostics(),
+		}
 	}
 }
 
@@ -80,6 +86,11 @@ func (m *UI) applyLSPStates(msg lspStatesMsg) tea.Cmd {
 	m.lspCheckedAt = time.Now()
 	m.lspStates = msg.states
 	m.lspDiagnostics = msg.diagnostics
+	m.lspFileDiagnostics = msg.fileDiagnostics
+	// Overlay the fresh per-file state on every diagnostics item in the
+	// transcript, so a report next to a file the servers have since
+	// cleared says so instead of leaving the old errors standing.
+	m.chat.SetLiveDiagnostics(msg.fileDiagnostics)
 	if m.lspRefreshQueued {
 		m.lspRefreshQueued = false
 		return m.dispatchLSPRefresh()

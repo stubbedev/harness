@@ -225,6 +225,11 @@ type Workspace interface {
 	LSPStopAll(ctx context.Context)
 	LSPGetStates() map[string]LSPClientInfo
 	LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts
+	// LSPFileDiagnostics aggregates every server's current diagnostics into
+	// per-file severity counts. It backs the transcript's live diagnostics
+	// overlay, which needs to know that a file is clean now, not just that
+	// some server somewhere still counts problems.
+	LSPFileDiagnostics() map[string]lsp.DiagnosticCounts
 	LSPRestartSingle(ctx context.Context, name string) error
 	LSPSetSessionDisabled(ctx context.Context, name string, disabled bool) error
 

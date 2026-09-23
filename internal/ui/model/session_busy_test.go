@@ -125,6 +125,10 @@ func (w *countingWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCo
 	return w.lspDiags[name]
 }
 
+func (w *countingWorkspace) LSPFileDiagnostics() map[string]lsp.DiagnosticCounts {
+	return nil
+}
+
 func (w *countingWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
 	return nil, nil
 }
