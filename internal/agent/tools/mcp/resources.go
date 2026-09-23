@@ -35,6 +35,14 @@ func ListResources(ctx context.Context, cfg *config.ConfigStore, name string) ([
 		return nil, err
 	}
 
+	// Publish under the renewal lock, and only while this session is still
+	// the registered one, like the Refresh functions.
+	mu := renewLock(name)
+	mu.Lock()
+	defer mu.Unlock()
+	if cur, ok := sessions.Get(name); !ok || cur != session {
+		return resources, nil
+	}
 	resourceCount := updateResources(name, resources)
 	prev, _ := states.Get(name)
 	prev.Counts.Resources = resourceCount
@@ -58,30 +66,10 @@ func ReadResource(ctx context.Context, cfg *config.ConfigStore, name, uri string
 // RefreshResources gets the updated list of resources from the MCP and updates the
 // global state.
 func RefreshResources(ctx context.Context, name string) {
-	// Serialize with session renewal so the registered session can't be
-	// swapped between the Get and the state update below — a stale error
-	// transition would otherwise tear down the healthy replacement.
-	mu := renewLock(name)
-	mu.Lock()
-	defer mu.Unlock()
-
-	session, ok := sessions.Get(name)
-	if !ok {
-		slog.Warn("Refresh resources: no session", "name", name)
-		return
-	}
-
-	resources, err := getResources(ctx, session)
-	if err != nil {
-		updateState(name, StateError, err, session, Counts{})
-		return
-	}
-
-	resourceCount := updateResources(name, resources)
-
-	prev, _ := states.Get(name)
-	prev.Counts.Resources = resourceCount
-	updateState(name, StateConnected, nil, session, prev.Counts)
+	refreshListing(ctx, name, "resources", getResources,
+		func(resources []*Resource) int { return updateResources(name, resources) },
+		func(c *Counts, n int) { c.Resources = n },
+	)
 }
 
 func getResources(ctx context.Context, c *ClientSession) ([]*Resource, error) {

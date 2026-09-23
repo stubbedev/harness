@@ -463,7 +463,7 @@ func AuthenticateMCP(ctx context.Context, cfg *config.ConfigStore, name string) 
 
 	// The OAuth handler persists the token automatically as it is
 	// exchanged, so a successful connection has already saved it.
-	_, err = connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	err = connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		return err
 	}
@@ -556,7 +556,7 @@ func BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Co
 // suppression enabled on the freshly created handler.
 func runAuthFlow(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig) error {
 	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
-	_, err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
+	err := connectAndRegister(ctx, cfg, name, m, currentGen(name), cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	return err
 }
 
@@ -581,7 +581,7 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	// (even if expired), try connecting first so the SDK can attempt a
 	// silent refresh. Only defer to the UI if no token is available at
 	// all or the token is structurally invalid (empty access token).
-	if m.OAuth && m.Type == config.MCPHttp && !hasUsableToken(m.OAuthToken) {
+	if m.UsesOAuthFlow() && !hasUsableToken(m.OAuthToken) {
 		if m.OAuthToken != nil {
 			clearOAuthToken(cfg, name)
 		}
@@ -592,14 +592,14 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	}
 
 	updateState(name, StateStarting, nil, nil, Counts{}, withPending(m))
-	_, err := connectAndRegister(ctx, cfg, name, m, gen, resolver, channelEnabled(cfg.Overrides().EnabledChannels, name))
+	err := connectAndRegister(ctx, cfg, name, m, gen, resolver, channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
 		// If an OAuth MCP fails because the saved token is no longer
 		// valid (e.g. refresh token expired or revoked) or no token
 		// could be obtained, clear the stale token and prompt the user
 		// to re-authenticate instead of leaving the server stuck in
 		// StateError.
-		if m.OAuth && m.Type == config.MCPHttp && isOAuthInitErr(err) {
+		if m.UsesOAuthFlow() && isOAuthInitErr(err) && currentGen(name) == gen {
 			if m.OAuthToken != nil {
 				clearOAuthToken(cfg, name)
 			}
@@ -612,65 +612,97 @@ func initClient(ctx context.Context, cfg *config.ConfigStore, name string, m con
 	return nil
 }
 
-// connectAndRegister creates a session, lists tools and prompts,
-// registers them in global state, and transitions to StateConnected.
-// Returns the session so callers can perform post-processing (e.g.
-// token persistence).
+// connectAndRegister creates a session and commits it (see commitSession).
 //
 // gen is the generation captured when this attempt was launched. If the
 // server was torn down since (generation bumped), the freshly built session
 // is closed and discarded instead of being registered over whatever the
-// newer attempt is doing. This is what makes a config change that lands
-// mid-connect converge on the latest config rather than a stale one.
-func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, gen uint64, resolver config.VariableResolver, channelOptIn bool) (*ClientSession, error) {
+// newer attempt is doing, and its failure is not published either. This is
+// what makes a config change that lands mid-connect converge on the latest
+// config rather than a stale one.
+func connectAndRegister(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, gen uint64, resolver config.VariableResolver, channelOptIn bool) error {
 	session, err := createSession(ctx, cfg, name, m, resolver, channelOptIn)
 	if err != nil {
-		return nil, err
+		failIfCurrent(name, gen, err)
+		return err
 	}
+	return commitSession(ctx, cfg, name, m, gen, session)
+}
 
-	// A teardown ran while we were connecting: a newer attempt owns this
-	// server now. Bail before writing to any shared registry so we don't
-	// clobber the newer attempt's registrations; just drop our own session.
+// failIfCurrent publishes StateError for a failed attempt that owns no
+// registered session, but only while its generation is still current: a
+// stale attempt's failure must not overwrite a newer attempt's state.
+func failIfCurrent(name string, gen uint64, err error) {
+	if currentGen(name) == gen {
+		updateState(name, StateError, err, nil, Counts{})
+	}
+}
+
+// commitSession lists everything a fresh session exposes, then registers
+// it all and transitions to StateConnected. Nothing is written to the
+// shared registries until every listing has succeeded and the generation
+// is confirmed current, so a failed or stale attempt leaves no partial
+// registrations behind. On any failure the session is closed.
+func commitSession(ctx context.Context, cfg *config.ConfigStore, name string, m config.MCPConfig, gen uint64, session *ClientSession) error {
 	if currentGen(name) != gen {
 		slog.Debug("Discarding stale MCP session after config change", "name", name)
 		closeSession(name, session)
-		return nil, context.Canceled
+		return context.Canceled
 	}
 
-	toolCount, err := registerSessionTools(ctx, cfg, name, session)
+	l, err := fetchListings(ctx, session)
 	if err != nil {
-		slog.Error("Error listing tools", "error", err)
-		updateState(name, StateError, err, nil, Counts{})
+		slog.Error("Error listing MCP capabilities", "name", name, "error", err)
 		closeSession(name, session)
-		return nil, err
+		failIfCurrent(name, gen, err)
+		return err
 	}
 
-	prompts, err := getPrompts(ctx, session)
-	if err != nil {
-		slog.Error("Error listing prompts", "error", err)
-		updateState(name, StateError, err, nil, Counts{})
-		closeSession(name, session)
-		return nil, err
-	}
-
-	// Re-check before publishing: if a teardown landed during registration a
-	// newer attempt owns the registries now, so leave them and our session
-	// alone rather than overwriting its state.
 	if currentGen(name) != gen {
 		slog.Debug("Discarding stale MCP session after config change", "name", name)
 		closeSession(name, session)
-		return nil, context.Canceled
+		return context.Canceled
 	}
 
-	updatePrompts(name, prompts)
+	counts := l.register(cfg, name)
 	sessions.Set(name, session)
+	updateState(name, StateConnected, nil, session, counts, withConfig(m))
+	return nil
+}
 
-	updateState(name, StateConnected, nil, session, Counts{
-		Tools:   toolCount,
-		Prompts: len(prompts),
-	}, withConfig(m))
+// listings is everything a session exposes to the agent.
+type listings struct {
+	tools     []*Tool
+	prompts   []*Prompt
+	resources []*Resource
+}
 
-	return session, nil
+func fetchListings(ctx context.Context, session *ClientSession) (listings, error) {
+	var (
+		l   listings
+		err error
+	)
+	if l.tools, err = getTools(ctx, session); err != nil {
+		return l, fmt.Errorf("listing tools: %w", err)
+	}
+	if l.prompts, err = getPrompts(ctx, session); err != nil {
+		return l, fmt.Errorf("listing prompts: %w", err)
+	}
+	if l.resources, err = getResources(ctx, session); err != nil {
+		return l, fmt.Errorf("listing resources: %w", err)
+	}
+	return l, nil
+}
+
+// register writes the listings into the shared registries and returns
+// the counts that registered, after any configured tool filtering.
+func (l listings) register(cfg *config.ConfigStore, name string) Counts {
+	updatePrompts(name, l.prompts)
+	return Counts{
+		Tools:     updateTools(cfg, name, l.tools),
+		Prompts:   len(l.prompts),
+		Resources: updateResources(name, l.resources),
+	}
 }
 
 // persistOAuthToken saves the OAuth token from a session to the global
@@ -750,7 +782,7 @@ func goInitClient(ctx context.Context, cfg *config.ConfigStore, name string, m c
 				default:
 					err = fmt.Errorf("panic: %v", v)
 				}
-				updateState(name, StateError, err, nil, Counts{})
+				failIfCurrent(name, gen, err)
 				slog.Error("Panic in MCP client initialization", "error", err, "name", name)
 			}
 		}()
@@ -800,7 +832,7 @@ func mcpConfigFor(cfg *config.ConfigStore, name string) (config.MCPConfig, error
 // requireMCPOAuth rejects configurations the interactive OAuth flow
 // cannot serve: only HTTP servers with OAuth enabled qualify.
 func requireMCPOAuth(name string, m config.MCPConfig) error {
-	if !m.OAuth || m.Type != config.MCPHttp {
+	if !m.UsesOAuthFlow() {
 		return fmt.Errorf("mcp '%s' does not use OAuth authentication", name)
 	}
 	return nil
@@ -883,69 +915,30 @@ func getOrRenewClient(ctx context.Context, cfg *config.ConfigStore, name string)
 	gen := currentGen(name)
 	newSess, err := newSession(ctx, cfg, name, m, cfg.Resolver(), channelEnabled(cfg.Overrides().EnabledChannels, name))
 	if err != nil {
-		clearMCPData(name)
+		if currentGen(name) == gen {
+			clearMCPData(name)
+		}
 		// If an OAuth MCP fails to reconnect because the token is no
 		// longer valid, clear the stale token and prompt the user to
 		// re-authenticate instead of leaving it in an error state.
-		if m.OAuth && m.Type == config.MCPHttp {
+		if m.UsesOAuthFlow() && currentGen(name) == gen {
 			if m.OAuthToken != nil && isOAuthInitErr(err) {
 				clearOAuthToken(cfg, name)
 			}
 			updateState(name, StateNeedsAuth, nil, nil, Counts{})
 			slog.Info("MCP OAuth session expired, re-authentication required", "name", name, "error", err)
+			return nil, err
 		}
+		failIfCurrent(name, gen, err)
 		return nil, err
-	}
-
-	// A reconcile teardown ran while we were rebuilding: a newer attempt owns
-	// this server now. Bail before writing to any shared registry so we don't
-	// clobber the newer attempt's registrations; just drop our own session.
-	if currentGen(name) != gen {
-		closeSession(name, newSess)
-		return nil, context.Canceled
 	}
 
 	// StateError cleared this server's tools, prompts, and resources from the
-	// registry. Re-list and re-register them all on the fresh session and
-	// recompute the counts from what actually registered; otherwise the agent
-	// reconnects but the registries stay empty (the next tool call fails with
-	// "tool not found") while the reported counts still advertise capabilities
-	// that are no longer there.
-	var counts Counts
-	counts.Tools, err = registerSessionTools(ctx, cfg, name, newSess)
-	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
-		closeSession(name, newSess)
+	// registry; committing re-lists and re-registers them all on the fresh
+	// session, so the agent does not reconnect to empty registries.
+	if err := commitSession(ctx, cfg, name, m, gen, newSess); err != nil {
 		return nil, err
 	}
-
-	prompts, err := getPrompts(ctx, newSess)
-	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
-		closeSession(name, newSess)
-		return nil, err
-	}
-	updatePrompts(name, prompts)
-	counts.Prompts = len(prompts)
-
-	resources, err := getResources(ctx, newSess)
-	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
-		closeSession(name, newSess)
-		return nil, err
-	}
-	counts.Resources = updateResources(name, resources)
-
-	// Re-check before publishing: if a teardown landed during registration a
-	// newer attempt owns the registries now, so leave them and our session
-	// alone rather than overwriting its state.
-	if currentGen(name) != gen {
-		closeSession(name, newSess)
-		return nil, context.Canceled
-	}
-
-	sessions.Set(name, newSess)
-	updateState(name, StateConnected, nil, newSess, counts, withConfig(m))
 	return newSess, nil
 }
 
@@ -1013,7 +1006,11 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 	}
 	switch state {
 	case StateConnected:
-		info.ConnectedAt = time.Now()
+		// Count refreshes republish StateConnected for the same session;
+		// only a new connection restarts the "connected for" clock.
+		if prev.State != StateConnected || prev.Client != client {
+			info.ConnectedAt = time.Now()
+		}
 	case StateDisabled:
 		info.Config = config.MCPConfig{}
 		info.PendingConfig = nil
@@ -1028,8 +1025,11 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 		// path installed — leave it and its registrations alone. Closing
 		// "whatever is in the map" here let a stale error transition (e.g. a
 		// refresh that raced a renewal) tear down the healthy replacement.
-		switch {
-		case client != nil:
+		//
+		// A nil client is a failed attempt that never registered anything
+		// (connects commit only on success), so there is nothing of its to
+		// close; whatever is registered belongs to someone else.
+		if client != nil {
 			if cur, ok := sessions.Get(name); ok && cur == client {
 				sessions.Del(name)
 				allTools.Del(name)
@@ -1037,15 +1037,6 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 				allResources.Del(name)
 			}
 			closeSession(name, client)
-		default:
-			// No specific session errored (e.g. connect itself failed);
-			// anything still registered under this name is unusable.
-			if old, ok := sessions.Take(name); ok {
-				closeSession(name, old)
-			}
-			allTools.Del(name)
-			allPrompts.Del(name)
-			allResources.Del(name)
 		}
 		// Never publish a dead session on the state.
 		info.Client = nil
@@ -1069,7 +1060,6 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 
 	transport, oauthHandler, err := createTransport(mcpCtx, cfg, name, m, resolver)
 	if err != nil {
-		updateState(name, StateError, err, nil, Counts{})
 		slog.Error("Error creating MCP client", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()
@@ -1145,7 +1135,7 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 	session, err := client.Connect(mcpCtx, transport, nil)
 	if err != nil {
 		err = maybeStdioErr(err, transport)
-		updateState(name, StateError, maybeTimeoutErr(err, timeout), nil, Counts{})
+		err = maybeTimeoutErr(err, timeout)
 		slog.Error("MCP client failed to initialize", "error", err, "name", name)
 		cancel()
 		cancelTimer.Stop()

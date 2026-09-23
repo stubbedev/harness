@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
-	"log/slog"
 	"slices"
 	"strings"
 
@@ -111,44 +110,10 @@ func RunTool(ctx context.Context, cfg *config.ConfigStore, name, toolName string
 // RefreshTools gets the updated list of tools from the MCP and updates the
 // global state.
 func RefreshTools(ctx context.Context, cfg *config.ConfigStore, name string) {
-	// Serialize with session renewal so the registered session can't be
-	// swapped between the Get and the state update below — a stale error
-	// transition would otherwise tear down the healthy replacement.
-	mu := renewLock(name)
-	mu.Lock()
-	defer mu.Unlock()
-
-	session, ok := sessions.Get(name)
-	if !ok {
-		slog.Warn("Refresh tools: no session", "name", name)
-		return
-	}
-
-	tools, err := getTools(ctx, session)
-	if err != nil {
-		updateState(name, StateError, err, session, Counts{})
-		return
-	}
-
-	toolCount := updateTools(cfg, name, tools)
-
-	prev, _ := states.Get(name)
-	prev.Counts.Tools = toolCount
-	updateState(name, StateConnected, nil, session, prev.Counts)
-}
-
-// registerSessionTools lists the tools a live session exposes and writes them
-// into the shared registry, returning the number registered after any
-// configured allow/deny filtering. It is the single seam through which a
-// (re)connected session's tools enter the registry, so both the initial
-// connect and a lazy renew repopulate the tool list the agent sends to the LLM
-// instead of leaving it empty.
-func registerSessionTools(ctx context.Context, cfg *config.ConfigStore, name string, sess *ClientSession) (int, error) {
-	tools, err := getTools(ctx, sess)
-	if err != nil {
-		return 0, err
-	}
-	return updateTools(cfg, name, tools), nil
+	refreshListing(ctx, name, "tools", getTools,
+		func(tools []*Tool) int { return updateTools(cfg, name, tools) },
+		func(c *Counts, n int) { c.Tools = n },
+	)
 }
 
 func getTools(ctx context.Context, session *ClientSession) ([]*Tool, error) {

@@ -416,7 +416,7 @@ func TestCreateTransport_HeadersResolution(t *testing.T) {
 // csync.Map and each assertion reads the entry written by the call
 // under test. They do use unique MCP names per subtest to keep them
 // independent regardless of ordering.
-func TestCreateSession_ResolutionFailureUpdatesState(t *testing.T) {
+func TestConnect_ResolutionFailureUpdatesState(t *testing.T) {
 	r := shellResolverWithPath(t, nil)
 
 	tests := []struct {
@@ -517,9 +517,8 @@ func TestCreateSession_ResolutionFailureUpdatesState(t *testing.T) {
 			states.Del(tc.mcpName)
 			t.Cleanup(func() { states.Del(tc.mcpName) })
 
-			sess, err := createSession(t.Context(), nil, tc.mcpName, tc.cfg, r, false)
+			err := connectAndRegister(t.Context(), nil, tc.mcpName, tc.cfg, currentGen(tc.mcpName), r, false)
 			require.Error(t, err)
-			require.Nil(t, sess)
 			require.Contains(t, err.Error(), tc.wantErrContains)
 
 			info, ok := GetState(tc.mcpName)

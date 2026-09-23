@@ -107,7 +107,7 @@ func TestUpdateState_ErrorClosesSessionAndClearsTools(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, sessCtx.Err(), "session context must be live before the error")
 
-	updateState(name, StateError, errors.New("stdio pipe broke"), nil, Counts{Tools: 1})
+	updateState(name, StateError, errors.New("stdio pipe broke"), sess, Counts{Tools: 1})
 
 	// The dead session is removed from the map...
 	_, ok = sessions.Get(name)
@@ -259,11 +259,13 @@ func TestUpdateState_ErrorClearsPromptsAndResources(t *testing.T) {
 		states.Del(name)
 	})
 
+	sess, _ := liveSession(t, "do_thing")
+	sessions.Set(name, sess)
 	allTools.Set(name, []*Tool{{Name: "do_thing"}})
 	allPrompts.Set(name, []*Prompt{{Name: "a_prompt"}})
 	allResources.Set(name, []*Resource{{Name: "a_resource"}})
 
-	updateState(name, StateError, errors.New("pipe broke"), nil, Counts{})
+	updateState(name, StateError, errors.New("pipe broke"), sess, Counts{})
 
 	_, ok := allTools.Get(name)
 	require.False(t, ok, "errored session's tools must be cleared")
@@ -380,10 +382,10 @@ func TestGetOrRenewClient_UnknownServerErrorsWithConfiguredNames(t *testing.T) {
 	require.ErrorContains(t, err, "available: none are configured")
 }
 
-// TestRegisterSessionTools_PopulatesRegistry pins that registerSessionTools —
+// TestRegisterListings_PopulatesRegistry pins that committed listings —
 // the single seam through which a (re)connected session's tools enter the
 // registry — lists a live session's tools and writes them to allTools.
-func TestRegisterSessionTools_PopulatesRegistry(t *testing.T) {
+func TestRegisterListings_PopulatesRegistry(t *testing.T) {
 	const name = "test-register-tools"
 	t.Cleanup(func() { allTools.Del(name) })
 
@@ -392,7 +394,7 @@ func TestRegisterSessionTools_PopulatesRegistry(t *testing.T) {
 
 	cfg := config.NewTestStore(&config.Config{MCP: config.MCPs{name: {Type: config.MCPStdio}}})
 
-	count, err := registerSessionTools(context.Background(), cfg, name, sess)
+	count, err := registerListings(t, cfg, name, sess)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 
@@ -424,14 +426,14 @@ func TestSessionErrorThenRenew_RestoresTools(t *testing.T) {
 	// 1. Initial connect registers the tool (mirrors initClient).
 	sess1, _ := liveSession(t, "send_message")
 	sessions.Set(name, sess1)
-	_, err := registerSessionTools(context.Background(), cfg, name, sess1)
+	_, err := registerListings(t, cfg, name, sess1)
 	require.NoError(t, err)
 	_, ok := allTools.Get(name)
 	require.True(t, ok, "tool should be registered after the initial connect")
 
 	// 2. The session drops mid-conversation -> StateError. Post-fix this clears
 	//    the tools and closes the dead session.
-	updateState(name, StateError, errors.New("pipe broke"), nil, Counts{Tools: 1})
+	updateState(name, StateError, errors.New("pipe broke"), sess1, Counts{Tools: 1})
 	_, ok = allTools.Get(name)
 	require.False(t, ok, "tools must be cleared when the session errors")
 	_, ok = sessions.Get(name)
@@ -441,7 +443,7 @@ func TestSessionErrorThenRenew_RestoresTools(t *testing.T) {
 	//    tools. The bug was that it never did: the LLM's tool list stayed empty
 	//    and every subsequent call returned "tool not found".
 	sess2, _ := liveSession(t, "send_message")
-	count, err := registerSessionTools(context.Background(), cfg, name, sess2)
+	count, err := registerListings(t, cfg, name, sess2)
 	require.NoError(t, err)
 	sessions.Set(name, sess2)
 	require.Equal(t, 1, count)
@@ -566,4 +568,65 @@ func TestStdioCheck_DoesNotDuplicateArgv0(t *testing.T) {
 		"the re-run must execute the original command, not a duplicated argv0")
 	require.NotContains(t, err.Error(), "cannot execute binary file",
 		"a duplicated argv0 makes the shell try to exec itself as a script")
+}
+
+// A failed connect owns no session, so its StateError must leave a healthy
+// registered session alone, and a stale attempt must not publish at all.
+func TestFailedConnectKeepsHealthySession(t *testing.T) {
+	const name = "test-failed-connect-keeps-healthy"
+	t.Cleanup(func() {
+		if s, ok := sessions.Take(name); ok {
+			_ = s.Close()
+		}
+		allTools.Del(name)
+		states.Del(name)
+	})
+
+	healthy, healthyCtx := liveSession(t, "t")
+	sessions.Set(name, healthy)
+	allTools.Set(name, []*Tool{{Name: "t"}})
+	updateState(name, StateConnected, nil, healthy, Counts{Tools: 1})
+
+	stale := currentGen(name)
+	g, _ := gens.Get(name)
+	gens.Set(name, g+1)
+	failIfCurrent(name, stale, errors.New("old attempt failed"))
+	info, _ := GetState(name)
+	require.Equal(t, StateConnected, info.State, "a stale failure must not publish")
+
+	updateState(name, StateError, errors.New("connect failed"), nil, Counts{})
+	got, ok := sessions.Get(name)
+	require.True(t, ok)
+	require.Same(t, healthy, got)
+	require.NoError(t, healthyCtx.Err(), "healthy session must stay open")
+	_, ok = allTools.Get(name)
+	require.True(t, ok)
+}
+
+// Republishing StateConnected for the same session is a count refresh and
+// must not restart the connected-for clock.
+func TestConnectedAtSurvivesCountRefresh(t *testing.T) {
+	const name = "test-connected-at"
+	t.Cleanup(func() {
+		sessions.Del(name)
+		states.Del(name)
+	})
+
+	sess, _ := liveSession(t, "t")
+	updateState(name, StateConnected, nil, sess, Counts{Tools: 1})
+	first, _ := GetState(name)
+	updateState(name, StateConnected, nil, sess, Counts{Tools: 2})
+	second, _ := GetState(name)
+	require.Equal(t, first.ConnectedAt, second.ConnectedAt)
+}
+
+// registerListings fetches and registers a session's listings the way a
+// commit does, returning the registered tool count.
+func registerListings(t *testing.T, cfg *config.ConfigStore, name string, sess *ClientSession) (int, error) {
+	t.Helper()
+	l, err := fetchListings(t.Context(), sess)
+	if err != nil {
+		return 0, err
+	}
+	return l.register(cfg, name).Tools, nil
 }

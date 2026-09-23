@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"iter"
-	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stubbedev/harness/internal/config"
@@ -48,30 +47,13 @@ func GetPromptMessages(ctx context.Context, cfg *config.ConfigStore, clientName,
 // RefreshPrompts gets the updated list of prompts from the MCP and updates the
 // global state.
 func RefreshPrompts(ctx context.Context, name string) {
-	// Serialize with session renewal so the registered session can't be
-	// swapped between the Get and the state update below — a stale error
-	// transition would otherwise tear down the healthy replacement.
-	mu := renewLock(name)
-	mu.Lock()
-	defer mu.Unlock()
-
-	session, ok := sessions.Get(name)
-	if !ok {
-		slog.Warn("Refresh prompts: no session", "name", name)
-		return
-	}
-
-	prompts, err := getPrompts(ctx, session)
-	if err != nil {
-		updateState(name, StateError, err, session, Counts{})
-		return
-	}
-
-	updatePrompts(name, prompts)
-
-	prev, _ := states.Get(name)
-	prev.Counts.Prompts = len(prompts)
-	updateState(name, StateConnected, nil, session, prev.Counts)
+	refreshListing(ctx, name, "prompts", getPrompts,
+		func(prompts []*Prompt) int {
+			updatePrompts(name, prompts)
+			return len(prompts)
+		},
+		func(c *Counts, n int) { c.Prompts = n },
+	)
 }
 
 func getPrompts(ctx context.Context, c *ClientSession) ([]*Prompt, error) {
