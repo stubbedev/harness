@@ -107,37 +107,21 @@ type DiagnosticsToolRenderContext struct {
 
 // RenderTool implements the [ToolRenderer] interface.
 func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	if opts.IsPending() {
-		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
-	}
-
 	var params tools.DiagnosticsParams
-	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
-
-	// Show "project" if no file path, otherwise show the file path.
-	mainParam := "project"
-	if params.FilePath != "" {
-		mainParam = fsext.PrettyPath(params.FilePath)
-	}
-
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, mainParam)
-	if opts.Compact {
-		return header
-	}
-
-	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
-		return joinToolParts(header, earlyState)
-	}
-
-	if opts.HasEmptyResult() {
-		return header
-	}
-
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, width, opts.ExpandedContent))
-	if note := d.liveNote(params.FilePath); note != "" {
-		body = joinToolParts(body, sty.Tool.TodoStatusNote.Render(note))
-	}
-	return joinToolParts(header, body)
+	return renderStandardTool(sty, width, opts, ToolDisplayName(opts.ToolCall), func() ([]string, bool) {
+		_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
+		// Show "project" if no file path, otherwise show the file path.
+		if params.FilePath == "" {
+			return []string{"project"}, true
+		}
+		return []string{fsext.PrettyPath(params.FilePath)}, true
+	}, func() string {
+		body := toolPlainBody(sty, opts, width)
+		if note := d.liveNote(params.FilePath); note != "" {
+			body = joinToolParts(body, sty.Tool.TodoStatusNote.Render(note))
+		}
+		return body
+	})
 }
 
 // liveNote describes the file's current state next to the report, when the

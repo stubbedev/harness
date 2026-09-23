@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -45,35 +44,16 @@ func (q *QuestionToolRenderContext) parseBlocks(content string) []questionBlock 
 
 // RenderTool implements the [ToolRenderer] interface.
 func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	if opts.IsPending() {
-		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
-	}
-
-	params, ok := q.parseParams(opts.ToolCall.Input)
-	if !ok {
-		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
-	}
-
-	headerText := questionSummary(params)
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, headerText)
-	if opts.Compact {
-		return header
-	}
-
-	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
-		return joinToolParts(header, earlyState)
-	}
-
-	if opts.HasEmptyResult() {
-		return header
-	}
-
-	body := formatQuestionAnswers(sty, q.parseBlocks(opts.Result.Content), width)
-	if body == "" {
-		return header
-	}
-
-	return joinToolParts(header, sty.Tool.Body.Render(body))
+	return renderStandardTool(sty, width, opts, ToolDisplayName(opts.ToolCall), func() ([]string, bool) {
+		params, ok := q.parseParams(opts.ToolCall.Input)
+		return []string{questionSummary(params)}, ok
+	}, func() string {
+		body := formatQuestionAnswers(sty, q.parseBlocks(opts.Result.Content), width)
+		if body == "" {
+			return ""
+		}
+		return sty.Tool.Body.Render(body)
+	})
 }
 
 // questionSummary builds a short header summary from the question params.

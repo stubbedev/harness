@@ -599,6 +599,63 @@ func pendingToolView(sty *styles.Styles, opts *ToolRenderOpts, name, detail stri
 	return header
 }
 
+// renderStandardTool renders the shape every standard tool shares: the
+// pending view, then the header, then - unless the call is compact, in an
+// early state (error, canceled, running) or without result content - the
+// body. params is only called for a settled call, since a pending one may
+// still be streaming its input; returning false renders an "Invalid
+// parameters" error instead. body renders the settled result; nil renders
+// it as plain text, and an empty string leaves the header alone.
+func renderStandardTool(
+	sty *styles.Styles,
+	width int,
+	opts *ToolRenderOpts,
+	name string,
+	params func() ([]string, bool),
+	body func() string,
+) string {
+	if opts.IsPending() {
+		return pendingToolView(sty, opts, name, "", width)
+	}
+	toolParams, ok := params()
+	if !ok {
+		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
+	}
+	header := toolHeader(sty, opts.Status, name, width, opts, toolParams...)
+	if opts.Compact {
+		return header
+	}
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+		return joinToolParts(header, earlyState)
+	}
+	if opts.HasEmptyResult() {
+		return header
+	}
+	if body == nil {
+		return joinToolParts(header, toolPlainBody(sty, opts, width))
+	}
+	return joinToolParts(header, body())
+}
+
+// toolPlainBody renders the result content as plain text.
+func toolPlainBody(sty *styles.Styles, opts *ToolRenderOpts, width int) string {
+	return sty.Tool.Body.Render(toolOutputPlainContent(sty, opts.Result.Content, width, opts.ExpandedContent))
+}
+
+// jsonToolParams renders a call's whole input as its one header param, for
+// tools with no dedicated renderer.
+func jsonToolParams(input string) ([]string, bool) {
+	var params map[string]any
+	if err := json.Unmarshal([]byte(input), &params); err != nil {
+		return nil, false
+	}
+	if len(params) == 0 {
+		return nil, true
+	}
+	parsed, _ := json.Marshal(params)
+	return []string{string(parsed)}, true
+}
+
 // waitingForToolMessage builds the "Waiting for tool response..." label,
 // including how long the tool has been running and, when a turn is
 // active, the total elapsed turn time.
