@@ -220,18 +220,41 @@ func (s *Service) truncateConversation(ctx context.Context, sessionID, messageID
 	if err != nil {
 		return nil
 	}
-	if sess.SummaryMessageID == "" {
-		return nil
-	}
-	if slices.ContainsFunc(doomed, func(m message.Message) bool {
-		return m.ID == sess.SummaryMessageID
-	}) {
-		sess.SummaryMessageID = ""
+	if clearDoomedPointers(&sess, doomed) {
 		if _, err := s.sessions.Save(ctx, sess); err != nil {
-			slog.Warn("Failed to clear summary pointer after rewind", "error", err)
+			slog.Warn("Failed to clear summary pointers after rewind", "error", err)
 		}
 	}
 	return nil
+}
+
+// clearDoomedPointers drops every session pointer into the deleted
+// messages. A compaction whose boundary went stands for conversation the
+// user rewound away, so its summary goes with it; an aged mark that went
+// only resets which tool results are stubbed. It reports whether anything
+// changed.
+func clearDoomedPointers(sess *session.Session, doomed []message.Message) bool {
+	gone := func(id string) bool {
+		return id != "" && slices.ContainsFunc(doomed, func(m message.Message) bool {
+			return m.ID == id
+		})
+	}
+	changed := false
+	if gone(sess.SummaryMessageID) {
+		sess.SummaryMessageID = ""
+		changed = true
+	}
+	if gone(sess.CompactionBoundaryID) {
+		sess.CompactionSummary = ""
+		sess.CompactionBoundaryID = ""
+		sess.CompactionAgedID = ""
+		changed = true
+	}
+	if gone(sess.CompactionAgedID) {
+		sess.CompactionAgedID = ""
+		changed = true
+	}
+	return changed
 }
 
 // DeleteSession removes the snapshot objects a session accumulated.

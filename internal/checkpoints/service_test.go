@@ -302,3 +302,32 @@ func TestRejectsUnsafeIdentifiers(t *testing.T) {
 	// A commit has to look like an object name before it goes back to git.
 	require.Error(t, svc.restore(t.Context(), "session-1", "--upload-pack=touch"))
 }
+
+// TestClearDoomedPointers: a rewind past the compaction boundary drops
+// the summary that stood for the rewound conversation, not only the
+// summary message pointer.
+func TestClearDoomedPointers(t *testing.T) {
+	t.Parallel()
+
+	doomed := []message.Message{{ID: "b"}, {ID: "c"}}
+
+	sess := session.Session{
+		SummaryMessageID:     "a",
+		CompactionSummary:    "old summary",
+		CompactionBoundaryID: "b",
+		CompactionAgedID:     "a",
+	}
+	require.True(t, clearDoomedPointers(&sess, doomed))
+	require.Equal(t, "a", sess.SummaryMessageID)
+	require.Empty(t, sess.CompactionSummary)
+	require.Empty(t, sess.CompactionBoundaryID)
+	require.Empty(t, sess.CompactionAgedID)
+
+	sess = session.Session{CompactionSummary: "s", CompactionBoundaryID: "a", CompactionAgedID: "c"}
+	require.True(t, clearDoomedPointers(&sess, doomed))
+	require.Equal(t, "s", sess.CompactionSummary)
+	require.Empty(t, sess.CompactionAgedID)
+
+	sess = session.Session{CompactionBoundaryID: "a"}
+	require.False(t, clearDoomedPointers(&sess, doomed))
+}
