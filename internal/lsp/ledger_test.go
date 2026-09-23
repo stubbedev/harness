@@ -27,7 +27,7 @@ func TestLedgerDiffReportsOnlyWhatIsNew(t *testing.T) {
 	if !slices.Equal(added, []string{"Error: c"}) {
 		t.Fatalf("added = %v", added)
 	}
-	if !slices.Equal(resolved, []string{"Error: a"}) {
+	if len(resolved) != 1 || resolved[0].Fingerprint != "a" || resolved[0].Line != "Error: a" {
 		t.Fatalf("resolved = %v", resolved)
 	}
 }

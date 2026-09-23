@@ -3,6 +3,7 @@ package lsp
 import (
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -22,6 +23,15 @@ type Ledger struct {
 	sessions map[string]map[string]string
 }
 
+// ResolvedDiagnostic is a problem the servers no longer report. It carries the
+// fingerprint it was reported under and the line as it last read, so a report
+// can name what went away and a consumer holding a live snapshot can match
+// the problem up with where it last sat.
+type ResolvedDiagnostic struct {
+	Fingerprint string
+	Line        string
+}
+
 // NewLedger creates an empty ledger.
 func NewLedger() *Ledger {
 	return &Ledger{sessions: make(map[string]map[string]string)}
@@ -29,14 +39,14 @@ func NewLedger() *Ledger {
 
 // Diff records current as everything the session has now been shown and
 // reports what changed since the last call: added holds the formatted lines
-// for diagnostics that are new, resolved holds the lines, as they last read,
-// for diagnostics that are gone. Both are sorted so repeated reports of the
-// same state read the same way.
+// for diagnostics that are new, resolved holds what is gone, keyed by
+// fingerprint with the line as it last read. Both are sorted so repeated
+// reports of the same state read the same way.
 //
 // The whole read-modify-write is held under one lock: tool calls run in
 // parallel, and two reports racing here would each see the other's
 // diagnostics as already-reported.
-func (l *Ledger) Diff(session string, current map[string]string) (added, resolved []string) {
+func (l *Ledger) Diff(session string, current map[string]string) (added []string, resolved []ResolvedDiagnostic) {
 	if l == nil {
 		return nil, nil
 	}
@@ -51,13 +61,15 @@ func (l *Ledger) Diff(session string, current map[string]string) (added, resolve
 	}
 	for fingerprint, line := range previous {
 		if _, stillThere := current[fingerprint]; !stillThere {
-			resolved = append(resolved, line)
+			resolved = append(resolved, ResolvedDiagnostic{Fingerprint: fingerprint, Line: line})
 		}
 	}
 	l.sessions[session] = maps.Clone(current)
 
 	slices.Sort(added)
-	slices.Sort(resolved)
+	slices.SortFunc(resolved, func(a, b ResolvedDiagnostic) int {
+		return strings.Compare(a.Line, b.Line)
+	})
 	return added, resolved
 }
 

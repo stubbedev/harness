@@ -127,13 +127,17 @@ func openInLSPs(
 // keyed by a fingerprint that identifies the problem rather than its position.
 // Line and column are left out of the key on purpose: inserting a line above
 // an existing warning moves every diagnostic below it, and keying on position
-// would report the whole file as newly broken. The value is the formatted line
-// including the current position, so what gets printed is still accurate.
-func diagnosticLines(manager *lsp.Manager) (lines map[string]string, paths map[string]string) {
-	lines = make(map[string]string)
-	paths = make(map[string]string)
+// would report the whole file as newly broken. The value carries the formatted
+// line including the current position, so what gets printed is still accurate.
+type diagnosticEntry struct {
+	line string
+	path string
+}
+
+func diagnosticLines(manager *lsp.Manager) (entries map[string]diagnosticEntry) {
+	entries = make(map[string]diagnosticEntry)
 	if manager == nil {
-		return lines, paths
+		return entries
 	}
 	for lspName, client := range manager.Clients().Seq2() {
 		for location, diags := range client.GetDiagnostics() {
@@ -144,12 +148,43 @@ func diagnosticLines(manager *lsp.Manager) (lines map[string]string, paths map[s
 			}
 			for _, diag := range diags {
 				key := fingerprint(path, diag, lspName)
-				lines[key] = formatDiagnostic(path, diag, lspName)
-				paths[key] = path
+				entries[key] = diagnosticEntry{
+					line: formatDiagnostic(path, diag, lspName),
+					path: path,
+				}
 			}
 		}
 	}
+	return entries
+}
+
+// entryLines flattens the entries into the (lines, paths) pair the report
+// writers consume.
+func entryLines(entries map[string]diagnosticEntry) (lines, paths map[string]string) {
+	lines = make(map[string]string, len(entries))
+	paths = make(map[string]string, len(entries))
+	for key, entry := range entries {
+		lines[key] = entry.line
+		paths[key] = entry.path
+	}
 	return lines, paths
+}
+
+// resolvedLines names the problems a report is retiring. A problem that is
+// still live at a new position is described where it sits now; one the servers
+// dropped entirely keeps the position it had when it was last reported. Every
+// line carries the Resolved prefix, so a consumer can tell a resolution from a
+// standing problem without parsing the section around it.
+func resolvedLines(resolved []lsp.ResolvedDiagnostic, live map[string]diagnosticEntry) []string {
+	lines := make([]string, 0, len(resolved))
+	for _, r := range resolved {
+		line := r.Line
+		if entry, ok := live[r.Fingerprint]; ok {
+			line = entry.line
+		}
+		lines = append(lines, "Resolved: "+line)
+	}
+	return lines
 }
 
 // reportDiagnostics describes what the language servers have learned since the
@@ -174,7 +209,8 @@ func reportDiagnostics(ctx context.Context, manager *lsp.Manager, grace time.Dur
 		return ""
 	}
 
-	lines, paths := diagnosticLines(manager)
+	entries := diagnosticLines(manager)
+	lines, paths := entryLines(entries)
 	added, resolved := manager.Ledger().Diff(GetSessionFromContext(ctx), lines)
 	if len(added) == 0 && len(resolved) == 0 {
 		return ""
@@ -191,7 +227,7 @@ func reportDiagnostics(ctx context.Context, manager *lsp.Manager, grace time.Dur
 		writeDiagnosticSection(&output, "new_file_diagnostics", inFocus)
 		writeDiagnosticSection(&output, "new_project_diagnostics", elsewhere)
 	}
-	writeDiagnosticSection(&output, "resolved_diagnostics", resolved)
+	writeDiagnosticSection(&output, "resolved_diagnostics", sortDiagnostics(resolvedLines(resolved, entries)))
 	writeSummary(&output, lines, paths, focus)
 	out := output.String()
 	slog.Debug("Diagnostics", "output", out)
@@ -205,7 +241,8 @@ func fullDiagnosticsReport(ctx context.Context, manager *lsp.Manager, focus ...s
 	if manager == nil {
 		return ""
 	}
-	lines, paths := diagnosticLines(manager)
+	entries := diagnosticLines(manager)
+	lines, paths := entryLines(entries)
 	manager.Ledger().Record(GetSessionFromContext(ctx), lines)
 
 	all := make([]string, 0, len(lines))
