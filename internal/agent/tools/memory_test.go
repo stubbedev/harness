@@ -158,3 +158,55 @@ func TestMemoryToolValidation(t *testing.T) {
 	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"read","id":"nope"}`})
 	require.ErrorContains(t, err, "not found")
 }
+
+func TestMemoryToolEditFuzzyTitle(t *testing.T) {
+	tool := newMemoryToolForTest(t)
+
+	runMemoryTool(t, tool, `{"action":"save","title":"Diagnostics relay","content":"the sweep runs at turn end"}`)
+
+	// A slightly-off title still finds and updates the existing memory,
+	// without renaming it and without duplicating it.
+	edited := runMemoryTool(t, tool, `{"action":"edit","title":"Diagnostics relays","content":"sweep runs when a turn ends"}`)
+	require.Contains(t, edited.Content, "Edited memory")
+	require.Contains(t, edited.Content, "[diagnostics-relay]")
+	require.Contains(t, edited.Content, "Matched by fuzzy title")
+
+	listed := runMemoryTool(t, tool, `{"action":"list"}`)
+	require.Contains(t, listed.Content, "1 memories", "fuzzy edit must not duplicate")
+
+	read := runMemoryTool(t, tool, `{"action":"read","id":"diagnostics-relay"}`)
+	require.Contains(t, read.Content, "(project) Diagnostics relay", "fuzzy edit must not rename")
+	require.Contains(t, read.Content, "sweep runs when a turn ends")
+}
+
+func TestMemoryToolEditAmbiguousTitleAsks(t *testing.T) {
+	tool := newMemoryToolForTest(t)
+
+	runMemoryTool(t, tool, `{"action":"save","title":"Build commands","content":"just build"}`)
+	runMemoryTool(t, tool, `{"action":"save","title":"Test commands","content":"just test"}`)
+
+	// A title that plausibly matches several memories must not guess.
+	_, err := tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","title":"commands","content":"x"}`})
+	require.ErrorContains(t, err, "closest matches")
+	require.ErrorContains(t, err, "[build-commands]")
+	require.ErrorContains(t, err, "[test-commands]")
+
+	// Editing by id still works when the title is ambiguous.
+	byID := runMemoryTool(t, tool, `{"action":"edit","id":"build-commands","content":"go build ./..."}`)
+	require.Contains(t, byID.Content, "Edited memory")
+}
+
+func TestMemoryToolSaveWarnsOnNearDuplicate(t *testing.T) {
+	tool := newMemoryToolForTest(t)
+
+	runMemoryTool(t, tool, `{"action":"save","title":"Build commands","content":"just build"}`)
+
+	dup := runMemoryTool(t, tool, `{"action":"save","title":"Build command setup","content":"go build ./..."}`)
+	require.Contains(t, dup.Content, "near-duplicate")
+	require.Contains(t, dup.Content, "[build-commands]")
+
+	// Re-saving the same title upserts and must not warn.
+	same := runMemoryTool(t, tool, `{"action":"save","title":"Build commands","content":"just build && just test"}`)
+	require.Contains(t, same.Content, "Updated memory")
+	require.NotContains(t, same.Content, "near-duplicate")
+}

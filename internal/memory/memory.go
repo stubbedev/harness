@@ -122,6 +122,9 @@ type SaveResult struct {
 type Service interface {
 	Save(ctx context.Context, input SaveInput) (SaveResult, error)
 	Get(ctx context.Context, id string) (Item, error)
+	// GetByTitle returns the memory whose title matches exactly,
+	// case-insensitively, or ErrNotFound.
+	GetByTitle(ctx context.Context, title string) (Item, error)
 	Search(ctx context.Context, query string) ([]Item, error)
 	List(ctx context.Context) ([]Item, error)
 	Delete(ctx context.Context, id string) error
@@ -273,6 +276,14 @@ func (s *service) Get(ctx context.Context, id string) (Item, error) {
 	item.UseCount++
 	item.LastUsedAt = time.Now().Unix()
 	return item, nil
+}
+
+func (s *service) GetByTitle(ctx context.Context, title string) (Item, error) {
+	row, err := s.q.GetMemoryByTitle(ctx, title)
+	if err != nil {
+		return Item{}, mapErr(title, err)
+	}
+	return fromDB(row), nil
 }
 
 func (s *service) List(ctx context.Context) ([]Item, error) {

@@ -109,6 +109,20 @@ func TestGetTouchesUsageAndReportsNotFound(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
+func TestGetByTitle(t *testing.T) {
+	svc := newTestService(t, nil)
+
+	_, err := svc.Save(t.Context(), SaveInput{Title: "Build commands", Content: "just build"})
+	require.NoError(t, err)
+
+	got, err := svc.GetByTitle(t.Context(), "build COMMANDS")
+	require.NoError(t, err)
+	require.Equal(t, "build-commands", got.ID)
+
+	_, err = svc.GetByTitle(t.Context(), "nope")
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
 func TestSearchMatchesTitleAndContent(t *testing.T) {
 	svc := newTestService(t, nil)
 

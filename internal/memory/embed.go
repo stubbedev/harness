@@ -60,6 +60,13 @@ func addFeature(vec []float32, feature string, weight float64) {
 	vec[idx] += float32(sign * weight)
 }
 
+// Similarity reports how close two texts embed: 1 for identical text,
+// near 0 for unrelated. It backs fuzzy title matching during edit
+// resolution and near-duplicate detection on save.
+func Similarity(a, b string) float64 {
+	return cosine(Embed(a), Embed(b))
+}
+
 // cosine returns the cosine similarity of two unit vectors, which is
 // their dot product. Vectors that came out all-zero (empty text)
 // yield zero similarity against anything.

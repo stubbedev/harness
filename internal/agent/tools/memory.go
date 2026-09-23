@@ -17,6 +17,20 @@ var memoryDescription string
 
 const MemoryToolName = "memory"
 
+const (
+	// minTitleMatch is the title similarity above which a single
+	// search hit is accepted as the edit target of a slightly-off
+	// title instead of erroring.
+	minTitleMatch = 0.6
+	// minTitleMatchMargin is how much a candidate's title similarity
+	// must lead the runner-up by before a fuzzy title is auto-resolved
+	// instead of asking; embedding hash noise alone must not decide.
+	minTitleMatchMargin = 0.1
+	// nearDupSimilarity is the title similarity above which saving a
+	// new memory warns that it probably duplicates an existing one.
+	nearDupSimilarity = 0.6
+)
+
 type MemoryParams struct {
 	Action   string `json:"action" enum:"save,edit,read,search,list,delete"`
 	ID       string `json:"id,omitempty" description:"Memory id (required for delete; optional for save, edit and read)"`
@@ -86,20 +100,46 @@ func memorySave(ctx context.Context, svc memory.Service, params MemoryParams) (f
 	if result.Redactions > 0 {
 		response += fmt.Sprintf("\n\nNote: %d likely secret(s) were redacted before saving.", result.Redactions)
 	}
+	if result.Created {
+		if dup, ok := nearDuplicate(ctx, svc, result.Item); ok {
+			response += fmt.Sprintf("\n\nWarning: near-duplicate memory exists: %s. If this is the same note, edit that memory instead of keeping both.", dup.IndexLine())
+		}
+	}
 	return fantasy.NewTextResponse(response), nil
 }
 
-// memoryEdit updates an existing memory identified by id or exact
-// title. Unlike save it never creates: when the target does not exist
-// it errors and points at save instead, so a typo'd title cannot
-// silently duplicate a memory. Omitted category and pinned keep the
-// stored values.
+// nearDuplicate finds an existing memory whose title is so close to a
+// newly created one that both are probably the same note. Slug
+// equality already upserts silently; this catches paraphrased titles
+// that would otherwise mint a near-copy.
+func nearDuplicate(ctx context.Context, svc memory.Service, saved memory.Item) (memory.Item, bool) {
+	matches, err := svc.Search(ctx, saved.Title)
+	if err != nil {
+		return memory.Item{}, false
+	}
+	for _, m := range matches {
+		if m.ID != saved.ID && memory.Similarity(saved.Title, m.Title) >= nearDupSimilarity {
+			return m, true
+		}
+	}
+	return memory.Item{}, false
+}
+
+// memoryEdit updates an existing memory identified by id or title.
+// A title that is not exact falls back to the ranked search: one
+// clearly matching memory is edited (keeping its original title),
+// otherwise the closest candidates are returned for the next call.
+// Unlike save it never creates: when the target does not exist it
+// errors and points at save, so a typo'd title cannot silently
+// duplicate a memory. Omitted category and pinned keep the stored
+// values.
 func memoryEdit(ctx context.Context, svc memory.Service, params MemoryParams) (fantasy.ToolResponse, error) {
 	if params.Content == "" {
 		return fantasy.ToolResponse{}, errors.New("content is required for edit")
 	}
 
 	var existing memory.Item
+	fuzzy := false
 	switch {
 	case params.ID != "":
 		item, err := svc.Get(ctx, params.ID)
@@ -108,26 +148,22 @@ func memoryEdit(ctx context.Context, svc memory.Service, params MemoryParams) (f
 		}
 		existing = item
 	case params.Title != "":
-		matches, err := svc.Search(ctx, params.Title)
+		item, err := resolveByTitle(ctx, svc, params.Title)
 		if err != nil {
 			return fantasy.ToolResponse{}, err
 		}
-		found := false
-		for _, m := range matches {
-			if strings.EqualFold(strings.TrimSpace(m.Title), strings.TrimSpace(params.Title)) {
-				existing = m
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fantasy.ToolResponse{}, fmt.Errorf("no memory titled %q; use save to create it", params.Title)
-		}
+		existing = item
+		// A fuzzy match keeps the stored title: the caller's spelling
+		// is not a rename request.
+		fuzzy = existing.Title != params.Title
 	default:
 		return fantasy.ToolResponse{}, errors.New("id or title is required for edit")
 	}
 
-	title := cmp.Or(params.Title, existing.Title)
+	title := existing.Title
+	if !fuzzy {
+		title = cmp.Or(params.Title, existing.Title)
+	}
 	category := existing.Category
 	if params.Category != "" {
 		parsed, err := memory.ParseCategory(params.Category)
@@ -149,10 +185,46 @@ func memoryEdit(ctx context.Context, svc memory.Service, params MemoryParams) (f
 	}
 
 	response := fmt.Sprintf("Edited memory %s\n\n%s", result.Item.IndexLine(), result.Item.Content)
+	if fuzzy {
+		response = "Matched by fuzzy title.\n\n" + response
+	}
 	if result.Redactions > 0 {
 		response += fmt.Sprintf("\n\nNote: %d likely secret(s) were redacted before saving.", result.Redactions)
 	}
 	return fantasy.NewTextResponse(response), nil
+}
+
+// resolveByTitle finds the memory an edit targets: exact title first,
+// then the ranked search. A single clearly-similar hit is returned as
+// the target; otherwise the closest candidates come back in the error
+// so the caller can retry with an id. It never guesses between
+// several memories.
+func resolveByTitle(ctx context.Context, svc memory.Service, title string) (memory.Item, error) {
+	item, err := svc.GetByTitle(ctx, title)
+	if err == nil {
+		return item, nil
+	}
+	if !errors.Is(err, memory.ErrNotFound) {
+		return memory.Item{}, err
+	}
+
+	matches, err := svc.Search(ctx, title)
+	if err != nil {
+		return memory.Item{}, err
+	}
+	if len(matches) == 0 {
+		return memory.Item{}, fmt.Errorf("no memory titled %q; use save to create it", title)
+	}
+
+	best := matches[0]
+	bestSim := memory.Similarity(title, best.Title)
+	if bestSim >= minTitleMatch && (len(matches) == 1 || memory.Similarity(title, matches[1].Title) < bestSim-minTitleMatchMargin) {
+		return best, nil
+	}
+	if len(matches) > 3 {
+		matches = matches[:3]
+	}
+	return memory.Item{}, fmt.Errorf("no memory titled %q; closest matches (edit by id):\n%s", title, renderIndex(matches))
 }
 
 // memoryRead returns a memory's full content. Agents ask to read by
