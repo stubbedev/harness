@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/stubbedev/harness/internal/checkpoints"
+	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/session"
@@ -84,7 +85,7 @@ func (b *Backend) ListSessionMessages(ctx context.Context, workspaceID, sessionI
 
 // ListSessionHistory returns the history items for a session, including
 // files edited by its direct child (subagent) sessions.
-func (b *Backend) ListSessionHistory(ctx context.Context, workspaceID, sessionID string) (any, error) {
+func (b *Backend) ListSessionHistory(ctx context.Context, workspaceID, sessionID string) ([]history.File, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, err

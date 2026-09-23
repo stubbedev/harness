@@ -493,12 +493,16 @@ func (c *controllerV1) handleGetWorkspaceSession(w http.ResponseWriter, r *http.
 func (c *controllerV1) handleGetWorkspaceSessionHistory(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sid := r.PathValue("sid")
-	history, err := c.backend.ListSessionHistory(r.Context(), id, sid)
+	files, err := c.backend.ListSessionHistory(r.Context(), id, sid)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, history)
+	out := make([]proto.File, len(files))
+	for i, f := range files {
+		out[i] = fileToProto(f)
+	}
+	jsonEncode(w, out)
 }
 
 // handleGetWorkspaceSessionMessages returns all messages for a session.

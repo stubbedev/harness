@@ -4,6 +4,7 @@ import (
 	"context"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/app"
@@ -33,7 +34,7 @@ func (b *Backend) GetLSPStates(workspaceID string) (map[string]app.LSPClientInfo
 
 // GetLSPDiagnostics returns diagnostics for a specific LSP client in
 // the workspace.
-func (b *Backend) GetLSPDiagnostics(workspaceID, lspName string) (any, error) {
+func (b *Backend) GetLSPDiagnostics(workspaceID, lspName string) (map[protocol.DocumentURI][]protocol.Diagnostic, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
