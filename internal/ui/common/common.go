@@ -2,9 +2,7 @@ package common
 
 import (
 	"errors"
-	"fmt"
 	"image"
-	"os"
 	"slices"
 	"strings"
 
@@ -133,21 +131,6 @@ func BottomLeftRect(area uv.Rectangle, width, height int) uv.Rectangle {
 	maxY := area.Max.Y
 	minY := maxY - height
 	return image.Rect(minX, minY, maxX, maxY)
-}
-
-// IsFileTooBig checks if the file at the given path exceeds the specified size
-// limit.
-func IsFileTooBig(filePath string, sizeLimit int64) (bool, error) {
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		return false, fmt.Errorf("error getting file info: %w", err)
-	}
-
-	if fileInfo.Size() > sizeLimit {
-		return true, nil
-	}
-
-	return false, nil
 }
 
 // CopyToClipboard copies the given text to the clipboard using both OSC 52

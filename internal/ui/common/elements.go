@@ -8,19 +8,11 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/styles"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
-
-// PrettyPath formats a file path with home directory shortening and applies
-// muted styling.
-func PrettyPath(t *styles.Styles, path string, width int) string {
-	formatted := home.Short(path)
-	return t.Sidebar.WorkingDir.Width(width).Render(formatted)
-}
 
 // FormatReasoningEffort formats a reasoning effort level for display.
 func FormatReasoningEffort(effort string) string {
@@ -40,15 +32,6 @@ func FormatReasoningEffort(effort string) string {
 func FormatSubagentTokenCount(prompt, completion int64) string {
 	if tokens := prompt + completion; tokens > 0 {
 		return fmt.Sprintf("%d tok", tokens)
-	}
-	return ""
-}
-
-// FormatSubagentTokens is the styled FormatSubagentTokenCount for lines
-// that do not post-style their whole metadata segment.
-func FormatSubagentTokens(t *styles.Styles, prompt, completion int64) string {
-	if count := FormatSubagentTokenCount(prompt, completion); count != "" {
-		return t.Resource.AdditionalText.Render(count)
 	}
 	return ""
 }

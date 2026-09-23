@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/stubbedev/harness/internal/diffdetect"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -13,10 +12,6 @@ type parsedDiffFile struct {
 	path   string
 	before string
 	after  string
-}
-
-func looksLikeDiff(content string) bool {
-	return diffdetect.IsUnifiedDiff(content)
 }
 
 func parseUnifiedDiff(content string) []parsedDiffFile {

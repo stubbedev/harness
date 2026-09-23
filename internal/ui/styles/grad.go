@@ -54,17 +54,3 @@ func ApplyForegroundGrad(base lipgloss.Style, input string, color1, color2 color
 	}
 	return o.String()
 }
-
-// ApplyBoldForegroundGrad renders a given string with a horizontal gradient
-// foreground.
-func ApplyBoldForegroundGrad(base lipgloss.Style, input string, color1, color2 color.Color) string {
-	if input == "" {
-		return ""
-	}
-	var o strings.Builder
-	clusters := ForegroundGrad(base, input, true, color1, color2)
-	for _, c := range clusters {
-		fmt.Fprint(&o, c)
-	}
-	return o.String()
-}

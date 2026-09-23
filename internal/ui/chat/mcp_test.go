@@ -3,6 +3,8 @@ package chat
 import (
 	"strings"
 	"testing"
+
+	"github.com/stubbedev/harness/internal/diffdetect"
 )
 
 func TestLooksLikeDiff(t *testing.T) {
@@ -135,9 +137,9 @@ No hunk markers at all
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := looksLikeDiff(tt.content)
+			got := diffdetect.IsUnifiedDiff(tt.content)
 			if got != tt.want {
-				t.Errorf("looksLikeDiff() = %v, want %v", got, tt.want)
+				t.Errorf("diffdetect.IsUnifiedDiff() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -400,7 +402,7 @@ func TestLooksLikeDiffVersusMarkdown(t *testing.T) {
 		" Some content",
 	}, "\n")
 
-	if !looksLikeDiff(diffContent) {
-		t.Error("looksLikeDiff() should detect unified diff")
+	if !diffdetect.IsUnifiedDiff(diffContent) {
+		t.Error("diffdetect.IsUnifiedDiff() should detect unified diff")
 	}
 }

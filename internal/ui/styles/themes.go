@@ -369,17 +369,3 @@ func ThemeFromConfig(name string) Styles {
 	}
 	return s
 }
-
-// ThemeSwatch returns a handful of representative colors for the named
-// theme, in a stable order (primary, secondary, accent, keyword). It is
-// meant for previews — the theme picker paints these next to each entry —
-// and returns nil for unknown names. Lookups are case-insensitive, like
-// [LoadTheme].
-func ThemeSwatch(name string) []color.Color {
-	optsFn, ok := builtinThemes[strings.ToLower(name)]
-	if !ok {
-		return nil
-	}
-	opts := optsFn()
-	return []color.Color{opts.primary, opts.secondary, opts.accent, opts.keyword}
-}
