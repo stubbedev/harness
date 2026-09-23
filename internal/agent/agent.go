@@ -746,12 +746,33 @@ func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgent
 	a.runComplete.PublishMustDeliver(ctx, pubsub.UpdatedEvent, complete)
 }
 
-// ValidateCall performs the cheap structural validation that
-// sessionAgent.Run requires before a call can be dispatched: a call must
-// carry either a non-empty prompt or a text attachment, and it must name a
-// session. It is exported so callers that accept a run before dispatching it
-// (e.g. backend.SendMessage) can apply the same checks and keep the error
-// contract consistent.
+// stepToolContext carries what tools read about the step they run in:
+// the assistant message their results attach to and the model's image
+// support and name.
+func stepToolContext(ctx context.Context, assistantID string, model Model) context.Context {
+	ctx = context.WithValue(ctx, tools.MessageIDContextKey, assistantID)
+	ctx = context.WithValue(ctx, tools.SupportsImagesContextKey, model.CatalogCfg.SupportsImages)
+	return context.WithValue(ctx, tools.ModelNameContextKey, model.CatalogCfg.Name)
+}
+
+// turnComplete builds the terminal RunComplete for a turn that streamed:
+// the assistant's ID and text when there is one, the error the turn ended
+// with, and whether it was canceled — by that error, or by ctx.
+func turnComplete(ctx context.Context, call SessionAgentCall, assistant *message.Message, err error) notify.RunComplete {
+	complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
+	if assistant != nil {
+		complete.MessageID = assistant.ID
+		complete.Text = assistant.Content().String()
+	}
+	if err != nil {
+		complete.Error = err.Error()
+		complete.Cancelled = errors.Is(err, context.Canceled)
+	} else if ctx.Err() != nil {
+		complete.Cancelled = true
+	}
+	return complete
+}
+
 // publishNotification fires Notification hooks for n and then publishes
 // it to the notification broker. Sub-agents and agents without a
 // publisher skip straight to the (no-op) publish.
@@ -791,6 +812,12 @@ func (a *sessionAgent) fireStopHooks(ctx context.Context, sessionID string) {
 	}
 }
 
+// ValidateCall performs the cheap structural validation that
+// sessionAgent.Run requires before a call can be dispatched: a call must
+// carry either a non-empty prompt or a text attachment, and it must name a
+// session. It is exported so callers that accept a run before dispatching it
+// (e.g. backend.SendMessage) can apply the same checks and keep the error
+// contract consistent.
 func ValidateCall(call SessionAgentCall) error {
 	if call.Prompt == "" && !message.ContainsTextAttachment(call.Attachments) {
 		return ErrEmptyPrompt
@@ -1119,25 +1146,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// turn's diagnostics across two rows.
 			return
 		}
-		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
-		if currentAssistant != nil {
-			complete.MessageID = currentAssistant.ID
-			complete.Text = currentAssistant.Content().String()
-		}
-		if retErr != nil {
-			complete.Error = retErr.Error()
-			complete.Cancelled = errors.Is(retErr, context.Canceled)
-		} else if ctx.Err() != nil {
-			complete.Cancelled = true
-		}
 		// Prefer the per-call hook when supplied so the coordinator
 		// can coalesce retries (e.g. unauthorized → re-auth → retry)
 		// into a single user-visible terminal event. The fallback
 		// must-deliver publish applies bounded-blocking semantics to
 		// the authoritative terminal event so a momentarily-full
 		// subscriber channel can't silently drop it and hang
-		// non-interactive clients waiting on RunComplete.
-		a.publishRunComplete(ctx, call, complete)
+		// non-interactive clients waiting on RunComplete. It gets the
+		// detached flushCtx: a canceled run context would make it give
+		// up on a full subscriber and drop the event.
+		a.publishRunComplete(flushCtx, call, turnComplete(ctx, call, currentAssistant, retErr))
 	}()
 
 	history, files := a.preparePrompt(msgs, largeModel.CatalogCfg.SupportsImages, call.Attachments...)
@@ -1408,10 +1426,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					_, ok := p.(message.Finish)
 					return ok
 				})
-				callContext = context.WithValue(callContext, tools.MessageIDContextKey, currentAssistant.ID)
-				callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatalogCfg.SupportsImages)
-				callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatalogCfg.Name)
-				return callContext, prepared, nil
+				return stepToolContext(callContext, currentAssistant.ID, largeModel), prepared, nil
 			}
 
 			var assistantMsg message.Message
@@ -1432,12 +1447,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				return callContext, prepared, err
 			}
 			assistantCancel()
-			callContext = context.WithValue(callContext, tools.MessageIDContextKey, assistantMsg.ID)
-			callContext = context.WithValue(callContext, tools.SupportsImagesContextKey, largeModel.CatalogCfg.SupportsImages)
-			callContext = context.WithValue(callContext, tools.ModelNameContextKey, largeModel.CatalogCfg.Name)
-
 			currentAssistant = &assistantMsg
-			return callContext, prepared, err
+			return stepToolContext(callContext, assistantMsg.ID, largeModel), prepared, nil
 		},
 		OnReasoningStart: func(id string, reasoning fantasy.ReasoningContent) error {
 			currentAssistant.AppendReasoningContent(reasoning.Text)
@@ -1898,15 +1909,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return q.RunID == call.RunID
 	})
 	if outerOwesRunComplete {
-		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
-		if currentAssistant != nil {
-			complete.MessageID = currentAssistant.ID
-			complete.Text = currentAssistant.Content().String()
-		}
-		if ctx.Err() != nil {
-			complete.Cancelled = true
-		}
-		a.publishRunComplete(ctx, call, complete)
+		a.publishRunComplete(ctx, call, turnComplete(ctx, call, currentAssistant, nil))
 	}
 	return a.Run(ctx, next)
 }
