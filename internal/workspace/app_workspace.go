@@ -724,7 +724,7 @@ func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([
 }
 
 func (w *AppWorkspace) ListMCPPrompts(context.Context) ([]commands.MCPPrompt, error) {
-	return commands.LoadMCPPrompts()
+	return commands.LoadMCPPrompts(), nil
 }
 
 func (w *AppWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {

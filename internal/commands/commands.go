@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"cmp"
 	"context"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +16,8 @@ import (
 	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/stringext"
+	"gopkg.in/yaml.v3"
 )
 
 var namedArgPattern = regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`)
@@ -63,9 +67,21 @@ type commandSource struct {
 }
 
 // LoadCustomCommands loads custom commands from multiple sources including
-// XDG config directory, home directory, and project directory.
-func LoadCustomCommands(cfg *config.Config) ([]CustomCommand, error) {
+// XDG config directory, home directory, and project directory. A source
+// that cannot be read is logged and skipped.
+func LoadCustomCommands(cfg *config.Config) []CustomCommand {
 	return loadAll(buildCommandSources(cfg))
+}
+
+// newArgument builds an Argument, titling it by its ID when no title is
+// given.
+func newArgument(id, title, description string, required bool) Argument {
+	return Argument{
+		ID:          id,
+		Title:       cmp.Or(title, id),
+		Description: description,
+		Required:    required,
+	}
 }
 
 // FromSkillCatalog converts catalog entries into custom command entries for
@@ -97,23 +113,14 @@ func FromSkillCatalog(entries []skills.CatalogEntry) []CustomCommand {
 }
 
 // LoadMCPPrompts loads custom commands from available MCP servers.
-func LoadMCPPrompts() ([]MCPPrompt, error) {
+func LoadMCPPrompts() []MCPPrompt {
 	var commands []MCPPrompt
 	for mcpName, prompts := range mcp.Prompts() {
 		for _, prompt := range prompts {
 			key := mcpName + ":" + prompt.Name
 			var args []Argument
 			for _, arg := range prompt.Arguments {
-				title := arg.Title
-				if title == "" {
-					title = arg.Name
-				}
-				args = append(args, Argument{
-					ID:          arg.Name,
-					Title:       title,
-					Description: arg.Description,
-					Required:    arg.Required,
-				})
+				args = append(args, newArgument(arg.Name, arg.Title, arg.Description, arg.Required))
 			}
 			commands = append(commands, MCPPrompt{
 				ID:          key,
@@ -125,7 +132,7 @@ func LoadMCPPrompts() ([]MCPPrompt, error) {
 			})
 		}
 	}
-	return commands, nil
+	return commands
 }
 
 func buildCommandSources(cfg *config.Config) []commandSource {
@@ -145,16 +152,16 @@ func buildCommandSources(cfg *config.Config) []commandSource {
 	}
 }
 
-func loadAll(sources []commandSource) ([]CustomCommand, error) {
+func loadAll(sources []commandSource) []CustomCommand {
 	var commands []CustomCommand
-
 	for _, source := range sources {
-		if cmds, err := loadFromSource(source); err == nil {
-			commands = append(commands, cmds...)
+		cmds, err := loadFromSource(source)
+		if err != nil {
+			slog.Warn("Failed to load custom commands", "path", source.path, "error", err)
 		}
+		commands = append(commands, cmds...)
 	}
-
-	return commands, nil
+	return commands
 }
 
 func loadFromSource(source commandSource) ([]CustomCommand, error) {
@@ -171,7 +178,8 @@ func loadFromSource(source commandSource) ([]CustomCommand, error) {
 
 		cmd, err := loadCommand(path, source.path, source.prefix)
 		if err != nil {
-			return nil // Skip invalid files
+			slog.Warn("Skipping unreadable custom command", "path", path, "error", err)
+			return nil
 		}
 
 		commands = append(commands, cmd)
@@ -181,19 +189,34 @@ func loadFromSource(source commandSource) ([]CustomCommand, error) {
 	return commands, err
 }
 
+// loadCommand reads one command file. Optional YAML frontmatter is
+// stripped from the prompt, and its description shows in the palette.
 func loadCommand(path, baseDir, prefix string) (CustomCommand, error) {
-	content, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return CustomCommand{}, err
+	}
+
+	content := string(raw)
+	var description string
+	if frontmatter, body, err := stringext.SplitFrontmatter(content); err == nil {
+		var meta struct {
+			Description string `yaml:"description"`
+		}
+		if err := yaml.Unmarshal([]byte(frontmatter), &meta); err == nil {
+			content = strings.TrimLeft(body, "\n")
+			description = meta.Description
+		}
 	}
 
 	id := buildCommandID(path, baseDir, prefix)
 
 	return CustomCommand{
-		ID:        id,
-		Name:      id,
-		Content:   string(content),
-		Arguments: extractArgNames(string(content)),
+		ID:          id,
+		Name:        id,
+		Content:     content,
+		Arguments:   extractArgNames(content),
+		Description: description,
 	}, nil
 }
 
@@ -256,16 +279,7 @@ func FromExtensions(cmds []extensions.Command) []CustomCommand {
 	for _, cmd := range cmds {
 		args := make([]Argument, 0, len(cmd.Arguments))
 		for _, arg := range cmd.Arguments {
-			title := arg.Title
-			if title == "" {
-				title = arg.ID
-			}
-			args = append(args, Argument{
-				ID:          arg.ID,
-				Title:       title,
-				Description: arg.Description,
-				Required:    arg.Required,
-			})
+			args = append(args, newArgument(arg.ID, arg.Title, arg.Description, arg.Required))
 		}
 		result = append(result, CustomCommand{
 			ID:          cmd.ID,

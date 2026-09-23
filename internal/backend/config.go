@@ -237,10 +237,7 @@ func (b *Backend) ListMCPPrompts(workspaceID string) ([]proto.MCPPrompt, error) 
 	if _, err := b.GetWorkspace(workspaceID); err != nil {
 		return nil, err
 	}
-	prompts, err := commands.LoadMCPPrompts()
-	if err != nil {
-		return nil, err
-	}
+	prompts := commands.LoadMCPPrompts()
 	result := make([]proto.MCPPrompt, len(prompts))
 	for i, prompt := range prompts {
 		arguments := make([]proto.MCPPromptArgument, len(prompt.Arguments))

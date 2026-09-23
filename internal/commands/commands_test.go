@@ -45,13 +45,27 @@ func TestLoadAll_MixedSources(t *testing.T) {
 
 	missing := filepath.Join(t.TempDir(), "nope")
 
-	cmds, err := loadAll([]commandSource{
+	cmds := loadAll([]commandSource{
 		{path: existing, prefix: userCommandPrefix},
 		{path: missing, prefix: projectCommandPrefix},
 	})
-	require.NoError(t, err)
 	require.Len(t, cmds, 1)
 	require.Equal(t, "user:cmd", cmds[0].ID)
+}
+
+func TestLoadCommandStripsFrontmatter(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "review.md")
+	require.NoError(t, os.WriteFile(path, []byte("---\ndescription: Review the diff\n---\nReview $TARGET now.\n"), 0o644))
+
+	cmd, err := loadCommand(path, dir, userCommandPrefix)
+	require.NoError(t, err)
+	require.Equal(t, "Review the diff", cmd.Description)
+	require.Equal(t, "Review $TARGET now.\n", cmd.Content)
+	require.Len(t, cmd.Arguments, 1)
+	require.Equal(t, "TARGET", cmd.Arguments[0].ID)
 }
 
 func TestFromSkillCatalog_ListsUserInvocableSkills(t *testing.T) {
