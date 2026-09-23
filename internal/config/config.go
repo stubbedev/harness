@@ -161,32 +161,11 @@ type ProviderConfig struct {
 
 // ToProvider converts the [ProviderConfig] to a [catalog.Provider].
 func (c *ProviderConfig) ToProvider() catalog.Provider {
-	// Convert config provider to provider.Provider format
-	provider := catalog.Provider{
+	return catalog.Provider{
 		Name:   c.Name,
 		ID:     catalog.InferenceProvider(c.ID),
-		Models: make([]catalog.Model, len(c.Models)),
+		Models: slices.Clone(c.Models),
 	}
-
-	// Convert models
-	for i, model := range c.Models {
-		provider.Models[i] = catalog.Model{
-			ID:                     model.ID,
-			Name:                   model.Name,
-			CostPer1MIn:            model.CostPer1MIn,
-			CostPer1MOut:           model.CostPer1MOut,
-			CostPer1MInCached:      model.CostPer1MInCached,
-			CostPer1MOutCached:     model.CostPer1MOutCached,
-			ContextWindow:          model.ContextWindow,
-			DefaultMaxTokens:       model.DefaultMaxTokens,
-			CanReason:              model.CanReason,
-			ReasoningLevels:        model.ReasoningLevels,
-			DefaultReasoningEffort: model.DefaultReasoningEffort,
-			SupportsImages:         model.SupportsImages,
-		}
-	}
-
-	return provider
 }
 
 // SetupGitHubCopilot adds the headers Copilot requires. It writes into a

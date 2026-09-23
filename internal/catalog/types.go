@@ -98,20 +98,19 @@ type ModelOptions struct {
 
 // Model represents an AI model configuration.
 type Model struct {
-	ID                     string       `json:"id"`
-	Name                   string       `json:"name"`
-	CostPer1MIn            float64      `json:"cost_per_1m_in"`
-	CostPer1MOut           float64      `json:"cost_per_1m_out"`
-	CostPer1MInCached      float64      `json:"cost_per_1m_in_cached"`
-	CostPer1MOutCached     float64      `json:"cost_per_1m_out_cached"`
-	ContextWindow          int64        `json:"context_window"`
-	ReleaseDate            string       `json:"release_date,omitempty"`
-	DefaultMaxTokens       int64        `json:"default_max_tokens"`
-	CanReason              bool         `json:"can_reason"`
-	ReasoningLevels        []string     `json:"reasoning_levels,omitempty"`
-	DefaultReasoningEffort string       `json:"default_reasoning_effort,omitempty"`
-	SupportsImages         bool         `json:"supports_attachments"`
-	Options                ModelOptions `json:"options,omitzero"`
+	ID                 string       `json:"id"`
+	Name               string       `json:"name"`
+	CostPer1MIn        float64      `json:"cost_per_1m_in"`
+	CostPer1MOut       float64      `json:"cost_per_1m_out"`
+	CostPer1MInCached  float64      `json:"cost_per_1m_in_cached"`
+	CostPer1MOutCached float64      `json:"cost_per_1m_out_cached"`
+	ContextWindow      int64        `json:"context_window"`
+	ReleaseDate        string       `json:"release_date,omitempty"`
+	DefaultMaxTokens   int64        `json:"default_max_tokens"`
+	CanReason          bool         `json:"can_reason"`
+	ReasoningLevels    []string     `json:"reasoning_levels,omitempty"`
+	SupportsImages     bool         `json:"supports_attachments"`
+	Options            ModelOptions `json:"options,omitzero"`
 }
 
 // KnownProviderTypes returns all the known inference providers types.

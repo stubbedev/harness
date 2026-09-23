@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -80,7 +81,6 @@ type openRouterPricing struct {
 }
 
 type openRouterReasoning struct {
-	DefaultEffort    string   `json:"default_effort"`
 	SupportedEfforts []string `json:"supported_efforts"`
 }
 
@@ -120,19 +120,18 @@ func fetchOpenRouterModels(ctx context.Context, client *http.Client) ([]Model, e
 		}
 		model := Model{
 			ID:                 m.ID,
-			Name:               strings.TrimPrefix(cmpOr(m.Name, m.ID), "OpenRouter: "),
+			Name:               strings.TrimPrefix(cmp.Or(m.Name, m.ID), "OpenRouter: "),
 			CostPer1MIn:        openRouterPrice(m.Pricing.Prompt),
 			CostPer1MOut:       openRouterPrice(m.Pricing.Completion),
 			CostPer1MInCached:  openRouterPrice(m.Pricing.InputCacheWrite),
 			CostPer1MOutCached: openRouterPrice(m.Pricing.InputCacheRead),
 			ContextWindow:      m.ContextLength,
 			ReleaseDate:        openRouterReleaseDate(m.Created),
-			DefaultMaxTokens:   cmpI64(m.TopProvider.MaxCompletionTokens, 4096),
+			DefaultMaxTokens:   cmp.Or(m.TopProvider.MaxCompletionTokens, 4096),
 		}
 		if m.Reasoning != nil && len(m.Reasoning.SupportedEfforts) > 0 {
 			model.CanReason = true
 			model.ReasoningLevels = m.Reasoning.SupportedEfforts
-			model.DefaultReasoningEffort = cmpOr(m.Reasoning.DefaultEffort, defaultEffort(m.Reasoning.SupportedEfforts))
 		}
 		for _, in := range m.Architecture.InputModalities {
 			if in == "image" || in == "file" {

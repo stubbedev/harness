@@ -3397,9 +3397,6 @@ const docTemplate = `{
                 "default_max_tokens": {
                     "type": "integer"
                 },
-                "default_reasoning_effort": {
-                    "type": "string"
-                },
                 "id": {
                     "type": "string"
                 },

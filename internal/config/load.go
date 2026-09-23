@@ -810,24 +810,15 @@ func (c *Config) defaultModelSelection(knownProviders []catalog.Provider) (large
 		return largeModel, smallModel, err
 	}
 
+	// A custom provider publishes no defaults, so its first model serves
+	// as both.
 	providerConfig := enabledProviders[0]
 	if len(providerConfig.Models) == 0 {
 		err = fmt.Errorf("provider %s has no models configured", providerConfig.ID)
 		return largeModel, smallModel, err
 	}
-	defaultLargeModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
-	largeModel = SelectedModel{
-		Provider:  providerConfig.ID,
-		Model:     defaultLargeModel.ID,
-		MaxTokens: defaultLargeModel.DefaultMaxTokens,
-	}
-	defaultSmallModel := c.GetModel(providerConfig.ID, providerConfig.Models[0].ID)
-	smallModel = SelectedModel{
-		Provider:  providerConfig.ID,
-		Model:     defaultSmallModel.ID,
-		MaxTokens: defaultSmallModel.DefaultMaxTokens,
-	}
-	return largeModel, smallModel, err
+	largeModel, err = defaultSelection(providerConfig.ID, providerConfig.Models[0].ID, "large")
+	return largeModel, largeModel, err
 }
 
 // resolveSelection overlays a user-selected model's provider and model

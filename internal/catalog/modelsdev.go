@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -34,23 +35,17 @@ type modelsDevProvider struct {
 	Models map[string]modelsDevModel `json:"models"`
 	NPM    string                    `json:"npm"`
 	Env    []string                  `json:"env"`
-	Doc    string                    `json:"doc"`
 }
 
 type modelsDevModel struct {
 	ID               string              `json:"id"`
 	Name             string              `json:"name"`
-	Family           string              `json:"family"`
-	Description      string              `json:"description"`
 	Attachment       bool                `json:"attachment"`
 	Reasoning        bool                `json:"reasoning"`
 	ReasoningOptions []modelsDevEffort   `json:"reasoning_options"`
 	ToolCall         bool                `json:"tool_call"`
 	Status           string              `json:"status"`
-	Knowledge        string              `json:"knowledge"`
 	ReleaseDate      string              `json:"release_date"`
-	LastUpdated      string              `json:"last_updated"`
-	OpenWeights      bool                `json:"open_weights"`
 	Cost             modelsDevCost       `json:"cost"`
 	Limit            modelsDevLimit      `json:"limit"`
 	Modalities       modelsDevModalities `json:"modalities"`
@@ -58,23 +53,18 @@ type modelsDevModel struct {
 
 type modelsDevEffort struct {
 	Type   string   `json:"type"`
-	Min    int64    `json:"min"`
 	Values []string `json:"values"`
 }
 
 type modelsDevCost struct {
-	Input       float64 `json:"input"`
-	Output      float64 `json:"output"`
-	CacheRead   float64 `json:"cache_read"`
-	CacheWrite  float64 `json:"cache_write"`
-	Reasoning   float64 `json:"reasoning"`
-	InputAudio  float64 `json:"input_audio"`
-	OutputAudio float64 `json:"output_audio"`
+	Input      float64 `json:"input"`
+	Output     float64 `json:"output"`
+	CacheRead  float64 `json:"cache_read"`
+	CacheWrite float64 `json:"cache_write"`
 }
 
 type modelsDevLimit struct {
 	Context int64 `json:"context"`
-	Input   int64 `json:"input"`
 	Output  int64 `json:"output"`
 }
 
@@ -114,7 +104,7 @@ func translateModelsDev(md modelsDev) []Provider {
 		if !ok {
 			continue
 		}
-		models, _ := translateModelsDevModels(src)
+		models := translateModelsDevModels(src)
 		if len(models) == 0 {
 			continue
 		}
@@ -264,14 +254,14 @@ func adoptModelsDevProvider(sourceID string, src modelsDevProvider) (Provider, b
 	// models.dev publishes one for most of them; the table covers the
 	// entries that name a vendor SDK instead, and native protocols
 	// carry the endpoint in their own client.
-	endpoint := cmpOr(src.API, known.Endpoint)
+	endpoint := cmp.Or(src.API, known.Endpoint)
 	if endpoint == "" && providerType == TypeOpenAICompat {
 		return Provider{}, false
 	}
 
 	p := Provider{
 		ID:             id,
-		Name:           cmpOr(src.Name, sourceID),
+		Name:           cmp.Or(src.Name, sourceID),
 		APIEndpoint:    endpoint,
 		Type:           providerType,
 		DefaultHeaders: knownHeaders(id),
@@ -308,19 +298,15 @@ func npmToType(npm string) (Type, bool) {
 }
 
 // translateModelsDevModels translates a models.dev model map, keeping
-// only the models harness can actually hold a conversation with. The
-// second return value counts skipped entries.
-func translateModelsDevModels(src modelsDevProvider) ([]Model, int) {
+// only the models harness can actually hold a conversation with.
+func translateModelsDevModels(src modelsDevProvider) []Model {
 	models := make([]Model, 0, len(src.Models))
-	skipped := 0
 	for _, m := range src.Models {
-		if !usableModel(m) {
-			skipped++
-			continue
+		if usableModel(m) {
+			models = append(models, translateModelsDevModel(m))
 		}
-		models = append(models, translateModelsDevModel(m))
 	}
-	return models, skipped
+	return models
 }
 
 // usableModel reports whether a models.dev entry is a model the agent
@@ -350,21 +336,20 @@ func acceptsModality(modalities []string, want string) bool {
 func translateModelsDevModel(m modelsDevModel) Model {
 	model := Model{
 		ID:                 m.ID,
-		Name:               cmpOr(m.Name, m.ID),
+		Name:               cmp.Or(m.Name, m.ID),
 		CostPer1MIn:        m.Cost.Input,
 		CostPer1MOut:       m.Cost.Output,
 		CostPer1MInCached:  m.Cost.CacheWrite,
 		CostPer1MOutCached: m.Cost.CacheRead,
 		ContextWindow:      m.Limit.Context,
 		ReleaseDate:        m.ReleaseDate,
-		DefaultMaxTokens:   cmpI64(m.Limit.Output, 4096),
+		DefaultMaxTokens:   cmp.Or(m.Limit.Output, 4096),
 		CanReason:          m.Reasoning,
 	}
 
 	for _, opt := range m.ReasoningOptions {
 		if opt.Type == "effort" && len(opt.Values) > 0 {
 			model.ReasoningLevels = opt.Values
-			model.DefaultReasoningEffort = defaultEffort(opt.Values)
 			break
 		}
 	}
@@ -381,35 +366,7 @@ func translateModelsDevModel(m modelsDevModel) Model {
 	return model
 }
 
-// defaultEffort picks the default reasoning effort from a level list,
-// preferring "medium" when present.
-func defaultEffort(levels []string) string {
-	for _, l := range levels {
-		if l == "medium" {
-			return l
-		}
-	}
-	if len(levels) > 0 {
-		return levels[0]
-	}
-	return ""
-}
-
 // httpClient returns the shared HTTP client for catalog fetches.
 func httpClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
-}
-
-func cmpOr(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
-
-func cmpI64(a, fallback int64) int64 {
-	if a != 0 {
-		return a
-	}
-	return fallback
 }
