@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stubbedev/harness/internal/db"
-	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/zeebo/xxh3"
 )
@@ -128,7 +127,7 @@ func (s *service) Create(ctx context.Context, title string) (Session, error) {
 	return s.createSession(ctx, db.CreateSessionParams{
 		ID:    uuid.New().String(),
 		Title: title,
-	}, true)
+	})
 }
 
 func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessionID, title string) (Session, error) {
@@ -136,22 +135,18 @@ func (s *service) CreateTaskSession(ctx context.Context, toolCallID, parentSessi
 		ID:              toolCallID,
 		ParentSessionID: sql.NullString{String: parentSessionID, Valid: true},
 		Title:           title,
-	}, false)
+	})
 }
 
 // createSession inserts a session row, converts it, and publishes the
-// created event. Only user-created sessions count in telemetry: task
-// sessions are internal children.
-func (s *service) createSession(ctx context.Context, params db.CreateSessionParams, countTelemetry bool) (Session, error) {
+// created event.
+func (s *service) createSession(ctx context.Context, params db.CreateSessionParams) (Session, error) {
 	dbSession, err := s.q.CreateSession(ctx, params)
 	if err != nil {
 		return Session{}, err
 	}
 	session := s.fromDBItem(dbSession)
 	s.Publish(pubsub.CreatedEvent, session)
-	if countTelemetry {
-		event.SessionCreated()
-	}
 	return session, nil
 }
 
@@ -182,7 +177,6 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	session := s.fromDBItem(dbSession)
 	s.clearEstimatedUsageState(dbSession.ID)
 	s.Publish(pubsub.DeletedEvent, session)
-	event.SessionDeleted()
 	return nil
 }
 

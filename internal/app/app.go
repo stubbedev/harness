@@ -29,7 +29,6 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/db"
-	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/format"
@@ -875,11 +874,6 @@ func (app *App) Shutdown() {
 
 	// Now run remaining cleanup tasks in parallel.
 	var wg sync.WaitGroup
-
-	// Send exit event
-	wg.Go(func() {
-		event.AppExited()
-	})
 
 	// The agents' terminal sessions: real shells, each holding its
 	// working directory open until it exits.

@@ -19,7 +19,6 @@ import (
 	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/format"
 	"github.com/stubbedev/harness/internal/herdr"
 	"github.com/stubbedev/harness/internal/proto"
@@ -94,23 +93,12 @@ harness run --continue "Follow up on your last response"
 			return fmt.Errorf("no prompt provided")
 		}
 
-		event.SetNonInteractive(true)
-
-		switch {
-		case sessionID != "":
-			event.SetContinueBySessionID(true)
-		case useLast:
-			event.SetContinueLastSession(true)
-		}
-
 		if useClientServer() {
 			c, ws, cleanup, err := connectToServer(cmd)
 			if err != nil {
 				return err
 			}
 			defer cleanup()
-
-			event.AppInitialized()
 
 			if !ws.Config.IsConfigured() {
 				return fmt.Errorf("no providers configured - please run 'harness' to set up a provider interactively")
@@ -145,8 +133,6 @@ harness run --continue "Follow up on your last response"
 			return err
 		}
 		defer cleanup()
-
-		event.AppInitialized()
 
 		if !ws.Config().IsConfigured() {
 			return fmt.Errorf("no providers configured - please run 'harness' to set up a provider interactively")

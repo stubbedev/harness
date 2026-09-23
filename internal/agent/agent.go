@@ -1164,9 +1164,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// ahead of the verbatim history; see compaction.go.
 	history = withSummary(hiddenSummary, history)
 
-	startTime := time.Now()
-	a.eventPromptSent(call.SessionID)
-
 	var stepMessages []fantasy.Message
 	var shouldSummarize bool
 	sanitizedToolCalls := make(map[string]bool)
@@ -1733,8 +1730,6 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			result = mergeContinuation(result, repaired)
 		}
 	}
-
-	a.eventPromptResponded(call.SessionID, time.Since(startTime).Truncate(time.Second))
 
 	// recoverOverflow records that this turn died on a context-window
 	// overflow — ours (PrepareStep projection) or the provider's
@@ -2627,10 +2622,6 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		modelConfig.CostPer1MOutCached/1e6*float64(usage.CacheReadTokens) +
 		modelConfig.CostPer1MIn/1e6*float64(usage.InputTokens) +
 		modelConfig.CostPer1MOut/1e6*float64(usage.OutputTokens)
-
-	if !estimated {
-		a.eventTokensUsed(session.ID, model, usage, cost)
-	}
 
 	if estimated {
 		cost = 0

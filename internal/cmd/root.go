@@ -33,7 +33,6 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/db"
-	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/lock"
 	harnesslog "github.com/stubbedev/harness/internal/log"
@@ -125,8 +124,6 @@ harness --continue
 			sessionID = sess.ID
 		}
 
-		event.AppInitialized()
-
 		com := common.DefaultCommon(ws)
 		model := ui.New(com, sessionID, continueLast)
 
@@ -141,7 +138,6 @@ harness --continue
 		go ws.Subscribe(program)
 
 		if _, err := program.Run(); err != nil {
-			event.Error(err)
 			slog.Error("TUI run error", "error", err)
 			if errors.Is(err, tea.ErrProgramPanic) {
 				return fmt.Errorf("Harness crashed; the panic report with the stack trace is in %s (see `harness crashes`)", crash.Dir()) //nolint:staticcheck
@@ -398,10 +394,6 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 		return nil, nil, err
 	}
 
-	if shouldEnableMetrics(cfg) {
-		event.Init()
-	}
-
 	ws := workspace.NewAppWorkspace(appInstance, store)
 	cleanup := func() { appInstance.Shutdown() }
 	return ws, cleanup, nil
@@ -497,10 +489,6 @@ func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func
 	})
 	if err != nil {
 		return nil, nil, nil, err
-	}
-
-	if shouldEnableMetrics(ws.Config) {
-		event.Init()
 	}
 
 	if ws.Config != nil {
@@ -978,19 +966,6 @@ func startDetachedServer(hostURL *url.URL) error {
 	}
 
 	return nil
-}
-
-func shouldEnableMetrics(cfg *config.Config) bool {
-	if v, _ := strconv.ParseBool(os.Getenv("HARNESS_DISABLE_METRICS")); v {
-		return false
-	}
-	if v, _ := strconv.ParseBool(os.Getenv("DO_NOT_TRACK")); v {
-		return false
-	}
-	if cfg.Options.DisableMetrics {
-		return false
-	}
-	return true
 }
 
 func MaybePrependStdin(prompt string) (string, error) {

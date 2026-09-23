@@ -22,7 +22,6 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/db"
-	"github.com/stubbedev/harness/internal/event"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/projects"
@@ -166,12 +165,6 @@ func runStats(cmd *cobra.Command, _ []string) error {
 		if dataDir == "" {
 			dataDir = cfg.Config().Options.DataDirectory
 		}
-		if shouldEnableMetrics(cfg.Config()) {
-			event.Init()
-		}
-
-		event.StatsViewed()
-
 		conn, err := db.Connect(ctx, dataDir)
 		if err != nil {
 			return fmt.Errorf("failed to connect to database: %w", err)
