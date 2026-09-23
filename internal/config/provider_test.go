@@ -257,20 +257,3 @@ func TestUpdateProviders_WritesTheStoreProvidersReads(t *testing.T) {
 	require.Len(t, providers, 1)
 	require.Equal(t, "Local", providers[0].Name)
 }
-
-func TestUpdateProviderInList(t *testing.T) {
-	resetProviderState()
-	defer resetProviderState()
-
-	providerList = []catalog.Provider{
-		{ID: "a", Name: "A"},
-		{ID: "b", Name: "B"},
-	}
-
-	UpdateProviderInList(catalog.Provider{ID: "b", Name: "B2"})
-	require.Equal(t, "B2", providerList[1].Name)
-
-	UpdateProviderInList(catalog.Provider{ID: "c", Name: "C"})
-	require.Len(t, providerList, 3)
-	require.Equal(t, "C", providerList[0].Name, "new providers are prepended")
-}

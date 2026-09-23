@@ -955,15 +955,7 @@ func (c *Config) ValidateReasoningEffort(provider, modelID, effort string) error
 // exists in its catalog. Unlike GetModel, it rejects disabled providers.
 func (c *Config) IsModelAvailable(provider, model string) bool {
 	providerConfig, ok := c.Providers.Get(provider)
-	if !ok || providerConfig.Disable {
-		return false
-	}
-	for _, m := range providerConfig.Models {
-		if m.ID == model {
-			return true
-		}
-	}
-	return false
+	return ok && !providerConfig.Disable && c.GetModel(provider, model) != nil
 }
 
 // IsKnownModelID reports whether modelID matches the ID of any model offered
@@ -1013,14 +1005,6 @@ func (c *Config) GetModelByType(modelType SelectedModelType) *catalog.Model {
 	return c.GetModel(model.Provider, model.Model)
 }
 
-func (c *Config) LargeModel() *catalog.Model {
-	model, ok := c.Models[SelectedModelTypeLarge]
-	if !ok {
-		return nil
-	}
-	return c.GetModel(model.Provider, model.Model)
-}
-
 // ResolvedLargeLine is the default-verbosity model pin for headless harness run.
 // Missing or zero-value large selection prints "harness run: model unresolved"
 // rather than "harness run: /".
@@ -1035,14 +1019,6 @@ func (c *Config) ResolvedLargeLine() string {
 	return fmt.Sprintf("harness run: %s/%s", m.Provider, m.Model)
 }
 
-func (c *Config) SmallModel() *catalog.Model {
-	model, ok := c.Models[SelectedModelTypeSmall]
-	if !ok {
-		return nil
-	}
-	return c.GetModel(model.Provider, model.Model)
-}
-
 const maxRecentModelsPerType = 5
 
 // AllToolNames returns every built-in tool name an agent's AllowedTools may
@@ -1052,10 +1028,6 @@ const maxRecentModelsPerType = 5
 // `tools:` / `disallowedTools:` frontmatter — can reject unknown names instead
 // of silently intersecting them away to nothing.
 func AllToolNames() []string {
-	return allToolNames()
-}
-
-func allToolNames() []string {
 	return []string{
 		"agent",
 		"batch",
@@ -1109,7 +1081,7 @@ func filterSlice(data []string, mask []string, include bool) []string {
 }
 
 func (c *Config) SetupAgents() {
-	allowedTools := resolveAllowedTools(allToolNames(), c.Options.DisabledTools)
+	allowedTools := resolveAllowedTools(AllToolNames(), c.Options.DisabledTools)
 
 	agents := map[string]Agent{
 		AgentCoder: {

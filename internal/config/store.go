@@ -1076,7 +1076,7 @@ func (s *ConfigStore) ConfigStaleness() StalenessResult {
 
 // RefreshStalenessSnapshot captures fresh snapshots of all tracked config files.
 // Call this after reloading config to clear dirty state.
-func (s *ConfigStore) RefreshStalenessSnapshot() error {
+func (s *ConfigStore) RefreshStalenessSnapshot() {
 	if s.snapshots == nil {
 		s.snapshots = make(map[string]fileSnapshot)
 	}
@@ -1097,8 +1097,6 @@ func (s *ConfigStore) RefreshStalenessSnapshot() error {
 
 		s.snapshots[path] = snapshot
 	}
-
-	return nil
 }
 
 // CaptureStalenessSnapshot captures snapshots for the given paths, building the

@@ -310,7 +310,7 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 	require.True(t, result.Dirty)
 
 	// Refresh snapshot
-	require.NoError(t, store.RefreshStalenessSnapshot())
+	store.RefreshStalenessSnapshot()
 
 	// Verify clean now
 	result = store.ConfigStaleness()

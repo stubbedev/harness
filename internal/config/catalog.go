@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/stubbedev/harness/internal/catalog"
@@ -32,10 +31,7 @@ func (liveCatalogClient) FetchCatalog(ctx context.Context) ([]catalog.Provider, 
 	return catalog.FetchCatalog(ctx, nil)
 }
 
-var (
-	_ syncer[[]catalog.Provider] = (*catalogSync)(nil)
-	_ catalogClient              = liveCatalogClient{}
-)
+var _ catalogClient = liveCatalogClient{}
 
 // catalogSync memoizes the provider catalog for the process. The cache
 // lives in a SQLite database shared by every workspace on the machine;
@@ -49,21 +45,16 @@ type catalogSync struct {
 	client     catalogClient
 	dataDir    string
 	autoupdate bool
-	init       atomic.Bool
 }
 
+// Init configures the syncer; it must be called before Get.
 func (s *catalogSync) Init(client catalogClient, dataDir string, autoupdate bool) {
 	s.client = client
 	s.dataDir = dataDir
 	s.autoupdate = autoupdate
-	s.init.Store(true)
 }
 
 func (s *catalogSync) Get(ctx context.Context) ([]catalog.Provider, error) {
-	if !s.init.Load() {
-		panic("called Get before Init")
-	}
-
 	// The result and the error are memoized together so that every
 	// caller sees the same outcome, not just the one that won the once.
 	s.once.Do(func() {

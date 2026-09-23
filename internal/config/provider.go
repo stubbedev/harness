@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -14,10 +15,6 @@ import (
 	"github.com/stubbedev/harness/internal/db"
 )
 
-type syncer[T any] interface {
-	Get(context.Context) (T, error)
-}
-
 var (
 	providerOnce sync.Once
 	providerList []catalog.Provider
@@ -25,6 +22,17 @@ var (
 )
 
 var catalogSyncer = &catalogSync{}
+
+// KnownProviderByID returns the catalog provider with the given ID, or
+// nil when it is not a built-in catalog provider.
+func KnownProviderByID(knownProviders []catalog.Provider, id string) *catalog.Provider {
+	for i, p := range knownProviders {
+		if string(p.ID) == id {
+			return &knownProviders[i]
+		}
+	}
+	return nil
+}
 
 // Providers returns the list of providers, taking into account the
 // shared catalog cache and whether or not auto update is enabled.
@@ -37,20 +45,12 @@ var catalogSyncer = &catalogSync{}
 // list, the stale cached list, or finally the snapshot bundled with the
 // build if the fetch fails.
 //
+// The catalog is loaded once per process, from the options of the first
+// config passed in; later calls return the memoized list.
+//
 // A returned error is advisory: it reports that the catalog could not
 // be refreshed or cached. Callers decide whether an empty catalog is
 // fatal.
-// KnownProviderByID returns the catalog provider with the given ID, or
-// nil when it is not a built-in catalog provider.
-func KnownProviderByID(knownProviders []catalog.Provider, id string) *catalog.Provider {
-	for i, p := range knownProviders {
-		if string(p.ID) == id {
-			return &knownProviders[i]
-		}
-	}
-	return nil
-}
-
 func Providers(cfg *Config) ([]catalog.Provider, error) {
 	providerOnce.Do(func() {
 		autoupdate := !cfg.Options.DisableProviderAutoUpdate
@@ -81,21 +81,6 @@ func Providers(cfg *Config) ([]catalog.Provider, error) {
 		providerErr = err
 	})
 	return providerList, providerErr
-}
-
-// UpdateProviderInList replaces a provider in the memoized provider list
-// returned by Providers(). This is used after re-fetching a single
-// provider's data so that all callers of Providers() see the updated
-// entry without needing to reset sync.Once.
-func UpdateProviderInList(provider catalog.Provider) {
-	for i, p := range providerList {
-		if p.ID == provider.ID {
-			providerList[i] = provider
-			return
-		}
-	}
-	// Provider not found in list; prepend it.
-	providerList = append([]catalog.Provider{provider}, providerList...)
 }
 
 // UpdateProviders refreshes the stored model catalog. With no argument
@@ -139,13 +124,7 @@ func UpdateProviders(pathOrURL string) error {
 		return err
 	}
 
-	// Make the fresh catalog visible to the running process so the
-	// model picker sees it without a restart.
-	for _, p := range providers {
-		UpdateProviderInList(p)
-	}
-
-	slog.Info("Providers updated successfully", "count", len(providers), "from", cmpOrString(pathOrURL, "models.dev"))
+	slog.Info("Providers updated successfully", "count", len(providers), "from", cmp.Or(pathOrURL, "models.dev"))
 	return nil
 }
 
@@ -158,11 +137,4 @@ func fetchCatalogFromHTTP(ctx context.Context, url string) ([]catalog.Provider, 
 		return nil, err
 	}
 	return catalog.ParseProviders(content)
-}
-
-func cmpOrString(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
