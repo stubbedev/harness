@@ -231,7 +231,6 @@ through all components that need access to app state or styles.
 - `styles/` — All style definitions, color tokens, icons
 - `diffview/` — Unified and split diff rendering with syntax highlighting
 - `anim/` — Animated spinnner
-- `image/` — Terminal image rendering (Kitty graphics)
 - `logo/` — Logo rendering
 - `util/` — Small shared utilities and message types
 

@@ -1,7 +1,6 @@
 package model
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -1629,12 +1628,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleConnectionEvent(msg)...)
 	case util.ClearStatusMsg:
 		m.status.ClearInfoMsg()
-	case uv.KittyGraphicsEvent:
-		if !bytes.HasPrefix(msg.Payload, []byte("OK")) {
-			slog.Warn("Unexpected Kitty graphics response",
-				"response", string(msg.Payload),
-				"options", msg.Options)
-		}
 	case dialog.ActionMCPAuthStarted:
 		cmds = append(cmds, m.authenticateMCP(msg.Ctx, msg.Name))
 	case dialog.ActionMCPAuthComplete, dialog.ActionMCPAuthErrored:
