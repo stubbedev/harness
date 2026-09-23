@@ -604,28 +604,18 @@ func quickStyle(o quickStyleOpts) Styles {
 	// borders
 	s.ToolCallSuccess = lipgloss.NewStyle().Foreground(o.success).SetString(ToolSuccess)
 
-	s.Header.Diagonals = base.Foreground(o.primary)
 	s.Header.Percentage = muted
 	s.Header.WorkingDir = muted
 	s.Header.Separator = subtle
 	s.Header.Wrapper = lipgloss.NewStyle().Foreground(o.fgBase)
-	s.Header.LogoGradCanvas = lipgloss.NewStyle()
-	s.Header.LogoGradFromColor = o.secondary
-	s.Header.LogoGradToColor = o.primary
 	s.Header.GitBranch = base.Foreground(o.primary)
 	s.Header.GitStatus = base.Foreground(o.warning)
 	s.Header.GitRemote = base.Foreground(o.info)
 
-	s.CompactDetails.Title = base
-	s.CompactDetails.View = base.Padding(0, 1, 1, 1).Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)
 	s.CompactDetails.Version = lipgloss.NewStyle().Foreground(o.separator)
 
 	// Tool rendering styles
-	s.Tool.IconPending = base.Foreground(o.successMostSubtle).SetString(ToolPending)
 	s.Tool.IconSuccess = base.Foreground(o.success).SetString(ToolSuccess)
-	s.Tool.IconError = base.Foreground(o.error).SetString(ToolError)
-	s.Tool.IconCancelled = muted.SetString(ToolPending)
-	s.Tool.IconPartial = base.Foreground(o.warning).SetString(ToolSuccess)
 
 	// Tool names are understated grey in every ordinary state so the
 	// calls recede behind the chat messages; only failure states keep
@@ -644,7 +634,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.NameCancelled = muted
 
 	s.Tool.ParamMain = subtle
-	s.Tool.ParamKey = subtle
 
 	// Content rendering - prepared styles that accept width parameter
 	s.Tool.ContentLine = muted.Background(o.bgLeastVisible)
@@ -655,8 +644,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.Body = muted
 
 	// Deprecated - kept for backward compatibility
-	s.Tool.ContentBg = muted.Background(o.bgLeastVisible)
-	s.Tool.ContentText = muted
 	s.Tool.ContentLineNumber = base.Foreground(o.fgMoreSubtle).Background(o.bgBase).PaddingRight(1).PaddingLeft(1)
 
 	s.Tool.StateWaiting = base.Foreground(o.fgMostSubtle)
@@ -674,25 +661,17 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.NoteMessage = base.Foreground(o.fgSubtle)
 
 	// Job header styles
-	s.Tool.JobIconPending = base.Foreground(o.successMostSubtle)
-	s.Tool.JobIconError = base.Foreground(o.error)
-	s.Tool.JobIconSuccess = base.Foreground(o.success)
 
 	// Agent task styles
-	s.Tool.AgentTaskTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.infoMoreSubtle).Foreground(o.onPrimary)
-	s.Tool.AgentPrompt = muted
 
 	// Research styles
-	s.Tool.ResearchPromptTag = base.Bold(true).Padding(0, 1).MarginLeft(2).Background(o.success).Foreground(o.separator)
 
 	// Todo styles
-	s.Tool.TodoRatio = base.Foreground(o.infoMostSubtle)
 	s.Tool.TodoCompletedIcon = base.Foreground(o.success)
 	s.Tool.TodoInProgressIcon = base.Foreground(o.successMostSubtle)
 	s.Tool.TodoPendingIcon = base.Foreground(o.fgMoreSubtle)
 	s.Tool.TodoStatusNote = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Tool.TodoItem = lipgloss.NewStyle().Foreground(o.fgBase)
-	s.Tool.TodoJustStarted = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	// MCP styles
 	s.Tool.MCPName = base.Foreground(o.info)
@@ -711,7 +690,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.HookName = muted
 	s.Tool.HookMatcher = muted
 	s.Tool.HookArrow = base.Foreground(o.successMoreSubtle)
-	s.Tool.HookDetail = muted
 	s.Tool.HookOK = base.Foreground(o.successMostSubtle)
 	s.Tool.HookDenied = base.Foreground(o.error)
 	s.Tool.HookDeniedLabel = base.Foreground(o.destructive)
@@ -719,27 +697,17 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.HookRewrote = base.Foreground(o.bgMostVisible)
 
 	// Tool-call action verbs and result-list styling.
-	s.Tool.ActionCreate = lipgloss.NewStyle().Foreground(o.successMoreSubtle)
-	s.Tool.ActionDestroy = lipgloss.NewStyle().Foreground(o.destructive)
-	s.Tool.ResultEmpty = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Tool.ResultTruncation = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Tool.ResultItemName = muted
-	s.Tool.ResultItemDesc = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Buttons
 	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)
 	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
 	s.Button.Hovered = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.fgMostSubtle)
-	s.Button.Negative = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.error)
 
 	// Editor
 	s.Editor.Frame = base.Foreground(o.fgMostSubtle)
 	s.Editor.PromptNormalFocused = lipgloss.NewStyle().Foreground(o.successMostSubtle).SetString("::: ")
 	s.Editor.PromptNormalBlurred = s.Editor.PromptNormalFocused.Foreground(o.fgMoreSubtle)
-	s.Editor.PromptYoloIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.fgMostSubtle).Background(o.busy).Bold(true).SetString(" Y ")
-	s.Editor.PromptYoloIconBlurred = s.Editor.PromptYoloIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
-	s.Editor.PromptYoloDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.warningSubtle).SetString(":::")
-	s.Editor.PromptYoloDotsBlurred = s.Editor.PromptYoloDotsFocused.Foreground(o.fgMoreSubtle)
 	s.Editor.PromptBangIconFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.onPrimary).Background(o.primary).Bold(true).SetString(" ! ")
 	s.Editor.PromptBangIconBlurred = s.Editor.PromptBangIconFocused.Foreground(o.bgBase).Background(o.fgMoreSubtle)
 	s.Editor.PromptBangDotsFocused = lipgloss.NewStyle().MarginRight(1).Foreground(o.primary).SetString(":::")
@@ -749,11 +717,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Editor.QuestionSelected = lipgloss.NewStyle().Foreground(o.secondary).Bold(true)
 	s.Editor.QuestionUnselected = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Editor.QuestionBody = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
-	s.Editor.QuestionConfirm = lipgloss.NewStyle().Foreground(o.primary).Bold(true)
 	s.Editor.QuestionNote = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.Editor.QuestionCursorBar = lipgloss.NewStyle().Foreground(o.secondary)
-	s.Editor.QuestionRadioOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
-	s.Editor.QuestionRadioOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 	s.Editor.QuestionCheckOn = lipgloss.NewStyle().Foreground(o.secondary).SetString(RadioOn)
 	s.Editor.QuestionCheckOff = lipgloss.NewStyle().Foreground(o.fgSubtle).SetString(RadioOff)
 
@@ -833,7 +798,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Files.TruncationHint = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Sidebar
-	s.Sidebar.SessionTitle = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 	s.Sidebar.WorkingDir = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 
 	// ModelInfo
@@ -844,7 +808,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.ModelInfo.Reasoning = lipgloss.NewStyle().Foreground(o.fgMostSubtle).PaddingLeft(2)
 	s.ModelInfo.TokenCount = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 	s.ModelInfo.TokenPercentage = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
-	s.ModelInfo.EstimatedUsagePrefix = s.ModelInfo.TokenPercentage
 	s.ModelInfo.Cost = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
 
 	// ResourceGroup
@@ -864,7 +827,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.AssistantBlurred = s.Messages.NoContent.PaddingLeft(2)
 	s.Messages.AssistantFocused = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
 		BorderForeground(o.successMostSubtle).BorderStyle(messageFocussedBorder)
-	s.Messages.Thinking = lipgloss.NewStyle().MaxHeight(10)
 	s.Messages.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
 		Background(o.destructive).Foreground(o.onPrimary)
 	s.Messages.ErrorTitle = lipgloss.NewStyle().Foreground(o.fgSubtle)
@@ -932,7 +894,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.TitleText = base.Foreground(o.primary)
 	s.Dialog.TitleError = base.Foreground(o.destructive)
 	s.Dialog.TitleAccent = base.Foreground(o.success).Bold(true)
-	s.Dialog.TitleLineBase = lipgloss.NewStyle()
 	s.Dialog.TitleGradFromColor = o.primary
 	s.Dialog.TitleGradToColor = o.secondary
 
@@ -948,9 +909,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Models.ConfiguredText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
 
 	// Dialog.Permissions
-	s.Dialog.Permissions.KeyText = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
-	s.Dialog.Permissions.ValueText = lipgloss.NewStyle().Foreground(o.fgBase)
-	s.Dialog.Permissions.ParamsBg = o.bgLessVisible
 
 	s.Dialog.View = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)
 	// Top border only: the sides variadic turns the other borders off
@@ -963,13 +921,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.PrimaryText = base.Padding(0, 1).Foreground(o.primary)
 	s.Dialog.SecondaryText = base.Padding(0, 1).Foreground(o.fgMostSubtle)
 	s.Dialog.HelpView = base.Padding(0, 1).AlignHorizontal(lipgloss.Left)
-	s.Dialog.Help.ShortKey = base.Foreground(o.fgMoreSubtle)
-	s.Dialog.Help.ShortDesc = base.Foreground(o.fgMostSubtle)
-	s.Dialog.Help.ShortSeparator = base.Foreground(o.separator)
-	s.Dialog.Help.Ellipsis = base.Foreground(o.separator)
-	s.Dialog.Help.FullKey = base.Foreground(o.fgMoreSubtle)
-	s.Dialog.Help.FullDesc = base.Foreground(o.fgMostSubtle)
-	s.Dialog.Help.FullSeparator = base.Foreground(o.separator)
 	s.Dialog.NormalItem = base.Padding(0, 1).Foreground(o.fgBase)
 	s.Dialog.SelectedItem = base.Padding(0, 1).Background(o.primary).Foreground(o.onPrimary)
 	s.Dialog.InputPrompt = base.Margin(1, 1)
@@ -983,13 +934,9 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Rule = base.Foreground(o.fgMostSubtle)
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
-	s.Dialog.ContentPanel = base.Background(o.bgLessVisible).Foreground(o.fgBase).Padding(1, 2)
-	s.Dialog.ContentPanelBg = o.bgLessVisible
 	s.Dialog.Spinner = base.Foreground(o.secondary)
 	s.Dialog.ScrollbarThumb = base.Foreground(o.secondary)
 	s.Dialog.ScrollbarTrack = base.Foreground(o.separator)
-
-	s.Dialog.ImagePreview = lipgloss.NewStyle().Padding(0, 1).Foreground(o.fgMostSubtle)
 
 	// API key input dialog
 	s.Dialog.APIKey.Spinner = base.Foreground(o.success)
@@ -1028,8 +975,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Dialog.Sessions.RenamingItemBlurred = s.Dialog.NormalItem.Foreground(o.fgMostSubtle)
 	s.Dialog.Sessions.RenamingingItemFocused = s.Dialog.SelectedItem.UnsetBackground().UnsetForeground()
 	s.Dialog.Sessions.RenamingPlaceholder = base.Foreground(o.fgMoreSubtle)
-	s.Dialog.Sessions.InfoBlurred = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Dialog.Sessions.InfoFocused = lipgloss.NewStyle().Foreground(o.onPrimary)
 
 	s.Status.Help = lipgloss.NewStyle().Padding(0, 1)
 	s.Status.SuccessIndicator = base.Foreground(o.bgLessVisible).Background(o.success).Padding(0, 1).Bold(true).SetString("OKAY!")
@@ -1044,7 +989,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(o.onPrimary).Background(o.error)
 
 	// Completions styles
-	s.Completions.Match = base.Underline(true)
 
 	// Attachments styles
 	attachmentIconStyle := base.Foreground(o.bgLessVisible).Background(o.success).Padding(0, 1)
@@ -1061,7 +1005,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Attachments.Deleting = base.Padding(0, 1).MarginRight(1).Bold(true).Background(o.destructive).Foreground(o.fgBase)
 
 	// Pills styles
-	s.Pills.Base = base.Padding(0, 1)
 	s.Pills.Focused = base.Padding(0, 1).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(o.bgMostVisible)
 	s.Pills.TodoLabel = lipgloss.NewStyle().Foreground(o.fgBase)
 	s.Pills.TodoProgress = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)

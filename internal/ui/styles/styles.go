@@ -20,7 +20,6 @@ import (
 const (
 	CheckIcon   string = "✓"
 	SpinnerIcon string = "⋯"
-	LoadingIcon string = "⟳"
 	ModelIcon   string = "◇"
 
 	ArrowRightIcon string = "→"
@@ -38,9 +37,7 @@ const (
 	// litters every inline code span with tofu.
 	CodespanPadding string = "\u00a0"
 
-	ToolPending string = "●"
 	ToolSuccess string = "✓"
-	ToolError   string = "×"
 
 	// QueuedIcon marks a prompt queued behind the running turn:
 	// nf-md-clock_outline. It is private-use area, rendered one cell
@@ -50,11 +47,6 @@ const (
 
 	RadioOn  string = "◉"
 	RadioOff string = "○"
-
-	BorderThin  string = "│"
-	BorderThick string = "▌"
-
-	SectionSeparator string = "─"
 
 	TodoCompletedIcon  string = "✓"
 	TodoPendingIcon    string = "•"
@@ -100,23 +92,17 @@ type Styles struct {
 
 	// Header
 	Header struct {
-		Diagonals         lipgloss.Style // Style for diagonal separators (╱)
-		Percentage        lipgloss.Style // Style for context percentage
-		WorkingDir        lipgloss.Style // Style for current working directory
-		Separator         lipgloss.Style // Style for separator dots (•)
-		Wrapper           lipgloss.Style // Outer container for the entire header row
-		LogoGradCanvas    lipgloss.Style // Canvas for the compact "HARNESS" gradient
-		LogoGradFromColor color.Color    // "HARNESS" wordmark gradient start
-		LogoGradToColor   color.Color    // "HARNESS" wordmark gradient end
-		GitBranch         lipgloss.Style // Style for the git branch glyph and name
-		GitStatus         lipgloss.Style // Style for git working-tree counts
-		GitRemote         lipgloss.Style // Style for git ahead/behind markers
+		Percentage lipgloss.Style // Style for context percentage
+		WorkingDir lipgloss.Style // Style for current working directory
+		Separator  lipgloss.Style // Style for separator dots (•)
+		Wrapper    lipgloss.Style // Outer container for the entire header row
+		GitBranch  lipgloss.Style // Style for the git branch glyph and name
+		GitStatus  lipgloss.Style // Style for git working-tree counts
+		GitRemote  lipgloss.Style // Style for git ahead/behind markers
 	}
 
 	CompactDetails struct {
-		View    lipgloss.Style
 		Version lipgloss.Style
-		Title   lipgloss.Style
 	}
 
 	// Tool calls
@@ -140,10 +126,9 @@ type Styles struct {
 
 	// Buttons
 	Button struct {
-		Focused  lipgloss.Style
-		Blurred  lipgloss.Style
-		Hovered  lipgloss.Style
-		Negative lipgloss.Style // Selected negative/destructive action.
+		Focused lipgloss.Style
+		Blurred lipgloss.Style
+		Hovered lipgloss.Style
 	}
 
 	// Editor
@@ -156,12 +141,6 @@ type Styles struct {
 		// Normal mode prompt (default "::: ").
 		PromptNormalFocused lipgloss.Style
 		PromptNormalBlurred lipgloss.Style
-
-		// YOLO mode prompt (" ! " icon + ":::" dots).
-		PromptYoloIconFocused lipgloss.Style
-		PromptYoloIconBlurred lipgloss.Style
-		PromptYoloDotsFocused lipgloss.Style
-		PromptYoloDotsBlurred lipgloss.Style
 
 		// Bang mode prompt (" ! " icon + ":::" dots, Turtle color).
 		PromptBangIconFocused lipgloss.Style
@@ -177,11 +156,8 @@ type Styles struct {
 		QuestionSelected   lipgloss.Style // Active choice text (Dolly).
 		QuestionUnselected lipgloss.Style // Inactive header text (Sash).
 		QuestionBody       lipgloss.Style // Description/body text.
-		QuestionConfirm    lipgloss.Style // Confirm tab title (primary).
 		QuestionNote       lipgloss.Style // Saved note text (dimmer than body).
 		QuestionCursorBar  lipgloss.Style // Active cursor indicator bar.
-		QuestionRadioOn    lipgloss.Style // Selected single-choice radio.
-		QuestionRadioOff   lipgloss.Style // Unselected single-choice radio.
 		QuestionCheckOn    lipgloss.Style // Checked multi-choice indicator.
 		QuestionCheckOff   lipgloss.Style // Unchecked multi-choice indicator.
 	}
@@ -238,21 +214,19 @@ type Styles struct {
 
 	// Sidebar
 	Sidebar struct {
-		SessionTitle lipgloss.Style // Current session title at top of sidebar
-		WorkingDir   lipgloss.Style // Working directory path (PrettyPath)
+		WorkingDir lipgloss.Style // Working directory path (PrettyPath)
 	}
 
 	// ModelInfo (model name, provider, reasoning, token/cost summary)
 	ModelInfo struct {
-		Icon                 lipgloss.Style // Model icon (◇)
-		Name                 lipgloss.Style // Model name text
-		Provider             lipgloss.Style // "via <provider>" text
-		ProviderFallback     lipgloss.Style // Provider on its own second line
-		Reasoning            lipgloss.Style // Reasoning effort text
-		TokenCount           lipgloss.Style // "(42K)" token count
-		TokenPercentage      lipgloss.Style // "42%" percent of context window
-		EstimatedUsagePrefix lipgloss.Style // "~" prefix for estimated usage
-		Cost                 lipgloss.Style // "$0.42" cost readout
+		Icon             lipgloss.Style // Model icon (◇)
+		Name             lipgloss.Style // Model name text
+		Provider         lipgloss.Style // "via <provider>" text
+		ProviderFallback lipgloss.Style // Provider on its own second line
+		Reasoning        lipgloss.Style // Reasoning effort text
+		TokenCount       lipgloss.Style // "(42K)" token count
+		TokenPercentage  lipgloss.Style // "42%" percent of context window
+		Cost             lipgloss.Style // "$0.42" cost readout
 	}
 
 	// Resource styles the LSP/MCP/skills sidebar lists: their heading,
@@ -293,7 +267,6 @@ type Styles struct {
 		AssistantBlurred lipgloss.Style
 		AssistantFocused lipgloss.Style
 		NoContent        lipgloss.Style
-		Thinking         lipgloss.Style
 		ErrorTag         lipgloss.Style
 		ErrorTitle       lipgloss.Style
 		ErrorDetails     lipgloss.Style
@@ -331,12 +304,7 @@ type Styles struct {
 
 	// Tool - styles for tool call rendering
 	Tool struct {
-		// Icon styles with tool status
-		IconPending   lipgloss.Style
-		IconSuccess   lipgloss.Style
-		IconError     lipgloss.Style
-		IconCancelled lipgloss.Style
-		IconPartial   lipgloss.Style // Yellow checkmark when some calls in a group failed
+		IconSuccess lipgloss.Style
 
 		// Tool name styles, colored by call status. Ordinary states
 		// (running, done) share the understated grey so tool calls recede
@@ -357,7 +325,6 @@ type Styles struct {
 
 		// Parameter list styles
 		ParamMain lipgloss.Style
-		ParamKey  lipgloss.Style
 
 		// Content rendering styles
 		ContentLine           lipgloss.Style // Individual content line with background and width
@@ -367,9 +334,6 @@ type Styles struct {
 		ContentCodeBg         color.Color    // Background color for syntax highlighting
 		Body                  lipgloss.Style // Body content padding (PaddingLeft(2))
 
-		// Deprecated - kept for backward compatibility
-		ContentBg         lipgloss.Style // Content background
-		ContentText       lipgloss.Style // Content text
 		ContentLineNumber lipgloss.Style // Line numbers in code
 
 		// State message styles
@@ -391,26 +355,11 @@ type Styles struct {
 		NoteTag     lipgloss.Style // NOTE tag (yellow background)
 		NoteMessage lipgloss.Style // Note message text
 
-		// Job header styles (for bash jobs)
-		JobIconPending lipgloss.Style // Pending job icon (green dark)
-		JobIconError   lipgloss.Style // Error job icon (red dark)
-		JobIconSuccess lipgloss.Style // Success job icon (green)
-
-		// Agent task styles
-		AgentTaskTag lipgloss.Style // Agent task tag (blue background, bold)
-		AgentPrompt  lipgloss.Style // Agent prompt text
-
-		// Research styles
-		ResearchPromptTag lipgloss.Style // Research prompt tag (green background, bold)
-
-		// Todo styles
-		TodoRatio          lipgloss.Style // Todo ratio (e.g., "2/5")
 		TodoCompletedIcon  lipgloss.Style // Completed todo icon
 		TodoInProgressIcon lipgloss.Style // In-progress todo icon
 		TodoPendingIcon    lipgloss.Style // Pending todo icon
 		TodoStatusNote     lipgloss.Style // " · completed N" / " · starting task" trailing note
 		TodoItem           lipgloss.Style // Default body text for todo list items
-		TodoJustStarted    lipgloss.Style // Text of the just-started todo in tool-call bodies
 
 		// MCP tools
 		MCPName     lipgloss.Style // The mcp name
@@ -429,22 +378,13 @@ type Styles struct {
 		HookName         lipgloss.Style // Hook command name
 		HookMatcher      lipgloss.Style // Matcher regex pattern
 		HookArrow        lipgloss.Style // Arrow indicator
-		HookDetail       lipgloss.Style // Decision detail text
 		HookOK           lipgloss.Style // "OK" status
 		HookDenied       lipgloss.Style // "Denied" status
 		HookDeniedLabel  lipgloss.Style // "Hook" label when denied
 		HookDeniedReason lipgloss.Style // Denied reason text
 		HookRewrote      lipgloss.Style // "Rewrote Input" indicator
 
-		// Action verb colors for tool-call headers.
-		ActionCreate  lipgloss.Style // Constructive actions (e.g. "Add", "Create")
-		ActionDestroy lipgloss.Style // Destructive actions (e.g. "Remove", "Delete")
-
-		// Tool result helpers.
-		ResultEmpty      lipgloss.Style // "No results" placeholder
-		ResultTruncation lipgloss.Style // "… and N more" truncation line
-		ResultItemName   lipgloss.Style // Item name (left column in result lists)
-		ResultItemDesc   lipgloss.Style // Item description (right column)
+		ResultItemName lipgloss.Style // Item name (left column in result lists)
 	}
 
 	// Dialog styles
@@ -453,9 +393,8 @@ type Styles struct {
 		TitleText          lipgloss.Style
 		TitleError         lipgloss.Style
 		TitleAccent        lipgloss.Style
-		TitleLineBase      lipgloss.Style // Base for the gradient ╱╱╱ next to dialog titles
-		TitleGradFromColor color.Color    // Default dialog title ╱╱╱ gradient start
-		TitleGradToColor   color.Color    // Default dialog title ╱╱╱ gradient end
+		TitleGradFromColor color.Color // Default dialog title ╱╱╱ gradient start
+		TitleGradToColor   color.Color // Default dialog title ╱╱╱ gradient end
 		// View is the main content area style.
 		View lipgloss.Style
 		// ViewBottom is the bottom-anchored variant of View: a top border
@@ -469,15 +408,6 @@ type Styles struct {
 		// Rule is the horizontal separator drawn between the input row
 		// and the dialog content.
 		Rule lipgloss.Style
-		Help struct {
-			Ellipsis       lipgloss.Style
-			ShortKey       lipgloss.Style
-			ShortDesc      lipgloss.Style
-			ShortSeparator lipgloss.Style
-			FullKey        lipgloss.Style
-			FullDesc       lipgloss.Style
-			FullSeparator  lipgloss.Style
-		}
 
 		NormalItem   lipgloss.Style
 		SelectedItem lipgloss.Style
@@ -490,10 +420,6 @@ type Styles struct {
 		List lipgloss.Style
 
 		Spinner lipgloss.Style
-
-		// ContentPanel is used for content blocks with subtle background.
-		ContentPanel   lipgloss.Style
-		ContentPanelBg color.Color // Background color for ContentPanel syntax highlighting.
 
 		// Scrollbar styles for scrollable content.
 		ScrollbarThumb lipgloss.Style
@@ -520,12 +446,6 @@ type Styles struct {
 			ConfiguredText lipgloss.Style // "Configured" badge shown on the ModelGroup header
 		}
 
-		Permissions struct {
-			KeyText   lipgloss.Style // Left key cell of a key/value row
-			ValueText lipgloss.Style // Right value cell of a key/value row
-			ParamsBg  color.Color    // Background color behind highlighted JSON parameters
-		}
-
 		APIKey struct {
 			Spinner lipgloss.Style // Loading spinner while validating the key
 		}
@@ -541,8 +461,6 @@ type Styles struct {
 			StatusText   lipgloss.Style // Narrative status text ("Initializing...", "Verifying...", etc.)
 			UserCodeBg   color.Color    // Background color of the centered user-code box
 		}
-
-		ImagePreview lipgloss.Style
 
 		Sessions struct {
 			// styles for when we are in delete mode
@@ -563,9 +481,6 @@ type Styles struct {
 			RenamingTitleGradientFromColor color.Color
 			RenamingTitleGradientToColor   color.Color
 			RenamingPlaceholder            lipgloss.Style
-
-			InfoBlurred lipgloss.Style // Timestamp text on unfocused session items
-			InfoFocused lipgloss.Style // Timestamp text on the focused session item
 		}
 	}
 
@@ -586,12 +501,6 @@ type Styles struct {
 		SuccessMessage lipgloss.Style
 	}
 
-	// MentionMatch highlights the fuzzy-matched runes inside a mention
-	// row; the rows themselves use the shared dialog item tokens.
-	Completions struct {
-		Match lipgloss.Style
-	}
-
 	// Attachments styles
 	Attachments struct {
 		Normal   lipgloss.Style
@@ -604,7 +513,6 @@ type Styles struct {
 
 	// Pills styles for the todo pill
 	Pills struct {
-		Base            lipgloss.Style // Base pill style with padding
 		Focused         lipgloss.Style // Pill with visible rounded border
 		TodoLabel       lipgloss.Style // "To-Do" label
 		TodoProgress    lipgloss.Style // Todo ratio (e.g. "2/5")
