@@ -3,14 +3,9 @@ package dialog
 import (
 	"errors"
 
-	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
-	tea "charm.land/bubbletea/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
-	"github.com/stubbedev/harness/internal/ui/list"
 )
 
 const (
@@ -20,189 +15,37 @@ const (
 	reasoningDialogMaxHeight    = 16
 )
 
-// Reasoning represents a dialog for selecting reasoning effort.
-type Reasoning struct {
-	com   *common.Common
-	list  *list.FilterableList
-	input textinput.Model
-
-	keyMap struct {
-		Select   key.Binding
-		Next     key.Binding
-		Previous key.Binding
-		UpDown   key.Binding
-		Close    key.Binding
-	}
-}
-
-var _ Dialog = (*Reasoning)(nil)
-
-// NewReasoning creates a new reasoning effort dialog.
-func NewReasoning(com *common.Common) (*Reasoning, error) {
-	r := &Reasoning{com: com}
-
-	r.list = list.NewFilterableList()
-	r.list.Focus()
-
-	r.input = textinput.New()
-	r.input.SetVirtualCursor(false)
-	r.input.Placeholder = "Type to filter"
-	r.input.SetStyles(com.Styles.TextInput)
-	r.input.Focus()
-
-	km := dialogKeys()
-	r.keyMap.Select = km.Select
-	r.keyMap.Next = km.Next
-	r.keyMap.Previous = km.Previous
-	r.keyMap.UpDown = km.UpDown
-	r.keyMap.Close = km.Close
-
-	if err := r.setReasoningItems(); err != nil {
-		return nil, err
-	}
-
-	return r, nil
-}
-
-// ID implements Dialog.
-func (r *Reasoning) ID() ID {
-	return ReasoningID
-}
-
-// HandleMsg implements [Dialog].
-func (r *Reasoning) HandleMsg(msg tea.Msg) Action {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch {
-		case key.Matches(msg, r.keyMap.Close):
-			return ActionClose{}
-		case key.Matches(msg, r.keyMap.Previous):
-			r.list.Focus()
-			selectPrevWrap(r.list)
-		case key.Matches(msg, r.keyMap.Next):
-			r.list.Focus()
-			selectNextWrap(r.list)
-		case key.Matches(msg, r.keyMap.Select):
-			if item, ok := r.list.SelectedItem().(PickerItem); ok && item != nil {
-				if effort, ok := item.Value().(string); ok {
-					return ActionSelectReasoningEffort{Effort: effort}
-				}
-			}
-		default:
-			cmd, _ := filterInput(&r.input, msg, applyListFilter(r.list))
-			return ActionCmd{cmd}
-		}
-	}
-	return nil
-}
-
-// Cursor returns the cursor position relative to the dialog.
-func (r *Reasoning) Cursor() *tea.Cursor {
-	return InputCursor(r.com.Styles, r.input.Cursor())
-}
-
-// Draw implements [Dialog].
-func (r *Reasoning) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	t := r.com.Styles
-	width := DialogWidth(t, area)
-	innerWidth := DialogInnerWidth(t, width)
-
-	r.input.SetWidth(dialogInputTextWidth(t, r.input, innerWidth))
-
-	// Size the dialog to fit the list content, clamped to min/max bounds.
-	listTotalHeight := r.list.TotalHeight()
-	heightOffset := dialogChromeHeight(t, t.Dialog.HelpView)
-	desiredHeight := heightOffset + listTotalHeight
-	maxAvailable := DialogHeightCeiling(t, area, reasoningDialogMaxHeight)
-	height := max(reasoningDialogMinHeight, min(reasoningDialogMaxHeight, desiredHeight, maxAvailable))
-
-	listHeight, listTotalHeight, _ := sizeDialogList(t, r.list, innerWidth, height, true)
-
-	rc := NewRenderContext(t, width)
-	rc.Title = "Select Reasoning Effort"
-	rc.AddInput(r.input.View())
-
-	visibleCount := len(r.list.FilteredItems())
-	if r.list.Height() >= visibleCount {
-		r.list.ScrollToTop()
-	} else {
-		r.list.ScrollToSelected()
-	}
-
-	listView := t.Dialog.List.Height(r.list.Height()).Render(r.list.Render())
-	listView = joinScrollbar(t, listView, listHeight, listTotalHeight, listHeight, r.list.Offset())
-	rc.AddPart(listView)
-
-	view := rc.Render()
-
-	cur := DialogCursor(t, view, r.input.Cursor())
-	DrawCenterCursor(scr, area, view, cur)
-	return cur
-}
-
-// ShortHelp implements [help.KeyMap].
-func (r *Reasoning) ShortHelp() []key.Binding {
-	return []key.Binding{
-		r.keyMap.UpDown,
-		r.keyMap.Select,
-		r.keyMap.Close,
-	}
-}
-
-// FullHelp implements [help.KeyMap].
-func (r *Reasoning) FullHelp() [][]key.Binding {
-	m := [][]key.Binding{}
-	slice := []key.Binding{
-		r.keyMap.Select,
-		r.keyMap.Next,
-		r.keyMap.Previous,
-		r.keyMap.Close,
-	}
-	for i := 0; i < len(slice); i += 4 {
-		end := min(i+4, len(slice))
-		m = append(m, slice[i:end])
-	}
-	return m
-}
-
-func (r *Reasoning) setReasoningItems() error {
-	cfg := r.com.Config()
+// NewReasoning creates a new reasoning effort dialog for the coder
+// agent's current model.
+func NewReasoning(com *common.Common) (Dialog, error) {
+	cfg := com.Config()
 	agentCfg, ok := cfg.Agents[config.AgentCoder]
 	if !ok {
-		return errors.New("agent configuration not found")
+		return nil, errors.New("agent configuration not found")
 	}
 
 	selectedModel := cfg.Models[agentCfg.Model]
 	model := cfg.GetModelByType(agentCfg.Model)
 	if model == nil {
-		return errors.New("model configuration not found")
+		return nil, errors.New("model configuration not found")
 	}
 
 	if len(model.ReasoningLevels) == 0 {
-		return errors.New("no reasoning levels available")
+		return nil, errors.New("no reasoning levels available")
 	}
 
-	currentEffort := selectedModel.ReasoningEffort
-	if currentEffort == "" {
-		currentEffort = catalog.DefaultReasoningLevel(model.ReasoningLevels)
+	current := selectedModel.ReasoningEffort
+	if current == "" {
+		current = catalog.DefaultReasoningLevel(model.ReasoningLevels)
 	}
 
-	items := make([]list.FilterableItem, 0, len(model.ReasoningLevels))
-	selectedIndex := 0
-	for i, effort := range model.ReasoningLevels {
-		items = append(items, NewPickerItem(
-			r.com.Styles,
-			effort,
-			common.FormatReasoningEffort(effort),
-			"",
-		))
-		if effort == currentEffort {
-			selectedIndex = i
-		}
+	options := make([]pickerOption, 0, len(model.ReasoningLevels))
+	for _, effort := range model.ReasoningLevels {
+		options = append(options, pickerOption{value: effort, title: common.FormatReasoningEffort(effort)})
 	}
 
-	r.list.SetItems(items...)
-	r.list.SetSelected(selectedIndex)
-	r.list.ScrollToSelected()
-	return nil
+	return newSimplePicker(com, ReasoningID, "Select Reasoning Effort", reasoningDialogMinHeight, reasoningDialogMaxHeight,
+		options, current, func(effort string) Action {
+			return ActionSelectReasoningEffort{Effort: effort}
+		}), nil
 }
