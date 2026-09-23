@@ -33,71 +33,19 @@ import (
 // Load loads the configuration from the default paths and returns a
 // ConfigStore that owns both the pure-data Config and all runtime state.
 func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
-	configPaths := lookupConfigs(workingDir)
-
-	cfg, loadedPaths, err := loadFromConfigPaths(context.Background(), configPaths)
+	disk, err := readConfig(context.Background(), workingDir, dataDir, debug)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
+		return nil, err
 	}
-
-	// A data directory set on the command line or in a config file is
-	// used verbatim; only the defaulted location is migrated from the
-	// legacy in-repo .harness layout.
-	explicitDataDir := dataDir != "" || (cfg.Options != nil && cfg.Options.DataDirectory != "")
-	appliedDefaultDataDir := false
-
-	cfg.setDefaults(workingDir, dataDir)
-	if !explicitDataDir && cfg.Options.DataDirectory != "" {
-		appliedDefaultDataDir = true
-	}
-	if appliedDefaultDataDir {
-		migrateLegacyDataDir(workingDir, cfg.Options.DataDirectory)
-	}
+	cfg := disk.cfg
 
 	store := &ConfigStore{
 		config:         cfg,
 		workingDir:     workingDir,
+		debug:          debug,
 		globalDataPath: GlobalConfigData(),
-		workspacePath:  filepath.Join(cfg.Options.DataDirectory, stateConfigFile),
-		loadedPaths:    loadedPaths,
-	}
-
-	if debug {
-		cfg.Options.Debug = true
-	}
-
-	// Load workspace config last so it has highest priority.
-	if wsData, err := os.ReadFile(store.workspacePath); err == nil {
-		wsJSON, decErr := decodeConfig(wsData)
-		if decErr != nil {
-			return nil, fmt.Errorf("invalid YAML in config file %s: %w", store.workspacePath, decErr)
-		}
-		merged, mergeErr := mergeWorkspaceConfig(cfg, wsJSON)
-		if mergeErr == nil && merged != nil {
-			// Preserve defaults that setDefaults already applied.
-			dataDir := cfg.Options.DataDirectory
-			*cfg = *merged
-			cfg.setDefaults(workingDir, dataDir)
-			store.config = cfg
-			store.loadedPaths = append(store.loadedPaths, store.workspacePath)
-		}
-	}
-
-	// Validate hooks after all config merging is complete so workspace
-	// hooks also get their matcher regexes compiled.
-	if err := cfg.ValidateHooks(); err != nil {
-		return nil, fmt.Errorf("invalid hook configuration: %w", err)
-	}
-	if err := cfg.Verification.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid verification configuration: %w", err)
-	}
-
-	if !isInsideWorktree() {
-		const depth = 2
-		const items = 100
-		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
-		assignIfNil(&cfg.Options.TUI.Completions.MaxDepth, depth)
-		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
+		workspacePath:  disk.workspacePath,
+		loadedPaths:    disk.loadedPaths,
 	}
 
 	// Load known providers, this loads the config from models.dev. A
@@ -163,12 +111,93 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		}
 	}
 
-	// Capture initial staleness snapshot. Track every discovered config path,
-	// not just the ones that loaded, so a config file created after startup
-	// (e.g. a project harness.yaml added mid-session) is detected as a change.
-	store.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
+	store.CaptureStalenessSnapshot(disk.trackedPaths())
 
 	return store, nil
+}
+
+// diskConfig is the disk half of a load: every config file read, merged
+// over the defaults with the workspace state file on top, and validated,
+// before any provider is configured. Load and ReloadFromDisk both build it
+// through readConfig so the two paths cannot drift apart.
+type diskConfig struct {
+	cfg           *Config
+	configPaths   []string // every discovered config path, loaded or not
+	loadedPaths   []string // the paths that actually loaded
+	workspacePath string
+}
+
+// readConfig reads, merges, defaults and validates the configuration for
+// workingDir. dataDir, when set, overrides the data directory; debug forces
+// debug logging on regardless of the files.
+func readConfig(ctx context.Context, workingDir, dataDir string, debug bool) (diskConfig, error) {
+	configPaths := lookupConfigs(workingDir)
+	cfg, loadedPaths, err := loadFromConfigPaths(ctx, configPaths)
+	if err != nil {
+		return diskConfig{}, fmt.Errorf("failed to load config from paths %v: %w", configPaths, err)
+	}
+
+	// A data directory set on the command line or in a config file is
+	// used verbatim; only the defaulted location is migrated from the
+	// legacy in-repo .harness layout.
+	explicitDataDir := dataDir != "" || (cfg.Options != nil && cfg.Options.DataDirectory != "")
+	cfg.setDefaults(workingDir, dataDir)
+	if !explicitDataDir && cfg.Options.DataDirectory != "" {
+		migrateLegacyDataDir(workingDir, cfg.Options.DataDirectory)
+	}
+
+	// Load workspace config last so it has highest priority.
+	workspacePath := filepath.Join(cfg.Options.DataDirectory, stateConfigFile)
+	wsJSON, err := readConfigJSON(workspacePath)
+	if err != nil {
+		return diskConfig{}, err
+	}
+	merged, err := mergeWorkspaceConfig(cfg, wsJSON)
+	if err != nil {
+		slog.Warn("Ignoring workspace config that failed to merge", "path", workspacePath, "error", err)
+	} else if merged != nil {
+		// Preserve defaults that setDefaults already applied.
+		dataDir := cfg.Options.DataDirectory
+		*cfg = *merged
+		cfg.setDefaults(workingDir, dataDir)
+		loadedPaths = append(loadedPaths, workspacePath)
+	}
+
+	if debug {
+		cfg.Options.Debug = true
+	}
+
+	// Validate hooks after all config merging is complete so workspace
+	// hooks also get their matcher regexes compiled.
+	if err := cfg.ValidateHooks(); err != nil {
+		return diskConfig{}, fmt.Errorf("invalid hook configuration: %w", err)
+	}
+	if err := cfg.Verification.Validate(); err != nil {
+		return diskConfig{}, fmt.Errorf("invalid verification configuration: %w", err)
+	}
+
+	if worktreeRoot(workingDir) == "" {
+		const depth = 2
+		const items = 100
+		slog.Warn("No git repository detected in working directory, will limit file walk operations", "depth", depth, "items", items)
+		assignIfNil(&cfg.Options.TUI.Completions.MaxDepth, depth)
+		assignIfNil(&cfg.Options.TUI.Completions.MaxItems, items)
+	}
+
+	return diskConfig{
+		cfg:           cfg,
+		configPaths:   configPaths,
+		loadedPaths:   loadedPaths,
+		workspacePath: workspacePath,
+	}, nil
+}
+
+// trackedPaths is every path the staleness check watches: all discovered
+// config paths, not just the ones that loaded, so a config file created
+// after the load (e.g. a project harness.yaml added mid-session) is
+// detected as a change.
+func (d diskConfig) trackedPaths() []string {
+	return append(slices.Clone(d.configPaths), d.loadedPaths...)
 }
 
 // mergeWorkspaceConfig merges the workspace config (already converted to
@@ -1178,15 +1207,6 @@ func assignIfNil[T any](ptr **T, val T) {
 	if *ptr == nil {
 		*ptr = &val
 	}
-}
-
-func isInsideWorktree() bool {
-	bts, err := exec.CommandContext(
-		context.Background(),
-		"git", "rev-parse",
-		"--is-inside-work-tree",
-	).CombinedOutput()
-	return err == nil && strings.TrimSpace(string(bts)) == "true"
 }
 
 // worktreeRoot returns the absolute path of the git working tree root for

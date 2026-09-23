@@ -87,6 +87,7 @@ type RuntimeOverrides struct {
 type ConfigStore struct {
 	config             *Config
 	workingDir         string
+	debug              bool // --debug from the command line, kept across reloads
 	resolver           VariableResolver
 	globalDataPath     string   // $XDG_DATA_HOME/harness/state.yaml
 	workspacePath      string   // .harness/state.yaml
@@ -438,7 +439,7 @@ func (s *ConfigStore) updateLocked(scope Scope, mutate func(*Config) map[string]
 	// our own write as an external change. Safe to touch the snapshot map
 	// here because we hold writeMu.
 	if path, err := s.configPath(scope); err == nil {
-		s.captureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
+		s.CaptureStalenessSnapshot(append(slices.Clone(s.loadedPaths), path))
 	}
 	return nil
 }
@@ -1141,11 +1142,6 @@ func (s *ConfigStore) CaptureStalenessSnapshot(paths []string) {
 	s.RefreshStalenessSnapshot()
 }
 
-// captureStalenessSnapshot is an alias for CaptureStalenessSnapshot for internal use.
-func (s *ConfigStore) captureStalenessSnapshot(paths []string) {
-	s.CaptureStalenessSnapshot(paths)
-}
-
 // ReloadFromDisk re-runs the config load/merge flow and updates the in-memory
 // config atomically. It rebuilds the staleness snapshot after successful reload.
 // On failure, the store state is rolled back to its previous state.
@@ -1161,57 +1157,24 @@ func (s *ConfigStore) ReloadFromDisk(ctx context.Context) error {
 
 // reloadFromDiskLocked performs the actual reload. Caller must hold writeMu.
 func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
-	configPaths := lookupConfigs(s.workingDir)
-	cfg, loadedPaths, err := loadFromConfigPaths(ctx, configPaths)
-	if err != nil {
-		return fmt.Errorf("failed to reload config: %w", err)
-	}
-
-	// Apply defaults (using existing data directory if set)
+	// Keep the existing data directory: it was fixed at startup, and the
+	// workspace state file lives inside it.
 	var dataDir string
 	if cur := s.Config(); cur != nil && cur.Options != nil {
 		dataDir = cur.Options.DataDirectory
 	}
-	cfg.setDefaults(s.workingDir, dataDir)
-
-	// Merge workspace config if present
-	workspacePath := filepath.Join(cfg.Options.DataDirectory, stateConfigFile)
-	if wsJSON, err := readConfigJSON(workspacePath); err == nil {
-		merged, mergeErr := mergeWorkspaceConfig(cfg, wsJSON)
-		if mergeErr == nil && merged != nil {
-			dataDir := cfg.Options.DataDirectory
-			*cfg = *merged
-			cfg.setDefaults(s.workingDir, dataDir)
-			loadedPaths = append(loadedPaths, workspacePath)
-		}
+	disk, err := readConfig(ctx, s.workingDir, dataDir, s.debug)
+	if err != nil {
+		return fmt.Errorf("failed to reload config: %w", err)
 	}
-
-	// Validate hooks after all config merging is complete so matcher
-	// regexes are recompiled on the reloaded config (mirrors Load).
-	if err := cfg.ValidateHooks(); err != nil {
-		return fmt.Errorf("invalid hook configuration on reload: %w", err)
-	}
-
-	// Save current state for potential rollback BEFORE configureProviders,
-	// which may write to disk via RemoveConfigField (e.g. removing stale
-	// OAuth providers). Capturing after would snapshot a config that has
-	// already been mutated, and the rollback would restore corrupted state.
-	oldConfig := s.Config()
-	oldLoadedPaths := s.loadedPaths
-	oldResolver := s.resolver
-	oldKnownProviders := s.knownProviders
-	oldOverrides := s.overrides
-	oldWorkspacePath := s.workspacePath
-
-	// Preserve runtime overrides
-	overrides := s.overrides
+	cfg := disk.cfg
 
 	// Reapply model choices made in this instance. The global config file is
 	// shared, so it may now name a model a sibling instance selected; a
 	// reload triggered by an unrelated write must not swap the user's model
 	// mid-session. An external edit to the config still takes effect for any
 	// model type this instance never chose.
-	maps.Copy(cfg.Models, overrides.Models)
+	maps.Copy(cfg.Models, s.overrides.Models)
 
 	// Reconfigure providers
 	env := env.New()
@@ -1233,43 +1196,27 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 		return fmt.Errorf("failed to configure providers during reload: %w", err)
 	}
 
-	// Update store state BEFORE running model/agent setup (so they see new config)
+	// Finish the new config before publishing it: readers hold the
+	// published pointer without a lock, so it must never change after
+	// setConfig. Agents are set up whether or not a provider is configured,
+	// as on startup.
+	cfg.SetupAgents()
+	if cfg.IsConfigured() {
+		resolved, err := resolveSelectedModels(cfg, providers)
+		if err != nil {
+			return fmt.Errorf("failed to configure selected models during reload: %w", err)
+		}
+		applyResolvedModels(cfg, resolved)
+	} else {
+		slog.Warn("No providers configured after reload")
+	}
+
 	s.setConfig(cfg)
-	s.loadedPaths = loadedPaths
+	s.loadedPaths = disk.loadedPaths
 	s.resolver = resolver
 	s.knownProviders = providers
-	s.overrides = overrides
-	s.workspacePath = workspacePath
-
-	// Mirror startup flow: setup models and agents against NEW config.
-	var setupErr error
-	if !cfg.IsConfigured() {
-		slog.Warn("No providers configured after reload")
-	} else {
-		resolved, resolveErr := resolveSelectedModels(cfg, providers)
-		if resolveErr != nil {
-			setupErr = fmt.Errorf("failed to configure selected models during reload: %w", resolveErr)
-		} else {
-			applyResolvedModels(cfg, resolved)
-			s.SetupAgents()
-		}
-	}
-
-	// Rollback on setup failure
-	if setupErr != nil {
-		s.setConfig(oldConfig)
-		s.loadedPaths = oldLoadedPaths
-		s.resolver = oldResolver
-		s.knownProviders = oldKnownProviders
-		s.overrides = oldOverrides
-		s.workspacePath = oldWorkspacePath
-		return setupErr
-	}
-
-	// Rebuild staleness tracking. Track every discovered config path, not
-	// just the ones that loaded, so a config file created after this reload
-	// is detected as a change on the next staleness check.
-	s.captureStalenessSnapshot(append(slices.Clone(configPaths), loadedPaths...))
+	s.workspacePath = disk.workspacePath
+	s.CaptureStalenessSnapshot(disk.trackedPaths())
 
 	return nil
 }

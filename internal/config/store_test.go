@@ -174,7 +174,7 @@ func TestConfigStaleness_CleanImmediatelyAfterSnapshot(t *testing.T) {
 		config:         &Config{},
 		globalDataPath: configPath,
 	}
-	store.captureStalenessSnapshot([]string{configPath})
+	store.CaptureStalenessSnapshot([]string{configPath})
 
 	result := store.ConfigStaleness()
 	require.False(t, result.Dirty)
@@ -195,7 +195,7 @@ func TestConfigStaleness_DetectsFileContentChange(t *testing.T) {
 		config:         &Config{},
 		globalDataPath: configPath,
 	}
-	store.captureStalenessSnapshot([]string{configPath})
+	store.CaptureStalenessSnapshot([]string{configPath})
 
 	// Modify the file
 	time.Sleep(10 * time.Millisecond) // Ensure different mtime
@@ -220,7 +220,7 @@ func TestConfigStaleness_DetectsFileDeletion(t *testing.T) {
 		config:         &Config{},
 		globalDataPath: configPath,
 	}
-	store.captureStalenessSnapshot([]string{configPath})
+	store.CaptureStalenessSnapshot([]string{configPath})
 
 	// Delete the file
 	require.NoError(t, os.Remove(configPath))
@@ -242,7 +242,7 @@ func TestConfigStaleness_DetectsNewFile(t *testing.T) {
 		config:         &Config{},
 		globalDataPath: configPath,
 	}
-	store.captureStalenessSnapshot([]string{configPath})
+	store.CaptureStalenessSnapshot([]string{configPath})
 
 	// Now create the file
 	time.Sleep(10 * time.Millisecond)
@@ -272,7 +272,7 @@ func TestConfigStaleness_SortedOutput(t *testing.T) {
 		globalDataPath: pathA,
 	}
 	// Add in reverse order to test sorting
-	store.captureStalenessSnapshot([]string{pathC, pathA, pathB})
+	store.CaptureStalenessSnapshot([]string{pathC, pathA, pathB})
 
 	// Modify all files
 	time.Sleep(10 * time.Millisecond)
@@ -299,7 +299,7 @@ func TestConfigStaleness_RefreshClearsDirtyState(t *testing.T) {
 		config:         &Config{},
 		globalDataPath: configPath,
 	}
-	store.captureStalenessSnapshot([]string{configPath})
+	store.CaptureStalenessSnapshot([]string{configPath})
 
 	// Modify the file
 	time.Sleep(10 * time.Millisecond)
