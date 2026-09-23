@@ -12,24 +12,28 @@ import (
 
 // promptHistoryLoadedMsg is sent when prompt history is loaded.
 type promptHistoryLoadedMsg struct {
-	messages []string
+	// forSession is the session the load was scoped to ("" for all
+	// sessions); a result that raced a session switch is discarded.
+	forSession string
+	messages   []string
 }
 
 // loadPromptHistory loads user messages for history navigation.
 func (m *UI) loadPromptHistory() tea.Cmd {
+	sessionID := m.currentSessionID()
 	return func() tea.Msg {
 		ctx := context.Background()
 		var messages []message.Message
 		var err error
 
-		if m.session != nil {
-			messages, err = m.com.Workspace.ListUserMessages(ctx, m.session.ID)
+		if sessionID != "" {
+			messages, err = m.com.Workspace.ListUserMessages(ctx, sessionID)
 		} else {
 			messages, err = m.com.Workspace.ListAllUserMessages(ctx)
 		}
 		if err != nil {
 			slog.Error("Failed to load prompt history", "error", err)
-			return promptHistoryLoadedMsg{messages: nil}
+			return promptHistoryLoadedMsg{forSession: sessionID}
 		}
 
 		texts := make([]string, 0, len(messages))
@@ -41,7 +45,7 @@ func (m *UI) loadPromptHistory() tea.Cmd {
 				texts = append(texts, "!"+sc.Command)
 			}
 		}
-		return promptHistoryLoadedMsg{messages: texts}
+		return promptHistoryLoadedMsg{forSession: sessionID, messages: texts}
 	}
 }
 

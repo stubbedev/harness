@@ -179,8 +179,15 @@ type (
 
 	// sessionFilesUpdatesMsg is sent when the files for this session have been updated
 	sessionFilesUpdatesMsg struct {
+		// forSession is the session the files were loaded for; a result
+		// that raced a session switch is discarded.
+		forSession   string
 		sessionFiles []SessionFile
 	}
+
+	// clearChatMouseMsg clears the chat's mouse selection state once a
+	// copy to the clipboard has finished.
+	clearChatMouseMsg struct{}
 	// parentTitleMsg is sent when the parent session metadata has been
 	// fetched: the title for the breadcrumb and this child's subagent color.
 	parentTitleMsg struct {
@@ -989,6 +996,9 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case sessionFilesUpdatesMsg:
+		if msg.forSession != m.currentSessionID() {
+			break
+		}
 		m.sessionFiles = msg.sessionFiles
 		var paths []string
 		for _, f := range msg.sessionFiles {
@@ -1034,7 +1044,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			commands.SetMCPPrompts(m.mcpPrompts)
 		}
 
+	case clearChatMouseMsg:
+		m.chat.ClearMouse()
+
 	case promptHistoryLoadedMsg:
+		if msg.forSession != m.currentSessionID() {
+			break
+		}
 		m.promptHistory.messages = msg.messages
 		m.promptHistory.index = -1
 		m.promptHistory.draft = ""
@@ -4017,26 +4033,30 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	}
 	heightCmd := m.handleTextareaHeightChange(prevHeight)
 
+	absPath, _ := filepath.Abs(path)
+	sessionID := m.currentSessionID()
+	alreadyRead := slices.Contains(m.sessionFileReads, absPath)
+	if !alreadyRead {
+		m.sessionFileReads = append(m.sessionFileReads, absPath)
+	}
+	supportsImages := m.currentModelSupportsImages()
+
 	fileCmd := func() tea.Msg {
-		if !m.currentModelSupportsImages() && common.IsImagePath(path) {
+		if !supportsImages && common.IsImagePath(path) {
 			return util.NewWarnMsg("The current model does not support image attachments")
 		}
 
-		absPath, _ := filepath.Abs(path)
-
-		if m.hasSession() {
+		if sessionID != "" {
 			// Skip attachment if file was already read and hasn't been modified.
-			lastRead := m.com.Workspace.FileTrackerLastReadTime(context.Background(), m.session.ID, absPath)
+			lastRead := m.com.Workspace.FileTrackerLastReadTime(context.Background(), sessionID, absPath)
 			if !lastRead.IsZero() {
 				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
 					return nil
 				}
 			}
-		} else if slices.Contains(m.sessionFileReads, absPath) {
+		} else if alreadyRead {
 			return nil
 		}
-
-		m.sessionFileReads = append(m.sessionFileReads, absPath)
 
 		// Add file as attachment.
 		content, err := os.ReadFile(path)
@@ -4366,9 +4386,11 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 	}
 
 	ctx := context.Background()
+	readsSessionID := m.session.ID
+	reads := slices.Clone(m.sessionFileReads)
 	cmds = append(cmds, func() tea.Msg {
-		for _, path := range m.sessionFileReads {
-			m.com.Workspace.FileTrackerRecordRead(ctx, m.session.ID, path)
+		for _, path := range reads {
+			m.com.Workspace.FileTrackerRecordRead(ctx, readsSessionID, path)
 			m.com.Workspace.LSPStart(ctx, path)
 		}
 		return nil
@@ -5470,10 +5492,7 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 	return common.CopyToClipboardWithCallback(
 		text,
 		"Selected text copied to clipboard",
-		func() tea.Msg {
-			m.chat.ClearMouse()
-			return nil
-		},
+		func() tea.Msg { return clearChatMouseMsg{} },
 	)
 }
 
