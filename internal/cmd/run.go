@@ -715,16 +715,22 @@ func resolveSession(ctx context.Context, c *client.Client, wsID, continueSession
 
 	case useLast:
 		sessions, err := c.ListSessions(ctx, wsID)
-		if err != nil || len(sessions) == 0 {
+		if err != nil {
 			return nil, fmt.Errorf("no sessions found to continue")
 		}
-		last := sessions[0]
-		for _, s := range sessions[1:] {
-			if s.UpdatedAt > last.UpdatedAt && s.ParentSessionID == "" {
+		// Only top-level sessions qualify, the same rule the explicit-ID
+		// branch enforces; seeding from sessions[0] let a child win.
+		var last *proto.Session
+		for i := range sessions {
+			s := &sessions[i]
+			if s.ParentSessionID == "" && (last == nil || s.UpdatedAt > last.UpdatedAt) {
 				last = s
 			}
 		}
-		return &last, nil
+		if last == nil {
+			return nil, fmt.Errorf("no sessions found to continue")
+		}
+		return last, nil
 
 	default:
 		return c.CreateSession(ctx, wsID, "non-interactive")
