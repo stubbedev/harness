@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"charm.land/fantasy"
@@ -35,6 +36,46 @@ type ReplaceSymbolResponseMetadata struct {
 	Action     string `json:"action"`
 }
 
+// replaceSymbolOp is what one replace_symbol action does to the lines of
+// a symbol spanning start..end (0-based, inclusive): the half-open range
+// it cuts, whether it inserts the replacement there, and how it reports
+// itself (with 1-based lines).
+type replaceSymbolOp struct {
+	span    func(start, end int) (from, to int)
+	insert  bool
+	summary func(symbol, path string, start, end int) string
+}
+
+var replaceSymbolOps = map[string]replaceSymbolOp{
+	"replace": {
+		span:   func(start, end int) (int, int) { return start, end + 1 },
+		insert: true,
+		summary: func(symbol, path string, start, end int) string {
+			return fmt.Sprintf("Replaced symbol '%s' in %s (lines %d-%d)", symbol, path, start, end)
+		},
+	},
+	"add_before": {
+		span:   func(start, _ int) (int, int) { return start, start },
+		insert: true,
+		summary: func(symbol, path string, start, _ int) string {
+			return fmt.Sprintf("Inserted before symbol '%s' in %s (before line %d)", symbol, path, start)
+		},
+	},
+	"add_after": {
+		span:   func(_, end int) (int, int) { return end + 1, end + 1 },
+		insert: true,
+		summary: func(symbol, path string, _, end int) string {
+			return fmt.Sprintf("Inserted after symbol '%s' in %s (after line %d)", symbol, path, end)
+		},
+	},
+	"delete": {
+		span: func(start, end int) (int, int) { return start, end + 1 },
+		summary: func(symbol, path string, start, end int) string {
+			return fmt.Sprintf("Deleted symbol '%s' from %s (lines %d-%d)", symbol, path, start, end)
+		},
+	},
+}
+
 func NewReplaceSymbolTool(
 	lspManager *lsp.Manager,
 	files history.Service,
@@ -55,12 +96,11 @@ func NewReplaceSymbolTool(
 			if action == "" {
 				action = "replace"
 			}
-			switch action {
-			case "replace", "add_before", "add_after", "delete":
-			default:
+			op, ok := replaceSymbolOps[action]
+			if !ok {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("invalid action %q: must be replace, add_before, add_after, or delete", action)), nil
 			}
-			if (action == "replace" || action == "add_before" || action == "add_after") && params.Replacement == "" {
+			if op.insert && params.Replacement == "" {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("replacement is required for action %q", action)), nil
 			}
 
@@ -97,31 +137,14 @@ func NewReplaceSymbolTool(
 				return fantasy.NewTextErrorResponse("symbol range exceeds file length"), nil
 			}
 
-			// Compute the new content.
-			var newLines []string
-			switch action {
-			case "replace":
-				newLines = make([]string, 0, len(lines))
-				newLines = append(newLines, lines[:startLine]...)
-				newLines = append(newLines, strings.Split(params.Replacement, "\n")...)
-				newLines = append(newLines, lines[endLine+1:]...)
-			case "add_before":
-				newLines = make([]string, 0, len(lines)+strings.Count(params.Replacement, "\n")+1)
-				newLines = append(newLines, lines[:startLine]...)
-				newLines = append(newLines, strings.Split(params.Replacement, "\n")...)
-				newLines = append(newLines, lines[startLine:]...)
-			case "add_after":
-				newLines = make([]string, 0, len(lines)+strings.Count(params.Replacement, "\n")+1)
-				newLines = append(newLines, lines[:endLine+1]...)
-				newLines = append(newLines, strings.Split(params.Replacement, "\n")...)
-				newLines = append(newLines, lines[endLine+1:]...)
-			case "delete":
-				newLines = make([]string, 0, len(lines))
-				newLines = append(newLines, lines[:startLine]...)
-				newLines = append(newLines, lines[endLine+1:]...)
+			// Cut lines [from, to) and put the replacement there when the
+			// action inserts one.
+			from, to := op.span(startLine, endLine)
+			var inserted []string
+			if op.insert {
+				inserted = strings.Split(params.Replacement, "\n")
 			}
-
-			newContent := strings.Join(newLines, "\n")
+			newContent := strings.Join(slices.Concat(lines[:from], inserted, lines[to:]), "\n")
 
 			sessionID := GetSessionFromContext(ctx)
 			affected := lineRange(content, startLine, endLine-startLine+1)
@@ -144,17 +167,7 @@ func NewReplaceSymbolTool(
 
 			lspManager.NotifyChangeAsync(ctx, params.FilePath)
 
-			var summary string
-			switch action {
-			case "replace":
-				summary = fmt.Sprintf("Replaced symbol '%s' in %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
-			case "add_before":
-				summary = fmt.Sprintf("Inserted before symbol '%s' in %s (before line %d)", params.Symbol, params.FilePath, startLine+1)
-			case "add_after":
-				summary = fmt.Sprintf("Inserted after symbol '%s' in %s (after line %d)", params.Symbol, params.FilePath, endLine+1)
-			case "delete":
-				summary = fmt.Sprintf("Deleted symbol '%s' from %s (lines %d-%d)", params.Symbol, params.FilePath, startLine+1, endLine+1)
-			}
+			summary := op.summary(params.Symbol, params.FilePath, startLine+1, endLine+1)
 
 			resp := fantasy.NewTextResponse(summary + "\n" + reportDiagnosticsNow(ctx, lspManager, params.FilePath))
 			resp = fantasy.WithResponseMetadata(resp, ReplaceSymbolResponseMetadata{
