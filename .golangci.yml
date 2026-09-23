@@ -13,7 +13,7 @@ linters:
     - misspell
     # - nakedret
     # - nestif
-    # - nilerr
+    - nilerr
     - noctx
     - nolintlint
     # - prealloc
@@ -23,18 +23,27 @@ linters:
     - staticcheck
     - tparallel
     # - unconvert
-    # - unparam
+    - unparam
     - whitespace
     # - wrapcheck
   disable:
     - errcheck
     - ineffassign
-    - unused
   exclusions:
     generated: lax
     presets:
       - common-false-positives
     rules:
+      # Test helpers take parameters for readability at the call site even
+      # when every current caller passes the same value.
+      - path: _test\.go
+        linters:
+          - unparam
+      # A tool reports failures to the model as an error response with a
+      # nil Go error; that is the tool contract, not a swallowed error.
+      - linters:
+          - nilerr
+        source: "NewTextErrorResponse|failureResponse"
       - text: '(slog|log)\.\w+'
         linters:
           - noctx

@@ -191,11 +191,7 @@ func (p *Prompt) Build(ctx context.Context, provider, model string, store *confi
 		return "", fmt.Errorf("parsing template: %w", err)
 	}
 	var sb strings.Builder
-	d, err := p.promptData(ctx, provider, model, store)
-	if err != nil {
-		return "", err
-	}
-	if err := t.Execute(&sb, d); err != nil {
+	if err := t.Execute(&sb, p.promptData(ctx, provider, model, store)); err != nil {
 		return "", fmt.Errorf("executing template: %w", err)
 	}
 
@@ -257,7 +253,7 @@ func loadContextFiles(paths []string, store *config.ConfigStore) []ContextFile {
 	return files
 }
 
-func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) (PromptDat, error) {
+func (p *Prompt) promptData(ctx context.Context, provider, model string, store *config.ConfigStore) PromptDat {
 	workingDir := cmp.Or(p.workingDir, store.WorkingDir())
 	platform := cmp.Or(p.platform, runtime.GOOS)
 
@@ -316,7 +312,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 	capped := capContextFiles(append(data.ContextFiles, data.GlobalContextFiles...), maxContextFileBytes, maxContextTotalBytes)
 	data.ContextFiles = capped[:len(data.ContextFiles)]
 	data.GlobalContextFiles = capped[len(data.ContextFiles):]
-	return data, nil
+	return data
 }
 
 func isGitRepo(dir string) bool {

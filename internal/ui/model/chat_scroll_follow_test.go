@@ -41,10 +41,7 @@ type expandableTestItem struct {
 	id            string
 	expanded      bool
 	version       uint64
-	lines         int
 	expandedLines int
-	toolCall      string
-	hasResult     bool
 }
 
 func (m *expandableTestItem) ID() string           { return m.id }

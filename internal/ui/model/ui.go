@@ -1333,8 +1333,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Forward clicks within the textarea region to the textarea so it
 		// can position the cursor and start a selection.
 		if m.activeInline == nil {
-			if handled, cmd := m.forwardMouseToTextarea(msg); handled {
-				cmds = append(cmds, cmd)
+			if m.forwardMouseToTextarea(msg) {
 				return m, tea.Batch(cmds...)
 			}
 		}
@@ -1381,9 +1380,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// While a mouse selection is in progress in the textarea, forward
 		// motion events to it and skip chat drag handling.
 		if m.activeInline == nil && m.textareaMouseSelecting {
-			if handled, cmd := m.forwardMouseToTextarea(msg); handled {
-				cmds = append(cmds, cmd)
-			}
+			m.forwardMouseToTextarea(msg)
 			return m, tea.Batch(cmds...)
 		}
 
@@ -1426,9 +1423,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// End any in-progress textarea mouse selection.
 		if m.textareaMouseSelecting {
 			m.textareaMouseSelecting = false
-			if handled, cmd := m.forwardMouseToTextarea(msg); handled {
-				cmds = append(cmds, cmd)
-			}
+			m.forwardMouseToTextarea(msg)
 			return m, tea.Batch(cmds...)
 		}
 
@@ -3594,7 +3589,7 @@ func (m *UI) textareaOrigin() image.Point {
 // forwardMouseToTextarea forwards a mouse event to the textarea with
 // coordinates translated into the textarea's local space. It reports whether
 // the event landed within the textarea's rendered region and was forwarded.
-func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
+func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) bool {
 	mouse := msg.Mouse()
 
 	// The textarea is rendered inside layout.editor below the
@@ -3604,7 +3599,7 @@ func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 	// The textarea occupies its own height starting at the origin.
 	area := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(m.layout.editor.Dx(), m.textarea.Height()))}
 	if !image.Pt(mouse.X, mouse.Y).In(area) {
-		return false, nil
+		return false
 	}
 
 	rel := tea.Mouse{
@@ -3617,23 +3612,23 @@ func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) (bool, tea.Cmd) {
 	switch msg.(type) {
 	case tea.MouseClickMsg:
 		if rel.Button != uv.MouseLeft {
-			return false, nil
+			return false
 		}
 		m.textareaMouseSelecting = true
 		m.textarea.BeginSelection(rel.X, rel.Y)
-		return true, nil
+		return true
 	case tea.MouseMotionMsg:
 		if !m.textareaMouseSelecting {
-			return true, nil
+			return true
 		}
 		m.textarea.ExtendSelection(rel.X, rel.Y)
-		return true, nil
+		return true
 	case tea.MouseReleaseMsg:
 		m.textarea.EndSelection()
 		m.textareaMouseSelecting = false
-		return true, nil
+		return true
 	default:
-		return false, nil
+		return false
 	}
 }
 
@@ -4735,7 +4730,7 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 }
 
 // openThemesDialog opens the color theme picker.
-func (m *UI) openThemesDialog() tea.Cmd {
+func (m *UI) openThemesDialog() tea.Cmd { //nolint:unparam // uniform openDialog dispatch signature
 	if m.dialog.ContainsDialog(dialog.ThemesID) {
 		m.dialog.BringToFront(dialog.ThemesID)
 		return nil
@@ -4746,7 +4741,7 @@ func (m *UI) openThemesDialog() tea.Cmd {
 }
 
 // openNotificationsDialog opens the notification style picker dialog.
-func (m *UI) openNotificationsDialog() tea.Cmd {
+func (m *UI) openNotificationsDialog() tea.Cmd { //nolint:unparam // uniform openDialog dispatch signature
 	if m.dialog.ContainsDialog(dialog.NotificationsID) {
 		m.dialog.BringToFront(dialog.NotificationsID)
 		return nil

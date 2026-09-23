@@ -1159,7 +1159,7 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 			// The caller gave up (the user interrupted the turn). Stop
 			// the command rather than leaving it running into the next
 			// call's output.
-			return r.interrupt(s), nil
+			return r.interrupt(s), nil //nolint:nilerr // an interrupt is a result, not a failure
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -1305,7 +1305,7 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 	}
 
 	if ctx.Err() != nil {
-		return r.interrupt(s), nil
+		return r.interrupt(s), nil //nolint:nilerr // an interrupt is a result, not a failure
 	}
 	if s.AltScreen() {
 		s.Drain()

@@ -36,7 +36,7 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 		if err != nil {
 			// The embedded tree is fixed at build time; an entry it cannot
 			// walk is skipped rather than aborting every other builtin.
-			return nil
+			return nil //nolint:nilerr // an unwalkable builtin is skipped, not fatal
 		}
 		if d.IsDir() || d.Name() != SkillFileName {
 			return nil

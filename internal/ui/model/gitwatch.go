@@ -322,7 +322,7 @@ func (w *gitWatcher) applyWatches(gitDir, commonDir string) {
 		refs := filepath.Join(root, "refs")
 		_ = filepath.WalkDir(refs, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
-				return nil
+				return nil //nolint:nilerr // unreadable refs are skipped, not fatal
 			}
 			if d.IsDir() {
 				w.addWatch(path)

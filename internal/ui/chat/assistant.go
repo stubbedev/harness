@@ -528,7 +528,7 @@ func (a *AssistantMessageItem) contentKey() (uint64, uint64) {
 // errorKey returns the (srcHash, extra) cache key components for the
 // error / refusal section. Returns (0, 0) when no error-like finish
 // is present so the cache stays a no-op for normal messages.
-func (a *AssistantMessageItem) errorKey() (uint64, uint64) {
+func (a *AssistantMessageItem) errorKey() (uint64, uint64) { //nolint:unparam // same shape as thinkingKey and contentKey
 	if !a.message.IsFinished() || !a.message.IsErrorLike() {
 		return 0, 0
 	}

@@ -283,7 +283,7 @@ func ListDirectory(initialPath string, ignorePatterns []string, depth, limit int
 
 	err := fastwalk.Walk(&conf, initialPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // Skip files we don't have permission to access
+			return nil //nolint:nilerr // unreadable entries are skipped, not fatal
 		}
 
 		isDir := d.IsDir()

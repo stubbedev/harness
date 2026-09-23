@@ -1287,7 +1287,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// and its rows would be created on a dead context.
 			inject := func(kind string, produce func([]fantasy.Message) []fantasy.Message) error {
 				if callContext.Err() != nil {
-					return nil
+					return nil //nolint:nilerr // canceled step adds nothing; the turn fails on its own
 				}
 				before := len(prepared.Messages)
 				next := produce(prepared.Messages)

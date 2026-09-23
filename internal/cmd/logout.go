@@ -140,7 +140,7 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
 	_, err = fmt.Scanln(&choice)
 	if err != nil || choice < 1 || choice > len(loggedIn) {
 		fmt.Println(logoutHeaderStyle.Render("Logout cancelled."))
-		return "", nil
+		return "", nil //nolint:nilerr // bad input cancels the prompt
 	}
 
 	return loggedIn[choice-1].id, nil

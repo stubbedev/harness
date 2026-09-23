@@ -16,7 +16,7 @@ const (
 // hasRepeatedToolCalls checks whether the agent is stuck in a loop by looking
 // at recent steps. It examines the last windowSize steps and returns true if
 // any tool-call signature appears more than maxRepeats times.
-func hasRepeatedToolCalls(steps []fantasy.StepResult, windowSize, maxRepeats int) bool {
+func hasRepeatedToolCalls(steps []fantasy.StepResult, windowSize, maxRepeats int) bool { //nolint:unparam // tests exercise other windows
 	if len(steps) < windowSize {
 		return false
 	}

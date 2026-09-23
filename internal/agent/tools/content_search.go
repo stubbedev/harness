@@ -184,7 +184,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 
 	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // Skip errors
+			return nil //nolint:nilerr // unreadable entries are skipped, not fatal
 		}
 
 		if info.IsDir() {
@@ -212,7 +212,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 
 		lineMatches, err := fileMatches(path, regex)
 		if err != nil {
-			return nil // Skip files we can't read
+			return nil //nolint:nilerr // unreadable files are skipped, not fatal
 		}
 
 		for _, lm := range lineMatches {

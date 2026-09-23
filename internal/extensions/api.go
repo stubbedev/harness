@@ -190,7 +190,7 @@ func (in *instance) luaRegisterTool(L *lua.LState) int {
 		L.RaiseError("register_tool: name is required")
 		return 0
 	}
-	fn := tableFunc(spec, "handler")
+	fn := tableHandler(spec)
 	if fn == nil {
 		L.RaiseError("register_tool %q: handler must be a function", name)
 		return 0
@@ -222,7 +222,7 @@ func (in *instance) luaRegisterCommand(L *lua.LState) int {
 		L.RaiseError("register_command: name is required")
 		return 0
 	}
-	fn := tableFunc(spec, "handler")
+	fn := tableHandler(spec)
 	prompt := tableString(spec, "prompt", "")
 	if fn == nil && prompt == "" {
 		L.RaiseError("register_command %q: either prompt or handler is required", name)
@@ -256,7 +256,7 @@ func (in *instance) luaOn(L *lua.LState) int {
 	if tbl, ok := L.Get(1).(*lua.LTable); ok {
 		event = tableString(tbl, "event", "")
 		matcher = tableString(tbl, "matcher", "")
-		fn = tableFunc(tbl, "handler")
+		fn = tableHandler(tbl)
 	} else {
 		event = L.CheckString(1)
 		switch arg := L.Get(2).(type) {
@@ -389,7 +389,7 @@ func (in *instance) luaRegisterJob(L *lua.LState) int {
 		L.RaiseError("register_job: name is required")
 		return 0
 	}
-	fn := tableFunc(spec, "handler")
+	fn := tableHandler(spec)
 	if fn == nil {
 		L.RaiseError("register_job %q: handler must be a function", name)
 		return 0

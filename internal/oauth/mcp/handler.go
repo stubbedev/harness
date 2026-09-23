@@ -673,7 +673,7 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	var raw map[string]any
 	if json.Unmarshal(body, &raw) != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(body))
-		return resp, nil
+		return resp, nil //nolint:nilerr // best-effort fixup passes the body through
 	}
 
 	issuer, ok := raw["issuer"].(string)
@@ -686,7 +686,7 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 	fixed, err := json.Marshal(raw)
 	if err != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(body))
-		return resp, nil
+		return resp, nil //nolint:nilerr // best-effort fixup passes the body through
 	}
 
 	slog.Debug("Normalized OAuth metadata issuer trailing slash", "url", req.URL.String())

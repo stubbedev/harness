@@ -1373,7 +1373,7 @@ func (rt *oauthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 		if authErr := rt.handler.Authorize(req.Context(), req, resp); authErr != nil {
 			// Authorization could not be completed; hand the 401 back so the
 			// caller sees the server's refusal rather than a transport error.
-			return resp, nil
+			return resp, nil //nolint:nilerr // hand the server's 401 back rather than a transport error
 		}
 		resp.Body.Close()
 		return rt.doRequestWithToken(req.Clone(req.Context()))

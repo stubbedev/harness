@@ -208,12 +208,12 @@ func tableBool(tbl *lua.LTable, key string) bool {
 	return bool(b)
 }
 
-// tableFunc reads a function field from a table.
-func tableFunc(tbl *lua.LTable, key string) *lua.LFunction {
+// tableHandler reads the handler function field from a spec table.
+func tableHandler(tbl *lua.LTable) *lua.LFunction {
 	if tbl == nil {
 		return nil
 	}
-	if fn, ok := tbl.RawGetString(key).(*lua.LFunction); ok {
+	if fn, ok := tbl.RawGetString("handler").(*lua.LFunction); ok {
 		return fn
 	}
 	return nil

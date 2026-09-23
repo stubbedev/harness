@@ -245,7 +245,7 @@ func crawlForStats(ctx context.Context, rootDir string) ([]ProjectStats, error) 
 
 	err := filepath.WalkDir(rootDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // Skip errors (permission denied, etc.)
+			return nil //nolint:nilerr // unreadable entries are skipped, not fatal
 		}
 
 		// Skip common ignored directories early
