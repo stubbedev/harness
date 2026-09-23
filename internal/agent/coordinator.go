@@ -1292,16 +1292,15 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 
 func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string, disableHTTP2 bool) (fantasy.Provider, error) {
 	var opts []anthropic.Option
+	var client httpDoer = log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)
 
 	switch {
 	case strings.HasPrefix(apiKey, "Bearer "):
-		// NOTE: Prevent the SDK from picking up the API key from env.
-		os.Setenv("ANTHROPIC_API_KEY", "")
 		headers["Authorization"] = apiKey
+		client = bearerOnlyClient{client}
 	case providerID == string(catalog.InferenceProviderMiniMax) || providerID == string(catalog.InferenceProviderMiniMaxChina):
-		// NOTE: Prevent the SDK from picking up the API key from env.
-		os.Setenv("ANTHROPIC_API_KEY", "")
 		headers["Authorization"] = "Bearer " + apiKey
+		client = bearerOnlyClient{client}
 	case apiKey != "":
 		// X-Api-Key header
 		opts = append(opts, anthropic.WithAPIKey(apiKey))
@@ -1315,8 +1314,27 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
-	opts = append(opts, anthropic.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)))
+	opts = append(opts, anthropic.WithHTTPClient(client))
 	return anthropic.New(opts...)
+}
+
+// bearerOnlyClient strips the X-Api-Key header from every request. The
+// Anthropic SDK adds that header from ANTHROPIC_API_KEY in the process
+// environment whenever it is set; a provider that authenticates with a
+// bearer token must not also send the user's unrelated Anthropic key.
+// Stripping it per request leaves the environment alone, where clearing
+// the variable would race other provider builds and hide the key from
+// every shell the agent spawns later.
+type bearerOnlyClient struct{ inner httpDoer }
+
+// httpDoer is the client shape provider SDKs accept for HTTP transport.
+type httpDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+func (c bearerOnlyClient) Do(req *http.Request) (*http.Response, error) {
+	req.Header.Del("X-Api-Key")
+	return c.inner.Do(req)
 }
 
 func (c *coordinator) buildOpenaiProvider(baseURL, apiKey string, headers map[string]string, disableHTTP2 bool) (fantasy.Provider, error) {
@@ -1556,10 +1574,15 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
 	case openaicompat.Name:
 		if catalog.IsZAI(providerCfg.ID) {
-			if providerCfg.ExtraBody == nil {
-				providerCfg.ExtraBody = map[string]any{}
+			// Clone before adding: providerCfg is a copy, but its map is
+			// shared with the config store and with sub-agent builds
+			// running in parallel.
+			extra := maps.Clone(providerCfg.ExtraBody)
+			if extra == nil {
+				extra = map[string]any{}
 			}
-			providerCfg.ExtraBody["tool_stream"] = true
+			extra["tool_stream"] = true
+			providerCfg.ExtraBody = extra
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.DisableHTTP2)
 	default:

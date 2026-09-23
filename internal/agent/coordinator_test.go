@@ -1572,3 +1572,24 @@ func TestResolveModelByID_ModelNotFound(t *testing.T) {
 	require.ErrorContains(t, err, "not found")
 	require.Equal(t, 0, coord.subagentModelCache.Len())
 }
+
+type recordingDoer struct{ got http.Header }
+
+func (d *recordingDoer) Do(req *http.Request) (*http.Response, error) {
+	d.got = req.Header.Clone()
+	return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+}
+
+func TestBearerOnlyClientStripsAPIKeyHeader(t *testing.T) {
+	t.Parallel()
+	inner := &recordingDoer{}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.invalid", nil)
+	require.NoError(t, err)
+	req.Header.Set("X-Api-Key", "env-key")
+	req.Header.Set("Authorization", "Bearer token")
+	resp, err := bearerOnlyClient{inner}.Do(req)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Empty(t, inner.got.Get("X-Api-Key"))
+	require.Equal(t, "Bearer token", inner.got.Get("Authorization"))
+}
