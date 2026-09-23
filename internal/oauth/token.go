@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 // minRefreshBuffer is the minimum number of seconds before actual
@@ -64,6 +66,61 @@ func (t *Token) SetExpiresAt() {
 func (t *Token) IsExpired() bool {
 	buffer := max(int64(t.ExpiresIn)/10, minRefreshBuffer)
 	return time.Now().Unix() >= (t.ExpiresAt - buffer)
+}
+
+// ToOAuth2 converts t to an oauth2 token. A zero ExpiresAt leaves Expiry
+// zero, which oauth2 reads as "never expires"; time.Unix(0, 0) would be
+// 1970 and force a refresh on every start.
+func (t *Token) ToOAuth2() *oauth2.Token {
+	out := &oauth2.Token{
+		AccessToken:  t.AccessToken,
+		RefreshToken: t.RefreshToken,
+	}
+	if t.ExpiresAt > 0 {
+		out.Expiry = time.Unix(t.ExpiresAt, 0)
+	}
+	return out
+}
+
+// FromOAuth2 converts an oauth2 token to a Token, recording the client
+// registration and endpoints from cfg when it is non-nil. A token without
+// an expiry keeps both expiry fields zero.
+func FromOAuth2(cfg *oauth2.Config, tok *oauth2.Token) *Token {
+	out := &Token{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: tok.RefreshToken,
+	}
+	if !tok.Expiry.IsZero() {
+		out.ExpiresAt = tok.Expiry.Unix()
+		out.SetExpiresIn()
+	}
+	if cfg != nil {
+		out.Client = &OAuthClient{
+			ClientID:     cfg.ClientID,
+			ClientSecret: cfg.ClientSecret,
+			AuthURL:      cfg.Endpoint.AuthURL,
+			TokenURL:     cfg.Endpoint.TokenURL,
+			AuthStyle:    int(cfg.Endpoint.AuthStyle),
+		}
+	}
+	return out
+}
+
+// Config rebuilds the oauth2 config from the client registration and
+// endpoints saved with the token. It returns nil when none were saved.
+func (c *OAuthClient) Config() *oauth2.Config {
+	if c == nil {
+		return nil
+	}
+	return &oauth2.Config{
+		ClientID:     c.ClientID,
+		ClientSecret: c.ClientSecret,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:   c.AuthURL,
+			TokenURL:  c.TokenURL,
+			AuthStyle: oauth2.AuthStyle(c.AuthStyle),
+		},
+	}
 }
 
 // SetExpiresIn calculates and sets the ExpiresIn field based on the ExpiresAt field.

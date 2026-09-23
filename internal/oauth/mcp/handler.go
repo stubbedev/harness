@@ -227,20 +227,8 @@ func NewHandler(
 	// flow. Seed the saver with the restored token so only a genuine
 	// refresh writes to disk; a plain restart causes no token churn.
 	if hasRefreshableToken(savedToken) {
-		restored := &oauth2.Token{
-			AccessToken:  savedToken.AccessToken,
-			RefreshToken: savedToken.RefreshToken,
-			Expiry:       time.Unix(savedToken.ExpiresAt, 0),
-		}
-		oc := &oauth2.Config{
-			ClientID:     savedToken.Client.ClientID,
-			ClientSecret: savedToken.Client.ClientSecret,
-			Endpoint: oauth2.Endpoint{
-				AuthURL:   savedToken.Client.AuthURL,
-				TokenURL:  savedToken.Client.TokenURL,
-				AuthStyle: oauth2.AuthStyle(savedToken.Client.AuthStyle),
-			},
-		}
+		restored := savedToken.ToOAuth2()
+		oc := savedToken.Client.Config()
 		base := oc.TokenSource(context.Background(), restored)
 		cfg.InitialTokenSource = NewSavingTokenSource(base, oc, restored, func(c *oauth2.Config, t *oauth2.Token) {
 			h.persist(c, t)
@@ -359,24 +347,7 @@ func (h *Handler) persist(cfg *oauth2.Config, tok *oauth2.Token) {
 		return
 	}
 
-	out := &oauth.Token{
-		AccessToken:  tok.AccessToken,
-		RefreshToken: tok.RefreshToken,
-	}
-	if !tok.Expiry.IsZero() {
-		out.ExpiresIn = int(time.Until(tok.Expiry).Seconds())
-	}
-	out.SetExpiresAt()
-	if cfg != nil {
-		out.Client = &oauth.OAuthClient{
-			ClientID:     cfg.ClientID,
-			ClientSecret: cfg.ClientSecret,
-			AuthURL:      cfg.Endpoint.AuthURL,
-			TokenURL:     cfg.Endpoint.TokenURL,
-			AuthStyle:    int(cfg.Endpoint.AuthStyle),
-		}
-	}
-	h.onTokenRefresh(out)
+	h.onTokenRefresh(oauth.FromOAuth2(cfg, tok))
 }
 
 // Close shuts down the callback server.
@@ -697,6 +668,8 @@ func (rt *metadataFixupRoundTripper) RoundTrip(req *http.Request) (*http.Respons
 		return nil, fmt.Errorf("read metadata response: %w", err)
 	}
 
+	// The fixup is best effort: a body it cannot parse or re-encode is
+	// passed through untouched for the SDK to judge.
 	var raw map[string]any
 	if json.Unmarshal(body, &raw) != nil {
 		resp.Body = io.NopCloser(bytes.NewReader(body))
