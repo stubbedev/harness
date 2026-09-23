@@ -542,6 +542,66 @@ func (a *sessionAgent) requeueCalls(sessionID string, calls []SessionAgentCall) 
 	a.messageQueue.Set(sessionID, append(slices.Clone(calls), existing...))
 }
 
+// appendQueued adds calls to the back of the session's queue under the
+// per-session dispatch mutex. Unlike enqueueCall it keeps the calls'
+// OnComplete: it is for a run re-queueing its own call to continue after
+// a compaction, which the same Run stack dequeues again, so the hook's
+// owner is still waiting on it.
+func (a *sessionAgent) appendQueued(sessionID string, calls ...SessionAgentCall) {
+	dispatchLock := a.sessionMu(sessionID)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
+	existing, _ := a.messageQueue.Get(sessionID)
+	a.messageQueue.Set(sessionID, append(existing, calls...))
+}
+
+// dequeueNextLocked takes the next turn off the session's queue. The
+// caller must hold the session's dispatch mutex.
+//
+// Queued calls covered by a pending cancel are dropped first; the dropped
+// ones are returned in drops so the caller can publish their terminal
+// cancelled RunComplete once it has released the lock. The leading run of
+// calls without a RunID was queued as one steering burst and is joined
+// into a single turn; RunID-bearing calls each keep their own turn. The
+// dequeued call gets a fresh accept reservation so acceptedRuns stays
+// above zero across the handoff into the Run that executes it: a cancel
+// arriving in that window records a mark the Run observes as
+// cancel-on-entry.
+//
+// remaining is the queue after the cancel filter, including the call
+// being dequeued. When it is empty, ok is false and the cancel mark is
+// cleared unless an accepted run it may still cover is in flight.
+func (a *sessionAgent) dequeueNextLocked(sessionID string) (next SessionAgentCall, remaining, drops []SessionAgentCall, ok bool) {
+	queued, _ := a.messageQueue.Get(sessionID)
+	for _, q := range queued {
+		if a.canceledBySeq(sessionID, q.acceptSeq) {
+			drops = append(drops, q)
+			continue
+		}
+		remaining = append(remaining, q)
+	}
+	if len(remaining) == 0 {
+		a.messageQueue.Del(sessionID)
+		a.acceptedMu.Lock()
+		inFlight, _ := a.acceptedRuns.Get(sessionID)
+		a.acceptedMu.Unlock()
+		if inFlight == 0 {
+			a.cancelMark.Del(sessionID)
+		}
+		return SessionAgentCall{}, nil, drops, false
+	}
+	n := 1
+	if remaining[0].RunID == "" {
+		for n < len(remaining) && remaining[n].RunID == "" {
+			n++
+		}
+	}
+	next = joinQueuedCalls(remaining[:n])
+	a.messageQueue.Set(sessionID, slices.Clone(remaining[n:]))
+	next.Accepted = a.BeginAccepted(sessionID)
+	return next, remaining, drops, true
+}
+
 // joinQueuedCalls merges queued calls without a RunID into a single
 // call: prompts joined with message.QueuedPromptSeparator and
 // attachments concatenated, so a queue drained as one steering burst
@@ -602,8 +662,7 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 // so callers waiting on those RunIDs (e.g. `harness run`) are not left
 // hanging when their queued prompt is discarded without running.
 func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
-	queued, ok := a.messageQueue.Get(sessionID)
-	a.messageQueue.Del(sessionID)
+	queued, ok := a.messageQueue.Take(sessionID)
 	if !ok {
 		return
 	}
@@ -1747,11 +1806,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if hadToolCalls {
 			requeued.Prompt = fmt.Sprintf("The previous session was interrupted because it exceeded the context window and the history was summarized. The initial user request was: `%s`", requeued.Prompt)
 		}
-		existing, ok := a.messageQueue.Get(call.SessionID)
-		if !ok {
-			existing = []SessionAgentCall{}
-		}
-		a.messageQueue.Set(call.SessionID, append(existing, requeued))
+		a.appendQueued(call.SessionID, requeued)
 	}
 
 	if err == nil && shouldSummarize {
@@ -1762,13 +1817,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		// If the agent wasn't done...
 		if len(currentAssistant.ToolCalls()) > 0 {
-			existing, ok := a.messageQueue.Get(call.SessionID)
-			if !ok {
-				existing = []SessionAgentCall{}
-			}
 			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			existing = append(existing, call)
-			a.messageQueue.Set(call.SessionID, existing)
+			a.appendQueued(call.SessionID, call)
 		}
 	} else if err == nil && !a.disableAutoSummarize {
 		// The turn is over and the session is still ours: this is the
@@ -1814,46 +1864,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// closing the dequeue -> re-register window.
 	mu := a.sessionMu(call.SessionID)
 	mu.Lock()
-	queuedMessages, _ := a.messageQueue.Get(call.SessionID)
-	if mark, ok := a.cancelMark.Get(call.SessionID); ok && mark > 0 && len(queuedMessages) > 0 {
-		// A cancel was recorded for this session (e.g. it arrived while
-		// this run was active and follow-ups had been queued). Drop the
-		// queued prompts it covers (accept sequence at or below the
-		// mark, or untracked); keep any queued after the cancel (higher
-		// sequence) so they still run.
-		var kept []SessionAgentCall
-		var canceledRunIDDrops []SessionAgentCall
-		for _, q := range queuedMessages {
-			if q.acceptSeq == 0 || q.acceptSeq <= mark {
-				if q.RunID != "" {
-					canceledRunIDDrops = append(canceledRunIDDrops, q)
-				}
-				continue
-			}
-			kept = append(kept, q)
-		}
-		queuedMessages = kept
-		a.messageQueue.Set(call.SessionID, kept)
-		// A dropped prompt carrying a RunID must still publish its
-		// terminal cancelled RunComplete so a caller waiting on that
-		// RunID does not hang.
-		a.publishCanceledQueueDrops(canceledRunIDDrops)
-	}
-	if len(queuedMessages) == 0 {
-		// No queued work. Clear the cancel mark only when no accepted
-		// run remains in flight that it might still cover; otherwise a
-		// sibling prompt (sequence at or below the mark) waiting to
-		// enter Run would lose its cancellation. When accepted runs are
-		// gone, this also clears a stale mark so it can't catch a
-		// future run.
-		a.messageQueue.Del(call.SessionID)
-		a.acceptedMu.Lock()
-		inFlight, _ := a.acceptedRuns.Get(call.SessionID)
-		a.acceptedMu.Unlock()
-		if inFlight == 0 {
-			a.cancelMark.Del(call.SessionID)
-		}
-		mu.Unlock()
+	next, queuedMessages, drops, ok := a.dequeueNextLocked(call.SessionID)
+	mu.Unlock()
+	// A dropped prompt carrying a RunID must still publish its terminal
+	// cancelled RunComplete so a caller waiting on that RunID does not
+	// hang.
+	a.publishCanceledQueueDrops(drops)
+	if !ok {
 		// Stop hooks fire on completed turns only: a turn that ended in
 		// an error or was canceled is not a completion. A canceled turn
 		// handing off to a queued prompt fires Stop once that follow-up
@@ -1877,38 +1894,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// which re-queues this same call (same RunID) to resume after a
 	// summary; in that case the eventual terminal turn for this RunID
 	// publishes, so publishing now would double-emit.
-	outerOwesRunComplete := call.RunID != ""
-	if outerOwesRunComplete {
-		for _, q := range queuedMessages {
-			if q.RunID == call.RunID {
-				outerOwesRunComplete = false
-				break
-			}
-		}
-	}
-	firstQueuedMessage := queuedMessages[0]
-	rest := queuedMessages[1:]
-	if firstQueuedMessage.RunID == "" {
-		// The leading run of queued prompts without a RunID was queued
-		// as one steering burst: join it into a single turn (and a
-		// single user message). RunID-bearing prompts after the run
-		// each keep their own turn and RunComplete lifecycle.
-		n := 1
-		for n < len(queuedMessages) && queuedMessages[n].RunID == "" {
-			n++
-		}
-		firstQueuedMessage = joinQueuedCalls(queuedMessages[:n])
-		rest = queuedMessages[n:]
-	}
-	a.messageQueue.Set(call.SessionID, rest)
-	// Reserve a fresh accept for the dequeued prompt before dropping the
-	// lock so acceptedRuns > 0 across the handoff into the recursive
-	// Run. This closes the window between this dequeue and the recursive
-	// Run registering its activeRequests entry: a cancel arriving in
-	// that window now records a pending cancel (acceptedRuns > 0) that
-	// the recursive Run's accepted path observes as cancel-on-entry.
-	firstQueuedMessage.Accepted = a.BeginAccepted(call.SessionID)
-	mu.Unlock()
+	outerOwesRunComplete := call.RunID != "" && !slices.ContainsFunc(queuedMessages, func(q SessionAgentCall) bool {
+		return q.RunID == call.RunID
+	})
 	if outerOwesRunComplete {
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}
 		if currentAssistant != nil {
@@ -1920,7 +1908,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		a.publishRunComplete(ctx, call, complete)
 	}
-	return a.Run(ctx, firstQueuedMessage)
+	return a.Run(ctx, next)
 }
 
 // stripOrphanThinking drops reasoning content from an assistant
@@ -2091,13 +2079,19 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 // hooks; instructions optionally steer the summary's focus. Prompts that
 // arrive while it runs are queued and run afterwards.
 func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, trigger, instructions string) error {
+	// The busy check and the registration happen under the dispatch lock,
+	// as in Run, so a concurrent Run cannot also pass the check and start
+	// on the same session.
+	sessMu := a.sessionMu(sessionID)
+	sessMu.Lock()
 	if a.IsSessionBusy(sessionID) {
+		sessMu.Unlock()
 		return ErrSessionBusy
 	}
-
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(sessionID, ac)
+	sessMu.Unlock()
 	defer csync.CompareAndDelete(a.activeRequests, sessionID, ac)
 	defer cancel()
 
@@ -2110,14 +2104,16 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	a.activeRequests.Del(sessionID)
 	cancel()
 
-	// Process any messages that were queued while summarizing.
-	queuedMessages, ok := a.messageQueue.Get(sessionID)
-	if !ok || len(queuedMessages) == 0 {
+	// Process any messages that were queued while summarizing, through
+	// the same cancel filter and burst join as Run's handoff.
+	sessMu.Lock()
+	next, _, drops, ok := a.dequeueNextLocked(sessionID)
+	sessMu.Unlock()
+	a.publishCanceledQueueDrops(drops)
+	if !ok {
 		return nil
 	}
-	firstQueuedMessage := queuedMessages[0]
-	a.messageQueue.Set(sessionID, queuedMessages[1:])
-	_, qErr := a.Run(ctx, firstQueuedMessage)
+	_, qErr := a.Run(ctx, next)
 	return qErr
 }
 
