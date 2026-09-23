@@ -88,6 +88,71 @@ func TestSubscribeEventsContextCancelClosesEvents(t *testing.T) {
 	}
 }
 
+// TestSubscribeEventsReadErrorClosesEvents covers a server that dies
+// mid-stream. The body then fails with an unexpected EOF on every read,
+// so the reader must close the channel rather than retry forever.
+func TestSubscribeEventsReadErrorClosesEvents(t *testing.T) {
+	t.Parallel()
+
+	payload := marshalSSEPayload(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+		w.(http.Flusher).Flush()
+		// Aborting mid-chunked-body surfaces as io.ErrUnexpectedEOF.
+		panic(http.ErrAbortHandler)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	events, err := c.SubscribeEvents(t.Context(), "ws1")
+	require.NoError(t, err)
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			require.Fail(t, "event channel never closed after a read error")
+		}
+	}
+}
+
+// TestSubscribeEventsSkipsUndecodablePayload verifies a payload that
+// fails to decode is dropped instead of reaching the consumer as a
+// zero-value event.
+func TestSubscribeEventsSkipsUndecodablePayload(t *testing.T) {
+	t.Parallel()
+
+	bad, err := json.Marshal(pubsub.Payload{
+		Type:    pubsub.PayloadTypeAgentEvent,
+		Payload: json.RawMessage(`{"payload": 7}`),
+	})
+	require.NoError(t, err)
+	good := marshalSSEPayload(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: %s\n\ndata: %s\n\n", bad, good)
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	events, err := c.SubscribeEvents(t.Context(), "ws1")
+	require.NoError(t, err)
+
+	var got []any
+	for ev := range events {
+		got = append(got, ev)
+	}
+	require.Len(t, got, 1)
+	ev, ok := got[0].(pubsub.Event[proto.AgentEvent])
+	require.True(t, ok)
+	require.Equal(t, proto.AgentEventTypeResponse, ev.Payload.Type)
+}
+
 func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
 	t.Parallel()
 

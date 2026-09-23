@@ -133,20 +133,15 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 		scr := bufio.NewReader(rsp.Body)
 		for {
 			line, err := scr.ReadBytes('\n')
-			if errors.Is(err, io.EOF) {
-				break
-			}
 			if err != nil {
-				if ctx.Err() != nil {
-					return
+				// Any read error is terminal: the body keeps returning
+				// it, so retrying the read would spin forever. Closing
+				// the channel hands recovery to the caller's reconnect
+				// loop.
+				if !errors.Is(err, io.EOF) && ctx.Err() == nil {
+					slog.Error("Reading from events stream", "error", err)
 				}
-				slog.Error("Reading from events stream", "error", err)
-				select {
-				case <-time.After(time.Second * 2):
-				case <-ctx.Done():
-					return
-				}
-				continue
+				return
 			}
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
@@ -167,87 +162,50 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				continue
 			}
 
-			switch p.Type {
-			case pubsub.PayloadTypeLSPEvent:
-				var e pubsub.Event[proto.LSPEvent]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeMCPEvent:
-				var e pubsub.Event[proto.MCPEvent]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeQuestionRequest:
-				var e pubsub.Event[proto.QuestionRequest]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeQuestionNotification:
-				var e pubsub.Event[proto.QuestionNotification]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeMessage:
-				var e pubsub.Event[proto.Message]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeSession:
-				var e pubsub.Event[proto.Session]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeFile:
-				var e pubsub.Event[proto.File]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeAgentEvent:
-				var e pubsub.Event[proto.AgentEvent]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeConfigChanged:
-				var e pubsub.Event[proto.ConfigChanged]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeSkillsEvent:
-				var e pubsub.Event[proto.SkillsEvent]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeRunComplete:
-				var e pubsub.Event[proto.RunComplete]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			case pubsub.PayloadTypeUpdateAvailable:
-				var e pubsub.Event[proto.UpdateAvailable]
-				_ = json.Unmarshal(p.Payload, &e)
-				if !sendEvent(ctx, events, e) {
-					return
-				}
-			default:
+			decode, ok := eventDecoders[p.Type]
+			if !ok {
 				slog.Warn("Unknown event type", "type", p.Type)
 				continue
+			}
+			e, err := decode(p.Payload)
+			if err != nil {
+				// A zero-value event would reach the UI as, say, an
+				// empty message; dropping it is the lesser harm.
+				slog.Error("Unmarshaling event payload", "type", p.Type, "error", err)
+				continue
+			}
+			if !sendEvent(ctx, events, e) {
+				return
 			}
 		}
 	}()
 
 	return events, nil
+}
+
+// eventDecoders maps each SSE payload type to the decoder for its
+// typed pubsub event.
+var eventDecoders = map[pubsub.PayloadType]func(json.RawMessage) (any, error){
+	pubsub.PayloadTypeLSPEvent:             decodeEvent[proto.LSPEvent],
+	pubsub.PayloadTypeMCPEvent:             decodeEvent[proto.MCPEvent],
+	pubsub.PayloadTypeQuestionRequest:      decodeEvent[proto.QuestionRequest],
+	pubsub.PayloadTypeQuestionNotification: decodeEvent[proto.QuestionNotification],
+	pubsub.PayloadTypeMessage:              decodeEvent[proto.Message],
+	pubsub.PayloadTypeSession:              decodeEvent[proto.Session],
+	pubsub.PayloadTypeFile:                 decodeEvent[proto.File],
+	pubsub.PayloadTypeAgentEvent:           decodeEvent[proto.AgentEvent],
+	pubsub.PayloadTypeConfigChanged:        decodeEvent[proto.ConfigChanged],
+	pubsub.PayloadTypeSkillsEvent:          decodeEvent[proto.SkillsEvent],
+	pubsub.PayloadTypeRunComplete:          decodeEvent[proto.RunComplete],
+	pubsub.PayloadTypeUpdateAvailable:      decodeEvent[proto.UpdateAvailable],
+}
+
+func decodeEvent[T any](raw json.RawMessage) (any, error) {
+	var e pubsub.Event[T]
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return nil, err
+	}
+	return e, nil
 }
 
 func sendEvent(ctx context.Context, evc chan any, ev any) bool {
