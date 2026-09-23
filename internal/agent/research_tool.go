@@ -49,7 +49,7 @@ func validateResearchParams(ctx context.Context, params tools.ResearchParams) (r
 //go:embed templates/research_prompt.md.tpl
 var researchPromptTmpl []byte
 
-func (c *coordinator) researchTool(_ context.Context, client *http.Client) (fantasy.AgentTool, error) {
+func (c *coordinator) researchTool(client *http.Client) fantasy.AgentTool {
 	if client == nil {
 		client = tools.DefaultHTTPClient()
 	}
@@ -175,5 +175,5 @@ func (c *coordinator) researchTool(_ context.Context, client *http.Client) (fant
 				AgentModel:     agent.Model().ModelCfg.Model,
 			})
 		},
-	), nil
+	)
 }

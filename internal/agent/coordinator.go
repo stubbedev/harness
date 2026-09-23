@@ -567,7 +567,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 
 	mergedOptions := make(map[string]any)
 
-	err = json.Unmarshal([]byte(got), &mergedOptions)
+	err = json.Unmarshal(got, &mergedOptions)
 	if err != nil {
 		slog.Error("Could not create config for call", "err", err)
 		return options
@@ -1106,11 +1106,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 
 	if slices.Contains(agent.AllowedTools, tools.ResearchToolName) {
-		researchTool, err := c.researchTool(ctx, nil)
-		if err != nil {
-			return nil, err
-		}
-		allTools = append(allTools, researchTool)
+		allTools = append(allTools, c.researchTool(nil))
 	}
 
 	if isSubAgent {

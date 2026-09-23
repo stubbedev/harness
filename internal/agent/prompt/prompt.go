@@ -306,11 +306,7 @@ func (p *Prompt) promptData(ctx context.Context, provider, model string, store *
 		MemoryEnabled:      p.memoryEnabled,
 	}
 	if isGit {
-		var err error
-		data.GitStatus, err = getGitStatus(ctx, store.WorkingDir())
-		if err != nil {
-			return PromptDat{}, err
-		}
+		data.GitStatus = getGitStatus(ctx, store.WorkingDir())
 	}
 
 	data.ContextFiles = contextFiles
@@ -328,56 +324,32 @@ func isGitRepo(dir string) bool {
 	return err == nil
 }
 
-func getGitStatus(ctx context.Context, dir string) (string, error) {
+// getGitStatus summarizes the repository at dir for the prompt: branch,
+// short status and the last few commits. It is best effort: a git
+// command that fails leaves its part out rather than failing the prompt.
+func getGitStatus(ctx context.Context, dir string) string {
 	sh := shell.NewShell(&shell.Options{
 		WorkingDir: dir,
 	})
-	branch, err := getGitBranch(ctx, sh)
-	if err != nil {
-		return "", err
+	run := func(cmd string) (string, bool) {
+		out, _, err := sh.Exec(ctx, cmd)
+		return strings.TrimSpace(out), err == nil
 	}
-	status, err := getGitStatusSummary(ctx, sh)
-	if err != nil {
-		return "", err
+	var b strings.Builder
+	if branch, ok := run("git branch --show-current 2>/dev/null"); ok && branch != "" {
+		fmt.Fprintf(&b, "Current branch: %s\n", branch)
 	}
-	commits, err := getGitRecentCommits(ctx, sh)
-	if err != nil {
-		return "", err
+	if status, ok := run("git status --short 2>/dev/null | head -20"); ok {
+		if status == "" {
+			b.WriteString("Status: clean\n")
+		} else {
+			fmt.Fprintf(&b, "Status:\n%s\n", status)
+		}
 	}
-	return branch + status + commits, nil
-}
-
-func getGitBranch(ctx context.Context, sh *shell.Shell) (string, error) {
-	out, _, err := sh.Exec(ctx, "git branch --show-current 2>/dev/null")
-	if err != nil {
-		return "", nil
+	if commits, ok := run("git log --oneline -n 3 2>/dev/null"); ok && commits != "" {
+		fmt.Fprintf(&b, "Recent commits:\n%s\n", commits)
 	}
-	out = strings.TrimSpace(out)
-	if out == "" {
-		return "", nil
-	}
-	return fmt.Sprintf("Current branch: %s\n", out), nil
-}
-
-func getGitStatusSummary(ctx context.Context, sh *shell.Shell) (string, error) {
-	out, _, err := sh.Exec(ctx, "git status --short 2>/dev/null | head -20")
-	if err != nil {
-		return "", nil
-	}
-	out = strings.TrimSpace(out)
-	if out == "" {
-		return "Status: clean\n", nil
-	}
-	return fmt.Sprintf("Status:\n%s\n", out), nil
-}
-
-func getGitRecentCommits(ctx context.Context, sh *shell.Shell) (string, error) {
-	out, _, err := sh.Exec(ctx, "git log --oneline -n 3 2>/dev/null")
-	if err != nil || out == "" {
-		return "", nil
-	}
-	out = strings.TrimSpace(out)
-	return fmt.Sprintf("Recent commits:\n%s\n", out), nil
+	return b.String()
 }
 
 func (p *Prompt) Name() string {

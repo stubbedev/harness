@@ -62,21 +62,6 @@ func privateScratchMode(perm os.FileMode, isRoot bool) bool {
 	return isRoot || perm&0o077 == 0
 }
 
-// ScratchFilePath places name inside a session's scratch directory. Only
-// the base name is kept: a caller-supplied "../../etc/passwd" or an
-// absolute path cannot escape the scratch directory.
-func ScratchFilePath(sessionID, kind, name string) (string, error) {
-	dir, err := ScratchDir(sessionID, kind)
-	if err != nil {
-		return "", err
-	}
-	base := sanitizePathSegment(filepath.Base(filepath.FromSlash(name)))
-	if base == "" {
-		return "", fmt.Errorf("a file name is required")
-	}
-	return filepath.Join(dir, base), nil
-}
-
 // sanitizePathSegment reduces a string to something safe to use as one
 // path segment: no separators, no traversal, no leading dots.
 func sanitizePathSegment(s string) string {

@@ -200,7 +200,7 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 	// type into, reset or pollute another's.
 	return fantasy.NewAgentTool(
 		ShellToolName,
-		string(shellDescription(shellPath)),
+		shellDescription(shellPath),
 		func(ctx context.Context, params ShellParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			// Determine working directory
 			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)

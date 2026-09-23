@@ -56,25 +56,22 @@ func TestFormatAnswer_MultiChoiceWithFillIn(t *testing.T) {
 		SelectedIDs: []string{"speed", "readability"},
 		FillInText:  "maintainability",
 	}
-	resp, err := formatAnswer(&answer, question.TypeMultiChoice)
-	require.NoError(t, err)
-	require.Contains(t, resp.Content, `User selected: ["speed","readability"]`)
-	require.Contains(t, resp.Content, "User provided: maintainability")
+	got := formatAnswer(&answer)
+	require.Contains(t, got, `User selected: ["speed","readability"]`)
+	require.Contains(t, got, "User provided: maintainability")
 }
 
 func TestFormatAnswer_SelectionsOnly(t *testing.T) {
 	answer := question.Answer{SelectedIDs: []string{"gardening"}}
-	resp, err := formatAnswer(&answer, question.TypeSingleChoice)
-	require.NoError(t, err)
-	require.Contains(t, resp.Content, `User selected: ["gardening"]`)
-	require.NotContains(t, resp.Content, "User provided")
+	got := formatAnswer(&answer)
+	require.Contains(t, got, `User selected: ["gardening"]`)
+	require.NotContains(t, got, "User provided")
 }
 
 func TestFormatAnswer_Skipped(t *testing.T) {
 	answer := question.Answer{}
-	resp, err := formatAnswer(&answer, question.TypeFreeText)
-	require.NoError(t, err)
-	require.Equal(t, "User skipped this question", resp.Content)
+	got := formatAnswer(&answer)
+	require.Equal(t, "User skipped this question", got)
 }
 
 // `options` is accepted as an alias for `choices` on decode but is not
