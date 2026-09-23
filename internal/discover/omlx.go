@@ -2,7 +2,6 @@ package discover
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/stubbedev/harness/internal/catalog"
@@ -31,30 +30,15 @@ type omlxModelStatus struct {
 // models.
 type omlxEnricher struct{}
 
-func (e *omlxEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) ([]catalog.Model, error) {
+func (e *omlxEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) []catalog.Model {
 	// oMLX serves /models/status under the OpenAI-compatible /v1
 	// namespace, so the path is relative to the configured base URL
 	// (which already includes /v1) rather than the server root.
-	resp, err := doRequest(ctx, http.MethodGet, cfg.BaseURL, "/models/status", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
-	if err != nil {
-		return models, nil
+	statusResp, ok := fetchJSON[omlxModelsStatusResponse](ctx, http.MethodGet, cfg.BaseURL, "/models/status", cfg, resolver, nil)
+	if !ok {
+		return models
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return models, nil
-	}
-
-	var statusResp omlxModelsStatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&statusResp); err != nil {
-		return models, nil
-	}
-
-	// Index by model ID for O(1) lookup.
-	metaByID := make(map[string]omlxModelStatus, len(statusResp.Models))
-	for _, m := range statusResp.Models {
-		metaByID[m.ID] = m
-	}
+	metaByID := indexBy(statusResp.Models, func(m omlxModelStatus) string { return m.ID })
 
 	for i := range models {
 		meta, ok := metaByID[models[i].ID]
@@ -69,5 +53,5 @@ func (e *omlxEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Re
 		}
 	}
 
-	return models, nil
+	return models
 }

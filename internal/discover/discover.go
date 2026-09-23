@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -37,7 +38,7 @@ func doRequest(ctx context.Context, method, baseURL, path, apiKey string, extraH
 
 	url := strings.TrimRight(resolvedBase, "/") + "/" + strings.TrimLeft(path, "/")
 
-	var reqBody *bytes.Reader
+	var reqBody io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
@@ -46,13 +47,7 @@ func doRequest(ctx context.Context, method, baseURL, path, apiKey string, extraH
 		reqBody = bytes.NewReader(data)
 	}
 
-	var req *http.Request
-	var err error
-	if reqBody != nil {
-		req, err = http.NewRequestWithContext(ctx, method, url, reqBody)
-	} else {
-		req, err = http.NewRequestWithContext(ctx, method, url, nil)
-	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +67,35 @@ func doRequest(ctx context.Context, method, baseURL, path, apiKey string, extraH
 	}
 
 	return httpClient.Do(req)
+}
+
+// fetchJSON sends an authenticated request and decodes a 200 response
+// into T. Enrichment is best effort, so any failure (transport error,
+// non-200 status, undecodable body) reports false and the caller keeps
+// the models it already has.
+func fetchJSON[T any](ctx context.Context, method, baseURL, path string, cfg Config, resolver Resolver, body any) (T, bool) {
+	var out T
+	resp, err := doRequest(ctx, method, baseURL, path, cfg.APIKey, cfg.ExtraHeaders, resolver, body)
+	if err != nil {
+		return out, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return out, false
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return out, false
+	}
+	return out, true
+}
+
+// indexBy maps each item by the key it yields.
+func indexBy[T any](items []T, key func(T) string) map[string]T {
+	m := make(map[string]T, len(items))
+	for _, item := range items {
+		m[key(item)] = item
+	}
+	return m
 }
 
 // Config holds the provider configuration needed for model discovery.

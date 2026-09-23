@@ -15,7 +15,9 @@ type Enricher interface {
 	// EnrichModels takes a slice of bare discovered models and returns
 	// them with metadata populated. Implementations should preserve
 	// existing non-zero fields (user overrides take precedence).
-	EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) ([]catalog.Model, error)
+	// Enrichment is best effort: when the metadata endpoint cannot be
+	// reached the models come back as they went in.
+	EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) []catalog.Model
 }
 
 // enrichers maps provider type strings to their enrichment

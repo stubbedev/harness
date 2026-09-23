@@ -2,7 +2,6 @@ package discover
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/stubbedev/harness/internal/catalog"
@@ -40,35 +39,21 @@ func init() {
 // discovered models.
 type litellmEnricher struct{}
 
-func (e *litellmEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) ([]catalog.Model, error) {
-	resp, err := doRequest(ctx, http.MethodGet, stripV1Suffix(cfg.BaseURL), "/model/info", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
-	if err != nil {
-		return models, nil
+func (e *litellmEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) []catalog.Model {
+	infoResp, ok := fetchJSON[litellmModelInfoResponse](ctx, http.MethodGet, stripV1Suffix(cfg.BaseURL), "/model/info", cfg, resolver, nil)
+	if !ok {
+		return models
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return models, nil
-	}
-
-	var infoResp litellmModelInfoResponse
-	if err := json.NewDecoder(resp.Body).Decode(&infoResp); err != nil {
-		return models, nil
-	}
-
-	// Index metadata by model name for O(1) lookup.
-	metaByID := make(map[string]litellmModelMeta, len(infoResp.Data))
-	for _, entry := range infoResp.Data {
-		metaByID[entry.ModelName] = entry.ModelInfo
-	}
+	byName := indexBy(infoResp.Data, func(m litellmModelInfo) string { return m.ModelName })
 
 	// Apply metadata to discovered models, preserving existing
 	// non-zero values (user overrides win).
 	for i := range models {
-		meta, ok := metaByID[models[i].ID]
+		entry, ok := byName[models[i].ID]
 		if !ok {
 			continue
 		}
+		meta := entry.ModelInfo
 		if models[i].ContextWindow == 0 && meta.MaxInputTokens != nil {
 			models[i].ContextWindow = *meta.MaxInputTokens
 		}
@@ -83,5 +68,5 @@ func (e *litellmEnricher) EnrichModels(ctx context.Context, cfg Config, resolver
 		}
 	}
 
-	return models, nil
+	return models
 }

@@ -2,7 +2,6 @@ package discover
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/stubbedev/harness/internal/catalog"
@@ -51,27 +50,12 @@ type lmstudioInstanceConfig struct {
 // and vision support on discovered models.
 type lmstudioEnricher struct{}
 
-func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) ([]catalog.Model, error) {
-	resp, err := doRequest(ctx, http.MethodGet, stripV1Suffix(cfg.BaseURL), "/api/v1/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
-	if err != nil {
-		return models, nil
+func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) []catalog.Model {
+	modelsResp, ok := fetchJSON[lmstudioModelsResponse](ctx, http.MethodGet, stripV1Suffix(cfg.BaseURL), "/api/v1/models", cfg, resolver, nil)
+	if !ok {
+		return models
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return models, nil
-	}
-
-	var modelsResp lmstudioModelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
-		return models, nil
-	}
-
-	// Index by key for O(1) lookup.
-	metaByKey := make(map[string]lmstudioModelEntry, len(modelsResp.Models))
-	for _, m := range modelsResp.Models {
-		metaByKey[m.Key] = m
-	}
+	metaByKey := indexBy(modelsResp.Models, func(m lmstudioModelEntry) string { return m.Key })
 
 	for i := range models {
 		meta, ok := metaByKey[models[i].ID]
@@ -100,5 +84,5 @@ func (e *lmstudioEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 		}
 	}
 
-	return models, nil
+	return models
 }

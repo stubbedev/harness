@@ -24,7 +24,7 @@ type ollamaShowResponse struct {
 // endpoint and populates context window on discovered models.
 type ollamaEnricher struct{}
 
-func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) ([]catalog.Model, error) {
+func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) []catalog.Model {
 	// Collect indices that need enrichment.
 	var needEnrichment []int
 	for i := range models {
@@ -33,7 +33,7 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 		}
 	}
 	if len(needEnrichment) == 0 {
-		return models, nil
+		return models
 	}
 
 	// Fetch metadata concurrently with bounded parallelism.
@@ -51,19 +51,11 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			resp, err := doRequest(ctx, http.MethodPost, stripV1Suffix(cfg.BaseURL), "/api/show",
-				cfg.APIKey, cfg.ExtraHeaders, resolver,
-				map[string]string{"model": models[idx].ID})
-			if err != nil {
+			showResp, ok := fetchJSON[ollamaShowResponse](ctx, http.MethodPost, stripV1Suffix(cfg.BaseURL), "/api/show",
+				cfg, resolver, map[string]string{"model": models[idx].ID})
+			if !ok {
 				return
 			}
-			defer resp.Body.Close()
-
-			var showResp ollamaShowResponse
-			if err := json.NewDecoder(resp.Body).Decode(&showResp); err != nil {
-				return
-			}
-
 			if cl := extractContextLength(showResp.ModelInfo); cl > 0 {
 				results[ri] = result{index: idx, contextLength: cl}
 			}
@@ -77,7 +69,7 @@ func (e *ollamaEnricher) EnrichModels(ctx context.Context, cfg Config, resolver 
 		}
 	}
 
-	return models, nil
+	return models
 }
 
 // extractContextLength finds the context_length value in Ollama's

@@ -2,7 +2,6 @@ package discover
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"github.com/stubbedev/harness/internal/catalog"
@@ -40,33 +39,19 @@ type llamacppMeta struct {
 // falls back to n_ctx_train (the model's trained maximum).
 type llamacppEnricher struct{}
 
-func (e *llamacppEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) ([]catalog.Model, error) {
-	resp, err := doRequest(ctx, http.MethodGet, cfg.BaseURL, "/v1/models", cfg.APIKey, cfg.ExtraHeaders, resolver, nil)
-	if err != nil {
-		return models, nil
+func (e *llamacppEnricher) EnrichModels(ctx context.Context, cfg Config, resolver Resolver, models []catalog.Model) []catalog.Model {
+	modelsResp, ok := fetchJSON[llamacppModelsResponse](ctx, http.MethodGet, cfg.BaseURL, "/v1/models", cfg, resolver, nil)
+	if !ok {
+		return models
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return models, nil
-	}
-
-	var modelsResp llamacppModelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
-		return models, nil
-	}
-
-	// Index by ID for O(1) lookup.
-	metaByID := make(map[string]llamacppMeta, len(modelsResp.Data))
-	for _, m := range modelsResp.Data {
-		metaByID[m.ID] = m.Meta
-	}
+	byID := indexBy(modelsResp.Data, func(m llamacppModelEntry) string { return m.ID })
 
 	for i := range models {
-		meta, ok := metaByID[models[i].ID]
+		entry, ok := byID[models[i].ID]
 		if !ok {
 			continue
 		}
+		meta := entry.Meta
 
 		// Context window: prefer configured n_ctx, fall back to
 		// the model's trained maximum.
@@ -79,5 +64,5 @@ func (e *llamacppEnricher) EnrichModels(ctx context.Context, cfg Config, resolve
 		}
 	}
 
-	return models, nil
+	return models
 }
