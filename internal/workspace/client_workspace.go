@@ -92,7 +92,7 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 		ws.Config.SetupAgents()
 		ws.Config.NormalizeOptions()
 	}
-	states := protoToSkillStates(ws.Skills)
+	states := proto.SkillStatesToDomain(ws.Skills)
 	mgr := skills.NewManager(nil, nil, states, skills.WithGlobalMirror())
 	subCtx, subCancel := context.WithCancel(context.Background())
 	return &ClientWorkspace{
@@ -143,7 +143,7 @@ func (w *ClientWorkspace) CreateSession(ctx context.Context, title string) (sess
 	if err != nil {
 		return session.Session{}, err
 	}
-	return protoToSession(*sess), nil
+	return sess.ToDomain(), nil
 }
 
 func (w *ClientWorkspace) GetSession(ctx context.Context, sessionID string) (session.Session, error) {
@@ -151,19 +151,15 @@ func (w *ClientWorkspace) GetSession(ctx context.Context, sessionID string) (ses
 	if err != nil {
 		return session.Session{}, err
 	}
-	return protoToSession(*sess), nil
+	return sess.ToDomain(), nil
 }
 
 func (w *ClientWorkspace) ListSessions(ctx context.Context) ([]session.Session, error) {
-	protoSessions, err := w.client.ListSessions(ctx, w.workspaceID())
+	sessions, err := w.client.ListSessions(ctx, w.workspaceID())
 	if err != nil {
 		return nil, err
 	}
-	sessions := make([]session.Session, len(protoSessions))
-	for i, s := range protoSessions {
-		sessions[i] = protoToSession(s)
-	}
-	return sessions, nil
+	return proto.SessionsToDomain(sessions), nil
 }
 
 func (w *ClientWorkspace) RenameSession(ctx context.Context, sessionID, title string) error {
@@ -205,7 +201,7 @@ func (w *ClientWorkspace) ListMessages(ctx context.Context, sessionID string) ([
 	if err != nil {
 		return nil, err
 	}
-	return protoToMessages(msgs), nil
+	return proto.MessagesToDomain(msgs), nil
 }
 
 func (w *ClientWorkspace) ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error) {
@@ -213,7 +209,7 @@ func (w *ClientWorkspace) ListUserMessages(ctx context.Context, sessionID string
 	if err != nil {
 		return nil, err
 	}
-	return protoToMessages(msgs), nil
+	return proto.MessagesToDomain(msgs), nil
 }
 
 func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Message, error) {
@@ -221,7 +217,7 @@ func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Me
 	if err != nil {
 		return nil, err
 	}
-	return protoToMessages(msgs), nil
+	return proto.MessagesToDomain(msgs), nil
 }
 
 // -- Agent --
@@ -345,19 +341,8 @@ func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.Selecte
 
 // QuestionAnswer submits answers for a question via the client SDK.
 func (w *ClientWorkspace) QuestionAnswer(responses []question.Answer) bool {
-	protoResp := proto.QuestionAnswer{
-		Responses: make([]proto.QuestionResponse, len(responses)),
-	}
-	for i, r := range responses {
-		protoResp.Responses[i] = proto.QuestionResponse{
-			QuestionID:  r.QuestionID,
-			SelectedIDs: r.SelectedIDs,
-			FillInText:  r.FillInText,
-			Yes:         r.Yes,
-			Notes:       r.Notes,
-		}
-	}
-	resolved, err := w.client.AnswerQuestionBatch(context.Background(), w.workspaceID(), protoResp)
+	req := proto.QuestionAnswer{Responses: proto.QuestionResponsesFromDomain(responses)}
+	resolved, err := w.client.AnswerQuestionBatch(context.Background(), w.workspaceID(), req)
 	if err != nil {
 		slog.Error("Failed to answer question", "error", err)
 		return false
@@ -400,7 +385,7 @@ func (w *ClientWorkspace) ListSessionHistory(ctx context.Context, sessionID stri
 	if err != nil {
 		return nil, err
 	}
-	return protoToFiles(files), nil
+	return proto.FilesToDomain(files), nil
 }
 
 // -- LSP --
@@ -625,17 +610,7 @@ func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
 	}
 	result := make(map[string]mcp.ClientInfo, len(states))
 	for k, v := range states {
-		result[k] = mcp.ClientInfo{
-			Name:  v.Name,
-			State: mcp.State(v.State),
-			Error: v.Error,
-			Counts: mcp.Counts{
-				Tools:     v.ToolCount,
-				Prompts:   v.PromptCount,
-				Resources: v.ResourceCount,
-			},
-			ConnectedAt: v.ConnectedAt,
-		}
+		result[k] = v.ToDomain()
 	}
 	return result
 }
@@ -1067,90 +1042,26 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 			},
 		}
 	case pubsub.Event[proto.MCPEvent]:
-		return pubsub.Event[mcp.Event]{
-			Type: e.Type,
-			Payload: mcp.Event{
-				Type:  protoToMCPEventType(e.Payload.Type),
-				Name:  e.Payload.Name,
-				State: mcp.State(e.Payload.State),
-				Error: e.Payload.Error,
-				Counts: mcp.Counts{
-					Tools:     e.Payload.ToolCount,
-					Prompts:   e.Payload.PromptCount,
-					Resources: e.Payload.ResourceCount,
-				},
-			},
-		}
+		return pubsub.Event[mcp.Event]{Type: e.Type, Payload: e.Payload.ToDomain()}
 	case pubsub.Event[proto.QuestionRequest]:
-		return pubsub.Event[question.Request]{
-			Type: e.Type,
-			Payload: question.Request{
-				ID:                 e.Payload.ID,
-				SessionID:          e.Payload.SessionID,
-				ToolCallID:         e.Payload.ToolCallID,
-				Questions:          protoQuestionsToDomain(e.Payload.Questions),
-				ConfirmTitle:       e.Payload.ConfirmTitle,
-				ConfirmDescription: e.Payload.ConfirmDescription,
-			},
-		}
+		return pubsub.Event[question.Request]{Type: e.Type, Payload: e.Payload.ToDomain()}
 	case pubsub.Event[proto.QuestionNotification]:
-		return pubsub.Event[question.Notification]{
-			Type: e.Type,
-			Payload: question.Notification{
-				BatchID: e.Payload.BatchID,
-			},
-		}
+		return pubsub.Event[question.Notification]{Type: e.Type, Payload: question.Notification(e.Payload)}
 	case pubsub.Event[proto.Message]:
-		return pubsub.Event[message.Message]{
-			Type:    e.Type,
-			Payload: protoToMessage(e.Payload),
-		}
+		return pubsub.Event[message.Message]{Type: e.Type, Payload: e.Payload.ToDomain()}
 	case pubsub.Event[proto.Session]:
-		return pubsub.Event[session.Session]{
-			Type:    e.Type,
-			Payload: protoToSession(e.Payload),
-		}
+		return pubsub.Event[session.Session]{Type: e.Type, Payload: e.Payload.ToDomain()}
 	case pubsub.Event[proto.File]:
-		return pubsub.Event[history.File]{
-			Type:    e.Type,
-			Payload: protoToFile(e.Payload),
-		}
+		return pubsub.Event[history.File]{Type: e.Type, Payload: e.Payload.ToDomain()}
 	case pubsub.Event[proto.AgentEvent]:
-		n := notify.Notification{
-			SessionID:    e.Payload.SessionID,
-			SessionTitle: e.Payload.SessionTitle,
-			RunID:        e.Payload.RunID,
-			Type:         notify.Type(e.Payload.Type),
-			AWSSOCommand: e.Payload.AWSSOCommand,
-			AWSSOURL:     e.Payload.AWSSOURL,
-		}
-		if e.Payload.Error != nil {
-			n.Message = e.Payload.Error.Error()
-		}
-		return pubsub.Event[notify.Notification]{
-			Type:    e.Type,
-			Payload: n,
-		}
+		return pubsub.Event[notify.Notification]{Type: e.Type, Payload: e.Payload.ToDomain()}
 	case pubsub.Event[proto.RunComplete]:
-		// Translate the wire-level proto.RunComplete back into the
-		// agent's domain notify.RunComplete. Without this case the
-		// default branch below warns on every run completion in the
-		// server-mode TUI, even though the TUI itself doesn't act
-		// on RunComplete — converting silently keeps the workspace
-		// event bridge symmetric with the server-side wrapEvent.
-		return pubsub.Event[notify.RunComplete]{
-			Type: e.Type,
-			Payload: notify.RunComplete{
-				SessionID: e.Payload.SessionID,
-				RunID:     e.Payload.RunID,
-				MessageID: e.Payload.MessageID,
-				Text:      e.Payload.Text,
-				Error:     e.Payload.Error,
-				Cancelled: e.Payload.Cancelled,
-			},
-		}
+		// The TUI does not act on RunComplete, but converting it keeps
+		// the bridge symmetric with the server's wrapEvent and keeps the
+		// default branch from warning on every run.
+		return pubsub.Event[notify.RunComplete]{Type: e.Type, Payload: e.Payload.ToDomain()}
 	case pubsub.Event[proto.SkillsEvent]:
-		states := protoToSkillStates(e.Payload.States)
+		states := proto.SkillStatesToDomain(e.Payload.States)
 		if w.skills != nil {
 			w.skills.SetLatestStates(states)
 		}
@@ -1170,240 +1081,6 @@ func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
 	}
 }
 
-func protoToMCPEventType(t proto.MCPEventType) mcp.EventType {
-	switch t {
-	case proto.MCPEventStateChanged:
-		return mcp.EventStateChanged
-	case proto.MCPEventToolsListChanged:
-		return mcp.EventToolsListChanged
-	case proto.MCPEventPromptsListChanged:
-		return mcp.EventPromptsListChanged
-	case proto.MCPEventResourcesListChanged:
-		return mcp.EventResourcesListChanged
-	default:
-		return mcp.EventStateChanged
-	}
-}
-
-// protoToSession converts a wire-level proto.Session into the domain
-// session.Session. Fields that exist only on the wire (computed-on-read
-// signals like IsBusy, and any future presence counters) are
-// intentionally dropped here: session.Session models persisted state,
-// not transient runtime signals. UI features that need those signals
-// should either extend session.Session or read them from the proto
-// payload directly before this conversion runs.
-func protoToSession(s proto.Session) session.Session {
-	return session.Session{
-		ID:               s.ID,
-		ParentSessionID:  s.ParentSessionID,
-		Title:            s.Title,
-		SummaryMessageID: s.SummaryMessageID,
-		MessageCount:     s.MessageCount,
-		PromptTokens:     s.PromptTokens,
-		CompletionTokens: s.CompletionTokens,
-		Cost:             s.Cost,
-		Todos:            protoToTodos(s.Todos),
-		CreatedAt:        s.CreatedAt,
-		UpdatedAt:        s.UpdatedAt,
-	}
-}
-
-func protoToTodos(todos []proto.Todo) []session.Todo {
-	if len(todos) == 0 {
-		return nil
-	}
-	out := make([]session.Todo, len(todos))
-	for i, t := range todos {
-		out[i] = session.Todo{
-			Content:    t.Content,
-			Status:     session.TodoStatus(t.Status),
-			ActiveForm: t.ActiveForm,
-		}
-	}
-	return out
-}
-
-func protoToFile(f proto.File) history.File {
-	return history.File{
-		ID:        f.ID,
-		SessionID: f.SessionID,
-		Path:      f.Path,
-		Content:   f.Content,
-		Version:   f.Version,
-		CreatedAt: f.CreatedAt,
-		UpdatedAt: f.UpdatedAt,
-	}
-}
-
-func protoToMessage(m proto.Message) message.Message {
-	msg := message.Message{
-		ID:                      m.ID,
-		SessionID:               m.SessionID,
-		Role:                    message.MessageRole(m.Role),
-		Model:                   m.Model,
-		Provider:                m.Provider,
-		PrismModelID:            m.PrismModelID,
-		PrismModelName:          m.PrismModelName,
-		PrismHypercreditSavings: m.PrismHypercreditSavings,
-		PrismDollarSavings:      m.PrismDollarSavings,
-		CreatedAt:               m.CreatedAt,
-		UpdatedAt:               m.UpdatedAt,
-		IsSummaryMessage:        m.IsSummaryMessage,
-	}
-
-	for _, p := range m.Parts {
-		switch v := p.(type) {
-		case proto.TextContent:
-			msg.Parts = append(msg.Parts, message.TextContent{Text: v.Text})
-		case proto.ReasoningContent:
-			msg.Parts = append(msg.Parts, message.ReasoningContent{
-				Thinking:   v.Thinking,
-				Signature:  v.Signature,
-				StartedAt:  v.StartedAt,
-				FinishedAt: v.FinishedAt,
-			})
-		case proto.ToolCall:
-			msg.Parts = append(msg.Parts, message.ToolCall{
-				ID:       v.ID,
-				Name:     v.Name,
-				Input:    v.Input,
-				Finished: v.Finished,
-			})
-		case proto.ToolResult:
-			msg.Parts = append(msg.Parts, message.ToolResult{
-				ToolCallID: v.ToolCallID,
-				Name:       v.Name,
-				Content:    v.Content,
-				Data:       v.Data,
-				MIMEType:   v.MIMEType,
-				Metadata:   v.Metadata,
-				IsError:    v.IsError,
-			})
-		case proto.Finish:
-			msg.Parts = append(msg.Parts, message.Finish{
-				Reason:  message.FinishReason(v.Reason),
-				Time:    v.Time,
-				Message: v.Message,
-				Details: v.Details,
-			})
-		case proto.ImageURLContent:
-			msg.Parts = append(msg.Parts, message.ImageURLContent{URL: v.URL, Detail: v.Detail})
-		case proto.BinaryContent:
-			msg.Parts = append(msg.Parts, message.BinaryContent{Path: v.Path, MIMEType: v.MIMEType, Data: v.Data})
-		case proto.ShellCommand:
-			msg.Parts = append(msg.Parts, message.ShellCommand{
-				Command:  v.Command,
-				Output:   v.Output,
-				ExitCode: v.ExitCode,
-			})
-		case proto.SubagentNote:
-			msg.Parts = append(msg.Parts, message.SubagentNote{
-				AgentName:      v.AgentName,
-				Handle:         v.Handle,
-				ChildSessionID: v.ChildSessionID,
-				Text:           v.Text,
-			})
-		}
-	}
-
-	return msg
-}
-
-func protoToMessages(msgs []proto.Message) []message.Message {
-	out := make([]message.Message, len(msgs))
-	for i, m := range msgs {
-		out[i] = protoToMessage(m)
-	}
-	return out
-}
-
-func protoToFiles(files []proto.File) []history.File {
-	out := make([]history.File, len(files))
-	for i, f := range files {
-		out[i] = protoToFile(f)
-	}
-	return out
-}
-
-func sessionToProto(s session.Session) proto.Session {
-	return proto.Session{
-		ID:               s.ID,
-		ParentSessionID:  s.ParentSessionID,
-		Title:            s.Title,
-		SummaryMessageID: s.SummaryMessageID,
-		MessageCount:     s.MessageCount,
-		PromptTokens:     s.PromptTokens,
-		CompletionTokens: s.CompletionTokens,
-		Cost:             s.Cost,
-		Todos:            todosToProto(s.Todos),
-		CreatedAt:        s.CreatedAt,
-		UpdatedAt:        s.UpdatedAt,
-	}
-}
-
-// protoToSkillStates reconstructs internal skill state slices from
-// their wire representation. Non-empty Error strings are turned into
-// synthetic error values; the TUI never type-asserts on Err.
-func protoToSkillStates(in []proto.SkillState) []*skills.SkillState {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]*skills.SkillState, len(in))
-	for i, s := range in {
-		state := &skills.SkillState{
-			Name:  s.Name,
-			Path:  s.Path,
-			State: skills.DiscoveryState(s.State),
-		}
-		if s.Error != "" {
-			state.Err = errors.New(s.Error)
-		}
-		out[i] = state
-	}
-	return out
-}
-
-func todosToProto(todos []session.Todo) []proto.Todo {
-	if len(todos) == 0 {
-		return nil
-	}
-	out := make([]proto.Todo, len(todos))
-	for i, t := range todos {
-		out[i] = proto.Todo{
-			Content:    t.Content,
-			Status:     string(t.Status),
-			ActiveForm: t.ActiveForm,
-		}
-	}
-	return out
-}
-
-func protoQuestionsToDomain(qs []proto.QuestionItem) []question.Question {
-	if len(qs) == 0 {
-		return nil
-	}
-	out := make([]question.Question, len(qs))
-	for i, q := range qs {
-		choices := make([]question.Choice, len(q.Choices))
-		for j, c := range q.Choices {
-			choices[j] = question.Choice{
-				ID:          c.ID,
-				Label:       c.Label,
-				Description: c.Description,
-			}
-		}
-		out[i] = question.Question{
-			ID:          q.ID,
-			Type:        question.Type(q.Type),
-			Label:       q.Label,
-			Text:        q.Question,
-			Description: q.Description,
-			Choices:     choices,
-		}
-	}
-	return out
-}
-
 // -- Checkpoints --
 
 func (w *ClientWorkspace) ListCheckpoints(ctx context.Context, sessionID string) ([]checkpoints.Checkpoint, error) {
@@ -1411,17 +1088,7 @@ func (w *ClientWorkspace) ListCheckpoints(ctx context.Context, sessionID string)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]checkpoints.Checkpoint, len(cps))
-	for i, cp := range cps {
-		out[i] = checkpoints.Checkpoint{
-			ID:        cp.ID,
-			SessionID: cp.SessionID,
-			MessageID: cp.MessageID,
-			CommitSHA: cp.CommitSHA,
-			CreatedAt: cp.CreatedAt,
-		}
-	}
-	return out, nil
+	return proto.CheckpointsToDomain(cps), nil
 }
 
 func (w *ClientWorkspace) Rewind(ctx context.Context, sessionID, messageID string, mode checkpoints.Mode) error {

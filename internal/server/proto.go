@@ -12,7 +12,6 @@ import (
 	"github.com/stubbedev/harness/internal/backend"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/proto"
-	"github.com/stubbedev/harness/internal/session"
 )
 
 type controllerV1 struct {
@@ -381,7 +380,7 @@ func (c *controllerV1) handleGetWorkspaceSessions(w http.ResponseWriter, r *http
 	ws, _ := c.backend.GetWorkspace(id)
 	result := make([]proto.Session, len(sessions))
 	for i, s := range sessions {
-		result[i] = sessionToProto(s)
+		result[i] = proto.SessionFromDomain(s)
 		result[i].IsBusy = isSessionBusy(ws, s.ID)
 		result[i].AttachedClients = attachedClients(ws, s.ID)
 	}
@@ -404,7 +403,7 @@ func (c *controllerV1) handleGetWorkspaceSessions(w http.ResponseWriter, r *http
 func (c *controllerV1) handlePostWorkspaceSessions(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	var args session.Session
+	var args proto.Session
 	if err := json.NewDecoder(r.Body).Decode(&args); err != nil {
 		c.server.logError(r, "Failed to decode request", "error", err)
 		jsonError(w, http.StatusBadRequest, "failed to decode request")
@@ -417,7 +416,7 @@ func (c *controllerV1) handlePostWorkspaceSessions(w http.ResponseWriter, r *htt
 		return
 	}
 	ws, _ := c.backend.GetWorkspace(id)
-	out := sessionToProto(sess)
+	out := proto.SessionFromDomain(sess)
 	out.IsBusy = isSessionBusy(ws, sess.ID)
 	out.AttachedClients = attachedClients(ws, sess.ID)
 	jsonEncode(w, out)
@@ -443,7 +442,7 @@ func (c *controllerV1) handleGetWorkspaceSession(w http.ResponseWriter, r *http.
 		return
 	}
 	ws, _ := c.backend.GetWorkspace(id)
-	out := sessionToProto(sess)
+	out := proto.SessionFromDomain(sess)
 	out.IsBusy = isSessionBusy(ws, sess.ID)
 	out.AttachedClients = attachedClients(ws, sess.ID)
 	jsonEncode(w, out)
@@ -470,7 +469,7 @@ func (c *controllerV1) handleGetWorkspaceSessionHistory(w http.ResponseWriter, r
 	}
 	out := make([]proto.File, len(files))
 	for i, f := range files {
-		out[i] = fileToProto(f)
+		out[i] = proto.FileFromDomain(f)
 	}
 	jsonEncode(w, out)
 }
@@ -494,7 +493,7 @@ func (c *controllerV1) handleGetWorkspaceSessionMessages(w http.ResponseWriter, 
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, messagesToProto(messages))
+	jsonEncode(w, proto.MessagesFromDomain(messages))
 }
 
 // handlePutWorkspaceSession renames a session. Only the title is
@@ -530,7 +529,7 @@ func (c *controllerV1) handlePutWorkspaceSession(w http.ResponseWriter, r *http.
 		return
 	}
 	ws, _ := c.backend.GetWorkspace(id)
-	out := sessionToProto(saved)
+	out := proto.SessionFromDomain(saved)
 	out.IsBusy = isSessionBusy(ws, saved.ID)
 	out.AttachedClients = attachedClients(ws, saved.ID)
 	jsonEncode(w, out)
@@ -575,7 +574,7 @@ func (c *controllerV1) handleGetWorkspaceSessionUserMessages(w http.ResponseWrit
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, messagesToProto(messages))
+	jsonEncode(w, proto.MessagesFromDomain(messages))
 }
 
 // handleGetWorkspaceAllUserMessages returns all user messages across sessions.
@@ -595,7 +594,7 @@ func (c *controllerV1) handleGetWorkspaceAllUserMessages(w http.ResponseWriter, 
 		c.handleError(w, r, err)
 		return
 	}
-	jsonEncode(w, messagesToProto(messages))
+	jsonEncode(w, proto.MessagesFromDomain(messages))
 }
 
 // handleGetWorkspaceSessionFileTrackerFiles lists files read in a session.
@@ -1294,22 +1293,12 @@ func writeError(w http.ResponseWriter, status int, code proto.ErrorCode, message
 func (c *controllerV1) handleGetWorkspaceSessionCheckpoints(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	sid := r.PathValue("sid")
-	checkpoints, err := c.backend.ListCheckpoints(r.Context(), id, sid)
+	cps, err := c.backend.ListCheckpoints(r.Context(), id, sid)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
 	}
-	out := make([]proto.Checkpoint, len(checkpoints))
-	for i, cp := range checkpoints {
-		out[i] = proto.Checkpoint{
-			ID:        cp.ID,
-			SessionID: cp.SessionID,
-			MessageID: cp.MessageID,
-			CommitSHA: cp.CommitSHA,
-			CreatedAt: cp.CreatedAt,
-		}
-	}
-	jsonEncode(w, out)
+	jsonEncode(w, proto.CheckpointsFromDomain(cps))
 }
 
 // handlePostWorkspaceSessionRewind rewinds a session to an earlier

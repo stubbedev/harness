@@ -2,7 +2,6 @@ package backend
 
 import (
 	"github.com/stubbedev/harness/internal/proto"
-	"github.com/stubbedev/harness/internal/question"
 )
 
 // AnswerQuestion submits answers for a question. The returned bool
@@ -14,18 +13,7 @@ func (b *Backend) AnswerQuestion(workspaceID string, req proto.QuestionAnswer) (
 		return false, err
 	}
 
-	responses := make([]question.Answer, len(req.Responses))
-	for i, r := range req.Responses {
-		responses[i] = question.Answer{
-			QuestionID:  r.QuestionID,
-			SelectedIDs: r.SelectedIDs,
-			FillInText:  r.FillInText,
-			Yes:         r.Yes,
-			Notes:       r.Notes,
-		}
-	}
-
-	return ws.Questions.Answer(responses), nil
+	return ws.Questions.Answer(proto.QuestionResponsesToDomain(req.Responses)), nil
 }
 
 // CancelQuestion cancels the pending question for a workspace.

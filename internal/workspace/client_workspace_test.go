@@ -46,7 +46,7 @@ func TestProtoToMessageToolResult(t *testing.T) {
 		},
 	}
 
-	got := protoToMessage(src)
+	got := src.ToDomain()
 	require.Len(t, got.Parts, 1)
 	tr, ok := got.Parts[0].(message.ToolResult)
 	require.True(t, ok, "expected message.ToolResult, got %T", got.Parts[0])
@@ -77,7 +77,7 @@ func TestProtoToMessagePrismModel(t *testing.T) {
 		PrismDollarSavings:      new(0.002),
 	}
 
-	got := protoToMessage(src)
+	got := src.ToDomain()
 	require.Equal(t, "prism-42", got.PrismModelID)
 	require.Equal(t, "GLM 5.3", got.PrismModelName)
 	require.NotNil(t, got.PrismHypercreditSavings)
@@ -97,7 +97,7 @@ func TestProtoToSkillStates(t *testing.T) {
 		{Name: "broken", Path: "/p/broken", State: proto.SkillStateError, Error: "bad frontmatter"},
 	}
 
-	got := protoToSkillStates(in)
+	got := proto.SkillStatesToDomain(in)
 	require.Len(t, got, 2)
 	require.Equal(t, "ok", got[0].Name)
 	require.Equal(t, skills.StateNormal, got[0].State)
