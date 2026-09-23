@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
@@ -480,7 +481,7 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	// hosts multiple workspaces concurrently, so the manager is
 	// constructed WITHOUT WithGlobalMirror to prevent last-writer-wins
 	// cross-talk between workspaces.
-	discoveryCfg := skillsDiscoveryConfig(cfg)
+	discoveryCfg := agent.SkillsDiscoveryConfig(cfg)
 	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
 	skillsMgr := skills.NewManager(
 		allSkills, activeSkills, skillStates,
@@ -564,27 +565,6 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	}
 
 	return ws, workspaceToProto(ws), nil
-}
-
-// skillsDiscoveryConfig adapts a *config.ConfigStore to the
-// skills.DiscoveryConfig that DiscoverFromConfig consumes.
-func skillsDiscoveryConfig(cfg *config.ConfigStore) skills.DiscoveryConfig {
-	opts := cfg.Config().Options
-	var paths, disabled []string
-	if opts != nil {
-		paths = opts.SkillsPaths
-		disabled = opts.DisabledSkills
-	}
-	var resolver func(string) (string, error)
-	if r := cfg.Resolver(); r != nil {
-		resolver = r.ResolveValue
-	}
-	return skills.DiscoveryConfig{
-		SkillsPaths:    paths,
-		DisabledSkills: disabled,
-		WorkingDir:     cfg.WorkingDir(),
-		Resolver:       resolver,
-	}
 }
 
 // skillStatesToProto converts internal skill discovery states into the

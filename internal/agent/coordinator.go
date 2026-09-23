@@ -2462,22 +2462,9 @@ func (c *coordinator) updateParentSessionCost(ctx context.Context, childSessionI
 // that case, so doing so would be misleading without delivering the
 // snapshot anywhere useful.
 func discoverSkills(cfg *config.ConfigStore) (allSkills, activeSkills []*skills.Skill) {
-	opts := cfg.Config().Options
-	var paths, disabled []string
-	if opts != nil {
-		paths = opts.SkillsPaths
-		disabled = opts.DisabledSkills
-	}
-	var resolver func(string) (string, error)
-	if r := cfg.Resolver(); r != nil {
-		resolver = r.ResolveValue
-	}
-	allSkills, activeSkills, states := skills.DiscoverFromConfig(skills.DiscoveryConfig{
-		SkillsPaths:    paths,
-		DisabledSkills: disabled,
-		Resolver:       resolver,
-	})
-	logDiscoveryStats(states, paths, allSkills, activeSkills, disabled)
+	dc := SkillsDiscoveryConfig(cfg)
+	allSkills, activeSkills, states := skills.DiscoverFromConfig(dc)
+	logDiscoveryStats(states, dc.SkillsPaths, allSkills, activeSkills, dc.DisabledSkills)
 	return allSkills, activeSkills
 }
 
@@ -2570,4 +2557,19 @@ func logDiscoveryStats(
 		"prompt_tok_est", skills.ApproxTokenCount(xml),
 		"active_names", activeNames,
 	)
+}
+
+// SkillsDiscoveryConfig adapts a config store to the inputs
+// skills.DiscoverFromConfig expects: the configured skill paths and
+// disabled names, the workspace root and the store's variable resolver.
+func SkillsDiscoveryConfig(cfg *config.ConfigStore) skills.DiscoveryConfig {
+	dc := skills.DiscoveryConfig{
+		WorkingDir: cfg.WorkingDir(),
+		Resolver:   cfg.ResolverFunc(),
+	}
+	if opts := cfg.Config().Options; opts != nil {
+		dc.SkillsPaths = opts.SkillsPaths
+		dc.DisabledSkills = opts.DisabledSkills
+	}
+	return dc
 }

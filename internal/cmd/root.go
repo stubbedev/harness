@@ -28,6 +28,7 @@ import (
 	xstrings "github.com/charmbracelet/x/exp/strings"
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
+	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/config"
@@ -374,7 +375,7 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	// workspace per process, so WithGlobalMirror keeps the package
 	// globals (which the TUI reads via skills.GetLatestStates) in sync
 	// with the manager.
-	discoveryCfg := localSkillsDiscoveryConfig(store)
+	discoveryCfg := agent.SkillsDiscoveryConfig(store)
 	allSkills, activeSkills, skillStates := skills.DiscoverFromConfig(discoveryCfg)
 	skillsMgr := skills.NewManager(
 		allSkills, activeSkills, skillStates,
@@ -397,27 +398,6 @@ func setupLocalWorkspace(cmd *cobra.Command) (workspace.Workspace, func(), error
 	ws := workspace.NewAppWorkspace(appInstance, store)
 	cleanup := func() { appInstance.Shutdown() }
 	return ws, cleanup, nil
-}
-
-// localSkillsDiscoveryConfig adapts a *config.ConfigStore to the inputs
-// skills.DiscoverFromConfig expects.
-func localSkillsDiscoveryConfig(store *config.ConfigStore) skills.DiscoveryConfig {
-	opts := store.Config().Options
-	var paths, disabled []string
-	if opts != nil {
-		paths = opts.SkillsPaths
-		disabled = opts.DisabledSkills
-	}
-	var resolver func(string) (string, error)
-	if r := store.Resolver(); r != nil {
-		resolver = r.ResolveValue
-	}
-	return skills.DiscoveryConfig{
-		SkillsPaths:    paths,
-		DisabledSkills: disabled,
-		WorkingDir:     store.WorkingDir(),
-		Resolver:       resolver,
-	}
 }
 
 // setupClientServerWorkspace connects to a server process and wraps the
