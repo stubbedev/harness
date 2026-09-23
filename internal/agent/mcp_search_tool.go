@@ -250,7 +250,7 @@ func (c *coordinator) refreshCoderTools(ctx context.Context) error {
 	if !ok {
 		return errCoderAgentNotConfigured
 	}
-	built, err := c.buildTools(ctx, agentCfg, false)
+	built, err := c.buildTools(ctx, agentCfg, false, nil)
 	if err != nil {
 		return err
 	}

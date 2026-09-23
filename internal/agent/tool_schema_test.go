@@ -36,7 +36,7 @@ func TestToolSchemas_AreProviderValid(t *testing.T) {
 			agentCfg, ok := coord.cfg.Config().Agents[agentID]
 			require.True(t, ok, "agent %s should be configured", agentID)
 
-			built, err := coord.buildTools(t.Context(), agentCfg, isSubAgent)
+			built, err := coord.buildTools(t.Context(), agentCfg, isSubAgent, nil)
 			require.NoError(t, err)
 			require.NotEmpty(t, built)
 

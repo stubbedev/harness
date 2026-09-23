@@ -72,7 +72,7 @@ func TestBuildAgent_ProvidedGroupWaitMakesAgentReady(t *testing.T) {
 	require.NoError(t, err)
 
 	var buildWg errgroup.Group
-	built, err := coord.buildAgent(t.Context(), taskPr, taskCfg, true, subagentModel{}, &buildWg)
+	built, err := coord.buildAgent(t.Context(), taskPr, taskCfg, true, subagentModel{}, &buildWg, nil)
 	require.NoError(t, err)
 	require.NoError(t, buildWg.Wait())
 
@@ -101,7 +101,7 @@ func TestBuildAgent_AsyncBuildFailureStaysOnProvidedGroup(t *testing.T) {
 	require.NoError(t, err)
 
 	var buildWg errgroup.Group
-	_, err = coord.buildAgent(t.Context(), badPr, taskCfg, true, subagentModel{}, &buildWg)
+	_, err = coord.buildAgent(t.Context(), badPr, taskCfg, true, subagentModel{}, &buildWg, nil)
 	require.NoError(t, err, "buildAgent itself must not fail; the failure is async")
 
 	require.Error(t, buildWg.Wait(), "the provided group must carry the async build failure")

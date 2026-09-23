@@ -22,14 +22,21 @@ func (c *coordinator) newAgentWorkspace(root string) *agentWorkspace {
 	return &agentWorkspace{store: store, manager: lsp.NewManager(store), directories: NewDirectoryInstructions(root, store.Config().Options.ContextPaths)}
 }
 
-func (c *coordinator) directoryTracker(workspace ...*agentWorkspace) *DirectoryInstructions {
-	if len(workspace) > 0 && workspace[0] != nil {
-		return workspace[0].directories
+// resolveWorkspace returns workspace, or the coordinator's root
+// workspace when it is nil. The root shares the coordinator's config
+// store and LSP manager and is never closed.
+func (c *coordinator) resolveWorkspace(workspace *agentWorkspace) *agentWorkspace {
+	if workspace != nil {
+		return workspace
 	}
-	c.directoryOnce.Do(func() {
-		c.directoryInstructions = NewDirectoryInstructions(c.cfg.WorkingDir(), c.cfg.Config().Options.ContextPaths)
+	c.rootWorkspaceOnce.Do(func() {
+		c.rootWorkspace = &agentWorkspace{
+			store:       c.cfg,
+			manager:     c.lspManager,
+			directories: NewDirectoryInstructions(c.cfg.WorkingDir(), c.cfg.Config().Options.ContextPaths),
+		}
 	})
-	return c.directoryInstructions
+	return c.rootWorkspace
 }
 
 func (w *agentWorkspace) Close() {

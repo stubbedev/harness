@@ -95,7 +95,7 @@ func TestVerificationToolRespectsAllowlist(t *testing.T) {
 	coord := newTestCoordinator(t, env, "p", config.ProviderConfig{ID: "p"})
 	coord.cfg.Config().Verification = verification.VerificationConfig{Rules: []verification.Rule{{Name: "check", Paths: []string{"**/*.go"}, Command: []string{"unused"}}}}
 	for _, allowed := range [][]string{{VerificationToolName}, {"view"}} {
-		built, err := coord.buildTools(t.Context(), config.Agent{ID: config.AgentCoder, AllowedTools: allowed}, false)
+		built, err := coord.buildTools(t.Context(), config.Agent{ID: config.AgentCoder, AllowedTools: allowed}, false, nil)
 		require.NoError(t, err)
 		found := false
 		for _, tool := range built {

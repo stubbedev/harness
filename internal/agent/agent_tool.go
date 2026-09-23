@@ -191,7 +191,7 @@ func (l *lazyAgent) get(ctx context.Context) (SessionAgent, error) {
 		return l.agent, nil
 	}
 	var wg errgroup.Group
-	agent, err := l.coord.buildAgent(ctx, l.prompt, l.cfg, true, l.model, &wg)
+	agent, err := l.coord.buildAgent(ctx, l.prompt, l.cfg, true, l.model, &wg, nil)
 	if err == nil {
 		err = wg.Wait()
 	}
@@ -388,7 +388,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 			}
 
 			workingDir := c.cfg.WorkingDir()
-			var workspace []*agentWorkspace
+			var workspace *agentWorkspace
 			if params.Isolation == "worktree" || sa.Isolation == "worktree" {
 				var err error
 				isolated, err = c.prepareIsolatedDispatch(ctx)
@@ -396,7 +396,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 					return fantasy.NewTextErrorResponse(err.Error()), nil
 				}
 				workingDir = isolated.workspace.store.WorkingDir()
-				workspace = append(workspace, isolated.workspace)
+				workspace = isolated.workspace
 			}
 			agentCfg := sa.ToConfigAgent(coderCfg)
 			// Config-driven setup failures (prompt build, model/provider that
@@ -423,7 +423,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 			// here as a tool error rather than in the coordinator-wide
 			// readyWg, whose sticky error would fail every subsequent turn.
 			var buildWg errgroup.Group
-			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider}, &buildWg, workspace...)
+			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider}, &buildWg, workspace)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
 			}

@@ -72,7 +72,7 @@ harness.register_tool({ name = "fine_tool", description = "usable", handler = fu
 	coord := newTestCoordinator(t, env, "p", config.ProviderConfig{ID: "p"})
 	coord.extensions = host
 
-	built, err := coord.buildTools(t.Context(), coord.cfg.Config().Agents[config.AgentCoder], false)
+	built, err := coord.buildTools(t.Context(), coord.cfg.Config().Agents[config.AgentCoder], false, nil)
 	require.NoError(t, err)
 
 	counts := map[string]int{}

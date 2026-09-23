@@ -889,7 +889,7 @@ func TestBuildAgent_SubagentModel(t *testing.T) {
 		// models configured, buildNamedModel fails before any prompt is needed,
 		// verifying the struct parameter is wired into model-selection logic.
 		var wg errgroup.Group
-		_, err := coord.buildAgent(t.Context(), nil, agentCfg, true, subagentModel{}, &wg)
+		_, err := coord.buildAgent(t.Context(), nil, agentCfg, true, subagentModel{}, &wg, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "model")
 	})

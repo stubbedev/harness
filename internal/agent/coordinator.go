@@ -201,10 +201,13 @@ type coordinator struct {
 	// backgroundByChild maps a background child session ID to its handle so
 	// send_message can route live. Runs are kept after they finish: their
 	// result stays collectable through the wait tool in later turns.
-	backgroundRuns        *csync.Map[string, *backgroundRun]
-	backgroundByChild     *csync.Map[string, string]
-	directoryOnce         sync.Once
-	directoryInstructions *DirectoryInstructions
+	backgroundRuns    *csync.Map[string, *backgroundRun]
+	backgroundByChild *csync.Map[string, string]
+	// rootWorkspace is the coordinator's own working directory as an
+	// agentWorkspace, built on first use; agents without an isolated
+	// workspace run in it.
+	rootWorkspaceOnce sync.Once
+	rootWorkspace     *agentWorkspace
 
 	// expandedMCPTools records which tools of defer-loaded (tool-search)
 	// MCP servers have been loaded into the coder agent's tool set.
@@ -382,7 +385,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		return nil, err
 	}
 
-	agent, err := c.buildAgent(ctx, coderPr, agentCfg, false, subagentModel{}, &c.readyWg)
+	agent, err := c.buildAgent(ctx, coderPr, agentCfg, false, subagentModel{}, &c.readyWg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -989,11 +992,7 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 // resolved via resolveModelByID. sm.Effort is applied to the resolved primary,
 // which is also the only large/specific model built — small always backs
 // titles/summaries, so it is built unconditionally.
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel, wg *errgroup.Group, workspace ...*agentWorkspace) (SessionAgent, error) {
-	store, manager := c.cfg, c.lspManager
-	if len(workspace) > 0 && workspace[0] != nil {
-		store, manager = workspace[0].store, workspace[0].manager
-	}
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel, wg *errgroup.Group, workspace *agentWorkspace) (SessionAgent, error) {
 	small, err := c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
 	if err != nil {
 		return nil, err
@@ -1018,6 +1017,8 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	}
 	primary.ModelCfg = subagents.ApplyEffortToModel(sm.Effort, primary.ModelCfg, primary.CatalogCfg)
 
+	workspace = c.resolveWorkspace(workspace)
+	store, manager := workspace.store, workspace.manager
 	primaryProviderCfg, _ := c.cfg.Config().Providers.Get(primary.ModelCfg.Provider)
 	result := NewSessionAgent(SessionAgentOptions{
 		Config:                store,
@@ -1039,7 +1040,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		RunComplete:           c.runComplete,
 		Hooks:                 c.hooks,
 		SkillActivation:       c.skillActivationConfig(isSubAgent),
-		DirectoryInstructions: c.directoryTracker(workspace...),
+		DirectoryInstructions: workspace.directories,
 		// The live inbox is keyed by session, and only a session that can
 		// dispatch (the coder today) ever has entries, so wiring it for
 		// every agent is a no-op for children. The queue notifier is the
@@ -1070,7 +1071,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	wg.Go(func() error {
-		tools, err := c.buildTools(initCtx, agent, isSubAgent, workspace...)
+		tools, err := c.buildTools(initCtx, agent, isSubAgent, workspace)
 		if err != nil {
 			return err
 		}
@@ -1092,11 +1093,9 @@ func shouldExposeDispatcher(allowed []string, isSubAgent bool) bool {
 }
 
 // buildTools assembles the agent's tool set.
-func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, workspace ...*agentWorkspace) ([]fantasy.AgentTool, error) {
-	store, manager := c.cfg, c.lspManager
-	if len(workspace) > 0 && workspace[0] != nil {
-		store, manager = workspace[0].store, workspace[0].manager
-	}
+func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubAgent bool, workspace *agentWorkspace) ([]fantasy.AgentTool, error) {
+	workspace = c.resolveWorkspace(workspace)
+	store, manager := workspace.store, workspace.manager
 	var allTools []fantasy.AgentTool
 	if shouldExposeDispatcher(agent.AllowedTools, isSubAgent) {
 		agentTool, err := c.agentTool(ctx)
@@ -1257,7 +1256,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// PreToolUse policy has to see their calls to mean anything. A hook
 	// fired from inside a sub-agent sees the child session's ID, which is
 	// what distinguishes the call in the payload.
-	filteredTools = c.directoryTracker(workspace...).WrapTools(filteredTools)
+	filteredTools = workspace.directories.WrapTools(filteredTools)
 	// Innermost on purpose: a failed call becomes an error result the
 	// model reads and corrects, and the hook wrap above sees that result
 	// like any other.
@@ -1691,7 +1690,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		return errCoderAgentNotConfigured
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg, false)
+	tools, err := c.buildTools(ctx, agentCfg, false, nil)
 	if err != nil {
 		return err
 	}
