@@ -198,15 +198,14 @@ func tableString(tbl *lua.LTable, key, fallback string) string {
 	return fallback
 }
 
-// tableBool reads a boolean field from a table.
-func tableBool(tbl *lua.LTable, key string, fallback bool) bool {
+// tableBool reads a boolean field from a table; absent or non-boolean
+// reads as false.
+func tableBool(tbl *lua.LTable, key string) bool {
 	if tbl == nil {
-		return fallback
+		return false
 	}
-	if b, ok := tbl.RawGetString(key).(lua.LBool); ok {
-		return bool(b)
-	}
-	return fallback
+	b, _ := tbl.RawGetString(key).(lua.LBool)
+	return bool(b)
 }
 
 // tableFunc reads a function field from a table.

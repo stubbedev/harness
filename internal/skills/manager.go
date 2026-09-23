@@ -119,7 +119,9 @@ func (m *Manager) States() []*SkillState {
 	return discovery.CloneStates(m.states)
 }
 
-// SetLatestStates updates the manager's cached discovery snapshot.
+// SetLatestStates updates the manager's cached discovery snapshot (and,
+// with WithGlobalMirror, the package cache) without notifying
+// subscribers.
 func (m *Manager) SetLatestStates(states []*SkillState) {
 	m.mu.Lock()
 	m.states = discovery.CloneStates(states)
@@ -129,23 +131,13 @@ func (m *Manager) SetLatestStates(states []*SkillState) {
 	}
 }
 
-// PublishStates updates the manager's cached snapshot and publishes a
-// discovery event to subscribers. Callers should not call
-// SetLatestStates separately — PublishStates is the single mutation
-// point, keeping Manager.States(), workspaceToProto, and (when
-// WithGlobalMirror is set) skills.GetLatestStates consistent with what
+// PublishStates is SetLatestStates followed by a discovery event to
+// subscribers, keeping Manager.States(), workspaceToProto and (with
+// WithGlobalMirror) skills.GetLatestStates consistent with what
 // subscribers observe.
 func (m *Manager) PublishStates(states []*SkillState) {
-	m.mu.Lock()
-	m.states = discovery.CloneStates(states)
-	m.mu.Unlock()
-	if m.globalMirror {
-		SetLatestStates(states)
-	}
+	m.SetLatestStates(states)
 	m.broker.Publish(pubsub.UpdatedEvent, Event{States: discovery.CloneStates(states)})
-	if m.globalMirror {
-		PublishStates(states)
-	}
 }
 
 // SubscribeEvents returns a channel of discovery events for the

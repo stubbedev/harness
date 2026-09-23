@@ -25,7 +25,9 @@ func HandleWorkDoneProgressCreate(_ context.Context, _ string, _ json.RawMessage
 	return nil, nil
 }
 
-// HandleRegisterCapability handles capability registration requests
+// HandleRegisterCapability acknowledges capability registration requests.
+// Nothing consumes dynamic registrations (file watching is done by Harness
+// itself), so they are validated and otherwise ignored.
 func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	var registerParams protocol.RegistrationParams
 	if err := json.Unmarshal(params, &registerParams); err != nil {
@@ -33,24 +35,6 @@ func HandleRegisterCapability(_ context.Context, _ string, params json.RawMessag
 		return nil, err
 	}
 
-	for _, reg := range registerParams.Registrations {
-		switch reg.Method {
-		case "workspace/didChangeWatchedFiles":
-			// Parse the registration options
-			optionsJSON, err := json.Marshal(reg.RegisterOptions)
-			if err != nil {
-				slog.Error("Error marshaling registration options", "error", err)
-				continue
-			}
-			var options protocol.DidChangeWatchedFilesRegistrationOptions
-			if err := json.Unmarshal(optionsJSON, &options); err != nil {
-				slog.Error("Error unmarshaling registration options", "error", err)
-				continue
-			}
-			// Store the file watchers registrations
-			notifyFileWatchRegistration(reg.ID, options.Watchers)
-		}
-	}
 	return nil, nil
 }
 
@@ -69,24 +53,6 @@ func HandleApplyEdit(encoding powernap.OffsetEncoding) func(_ context.Context, _
 		}
 
 		return protocol.ApplyWorkspaceEditResult{Applied: true}, nil
-	}
-}
-
-// FileWatchRegistrationHandler is a function that will be called when file watch registrations are received
-type FileWatchRegistrationHandler func(id string, watchers []protocol.FileSystemWatcher)
-
-// fileWatchHandler holds the current handler for file watch registrations
-var fileWatchHandler FileWatchRegistrationHandler
-
-// RegisterFileWatchHandler sets the handler for file watch registrations
-func RegisterFileWatchHandler(handler FileWatchRegistrationHandler) {
-	fileWatchHandler = handler
-}
-
-// notifyFileWatchRegistration notifies the handler about new file watch registrations
-func notifyFileWatchRegistration(id string, watchers []protocol.FileSystemWatcher) {
-	if fileWatchHandler != nil {
-		fileWatchHandler(id, watchers)
 	}
 }
 

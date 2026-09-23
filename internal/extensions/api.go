@@ -34,7 +34,6 @@ type commandSpec struct {
 	prompt      string
 	arguments   []Argument
 	fn          *lua.LFunction
-	in          *instance
 }
 
 // hookHandler is an in-process handler for a hook event.
@@ -42,7 +41,6 @@ type hookHandler struct {
 	event   string
 	matcher *regexp.Regexp
 	fn      *lua.LFunction
-	in      *instance
 }
 
 // Argument describes one argument a command takes. It mirrors the
@@ -204,7 +202,7 @@ func (in *instance) luaRegisterTool(L *lua.LState) int {
 		description: tableString(spec, "description", ""),
 		parameters:  properties,
 		required:    required,
-		parallel:    tableBool(spec, "parallel", false),
+		parallel:    tableBool(spec, "parallel"),
 		fn:          fn,
 		in:          in,
 	})
@@ -237,7 +235,6 @@ func (in *instance) luaRegisterCommand(L *lua.LState) int {
 		prompt:      prompt,
 		arguments:   buildArguments(spec.RawGetString("arguments")),
 		fn:          fn,
-		in:          in,
 	})
 	return 0
 }
@@ -280,7 +277,7 @@ func (in *instance) luaOn(L *lua.LState) int {
 		return 0
 	}
 
-	handler := &hookHandler{event: event, fn: fn, in: in}
+	handler := &hookHandler{event: event, fn: fn}
 	if matcher != "" {
 		re, err := config.CompileMatcher(matcher)
 		if err != nil {
@@ -370,7 +367,7 @@ func buildArguments(value lua.LValue) []Argument {
 			ID:          id,
 			Title:       tableString(item, "title", id),
 			Description: tableString(item, "description", ""),
-			Required:    tableBool(item, "required", false),
+			Required:    tableBool(item, "required"),
 		})
 	})
 	return args

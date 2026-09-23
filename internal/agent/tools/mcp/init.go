@@ -426,22 +426,6 @@ func WaitForInitBudget(ctx context.Context, budget time.Duration) error {
 	return nil
 }
 
-// InitializeSingle initializes a single MCP client by name.
-func InitializeSingle(ctx context.Context, name string, cfg *config.ConfigStore) error {
-	m, err := mcpConfigFor(cfg, name)
-	if err != nil {
-		return err
-	}
-
-	if m.Disabled {
-		updateState(name, StateDisabled, nil, nil, Counts{})
-		slog.Debug("Skipping disabled MCP", "name", name)
-		return nil
-	}
-
-	return initClient(ctx, cfg, name, m, currentGen(name), cfg.Resolver())
-}
-
 // AuthenticateMCP initiates the OAuth flow for an MCP server that is in
 // StateNeedsAuth. It creates the OAuth handler (which starts a local
 // callback server), connects to the server (which triggers the browser

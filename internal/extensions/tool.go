@@ -93,10 +93,10 @@ func toolResponse(value lua.LValue) fantasy.ToolResponse {
 			content = tableString(typed, "text", "")
 		}
 		response := fantasy.NewTextResponse(content)
-		if tableBool(typed, "is_error", false) || tableBool(typed, "error", false) {
+		if tableBool(typed, "is_error") || tableBool(typed, "error") {
 			response.IsError = true
 		}
-		response.StopTurn = tableBool(typed, "stop_turn", false)
+		response.StopTurn = tableBool(typed, "stop_turn")
 		if metadata, ok := typed.RawGetString("metadata").(*lua.LTable); ok {
 			if data, err := marshalLuaValue(metadata); err == nil {
 				response.Metadata = string(data)

@@ -3,7 +3,6 @@
 package skills
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"github.com/stubbedev/harness/internal/discovery"
 	"github.com/stubbedev/harness/internal/stringext"
 
-	"github.com/stubbedev/harness/internal/pubsub"
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
 )
@@ -73,18 +71,6 @@ type SkillState = discovery.State
 // Event is published when skill discovery completes.
 type Event struct {
 	States []*SkillState
-}
-
-var broker = pubsub.NewBroker[Event]()
-
-// SubscribeEvents returns a channel that receives events when skill discovery state changes.
-func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
-	return broker.Subscribe(ctx)
-}
-
-// PublishStates publishes a skill discovery event with the given states.
-func PublishStates(states []*SkillState) {
-	broker.Publish(pubsub.UpdatedEvent, Event{States: discovery.CloneStates(states)})
 }
 
 // GetLatestStates returns the latest discovery states.

@@ -34,6 +34,8 @@ func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
 
 	fs.WalkDir(builtinFS, "builtin", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			// The embedded tree is fixed at build time; an entry it cannot
+			// walk is skipped rather than aborting every other builtin.
 			return nil
 		}
 		if d.IsDir() || d.Name() != SkillFileName {

@@ -99,7 +99,7 @@ func hookResult(value lua.LValue) hooks.HookResult {
 	case *lua.LTable:
 		result := hooks.HookResult{
 			Decision:      hooks.ParseDecision(tableString(typed, "decision", "")),
-			Halt:          tableBool(typed, "halt", false),
+			Halt:          tableBool(typed, "halt"),
 			Reason:        tableString(typed, "reason", ""),
 			Context:       tableString(typed, "context", ""),
 			UpdatedPrompt: tableString(typed, "updated_prompt", ""),

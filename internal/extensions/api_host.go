@@ -204,7 +204,7 @@ func (in *instance) luaExec(L *lua.LState) int {
 		return 0
 	}
 
-	if tableBool(opts, "async", false) {
+	if tableBool(opts, "async") {
 		return in.pushPending(L, "exec", func(p *pendingCall, ctx context.Context) {
 			p.exec = in.runExec(ctx, req)
 		})
@@ -324,7 +324,7 @@ func (in *instance) luaHTTPRequest(L *lua.LState) int {
 		return 0
 	}
 
-	if tableBool(tbl, "async", false) {
+	if tableBool(tbl, "async") {
 		return in.pushPending(L, "http", func(p *pendingCall, ctx context.Context) {
 			p.http, p.err = in.runHTTP(ctx, spec)
 		})
