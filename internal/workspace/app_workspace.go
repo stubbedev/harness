@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -35,18 +34,37 @@ import (
 // AppWorkspace implements the Workspace interface by delegating
 // directly to an in-process [app.App] instance. This is the default
 // mode when the client/server architecture is not enabled.
+//
+// The server wraps each hosted workspace in one too, so every operation
+// has one implementation whether a frontend reaches it in-process or
+// over RPC.
 type AppWorkspace struct {
 	app   *app.App
 	store *config.ConfigStore
+	// env is appended to the process environment for shell commands.
+	// A server sets it to the environment the client registered with.
+	env []string
+}
+
+// AppWorkspaceOption configures an [AppWorkspace].
+type AppWorkspaceOption func(*AppWorkspace)
+
+// WithEnv adds env to the environment shell commands run with.
+func WithEnv(env []string) AppWorkspaceOption {
+	return func(w *AppWorkspace) { w.env = env }
 }
 
 // NewAppWorkspace creates a new AppWorkspace wrapping the given app
 // and config store.
-func NewAppWorkspace(a *app.App, store *config.ConfigStore) *AppWorkspace {
-	return &AppWorkspace{
+func NewAppWorkspace(a *app.App, store *config.ConfigStore, opts ...AppWorkspaceOption) *AppWorkspace {
+	w := &AppWorkspace{
 		app:   a,
 		store: store,
 	}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
 }
 
 // -- Sessions --
@@ -116,7 +134,7 @@ func (w *AppWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Messa
 
 func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
 	if w.app.AgentCoordinator == nil {
-		return errors.New("agent coordinator not initialized")
+		return ErrAgentNotInitialized
 	}
 	_, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
 	return err
@@ -134,6 +152,9 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 		Command:   command,
 		Cwd:       w.store.WorkingDir(),
 		TermWidth: termWidth,
+	}
+	if len(w.env) > 0 {
+		opts.Env = append(os.Environ(), w.env...)
 	}
 
 	var result shell.CaptureResult
@@ -238,7 +259,7 @@ func (w *AppWorkspace) AgentClearQueue(sessionID string) {
 
 func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID, instructions string) error {
 	if w.app.AgentCoordinator == nil {
-		return errors.New("agent coordinator not initialized")
+		return ErrAgentNotInitialized
 	}
 	return w.app.AgentCoordinator.Summarize(ctx, sessionID, instructions)
 }
@@ -760,10 +781,28 @@ func (w *AppWorkspace) ListCheckpoints(ctx context.Context, sessionID string) ([
 }
 
 func (w *AppWorkspace) Rewind(ctx context.Context, sessionID, messageID string, mode checkpoints.Mode) error {
-	if w.app.AgentCoordinator != nil && w.app.AgentCoordinator.IsSessionBusy(sessionID) {
-		return errors.New("cannot rewind while the agent is running")
+	// Rewinding mid-run would race the tools still writing to the tree.
+	if w.AgentIsSessionBusy(sessionID) {
+		return fmt.Errorf("cannot rewind: %w", ErrSessionBusy)
+	}
+	mode, err := normalizeRewindMode(mode)
+	if err != nil {
+		return err
 	}
 	return w.app.Checkpoints.Rewind(ctx, sessionID, messageID, mode)
+}
+
+// normalizeRewindMode defaults an empty mode to rewinding both the
+// transcript and the files, and rejects anything unknown.
+func normalizeRewindMode(mode checkpoints.Mode) (checkpoints.Mode, error) {
+	if mode == "" {
+		return checkpoints.ModeBoth, nil
+	}
+	m, err := checkpoints.ParseMode(string(mode))
+	if err != nil {
+		return mode, fmt.Errorf("%w: rewind mode %q", ErrInvalidArgument, string(mode))
+	}
+	return m, nil
 }
 
 // ListExtensionCommands returns the slash commands the workspace's Lua

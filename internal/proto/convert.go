@@ -349,6 +349,40 @@ func SkillStatesToDomain(states []SkillState) []*skills.SkillState {
 	})
 }
 
+// SkillInfoFromDomain converts a skill catalog entry for the wire.
+func SkillInfoFromDomain(e skills.CatalogEntry) SkillInfo {
+	return SkillInfo{
+		ID:            e.ID,
+		Name:          e.Name,
+		Description:   e.Description,
+		Label:         e.Label,
+		Source:        string(e.Source),
+		UserInvocable: e.UserInvocable,
+	}
+}
+
+// ToDomain converts a wire skill catalog entry back.
+func (i SkillInfo) ToDomain() skills.CatalogEntry {
+	return skills.CatalogEntry{
+		ID:            i.ID,
+		Name:          i.Name,
+		Description:   i.Description,
+		Label:         i.Label,
+		Source:        skills.SourceType(i.Source),
+		UserInvocable: i.UserInvocable,
+	}
+}
+
+// SkillReadResultFromDomain converts skill read metadata for the wire.
+func SkillReadResultFromDomain(r skills.SkillReadResult) SkillReadResult {
+	return SkillReadResult{Name: r.Name, Description: r.Description, Source: string(r.Source), Builtin: r.Builtin}
+}
+
+// ToDomain converts wire skill read metadata back.
+func (r SkillReadResult) ToDomain() skills.SkillReadResult {
+	return skills.SkillReadResult{Name: r.Name, Description: r.Description, Source: skills.SourceType(r.Source), Builtin: r.Builtin}
+}
+
 // MCPClientInfoFromDomain converts an MCP server's state for the wire.
 // The live session and the connect-time configs stay on the server.
 func MCPClientInfoFromDomain(i mcp.ClientInfo) MCPClientInfo {

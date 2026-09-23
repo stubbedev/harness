@@ -137,6 +137,16 @@ func TestSkillStatesRoundTrip(t *testing.T) {
 	require.Equal(t, d, got)
 }
 
+func TestSkillCatalogRoundTrip(t *testing.T) {
+	t.Parallel()
+	f := &filler{}
+	entry := filled[skills.CatalogEntry](f)
+	require.Equal(t, entry, SkillInfoFromDomain(entry).ToDomain())
+
+	result := filled[skills.SkillReadResult](f)
+	require.Equal(t, result, SkillReadResultFromDomain(result).ToDomain())
+}
+
 func TestMCPRoundTrip(t *testing.T) {
 	t.Parallel()
 	f := &filler{}

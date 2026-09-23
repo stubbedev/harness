@@ -1,17 +1,18 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/stubbedev/harness/internal/backend"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 type controllerV1 struct {
@@ -51,10 +52,8 @@ func (c *controllerV1) handleGetVersion(w http.ResponseWriter, _ *http.Request) 
 //	@Failure		409	{object}	proto.Error
 //	@Router			/control [post]
 func (c *controllerV1) handlePostControl(w http.ResponseWriter, r *http.Request) {
-	var req proto.ServerControl
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
+	req, ok := decodeBody[proto.ServerControl](c, w, r, false)
+	if !ok {
 		return
 	}
 
@@ -70,8 +69,7 @@ func (c *controllerV1) handlePostControl(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	default:
-		c.server.logError(r, "Unknown command", "command", req.Command)
-		jsonError(w, http.StatusBadRequest, "unknown command")
+		c.handleError(w, r, fmt.Errorf("%w: %q", backend.ErrUnknownCommand, req.Command))
 		return
 	}
 }
@@ -98,8 +96,7 @@ func (c *controllerV1) handleGetWorkspaces(w http.ResponseWriter, _ *http.Reques
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id} [get]
 func (c *controllerV1) handleGetWorkspace(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	ws, err := c.backend.GetWorkspaceProto(id)
+	ws, err := c.backend.GetWorkspaceProto(r.PathValue("id"))
 	if err != nil {
 		c.handleError(w, r, err)
 		return
@@ -119,13 +116,10 @@ func (c *controllerV1) handleGetWorkspace(w http.ResponseWriter, r *http.Request
 //	@Failure		500		{object}	proto.Error
 //	@Router			/workspaces [post]
 func (c *controllerV1) handlePostWorkspaces(w http.ResponseWriter, r *http.Request) {
-	var args proto.Workspace
-	if err := json.NewDecoder(r.Body).Decode(&args); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
+	args, ok := decodeBody[proto.Workspace](c, w, r, false)
+	if !ok {
 		return
 	}
-
 	_, result, err := c.backend.CreateWorkspace(args)
 	if err != nil {
 		c.handleError(w, r, err)
@@ -167,20 +161,16 @@ func (c *controllerV1) requireClientID(w http.ResponseWriter, r *http.Request) (
 //	@Failure		404	{object}	proto.Error
 //	@Router			/workspaces/{id}/current-session [post]
 func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
 	clientID, ok := c.requireClientID(w, r)
 	if !ok {
 		return
 	}
-	var req proto.CurrentSession
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
+	req, ok := decodeBody[proto.CurrentSession](c, w, r, false)
+	if !ok {
 		return
 	}
-	if err := c.backend.SetCurrentSession(id, clientID, req.SessionID); err != nil {
+	if err := c.backend.SetCurrentSession(r.PathValue("id"), clientID, req.SessionID); err != nil {
 		c.handleError(w, r, err)
-		return
 	}
 }
 
@@ -195,7 +185,6 @@ func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, 
 func (c *controllerV1) handleDeleteClient(w http.ResponseWriter, r *http.Request) {
 	if err := c.backend.RetireClient(r.PathValue("client_id")); err != nil {
 		c.handleError(w, r, err)
-		return
 	}
 }
 
@@ -208,14 +197,12 @@ func (c *controllerV1) handleDeleteClient(w http.ResponseWriter, r *http.Request
 //	@Failure		404	{object}	proto.Error
 //	@Router			/workspaces/{id} [delete]
 func (c *controllerV1) handleDeleteWorkspaces(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
 	clientID, ok := c.requireClientID(w, r)
 	if !ok {
 		return
 	}
-	if err := c.backend.DeleteWorkspace(id, clientID); err != nil {
+	if err := c.backend.DeleteWorkspace(r.PathValue("id"), clientID); err != nil {
 		c.handleError(w, r, err)
-		return
 	}
 }
 
@@ -230,13 +217,9 @@ func (c *controllerV1) handleDeleteWorkspaces(w http.ResponseWriter, r *http.Req
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/config [get]
 func (c *controllerV1) handleGetWorkspaceConfig(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	cfg, err := c.backend.GetWorkspaceConfig(id)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, cfg)
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		return ws.Cfg.Config(), nil
+	})
 }
 
 // handleGetWorkspaceEvents streams workspace events as Server-Sent Events.
@@ -318,24 +301,11 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/lsps [get]
 func (c *controllerV1) handleGetWorkspaceLSPs(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	states, err := c.backend.GetLSPStates(id)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	result := make(map[string]proto.LSPClientInfo, len(states))
-	for k, v := range states {
-		result[k] = proto.LSPClientInfo{
-			Name:            v.Name,
-			State:           v.State,
-			Error:           v.Error,
-			DiagnosticCount: v.DiagnosticCount,
-			ConnectedAt:     v.ConnectedAt,
-			SessionDisabled: v.SessionDisabled,
-		}
-	}
-	jsonEncode(w, result)
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		return mapValues(ws.Ops().LSPGetStates(), func(v workspace.LSPClientInfo) proto.LSPClientInfo {
+			return proto.LSPClientInfo(v)
+		}), nil
+	})
 }
 
 // handleGetWorkspaceLSPDiagnostics returns diagnostics for an LSP client.
@@ -350,14 +320,9 @@ func (c *controllerV1) handleGetWorkspaceLSPs(w http.ResponseWriter, r *http.Req
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/lsps/{lsp}/diagnostics [get]
 func (c *controllerV1) handleGetWorkspaceLSPDiagnostics(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	lspName := r.PathValue("lsp")
-	diagnostics, err := c.backend.GetLSPDiagnostics(id, lspName)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, diagnostics)
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		return c.backend.GetLSPDiagnostics(ws.ID, r.PathValue("lsp"))
+	})
 }
 
 // handleGetWorkspaceSessions lists sessions for a workspace.
@@ -371,20 +336,17 @@ func (c *controllerV1) handleGetWorkspaceLSPDiagnostics(w http.ResponseWriter, r
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions [get]
 func (c *controllerV1) handleGetWorkspaceSessions(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sessions, err := c.backend.ListSessions(r.Context(), id)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	ws, _ := c.backend.GetWorkspace(id)
-	result := make([]proto.Session, len(sessions))
-	for i, s := range sessions {
-		result[i] = proto.SessionFromDomain(s)
-		result[i].IsBusy = isSessionBusy(ws, s.ID)
-		result[i].AttachedClients = attachedClients(ws, s.ID)
-	}
-	jsonEncode(w, result)
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		sessions, err := ws.Ops().ListSessions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]proto.Session, len(sessions))
+		for i, s := range sessions {
+			result[i] = sessionOut(ws, s)
+		}
+		return result, nil
+	})
 }
 
 // handlePostWorkspaceSessions creates a new session in a workspace.
@@ -401,25 +363,10 @@ func (c *controllerV1) handleGetWorkspaceSessions(w http.ResponseWriter, r *http
 //	@Failure		500		{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions [post]
 func (c *controllerV1) handlePostWorkspaceSessions(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	var args proto.Session
-	if err := json.NewDecoder(r.Body).Decode(&args); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	sess, err := c.backend.CreateSession(r.Context(), id, args.Title)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	ws, _ := c.backend.GetWorkspace(id)
-	out := proto.SessionFromDomain(sess)
-	out.IsBusy = isSessionBusy(ws, sess.ID)
-	out.AttachedClients = attachedClients(ws, sess.ID)
-	jsonEncode(w, out)
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.Session) (any, error) {
+		s, err := ws.Ops().CreateSession(ctx, req.Title)
+		return sessionResult(ws, s, err)
+	})
 }
 
 // handleGetWorkspaceSession returns a single session.
@@ -434,18 +381,10 @@ func (c *controllerV1) handlePostWorkspaceSessions(w http.ResponseWriter, r *htt
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid} [get]
 func (c *controllerV1) handleGetWorkspaceSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	sess, err := c.backend.GetSession(r.Context(), id, sid)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	ws, _ := c.backend.GetWorkspace(id)
-	out := proto.SessionFromDomain(sess)
-	out.IsBusy = isSessionBusy(ws, sess.ID)
-	out.AttachedClients = attachedClients(ws, sess.ID)
-	jsonEncode(w, out)
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		s, err := ws.Ops().GetSession(ctx, r.PathValue("sid"))
+		return sessionResult(ws, s, err)
+	})
 }
 
 // handleGetWorkspaceSessionHistory returns the history for a session.
@@ -460,18 +399,10 @@ func (c *controllerV1) handleGetWorkspaceSession(w http.ResponseWriter, r *http.
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid}/history [get]
 func (c *controllerV1) handleGetWorkspaceSessionHistory(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	files, err := c.backend.ListSessionHistory(r.Context(), id, sid)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	out := make([]proto.File, len(files))
-	for i, f := range files {
-		out[i] = proto.FileFromDomain(f)
-	}
-	jsonEncode(w, out)
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		files, err := ws.Ops().ListSessionHistory(ctx, r.PathValue("sid"))
+		return proto.FilesFromDomain(files), err
+	})
 }
 
 // handleGetWorkspaceSessionMessages returns all messages for a session.
@@ -486,14 +417,10 @@ func (c *controllerV1) handleGetWorkspaceSessionHistory(w http.ResponseWriter, r
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid}/messages [get]
 func (c *controllerV1) handleGetWorkspaceSessionMessages(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	messages, err := c.backend.ListSessionMessages(r.Context(), id, sid)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, proto.MessagesFromDomain(messages))
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		msgs, err := ws.Ops().ListMessages(ctx, r.PathValue("sid"))
+		return proto.MessagesFromDomain(msgs), err
+	})
 }
 
 // handlePutWorkspaceSession renames a session. Only the title is
@@ -513,26 +440,15 @@ func (c *controllerV1) handleGetWorkspaceSessionMessages(w http.ResponseWriter, 
 //	@Failure		500		{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid} [put]
 func (c *controllerV1) handlePutWorkspaceSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-
-	var req proto.SessionRenameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	saved, err := c.backend.RenameSession(r.Context(), id, sid, req.Title)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	ws, _ := c.backend.GetWorkspace(id)
-	out := proto.SessionFromDomain(saved)
-	out.IsBusy = isSessionBusy(ws, saved.ID)
-	out.AttachedClients = attachedClients(ws, saved.ID)
-	jsonEncode(w, out)
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.SessionRenameRequest) (any, error) {
+		sid := r.PathValue("sid")
+		ops := ws.Ops()
+		if err := ops.RenameSession(ctx, sid, req.Title); err != nil {
+			return nil, err
+		}
+		s, err := ops.GetSession(ctx, sid)
+		return sessionResult(ws, s, err)
+	})
 }
 
 // handleDeleteWorkspaceSession deletes a session.
@@ -546,13 +462,9 @@ func (c *controllerV1) handlePutWorkspaceSession(w http.ResponseWriter, r *http.
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid} [delete]
 func (c *controllerV1) handleDeleteWorkspaceSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	if err := c.backend.DeleteSession(r.Context(), id, sid); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		return done(ws.Ops().DeleteSession(ctx, r.PathValue("sid")))
+	})
 }
 
 // handleGetWorkspaceSessionUserMessages returns user messages for a session.
@@ -567,14 +479,10 @@ func (c *controllerV1) handleDeleteWorkspaceSession(w http.ResponseWriter, r *ht
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid}/messages/user [get]
 func (c *controllerV1) handleGetWorkspaceSessionUserMessages(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	messages, err := c.backend.ListUserMessages(r.Context(), id, sid)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, proto.MessagesFromDomain(messages))
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		msgs, err := ws.Ops().ListUserMessages(ctx, r.PathValue("sid"))
+		return proto.MessagesFromDomain(msgs), err
+	})
 }
 
 // handleGetWorkspaceAllUserMessages returns all user messages across sessions.
@@ -588,13 +496,10 @@ func (c *controllerV1) handleGetWorkspaceSessionUserMessages(w http.ResponseWrit
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/messages/user [get]
 func (c *controllerV1) handleGetWorkspaceAllUserMessages(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	messages, err := c.backend.ListAllUserMessages(r.Context(), id)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, proto.MessagesFromDomain(messages))
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		msgs, err := ws.Ops().ListAllUserMessages(ctx)
+		return proto.MessagesFromDomain(msgs), err
+	})
 }
 
 // handleGetWorkspaceSessionFileTrackerFiles lists files read in a session.
@@ -609,14 +514,9 @@ func (c *controllerV1) handleGetWorkspaceAllUserMessages(w http.ResponseWriter, 
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid}/filetracker/files [get]
 func (c *controllerV1) handleGetWorkspaceSessionFileTrackerFiles(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	files, err := c.backend.FileTrackerListReadFiles(r.Context(), id, sid)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, files)
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		return ws.Ops().FileTrackerListReadFiles(ctx, r.PathValue("sid"))
+	})
 }
 
 // handlePostWorkspaceFileTrackerRead records a file read event.
@@ -632,20 +532,10 @@ func (c *controllerV1) handleGetWorkspaceSessionFileTrackerFiles(w http.Response
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/filetracker/read [post]
 func (c *controllerV1) handlePostWorkspaceFileTrackerRead(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	var req proto.FileTrackerReadRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	if err := c.backend.FileTrackerRecordRead(r.Context(), id, req.SessionID, req.Path); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.FileTrackerReadRequest) (any, error) {
+		ws.Ops().FileTrackerRecordRead(ctx, req.SessionID, req.Path)
+		return nil, nil
+	})
 }
 
 // handleGetWorkspaceFileTrackerLastRead returns the last read time for a file.
@@ -661,16 +551,10 @@ func (c *controllerV1) handlePostWorkspaceFileTrackerRead(w http.ResponseWriter,
 //	@Failure		500			{object}	proto.Error
 //	@Router			/workspaces/{id}/filetracker/lastread [get]
 func (c *controllerV1) handleGetWorkspaceFileTrackerLastRead(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.URL.Query().Get("session_id")
-	path := r.URL.Query().Get("path")
-
-	t, err := c.backend.FileTrackerLastReadTime(r.Context(), id, sid, path)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, t)
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		q := r.URL.Query()
+		return ws.Ops().FileTrackerLastReadTime(ctx, q.Get("session_id"), q.Get("path")), nil
+	})
 }
 
 // handlePostWorkspaceLSPStart starts an LSP server for a path.
@@ -686,20 +570,10 @@ func (c *controllerV1) handleGetWorkspaceFileTrackerLastRead(w http.ResponseWrit
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/lsps/start [post]
 func (c *controllerV1) handlePostWorkspaceLSPStart(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	var req proto.LSPStartRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	if err := c.backend.LSPStart(r.Context(), id, req.Path); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.LSPStartRequest) (any, error) {
+		ws.Ops().LSPStart(ctx, req.Path)
+		return nil, nil
+	})
 }
 
 // handlePostWorkspaceLSPStopAll stops all LSP servers.
@@ -712,12 +586,10 @@ func (c *controllerV1) handlePostWorkspaceLSPStart(w http.ResponseWriter, r *htt
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/lsps/stop [post]
 func (c *controllerV1) handlePostWorkspaceLSPStopAll(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := c.backend.LSPStopAll(r.Context(), id); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		ws.Ops().LSPStopAll(ctx)
+		return nil, nil
+	})
 }
 
 // handlePostWorkspaceLSPRestart restarts a named running LSP server.
@@ -733,20 +605,9 @@ func (c *controllerV1) handlePostWorkspaceLSPStopAll(w http.ResponseWriter, r *h
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/lsps/restart [post]
 func (c *controllerV1) handlePostWorkspaceLSPRestart(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	var req proto.LSPNameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	if err := c.backend.LSPRestartSingle(id, req.Name); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.LSPNameRequest) (any, error) {
+		return done(ws.Ops().LSPRestartSingle(ctx, req.Name))
+	})
 }
 
 // handlePostWorkspaceLSPDisable turns a named LSP server off for the
@@ -786,20 +647,9 @@ func (c *controllerV1) handlePostWorkspaceLSPEnable(w http.ResponseWriter, r *ht
 // handleLSPSessionDisabled is the shared body of the LSP disable and
 // enable endpoints.
 func (c *controllerV1) handleLSPSessionDisabled(w http.ResponseWriter, r *http.Request, disabled bool) {
-	id := r.PathValue("id")
-
-	var req proto.LSPNameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	if err := c.backend.LSPSetSessionDisabled(r.Context(), id, req.Name, disabled); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.LSPNameRequest) (any, error) {
+		return done(ws.Ops().LSPSetSessionDisabled(ctx, req.Name, disabled))
+	})
 }
 
 // handleGetWorkspaceAgent returns agent info for a workspace.
@@ -813,13 +663,19 @@ func (c *controllerV1) handleLSPSessionDisabled(w http.ResponseWriter, r *http.R
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent [get]
 func (c *controllerV1) handleGetWorkspaceAgent(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	info, err := c.backend.GetAgentInfo(id)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, info)
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		ops := ws.Ops()
+		if !ops.AgentIsReady() {
+			return proto.AgentInfo{}, nil
+		}
+		m := ops.AgentModel()
+		return proto.AgentInfo{
+			Model:    m.CatalogCfg,
+			ModelCfg: m.ModelCfg,
+			IsBusy:   ops.AgentIsBusy(),
+			IsReady:  true,
+		}, nil
+	})
 }
 
 // handlePostWorkspaceAgent sends a message to the agent.
@@ -836,15 +692,10 @@ func (c *controllerV1) handleGetWorkspaceAgent(w http.ResponseWriter, r *http.Re
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent [post]
 func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	var msg proto.AgentMessage
-	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
+	msg, ok := decodeBody[proto.AgentMessage](c, w, r, false)
+	if !ok {
 		return
 	}
-
 	// The run's lifetime is detached from the prompting client's HTTP
 	// request: SendMessage validates and accepts the prompt, dispatches
 	// the run on a goroutine bound to the workspace context, and returns
@@ -853,11 +704,9 @@ func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.R
 	// endpoint can no longer tear down a turn that other subscribed
 	// clients are still watching. Only the explicit cancel endpoint
 	// should be able to end a run.
-	if err := c.backend.SendMessage(id, msg); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusAccepted)
+	c.serveStatus(w, r, http.StatusAccepted, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		return done(c.backend.SendMessage(ws.ID, msg))
+	})
 }
 
 // handlePostWorkspaceAgentInit initializes the agent for a workspace.
@@ -870,22 +719,12 @@ func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.R
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/init [post]
 func (c *controllerV1) handlePostWorkspaceAgentInit(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	var req proto.AgentInitRequest
-	if r.Body != nil && r.ContentLength > 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			c.server.logError(r, "Failed to decode agent init request", "error", err)
-			jsonError(w, http.StatusBadRequest, "failed to decode request")
-			return
+	serveOptionalBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.AgentInitRequest) (any, error) {
+		if req.Interactive {
+			return done(ws.Ops().InitCoderAgent(ctx))
 		}
-	}
-
-	if err := c.backend.InitAgent(r.Context(), id, req.Interactive); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+		return done(ws.Ops().InitCoderAgentNonInteractive(ctx))
+	})
 }
 
 // handlePostWorkspaceAgentUpdate updates the agent for a workspace.
@@ -898,12 +737,9 @@ func (c *controllerV1) handlePostWorkspaceAgentInit(w http.ResponseWriter, r *ht
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/update [post]
 func (c *controllerV1) handlePostWorkspaceAgentUpdate(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := c.backend.UpdateAgent(r.Context(), id); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		return done(ws.Ops().UpdateAgentModel(ctx))
+	})
 }
 
 // handleGetWorkspaceAgentSession returns a specific agent session.
@@ -918,14 +754,14 @@ func (c *controllerV1) handlePostWorkspaceAgentUpdate(w http.ResponseWriter, r *
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid} [get]
 func (c *controllerV1) handleGetWorkspaceAgentSession(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	agentSession, err := c.backend.GetAgentSession(r.Context(), id, sid)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, agentSession)
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		s, err := ws.Ops().GetSession(ctx, r.PathValue("sid"))
+		if err != nil {
+			return nil, err
+		}
+		out := sessionOut(ws, s)
+		return proto.AgentSession{Session: out, IsBusy: out.IsBusy}, nil
+	})
 }
 
 // handlePostWorkspaceAgentSessionCancel cancels a running agent session.
@@ -939,13 +775,10 @@ func (c *controllerV1) handleGetWorkspaceAgentSession(w http.ResponseWriter, r *
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/cancel [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionCancel(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	if err := c.backend.CancelSession(id, sid); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		ws.Ops().AgentCancel(r.PathValue("sid"))
+		return nil, nil
+	})
 }
 
 // handlePostWorkspaceAgentSessionCancelTurn interrupts the session's
@@ -961,13 +794,10 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionCancel(w http.ResponseWrit
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/cancel-turn [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionCancelTurn(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	if err := c.backend.CancelSessionTurn(id, sid); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		ws.Ops().AgentCancelTurn(r.PathValue("sid"))
+		return nil, nil
+	})
 }
 
 // handleGetWorkspaceAgentSessionPromptQueued returns whether a queued prompt exists.
@@ -982,14 +812,9 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionCancelTurn(w http.Response
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/queued [get]
 func (c *controllerV1) handleGetWorkspaceAgentSessionPromptQueued(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	queued, err := c.backend.QueuedPrompts(id, sid)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, queued)
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		return ws.Ops().AgentQueuedPrompts(r.PathValue("sid")), nil
+	})
 }
 
 // handlePostWorkspaceAgentSessionPromptClear clears the prompt queue for a session.
@@ -1003,13 +828,10 @@ func (c *controllerV1) handleGetWorkspaceAgentSessionPromptQueued(w http.Respons
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/clear [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	if err := c.backend.ClearQueue(id, sid); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		ws.Ops().AgentClearQueue(r.PathValue("sid"))
+		return nil, nil
+	})
 }
 
 // handlePostWorkspaceAgentSessionSummarize summarizes a session.
@@ -1025,24 +847,10 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.Respons
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/summarize [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	// Optional focus instructions from /compact.
-	// An empty body means no instructions; anything else must decode.
-	var body proto.SummarizeRequest
-	if r.Body != nil {
-		err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
-		if err != nil && !errors.Is(err, io.EOF) {
-			c.server.logError(r, "Failed to decode request", "error", err)
-			jsonError(w, http.StatusBadRequest, "failed to decode request")
-			return
-		}
-	}
-	if err := c.backend.SummarizeSession(r.Context(), id, sid, body.Instructions); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	// The body carries optional focus instructions from /compact.
+	serveOptionalBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.SummarizeRequest) (any, error) {
+		return done(ws.Ops().AgentSummarize(ctx, r.PathValue("sid"), req.Instructions))
+	})
 }
 
 // handlePostWorkspaceAgentSessionShell runs a shell command in the workspace.
@@ -1060,23 +868,9 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseW
 //	@Failure		500		{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/shell [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionShell(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-
-	var req proto.ShellCommandRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-	req.SessionID = sid
-
-	resp, err := c.backend.RunShellCommand(r.Context(), id, req)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, resp)
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.ShellCommandRequest) (any, error) {
+		return ws.Ops().AgentRunShellCommand(ctx, r.PathValue("sid"), req.Command, req.TermWidth, nil, req.IsFirstMessage)
+	})
 }
 
 // handleGetWorkspaceAgentSessionPromptList returns the list of queued prompts.
@@ -1091,14 +885,9 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionShell(w http.ResponseWrite
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/list [get]
 func (c *controllerV1) handleGetWorkspaceAgentSessionPromptList(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	prompts, err := c.backend.QueuedPromptsList(id, sid)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, prompts)
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		return ws.Ops().AgentQueuedPromptsList(r.PathValue("sid")), nil
+	})
 }
 
 // handleGetWorkspaceAgentDefaultSmallModel returns the default small model for a provider.
@@ -1113,14 +902,9 @@ func (c *controllerV1) handleGetWorkspaceAgentSessionPromptList(w http.ResponseW
 //	@Failure		500			{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/default-small-model [get]
 func (c *controllerV1) handleGetWorkspaceAgentDefaultSmallModel(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	providerID := r.URL.Query().Get("provider_id")
-	model, err := c.backend.GetDefaultSmallModel(id, providerID)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, model)
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		return ws.Ops().GetDefaultSmallModel(r.URL.Query().Get("provider_id")), nil
+	})
 }
 
 // handlePostWorkspaceQuestionsAnswer submits answers for a batch question.
@@ -1136,21 +920,10 @@ func (c *controllerV1) handleGetWorkspaceAgentDefaultSmallModel(w http.ResponseW
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/questions/answer [post]
 func (c *controllerV1) handlePostWorkspaceQuestionsAnswer(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	var req proto.QuestionAnswer
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	resolved, err := c.backend.AnswerQuestion(id, req)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, proto.QuestionAnswerResponse{Resolved: resolved})
+	serveBody(c, w, r, func(_ context.Context, ws *backend.Workspace, req proto.QuestionAnswer) (any, error) {
+		resolved := ws.Ops().QuestionAnswer(proto.QuestionResponsesToDomain(req.Responses))
+		return proto.QuestionAnswerResponse{Resolved: resolved}, nil
+	})
 }
 
 // handlePostWorkspaceQuestionsCancel cancels the pending question
@@ -1165,26 +938,51 @@ func (c *controllerV1) handlePostWorkspaceQuestionsAnswer(w http.ResponseWriter,
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/questions/cancel [post]
 func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	cancelled, err := c.backend.CancelQuestion(id)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	jsonEncode(w, proto.QuestionAnswerResponse{Resolved: cancelled})
+	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+		return proto.QuestionAnswerResponse{Resolved: ws.Ops().QuestionCancel()}, nil
+	})
 }
 
-// handleError maps backend errors to HTTP status codes and writes the
-// JSON error response.
+// handleGetWorkspaceSessionCheckpoints returns a session's rewind
+// checkpoints.
 //
-// Runtime cancellation of an agent run no longer reaches here for the
-// agent-prompt path: SendMessage is fire-and-forget (the handler returns
-// 202 before the run starts) and Backend.runAgent swallows
-// context.Canceled, surfacing the FinishReasonCanceled marker to SSE
-// subscribers instead. The remaining callers pass synchronous backend
-// errors, so context.Canceled gets no special case and would fall through
-// to the default 500 like any other unexpected error.
+//	@Summary		Get session checkpoints
+//	@Tags			sessions
+//	@Produce		json
+//	@Param			id	path		string	true	"Workspace ID"
+//	@Param			sid	path		string	true	"Session ID"
+//	@Success		200	{array}		proto.Checkpoint
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/sessions/{sid}/checkpoints [get]
+func (c *controllerV1) handleGetWorkspaceSessionCheckpoints(w http.ResponseWriter, r *http.Request) {
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		cps, err := ws.Ops().ListCheckpoints(ctx, r.PathValue("sid"))
+		return proto.CheckpointsFromDomain(cps), err
+	})
+}
+
+// handlePostWorkspaceSessionRewind rewinds a session to an earlier
+// turn.
+//
+//	@Summary		Rewind session
+//	@Tags			sessions
+//	@Accept			json
+//	@Param			id		path	string				true	"Workspace ID"
+//	@Param			sid		path	string				true	"Session ID"
+//	@Param			request	body	proto.RewindRequest	true	"Rewind request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		409	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/sessions/{sid}/rewind [post]
+func (c *controllerV1) handlePostWorkspaceSessionRewind(w http.ResponseWriter, r *http.Request) {
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.RewindRequest) (any, error) {
+		return done(ws.Ops().Rewind(ctx, r.PathValue("sid"), req.MessageID, checkpoints.Mode(req.Mode)))
+	})
+}
+
 // errorClass is the response an error maps to.
 type errorClass struct {
 	status int
@@ -1202,6 +1000,10 @@ var (
 
 // errorClasses maps backend sentinels to responses; the first match
 // wins and anything unlisted is an internal error.
+//
+// context.Canceled from an agent run never reaches here: SendMessage
+// answers 202 before the run starts, and the run reports cancellation
+// over the event stream.
 var errorClasses = []struct {
 	err   error
 	class errorClass
@@ -1241,6 +1043,8 @@ func classifyError(err error) errorClass {
 	return classInternal
 }
 
+// handleError maps an error to its status and code and writes the JSON
+// error response. Only server-side failures are logged at error level.
 func (c *controllerV1) handleError(w http.ResponseWriter, r *http.Request, err error) {
 	class := classifyError(err)
 	if class.status >= http.StatusInternalServerError {
@@ -1278,57 +1082,11 @@ func writeError(w http.ResponseWriter, status int, code proto.ErrorCode, message
 	_ = json.NewEncoder(w).Encode(proto.Error{Message: message, Code: code})
 }
 
-// handleGetWorkspaceSessionCheckpoints returns a session's rewind
-// checkpoints.
-//
-//	@Summary		Get session checkpoints
-//	@Tags			sessions
-//	@Produce		json
-//	@Param			id	path		string	true	"Workspace ID"
-//	@Param			sid	path		string	true	"Session ID"
-//	@Success		200	{array}		proto.Checkpoint
-//	@Failure		404	{object}	proto.Error
-//	@Failure		500	{object}	proto.Error
-//	@Router			/workspaces/{id}/sessions/{sid}/checkpoints [get]
-func (c *controllerV1) handleGetWorkspaceSessionCheckpoints(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-	cps, err := c.backend.ListCheckpoints(r.Context(), id, sid)
-	if err != nil {
-		c.handleError(w, r, err)
-		return
+// mapValues converts every value of a map with f.
+func mapValues[K comparable, V, U any](in map[K]V, f func(V) U) map[K]U {
+	out := make(map[K]U, len(in))
+	for k, v := range in {
+		out[k] = f(v)
 	}
-	jsonEncode(w, proto.CheckpointsFromDomain(cps))
-}
-
-// handlePostWorkspaceSessionRewind rewinds a session to an earlier
-// turn.
-//
-//	@Summary		Rewind session
-//	@Tags			sessions
-//	@Accept			json
-//	@Param			id		path	string				true	"Workspace ID"
-//	@Param			sid		path	string				true	"Session ID"
-//	@Param			request	body	proto.RewindRequest	true	"Rewind request"
-//	@Success		200
-//	@Failure		400	{object}	proto.Error
-//	@Failure		404	{object}	proto.Error
-//	@Failure		500	{object}	proto.Error
-//	@Router			/workspaces/{id}/sessions/{sid}/rewind [post]
-func (c *controllerV1) handlePostWorkspaceSessionRewind(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	sid := r.PathValue("sid")
-
-	var req proto.RewindRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		c.server.logError(r, "Failed to decode request", "error", err)
-		jsonError(w, http.StatusBadRequest, "failed to decode request")
-		return
-	}
-
-	if err := c.backend.Rewind(r.Context(), id, sid, req.MessageID, checkpoints.Mode(req.Mode)); err != nil {
-		c.handleError(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	return out
 }

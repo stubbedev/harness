@@ -178,6 +178,9 @@ type ShellCommandRequest struct {
 	SessionID string `json:"session_id"`
 	Command   string `json:"command"`
 	TermWidth int    `json:"term_width,omitempty"`
+	// IsFirstMessage asks the server to title the session from the
+	// command, as a local run does for a session's first message.
+	IsFirstMessage bool `json:"is_first_message,omitempty"`
 }
 
 // ShellCommandResponse represents the result of a direct shell command.

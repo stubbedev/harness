@@ -47,6 +47,12 @@ var (
 	// the meantime are lost for good, so the client treats it as a
 	// degraded link that requires a resync.
 	ErrStreamClosed = errors.New("the event stream closed; reconnecting")
+	// ErrSessionBusy means the request is refused because an agent run is
+	// in flight for the session, such as a rewind that would race the
+	// tools still writing to the tree.
+	ErrSessionBusy = errors.New("the agent is running in this session")
+	// ErrInvalidArgument means a request value was malformed.
+	ErrInvalidArgument = errors.New("invalid argument")
 )
 
 // ConnectionState describes the health of the client-server link as
@@ -322,9 +328,4 @@ type SubagentDefInfo struct {
 }
 
 // MCPResourceContents holds the contents of an MCP resource.
-type MCPResourceContents struct {
-	URI      string `json:"uri"`
-	MIMEType string `json:"mime_type,omitempty"`
-	Text     string `json:"text,omitempty"`
-	Blob     []byte `json:"blob,omitempty"`
-}
+type MCPResourceContents = proto.MCPResourceContents

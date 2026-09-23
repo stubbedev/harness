@@ -1,18 +1,20 @@
-package backend
+package workspace
 
 import (
-	"context"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/message"
-	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/session"
 )
 
+// TestRunShellCommand_SkipsPersistenceForMissingSession verifies a shell
+// command for a session that does not exist still runs, and leaves no
+// orphaned message behind.
 func TestRunShellCommand_SkipsPersistenceForMissingSession(t *testing.T) {
 	t.Parallel()
 
@@ -21,31 +23,17 @@ func TestRunShellCommand_SkipsPersistenceForMissingSession(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	q := db.New(conn)
-	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
-
-	b, _ := newTestBackend(t)
-	ws := &Workspace{
-		ID:           uuid.New().String(),
-		Path:         t.TempDir(),
-		resolvedPath: t.TempDir(),
-		clients:      make(map[string]*clientState),
-		shutdownFn:   func() {},
-	}
-	ws.App = &app.App{
-		Sessions: sessions,
-		Messages: messages,
-	}
-	ws.ctx, ws.cancel = context.WithCancel(b.ctx)
-	InsertWorkspaceForTest(b, ws)
+	w := NewAppWorkspace(
+		&app.App{Sessions: session.NewService(q, conn), Messages: messages},
+		config.NewTestStoreWithWorkingDir(&config.Config{}, t.TempDir()),
+		WithEnv([]string{"HARNESS_TEST_GREETING=hello"}),
+	)
 
 	missingSessionID := uuid.New().String()
-	resp, err := b.RunShellCommand(t.Context(), ws.ID, proto.ShellCommandRequest{
-		SessionID: missingSessionID,
-		Command:   "echo hello",
-	})
+	resp, err := w.AgentRunShellCommand(t.Context(), missingSessionID, "echo $HARNESS_TEST_GREETING", 0, nil, false)
 	require.NoError(t, err)
-	require.Equal(t, "hello\n", resp.Output)
+	require.Equal(t, "hello\n", resp.Output, "the registered environment reaches the command")
 	require.Zero(t, resp.ExitCode)
 
 	stored, err := messages.List(t.Context(), missingSessionID)

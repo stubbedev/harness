@@ -27,13 +27,14 @@ import (
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/version"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // Common errors returned by backend operations.
 var (
 	ErrWorkspaceNotFound       = errors.New("workspace not found")
 	ErrLSPClientNotFound       = errors.New("LSP client not found")
-	ErrAgentNotInitialized     = errors.New("agent coordinator not initialized")
+	ErrAgentNotInitialized     = workspace.ErrAgentNotInitialized
 	ErrPathRequired            = errors.New("path is required")
 	ErrInvalidWorkspacePath    = errors.New("invalid workspace path")
 	ErrInvalidSessionID        = errors.New("invalid session_id")
@@ -48,8 +49,8 @@ var (
 	ErrServerNotIdle           = errors.New("server is hosting live workspaces")
 	ErrClientRetired           = errors.New("client has been retired")
 	ErrChannelOptInMismatch    = errors.New("requested channels differ from the existing workspace; channels are an explicit opt-in and are not shared across duplicate creates")
-	ErrSessionBusy             = errors.New("the agent is running in this session")
-	ErrInvalidArgument         = errors.New("invalid argument")
+	ErrSessionBusy             = workspace.ErrSessionBusy
+	ErrInvalidArgument         = workspace.ErrInvalidArgument
 )
 
 // workspacePathPattern matches the absolute path shapes a client may
@@ -229,6 +230,13 @@ type Workspace struct {
 	// embedded [app.App.Shutdown]; tests may override it to avoid
 	// driving a full [app.App] through shutdown.
 	shutdownFn func()
+}
+
+// Ops returns the workspace's operations: the same implementation a
+// frontend uses in-process, so an RPC and a local call cannot drift
+// apart. Shell commands run with the environment the client registered.
+func (w *Workspace) Ops() *workspace.AppWorkspace {
+	return workspace.NewAppWorkspace(w.App, w.Cfg, workspace.WithEnv(w.Env))
 }
 
 // invokeShutdown calls the workspace shutdown hook if set, falling

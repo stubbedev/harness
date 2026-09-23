@@ -88,8 +88,8 @@ type ConfigRefreshOAuthRequest struct {
 
 // ImportCopilotResponse represents the response from importing Copilot credentials.
 type ImportCopilotResponse struct {
-	Token   any  `json:"token"`
-	Success bool `json:"success"`
+	Token   *oauth.Token `json:"token"`
+	Success bool         `json:"success"`
 }
 
 // ProjectInitPromptResponse represents the project initialization prompt.
