@@ -1034,10 +1034,30 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// closed. A short timeout bounds the flush.
 		flushCtx, flushCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer flushCancel()
+		if !skipRunComplete {
+			// Report what the servers worked out since the last step of
+			// the now-ending turn. A fix on the final step would otherwise
+			// never be reported: the step sweep runs before a model step,
+			// and there is no next one. The note is appended once at the
+			// end of the transcript and replayed at that fixed position on
+			// the next turn, so the cached prefix only grows.
+			tools.DiagnosticsFinalSweep(flushCtx, a.lspManager, call.SessionID, func(text string) {
+				if _, err := a.messages.Create(flushCtx, call.SessionID, message.CreateMessageParams{
+					Role:  message.User,
+					Parts: []message.ContentPart{message.ContextNote{Kind: message.ContextNoteDiagnostics, Text: text}},
+				}); err != nil {
+					slog.Error("Failed to persist final diagnostics report", "error", err)
+				}
+			})
+		}
 		if flushErr := a.messages.FlushAll(flushCtx); flushErr != nil {
 			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
 		}
 		if skipRunComplete {
+			// A queued prompt is about to recurse into its own Run on
+			// this session; that run's step sweep and final sweep cover
+			// anything in flight, so reporting here would only split one
+			// turn's diagnostics across two rows.
 			return
 		}
 		complete := notify.RunComplete{SessionID: call.SessionID, RunID: call.RunID}

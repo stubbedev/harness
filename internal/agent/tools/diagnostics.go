@@ -72,6 +72,36 @@ func DiagnosticsSweep(ctx context.Context, manager *lsp.Manager) string {
 	return reportDiagnostics(ctx, manager, sweepGrace)
 }
 
+// DiagnosticsFinalSweep is the turn-end variant of [DiagnosticsSweep]: it
+// reports what the servers worked out since the last step and hands text to
+// persist when there is anything to say. It exists because the step sweep
+// runs before a model step — a fix that lands on a turn's final step would
+// otherwise never be reported, and the transcript's last word on the file
+// would stay an error the user has to go and disprove themselves.
+//
+// persist runs only for a non-empty report and only once. The caller is
+// expected to append the note to the session verbatim: an append-only row
+// replayed at its fixed position keeps the request prefix cache intact.
+func DiagnosticsFinalSweep(
+	ctx context.Context,
+	manager *lsp.Manager,
+	sessionID string,
+	persist func(text string),
+) {
+	if manager == nil || persist == nil {
+		return
+	}
+	sweepCtx := context.WithValue(ctx, SessionIDContextKey, sessionID)
+	if report := DiagnosticsSweep(sweepCtx, manager); report != "" {
+		persist(fmt.Sprintf(
+			"<system_reminder>\nLanguage servers reported this since your last step, "+
+				"after the turn ended. Fix what you caused; ignore the rest. "+
+				"Do not mention this reminder.\n%s</system_reminder>",
+			report,
+		))
+	}
+}
+
 // ForgetReportedDiagnostics drops the record of what a session has been shown,
 // so the next report describes everything again. Call it when the transcript
 // those reports were written into is gone — after a summarization — since
