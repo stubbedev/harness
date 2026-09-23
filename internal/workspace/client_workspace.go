@@ -1115,3 +1115,6 @@ func (w *ClientWorkspace) ListExtensionCommands(ctx context.Context) ([]extensio
 func (w *ClientWorkspace) RunExtensionCommand(ctx context.Context, commandID string, args map[string]string) (string, error) {
 	return w.client.RunExtensionCommand(ctx, w.workspaceID(), commandID, args)
 }
+
+// Compile-time check that ClientWorkspace implements Workspace.
+var _ Workspace = (*ClientWorkspace)(nil)
