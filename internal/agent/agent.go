@@ -2670,10 +2670,6 @@ func (a *sessionAgent) CancelTurn(sessionID string) {
 		slog.Debug("Turn cancellation initiated", "session_id", sessionID)
 		ac.cancel()
 	}
-	if ac, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && ac != nil {
-		slog.Debug("Summarize turn cancellation initiated", "session_id", sessionID)
-		ac.cancel()
-	}
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
@@ -2693,12 +2689,6 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	// The defer in processRequest will clean up the entry.
 	if ac, ok := a.activeRequests.Get(sessionID); ok && ac != nil {
 		slog.Debug("Request cancellation initiated", "session_id", sessionID)
-		ac.cancel()
-	}
-
-	// Also check for summarize requests.
-	if ac, ok := a.activeRequests.Get(sessionID + "-summarize"); ok && ac != nil {
-		slog.Debug("Summarize cancellation initiated", "session_id", sessionID)
 		ac.cancel()
 	}
 
