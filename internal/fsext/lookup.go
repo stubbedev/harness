@@ -155,6 +155,19 @@ func ResolveConfigPath(path string, resolver func(string) (string, error)) strin
 	return expanded
 }
 
+// ResolveConfigPaths applies ResolveConfigPath to each of paths. It
+// returns nil for an empty list.
+func ResolveConfigPaths(paths []string, resolver func(string) (string, error)) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, ResolveConfigPath(path, resolver))
+	}
+	return out
+}
+
 // Canonicalize returns the absolute form of path with symlinks
 // resolved. Resolution is best effort: when EvalSymlinks fails
 // (typically a non-existent path) the absolute path is returned as-is,

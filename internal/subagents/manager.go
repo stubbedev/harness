@@ -3,10 +3,10 @@ package subagents
 import (
 	"context"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/discovery"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/skills"
@@ -24,23 +24,16 @@ type Manager struct {
 	broker *pubsub.Broker[Event]
 }
 
-// ManagerOption configures a Manager at construction time.
-type ManagerOption func(*Manager)
-
 // NewManager constructs a workspace-scoped Manager with the given
 // pre-computed discovery results. The slices are stored as-is; callers
 // should not mutate them afterwards.
-func NewManager(all, active []*Subagent, states []*SubagentState, opts ...ManagerOption) *Manager {
-	m := &Manager{
+func NewManager(all, active []*Subagent, states []*SubagentState) *Manager {
+	return &Manager{
 		allSubagents:    all,
 		activeSubagents: active,
 		states:          states,
 		broker:          pubsub.NewBroker[Event](),
 	}
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
 }
 
 // AllSubagents returns a copy of the deduplicated list of all discovered
@@ -48,7 +41,7 @@ func NewManager(all, active []*Subagent, states []*SubagentState, opts ...Manage
 func (m *Manager) AllSubagents() []*Subagent {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return cloneSubagents(m.allSubagents)
+	return slices.Clone(m.allSubagents)
 }
 
 // ActiveSubagents returns a copy of the post-filter list of active subagents
@@ -57,14 +50,14 @@ func (m *Manager) AllSubagents() []*Subagent {
 func (m *Manager) ActiveSubagents() []*Subagent {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return cloneSubagents(m.activeSubagents)
+	return slices.Clone(m.activeSubagents)
 }
 
 // States returns a clone of the latest discovery state snapshot.
 func (m *Manager) States() []*SubagentState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return cloneStates(m.states)
+	return discovery.CloneStates(m.states)
 }
 
 // SubscribeEvents returns a channel of discovery events for the
@@ -86,11 +79,11 @@ func (m *Manager) Reload(all, active []*Subagent, states []*SubagentState) {
 		return
 	}
 	m.mu.Lock()
-	m.allSubagents = cloneSubagents(all)
-	m.activeSubagents = cloneSubagents(active)
-	m.states = cloneStates(states)
+	m.allSubagents = slices.Clone(all)
+	m.activeSubagents = slices.Clone(active)
+	m.states = discovery.CloneStates(states)
 	m.mu.Unlock()
-	m.broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
+	m.broker.Publish(pubsub.UpdatedEvent, Event{States: discovery.CloneStates(states)})
 }
 
 // Shutdown releases broker resources. It is a no-op when m is nil, matching
@@ -133,14 +126,10 @@ func DiscoveryConfigFromStore(store *config.ConfigStore, skillsMgr *skills.Manag
 		paths = opts.SubagentsPaths
 		disabled = opts.DisabledSubagents
 	}
-	var resolver func(string) (string, error)
-	if r := store.Resolver(); r != nil {
-		resolver = r.ResolveValue
-	}
 	return DiscoveryConfig{
 		SubagentsPaths:    paths,
 		DisabledSubagents: disabled,
-		Resolver:          resolver,
+		Resolver:          store.ResolverFunc(),
 		IsKnownModel:      store.Config().IsKnownModel,
 		IsKnownSkill:      knownSkillFunc(skillsMgr),
 	}
@@ -166,14 +155,7 @@ func knownSkillFunc(mgr *skills.Manager) func(name string) bool {
 
 // ResolvePaths expands home-directory and $VAR references in SubagentsPaths.
 func (c DiscoveryConfig) ResolvePaths() []string {
-	if len(c.SubagentsPaths) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(c.SubagentsPaths))
-	for _, pth := range c.SubagentsPaths {
-		out = append(out, fsext.ResolveConfigPath(pth, c.Resolver))
-	}
-	return out
+	return fsext.ResolveConfigPaths(c.SubagentsPaths, c.Resolver)
 }
 
 // DiscoverFromConfig walks every path in cfg.SubagentsPaths (after home / env
@@ -189,8 +171,6 @@ func DiscoverFromConfig(cfg DiscoveryConfig) (all, active []*Subagent, states []
 	all = Deduplicate(discovered)
 	active = Filter(all, cfg.DisabledSubagents)
 	allStates = DeduplicateStates(allStates)
-	slices.SortStableFunc(allStates, func(a, b *SubagentState) int {
-		return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
-	})
+	discovery.SortStates(allStates)
 	return all, active, allStates
 }

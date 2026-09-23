@@ -10,12 +10,11 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"sync"
 
-	"github.com/charlievieth/fastwalk"
 	"gopkg.in/yaml.v3"
 
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/discovery"
 	"github.com/stubbedev/harness/internal/stringext"
 )
 
@@ -425,120 +424,40 @@ func (s *Subagent) Validate() error {
 
 // Filter removes subagents whose names appear in the disabled list.
 func Filter(all []*Subagent, disabled []string) []*Subagent {
-	if len(disabled) == 0 {
-		return all
-	}
-
-	disabledSet := make(map[string]bool, len(disabled))
-	for _, name := range disabled {
-		disabledSet[name] = true
-	}
-
-	result := make([]*Subagent, 0, len(all))
-	for _, s := range all {
-		if !disabledSet[s.Name] {
-			result = append(result, s)
-		}
-	}
-	return result
+	return discovery.Filter(all, disabled, subagentName)
 }
 
 // Deduplicate removes duplicate subagents by name. When duplicates exist, the
 // last occurrence wins.
 func Deduplicate(all []*Subagent) []*Subagent {
-	if len(all) == 0 {
-		return nil
-	}
-
-	seen := make(map[string]int, len(all))
-	for i, s := range all {
-		seen[s.Name] = i
-	}
-
-	result := make([]*Subagent, 0, len(seen))
-	for i, s := range all {
-		if seen[s.Name] == i {
-			result = append(result, s)
-		}
-	}
-	return result
+	return discovery.Dedupe(all, subagentName)
 }
 
+func subagentName(s *Subagent) string { return s.Name }
+
 // DiscoveryState represents the outcome of discovering a single subagent file.
-type DiscoveryState int
+type DiscoveryState = discovery.Outcome
 
 const (
 	// StateNormal indicates the subagent was parsed and validated successfully.
-	StateNormal DiscoveryState = iota
+	StateNormal = discovery.StateNormal
 	// StateError indicates discovery encountered a scan/parse/validate error.
-	StateError
+	StateError = discovery.StateError
 )
 
 // SubagentState represents the latest discovery status of a subagent file.
-type SubagentState struct {
-	Name  string
-	Path  string
-	State DiscoveryState
-	Err   error
-}
+type SubagentState = discovery.State
 
 // Event is published when subagent discovery completes.
 type Event struct {
 	States []*SubagentState
 }
 
-// cloneSubagents returns a shallow copy of the slice so callers cannot mutate
-// the manager's internal slice header. The underlying *Subagent pointers are
-// shared — subagents are immutable post-discovery.
-func cloneSubagents(in []*Subagent) []*Subagent {
-	if in == nil {
-		return nil
-	}
-	out := make([]*Subagent, len(in))
-	copy(out, in)
-	return out
-}
-
-// cloneStates returns a deep copy of the given state slice so callers cannot
-// accidentally mutate the source.
-func cloneStates(states []*SubagentState) []*SubagentState {
-	if states == nil {
-		return nil
-	}
-	result := make([]*SubagentState, len(states))
-	for i, s := range states {
-		clone := *s
-		result[i] = &clone
-	}
-	return result
-}
-
-// DeduplicateStates removes duplicate subagent states by name. When duplicates
-// exist, the last occurrence wins (consistent with Deduplicate for subagents),
-// so the surviving state describes the file whose agent survived.
-//
-// Error states are exempt from that collapse. They are per-file diagnostics —
-// paths are unique, names are not — and the Library renders one row per error
-// state. Name-keying them means a valid definition elsewhere silently hides
-// the broken file the user is trying to fix, which is the failure surfacing
-// error states was meant to end.
+// DeduplicateStates removes duplicate subagent states by name, keeping the
+// last so the surviving state describes the file whose agent survived.
+// Error states are kept per file; see discovery.DedupeStates.
 func DeduplicateStates(all []*SubagentState) []*SubagentState {
-	seen := make(map[string]int, len(all))
-	for i, s := range all {
-		if s.Name != "" && s.State != StateError {
-			seen[s.Name] = i
-		}
-	}
-
-	result := make([]*SubagentState, 0, len(all))
-	for i, s := range all {
-		// Keep every error state and anything without a name, plus the last
-		// non-error occurrence of each name.
-		if s.Name == "" || s.State == StateError || seen[s.Name] == i {
-			result = append(result, s)
-		}
-	}
-	return result
+	return discovery.DedupeStates(all)
 }
 
 // DiscoverWithStates finds all valid subagent definition files (*.md) in the
@@ -554,89 +473,18 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 // the working directory, per ProjectSubagentsDir — override earlier ones
 // (monorepo root, global dirs) on a name collision.
 func DiscoverWithStates(paths []string, isKnownModel func(provider, model string) bool, isKnownSkill func(name string) bool) ([]*Subagent, []*SubagentState) {
-	var agents []*Subagent
-	var states []*SubagentState
-	var mu sync.Mutex
-	seen := make(map[string]bool)
-
-	for _, base := range paths {
-		var baseAgents []*Subagent
-		var baseStates []*SubagentState
-		addState := func(name, path string, state DiscoveryState, err error) {
-			mu.Lock()
-			baseStates = append(baseStates, &SubagentState{
-				Name:  name,
-				Path:  path,
-				State: state,
-				Err:   err,
-			})
-			mu.Unlock()
-		}
-		conf := fastwalk.Config{
-			Follow:  true,
-			ToSlash: fastwalk.DefaultToSlash(),
-		}
-		err := fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				slog.Warn("Failed to walk subagents path entry", "base", base, "path", path, "error", err)
-				addState("", path, StateError, err)
-				return nil
-			}
-			if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
-				return nil
-			}
-			mu.Lock()
-			if seen[path] {
-				mu.Unlock()
-				return nil
-			}
-			seen[path] = true
-			mu.Unlock()
-
+	return discovery.Walk("subagent", paths,
+		func(name string) bool { return strings.HasSuffix(name, ".md") },
+		func(path string) (*Subagent, string, error) {
 			agent, err := Parse(path)
 			if err != nil {
-				slog.Warn("Failed to parse subagent file", "path", path, "error", err)
-				addState("", path, StateError, err)
-				return nil
+				return nil, "", err
 			}
 			if err := agent.ValidateAgainst(isKnownModel, isKnownSkill); err != nil {
-				slog.Warn("Subagent validation failed", "path", path, "error", err)
-				addState(agent.Name, path, StateError, err)
-				return nil
+				return nil, agent.Name, err
 			}
-			slog.Debug("Successfully loaded subagent", "name", agent.Name, "path", path)
 			warnIfShadowsToolName(agent.Name, path)
-			mu.Lock()
-			baseAgents = append(baseAgents, agent)
-			mu.Unlock()
-			addState(agent.Name, path, StateNormal, nil)
-			return nil
-		})
-		if err != nil && !os.IsNotExist(err) {
-			slog.Warn("Failed to walk subagents path", "path", base, "error", err)
-		}
-
-		// fastwalk traversal order within a base is non-deterministic, so
-		// sort each base's results for stable output. Sorting per base (never
-		// across bases) preserves the caller's path-order precedence.
-		slices.SortStableFunc(baseAgents, func(a, b *Subagent) int {
-			if c := strings.Compare(strings.ToLower(a.FilePath), strings.ToLower(b.FilePath)); c != 0 {
-				return c
-			}
-			return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
-		})
-		// States are sorted and appended on the same per-base schedule as the
-		// agents above. Deduplicate and DeduplicateStates both keep the last
-		// occurrence of a name, so the two lists must agree on what "last"
-		// means — otherwise a name collision can resolve to one file's agent
-		// while the Library shows the other file's state. (Error states opt
-		// out of that collapse entirely; see DeduplicateStates.)
-		slices.SortStableFunc(baseStates, func(a, b *SubagentState) int {
-			return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
-		})
-		agents = append(agents, baseAgents...)
-		states = append(states, baseStates...)
-	}
-
-	return agents, states
+			return agent, agent.Name, nil
+		},
+	)
 }

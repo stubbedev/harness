@@ -6,17 +6,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 
+	"github.com/stubbedev/harness/internal/discovery"
 	"github.com/stubbedev/harness/internal/stringext"
 
-	"github.com/charlievieth/fastwalk"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
@@ -60,22 +58,17 @@ type Skill struct {
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.
-type DiscoveryState int
+type DiscoveryState = discovery.Outcome
 
 const (
 	// StateNormal indicates the skill was parsed and validated successfully.
-	StateNormal DiscoveryState = iota
+	StateNormal = discovery.StateNormal
 	// StateError indicates discovery encountered a scan/parse/validate error.
-	StateError
+	StateError = discovery.StateError
 )
 
 // SkillState represents the latest discovery status of a skill file.
-type SkillState struct {
-	Name  string
-	Path  string
-	State DiscoveryState
-	Err   error
-}
+type SkillState = discovery.State
 
 // Event is published when skill discovery completes.
 type Event struct {
@@ -91,28 +84,14 @@ func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
 
 // PublishStates publishes a skill discovery event with the given states.
 func PublishStates(states []*SkillState) {
-	broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
-}
-
-// cloneStates returns a deep copy of the given state slice so callers cannot
-// accidentally mutate the source.
-func cloneStates(states []*SkillState) []*SkillState {
-	if states == nil {
-		return nil
-	}
-	result := make([]*SkillState, len(states))
-	for i, s := range states {
-		clone := *s
-		result[i] = &clone
-	}
-	return result
+	broker.Publish(pubsub.UpdatedEvent, Event{States: discovery.CloneStates(states)})
 }
 
 // GetLatestStates returns the latest discovery states.
 func GetLatestStates() []*SkillState {
 	latestStatesMu.RLock()
 	defer latestStatesMu.RUnlock()
-	return cloneStates(latestStates)
+	return discovery.CloneStates(latestStates)
 }
 
 // SetLatestStates stores the given states in the package-level cache so that
@@ -120,7 +99,7 @@ func GetLatestStates() []*SkillState {
 // arrives.
 func SetLatestStates(states []*SkillState) {
 	latestStatesMu.Lock()
-	latestStates = cloneStates(states)
+	latestStates = discovery.CloneStates(states)
 	latestStatesMu.Unlock()
 }
 
@@ -213,81 +192,19 @@ func Discover(paths []string) []*Skill {
 
 // DiscoverWithStates finds all valid skills in the given paths and also
 // returns a per-file state slice describing parse/validation outcomes. Useful
-// for diagnostics and UI reporting.
+// for diagnostics and UI reporting. Results keep the caller's path order,
+// so with Deduplicate a later path overrides an earlier one.
 func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
-	var skills []*Skill
-	var states []*SkillState
-	var mu sync.Mutex
-	seen := make(map[string]bool)
-	addState := func(name, path string, state DiscoveryState, err error) {
-		mu.Lock()
-		states = append(states, &SkillState{
-			Name:  name,
-			Path:  path,
-			State: state,
-			Err:   err,
-		})
-		mu.Unlock()
-	}
-
-	for _, base := range paths {
-		// We use fastwalk with Follow: true instead of filepath.WalkDir because
-		// WalkDir doesn't follow symlinked directories at any depth—only entry
-		// points. This ensures skills in symlinked subdirectories are discovered.
-		// fastwalk is concurrent, so we protect shared state (seen, skills) with mu.
-		conf := fastwalk.Config{
-			Follow:  true,
-			ToSlash: fastwalk.DefaultToSlash(),
-		}
-		err := fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				slog.Warn("Failed to walk skills path entry", "base", base, "path", path, "error", err)
-				addState("", path, StateError, err)
-				return nil
-			}
-			if d.IsDir() || d.Name() != SkillFileName {
-				return nil
-			}
-			mu.Lock()
-			if seen[path] {
-				mu.Unlock()
-				return nil
-			}
-			seen[path] = true
-			mu.Unlock()
+	return discovery.Walk("skill", paths,
+		func(name string) bool { return name == SkillFileName },
+		func(path string) (*Skill, string, error) {
 			skill, err := Parse(path)
 			if err != nil {
-				slog.Warn("Failed to parse skill file", "path", path, "error", err)
-				addState("", path, StateError, err)
-				return nil
+				return nil, "", err
 			}
-			if err := skill.Validate(); err != nil {
-				slog.Warn("Skill validation failed", "path", path, "error", err)
-				addState(skill.Name, path, StateError, err)
-				return nil
-			}
-			slog.Debug("Successfully loaded skill", "name", skill.Name, "path", path)
-			mu.Lock()
-			skills = append(skills, skill)
-			mu.Unlock()
-			addState(skill.Name, path, StateNormal, nil)
-			return nil
-		})
-		if err != nil && !os.IsNotExist(err) {
-			slog.Warn("Failed to walk skills path", "path", base, "error", err)
-		}
-	}
-
-	// fastwalk traversal order is non-deterministic, so sort for stable output.
-	// Sort by path first, then alphabetically by name within each path.
-	slices.SortStableFunc(skills, func(a, b *Skill) int {
-		if c := strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path)); c != 0 {
-			return c
-		}
-		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
-	})
-
-	return skills, states
+			return skill, skill.Name, skill.Validate()
+		},
+	)
 }
 
 // ToPromptXML generates XML for injection into the system prompt.
@@ -347,43 +264,20 @@ func FormatLoadedSkill(name, path, content string) string {
 	)
 }
 
-// DeduplicateStates removes duplicate skill states by name. When duplicates exist,
-// the last occurrence wins (consistent with Deduplicate for skills).
+// DeduplicateStates removes duplicate skill states by name, keeping the
+// last so it agrees with Deduplicate. Error states are kept per file.
 func DeduplicateStates(all []*SkillState) []*SkillState {
-	seen := make(map[string]int, len(all))
-	for i, s := range all {
-		if s.Name != "" {
-			seen[s.Name] = i
-		}
-	}
-
-	result := make([]*SkillState, 0, len(seen))
-	for i, s := range all {
-		// If it's the last occurrence of this name, or it has no name (error state), keep it
-		if s.Name == "" || seen[s.Name] == i {
-			result = append(result, s)
-		}
-	}
-	return result
+	return discovery.DedupeStates(all)
 }
 
 // Deduplicate removes duplicate skills by name. When duplicates exist, the
 // last occurrence wins. This means user skills (appended after builtins)
 // override builtin skills with the same name.
 func Deduplicate(all []*Skill) []*Skill {
-	seen := make(map[string]int, len(all))
-	for i, s := range all {
-		seen[s.Name] = i
-	}
-
-	result := make([]*Skill, 0, len(seen))
-	for i, s := range all {
-		if seen[s.Name] == i {
-			result = append(result, s)
-		}
-	}
-	return result
+	return discovery.Dedupe(all, skillName)
 }
+
+func skillName(s *Skill) string { return s.Name }
 
 // ApproxTokenCount returns a rough estimate of how many tokens a string
 // occupies when sent to an LLM. Uses the common ~4-chars-per-token heuristic
@@ -397,20 +291,5 @@ func ApproxTokenCount(s string) int {
 
 // Filter removes skills whose names appear in the disabled list.
 func Filter(all []*Skill, disabled []string) []*Skill {
-	if len(disabled) == 0 {
-		return all
-	}
-
-	disabledSet := make(map[string]bool, len(disabled))
-	for _, name := range disabled {
-		disabledSet[name] = true
-	}
-
-	result := make([]*Skill, 0, len(all))
-	for _, s := range all {
-		if !disabledSet[s.Name] {
-			result = append(result, s)
-		}
-	}
-	return result
+	return discovery.Filter(all, disabled, skillName)
 }

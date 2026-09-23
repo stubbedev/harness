@@ -2,10 +2,9 @@ package skills
 
 import (
 	"context"
-	"slices"
-	"strings"
 	"sync"
 
+	"github.com/stubbedev/harness/internal/discovery"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
@@ -117,13 +116,13 @@ func (m *Manager) WorkingDir() string {
 func (m *Manager) States() []*SkillState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return cloneStates(m.states)
+	return discovery.CloneStates(m.states)
 }
 
 // SetLatestStates updates the manager's cached discovery snapshot.
 func (m *Manager) SetLatestStates(states []*SkillState) {
 	m.mu.Lock()
-	m.states = cloneStates(states)
+	m.states = discovery.CloneStates(states)
 	m.mu.Unlock()
 	if m.globalMirror {
 		SetLatestStates(states)
@@ -138,12 +137,12 @@ func (m *Manager) SetLatestStates(states []*SkillState) {
 // subscribers observe.
 func (m *Manager) PublishStates(states []*SkillState) {
 	m.mu.Lock()
-	m.states = cloneStates(states)
+	m.states = discovery.CloneStates(states)
 	m.mu.Unlock()
 	if m.globalMirror {
 		SetLatestStates(states)
 	}
-	m.broker.Publish(pubsub.UpdatedEvent, Event{States: cloneStates(states)})
+	m.broker.Publish(pubsub.UpdatedEvent, Event{States: discovery.CloneStates(states)})
 	if m.globalMirror {
 		PublishStates(states)
 	}
@@ -188,9 +187,7 @@ func DiscoverFromConfig(cfg DiscoveryConfig) (allSkills, activeSkills []*Skill, 
 	allStates := append([]*SkillState(nil), builtinStates...)
 	allStates = append(allStates, userStates...)
 	allStates = DeduplicateStates(allStates)
-	slices.SortStableFunc(allStates, func(a, b *SkillState) int {
-		return strings.Compare(strings.ToLower(a.Path), strings.ToLower(b.Path))
-	})
+	discovery.SortStates(allStates)
 	return allSkills, activeSkills, allStates
 }
 
@@ -210,12 +207,5 @@ type DiscoveryConfig struct {
 // DiscoverFromConfig; callers that need the resolved list (e.g. for
 // Catalog labels) can call this directly.
 func (c DiscoveryConfig) ResolvePaths() []string {
-	if len(c.SkillsPaths) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(c.SkillsPaths))
-	for _, pth := range c.SkillsPaths {
-		out = append(out, fsext.ResolveConfigPath(pth, c.Resolver))
-	}
-	return out
+	return fsext.ResolveConfigPaths(c.SkillsPaths, c.Resolver)
 }
