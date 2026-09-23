@@ -145,17 +145,17 @@ func TestGroupSubCursorNavigation(t *testing.T) {
 
 	// Space expands exactly that one call to its full view.
 	u.chat.ToggleExpandedSelectedItem()
-	assert.True(t, isToolExpandedInChat(u.chat.ToolItem("t1")), "the sub-cursor's call renders its full view")
-	assert.False(t, isToolExpandedInChat(u.chat.ToolItem("t2")))
+	assert.True(t, chat.ShowsFullView(u.chat.ToolItem("t1")), "the sub-cursor's call renders its full view")
+	assert.False(t, chat.ShowsFullView(u.chat.ToolItem("t2")))
 
 	// Escape collapses t1's full view, down to the second call, enter
 	// there expands that call without resetting the cursor.
 	require.True(t, u.chat.AscendSelectedItem())
-	assert.False(t, isToolExpandedInChat(u.chat.ToolItem("t1")))
+	assert.False(t, chat.ShowsFullView(u.chat.ToolItem("t1")))
 	require.True(t, u.chat.SubCursorDown())
 	require.Equal(t, 1, group.SelectedChild())
 	u.chat.EnterSelectedItem()
-	assert.True(t, isToolExpandedInChat(u.chat.ToolItem("t2")), "enter expands the call under the cursor")
+	assert.True(t, chat.ShowsFullView(u.chat.ToolItem("t2")), "enter expands the call under the cursor")
 	require.Equal(t, 1, group.SelectedChild(), "the cursor stays on the entered call")
 
 	// Up parks back on the group row.

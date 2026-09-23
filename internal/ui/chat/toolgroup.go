@@ -112,7 +112,7 @@ func (g *ToolGroupMessageItem) ExpandedLevel() bool { return g.expanded }
 func (g *ToolGroupMessageItem) FullyRenderedChildren() int {
 	n := 0
 	for _, t := range g.tools {
-		if isToolExpanded(t) {
+		if ShowsFullView(t) {
 			n++
 		}
 	}
@@ -287,7 +287,7 @@ func (g *ToolGroupMessageItem) DigIn() {
 // Reports whether a level was consumed.
 func (g *ToolGroupMessageItem) Ascend() bool {
 	switch {
-	case g.selectedChild >= 0 && g.selectedChild < len(g.tools) && isToolExpanded(g.tools[g.selectedChild]):
+	case g.selectedChild >= 0 && g.selectedChild < len(g.tools) && ShowsFullView(g.tools[g.selectedChild]):
 		if e, ok := g.tools[g.selectedChild].(Expandable); ok {
 			_ = e.ToggleExpanded()
 		}
@@ -306,7 +306,7 @@ func (g *ToolGroupMessageItem) collapse() {
 	g.expanded = false
 	g.selectedChild = -1
 	for _, t := range g.tools {
-		if e, ok := t.(Expandable); ok && isToolExpanded(t) {
+		if e, ok := t.(Expandable); ok && ShowsFullView(t) {
 			_ = e.ToggleExpanded()
 		}
 	}
@@ -320,6 +320,57 @@ func isToolExpanded(t ToolMessageItem) bool {
 		return true
 	}
 	return base.Expanded()
+}
+
+// ShowsFullView reports whether a tool call renders its full view
+// rather than its one-liner: expanded and not in compact mode. The
+// compact axis is the background task strip's rest state for its
+// nested calls; transcript calls never carry it.
+func ShowsFullView(t ToolMessageItem) bool {
+	if c, ok := t.(Compactable); ok && c.IsCompact() {
+		return false
+	}
+	return isToolExpanded(t)
+}
+
+// ToggleFullView flips a tool call between its full view and its
+// one-liner - the one expansion move every surface shares. A call at
+// rest opens, un-compacting the strip's nested calls; a full one
+// collapses back and re-compactes if it was compact at rest. Reports
+// whether the call shows its full view after the flip.
+func ToggleFullView(t ToolMessageItem) bool {
+	compact, isCompact := t.(Compactable)
+	if ShowsFullView(t) {
+		if e, ok := t.(Expandable); ok && isToolExpanded(t) {
+			_ = e.ToggleExpanded()
+		}
+		if isCompact {
+			compact.SetCompact(true)
+		}
+		return false
+	}
+	if isCompact {
+		compact.SetCompact(false)
+	}
+	if e, ok := t.(Expandable); ok && !isToolExpanded(t) {
+		_ = e.ToggleExpanded()
+	}
+	return true
+}
+
+// NestedToolLines renders one nested tool call's lines under indent:
+// its full view when it shows one, its one-liner otherwise, both at
+// the body width the nesting level gives. Shared by the transcript's
+// expanded groups and the background task strip's detail block.
+func NestedToolLines(sty *styles.Styles, t ToolMessageItem, bodyWidth int, indent string, selected bool) []string {
+	if !ShowsFullView(t) {
+		return []string{indent + ToolOneLiner(sty, t, bodyWidth, selected)}
+	}
+	var lines []string
+	for ln := range strings.SplitSeq(t.BodyRender(bodyWidth), "\n") {
+		lines = append(lines, indent+ln)
+	}
+	return lines
 }
 
 // HandleMouseClick implements [MouseClickable]: any left click cycles
@@ -406,13 +457,7 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 		bodyWidth := ToolBodyWidth(width, 1)
 		for i, t := range g.tools {
 			start := len(lines)
-			if isToolExpanded(t) {
-				for ln := range strings.SplitSeq(t.BodyRender(bodyWidth), "\n") {
-					lines = append(lines, toolNestIndentString+ln)
-				}
-			} else {
-				lines = append(lines, toolNestIndentString+g.oneLiner(t, bodyWidth, g.focused && i == g.selectedChild))
-			}
+			lines = append(lines, NestedToolLines(g.sty, t, bodyWidth, toolNestIndentString, g.focused && i == g.selectedChild)...)
 			if g.focused && i == g.selectedChild {
 				selStart, selEnd = start, len(lines)-1
 			}

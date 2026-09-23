@@ -59,6 +59,7 @@ type ToolMessageItem interface {
 // When compact mode is enabled, tools render as a compact single-line header.
 type Compactable interface {
 	SetCompact(compact bool)
+	IsCompact() bool
 }
 
 // SpinningState contains the state passed to SpinningFunc for custom spinning logic.

@@ -635,7 +635,7 @@ func (m *UI) toggleTaskAtCursor() {
 	m.clampTaskCursor()
 	task := m.agentTasks[m.taskCursor]
 	if m.taskSubCursor >= 0 && m.taskSubCursor < len(task.nested) {
-		toggleNestedFullView(task.nested[m.taskSubCursor])
+		chat.ToggleFullView(task.nested[m.taskSubCursor])
 		m.updateLayoutAndSize()
 		return
 	}
@@ -646,36 +646,6 @@ func (m *UI) toggleTaskAtCursor() {
 	}
 	m.taskSubCursor = -1
 	m.updateLayoutAndSize()
-}
-
-// toggleNestedFullView flips a nested tool call between its compact
-// one-liner and its full renderer output, mirroring the chat's
-// per-call expansion.
-func toggleNestedFullView(nested chat.ToolMessageItem) {
-	compact, isCompact := nested.(chat.Compactable)
-	if probe, ok := nested.(interface{ IsCompact() bool }); ok && probe.IsCompact() {
-		if isCompact {
-			compact.SetCompact(false)
-		}
-		if e, ok := nested.(chat.Expandable); ok && !isToolExpandedInChat(nested) {
-			_ = e.ToggleExpanded()
-		}
-		return
-	}
-	// Already full: collapse back to the one-liner.
-	if e, ok := nested.(chat.Expandable); ok && isToolExpandedInChat(nested) {
-		_ = e.ToggleExpanded()
-	}
-	if isCompact {
-		compact.SetCompact(true)
-	}
-}
-
-func isToolExpandedInChat(t chat.ToolMessageItem) bool {
-	if probe, ok := t.(interface{ Expanded() bool }); ok {
-		return probe.Expanded()
-	}
-	return false
 }
 
 // enterTaskAtCursor implements the enter key: go in one level. On a task
@@ -689,8 +659,8 @@ func (m *UI) enterTaskAtCursor() {
 	task := m.agentTasks[m.taskCursor]
 	if m.taskSubCursor >= 0 && m.taskSubCursor < len(task.nested) {
 		nested := task.nested[m.taskSubCursor]
-		if probe, ok := nested.(interface{ IsCompact() bool }); !ok || probe.IsCompact() {
-			toggleNestedFullView(nested)
+		if !chat.ShowsFullView(nested) {
+			chat.ToggleFullView(nested)
 			m.updateLayoutAndSize()
 		}
 		return
@@ -718,8 +688,8 @@ func (m *UI) ascendTaskAtCursor() {
 	task := m.agentTasks[m.taskCursor]
 	if m.taskSubCursor >= 0 && m.taskSubCursor < len(task.nested) {
 		nested := task.nested[m.taskSubCursor]
-		if probe, ok := nested.(interface{ IsCompact() bool }); ok && !probe.IsCompact() {
-			toggleNestedFullView(nested)
+		if chat.ShowsFullView(nested) {
+			chat.ToggleFullView(nested)
 			m.updateLayoutAndSize()
 			return
 		}
@@ -901,29 +871,25 @@ func (m *UI) renderTasks(width int) string {
 // subagent's own tool calls as one-liners and its result. The dispatch
 // prompt and any send_message content stay out — they are context for
 // the model, not the transcript; the row's msg count covers report-backs.
+// Detail lines fill the row's content width - the body width the
+// transcript's ToolBodyWidth derives - under the strip's two-column
+// indent, which the sub-cursor recolors into the focused bar.
 func (m *UI) renderTaskDetails(task *agentTask, width, subCursor int) []string {
 	t := m.com.Styles
-	inner := max(width-6, 1)
+	bodyWidth := chat.ToolBodyWidth(width, 0)
 	var lines []string
 	for j, nested := range task.nested {
 		indent := "  "
 		if j == subCursor {
 			indent = t.Messages.ToolCallFocused.Render()
 		}
-		if probe, ok := nested.(interface{ IsCompact() bool }); ok && !probe.IsCompact() {
-			// Expanded call: RawRender skips the per-item left prefix so
-			// the full view keeps the one-liner indentation.
-			for ln := range strings.SplitSeq(nested.RawRender(inner), "\n") {
-				lines = append(lines, indent+ln)
-			}
-			continue
-		}
-		lines = append(lines, indent+chat.ToolOneLiner(t, nested, inner-2, j == subCursor))
+		lines = append(lines, chat.NestedToolLines(t, nested, bodyWidth, indent, j == subCursor)...)
 	}
 	if task.result != nil && task.result.Content != "" {
 		excerpt := chat.FirstLine(task.result.Content)
 		if excerpt != "" {
-			lines = append(lines, "  "+t.Resource.AdditionalText.Render("Result: ")+ansi.Truncate(excerpt, inner-9, "…"))
+			label := "Result: "
+			lines = append(lines, "  "+t.Resource.AdditionalText.Render(label)+ansi.Truncate(excerpt, max(bodyWidth-lipgloss.Width(label), 1), "…"))
 		}
 	}
 	if len(lines) == 0 {
