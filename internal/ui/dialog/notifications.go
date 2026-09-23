@@ -12,8 +12,8 @@ import (
 
 const (
 	// NotificationsID is the identifier for the notification style picker dialog.
-	NotificationsID              = "notifications"
-	notificationsDialogMaxHeight = 12
+	NotificationsID              ID = "notifications"
+	notificationsDialogMaxHeight    = 12
 )
 
 // NotificationStyle represents a notification backend option.
@@ -75,7 +75,7 @@ func NewNotifications(com *common.Common) *Notifications {
 }
 
 // ID implements Dialog.
-func (n *Notifications) ID() string {
+func (n *Notifications) ID() ID {
 	return NotificationsID
 }
 

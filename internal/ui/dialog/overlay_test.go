@@ -11,11 +11,11 @@ import (
 
 // stubDialog is a minimal Dialog for testing Overlay behavior.
 type stubDialog struct {
-	id       string
+	id       ID
 	received []tea.Msg
 }
 
-func (s *stubDialog) ID() string { return s.id }
+func (s *stubDialog) ID() ID { return s.id }
 func (s *stubDialog) HandleMsg(msg tea.Msg) Action {
 	s.received = append(s.received, msg)
 	return nil

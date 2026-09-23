@@ -20,7 +20,7 @@ type ActionQuit = tea.QuitMsg
 
 // ActionOpenDialog is a message to open a dialog.
 type ActionOpenDialog struct {
-	DialogID string
+	DialogID ID
 }
 
 // ActionSelectSession is a message indicating a session has been selected.

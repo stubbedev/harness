@@ -12,7 +12,7 @@ import (
 )
 
 // MCPServersID is the identifier for the MCP servers dialog.
-const MCPServersID = "mcp_servers"
+const MCPServersID ID = "mcp_servers"
 
 // ActionMCPReconnect restarts a named MCP server, clearing a
 // session-scoped disable.
@@ -63,7 +63,7 @@ func (m *MCPServers) SetStates(states map[string]mcptools.ClientInfo) {
 
 // -- serversSource --
 
-func (m *MCPServers) dialogID() string { return MCPServersID }
+func (m *MCPServers) dialogID() ID { return MCPServersID }
 
 func (m *MCPServers) title() string { return "MCP Servers" }
 

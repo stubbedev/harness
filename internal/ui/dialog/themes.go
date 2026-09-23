@@ -15,9 +15,9 @@ import (
 
 const (
 	// ThemesID is the identifier for the theme picker dialog.
-	ThemesID              = "themes"
-	themesDialogMinHeight = 8
-	themesDialogMaxHeight = 16
+	ThemesID              ID = "themes"
+	themesDialogMinHeight    = 8
+	themesDialogMaxHeight    = 16
 )
 
 // Themes represents a dialog for selecting the TUI color theme. Moving
@@ -68,7 +68,7 @@ func NewThemes(com *common.Common) *Themes {
 }
 
 // ID implements Dialog.
-func (t *Themes) ID() string {
+func (t *Themes) ID() ID {
 	return ThemesID
 }
 

@@ -15,7 +15,7 @@ import (
 
 // sessionDetailsID identifies the session details window on the dialog
 // stack.
-const sessionDetailsID = "session-details"
+const sessionDetailsID dialog.ID = "session-details"
 
 // sessionDetailsDialog renders the session details window as a
 // [dialog.Dialog], so it flows through the same overlay stack, key
@@ -32,7 +32,7 @@ var (
 )
 
 // ID implements [dialog.Dialog].
-func (d *sessionDetailsDialog) ID() string { return sessionDetailsID }
+func (d *sessionDetailsDialog) ID() dialog.ID { return sessionDetailsID }
 
 // HandleMsg implements [dialog.Dialog].
 func (d *sessionDetailsDialog) HandleMsg(msg tea.Msg) dialog.Action {

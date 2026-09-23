@@ -20,7 +20,7 @@ import (
 )
 
 // ArgumentsID is the identifier for the arguments dialog.
-const ArgumentsID = "arguments"
+const ArgumentsID ID = "arguments"
 
 // Dialog sizing for arguments.
 const (
@@ -104,7 +104,7 @@ func NewArguments(com *common.Common, title, description string, arguments []com
 }
 
 // ID implements Dialog.
-func (a *Arguments) ID() string {
+func (a *Arguments) ID() ID {
 	return ArgumentsID
 }
 

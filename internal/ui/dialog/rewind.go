@@ -20,7 +20,7 @@ import (
 )
 
 // RewindID is the identifier for the rewind (checkpoint) picker dialog.
-const RewindID = "rewind"
+const RewindID ID = "rewind"
 
 const rewindDialogMaxHeight = 24
 
@@ -160,7 +160,7 @@ func userPromptText(msg message.Message) string {
 }
 
 // ID implements Dialog.
-func (r *Rewind) ID() string {
+func (r *Rewind) ID() ID {
 	return RewindID
 }
 

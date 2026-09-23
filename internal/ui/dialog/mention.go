@@ -15,7 +15,7 @@ import (
 )
 
 // MentionPickerID is the identifier for the @-mention picker dialog.
-const MentionPickerID = "mention"
+const MentionPickerID ID = "mention"
 
 // mentionPickerMaxHeight caps the mention picker.
 const mentionPickerMaxHeight = 20
@@ -82,7 +82,7 @@ func NewMentionPicker(com *common.Common, subagents []completions.SubagentComple
 }
 
 // ID implements Dialog.
-func (p *MentionPicker) ID() string {
+func (p *MentionPicker) ID() ID {
 	return MentionPickerID
 }
 

@@ -15,7 +15,7 @@ import (
 )
 
 // LSPServersID is the identifier for the LSP servers dialog.
-const LSPServersID = "lsp_servers"
+const LSPServersID ID = "lsp_servers"
 
 // ActionLSPRestart restarts a named running LSP server.
 type ActionLSPRestart struct {
@@ -64,7 +64,7 @@ func (m *LSPServers) SetStates(states map[string]workspace.LSPClientInfo, diagno
 
 // -- serversSource --
 
-func (m *LSPServers) dialogID() string { return LSPServersID }
+func (m *LSPServers) dialogID() ID { return LSPServersID }
 
 func (m *LSPServers) title() string { return "LSP Servers" }
 

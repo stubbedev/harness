@@ -15,7 +15,7 @@ import (
 )
 
 // AWSSSOID is the identifier for the AWS SSO auth dialog.
-const AWSSSOID = "aws_sso"
+const AWSSSOID ID = "aws_sso"
 
 // awsSSOState represents the current state of the AWS SSO flow.
 type awsSSOState int
@@ -96,7 +96,7 @@ func (m *AWSSSO) Finish(errMsg string) {
 }
 
 // ID implements Dialog.
-func (m *AWSSSO) ID() string {
+func (m *AWSSSO) ID() ID {
 	return AWSSSOID
 }
 

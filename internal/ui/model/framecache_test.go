@@ -155,7 +155,7 @@ func TestFrameCache_Reset(t *testing.T) {
 // stubDialog is an empty dialog used to exercise the dialog-open path.
 type stubDialog struct{}
 
-func (stubDialog) ID() string                               { return "stub" }
+func (stubDialog) ID() dialog.ID                            { return "stub" }
 func (stubDialog) HandleMsg(tea.Msg) dialog.Action          { return nil }
 func (stubDialog) Draw(uv.Screen, uv.Rectangle) *tea.Cursor { return nil }
 

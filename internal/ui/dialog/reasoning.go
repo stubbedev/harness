@@ -15,9 +15,9 @@ import (
 
 const (
 	// ReasoningID is the identifier for the reasoning effort dialog.
-	ReasoningID              = "reasoning"
-	reasoningDialogMinHeight = 8
-	reasoningDialogMaxHeight = 16
+	ReasoningID              ID = "reasoning"
+	reasoningDialogMinHeight    = 8
+	reasoningDialogMaxHeight    = 16
 )
 
 // Reasoning represents a dialog for selecting reasoning effort.
@@ -65,7 +65,7 @@ func NewReasoning(com *common.Common) (*Reasoning, error) {
 }
 
 // ID implements Dialog.
-func (r *Reasoning) ID() string {
+func (r *Reasoning) ID() ID {
 	return ReasoningID
 }
 

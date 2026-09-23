@@ -29,7 +29,7 @@ const (
 )
 
 // APIKeyInputID is the identifier for the model selection dialog.
-const APIKeyInputID = "api_key_input"
+const APIKeyInputID ID = "api_key_input"
 
 // APIKeyInput represents a model selection dialog.
 type APIKeyInput struct {
@@ -90,7 +90,7 @@ func NewAPIKeyInput(
 }
 
 // ID implements Dialog.
-func (m *APIKeyInput) ID() string {
+func (m *APIKeyInput) ID() ID {
 	return APIKeyInputID
 }
 

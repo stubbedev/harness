@@ -4566,7 +4566,7 @@ func (m *UI) disarmRewind() {
 }
 
 // openDialog opens a dialog by its ID.
-func (m *UI) openDialog(id string) tea.Cmd {
+func (m *UI) openDialog(id dialog.ID) tea.Cmd {
 	var cmds []tea.Cmd
 	switch id {
 	case dialog.SessionsID:

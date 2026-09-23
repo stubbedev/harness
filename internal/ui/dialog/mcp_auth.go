@@ -17,7 +17,7 @@ import (
 )
 
 // MCPAuthID is the identifier for the MCP authentication dialog.
-const MCPAuthID = "mcp_auth"
+const MCPAuthID ID = "mcp_auth"
 
 // MCPAuthState represents the current state of the MCP auth flow.
 type MCPAuthState int
@@ -79,7 +79,7 @@ func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authUR
 }
 
 // ID implements Dialog.
-func (m *MCPAuth) ID() string {
+func (m *MCPAuth) ID() ID {
 	return MCPAuthID
 }
 

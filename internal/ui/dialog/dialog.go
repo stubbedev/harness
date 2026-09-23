@@ -47,10 +47,15 @@ func CloseKey() key.Binding {
 // Action represents an action taken in a dialog after handling a message.
 type Action any
 
+// ID identifies a dialog kind. Every dialog declares its own as a
+// package constant, so a misspelled ID is a compile error rather than a
+// dialog that silently never opens.
+type ID string
+
 // Dialog is a component that can be displayed on top of the UI.
 type Dialog interface {
 	// ID returns the unique identifier of the dialog.
-	ID() string
+	ID() ID
 	// HandleMsg processes a message and returns an action. An [Action] can be
 	// anything and the caller is responsible for handling it appropriately.
 	HandleMsg(msg tea.Msg) Action
@@ -141,7 +146,7 @@ type Overlay struct {
 	// dialog type can skip the grace period. This prevents rapid
 	// successive dialogs (e.g. multiple permission prompts) from
 	// each eating a keystroke.
-	lastClosedID string
+	lastClosedID ID
 	lastClosedAt time.Time
 }
 
@@ -158,7 +163,7 @@ func (d *Overlay) HasDialogs() bool {
 }
 
 // ContainsDialog checks if a dialog with the specified ID exists.
-func (d *Overlay) ContainsDialog(dialogID string) bool {
+func (d *Overlay) ContainsDialog(dialogID ID) bool {
 	for _, dialog := range d.dialogs {
 		if dialog.ID() == dialogID {
 			return true
@@ -215,7 +220,7 @@ func (d *Overlay) inGracePeriod() bool {
 }
 
 // CloseDialog closes the dialog with the specified ID from the stack.
-func (d *Overlay) CloseDialog(dialogID string) {
+func (d *Overlay) CloseDialog(dialogID ID) {
 	for i, dialog := range d.dialogs {
 		if dialog.ID() == dialogID {
 			d.removeDialog(i)
@@ -250,7 +255,7 @@ func (d *Overlay) removeDialog(idx int) {
 }
 
 // Dialog returns the dialog with the specified ID, or nil if not found.
-func (d *Overlay) Dialog(dialogID string) Dialog {
+func (d *Overlay) Dialog(dialogID ID) Dialog {
 	for _, dialog := range d.dialogs {
 		if dialog.ID() == dialogID {
 			return dialog
@@ -292,7 +297,7 @@ func (d *Overlay) FullHelp() [][]key.Binding {
 }
 
 // BringToFront brings the dialog with the specified ID to the front.
-func (d *Overlay) BringToFront(dialogID string) {
+func (d *Overlay) BringToFront(dialogID ID) {
 	for i, dialog := range d.dialogs {
 		if dialog.ID() == dialogID {
 			// Move the dialog to the end of the slice

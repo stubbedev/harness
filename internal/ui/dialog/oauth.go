@@ -38,7 +38,7 @@ const (
 )
 
 // OAuthID is the identifier for the model selection dialog.
-const OAuthID = "oauth"
+const OAuthID ID = "oauth"
 
 // OAuth handles the OAuth flow authentication.
 type OAuth struct {
@@ -108,7 +108,7 @@ func newOAuth(
 }
 
 // ID implements Dialog.
-func (m *OAuth) ID() string {
+func (m *OAuth) ID() ID {
 	return OAuthID
 }
 

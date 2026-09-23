@@ -13,7 +13,7 @@ type dialogMouseActionMsg struct{}
 
 type mouseActionDialog struct{}
 
-func (*mouseActionDialog) ID() string {
+func (*mouseActionDialog) ID() dialog.ID {
 	return "mouse-action"
 }
 

@@ -20,9 +20,9 @@ import (
 
 const (
 	// ConnectID is the identifier for the provider connection dialog.
-	ConnectID              = "connect"
-	connectDialogMinHeight = 8
-	connectDialogMaxHeight = 20
+	ConnectID              ID = "connect"
+	connectDialogMinHeight    = 8
+	connectDialogMaxHeight    = 20
 )
 
 // Connect lists the catalog providers that have no credentials yet. The
@@ -81,7 +81,7 @@ func NewConnect(com *common.Common) (*Connect, error) {
 }
 
 // ID implements Dialog.
-func (c *Connect) ID() string {
+func (c *Connect) ID() ID {
 	return ConnectID
 }
 

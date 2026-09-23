@@ -33,7 +33,7 @@ const (
 // manager dialog.
 type serversSource interface {
 	// dialogID identifies the dialog in the overlay.
-	dialogID() string
+	dialogID() ID
 	// title is the dialog title in the list phase.
 	title() string
 	// detailTitle is the dialog title in the detail phase.
@@ -106,7 +106,7 @@ type serversDialog struct {
 }
 
 // ID implements Dialog.
-func (d *serversDialog) ID() string {
+func (d *serversDialog) ID() ID {
 	return d.source.dialogID()
 }
 

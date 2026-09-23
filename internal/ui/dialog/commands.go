@@ -18,7 +18,7 @@ import (
 )
 
 // CommandsID is the identifier for the commands dialog.
-const CommandsID = "commands"
+const CommandsID ID = "commands"
 
 // CommandType represents the type of commands being displayed.
 type CommandType uint
@@ -117,7 +117,7 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary, h
 }
 
 // ID implements Dialog.
-func (c *Commands) ID() string {
+func (c *Commands) ID() ID {
 	return CommandsID
 }
 

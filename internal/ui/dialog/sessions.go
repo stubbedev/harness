@@ -18,7 +18,7 @@ import (
 )
 
 // SessionsID is the identifier for the session selector dialog.
-const SessionsID = "session"
+const SessionsID ID = "session"
 
 const sessionDoubleClickThreshold = 400 * time.Millisecond
 
@@ -110,7 +110,7 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 }
 
 // ID implements Dialog.
-func (s *Session) ID() string {
+func (s *Session) ID() ID {
 	return SessionsID
 }
 

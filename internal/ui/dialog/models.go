@@ -67,7 +67,7 @@ const (
 )
 
 // ModelsID is the identifier for the model selection dialog.
-const ModelsID = "models"
+const ModelsID ID = "models"
 
 const defaultModelsDialogMaxWidth = 73
 
@@ -142,7 +142,7 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 }
 
 // ID implements Dialog.
-func (m *Models) ID() string {
+func (m *Models) ID() ID {
 	return ModelsID
 }
 
