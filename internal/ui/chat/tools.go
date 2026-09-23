@@ -625,8 +625,7 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 		return ""
 	}
 	errContent := strings.ReplaceAll(result.Content, "\n", " ")
-	if strings.Contains(errContent, "User denied permission") ||
-		strings.Contains(errContent, "User cancelled") {
+	if result.Canceled {
 		deniedTag := sty.Tool.WarnTag.Render("WARN")
 		deniedTagWidth := lipgloss.Width(deniedTag)
 		errContent = ansi.Truncate(errContent, width-deniedTagWidth-3, "…")

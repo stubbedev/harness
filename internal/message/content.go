@@ -130,6 +130,10 @@ type ToolResult struct {
 	MIMEType   string `json:"mime_type"`
 	Metadata   string `json:"metadata"`
 	IsError    bool   `json:"is_error"`
+	// Canceled marks an error result that is a deliberate stop (the user
+	// cancelled the call, or the tool halted the turn) rather than a
+	// failure, so it can be shown as a warning instead of an error.
+	Canceled bool `json:"canceled,omitempty"`
 }
 
 func (ToolResult) partType() partType { return toolResultType }

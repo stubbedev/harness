@@ -2012,6 +2012,7 @@ func (a *sessionAgent) persistFailedTurn(
 			Name:       tc.Name,
 			Content:    content,
 			IsError:    true,
+			Canceled:   isCancelErr,
 		}
 		_, createErr := a.messages.Create(cleanupCtx, currentAssistant.SessionID, message.CreateMessageParams{
 			Role: message.Tool,
@@ -2850,6 +2851,9 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 				baseResult.Content += "\n\n" + hint
 			}
 			baseResult.IsError = true
+			// An error that halts the turn is a deliberate stop (e.g. the
+			// user cancelled a question), not a failure.
+			baseResult.Canceled = result.StopTurn
 		}
 	case fantasy.ToolResultContentTypeMedia:
 		if r, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](result.Result); ok {
