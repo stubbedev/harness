@@ -318,8 +318,6 @@ definitions:
         type: integer
       theme:
         type: string
-      transparent:
-        type: boolean
     type: object
   csync.Map-string-config_ProviderConfig:
     type: object
@@ -705,9 +703,27 @@ definitions:
     type: object
   proto.Error:
     properties:
+      code:
+        $ref: '#/definitions/proto.ErrorCode'
       message:
         type: string
     type: object
+  proto.ErrorCode:
+    enum:
+    - workspace_not_found
+    - not_found
+    - invalid_argument
+    - conflict
+    - unavailable
+    - internal
+    type: string
+    x-enum-varnames:
+    - ErrorCodeWorkspaceNotFound
+    - ErrorCodeNotFound
+    - ErrorCodeInvalidArgument
+    - ErrorCodeConflict
+    - ErrorCodeUnavailable
+    - ErrorCodeInternal
   proto.ExtensionCommandArgument:
     properties:
       description:
@@ -762,7 +778,8 @@ definitions:
     properties:
       success:
         type: boolean
-      token: {}
+      token:
+        $ref: '#/definitions/oauth.Token'
     type: object
   proto.LSPClientInfo:
     properties:
@@ -874,6 +891,19 @@ definitions:
   proto.MCPReadResourceRequest:
     properties:
       name:
+        type: string
+      uri:
+        type: string
+    type: object
+  proto.MCPResourceContents:
+    properties:
+      blob:
+        items:
+          type: integer
+        type: array
+      mime_type:
+        type: string
+      text:
         type: string
       uri:
         type: string
@@ -1011,10 +1041,20 @@ definitions:
       updated_at:
         type: integer
     type: object
+  proto.SessionRenameRequest:
+    properties:
+      title:
+        type: string
+    type: object
   proto.ShellCommandRequest:
     properties:
       command:
         type: string
+      is_first_message:
+        description: |-
+          IsFirstMessage asks the server to title the session from the
+          command, as a local run does for a session's first message.
+        type: boolean
       session_id:
         type: string
       term_width:
@@ -1196,18 +1236,6 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Retire a client
-      tags:
-      - system
-  /config:
-    get:
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: object
-      summary: Get server config
       tags:
       - system
   /control:
@@ -2461,6 +2489,10 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
       summary: Get MCP OAuth authorization URL
       tags:
       - mcp
@@ -2614,7 +2646,9 @@ paths:
         "200":
           description: OK
           schema:
-            type: object
+            items:
+              $ref: '#/definitions/proto.MCPResourceContents'
+            type: array
         "400":
           description: Bad Request
           schema:
@@ -2848,32 +2882,6 @@ paths:
       summary: Get project initialization prompt
       tags:
       - project
-  /workspaces/{id}/providers:
-    get:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Get workspace providers
-      tags:
-      - workspaces
   /workspaces/{id}/questions/answer:
     post:
       consumes:
@@ -3074,12 +3082,12 @@ paths:
         name: sid
         required: true
         type: string
-      - description: Updated session
+      - description: New title
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/proto.Session'
+          $ref: '#/definitions/proto.SessionRenameRequest'
       produces:
       - application/json
       responses:
@@ -3099,7 +3107,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/proto.Error'
-      summary: Update session
+      summary: Rename session
       tags:
       - sessions
   /workspaces/{id}/sessions/{sid}/checkpoints:
@@ -3297,6 +3305,10 @@ paths:
             $ref: '#/definitions/proto.Error'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/proto.Error'
         "500":

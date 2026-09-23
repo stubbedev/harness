@@ -50,25 +50,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/config": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "system"
-                ],
-                "summary": "Get server config",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object"
-                        }
-                    }
-                }
-            }
-        },
         "/control": {
             "post": {
                 "consumes": [
@@ -1983,6 +1964,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/proto.Error"
                         }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
                     }
                 }
             }
@@ -2217,7 +2204,10 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object"
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/proto.MCPResourceContents"
+                            }
                         }
                     },
                     "400": {
@@ -2575,46 +2565,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/workspaces/{id}/providers": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "workspaces"
-                ],
-                "summary": "Get workspace providers",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Workspace ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/proto.Error"
-                        }
-                    }
-                }
-            }
-        },
         "/workspaces/{id}/questions/answer": {
             "post": {
                 "consumes": [
@@ -2868,7 +2818,7 @@ const docTemplate = `{
                 "tags": [
                     "sessions"
                 ],
-                "summary": "Update session",
+                "summary": "Rename session",
                 "parameters": [
                     {
                         "type": "string",
@@ -2885,12 +2835,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Updated session",
+                        "description": "New title",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/proto.Session"
+                            "$ref": "#/definitions/proto.SessionRenameRequest"
                         }
                     }
                 ],
@@ -3257,6 +3207,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/proto.Error"
                         }
@@ -3760,9 +3716,6 @@ const docTemplate = `{
                 },
                 "theme": {
                     "type": "string"
-                },
-                "transparent": {
-                    "type": "boolean"
                 }
             }
         },
@@ -4309,10 +4262,32 @@ const docTemplate = `{
         "proto.Error": {
             "type": "object",
             "properties": {
+                "code": {
+                    "$ref": "#/definitions/proto.ErrorCode"
+                },
                 "message": {
                     "type": "string"
                 }
             }
+        },
+        "proto.ErrorCode": {
+            "type": "string",
+            "enum": [
+                "workspace_not_found",
+                "not_found",
+                "invalid_argument",
+                "conflict",
+                "unavailable",
+                "internal"
+            ],
+            "x-enum-varnames": [
+                "ErrorCodeWorkspaceNotFound",
+                "ErrorCodeNotFound",
+                "ErrorCodeInvalidArgument",
+                "ErrorCodeConflict",
+                "ErrorCodeUnavailable",
+                "ErrorCodeInternal"
+            ]
         },
         "proto.ExtensionCommandArgument": {
             "type": "object",
@@ -4397,7 +4372,9 @@ const docTemplate = `{
                 "success": {
                     "type": "boolean"
                 },
-                "token": {}
+                "token": {
+                    "$ref": "#/definitions/oauth.Token"
+                }
             }
         },
         "proto.LSPClientInfo": {
@@ -4562,6 +4539,26 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "name": {
+                    "type": "string"
+                },
+                "uri": {
+                    "type": "string"
+                }
+            }
+        },
+        "proto.MCPResourceContents": {
+            "type": "object",
+            "properties": {
+                "blob": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "mime_type": {
+                    "type": "string"
+                },
+                "text": {
                     "type": "string"
                 },
                 "uri": {
@@ -4767,11 +4764,23 @@ const docTemplate = `{
                 }
             }
         },
+        "proto.SessionRenameRequest": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
         "proto.ShellCommandRequest": {
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string"
+                },
+                "is_first_message": {
+                    "description": "IsFirstMessage asks the server to title the session from the\ncommand, as a local run does for a session's first message.",
+                    "type": "boolean"
                 },
                 "session_id": {
                     "type": "string"
