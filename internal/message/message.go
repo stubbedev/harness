@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -629,127 +629,58 @@ type partWrapper struct {
 
 func marshalParts(parts []ContentPart) ([]byte, error) {
 	wrappedParts := make([]partWrapper, len(parts))
-
 	for i, part := range parts {
-		var typ partType
-
-		switch part.(type) {
-		case ReasoningContent:
-			typ = reasoningType
-		case TextContent:
-			typ = textType
-		case ImageURLContent:
-			typ = imageURLType
-		case BinaryContent:
-			typ = binaryType
-		case ToolCall:
-			typ = toolCallType
-		case ToolResult:
-			typ = toolResultType
-		case Finish:
-			typ = finishType
-		case ShellCommand:
-			typ = shellCommandType
-		case SubagentNote:
-			typ = subagentNoteType
-		case ContextNote:
-			typ = contextNoteType
-		default:
-			return nil, fmt.Errorf("unknown part type: %T", part)
-		}
-
-		wrappedParts[i] = partWrapper{
-			Type: typ,
-			Data: part,
-		}
+		wrappedParts[i] = partWrapper{Type: part.partType(), Data: part}
 	}
 	return json.Marshal(wrappedParts)
 }
 
-func unmarshalParts(data []byte) ([]ContentPart, error) {
-	temp := []json.RawMessage{}
+// partDecoders maps each stored part type to its decoder.
+var partDecoders = map[partType]func(json.RawMessage) (ContentPart, error){
+	reasoningType:    decodePart[ReasoningContent],
+	textType:         decodePart[TextContent],
+	imageURLType:     decodePart[ImageURLContent],
+	binaryType:       decodePart[BinaryContent],
+	toolCallType:     decodePart[ToolCall],
+	toolResultType:   decodePart[ToolResult],
+	finishType:       decodePart[Finish],
+	shellCommandType: decodePart[ShellCommand],
+	subagentNoteType: decodePart[SubagentNote],
+	contextNoteType:  decodePart[ContextNote],
+}
 
-	if err := json.Unmarshal(data, &temp); err != nil {
+func decodePart[T ContentPart](data json.RawMessage) (ContentPart, error) {
+	var part T
+	if err := json.Unmarshal(data, &part); err != nil {
+		return nil, err
+	}
+	return part, nil
+}
+
+// unmarshalParts decodes stored parts. A part type this build does not
+// know (written by a newer one) is skipped rather than failing the whole
+// message, so an older binary can still open every session.
+func unmarshalParts(data []byte) ([]ContentPart, error) {
+	var wrappers []struct {
+		Type partType        `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &wrappers); err != nil {
 		return nil, err
 	}
 
-	parts := make([]ContentPart, 0)
-
-	for _, rawPart := range temp {
-		var wrapper struct {
-			Type partType        `json:"type"`
-			Data json.RawMessage `json:"data"`
+	parts := make([]ContentPart, 0, len(wrappers))
+	for _, wrapper := range wrappers {
+		decode, ok := partDecoders[wrapper.Type]
+		if !ok {
+			slog.Warn("Skipping unknown message part type", "type", wrapper.Type)
+			continue
 		}
-
-		if err := json.Unmarshal(rawPart, &wrapper); err != nil {
+		part, err := decode(wrapper.Data)
+		if err != nil {
 			return nil, err
 		}
-
-		switch wrapper.Type {
-		case reasoningType:
-			part := ReasoningContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case textType:
-			part := TextContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case imageURLType:
-			part := ImageURLContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case binaryType:
-			part := BinaryContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case toolCallType:
-			part := ToolCall{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case toolResultType:
-			part := ToolResult{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case finishType:
-			part := Finish{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case shellCommandType:
-			part := ShellCommand{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case subagentNoteType:
-			part := SubagentNote{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case contextNoteType:
-			part := ContextNote{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		default:
-			return nil, fmt.Errorf("unknown part type: %s", wrapper.Type)
-		}
+		parts = append(parts, part)
 	}
-
 	return parts, nil
 }

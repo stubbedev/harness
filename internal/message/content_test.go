@@ -381,3 +381,14 @@ func TestToAIMessage_ContextNoteReadsAsUserText(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, note, parts[0])
 }
+
+// TestUnmarshalParts_SkipsUnknownType: a part type written by a newer
+// build must not make the whole message (and so the session) unloadable.
+func TestUnmarshalParts_SkipsUnknownType(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`[{"type":"hologram","data":{}},{"type":"text","data":{"text":"hi"}}]`)
+	parts, err := unmarshalParts(data)
+	require.NoError(t, err)
+	require.Equal(t, []ContentPart{TextContent{Text: "hi"}}, parts)
+}

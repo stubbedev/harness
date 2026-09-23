@@ -54,8 +54,10 @@ const (
 	FinishReasonUnknown FinishReason = "unknown"
 )
 
+// ContentPart is one piece of a message. partType names its stored
+// encoding, so a part type cannot exist without one.
 type ContentPart interface {
-	isPart()
+	partType() partType
 }
 
 type ReasoningContent struct {
@@ -71,7 +73,7 @@ type ReasoningContent struct {
 func (tc ReasoningContent) String() string {
 	return tc.Thinking
 }
-func (ReasoningContent) isPart() {}
+func (ReasoningContent) partType() partType { return reasoningType }
 
 type TextContent struct {
 	Text string `json:"text"`
@@ -81,7 +83,7 @@ func (tc TextContent) String() string {
 	return tc.Text
 }
 
-func (TextContent) isPart() {}
+func (TextContent) partType() partType { return textType }
 
 type ImageURLContent struct {
 	URL    string `json:"url"`
@@ -92,7 +94,7 @@ func (iuc ImageURLContent) String() string {
 	return iuc.URL
 }
 
-func (ImageURLContent) isPart() {}
+func (ImageURLContent) partType() partType { return imageURLType }
 
 type BinaryContent struct {
 	Path     string
@@ -108,7 +110,7 @@ func (bc BinaryContent) String(p catalog.InferenceProvider) string {
 	return base64Encoded
 }
 
-func (BinaryContent) isPart() {}
+func (BinaryContent) partType() partType { return binaryType }
 
 type ToolCall struct {
 	ID               string `json:"id"`
@@ -118,7 +120,7 @@ type ToolCall struct {
 	Finished         bool   `json:"finished"`
 }
 
-func (ToolCall) isPart() {}
+func (ToolCall) partType() partType { return toolCallType }
 
 type ToolResult struct {
 	ToolCallID string `json:"tool_call_id"`
@@ -130,7 +132,7 @@ type ToolResult struct {
 	IsError    bool   `json:"is_error"`
 }
 
-func (ToolResult) isPart() {}
+func (ToolResult) partType() partType { return toolResultType }
 
 type Finish struct {
 	Reason  FinishReason `json:"reason"`
@@ -139,7 +141,7 @@ type Finish struct {
 	Details string       `json:"details,omitempty"`
 }
 
-func (Finish) isPart() {}
+func (Finish) partType() partType { return finishType }
 
 // ShellCommand stores a bang-mode shell command and its output as a
 // distinct content part so it can be reconstructed on session restore.
@@ -149,7 +151,7 @@ type ShellCommand struct {
 	ExitCode int    `json:"exit_code"`
 }
 
-func (ShellCommand) isPart() {}
+func (ShellCommand) partType() partType { return shellCommandType }
 
 // SubagentNote is a message a running background sub-agent pushed to its
 // orchestrator through the send_message tool. It is stored as a user
@@ -168,7 +170,7 @@ func (sn SubagentNote) String() string {
 	return fmt.Sprintf("[Message from background agent %q (handle %s)]\n%s", sn.AgentName, sn.Handle, sn.Text)
 }
 
-func (SubagentNote) isPart() {}
+func (SubagentNote) partType() partType { return subagentNoteType }
 
 // ContextNote is context the harness put in front of the model on its
 // own: a directory's instructions, an auto-activated skill, a
@@ -193,7 +195,7 @@ const (
 	ContextNoteDiagnostics           = "diagnostics"
 )
 
-func (ContextNote) isPart() {}
+func (ContextNote) partType() partType { return contextNoteType }
 
 // ContextNotes returns all ContextNote parts from the message.
 func (m *Message) ContextNotes() []ContextNote {
