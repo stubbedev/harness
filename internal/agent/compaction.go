@@ -375,6 +375,17 @@ func (a *sessionAgent) foldCut(msgs []message.Message, keepTokens int64, support
 	return cut
 }
 
+// compactTrigger says who asked for a compaction; the Pre/PostCompact
+// hooks receive it.
+type compactTrigger string
+
+const (
+	// compactAuto is a compaction the agent decided on itself.
+	compactAuto compactTrigger = "auto"
+	// compactManual is a compaction the user asked for.
+	compactManual compactTrigger = "manual"
+)
+
 // maintainContext is the one entry point for compaction: it takes the
 // session's history as it stands and applies whichever layers the
 // projected request calls for. With force set - a context-window
@@ -387,7 +398,8 @@ func (a *sessionAgent) maintainContext(
 	sessionID string,
 	opts fantasy.ProviderOptions,
 	onAuthRefresh func(context.Context, *fantasy.ProviderError) error,
-	trigger, instructions string,
+	trigger compactTrigger,
+	instructions string,
 	force bool,
 ) (bool, error) {
 	sess, err := a.sessions.Get(ctx, sessionID)
@@ -440,7 +452,7 @@ func (a *sessionAgent) maintainContext(
 		if cut > 0 {
 			if !a.isSubAgent && a.hooks.Has(hooks.EventPreCompact) {
 				if _, hookErr := a.hooks.Run(ctx, hooks.EventContext{
-					Event: hooks.EventPreCompact, SessionID: sessionID, Trigger: trigger,
+					Event: hooks.EventPreCompact, SessionID: sessionID, Trigger: string(trigger),
 				}); hookErr != nil {
 					slog.Warn("PreCompact hook error", "error", hookErr)
 				}
@@ -463,7 +475,7 @@ func (a *sessionAgent) maintainContext(
 			tools.ForgetReportedDiagnostics(a.lspManager, sessionID)
 			if !a.isSubAgent && a.hooks.Has(hooks.EventPostCompact) {
 				if _, hookErr := a.hooks.Run(ctx, hooks.EventContext{
-					Event: hooks.EventPostCompact, SessionID: sessionID, Trigger: trigger,
+					Event: hooks.EventPostCompact, SessionID: sessionID, Trigger: string(trigger),
 				}); hookErr != nil {
 					slog.Warn("PostCompact hook error", "error", hookErr)
 				}

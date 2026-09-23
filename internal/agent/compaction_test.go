@@ -69,7 +69,7 @@ func TestCompactionAgesOldToolResults(t *testing.T) {
 	old := seedToolTurn(t, env, sess.ID, 1, 20000)
 	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "question 2"})
 
-	changed, err := sa.maintainContext(t.Context(), sess.ID, nil, nil, "auto", "", false)
+	changed, err := sa.maintainContext(t.Context(), sess.ID, nil, nil, compactAuto, "", false)
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -107,7 +107,7 @@ func TestCompactionAgesOldToolResults(t *testing.T) {
 
 	// A second pass with nothing new is a no-op: the watermark does not
 	// creep, so the request prefix stays cacheable.
-	changed, err = sa.maintainContext(t.Context(), sess.ID, nil, nil, "auto", "", false)
+	changed, err = sa.maintainContext(t.Context(), sess.ID, nil, nil, compactAuto, "", false)
 	require.NoError(t, err)
 	assert.False(t, changed)
 }
@@ -130,7 +130,7 @@ func TestCompactionFoldsOldestHistoryIntoHiddenSummary(t *testing.T) {
 		createMessage(t, env, sess.ID, message.Assistant, message.TextContent{Text: strings.Repeat(fmt.Sprintf("answer %d ", i), 550)})
 	}
 
-	changed, err := sa.maintainContext(t.Context(), sess.ID, nil, nil, "auto", "", false)
+	changed, err := sa.maintainContext(t.Context(), sess.ID, nil, nil, compactAuto, "", false)
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -174,7 +174,7 @@ func TestManualCompactionFoldsEverythingAndRolls(t *testing.T) {
 	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "first question"})
 	last := createMessage(t, env, sess.ID, message.Assistant, message.TextContent{Text: "first answer"})
 
-	require.NoError(t, sa.summarize(t.Context(), sess.ID, nil, nil, "manual", "keep the numbers"))
+	require.NoError(t, sa.Summarize(t.Context(), sess.ID, nil, nil, "keep the numbers"))
 
 	updated, err := env.sessions.Get(t.Context(), sess.ID)
 	require.NoError(t, err)
@@ -191,7 +191,7 @@ func TestManualCompactionFoldsEverythingAndRolls(t *testing.T) {
 	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "second question"})
 	createMessage(t, env, sess.ID, message.Assistant, message.TextContent{Text: "second answer"})
 	sa.smallModel.Set(Model{Model: textModel("second summary")})
-	require.NoError(t, sa.summarize(t.Context(), sess.ID, nil, nil, "manual", ""))
+	require.NoError(t, sa.Summarize(t.Context(), sess.ID, nil, nil, ""))
 
 	updated, err = env.sessions.Get(t.Context(), sess.ID)
 	require.NoError(t, err)
@@ -408,7 +408,7 @@ func TestCompactionExecutionStatePersistsIndependentOfNarrative(t *testing.T) {
 	for _, msg := range executionMessages("test", "shell", `{"command":"go test ./..."}`, `{"exit_code":3}`, false) {
 		createMessage(t, env, sess.ID, msg.Role, msg.Parts...)
 	}
-	require.NoError(t, sa.summarize(t.Context(), sess.ID, nil, nil, "manual", ""))
+	require.NoError(t, sa.Summarize(t.Context(), sess.ID, nil, nil, ""))
 	updated, err := env.sessions.Get(t.Context(), sess.ID)
 	require.NoError(t, err)
 	narrative, state := splitExecutionSummary(updated.CompactionSummary)
@@ -419,7 +419,7 @@ func TestCompactionExecutionStatePersistsIndependentOfNarrative(t *testing.T) {
 	sa, _ = compactionAgent(t, env, 1_000_000, "still no facts")
 	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "continue"})
 	createMessage(t, env, sess.ID, message.Assistant, message.TextContent{Text: "nothing"})
-	require.NoError(t, sa.summarize(t.Context(), sess.ID, nil, nil, "manual", ""))
+	require.NoError(t, sa.Summarize(t.Context(), sess.ID, nil, nil, ""))
 	updated, err = env.sessions.Get(t.Context(), sess.ID)
 	require.NoError(t, err)
 	narrative, state = splitExecutionSummary(updated.CompactionSummary)

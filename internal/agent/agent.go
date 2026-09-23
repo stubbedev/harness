@@ -1810,7 +1810,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if delErr := a.messages.Delete(ctx, userMsg.ID); delErr != nil {
 			slog.Warn("Failed to remove the overflowed user message", "error", delErr)
 		}
-		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", "", true); compactErr != nil {
+		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", true); compactErr != nil {
 			return nil, compactErr
 		}
 		requeued := call
@@ -1824,7 +1824,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err == nil && shouldSummarize {
 		// The stop condition ended the turn with the window nearly full:
 		// fold everything, then let the turn carry on if it was not done.
-		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", "", true); compactErr != nil {
+		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", true); compactErr != nil {
 			return nil, compactErr
 		}
 		// If the agent wasn't done...
@@ -1838,7 +1838,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// waits on a compaction in the middle of an answer. Usually there
 		// is nothing to do; when there is, nothing shows in the
 		// transcript. A failure here is not the turn's failure.
-		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, "auto", "", false); compactErr != nil &&
+		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", false); compactErr != nil &&
 			!errors.Is(compactErr, context.Canceled) {
 			slog.Warn("Context maintenance failed", "session_id", call.SessionID, "error", compactErr)
 		}
@@ -2073,16 +2073,11 @@ func (a *sessionAgent) persistFailedTurn(
 	return nil
 }
 
+// Summarize compacts the session on request: everything sent verbatim so
+// far is folded into the hidden summary (see compaction.go).
+// instructions optionally steer the summary's focus. Prompts that arrive
+// while it runs are queued and run afterwards.
 func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, instructions string) error {
-	return a.summarize(ctx, sessionID, opts, onAuthRefresh, "manual", instructions)
-}
-
-// summarize compacts the session on request: everything sent verbatim so
-// far is folded into the hidden summary (see compaction.go). trigger is
-// "manual" (user-invoked) or "auto" and is passed to the Pre/PostCompact
-// hooks; instructions optionally steer the summary's focus. Prompts that
-// arrive while it runs are queued and run afterwards.
-func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fantasy.ProviderOptions, onAuthRefresh func(context.Context, *fantasy.ProviderError) error, trigger, instructions string) error {
 	// The busy check and the registration happen under the dispatch lock,
 	// as in Run, so a concurrent Run cannot also pass the check and start
 	// on the same session.
@@ -2099,7 +2094,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	defer csync.CompareAndDelete(a.activeRequests, sessionID, ac)
 	defer cancel()
 
-	if _, err := a.maintainContext(genCtx, sessionID, opts, onAuthRefresh, trigger, instructions, true); err != nil {
+	if _, err := a.maintainContext(genCtx, sessionID, opts, onAuthRefresh, compactManual, instructions, true); err != nil {
 		return err
 	}
 
