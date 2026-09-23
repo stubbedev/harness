@@ -8,49 +8,27 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/config"
 	"github.com/tidwall/sjson"
 )
 
-// Hook event name constants.
+// Hook event name constants, re-exported from config, which owns the one
+// list of events. See the config.Hook* constants for what each means.
 const (
-	EventPreToolUse = "PreToolUse"
-	// EventPostToolUse fires after a tool call completes. The payload
-	// carries the tool response in addition to the input.
-	EventPostToolUse = "PostToolUse"
-	// EventUserPromptSubmit fires after the user submits a prompt but
-	// before it reaches the model. Can block, rewrite, or annotate the
-	// prompt.
-	EventUserPromptSubmit = "UserPromptSubmit"
-	// EventSessionStart fires on the first prompt of a session.
-	EventSessionStart = "SessionStart"
-	// EventStop fires when the top-level agent finishes a turn.
-	EventStop = "Stop"
-	// EventSubagentStop fires when a dispatched sub-agent finishes.
-	EventSubagentStop = "SubagentStop"
-	// EventNotification fires when Harness sends a user notification
-	// (agent finished, agent error, provider retry).
-	EventNotification = "Notification"
-	// EventPreCompact fires before a session is summarized/compacted.
-	EventPreCompact = "PreCompact"
-	// EventPostCompact fires after a session was summarized/compacted.
-	EventPostCompact = "PostCompact"
+	EventPreToolUse       = config.HookPreToolUse
+	EventPostToolUse      = config.HookPostToolUse
+	EventUserPromptSubmit = config.HookUserPromptSubmit
+	EventSessionStart     = config.HookSessionStart
+	EventStop             = config.HookStop
+	EventSubagentStop     = config.HookSubagentStop
+	EventNotification     = config.HookNotification
+	EventPreCompact       = config.HookPreCompact
+	EventPostCompact      = config.HookPostCompact
 )
 
 // EventNames lists every event this build understands, in a stable order.
-// Mirrored for config validation in internal/config/load.go; keep both in
-// sync.
 func EventNames() []string {
-	return []string{
-		EventPreToolUse,
-		EventPostToolUse,
-		EventUserPromptSubmit,
-		EventSessionStart,
-		EventStop,
-		EventSubagentStop,
-		EventNotification,
-		EventPreCompact,
-		EventPostCompact,
-	}
+	return config.HookEvents()
 }
 
 // HaltExitCode is the exit code that halts the whole turn. 2 blocks the
