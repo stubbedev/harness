@@ -11,7 +11,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
@@ -440,18 +439,7 @@ func (w *ClientWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCoun
 	}
 	var counts lsp.DiagnosticCounts
 	for _, fileDiags := range diags {
-		for _, d := range fileDiags {
-			switch d.Severity {
-			case protocol.SeverityError:
-				counts.Error++
-			case protocol.SeverityWarning:
-				counts.Warning++
-			case protocol.SeverityInformation:
-				counts.Information++
-			case protocol.SeverityHint:
-				counts.Hint++
-			}
-		}
+		countDiagnostics(&counts, fileDiags)
 	}
 	return counts
 }
@@ -467,27 +455,7 @@ func (w *ClientWorkspace) LSPFileDiagnostics() map[string]lsp.DiagnosticCounts {
 		if err != nil {
 			continue
 		}
-		for uri, fileDiags := range diags {
-			path, err := uri.Path()
-			if err != nil {
-				slog.Error("Failed to convert diagnostic URI to path", "uri", uri, "error", err)
-				continue
-			}
-			file := counts[path]
-			for _, d := range fileDiags {
-				switch d.Severity {
-				case protocol.SeverityError:
-					file.Error++
-				case protocol.SeverityWarning:
-					file.Warning++
-				case protocol.SeverityInformation:
-					file.Information++
-				case protocol.SeverityHint:
-					file.Hint++
-				}
-			}
-			counts[path] = file
-		}
+		foldFileDiagnostics(counts, diags)
 	}
 	return counts
 }
