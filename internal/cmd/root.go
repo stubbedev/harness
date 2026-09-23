@@ -1018,25 +1018,7 @@ func MaybePrependStdin(prompt string) (string, error) {
 // interface so both local and client/server paths get hash prefix
 // support.
 func resolveWorkspaceSessionID(ctx context.Context, ws workspace.Workspace, id string) (session.Session, error) {
-	if sess, err := ws.GetSession(ctx, id); err == nil {
-		return sess, nil
-	}
-
-	sessions, err := ws.ListSessions(ctx)
-	if err != nil {
-		return session.Session{}, err
-	}
-
-	matches := session.FilterHashPrefix(sessions, id, func(s session.Session) string { return s.ID })
-
-	switch len(matches) {
-	case 0:
-		return session.Session{}, fmt.Errorf("session not found: %s", id)
-	case 1:
-		return matches[0], nil
-	default:
-		return session.Session{}, fmt.Errorf("session ID %q is ambiguous (%d matches)", id, len(matches))
-	}
+	return resolveSessionPrefix(ctx, id, ws.GetSession, ws.ListSessions, sessionID, nil)
 }
 
 func ResolveCwd(cmd *cobra.Command) (string, error) {

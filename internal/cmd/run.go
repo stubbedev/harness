@@ -24,7 +24,6 @@ import (
 	"github.com/stubbedev/harness/internal/herdr"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
-	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/tmux"
 	"github.com/stubbedev/harness/internal/ui/anim"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -740,23 +739,17 @@ func resolveSession(ctx context.Context, c *client.Client, wsID, continueSession
 // resolveSessionByID resolves a session ID that may be a full UUID or a hash
 // prefix returned by harness session list.
 func resolveSessionByID(ctx context.Context, c *client.Client, wsID, id string) (*proto.Session, error) {
-	if sess, err := c.GetSession(ctx, wsID, id); err == nil {
-		return sess, nil
+	get := func(ctx context.Context, id string) (proto.Session, error) {
+		s, err := c.GetSession(ctx, wsID, id)
+		if err != nil {
+			return proto.Session{}, err
+		}
+		return *s, nil
 	}
-
-	sessions, err := c.ListSessions(ctx, wsID)
+	list := func(ctx context.Context) ([]proto.Session, error) { return c.ListSessions(ctx, wsID) }
+	s, err := resolveSessionPrefix(ctx, id, get, list, func(s proto.Session) string { return s.ID }, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	matches := session.FilterHashPrefix(sessions, id, func(s proto.Session) string { return s.ID })
-
-	switch len(matches) {
-	case 0:
-		return nil, fmt.Errorf("session %q not found", id)
-	case 1:
-		return &matches[0], nil
-	default:
-		return nil, fmt.Errorf("session ID %q is ambiguous (%d matches)", id, len(matches))
-	}
+	return &s, nil
 }

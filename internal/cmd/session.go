@@ -215,40 +215,18 @@ type sessionMutationResult struct {
 // resolveSessionID resolves a session ID that can be a UUID, full hash, or hash prefix.
 // Returns an error if the prefix is ambiguous (matches multiple sessions).
 func resolveSessionID(ctx context.Context, svc session.Service, id string) (session.Session, error) {
-	// Try direct UUID lookup first
-	if s, err := svc.Get(ctx, id); err == nil {
-		return s, nil
-	}
+	return resolveSessionPrefix(ctx, id, svc.Get, svc.List, sessionID, describeSessionMatch)
+}
 
-	// List all sessions and check for hash matches
-	sessions, err := svc.List(ctx)
-	if err != nil {
-		return session.Session{}, err
-	}
+func sessionID(s session.Session) string { return s.ID }
 
-	matches := session.FilterHashPrefix(sessions, id, func(s session.Session) string { return s.ID })
-
-	if len(matches) == 0 {
-		return session.Session{}, fmt.Errorf("session not found: %s", id)
-	}
-
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-
-	// Ambiguous - show matches like Git does
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "session ID '%s' is ambiguous. Matches:\n\n", id)
-	for _, m := range matches {
-		hash := session.HashID(m.ID)
-		created := time.Unix(m.CreatedAt, 0).Format("2006-01-02")
-		// Keep title on one line by replacing newlines with spaces, and truncate.
-		title := strings.ReplaceAll(m.Title, "\n", " ")
-		title = ansi.Truncate(title, 50, "…")
-		fmt.Fprintf(&sb, "  %s... %q (created %s)\n", hash[:12], title, created)
-	}
-	sb.WriteString("\nUse more characters or the full hash")
-	return session.Session{}, errors.New(sb.String())
+// describeSessionMatch renders one candidate of an ambiguous prefix:
+// short hash, one-line truncated title and creation date.
+func describeSessionMatch(m session.Session) string {
+	hash := session.HashID(m.ID)
+	created := time.Unix(m.CreatedAt, 0).Format("2006-01-02")
+	title := ansi.Truncate(strings.ReplaceAll(m.Title, "\n", " "), 50, "…")
+	return fmt.Sprintf("%s... %q (created %s)", hash[:12], title, created)
 }
 
 func runSessionShow(cmd *cobra.Command, args []string) error {
