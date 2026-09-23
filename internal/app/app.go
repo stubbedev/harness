@@ -434,7 +434,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		defer crash.Recover("app.cliAgentRun", func() {
 			done <- response{err: errors.New("agent run panicked; see the crash report")}
 		})
-		result, err := app.AgentCoordinator.Run(ctx, sess.ID, prompt)
+		result, err := app.AgentCoordinator.Run(ctx, sessionID, prompt)
 		if err != nil {
 			done <- response{
 				err: fmt.Errorf("failed to start agent processing stream: %w", err),

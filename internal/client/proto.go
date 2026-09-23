@@ -484,14 +484,12 @@ func (c *Client) GetAgentSessionInfo(ctx context.Context, id string, sessionID s
 // when non-empty, steer the summary's focus (/compact input).
 func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID string, instructions string) error {
 	var body io.Reader
+	var headers http.Header
 	if instructions != "" {
-		payload, err := json.Marshal(proto.SummarizeRequest{Instructions: instructions})
-		if err != nil {
-			return fmt.Errorf("failed to summarize session: %w", err)
-		}
-		body = bytes.NewReader(payload)
+		body = jsonBody(proto.SummarizeRequest{Instructions: instructions})
+		headers = http.Header{"Content-Type": []string{"application/json"}}
 	}
-	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/summarize", id, sessionID), nil, body, nil)
+	rsp, err := c.post(ctx, fmt.Sprintf("/workspaces/%s/agent/sessions/%s/summarize", id, sessionID), nil, body, headers)
 	if err != nil {
 		return fmt.Errorf("failed to summarize session: %w", err)
 	}
