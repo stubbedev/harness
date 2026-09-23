@@ -4,26 +4,8 @@ import (
 	"encoding/json"
 
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
-
-// SymbolsToolMessageItem is a message item that represents a symbols tool call.
-type SymbolsToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*SymbolsToolMessageItem)(nil)
-
-// NewSymbolsToolMessageItem creates a new [SymbolsToolMessageItem].
-func NewSymbolsToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &SymbolsToolRenderContext{}, canceled)
-}
 
 // SymbolsToolRenderContext renders symbols tool messages.
 type SymbolsToolRenderContext struct{}

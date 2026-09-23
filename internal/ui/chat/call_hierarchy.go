@@ -4,26 +4,8 @@ import (
 	"encoding/json"
 
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
-
-// CallHierarchyToolMessageItem is a message item that represents a call hierarchy tool call.
-type CallHierarchyToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*CallHierarchyToolMessageItem)(nil)
-
-// NewCallHierarchyToolMessageItem creates a new [CallHierarchyToolMessageItem].
-func NewCallHierarchyToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &CallHierarchyToolRenderContext{}, canceled)
-}
 
 // CallHierarchyToolRenderContext renders call hierarchy tool messages.
 type CallHierarchyToolRenderContext struct{}

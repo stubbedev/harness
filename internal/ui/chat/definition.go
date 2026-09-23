@@ -4,26 +4,8 @@ import (
 	"encoding/json"
 
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
-
-// DefinitionToolMessageItem is a message item that represents a definition tool call.
-type DefinitionToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*DefinitionToolMessageItem)(nil)
-
-// NewDefinitionToolMessageItem creates a new [DefinitionToolMessageItem].
-func NewDefinitionToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &DefinitionToolRenderContext{}, canceled)
-}
 
 // DefinitionToolRenderContext renders definition tool messages.
 type DefinitionToolRenderContext struct{}

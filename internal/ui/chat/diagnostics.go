@@ -16,25 +16,29 @@ import (
 // Diagnostics Tool
 // -----------------------------------------------------------------------------
 
-// DiagnosticsToolMessageItem is a message item that represents a diagnostics tool call.
-type DiagnosticsToolMessageItem struct {
+// LSPToolMessageItem is a message item that represents an lsp tool call
+// (or a legacy standalone diagnostics call).
+type LSPToolMessageItem struct {
 	*baseToolMessageItem
+	renderer *lspToolRenderer
 }
 
 var (
-	_ ToolMessageItem       = (*DiagnosticsToolMessageItem)(nil)
-	_ LiveDiagnosticsSetter = (*DiagnosticsToolMessageItem)(nil)
+	_ ToolMessageItem       = (*LSPToolMessageItem)(nil)
+	_ LiveDiagnosticsSetter = (*LSPToolMessageItem)(nil)
 )
 
-// NewDiagnosticsToolMessageItem creates a new [DiagnosticsToolMessageItem].
-func NewDiagnosticsToolMessageItem(
+// newLSPToolMessageItem creates a new [LSPToolMessageItem].
+func newLSPToolMessageItem(
 	sty *styles.Styles,
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
 ) ToolMessageItem {
-	return &DiagnosticsToolMessageItem{
-		baseToolMessageItem: newBaseToolMessageItem(sty, toolCall, result, &DiagnosticsToolRenderContext{}, canceled),
+	r := &lspToolRenderer{}
+	return &LSPToolMessageItem{
+		baseToolMessageItem: newBaseToolMessageItem(sty, toolCall, result, r, canceled),
+		renderer:            r,
 	}
 }
 
@@ -42,14 +46,53 @@ func NewDiagnosticsToolMessageItem(
 // invalidates the cached render. A diagnostics item reports a point in time;
 // without the live overlay a file the agent has since fixed keeps showing its
 // old errors as the transcript's last word. See [LiveDiagnosticsSetter].
-func (d *DiagnosticsToolMessageItem) SetLiveDiagnostics(live map[string]lsp.DiagnosticCounts) {
-	rc, ok := d.toolRenderer.(*DiagnosticsToolRenderContext)
-	if !ok || maps.Equal(rc.live, live) {
+func (d *LSPToolMessageItem) SetLiveDiagnostics(live map[string]lsp.DiagnosticCounts) {
+	rc := &d.renderer.diagnostics
+	if maps.Equal(rc.live, live) {
 		return
 	}
 	rc.live = live
-	d.clearCache()
-	d.Bump()
+	// Only a diagnostics run draws the overlay; other actions keep their
+	// cached render.
+	if _, ok := d.renderer.pick(d.toolCall).(*DiagnosticsToolRenderContext); ok {
+		d.clearCache()
+		d.Bump()
+	}
+}
+
+// lspToolRenderer picks the action's renderer on every render. The actions
+// were separate tools once and kept their own renderers when they were
+// folded into one; the transcript still shows a rename differently from a
+// diagnostics run. The pick cannot happen once at construction: a streamed
+// call is created with empty input, before its action is known.
+type lspToolRenderer struct {
+	diagnostics DiagnosticsToolRenderContext
+}
+
+// RenderTool implements the [ToolRenderer] interface.
+func (r *lspToolRenderer) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	return r.pick(opts.ToolCall).RenderTool(sty, width, opts)
+}
+
+func (r *lspToolRenderer) pick(tc message.ToolCall) ToolRenderer {
+	switch lspAction(tc) {
+	case "references":
+		return &ReferencesToolRenderContext{}
+	case "definition":
+		return &DefinitionToolRenderContext{}
+	case "rename":
+		return &RenameToolRenderContext{}
+	case "replace_symbol":
+		return &ReplaceSymbolToolRenderContext{}
+	case "call_hierarchy":
+		return &CallHierarchyToolRenderContext{}
+	case "symbols":
+		return &SymbolsToolRenderContext{}
+	case "restart":
+		return &LSPRestartToolRenderContext{}
+	default:
+		return &r.diagnostics
+	}
 }
 
 // DiagnosticsToolRenderContext renders diagnostics tool messages. It carries

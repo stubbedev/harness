@@ -4,26 +4,8 @@ import (
 	"encoding/json"
 
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
-
-// LSPRestartToolMessageItem is a message item that represents a lsprestart tool call.
-type LSPRestartToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*LSPRestartToolMessageItem)(nil)
-
-// NewLSPRestartToolMessageItem creates a new [LSPRestartToolMessageItem].
-func NewLSPRestartToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &LSPRestartToolRenderContext{}, canceled)
-}
 
 // LSPRestartToolRenderContext renders lsprestart tool messages.
 type LSPRestartToolRenderContext struct{}

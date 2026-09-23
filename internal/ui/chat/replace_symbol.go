@@ -5,26 +5,8 @@ import (
 
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/fsext"
-	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
-
-// ReplaceSymbolToolMessageItem is a message item that represents a replace symbol tool call.
-type ReplaceSymbolToolMessageItem struct {
-	*baseToolMessageItem
-}
-
-var _ ToolMessageItem = (*ReplaceSymbolToolMessageItem)(nil)
-
-// NewReplaceSymbolToolMessageItem creates a new [ReplaceSymbolToolMessageItem].
-func NewReplaceSymbolToolMessageItem(
-	sty *styles.Styles,
-	toolCall message.ToolCall,
-	result *message.ToolResult,
-	canceled bool,
-) ToolMessageItem {
-	return newBaseToolMessageItem(sty, toolCall, result, &ReplaceSymbolToolRenderContext{}, canceled)
-}
 
 // ReplaceSymbolToolRenderContext renders replace symbol tool messages.
 type ReplaceSymbolToolRenderContext struct{}

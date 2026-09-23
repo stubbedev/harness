@@ -10,16 +10,16 @@ import (
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
-func diagnosticsRenderItem(t *testing.T, input, result string) *DiagnosticsToolMessageItem {
+func diagnosticsRenderItem(t *testing.T, input, result string) *LSPToolMessageItem {
 	t.Helper()
 	sty := &styles.Styles{}
-	item := NewDiagnosticsToolMessageItem(sty, message.ToolCall{
+	item := newLSPToolMessageItem(sty, message.ToolCall{
 		ID:       "tc1",
 		Name:     "lsp_diagnostics",
 		Input:    input,
 		Finished: true,
 	}, &message.ToolResult{Content: result}, false)
-	di, ok := item.(*DiagnosticsToolMessageItem)
+	di, ok := item.(*LSPToolMessageItem)
 	require.True(t, ok)
 	return di
 }
@@ -117,4 +117,28 @@ func TestLiveCountNote(t *testing.T) {
 	require.Equal(t, "1 error", liveCountNote(lsp.DiagnosticCounts{Error: 1}))
 	require.Equal(t, "2 errors, 1 warning, 1 hint",
 		liveCountNote(lsp.DiagnosticCounts{Error: 2, Warning: 1, Hint: 1}))
+}
+
+// A streamed lsp call is created before its input arrives, so the action
+// is unknown at construction. Once the input lands the item must render
+// with the action's renderer, not the diagnostics fallback.
+func TestLSPItemPicksRendererAfterInputArrives(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	item := NewToolMessageItem(&sty, "m1", message.ToolCall{ID: "tc1", Name: "lsp"}, nil, false, "")
+	item.SetToolCall(message.ToolCall{
+		ID:       "tc1",
+		Name:     "lsp",
+		Input:    `{"action":"rename","symbol":"oldName","new_name":"newName"}`,
+		Finished: true,
+	})
+	item.SetResult(&message.ToolResult{ToolCallID: "tc1", Content: "renamed 3 occurrences"})
+	out := item.Render(100)
+	require.Contains(t, out, "oldName → newName")
+	require.NotContains(t, out, "project")
+
+	setter, ok := item.(LiveDiagnosticsSetter)
+	require.True(t, ok)
+	setter.SetLiveDiagnostics(map[string]lsp.DiagnosticCounts{})
+	require.NotContains(t, item.Render(100), "resolved")
 }
