@@ -421,14 +421,14 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 	failed := 0
 	succeeded := 0
 	for _, t := range g.tools {
-		if a, ok := t.(Animatable); ok && a.Spinning() {
+		switch t.EffectiveStatus() {
+		case ToolStatusRunning:
 			running = true
-		}
-		if res := t.Result(); res != nil && res.IsError {
+		case ToolStatusError:
 			failed++
-		} else if t.Status() == ToolStatusCanceled {
+		case ToolStatusCanceled:
 			cancelled = true
-		} else {
+		case ToolStatusSuccess:
 			succeeded++
 		}
 	}
@@ -559,15 +559,7 @@ func groupVerbStyle(sty *styles.Styles, running, cancelled bool, failed, succeed
 // spinner either. Shared by the transcript's expanded groups and the
 // background task strip's nested lines.
 func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int, selected bool) string {
-	status := ToolStatusSuccess
-	if a, ok := t.(Animatable); ok && a.Spinning() {
-		status = ToolStatusRunning
-	} else if res := t.Result(); res != nil && res.IsError {
-		status = ToolStatusError
-	} else if t.Status() == ToolStatusCanceled {
-		status = ToolStatusCanceled
-	}
-	name := toolNameStyle(sty, status, false, selected).Render(ToolDisplayName(t.ToolCall()))
+	name := toolNameStyle(sty, t.EffectiveStatus(), false, selected).Render(ToolDisplayName(t.ToolCall()))
 	line := name
 	if summary := ToolCallSummary(t.ToolCall()); summary != "" {
 		line += " " + sty.Tool.Body.Render(summary)

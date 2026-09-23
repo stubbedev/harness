@@ -246,7 +246,7 @@ func (t *baseToolMessageItem) copyText(depth int) string {
 		if content := t.formatResultForCopy(); content != "" {
 			sections = append(sections, copyHeading(depth+1, "Result:"), content)
 		}
-	case t.status == ToolStatusCanceled:
+	case t.canceled:
 		sections = append(sections, copyHeading(depth+1, "Status:"), "Cancelled")
 	default:
 		sections = append(sections, copyHeading(depth+1, "Status:"), "Pending...")

@@ -25,7 +25,7 @@ func TestPendingToolRenderHasNoSpinner(t *testing.T) {
 	t.Parallel()
 
 	tool := bashTool("t1", "go build ./... && go test ./internal/ui/...", false)
-	require.Equal(t, ToolStatusRunning, tool.Status())
+	require.Equal(t, ToolStatusRunning, tool.EffectiveStatus())
 
 	plain := ansi.Strip(tool.Render(80))
 	require.False(t, pulseGlyphSet(plain), "pending tool render must not carry a spinner: %s", plain)

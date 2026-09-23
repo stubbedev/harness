@@ -21,7 +21,7 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, params.Symbol, file)
+	header := toolHeader(sty, ToolDisplayName(opts.ToolCall), width, opts, params.Symbol, file)
 	if opts.Compact {
 		return header
 	}

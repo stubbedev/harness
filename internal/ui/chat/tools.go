@@ -30,8 +30,7 @@ const responseContextHeight = 10
 type ToolStatus int
 
 const (
-	ToolStatusAwaitingPermission ToolStatus = iota
-	ToolStatusRunning
+	ToolStatusRunning ToolStatus = iota
 	ToolStatusSuccess
 	ToolStatusError
 	ToolStatusCanceled
@@ -52,8 +51,10 @@ type ToolMessageItem interface {
 	Result() *message.ToolResult
 	MessageID() string
 	SetMessageID(id string)
-	SetStatus(status ToolStatus)
-	Status() ToolStatus
+	// EffectiveStatus is the call's status as every view shows it: the
+	// result decides once there is one, otherwise it is canceled or
+	// still running.
+	EffectiveStatus() ToolStatus
 }
 
 // Compactable is an interface for tool items that can render in a compacted mode.
@@ -71,35 +72,6 @@ type Compactable interface {
 // servers have said it is gone.
 type LiveDiagnosticsSetter interface {
 	SetLiveDiagnostics(live map[string]lsp.DiagnosticCounts)
-}
-
-// SpinningState contains the state passed to SpinningFunc for custom spinning logic.
-type SpinningState struct {
-	ToolCall message.ToolCall
-	Result   *message.ToolResult
-	Status   ToolStatus
-}
-
-// IsCanceled returns true if the tool status is canceled.
-func (s *SpinningState) IsCanceled() bool {
-	return s.Status == ToolStatusCanceled
-}
-
-// HasResult returns true if the result is not nil.
-func (s *SpinningState) HasResult() bool {
-	return s.Result != nil
-}
-
-// SpinningFunc is a function type for custom spinning logic.
-// Returns true if the tool should show the spinning animation.
-type SpinningFunc func(state SpinningState) bool
-
-// DefaultToolRenderContext implements the default [ToolRenderer] interface.
-type DefaultToolRenderContext struct{}
-
-// RenderTool implements the [ToolRenderer] interface.
-func (d *DefaultToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	return "TODO: Implement Tool Renderer For: " + opts.ToolCall.Name
 }
 
 // ToolRenderOpts contains the data needed to render a tool call.
@@ -144,14 +116,6 @@ type ToolRenderer interface {
 	RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string
 }
 
-// ToolRendererFunc is a function type that implements the [ToolRenderer] interface.
-type ToolRendererFunc func(sty *styles.Styles, width int, opts *ToolRenderOpts) string
-
-// RenderTool implements the ToolRenderer interface.
-func (f ToolRendererFunc) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	return f(sty, width, opts)
-}
-
 // baseToolMessageItem represents a tool call message that can be displayed in the UI.
 type baseToolMessageItem struct {
 	*list.Versioned
@@ -163,12 +127,9 @@ type baseToolMessageItem struct {
 	toolCall     message.ToolCall
 	result       *message.ToolResult
 	messageID    string
-	status       ToolStatus
+	canceled     bool
 	// isCompact indicates this tool should render in compact mode.
 	isCompact bool
-	// spinningFunc allows tools to override the default spinning logic.
-	// If nil, uses the default: !toolCall.Finished && !canceled.
-	spinningFunc SpinningFunc
 
 	sty             *styles.Styles
 	anim            *anim.Anim
@@ -197,11 +158,6 @@ func newBaseToolMessageItem(
 	toolRenderer ToolRenderer,
 	canceled bool,
 ) *baseToolMessageItem {
-	status := ToolStatusRunning
-	if canceled {
-		status = ToolStatusCanceled
-	}
-
 	v := list.NewVersioned()
 	t := &baseToolMessageItem{
 		Versioned:                v,
@@ -212,7 +168,7 @@ func newBaseToolMessageItem(
 		toolRenderer:             toolRenderer,
 		toolCall:                 toolCall,
 		result:                   result,
-		status:                   status,
+		canceled:                 canceled,
 		startedAt:                time.Now(),
 	}
 	t.anim = anim.New(anim.Settings{
@@ -382,7 +338,7 @@ func (t *baseToolMessageItem) BodyRender(bodyWidth int) string {
 			Result:          t.result,
 			ExpandedContent: t.expandedContent,
 			Compact:         t.isCompact,
-			Status:          t.computeStatus(),
+			Status:          t.EffectiveStatus(),
 			StartedAt:       t.startedAt,
 			Elapsed:         t.elapsed(),
 		})
@@ -500,49 +456,25 @@ func (t *baseToolMessageItem) SetMessageID(id string) {
 	t.messageID = id
 }
 
-// SetStatus sets the tool status.
-func (t *baseToolMessageItem) SetStatus(status ToolStatus) {
-	if t.status == status {
-		return
-	}
-	t.status = status
-	t.clearCache()
-	t.Bump()
-}
-
-// Status returns the current tool status.
-func (t *baseToolMessageItem) Status() ToolStatus {
-	return t.status
-}
-
-// computeStatus computes the effective status considering the result.
-func (t *baseToolMessageItem) computeStatus() ToolStatus {
-	if t.result != nil {
-		if t.result.IsError {
-			return ToolStatusError
-		}
+// EffectiveStatus implements [ToolMessageItem].
+func (t *baseToolMessageItem) EffectiveStatus() ToolStatus {
+	switch {
+	case t.result != nil && t.result.IsError:
+		return ToolStatusError
+	case t.result != nil:
 		return ToolStatusSuccess
+	case t.canceled:
+		return ToolStatusCanceled
+	default:
+		return ToolStatusRunning
 	}
-	return t.status
 }
 
 // isSpinning returns true if the tool should show animation.
 func (t *baseToolMessageItem) isSpinning() bool {
-	if t.spinningFunc != nil {
-		return t.spinningFunc(SpinningState{
-			ToolCall: t.toolCall,
-			Result:   t.result,
-			Status:   t.status,
-		})
-	}
 	// Keep animating while waiting for the tool result too, so the
 	// "Waiting for tool response for Xs" label keeps ticking.
-	return (!t.toolCall.Finished || t.result == nil) && t.status != ToolStatusCanceled
-}
-
-// SetSpinningFunc sets a custom function to determine if the tool should spin.
-func (t *baseToolMessageItem) SetSpinningFunc(fn SpinningFunc) {
-	t.spinningFunc = fn
+	return (!t.toolCall.Finished || t.result == nil) && !t.canceled
 }
 
 // ToggleExpanded toggles the expanded state of the thinking box.
@@ -555,17 +487,12 @@ func (t *baseToolMessageItem) ToggleExpanded() bool {
 
 // Finished implements list.Item. A tool call is freezable once the
 // tool call itself is marked finished AND a result has been recorded
-// (or it has been canceled). Tools that override the spinning logic
-// via spinningFunc would short-circuit live ticks; we still gate
-// freezing on isSpinning to keep the contract conservative.
+// (or it has been canceled).
 func (t *baseToolMessageItem) Finished() bool {
 	if t.isSpinning() {
 		return false
 	}
-	if t.status == ToolStatusCanceled {
-		return true
-	}
-	return t.toolCall.Finished && t.result != nil
+	return t.canceled || (t.toolCall.Finished && t.result != nil)
 }
 
 // HandleMouseClick implements MouseClickable.
@@ -589,7 +516,7 @@ func (t *baseToolMessageItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (b
 // exactly as it would for a finished call still awaiting its result,
 // so a call with no output yet remains expandable.
 func pendingToolView(sty *styles.Styles, opts *ToolRenderOpts, name, detail string, width int) string {
-	header := strings.TrimSuffix(toolHeader(sty, opts.Status, name, width, opts, detail), " ")
+	header := strings.TrimSuffix(toolHeader(sty, name, width, opts, detail), " ")
 	if opts.Compact {
 		return header
 	}
@@ -621,7 +548,7 @@ func renderStandardTool(
 	if !ok {
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
-	header := toolHeader(sty, opts.Status, name, width, opts, toolParams...)
+	header := toolHeader(sty, name, width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -679,8 +606,6 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 		msg = toolErrorContent(sty, opts.Result, width)
 	case ToolStatusCanceled:
 		msg = sty.Tool.StateCancelled.Render("Canceled.")
-	case ToolStatusAwaitingPermission:
-		msg = sty.Tool.StateWaiting.Render("Requesting permission...")
 	case ToolStatusRunning:
 		msg = sty.Tool.StateWaiting.Render(waitingForToolMessage(opts))
 	default:
@@ -711,7 +636,7 @@ func toolErrorContent(sty *styles.Styles, result *message.ToolResult, width int)
 // selection. Unselected one-liners stay in the understated grey so
 // tool calls recede behind the chat messages; a selected call, and
 // every full render (which is the expanded view), carries its status
-// color - green while running or awaiting permission, blue when done,
+// color - green while running, blue when done,
 // red on failure, yellow for a partially failed run. Nested calls
 // (rendered inside a group) use the nested variants. Canceled stays
 // muted either way.
@@ -721,7 +646,7 @@ func toolNameStyle(sty *styles.Styles, status ToolStatus, nested, selected bool)
 		return sty.Tool.NameError
 	case ToolStatusCanceled:
 		return sty.Tool.NameCancelled
-	case ToolStatusRunning, ToolStatusAwaitingPermission:
+	case ToolStatusRunning:
 		if selected {
 			return sty.Tool.NamePendingSelected
 		}
@@ -804,11 +729,10 @@ func isHTTPURL(s string) bool {
 // toolHeader builds the tool header line: "ToolName params...", with
 // the name colored by status. The parameter text is always a single
 // line, ellipsis-truncated to the remaining width.
-func toolHeader(sty *styles.Styles, status ToolStatus, name string, width int, opts *ToolRenderOpts, params ...string) string {
-	nested := opts != nil && opts.Compact
+func toolHeader(sty *styles.Styles, name string, width int, opts *ToolRenderOpts, params ...string) string {
 	// The full render is the expanded view, so its name always says
 	// the status in color; the grey belongs to the collapsed rows.
-	toolName := toolNameStyle(sty, status, nested, true).Render(name)
+	toolName := toolNameStyle(sty, opts.Status, opts.Compact, true).Render(name)
 	prefix := toolName + " "
 	remainingWidth := width - lipgloss.Width(prefix)
 	return prefix + toolParamList(sty, params, remainingWidth)

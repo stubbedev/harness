@@ -55,7 +55,7 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		toolParams = append(toolParams, "took", common.FormatDuration(opts.Elapsed))
 	}
 
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
+	header := toolHeader(sty, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

@@ -88,8 +88,8 @@ func TestToolHeaderSingleLine(t *testing.T) {
 	cmd := "cd /home/stubbe/git/private/harness &&  echo \"one\" \n echo   two"
 
 	for _, expanded := range []bool{false, true} {
-		got := toolHeader(sty, ToolStatusSuccess, "Shell", 80,
-			&ToolRenderOpts{ExpandedContent: expanded}, cmd)
+		got := toolHeader(sty, "Shell", 80,
+			&ToolRenderOpts{Status: ToolStatusSuccess, ExpandedContent: expanded}, cmd)
 		require.NotContains(t, got, "\n", "header stays one line (expanded=%t):\n%q", expanded, got)
 		require.LessOrEqual(t, ansi.StringWidth(got), 80, "header fits its width (expanded=%t):\n%q", expanded, got)
 		require.NotContains(t, got, "  ", "no doubled spaces (expanded=%t):\n%q", expanded, got)
@@ -105,7 +105,7 @@ func TestToolHeaderLongParamEllipsizes(t *testing.T) {
 	sty := linkStyles()
 	long := strings.Repeat("a", 200)
 
-	got := toolHeader(sty, ToolStatusSuccess, "View", 60, nil, long)
+	got := toolHeader(sty, "View", 60, &ToolRenderOpts{Status: ToolStatusSuccess}, long)
 	require.NotContains(t, got, "\n", "header stays one line:\n%q", got)
 	require.LessOrEqual(t, ansi.StringWidth(got), 60, "header fits its width:\n%q", got)
 	require.Contains(t, got, "…", "long param ends in an ellipsis:\n%q", got)

@@ -149,9 +149,6 @@ func TestBaseToolMessageItem_MutatorsBumpVersion(t *testing.T) {
 	requireBump(t, "SetResult", v, func() {
 		item.SetResult(&message.ToolResult{ToolCallID: "tc1", Content: "ok"})
 	})
-	requireBump(t, "SetStatus", v, func() {
-		item.SetStatus(ToolStatusSuccess)
-	})
 	requireBump(t, "ToggleExpanded", v, func() {
 		if e, ok := item.(Expandable); ok {
 			e.ToggleExpanded()

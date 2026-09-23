@@ -38,7 +38,7 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "offset", fmt.Sprintf("%d", params.Offset))
 	}
 
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
+	header := toolHeader(sty, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -101,7 +101,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, file)
+	header := toolHeader(sty, ToolDisplayName(opts.ToolCall), width, opts, file)
 	if opts.Compact {
 		return header
 	}
@@ -161,7 +161,7 @@ func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "edits", fmt.Sprintf("%d", len(params.Edits)))
 	}
 
-	header := toolHeader(sty, opts.Status, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
+	header := toolHeader(sty, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
