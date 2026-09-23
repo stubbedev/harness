@@ -281,56 +281,35 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				p.APIKey = config.APIKey
 			}
 			if len(config.Models) > 0 {
-				models := []catalog.Model{}
+				// User models first so they win over catalog entries
+				// with the same ID.
+				var models []catalog.Model
 				seen := make(map[string]bool)
-
-				for _, model := range config.Models {
+				for _, model := range slices.Concat(config.Models, p.Models) {
 					if seen[model.ID] {
 						continue
 					}
 					seen[model.ID] = true
-					if model.Name == "" {
-						model.Name = model.ID
-					}
+					model.Name = cmp.Or(model.Name, model.ID)
 					models = append(models, model)
 				}
-				for _, model := range p.Models {
-					if seen[model.ID] {
-						continue
-					}
-					seen[model.ID] = true
-					if model.Name == "" {
-						model.Name = model.ID
-					}
-					models = append(models, model)
-				}
-
 				p.Models = models
 			}
 		}
 
-		headers := map[string]string{}
-		if len(p.DefaultHeaders) > 0 {
-			maps.Copy(headers, p.DefaultHeaders)
-		}
-		if len(config.ExtraHeaders) > 0 {
-			maps.Copy(headers, config.ExtraHeaders)
-		}
 		// Provider headers use the same error contract as MCP headers:
 		// a failing $(...) aborts the provider load with a clear
 		// message, and a header that resolves to the empty string
 		// (unset bare $VAR under lenient nounset, $(echo), or literal
 		// "") is dropped from the outgoing request.
-		for k, v := range headers {
-			resolved, err := resolver.ResolveValue(v)
-			if err != nil {
-				return fmt.Errorf("resolving provider %s header %q: %w", p.ID, k, err)
-			}
-			if resolved == "" {
-				delete(headers, k)
-				continue
-			}
-			headers[k] = resolved
+		headers := maps.Clone(p.DefaultHeaders)
+		if headers == nil {
+			headers = make(map[string]string)
+		}
+		maps.Copy(headers, config.ExtraHeaders)
+		headers, err := resolveHeaders(headers, resolver)
+		if err != nil {
+			return fmt.Errorf("resolving provider %s: %w", p.ID, err)
 		}
 		// Start from user config so all user fields survive without
 		// explicit copying. Overlay catwalk identity/endpoint fields
@@ -362,6 +341,16 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			prepared.SetupGitHubCopilot()
 		}
 
+		// skip leaves a provider unconfigured. Only one the user configured
+		// is worth a warning, and its entry is removed so it does not show
+		// as connected.
+		skip := func(msg string, args ...any) {
+			if configExists {
+				slog.Warn(msg, append([]any{"provider", p.ID}, args...)...)
+				c.Providers.Del(string(p.ID))
+			}
+		}
+
 		switch p.ID {
 		// Handle specific providers that require additional configuration
 		case catalog.InferenceProviderVertexAI:
@@ -370,10 +359,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				location = env.Get("VERTEXAI_LOCATION")
 			)
 			if project == "" || location == "" {
-				if configExists {
-					slog.Warn("Skipping Vertex AI provider due to missing credentials")
-					c.Providers.Del(string(p.ID))
-				}
+				skip("Skipping Vertex AI provider due to missing credentials")
 				continue
 			}
 			prepared.ExtraParams["project"] = project
@@ -381,10 +367,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		case catalog.InferenceProviderAzure:
 			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
 			if err != nil || endpoint == "" {
-				if configExists {
-					slog.Warn("Skipping Azure provider due to missing API endpoint", "provider", p.ID, "error", err)
-					c.Providers.Del(string(p.ID))
-				}
+				skip("Skipping Azure provider due to missing API endpoint", "error", err)
 				continue
 			}
 			prepared.BaseURL = endpoint
@@ -396,20 +379,14 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			// not, and then shows up as a connected provider.
 			key, err := resolver.ResolveValue(p.APIKey)
 			if (key == "" || err != nil) && !hasAWSCredentials(env) {
-				if configExists {
-					slog.Warn("Skipping Bedrock provider due to missing AWS credentials")
-					c.Providers.Del(string(p.ID))
-				}
+				skip("Skipping Bedrock provider due to missing AWS credentials")
 				continue
 			}
 		default:
 			// if the provider api or endpoint are missing we skip them
 			v, err := resolver.ResolveValue(p.APIKey)
 			if v == "" || err != nil {
-				if configExists {
-					slog.Warn("Skipping provider due to missing API key", "provider", p.ID)
-					c.Providers.Del(string(p.ID))
-				}
+				skip("Skipping provider due to missing API key")
 				continue
 			}
 		}
@@ -520,18 +497,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			continue
 		}
 
-		// Custom-provider headers share the MCP error contract; see
-		// the known-provider loop above.
-		for k, v := range providerConfig.ExtraHeaders {
-			resolved, err := resolver.ResolveValue(v)
-			if err != nil {
-				return fmt.Errorf("resolving provider %s header %q: %w", id, k, err)
-			}
-			if resolved == "" {
-				delete(providerConfig.ExtraHeaders, k)
-				continue
-			}
-			providerConfig.ExtraHeaders[k] = resolved
+		// Custom-provider headers share the MCP error contract; see the
+		// known-provider loop above. The resolved headers go into a fresh
+		// map, leaving the loaded templates untouched.
+		providerConfig.ExtraHeaders, err = resolveHeaders(providerConfig.ExtraHeaders, resolver)
+		if err != nil {
+			return fmt.Errorf("resolving provider %s: %w", id, err)
 		}
 
 		c.Providers.Set(id, providerConfig)
@@ -597,12 +568,7 @@ func (c *Config) migrateLegacyProviderIDs(knownProviders []catalog.Provider) {
 // deterministic ordering so that vars referencing other vars via the
 // value resolver produce consistent results.
 func (c *Config) applyEnv(resolver VariableResolver) {
-	keys := make([]string, 0, len(c.Env))
-	for k := range c.Env {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(c.Env)) {
 		resolved, err := resolver.ResolveValue(c.Env[k])
 		if err != nil {
 			slog.Warn("Skipping env var due to resolution failure.", "key", k, "value", c.Env[k], "error", err)
