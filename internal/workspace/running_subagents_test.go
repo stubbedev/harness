@@ -35,10 +35,6 @@ func (s *stubSessionService) Create(_ context.Context, title string) (session.Se
 	return session.Session{ID: "new", Title: title}, nil
 }
 
-func (s *stubSessionService) CreateTitleSession(context.Context, string) (session.Session, error) {
-	return session.Session{}, nil
-}
-
 func (s *stubSessionService) CreateTaskSession(context.Context, string, string, string) (session.Session, error) {
 	return session.Session{}, nil
 }
