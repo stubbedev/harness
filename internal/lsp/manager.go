@@ -310,7 +310,7 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 	if _, err := client.Initialize(initCtx, s.cfg.WorkingDir()); err != nil {
 		slog.Error("LSP client initialization failed", "name", name, "error", err)
 		client.Shutdown()
-		s.clients.CompareAndDelete(name, client)
+		csync.CompareAndDelete(s.clients, name, client)
 		return
 	}
 
