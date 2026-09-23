@@ -542,73 +542,80 @@ func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
 	})
 }
 
-// SetProviderAPIKey sets the API key for a provider and persists it.
+// SetProviderAPIKey persists a provider credential: a plain API key string
+// or an *oauth.Token from an interactive login. Any other value is an
+// error. It dispatches to SetProviderKey or SetProviderOAuthToken, which
+// callers holding a concrete type should use directly.
 func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
-	var providerConfig ProviderConfig
-	var exists bool
-	var setKeyOrToken func()
-
 	switch v := apiKey.(type) {
 	case string:
-		if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), v); err != nil {
-			return fmt.Errorf("failed to save api key to config file: %w", err)
-		}
-		setKeyOrToken = func() { providerConfig.APIKey = v }
+		return s.SetProviderKey(scope, providerID, v)
 	case *oauth.Token:
-		// Hold the refresh lock across the write so a peer's in-flight
-		// token exchange cannot land on top of a credential the user just
-		// obtained interactively — which would silently invalidate the
-		// login they only just completed.
-		if err := s.withRefreshLock(providerID, func() error {
-			return s.SetConfigFields(scope, map[string]any{
-				fmt.Sprintf("providers.%s.api_key", providerID): v.AccessToken,
-				fmt.Sprintf("providers.%s.oauth", providerID):   v,
-			})
-		}); err != nil {
-			return err
-		}
-		setKeyOrToken = func() {
-			providerConfig.APIKey = v.AccessToken
-			providerConfig.OAuthToken = v
-			switch providerID {
-			case string(catalog.InferenceProviderCopilot):
-				providerConfig.SetupGitHubCopilot()
-			}
-		}
+		return s.SetProviderOAuthToken(scope, providerID, v)
+	default:
+		return fmt.Errorf("unsupported credential type %T for provider %s", apiKey, providerID)
 	}
+}
 
-	cfg := s.Config()
-	providerConfig, exists = cfg.Providers.Get(providerID)
-	if exists {
-		setKeyOrToken()
-		cfg.Providers.Set(providerID, providerConfig)
-	} else {
-		var foundProvider *catalog.Provider
-		for _, p := range s.knownProviders {
-			if string(p.ID) == providerID {
-				foundProvider = &p
-				break
-			}
-		}
-
-		if foundProvider != nil {
-			providerConfig = ProviderConfig{
-				ID:           providerID,
-				Name:         foundProvider.Name,
-				BaseURL:      foundProvider.APIEndpoint,
-				Type:         foundProvider.Type,
-				Disable:      false,
-				ExtraHeaders: make(map[string]string),
-				ExtraParams:  make(map[string]string),
-				Models:       foundProvider.Models,
-			}
-			setKeyOrToken()
-		} else {
-			return fmt.Errorf("provider with ID %s not found in known providers", providerID)
-		}
-		cfg.Providers.Set(providerID, providerConfig)
+// SetProviderKey sets the API key for a provider and persists it.
+func (s *ConfigStore) SetProviderKey(scope Scope, providerID, apiKey string) error {
+	providerConfig, err := s.providerConfigFor(providerID)
+	if err != nil {
+		return err
 	}
+	if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), apiKey); err != nil {
+		return fmt.Errorf("failed to save api key to config file: %w", err)
+	}
+	providerConfig.APIKey = apiKey
+	s.Config().Providers.Set(providerID, providerConfig)
 	return nil
+}
+
+// SetProviderOAuthToken sets the OAuth token for a provider and persists it.
+func (s *ConfigStore) SetProviderOAuthToken(scope Scope, providerID string, token *oauth.Token) error {
+	if token == nil {
+		return fmt.Errorf("no OAuth token for provider %s", providerID)
+	}
+	providerConfig, err := s.providerConfigFor(providerID)
+	if err != nil {
+		return err
+	}
+	// Hold the refresh lock across the write so a peer's in-flight token
+	// exchange cannot land on top of a credential the user just obtained
+	// interactively — which would silently invalidate the login they only
+	// just completed.
+	if err := s.withRefreshLock(providerID, func() error {
+		return s.SetConfigFields(scope, map[string]any{
+			fmt.Sprintf("providers.%s.api_key", providerID): token.AccessToken,
+			fmt.Sprintf("providers.%s.oauth", providerID):   token,
+		})
+	}); err != nil {
+		return err
+	}
+	s.applyToken(providerConfig, token, providerID)
+	return nil
+}
+
+// providerConfigFor returns the configured provider, or a fresh config
+// built from the catalog entry when the provider is known but not yet
+// configured.
+func (s *ConfigStore) providerConfigFor(providerID string) (ProviderConfig, error) {
+	if providerConfig, ok := s.Config().Providers.Get(providerID); ok {
+		return providerConfig, nil
+	}
+	known := KnownProviderByID(s.KnownProviders(), providerID)
+	if known == nil {
+		return ProviderConfig{}, fmt.Errorf("provider with ID %s not found in known providers", providerID)
+	}
+	return ProviderConfig{
+		ID:           providerID,
+		Name:         known.Name,
+		BaseURL:      known.APIEndpoint,
+		Type:         known.Type,
+		ExtraHeaders: make(map[string]string),
+		ExtraParams:  make(map[string]string),
+		Models:       known.Models,
+	}, nil
 }
 
 // RefreshOAuthToken refreshes the OAuth token for the given provider.
@@ -667,7 +674,8 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		// would risk reusing a rotated refresh token.
 		if diskToken := s.usableDiskToken(scope, providerID, entryToken); diskToken != nil {
 			slog.Warn("Refresh lock unavailable; adopting token from disk", "provider", providerID, "error", lockErr)
-			return s.applyToken(providerConfig, diskToken, providerID)
+			s.applyToken(providerConfig, diskToken, providerID)
+			return nil
 		}
 		return fmt.Errorf("acquire refresh lock for provider %s: %w", providerID, lockErr)
 	}
@@ -682,7 +690,8 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	if diskToken := s.newerDiskToken(scope, providerID, entryToken); diskToken != nil {
 		if !diskToken.IsExpired() {
 			slog.Info("Adopting token refreshed by another session", "provider", providerID)
-			return s.applyToken(providerConfig, diskToken, providerID)
+			s.applyToken(providerConfig, diskToken, providerID)
+			return nil
 		}
 		slog.Info("Exchanging with refresh token rotated by another session", "provider", providerID)
 		entryToken = diskToken
@@ -698,7 +707,8 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 		if diskToken := s.newerDiskToken(scope, providerID, entryToken); diskToken != nil {
 			if !diskToken.IsExpired() {
 				slog.Info("Adopting token refreshed by another session after exchange failure", "provider", providerID)
-				return s.applyToken(providerConfig, diskToken, providerID)
+				s.applyToken(providerConfig, diskToken, providerID)
+				return nil
 			}
 			slog.Info("Retrying exchange with refresh token rotated by another session", "provider", providerID)
 			refreshedToken, refreshErr = s.exchange(ctx, providerID, diskToken.RefreshToken)
@@ -709,9 +719,7 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	}
 
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
-	if err := s.applyToken(providerConfig, refreshedToken, providerID); err != nil {
-		return err
-	}
+	s.applyToken(providerConfig, refreshedToken, providerID)
 
 	if err := s.SetConfigFields(scope, map[string]any{
 		fmt.Sprintf("providers.%s.api_key", providerID): refreshedToken.AccessToken,
@@ -875,14 +883,13 @@ func (s *ConfigStore) refreshLockPath(providerID string) string {
 }
 
 // applyToken updates the in-memory provider config with the given token.
-func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) error {
+func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) {
 	providerConfig.OAuthToken = token
 	providerConfig.APIKey = token.AccessToken
 	if providerID == string(catalog.InferenceProviderCopilot) {
 		providerConfig.SetupGitHubCopilot()
 	}
 	s.Config().Providers.Set(providerID, providerConfig)
-	return nil
 }
 
 // loadTokenFromDisk reads the OAuth token for the given provider from the
@@ -999,15 +1006,9 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 		return nil, false
 	}
 
-	if err := s.SetProviderAPIKey(ScopeGlobal, string(catalog.InferenceProviderCopilot), token); err != nil {
+	if err := s.SetProviderOAuthToken(ScopeGlobal, string(catalog.InferenceProviderCopilot), token); err != nil {
+		slog.Error("Unable to save GitHub Copilot token", "error", err)
 		return token, false
-	}
-
-	if err := s.SetConfigFields(ScopeGlobal, map[string]any{
-		"providers.copilot.api_key": token.AccessToken,
-		"providers.copilot.oauth":   token,
-	}); err != nil {
-		slog.Error("Unable to save GitHub Copilot token to disk", "error", err)
 	}
 
 	slog.Info("GitHub Copilot successfully imported")

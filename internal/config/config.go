@@ -189,8 +189,16 @@ func (c *ProviderConfig) ToProvider() catalog.Provider {
 	return provider
 }
 
+// SetupGitHubCopilot adds the headers Copilot requires. It writes into a
+// copy: ProviderConfig is copied by value, so the map may be shared with a
+// published Config that request code is reading concurrently.
 func (c *ProviderConfig) SetupGitHubCopilot() {
-	maps.Copy(c.ExtraHeaders, copilot.Headers())
+	headers := maps.Clone(c.ExtraHeaders)
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	maps.Copy(headers, copilot.Headers())
+	c.ExtraHeaders = headers
 }
 
 type MCPType string
