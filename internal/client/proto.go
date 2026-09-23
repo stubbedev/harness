@@ -671,17 +671,13 @@ func jsonBody(v any) *bytes.Buffer {
 	return b
 }
 
-// SaveSession updates a session in a workspace, returning a proto type.
-func (c *Client) SaveSession(ctx context.Context, id string, sess proto.Session) (*proto.Session, error) {
-	rsp, err := c.put(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s", id, sess.ID), nil, jsonBody(sess), http.Header{"Content-Type": []string{"application/json"}})
+// RenameSession changes only the title of a session in a workspace.
+func (c *Client) RenameSession(ctx context.Context, id, sessionID, title string) error {
+	rsp, err := c.put(ctx, fmt.Sprintf("/workspaces/%s/sessions/%s", id, sessionID), nil, jsonBody(proto.SessionRenameRequest{Title: title}), http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
-		return nil, fmt.Errorf("failed to save session: %w", err)
+		return fmt.Errorf("failed to rename session: %w", err)
 	}
-	var saved proto.Session
-	if err := decodeJSON(rsp, &saved, "failed to save session", "session"); err != nil {
-		return nil, err
-	}
-	return &saved, nil
+	return okOrError(rsp, "failed to rename session")
 }
 
 // DeleteSession deletes a session from a workspace.

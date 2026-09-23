@@ -93,14 +93,17 @@ func (b *Backend) ListSessionHistory(ctx context.Context, workspaceID, sessionID
 	return ws.ListSessionHistory(ctx, sessionID)
 }
 
-// SaveSession updates a session in the given workspace.
-func (b *Backend) SaveSession(ctx context.Context, workspaceID string, sess session.Session) (session.Session, error) {
+// RenameSession changes only the title of a session in the given
+// workspace and returns the stored session.
+func (b *Backend) RenameSession(ctx context.Context, workspaceID, sessionID, title string) (session.Session, error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return session.Session{}, err
 	}
-
-	return ws.Sessions.Save(ctx, sess)
+	if err := ws.Sessions.Rename(ctx, sessionID, title); err != nil {
+		return session.Session{}, err
+	}
+	return ws.Sessions.Get(ctx, sessionID)
 }
 
 // DeleteSession deletes a session from the given workspace, along

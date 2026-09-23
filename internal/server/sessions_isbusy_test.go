@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -332,4 +333,44 @@ func TestSessionGetIncludesAttachedClients(t *testing.T) {
 	var got proto.Session
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, 1, got.AttachedClients)
+}
+
+// Rename updates the stored title in place so the rename handler test
+// can check that nothing but the title changes.
+func (s *stubSessions) Rename(_ context.Context, id, title string) error {
+	for i := range s.all {
+		if s.all[i].ID == id {
+			s.all[i].Title = title
+			return nil
+		}
+	}
+	return errors.New("not found")
+}
+
+// TestSessionRenameKeepsStoredFields verifies the rename endpoint
+// writes only the title. It used to decode the body into a full
+// session and save it, which zeroed token counts and the summary
+// pointer because the wire names never matched the untagged fields.
+func TestSessionRenameKeepsStoredFields(t *testing.T) {
+	t.Parallel()
+	c, ws := buildMultiSessionWorkspace(t, "S1")
+	stub := ws.App.Sessions.(*stubSessions)
+	stub.all[0].PromptTokens = 42
+	stub.all[0].SummaryMessageID = "sum"
+
+	body, err := json.Marshal(proto.SessionRenameRequest{Title: "renamed"})
+	require.NoError(t, err)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPut,
+		"/v1/workspaces/"+ws.ID+"/sessions/S1", bytes.NewReader(body))
+	req.SetPathValue("id", ws.ID)
+	req.SetPathValue("sid", "S1")
+	rec := httptest.NewRecorder()
+	c.handlePutWorkspaceSession(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got proto.Session
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, "renamed", got.Title)
+	require.Equal(t, int64(42), got.PromptTokens)
+	require.Equal(t, "sum", got.SummaryMessageID)
 }

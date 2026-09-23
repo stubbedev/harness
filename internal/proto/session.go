@@ -29,6 +29,13 @@ type Session struct {
 	AttachedClients  int     `json:"attached_clients"`
 }
 
+// SessionRenameRequest renames a session. Only the title changes; every
+// other stored field (usage, summary pointer, compaction state) is left
+// alone.
+type SessionRenameRequest struct {
+	Title string `json:"title"`
+}
+
 // Todo represents a single todo entry on a session in the proto layer.
 type Todo struct {
 	Content    string `json:"content"`

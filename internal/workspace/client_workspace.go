@@ -167,12 +167,8 @@ func (w *ClientWorkspace) ListSessions(ctx context.Context) ([]session.Session, 
 	return sessions, nil
 }
 
-func (w *ClientWorkspace) SaveSession(ctx context.Context, sess session.Session) (session.Session, error) {
-	saved, err := w.client.SaveSession(ctx, w.workspaceID(), sessionToProto(sess))
-	if err != nil {
-		return session.Session{}, err
-	}
-	return protoToSession(*saved), nil
+func (w *ClientWorkspace) RenameSession(ctx context.Context, sessionID, title string) error {
+	return w.client.RenameSession(ctx, w.workspaceID(), sessionID, title)
 }
 
 func (w *ClientWorkspace) DeleteSession(ctx context.Context, sessionID string) error {

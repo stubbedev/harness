@@ -150,7 +150,9 @@ type Workspace interface {
 	CreateSession(ctx context.Context, title string) (session.Session, error)
 	GetSession(ctx context.Context, sessionID string) (session.Session, error)
 	ListSessions(ctx context.Context) ([]session.Session, error)
-	SaveSession(ctx context.Context, sess session.Session) (session.Session, error)
+	// RenameSession changes only the session's title; usage, summary
+	// and compaction fields are never rewritten from a client copy.
+	RenameSession(ctx context.Context, sessionID, title string) error
 	DeleteSession(ctx context.Context, sessionID string) error
 	CreateAgentToolSessionID(messageID, toolCallID string) string
 	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)

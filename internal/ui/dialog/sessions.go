@@ -399,7 +399,7 @@ func (s *Session) confirmRenameSession() Action {
 	session := sessionItem.Session
 	session.Title = newTitle
 	s.updateSession(session)
-	return ActionCmd{s.updateSessionCmd(session)}
+	return ActionCmd{s.renameSessionCmd(session.ID, newTitle)}
 }
 
 func (s *Session) updateSession(session session.Session) {
@@ -411,10 +411,9 @@ func (s *Session) updateSession(session session.Session) {
 	}
 }
 
-func (s *Session) updateSessionCmd(session session.Session) tea.Cmd {
+func (s *Session) renameSessionCmd(id, title string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := s.com.Workspace.SaveSession(context.TODO(), session)
-		if err != nil {
+		if err := s.com.Workspace.RenameSession(context.TODO(), id, title); err != nil {
 			return util.NewErrorMsg(err)
 		}
 		return nil

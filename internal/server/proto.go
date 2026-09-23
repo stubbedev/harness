@@ -523,15 +523,17 @@ func (c *controllerV1) handleGetWorkspaceSessionMessages(w http.ResponseWriter, 
 	jsonEncode(w, messagesToProto(messages))
 }
 
-// handlePutWorkspaceSession updates a session.
+// handlePutWorkspaceSession renames a session. Only the title is
+// written; the stored usage, summary and compaction fields are left
+// untouched.
 //
-//	@Summary		Update session
+//	@Summary		Rename session
 //	@Tags			sessions
 //	@Accept			json
 //	@Produce		json
-//	@Param			id		path		string			true	"Workspace ID"
-//	@Param			sid		path		string			true	"Session ID"
-//	@Param			request	body		proto.Session	true	"Updated session"
+//	@Param			id		path		string						true	"Workspace ID"
+//	@Param			sid		path		string						true	"Session ID"
+//	@Param			request	body		proto.SessionRenameRequest	true	"New title"
 //	@Success		200		{object}	proto.Session
 //	@Failure		400		{object}	proto.Error
 //	@Failure		404		{object}	proto.Error
@@ -539,15 +541,16 @@ func (c *controllerV1) handleGetWorkspaceSessionMessages(w http.ResponseWriter, 
 //	@Router			/workspaces/{id}/sessions/{sid} [put]
 func (c *controllerV1) handlePutWorkspaceSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	sid := r.PathValue("sid")
 
-	var sess session.Session
-	if err := json.NewDecoder(r.Body).Decode(&sess); err != nil {
+	var req proto.SessionRenameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		c.server.logError(r, "Failed to decode request", "error", err)
 		jsonError(w, http.StatusBadRequest, "failed to decode request")
 		return
 	}
 
-	saved, err := c.backend.SaveSession(r.Context(), id, sess)
+	saved, err := c.backend.RenameSession(r.Context(), id, sid, req.Title)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
