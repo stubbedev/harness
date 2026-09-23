@@ -28,18 +28,6 @@ func NewMapFrom[K comparable, V any](m map[K]V) *Map[K, V] {
 	}
 }
 
-// NewLazyMap creates a new lazy-loaded map. The provided load function is
-// executed in a separate goroutine to populate the map.
-func NewLazyMap[K comparable, V any](load func() map[K]V) *Map[K, V] {
-	m := &Map[K, V]{}
-	m.mu.Lock()
-	go func() {
-		defer m.mu.Unlock()
-		m.inner = load()
-	}()
-	return m
-}
-
 // Reset replaces the inner map with the new one.
 func (m *Map[K, V]) Reset(input map[K]V) {
 	m.mu.Lock()
@@ -61,19 +49,18 @@ func (m *Map[K, V]) Del(key K) {
 	delete(m.inner, key)
 }
 
-// CompareAndDelete deletes the key only if the current value matches the
-// expected pointer. Returns true if the deletion occurred. This is the
-// ABA-safe cleanup primitive: it prevents a deferred cleanup from removing
-// a value that was replaced by a newer writer in the window between the
-// explicit Del and the deferred Del.
-func (m *Map[K, V]) CompareAndDelete(key K, expected any) bool {
+// CompareAndDelete deletes key from m only if its current value equals
+// expected. Returns true if the deletion occurred. This is the ABA-safe
+// cleanup primitive: it prevents a deferred cleanup from removing a value
+// that was replaced by a newer writer in the window between the explicit
+// Del and the deferred Del. It is a function rather than a method so V
+// can be constrained to comparable types; comparing any other value
+// would panic at run time.
+func CompareAndDelete[K, V comparable](m *Map[K, V], key K, expected V) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	current, ok := m.inner[key]
-	if !ok {
-		return false
-	}
-	if any(current) != expected {
+	if !ok || current != expected {
 		return false
 	}
 	delete(m.inner, key)
@@ -97,6 +84,11 @@ func (m *Map[K, V]) Len() int {
 
 // GetOrSet gets and returns the key if it exists, otherwise, it executes the
 // given function, set its return value for the given key, and returns it.
+//
+// It is not atomic: fn runs without the lock held, so concurrent callers
+// missing the same key may each run fn, and the last write wins. That
+// suits caches of idempotent computations, where it keeps a slow fn from
+// blocking every other reader; it does not suit fn with side effects.
 func (m *Map[K, V]) GetOrSet(key K, fn func() V) V {
 	got, ok := m.Get(key)
 	if ok {

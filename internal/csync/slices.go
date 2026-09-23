@@ -5,34 +5,6 @@ import (
 	"sync"
 )
 
-// LazySlice is a thread-safe lazy-loaded slice.
-type LazySlice[K any] struct {
-	inner []K
-	wg    sync.WaitGroup
-}
-
-// NewLazySlice creates a new slice and runs the [load] function in a goroutine
-// to populate it.
-func NewLazySlice[K any](load func() []K) *LazySlice[K] {
-	s := &LazySlice[K]{}
-	s.wg.Go(func() {
-		s.inner = load()
-	})
-	return s
-}
-
-// Seq returns an iterator that yields elements from the slice.
-func (s *LazySlice[K]) Seq() iter.Seq[K] {
-	s.wg.Wait()
-	return func(yield func(K) bool) {
-		for _, v := range s.inner {
-			if !yield(v) {
-				return
-			}
-		}
-	}
-}
-
 // Slice is a thread-safe slice implementation that provides concurrent access.
 type Slice[T any] struct {
 	inner []T

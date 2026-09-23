@@ -846,7 +846,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// by a newer run. Without this guard, the deferred Del fires after a
 	// concurrent run registers in the completion window, silently wiping
 	// the new run's cancel and breaking cancellation.
-	defer a.activeRequests.CompareAndDelete(call.SessionID, ac)
+	defer csync.CompareAndDelete(a.activeRequests, call.SessionID, ac)
 
 	// Copy mutable fields under lock to avoid races with SetTools/SetModels.
 	agentTools := a.tools.Copy()
@@ -2094,7 +2094,7 @@ func (a *sessionAgent) summarize(ctx context.Context, sessionID string, opts fan
 	genCtx, cancel := context.WithCancel(ctx)
 	ac := &activeCancel{cancel: cancel}
 	a.activeRequests.Set(sessionID, ac)
-	defer a.activeRequests.CompareAndDelete(sessionID, ac)
+	defer csync.CompareAndDelete(a.activeRequests, sessionID, ac)
 	defer cancel()
 
 	if _, err := a.maintainContext(genCtx, sessionID, opts, onAuthRefresh, trigger, instructions, true); err != nil {
