@@ -126,3 +126,23 @@ func TestCoderPrompt_OmitsMemoryWhenDisabled(t *testing.T) {
 
 	require.NotContains(t, systemPrompt, "# Memory")
 }
+
+// TestCoderPrompt_CodeConventionsSteerReuseAndInvariants verifies the code
+// conventions block carries the reuse-before-reimplementing and
+// correctness-by-construction steering: the standing counter to the usual
+// drift toward localized reimplementations of logic that already exists.
+func TestCoderPrompt_CodeConventionsSteerReuseAndInvariants(t *testing.T) {
+	t.Parallel()
+
+	p, err := coderPrompt()
+	require.NoError(t, err)
+
+	store := newPromptTestStore(t)
+
+	systemPrompt, err := p.Build(context.Background(), "test-provider", "test-model", store)
+	require.NoError(t, err)
+
+	require.Contains(t, systemPrompt, "Write DRY code and make it correct by construction")
+	require.Contains(t, systemPrompt, "search the codebase for one that already exists")
+	require.Contains(t, systemPrompt, "make wrong states unrepresentable")
+}

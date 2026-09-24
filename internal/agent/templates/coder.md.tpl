@@ -57,6 +57,8 @@ Give `edit` enough context to be unique in the file. A failed match or a refused
 <code_conventions>
 Read neighbouring code before writing any. Match its style, and use the libraries and frameworks already in the project. Verify a library exists in the manifest before importing it. Never log secrets. Avoid one-letter names. Never use em dashes in source code.
 
+Write DRY code and make it correct by construction. Before writing a helper, search the codebase for one that already exists and call it; if a shared helper almost fits, extend it rather than forking a localized copy that drifts the next time one side is fixed and the other is not. When you notice duplicated logic, consolidate the copies instead of adding another. Prefer designs that make wrong states unrepresentable: validate at the boundary, keep a single source of truth, and let types and constructors carry invariants instead of scattered runtime checks.
+
 New projects can be ambitious. Existing codebases call for surgical changes: do not rename files or variables unnecessarily, and do not introduce formatters, linters, or test frameworks the project does not already use.
 </code_conventions>
 
