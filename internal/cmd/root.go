@@ -186,19 +186,27 @@ const defaultVersionTemplate = `{{with .DisplayName}}{{printf "%s " .}}{{end}}{{
 `
 
 func Execute() {
-	// Panics that escape a command (anything outside the TUI's own
-	// recovery, which reports through the same package) get one last
-	// chance to leave a report before the process dies.
-	defer reportCLIPanic()
-
 	// config.Load uses slog internally during provider resolution, but
 	// the file-based logger isn't set up until after config is loaded
 	// (because the log path depends on the data directory from config).
 	// Buffer that window instead of letting it leak to stderr: the
 	// records are replayed into the log file once harnesslog.Setup
 	// installs the real handler, so a provider that was skipped or
-	// migrated at load time is still explained afterwards.
+	// migrated at load time is still explained afterwards. Crash
+	// collection logs through it too.
 	slog.SetDefault(slog.New(harnesslog.Early()))
+
+	// A panic nobody recovers, in any goroutine, and fatal runtime errors
+	// leave their trace in the report directory (see crash.WatchFatal).
+	// os.Exit skips deferred calls, so every exit below ends the watch
+	// itself.
+	stopFatal := crash.WatchFatal()
+	defer stopFatal()
+
+	// Panics that escape a command (anything outside the TUI's own
+	// recovery, which reports through the same package) get one last
+	// chance to leave a report before the process dies.
+	defer reportCLIPanic(stopFatal)
 
 	// NOTE: very hacky: we create a colorprofile writer with STDOUT, then make
 	// it forward to a bytes.Buffer, write the colored logo mark to it, and then
@@ -220,13 +228,16 @@ func Execute() {
 		fang.WithVersion(version.Version),
 		fang.WithNotifySignal(os.Interrupt),
 	); err != nil {
+		stopFatal()
 		os.Exit(1)
 	}
 }
 
 // reportCLIPanic is the last-chance recover in Execute: it persists a
 // report for a panic that escaped a command before the process dies.
-func reportCLIPanic() {
+// stopFatal ends the fatal-crash watch: the panic has its report, and
+// the process exits without running Execute's defers.
+func reportCLIPanic(stopFatal func()) {
 	r := recover()
 	if r == nil {
 		return
@@ -237,6 +248,7 @@ func reportCLIPanic() {
 	} else {
 		fmt.Fprintf(os.Stderr, "Harness panicked; no report could be written to %s\n", crash.Dir())
 	}
+	stopFatal()
 	os.Exit(1)
 }
 

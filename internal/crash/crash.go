@@ -56,7 +56,7 @@ func Dir() string {
 // string when the report could not be written. Call it from a recovering
 // defer so the stack still contains the panicking frames.
 func Capture(component string, r any) string {
-	return write(component, fmt.Sprint(r), string(debug.Stack()))
+	return write(time.Now(), component, fmt.Sprint(r), string(debug.Stack()))
 }
 
 // CaptureText writes a report for a panic known only by what was
@@ -64,7 +64,7 @@ func Capture(component string, r any) string {
 // recovery already formatted - and returns its path, or an empty string
 // when it could not be written.
 func CaptureText(component, panicValue, stack string) string {
-	return write(component, panicValue, stack)
+	return write(time.Now(), component, panicValue, stack)
 }
 
 // Written reports how many reports this process has written so far.
@@ -72,11 +72,9 @@ func Written() uint64 {
 	return written.Load()
 }
 
-// write persists one report and returns its path, or an empty string
-// when it could not be written.
-func write(component, panicValue, stack string) string {
-	now := time.Now()
-
+// write persists one report of a crash at now and returns its path, or
+// an empty string when it could not be written.
+func write(now time.Time, component, panicValue, stack string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "time: %s\n", now.Format(reportTimeFormat))
 	fmt.Fprintf(&b, "component: %s\n", component)
