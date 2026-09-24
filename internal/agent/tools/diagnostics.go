@@ -19,13 +19,6 @@ type DiagnosticsParams struct {
 
 const DiagnosticsToolName = "lsp_diagnostics"
 
-// sweepGrace is how long the sweep before a model step waits for a language
-// server that is still answering for a recent change. It is deliberately
-// short: tool calls never wait on a server — they hand the file over and
-// return — and a server slower than this grace is reported by the sweep after
-// the next step rather than held for here.
-const sweepGrace = 250 * time.Millisecond
-
 // maxReportedDiagnostics caps each section of a report. A project that is
 // badly broken has hundreds of diagnostics, and spending the context window on
 // all of them buys nothing the count does not already say.
@@ -60,8 +53,16 @@ func diagnosticsAction(lspManager *lsp.Manager) func(context.Context, Diagnostic
 // before each model step and the analysis of an edit lands as soon as it is
 // ready, without any edit having waited for it. It returns "" when there is
 // nothing new to say, which is the usual case.
+//
+// It does not wait for a server still answering. A settle takes at least
+// the server's first publish plus the quiet window that ends it (see
+// lsp.Client.WaitForDiagnostics), so any grace short enough to be worth
+// holding a model step for expires before the settle can end - the sweep
+// right after an edit step would pay the whole grace and then, the server
+// still settling, report nothing. What is still in flight is reported by
+// the next sweep instead.
 func DiagnosticsSweep(ctx context.Context, manager *lsp.Manager) string {
-	return reportDiagnostics(ctx, manager, sweepGrace)
+	return reportDiagnosticsNow(ctx, manager)
 }
 
 // DiagnosticsFinalSweep is the turn-end variant of [DiagnosticsSweep]: it
@@ -69,7 +70,10 @@ func DiagnosticsSweep(ctx context.Context, manager *lsp.Manager) string {
 // persist when there is anything to say. It exists because the step sweep
 // runs before a model step — a fix that lands on a turn's final step would
 // otherwise never be reported, and the transcript's last word on the file
-// would stay an error the user has to go and disprove themselves.
+// would stay an error the user has to go and disprove themselves. Like the
+// step sweep it does not wait: an analysis still in flight when the turn
+// ends is reported by the first sweep of the next turn, rather than holding
+// the turn open for it.
 //
 // persist runs only for a non-empty report and only once. The caller is
 // expected to append the note to the session verbatim: an append-only row
