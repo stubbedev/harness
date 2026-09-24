@@ -198,3 +198,11 @@ func (m *UI) isAtEditorEnd() bool {
 	info := m.textarea.LineInfo()
 	return info.CharOffset >= info.CharWidth-1 || info.CharWidth == 0
 }
+
+// isAtEditorTopRow returns true if the cursor is on the input's top
+// display row, counting wrapped rows of the first line individually.
+// There, an upward selection cannot extend any further, so shift+up
+// hands focus to the region above instead.
+func (m *UI) isAtEditorTopRow() bool {
+	return m.textarea.Line() == 0 && m.textarea.LineInfo().RowOffset == 0
+}

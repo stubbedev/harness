@@ -472,6 +472,8 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `editor.open_editor` | `ctrl+o` |
 | `editor.paste` | `ctrl+v`, `ctrl+shift+v` |
 | `editor.select_all` | `ctrl+shift+a` |
+| `editor.select_line_down` | `shift+down` |
+| `editor.select_line_up` | `shift+up` |
 | `editor.send_message` | `enter` |
 | `editor.shell_mode` | `!` |
 | `editor.skills` | `/` |

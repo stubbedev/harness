@@ -45,6 +45,12 @@ type KeyMap struct {
 		// SelectAll selects all text in the textarea.
 		SelectAll key.Binding
 
+		// SelectLineUp and SelectLineDown extend the textarea selection
+		// one display row at a time. Shift+up also leaves the editor from
+		// the top row, through the chat up-one-item binding.
+		SelectLineUp   key.Binding
+		SelectLineDown key.Binding
+
 		// Paste pastes the clipboard into the textarea: an image
 		// becomes an inline attachment token, text flows through the
 		// text paste pipeline.
@@ -343,6 +349,14 @@ func DefaultKeyMap() KeyMap {
 	km.Editor.SelectAll = key.NewBinding(
 		key.WithKeys("ctrl+shift+a"),
 		key.WithHelp("ctrl+shift+a", "select all"),
+	)
+	km.Editor.SelectLineUp = key.NewBinding(
+		key.WithKeys("shift+up"),
+		key.WithHelp("shift+↑", "select up"),
+	)
+	km.Editor.SelectLineDown = key.NewBinding(
+		key.WithKeys("shift+down"),
+		key.WithHelp("shift+↓", "select down"),
 	)
 	km.Editor.LineStart = key.NewBinding(
 		key.WithKeys("home", "ctrl+a"),
@@ -720,6 +734,8 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"editor.copy_selection":         &km.Editor.CopySelection,
 		"editor.cut_selection":          &km.Editor.CutSelection,
 		"editor.select_all":             &km.Editor.SelectAll,
+		"editor.select_line_up":         &km.Editor.SelectLineUp,
+		"editor.select_line_down":       &km.Editor.SelectLineDown,
 		"editor.paste":                  &km.Editor.Paste,
 		"editor.delete_word_backward":   &km.Editor.DeleteWordBackward,
 		"editor.line_start":             &km.Editor.LineStart,

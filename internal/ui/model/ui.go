@@ -510,6 +510,10 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// to "ctrl+shift+a" instead (line-start is also available via "home").
 	ta.KeyMap.LineStart = keyMap.Editor.LineStart
 	ta.KeyMap.SelectAll = keyMap.Editor.SelectAll
+	// Line selection flows through the rebindable keymap too; shift+up
+	// still leaves the editor from the top row via Chat.UpOneItem.
+	ta.KeyMap.SelectLineUp = keyMap.Editor.SelectLineUp
+	ta.KeyMap.SelectLineDown = keyMap.Editor.SelectLineDown
 	// Word deletion flows through the rebindable keymap like every
 	// other editor binding.
 	ta.KeyMap.DeleteWordBackward = keyMap.Editor.DeleteWordBackward
@@ -2800,10 +2804,12 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd := m.focusAboveEditor(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-			case key.Matches(msg, m.keyMap.Chat.UpOneItem) && msg.String() == "shift+up":
-				// Shift+up leaves the editor the same way shift+tab does.
-				// Only the arrow key qualifies: the binding's letter alias
-				// (K) must stay typeable.
+			case key.Matches(msg, m.keyMap.Chat.UpOneItem) && msg.String() == "shift+up" && m.isAtEditorTopRow():
+				// Shift+up extends a selection upward while there are
+				// display rows above; on the top row, where the selection
+				// cannot grow, it leaves the editor the same way shift+tab
+				// does. Only the arrow key qualifies: the binding's letter
+				// alias (K) must stay typeable.
 				if cmd := m.focusAboveEditor(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -3437,6 +3443,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
 				k.Editor.SelectAll,
+				k.Editor.SelectLineUp,
+				k.Editor.SelectLineDown,
 				k.Editor.CopySelection,
 				k.Editor.CutSelection,
 			}
@@ -3501,6 +3509,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 				k.Editor.MentionFile,
 				k.Editor.OpenEditor,
 				k.Editor.SelectAll,
+				k.Editor.SelectLineUp,
+				k.Editor.SelectLineDown,
 				k.Editor.CopySelection,
 				k.Editor.CutSelection,
 			}

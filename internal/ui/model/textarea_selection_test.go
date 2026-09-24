@@ -60,6 +60,41 @@ func TestTextareaCutSelection(t *testing.T) {
 	require.Equal(t, "llo", u.textarea.Value())
 }
 
+// TestShiftUpSelectsUntilTopEdge pins the editor's shift+up contract:
+// while display rows remain above the cursor the key extends the
+// selection in place, and on the top row, where the selection cannot
+// grow, it hands focus to the region above like it always did.
+func TestShiftUpSelectsUntilTopEdge(t *testing.T) {
+	t.Parallel()
+
+	u := newSelectionTestUI()
+	u.keyMap = DefaultKeyMap()
+	u.textarea.InsertString("hello\nworld")
+
+	_, _ = u.Update(shiftUp())
+	require.Equal(t, uiFocusEditor, u.focus, "shift+up with rows above must keep editing")
+	require.True(t, u.textarea.HasSelection())
+	require.Contains(t, u.textarea.SelectedText(), "world")
+
+	// The cursor is now on the top row; the same key leaves.
+	_, _ = u.Update(shiftUp())
+	require.Equal(t, uiFocusMain, u.focus, "shift+up on the top row must leave the editor")
+}
+
+// TestShiftUpWithoutRowsAboveLeavesEditor pins that a single-line input,
+// whose cursor is always on the top row, keeps the old gesture: shift+up
+// leaves the editor immediately.
+func TestShiftUpWithoutRowsAboveLeavesEditor(t *testing.T) {
+	t.Parallel()
+
+	u := newSelectionTestUI()
+	u.keyMap = DefaultKeyMap()
+	u.textarea.InsertString("hello")
+
+	_, _ = u.Update(shiftUp())
+	require.Equal(t, uiFocusMain, u.focus)
+}
+
 func TestTextareaMouseSelection(t *testing.T) {
 	t.Parallel()
 
