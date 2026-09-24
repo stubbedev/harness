@@ -1,11 +1,13 @@
 package chat
 
 import (
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -21,37 +23,40 @@ type QueuedMessageItem struct {
 	*cachedMessageItem
 	*focusableMessageItem
 
-	id   string
-	text string
-	sty  *styles.Styles
+	id    string
+	texts []string
+	sty   *styles.Styles
 }
 
 var _ MessageItem = (*QueuedMessageItem)(nil)
 
-// NewQueuedMessageItem creates the transcript entry for a queued prompt.
-func NewQueuedMessageItem(sty *styles.Styles, id, text string) *QueuedMessageItem {
+// NewQueuedMessageItem creates the transcript entry for one or more
+// queued prompts.
+func NewQueuedMessageItem(sty *styles.Styles, id string, texts []string) *QueuedMessageItem {
 	v := list.NewVersioned()
 	return &QueuedMessageItem{
 		Versioned:            v,
 		cachedMessageItem:    newCachedMessageItem(v),
 		focusableMessageItem: newFocusableMessageItem(v),
 		id:                   id,
-		text:                 text,
+		texts:                slices.Clone(texts),
 		sty:                  sty,
 	}
 }
 
-// Text returns the queued prompt's text.
-func (q *QueuedMessageItem) Text() string { return q.text }
+// Text returns the queued prompts' text.
+func (q *QueuedMessageItem) Text() string {
+	return strings.Join(q.texts, message.QueuedPromptSeparator)
+}
 
-// UpdateText replaces the placeholder's prompt text: another prompt was
-// queued and joins this entry. Cached renders are invalidated and the
-// version bumped so the list re-renders the entry.
-func (q *QueuedMessageItem) UpdateText(text string) {
-	if q.text == text {
+// UpdateTexts replaces the placeholder's queued prompts: another
+// prompt was queued and joins this entry. Cached renders are
+// invalidated and the version bumped so the list re-renders the entry.
+func (q *QueuedMessageItem) UpdateTexts(texts []string) {
+	if slices.Equal(q.texts, texts) {
 		return
 	}
-	q.text = text
+	q.texts = slices.Clone(texts)
 	q.invalidate()
 }
 
@@ -62,8 +67,10 @@ func (q *QueuedMessageItem) ID() string { return q.id }
 // materializes as a real message (a separate item).
 func (q *QueuedMessageItem) Finished() bool { return true }
 
-// RawRender implements [MessageItem]: the prompt's markdown, like a user
-// message, prefixed with a dim clock glyph on the first line.
+// RawRender implements [MessageItem]: the prompts' markdown, like user
+// messages, prefixed with a dim clock glyph on the first line. A
+// prompt queued as a named invocation renders as its compact row, the
+// shape it takes once the real message lands.
 func (q *QueuedMessageItem) RawRender(width int) string {
 	cappedWidth := cappedMessageWidth(width)
 
@@ -72,18 +79,15 @@ func (q *QueuedMessageItem) RawRender(width int) string {
 		return content
 	}
 
-	renderer := common.UserMarkdownRenderer(q.sty, cappedWidth)
-	mu := common.LockMarkdownRenderer(renderer)
-
-	mu.Lock()
-	result, err := renderer.Render(strings.TrimSpace(q.text))
-	mu.Unlock()
-
-	if err != nil {
-		content = strings.TrimSpace(q.text)
-	} else {
-		content = strings.TrimSuffix(result, "\n")
+	rendered := make([]string, 0, len(q.texts))
+	for _, text := range q.texts {
+		if name, _, isInvocation := message.ParsePromptInvocation(strings.TrimSpace(text)); isInvocation {
+			rendered = append(rendered, promptInvocationRow(q.sty, name))
+			continue
+		}
+		rendered = append(rendered, renderUserMarkdown(q.sty, strings.TrimSpace(text), cappedWidth))
 	}
+	content = strings.Join(rendered, message.QueuedPromptSeparator)
 
 	lines := strings.Split(content, "\n")
 	tag := q.sty.Resource.AdditionalText.Render(styles.QueuedIcon)
@@ -131,7 +135,7 @@ func (q *QueuedMessageItem) Render(width int) string {
 // as its own text, the same as the user message it becomes.
 func (q *QueuedMessageItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (bool, tea.Cmd) {
 	if keys.MatchesCopy(msg) {
-		return true, common.CopyToClipboard(q.text, copyToastMessage)
+		return true, common.CopyToClipboard(q.Text(), copyToastMessage)
 	}
 	return false, nil
 }

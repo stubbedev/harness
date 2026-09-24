@@ -159,9 +159,12 @@ type (
 	mcpStateChangedMsg struct {
 		states map[string]mcp.ClientInfo
 	}
-	// sendMessageMsg is sent to send a message.
-	// currently only used for mcp prompts.
+	// sendMessageMsg is sent to send a message. A set Name marks the
+	// content as a named prompt invocation (custom command, MCP prompt
+	// or extension command), the one place that wraps it for the
+	// transcript's compact rendering.
 	sendMessageMsg struct {
+		Name        string
 		Content     string
 		Attachments []message.Attachment
 	}
@@ -994,10 +997,14 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.startLSPs(paths))
 
 	case sendMessageMsg:
-		cmds = append(cmds, m.sendMessage(msg.Content, msg.Attachments...))
+		content := msg.Content
+		if msg.Name != "" {
+			content = message.FormatPromptInvocation(msg.Name, content)
+		}
+		cmds = append(cmds, m.sendMessage(content, msg.Attachments...))
 
 	case extensionCommandExpandedMsg:
-		cmds = append(cmds, m.sendMessage(msg.Prompt))
+		cmds = append(cmds, util.CmdHandler(sendMessageMsg{Name: msg.Name, Content: msg.Prompt}))
 	case userCommandsLoadedMsg:
 		m.customCommands = msg.Commands
 		dia := m.dialog.Dialog(dialog.CommandsID)
@@ -2270,7 +2277,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			// An extension command has no content until the extension
 			// produces it, which may touch the filesystem or the network,
 			// so the expansion happens off the UI loop.
-			cmds = append(cmds, m.runExtensionCommand(msg.ExtensionID, msg.Args))
+			cmds = append(cmds, m.runExtensionCommand(msg.Name, msg.ExtensionID, msg.Args))
 			m.dialog.CloseFrontDialog()
 			break
 		}
@@ -2278,11 +2285,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if msg.Args != nil {
 			content = substituteArgs(content, msg.Args)
 		}
-		// If this is a skill command, format it using the skill's FormatInvocation method
 		if msg.Skill != nil {
+			// A skill invocation keeps its <loaded_skill> wrapper, which
+			// the transcript already renders compactly.
 			content = msg.Skill.FormatInvocation()
+			cmds = append(cmds, m.sendMessage(content))
+		} else {
+			cmds = append(cmds, util.CmdHandler(sendMessageMsg{Name: msg.Name, Content: content}))
 		}
-		cmds = append(cmds, m.sendMessage(content))
 		m.dialog.CloseFrontDialog()
 	case dialog.ActionAttachSkill:
 		m.dialog.CloseFrontDialog()
@@ -2301,7 +2311,7 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			m.dialog.OpenDialog(argsDialog)
 			break
 		}
-		cmds = append(cmds, m.runMCPPrompt(msg.ClientID, msg.PromptID, msg.Args))
+		cmds = append(cmds, m.runMCPPrompt(cmp.Or(msg.Title, msg.ClientID+":"+msg.PromptID), msg.ClientID, msg.PromptID, msg.Args))
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
 	}
@@ -5350,7 +5360,7 @@ func (m *UI) pasteIdx() int {
 	return result + 1
 }
 
-func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string) tea.Cmd {
+func (m *UI) runMCPPrompt(name, clientID, promptID string, arguments map[string]string) tea.Cmd {
 	load := func() tea.Msg {
 		prompt, err := m.com.Workspace.GetMCPPrompt(clientID, promptID, arguments)
 		if err != nil {
@@ -5362,6 +5372,7 @@ func (m *UI) runMCPPrompt(clientID, promptID string, arguments map[string]string
 			return nil
 		}
 		return sendMessageMsg{
+			Name:    name,
 			Content: prompt,
 		}
 	}
@@ -5419,7 +5430,7 @@ func (m *UI) copyChatHighlight() tea.Cmd {
 // runExtensionCommand expands a Lua extension's command into a prompt
 // and sends it. The handler runs in the extension's VM, so it is done in
 // a command rather than inline in Update.
-func (m *UI) runExtensionCommand(commandID string, args map[string]string) tea.Cmd {
+func (m *UI) runExtensionCommand(name, commandID string, args map[string]string) tea.Cmd {
 	return func() tea.Msg {
 		prompt, err := m.com.Workspace.RunExtensionCommand(context.Background(), commandID, args)
 		if err != nil {
@@ -5429,12 +5440,13 @@ func (m *UI) runExtensionCommand(commandID string, args map[string]string) tea.C
 		if strings.TrimSpace(prompt) == "" {
 			return nil
 		}
-		return extensionCommandExpandedMsg{Prompt: prompt}
+		return extensionCommandExpandedMsg{Name: name, Prompt: prompt}
 	}
 }
 
 // extensionCommandExpandedMsg carries the prompt an extension command
 // produced back to the UI loop, which sends it as the user's message.
 type extensionCommandExpandedMsg struct {
+	Name   string
 	Prompt string
 }

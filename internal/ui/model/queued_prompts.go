@@ -42,13 +42,12 @@ func (m *UI) syncQueuedPromptItem() {
 		}
 		return
 	}
-	joined := strings.Join(m.queuedPrompts, message.QueuedPromptSeparator)
 	if m.queuedPromptItem == nil {
 		m.queuedPromptSeq++
-		m.queuedPromptItem = chat.NewQueuedMessageItem(m.com.Styles, fmt.Sprintf("queued-prompt-%d", m.queuedPromptSeq), joined)
+		m.queuedPromptItem = chat.NewQueuedMessageItem(m.com.Styles, fmt.Sprintf("queued-prompt-%d", m.queuedPromptSeq), m.queuedPrompts)
 		m.chat.AppendMessages(m.queuedPromptItem)
 	} else {
-		m.queuedPromptItem.UpdateText(joined)
+		m.queuedPromptItem.UpdateTexts(m.queuedPrompts)
 	}
 	m.chat.ScrollToBottom()
 }

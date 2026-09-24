@@ -337,6 +337,7 @@ func (m userMenu) items() []*CommandItem {
 	var items []*CommandItem
 	for _, cmd := range m.c.userCommands() {
 		action := ActionRunCustomCommand{
+			Name:        cmd.Name,
 			Content:     cmd.Content,
 			Arguments:   cmd.Arguments,
 			Skill:       cmd.Skill,

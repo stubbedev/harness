@@ -34,7 +34,15 @@ type UserMessageItem struct {
 
 	message *message.Message
 	sty     *styles.Styles
+	// promptExpanded shows a prompt invocation's full body under its
+	// compact row. Only meaningful when promptInvocation reports ok.
+	promptExpanded bool
 }
+
+var (
+	_ MessageItem = (*UserMessageItem)(nil)
+	_ Expandable  = (*UserMessageItem)(nil)
+)
 
 // NewUserMessageItem creates a new UserMessageItem.
 func NewUserMessageItem(sty *styles.Styles, message *message.Message) MessageItem {
@@ -66,34 +74,24 @@ func (m *UserMessageItem) RawRender(width int) string {
 	}
 
 	msgContent := strings.TrimSpace(m.message.Content().Text)
+	inv := m.promptInvocation()
 
-	// Check if this is a skill invocation (loaded_skill XML)
-	if strings.HasPrefix(msgContent, "<loaded_skill>") {
+	switch {
+	case strings.HasPrefix(msgContent, "<loaded_skill>"):
+		// A skill invocation carries its own compact rendering.
 		content = m.renderSkillInvocation(msgContent, cappedWidth)
-		height = lipgloss.Height(content)
-		m.setCachedRender(content, cappedWidth, height)
-		return m.renderHighlighted(content, cappedWidth, height)
-	}
+	case inv != nil:
+		content = m.renderPromptInvocation(inv, cappedWidth)
+	default:
+		content = renderUserMarkdown(m.sty, msgContent, cappedWidth)
 
-	renderer := common.UserMarkdownRenderer(m.sty, cappedWidth)
-	mu := common.LockMarkdownRenderer(renderer)
-
-	mu.Lock()
-	result, err := renderer.Render(msgContent)
-	mu.Unlock()
-
-	if err != nil {
-		content = msgContent
-	} else {
-		content = strings.TrimSuffix(result, "\n")
-	}
-
-	if len(m.message.BinaryContent()) > 0 {
-		attachmentsStr := m.renderAttachments(cappedWidth)
-		if content == "" {
-			content = attachmentsStr
-		} else {
-			content = strings.Join([]string{content, "", attachmentsStr}, "\n")
+		if len(m.message.BinaryContent()) > 0 {
+			attachmentsStr := m.renderAttachments(cappedWidth)
+			if content == "" {
+				content = attachmentsStr
+			} else {
+				content = strings.Join([]string{content, "", attachmentsStr}, "\n")
+			}
 		}
 	}
 
@@ -102,22 +100,51 @@ func (m *UserMessageItem) RawRender(width int) string {
 	return m.renderHighlighted(content, cappedWidth, height)
 }
 
+// promptInvocation returns the wrapped prompt invocation the message
+// carries, or nil when the message is ordinary typed input.
+func (m *UserMessageItem) promptInvocation() *promptInvocationBody {
+	name, body, ok := message.ParsePromptInvocation(strings.TrimSpace(m.message.Content().Text))
+	if !ok {
+		return nil
+	}
+	return &promptInvocationBody{name: name, body: body}
+}
+
+// promptInvocationBody is the parsed form of a wrapped prompt
+// invocation. A pointer to it doubles as the "is one" flag.
+type promptInvocationBody struct {
+	name string
+	body string
+}
+
+// renderPromptInvocation renders the message's prompt invocation: the
+// compact row, plus the full prompt body once expanded.
+func (m *UserMessageItem) renderPromptInvocation(inv *promptInvocationBody, width int) string {
+	if !m.promptExpanded {
+		return promptInvocationRow(m.sty, inv.name)
+	}
+	return promptInvocationRow(m.sty, inv.name) + "\n\n" + renderUserMarkdown(m.sty, inv.body, width)
+}
+
+// ToggleExpanded implements [Expandable]. A prompt invocation collapses
+// to its compact row and expands to the full prompt body; any other user
+// message is a no-op reported collapsed, so the expand key never claims
+// text the user typed.
+func (m *UserMessageItem) ToggleExpanded() bool {
+	if m.promptInvocation() == nil {
+		return false
+	}
+	m.promptExpanded = !m.promptExpanded
+	m.invalidate()
+	return m.promptExpanded
+}
+
 // renderSkillInvocation renders a loaded_skill XML as a special UI element.
 func (m *UserMessageItem) renderSkillInvocation(content string, width int) string {
 	var skill skillInvocation
 	if err := xml.Unmarshal([]byte(content), &skill); err != nil {
-		// If parsing fails, just render as markdown
-		renderer := common.UserMarkdownRenderer(m.sty, width)
-		mu := common.LockMarkdownRenderer(renderer)
-
-		mu.Lock()
-		result, err := renderer.Render(content)
-		mu.Unlock()
-
-		if err != nil {
-			return content
-		}
-		return strings.TrimSuffix(result, "\n")
+		// If parsing fails, just render as markdown.
+		return renderUserMarkdown(m.sty, content, width)
 	}
 
 	return toolOutputSkillContent(m.sty, skill.Name, skill.Description)
