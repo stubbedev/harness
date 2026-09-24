@@ -195,24 +195,23 @@ func NewToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
-	workingDir string,
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch toolCall.Name {
 	case tools.DiagnosticsToolName, tools.LSPToolName:
 		item = newLSPToolMessageItem(sty, toolCall, result, canceled)
 	default:
-		item = newBaseToolMessageItem(sty, toolCall, result, toolRendererFor(toolCall.Name, workingDir), canceled)
+		item = newBaseToolMessageItem(sty, toolCall, result, toolRendererFor(toolCall.Name), canceled)
 	}
 	item.SetMessageID(messageID)
 	return item
 }
 
 // toolRendererFor returns the renderer for a tool, by name.
-func toolRendererFor(name, workingDir string) ToolRenderer {
+func toolRendererFor(name string) ToolRenderer {
 	switch name {
 	case tools.ShellToolName:
-		return &ShellToolRenderContext{workingDir: workingDir}
+		return &ShellToolRenderContext{}
 	case tools.ViewToolName:
 		return &ViewToolRenderContext{}
 	case tools.WriteToolName:

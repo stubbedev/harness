@@ -14,16 +14,14 @@ import (
 // -----------------------------------------------------------------------------
 
 // ShellToolRenderContext renders shell tool messages.
-type ShellToolRenderContext struct {
-	workingDir string
-}
+type ShellToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	if opts.IsPending() {
 		// The command shows as the model types it.
 		if cmd, ok := partialStringField(opts.ToolCall.Input, "command"); ok && strings.TrimSpace(cmd) != "" {
-			return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), cmd, width)
+			return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), common.StripShellDisplayPrefix(cmd), width)
 		}
 		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
 	}
@@ -43,7 +41,7 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	if cmd == "" {
 		cmd = "(poll session)"
 	}
-	cmd = common.StripShellDisplayPrefix(cmd, b.workingDir)
+	cmd = common.StripShellDisplayPrefix(cmd)
 	if highlighted, err := common.SyntaxHighlightLexerName(sty, cmd, "bash", nil); err == nil {
 		cmd = highlighted
 	}

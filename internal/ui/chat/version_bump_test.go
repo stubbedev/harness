@@ -127,7 +127,7 @@ func TestBaseToolMessageItem_MutatorsBumpVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	tc := message.ToolCall{ID: "tc1", Name: "shell", Input: "{}", Finished: false}
-	item := NewToolMessageItem(&sty, "msg", tc, nil, false, "")
+	item := NewToolMessageItem(&sty, "msg", tc, nil, false)
 
 	v := item.(versionedItem)
 
@@ -278,7 +278,7 @@ func TestBaseToolMessageItem_AdvanceBumpsVersion(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	tc := message.ToolCall{ID: "tc-spin", Name: "shell", Input: "{}", Finished: false}
-	item := NewToolMessageItem(&sty, "msg", tc, nil, false, "")
+	item := NewToolMessageItem(&sty, "msg", tc, nil, false)
 	v := item.(versionedItem)
 	a, ok := item.(Animatable)
 	require.True(t, ok, "base tool message item must implement Animatable")
@@ -313,7 +313,7 @@ func TestBaseToolMessageItem_FinishedTransition(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	tc := message.ToolCall{ID: "tc-fin", Name: "shell", Input: "{}", Finished: false}
-	item := NewToolMessageItem(&sty, "msg", tc, nil, false, "")
+	item := NewToolMessageItem(&sty, "msg", tc, nil, false)
 	require.False(t, item.Finished(), "running tool must not be Finished()")
 
 	tcFinished := tc
@@ -324,6 +324,6 @@ func TestBaseToolMessageItem_FinishedTransition(t *testing.T) {
 
 	// Canceled tool with no result is also Finished.
 	tcCanceled := message.ToolCall{ID: "tc-cancel", Name: "shell", Input: "{}", Finished: false}
-	canceled := NewToolMessageItem(&sty, "msg", tcCanceled, nil, true, "")
+	canceled := NewToolMessageItem(&sty, "msg", tcCanceled, nil, true)
 	require.True(t, canceled.Finished(), "canceled tool must be Finished()")
 }

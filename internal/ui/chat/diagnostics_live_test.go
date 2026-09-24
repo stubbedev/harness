@@ -125,7 +125,7 @@ func TestLiveCountNote(t *testing.T) {
 func TestLSPItemPicksRendererAfterInputArrives(t *testing.T) {
 	t.Parallel()
 	sty := styles.CharmtonePantera()
-	item := NewToolMessageItem(&sty, "m1", message.ToolCall{ID: "tc1", Name: "lsp"}, nil, false, "")
+	item := NewToolMessageItem(&sty, "m1", message.ToolCall{ID: "tc1", Name: "lsp"}, nil, false)
 	item.SetToolCall(message.ToolCall{
 		ID:       "tc1",
 		Name:     "lsp",

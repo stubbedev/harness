@@ -20,7 +20,7 @@ func bashTool(id, command string, finished bool) ToolMessageItem {
 	input := `{"command":` + quoteJSON(command) + `}`
 	return NewToolMessageItem(groupStyles(), "msg", message.ToolCall{
 		ID: id, Name: "shell", Input: input, Finished: finished,
-	}, nil, false, "/tmp")
+	}, nil, false)
 }
 
 func quoteJSON(s string) string {
@@ -128,7 +128,7 @@ func TestToolLabelsStableAcrossRenders(t *testing.T) {
 			t.Parallel()
 			sty := groupStyles()
 			call := message.ToolCall{ID: "t1", Name: tt.name, Input: tt.input, Finished: true}
-			item := NewToolMessageItem(sty, "msg", call, nil, false, "/tmp")
+			item := NewToolMessageItem(sty, "msg", call, nil, false)
 			singleton := NewToolGroupMessageItem(sty, item)
 			group := NewToolGroupMessageItem(sty, item)
 			group.AddTool(bashTool("t2", "go test", true))
@@ -336,7 +336,7 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		// capitalized group verb ("Ran").
 		item := NewToolMessageItem(sty, "msg", message.ToolCall{
 			ID: "t1", Name: "edit", Input: `{"file_path":"/a/b.go"}`, Finished: true,
-		}, nil, false, "/tmp")
+		}, nil, false)
 		g := NewToolGroupMessageItem(sty, item)
 		out := ansi.Strip(g.Render(80))
 		assert.Contains(t, out, "Edit")

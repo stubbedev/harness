@@ -21,7 +21,7 @@ func TestExtractMessageItemsSkipsSubagentTools(t *testing.T) {
 			message.ToolCall{ID: "r1", Name: "research", Input: `{"query":"go dig"}`, Finished: true},
 		},
 	}
-	items := ExtractMessageItems(sty, msg, nil, "/tmp")
+	items := ExtractMessageItems(sty, msg, nil)
 
 	require.Len(t, items, 1, "only the bash call renders in the transcript")
 	tool, ok := items[0].(ToolMessageItem)
@@ -51,7 +51,7 @@ func TestExtractMessageItemsSkipsInternalContextTools(t *testing.T) {
 			message.ToolCall{ID: "g1", Name: "grep", Input: `{"pattern":"foo"}`, Finished: true},
 		},
 	}
-	items := ExtractMessageItems(sty, msg, nil, "/tmp")
+	items := ExtractMessageItems(sty, msg, nil)
 
 	require.Len(t, items, 1, "only the grep call renders in the transcript")
 	tool, ok := items[0].(ToolMessageItem)
@@ -87,7 +87,7 @@ func TestExtractMessageItemsSkipsSubagentNotes(t *testing.T) {
 			message.Finish{Reason: "stop"},
 		},
 	}
-	require.Empty(t, ExtractMessageItems(sty, noteOnly, nil, "/tmp"))
+	require.Empty(t, ExtractMessageItems(sty, noteOnly, nil))
 
 	real := &message.Message{
 		ID:   "u1",
@@ -96,5 +96,5 @@ func TestExtractMessageItemsSkipsSubagentNotes(t *testing.T) {
 			message.TextContent{Text: "go dig"},
 		},
 	}
-	require.Len(t, ExtractMessageItems(sty, real, nil, "/tmp"), 1)
+	require.Len(t, ExtractMessageItems(sty, real, nil), 1)
 }

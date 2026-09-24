@@ -68,7 +68,7 @@ func TestPendingToolStreamsPartialDetail(t *testing.T) {
 	input := `{"command":"go build ./int`
 	tool := NewToolMessageItem(groupStyles(), "msg", message.ToolCall{
 		ID: "t1", Name: "shell", Input: input,
-	}, nil, false, "/tmp")
+	}, nil, false)
 
 	plain := ansi.Strip(tool.Render(80))
 	require.False(t, pulseGlyphSet(plain))

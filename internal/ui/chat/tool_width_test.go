@@ -26,9 +26,9 @@ func TestToolWidthCapAppliedOnce(t *testing.T) {
 	sty := styles.CharmtonePantera()
 	input := `{"query":"` + strings.Repeat("x", 400) + `"}`
 
-	pending := NewToolMessageItem(&sty, "m", message.ToolCall{ID: "a", Name: "custom_tool", Input: input}, nil, false, "")
+	pending := NewToolMessageItem(&sty, "m", message.ToolCall{ID: "a", Name: "custom_tool", Input: input}, nil, false)
 	settled := NewToolMessageItem(&sty, "m", message.ToolCall{ID: "b", Name: "custom_tool", Input: input, Finished: true},
-		&message.ToolResult{ToolCallID: "b", Content: strings.Repeat("y ", 300)}, false, "")
+		&message.ToolResult{ToolCallID: "b", Content: strings.Repeat("y ", 300)}, false)
 
 	for _, width := range []int{80, 200} {
 		want := min(ToolBodyWidth(width, 0), maxTextWidth)

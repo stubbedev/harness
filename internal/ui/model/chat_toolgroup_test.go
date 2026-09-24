@@ -20,7 +20,6 @@ func newToolItemForGroup(u *UI, id string) chat.MessageItem {
 		message.ToolCall{ID: id, Name: "Bash", Input: `{"command":"ls"}`, Finished: true},
 		&message.ToolResult{ToolCallID: id, Name: "Bash", Content: "ok"},
 		false,
-		"/tmp",
 	)
 }
 

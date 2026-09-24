@@ -21,7 +21,7 @@ func busyTurnShellTool(sty *styles.Styles, id, command string, finished bool) ch
 		ID: id, Name: "shell",
 		Input:    `{"command":"` + command + `"}`,
 		Finished: finished,
-	}, nil, false, "/tmp")
+	}, nil, false)
 }
 
 // TestBusyTurnRenderSurvivesStress drives a full busy turn through the

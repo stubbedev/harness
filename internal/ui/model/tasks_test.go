@@ -257,8 +257,8 @@ func TestBackgroundTasksKeyboardNavigation(t *testing.T) {
 	task := u.agentTaskByToolCall("a1")
 	task.status = subagents.StatusCompleted
 	task.nested = []chat.ToolMessageItem{
-		chat.NewToolMessageItem(u.com.Styles, "c1", message.ToolCall{ID: "n1", Name: "Bash", Input: `{"command":"ls"}`, Finished: true}, nil, false, "/tmp"),
-		chat.NewToolMessageItem(u.com.Styles, "c1", message.ToolCall{ID: "n2", Name: "View", Input: `{"file_path":"a.go"}`, Finished: true}, nil, false, "/tmp"),
+		chat.NewToolMessageItem(u.com.Styles, "c1", message.ToolCall{ID: "n1", Name: "Bash", Input: `{"command":"ls"}`, Finished: true}, nil, false),
+		chat.NewToolMessageItem(u.com.Styles, "c1", message.ToolCall{ID: "n2", Name: "View", Input: `{"file_path":"a.go"}`, Finished: true}, nil, false),
 	}
 	for _, nested := range task.nested {
 		nested.(chat.Compactable).SetCompact(true)

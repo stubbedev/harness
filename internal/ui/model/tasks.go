@@ -328,7 +328,7 @@ func (m *UI) loadTaskNestedTools(msg *message.Message, tc message.ToolCall, task
 	}
 	resultMap := chat.BuildToolResultMap(nestedPtrs)
 	for _, nestedMsg := range nestedPtrs {
-		for _, item := range chat.ExtractMessageItems(m.com.Styles, nestedMsg, resultMap, m.com.Workspace.WorkingDir()) {
+		for _, item := range chat.ExtractMessageItems(m.com.Styles, nestedMsg, resultMap) {
 			if nestedTool, ok := item.(chat.ToolMessageItem); ok {
 				if simplifiable, ok := nestedTool.(chat.Compactable); ok {
 					simplifiable.SetCompact(true)
@@ -366,7 +366,7 @@ func (m *UI) updateAgentTaskFromChildSession(event message.Message) {
 			}
 		}
 		if !found {
-			nested := chat.NewToolMessageItem(m.com.Styles, event.ID, tc, nil, false, m.com.Workspace.WorkingDir())
+			nested := chat.NewToolMessageItem(m.com.Styles, event.ID, tc, nil, false)
 			if simplifiable, ok := nested.(chat.Compactable); ok {
 				simplifiable.SetCompact(true)
 			}

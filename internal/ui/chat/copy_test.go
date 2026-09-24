@@ -25,7 +25,7 @@ func copyItem(t *testing.T, name string, input any, result *message.ToolResult) 
 	}
 	item := NewToolMessageItem(groupStyles(), "msg", message.ToolCall{
 		ID: "call-1", Name: name, Input: string(raw), Finished: true,
-	}, result, false, "/srv")
+	}, result, false)
 	c, ok := item.(interface{ formatToolForCopy() string })
 	require.True(t, ok, "%s item does not implement the copy hook", name)
 	return c.formatToolForCopy()
@@ -215,7 +215,7 @@ func TestToolCopyPendingAndCancelled(t *testing.T) {
 		t.Parallel()
 		item := NewToolMessageItem(groupStyles(), "msg", message.ToolCall{
 			ID: "c1", Name: tools.ShellToolName, Input: `{"command":"sleep 1"}`, Finished: true,
-		}, nil, true, "/srv")
+		}, nil, true)
 		c := item.(interface{ formatToolForCopy() string })
 		assert.Contains(t, c.formatToolForCopy(), "### Status:\n\nCancelled")
 	})

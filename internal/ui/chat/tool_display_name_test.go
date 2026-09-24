@@ -67,7 +67,7 @@ func TestToolDisplayNameLSPFollowsAction(t *testing.T) {
 
 		// The dispatch and the label read the same field: a label always
 		// exists for the renderer lspToolRenderer picks.
-		item := NewToolMessageItem(&sty, "m1", call, nil, false, "")
+		item := NewToolMessageItem(&sty, "m1", call, nil, false)
 		require.Equal(t, tc.want, ToolDisplayName(item.ToolCall()))
 	}
 }
