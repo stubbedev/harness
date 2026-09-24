@@ -2,8 +2,9 @@ package agent
 
 import (
 	"fmt"
-	"hash/fnv"
+	"hash/maphash"
 	"sync"
+	"unsafe"
 
 	"charm.land/fantasy"
 	"github.com/tiktoken-go/tokenizer"
@@ -19,11 +20,17 @@ func usageIsZero(usage fantasy.Usage) bool {
 }
 
 func fallbackStepUsage(messages []fantasy.Message, step fantasy.StepResult) (fantasy.Usage, bool) {
+	return fallbackStepUsageWith(estimateMessageTokens, messages, step)
+}
+
+// fallbackStepUsageWith is fallbackStepUsage with the prompt estimate
+// taken from estimate, so a turn can hand it its historyTokenEstimator.
+func fallbackStepUsageWith(estimate func([]fantasy.Message) int64, messages []fantasy.Message, step fantasy.StepResult) (fantasy.Usage, bool) {
 	if !usageIsZero(step.Usage) {
 		return step.Usage, false
 	}
 
-	inputTokens := estimateMessageTokens(messages)
+	inputTokens := estimate(messages)
 	outputTokens := estimateStepCompletionTokens(step)
 	if inputTokens == 0 && outputTokens == 0 {
 		return fantasy.Usage{}, false
@@ -46,14 +53,75 @@ func cloneFantasyMessages(messages []fantasy.Message) []fantasy.Message {
 }
 
 func estimateMessageTokens(messages []fantasy.Message) int64 {
+	return estimateMessageTokensWith(approxTokenCount, messages)
+}
+
+func estimateMessageTokensWith(count func(string) int64, messages []fantasy.Message) int64 {
 	var tokens int64
 	for _, msg := range messages {
-		tokens += approxTokenCount(string(msg.Role))
+		tokens += count(string(msg.Role))
 		for _, part := range msg.Content {
-			tokens += estimateMessagePartTokens(part)
+			tokens += estimateMessagePartTokens(count, part)
 		}
 	}
 	return tokens
+}
+
+// stringIdentity names a string by where its bytes live rather than by
+// what they say. Strings are immutable, so two strings with the same
+// data pointer and length are the same text, and comparing them costs
+// nothing however long they are. The pointer also keeps those bytes
+// alive, so while an identity is held its address cannot be handed to
+// a different string.
+type stringIdentity struct {
+	data *byte
+	n    int
+}
+
+// historyTokenEstimator estimates one turn's requests. Each step sends
+// the previous step's history plus a little, built from the same
+// strings, so it remembers the count for every string of the last
+// estimate by identity: an unchanged history costs a map lookup per
+// string instead of a pass over every byte of it, and only what is new
+// goes to the tokenizer (or the process-wide count cache). A history
+// that was rewritten, merged or compacted in between simply holds new
+// strings, which are counted afresh; nothing has to detect the rewrite.
+// Only the strings of the latest estimate are kept, so memory tracks
+// the current request rather than the whole turn.
+type historyTokenEstimator struct {
+	mu   sync.Mutex
+	prev map[stringIdentity]int64
+	cur  map[stringIdentity]int64
+}
+
+func newHistoryTokenEstimator() *historyTokenEstimator {
+	return &historyTokenEstimator{}
+}
+
+// Messages estimates messages as estimateMessageTokens does.
+func (e *historyTokenEstimator) Messages(messages []fantasy.Message) int64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cur = make(map[stringIdentity]int64, len(e.prev))
+	tokens := estimateMessageTokensWith(e.count, messages)
+	e.prev, e.cur = e.cur, nil
+	return tokens
+}
+
+func (e *historyTokenEstimator) count(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	id := stringIdentity{data: unsafe.StringData(s), n: len(s)}
+	if n, ok := e.cur[id]; ok {
+		return n
+	}
+	n, ok := e.prev[id]
+	if !ok {
+		n = approxTokenCount(s)
+	}
+	e.cur[id] = n
+	return n
 }
 
 func estimateStepCompletionTokens(step fantasy.StepResult) int64 {
@@ -69,106 +137,106 @@ func estimateStepCompletionTokens(step fantasy.StepResult) int64 {
 		case *fantasy.ReasoningContent:
 			tokens += approxTokenCount(c.Text)
 		case fantasy.FileContent:
-			tokens += estimateGeneratedFileTokens(c)
+			tokens += estimateGeneratedFileTokens(approxTokenCount, c)
 		case *fantasy.FileContent:
-			tokens += estimateGeneratedFileTokens(*c)
+			tokens += estimateGeneratedFileTokens(approxTokenCount, *c)
 		case fantasy.SourceContent:
-			tokens += estimateSourceTokens(c)
+			tokens += estimateSourceTokens(approxTokenCount, c)
 		case *fantasy.SourceContent:
-			tokens += estimateSourceTokens(*c)
+			tokens += estimateSourceTokens(approxTokenCount, *c)
 		case fantasy.ToolCallContent:
-			tokens += estimateToolCallTokens(c.ToolName, c.Input)
+			tokens += estimateToolCallTokens(approxTokenCount, c.ToolName, c.Input)
 		case *fantasy.ToolCallContent:
-			tokens += estimateToolCallTokens(c.ToolName, c.Input)
+			tokens += estimateToolCallTokens(approxTokenCount, c.ToolName, c.Input)
 		case fantasy.ToolResultContent:
 			if c.ProviderExecuted {
-				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+				tokens += estimateToolResultContentTokens(approxTokenCount, c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
 			}
 		case *fantasy.ToolResultContent:
 			if c.ProviderExecuted {
-				tokens += estimateToolResultContentTokens(c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
+				tokens += estimateToolResultContentTokens(approxTokenCount, c.ToolCallID, c.ToolName, c.ClientMetadata, c.Result)
 			}
 		}
 	}
 	return tokens
 }
 
-func estimateMessagePartTokens(part fantasy.MessagePart) int64 {
+func estimateMessagePartTokens(count func(string) int64, part fantasy.MessagePart) int64 {
 	switch p := part.(type) {
 	case fantasy.TextPart:
-		return approxTokenCount(p.Text)
+		return count(p.Text)
 	case *fantasy.TextPart:
-		return approxTokenCount(p.Text)
+		return count(p.Text)
 	case fantasy.ReasoningPart:
-		return approxTokenCount(p.Text)
+		return count(p.Text)
 	case *fantasy.ReasoningPart:
-		return approxTokenCount(p.Text)
+		return count(p.Text)
 	case fantasy.FilePart:
-		return estimateFilePartTokens(p)
+		return estimateFilePartTokens(count, p)
 	case *fantasy.FilePart:
-		return estimateFilePartTokens(*p)
+		return estimateFilePartTokens(count, *p)
 	case fantasy.ToolCallPart:
-		return estimateToolCallTokens(p.ToolName, p.Input)
+		return estimateToolCallTokens(count, p.ToolName, p.Input)
 	case *fantasy.ToolCallPart:
-		return estimateToolCallTokens(p.ToolName, p.Input)
+		return estimateToolCallTokens(count, p.ToolName, p.Input)
 	case fantasy.ToolResultPart:
-		return estimateToolResultContentTokens(p.ToolCallID, "", "", p.Output)
+		return estimateToolResultContentTokens(count, p.ToolCallID, "", "", p.Output)
 	case *fantasy.ToolResultPart:
-		return estimateToolResultContentTokens(p.ToolCallID, "", "", p.Output)
+		return estimateToolResultContentTokens(count, p.ToolCallID, "", "", p.Output)
 	default:
 		return 0
 	}
 }
 
-func estimateToolCallTokens(toolName, input string) int64 {
-	return approxTokenCount(toolName) + approxTokenCount(input)
+func estimateToolCallTokens(count func(string) int64, toolName, input string) int64 {
+	return count(toolName) + count(input)
 }
 
-func estimateToolResultContentTokens(toolCallID, toolName, metadata string, output fantasy.ToolResultOutputContent) int64 {
-	tokens := approxTokenCount(toolCallID) + approxTokenCount(toolName) + approxTokenCount(metadata)
+func estimateToolResultContentTokens(count func(string) int64, toolCallID, toolName, metadata string, output fantasy.ToolResultOutputContent) int64 {
+	tokens := count(toolCallID) + count(toolName) + count(metadata)
 	switch result := output.(type) {
 	case fantasy.ToolResultOutputContentText:
-		tokens += approxTokenCount(result.Text)
+		tokens += count(result.Text)
 	case *fantasy.ToolResultOutputContentText:
-		tokens += approxTokenCount(result.Text)
+		tokens += count(result.Text)
 	case fantasy.ToolResultOutputContentError:
 		if result.Error != nil {
-			tokens += approxTokenCount(result.Error.Error())
+			tokens += count(result.Error.Error())
 		}
 	case *fantasy.ToolResultOutputContentError:
 		if result.Error != nil {
-			tokens += approxTokenCount(result.Error.Error())
+			tokens += count(result.Error.Error())
 		}
 	case fantasy.ToolResultOutputContentMedia:
-		tokens += estimateMediaTokens(result.MediaType, result.Text, len(result.Data))
+		tokens += estimateMediaTokens(count, result.MediaType, result.Text, len(result.Data))
 	case *fantasy.ToolResultOutputContentMedia:
-		tokens += estimateMediaTokens(result.MediaType, result.Text, len(result.Data))
+		tokens += estimateMediaTokens(count, result.MediaType, result.Text, len(result.Data))
 	}
 	return tokens
 }
 
-func estimateFilePartTokens(file fantasy.FilePart) int64 {
-	return estimateMediaTokens(file.MediaType, file.Filename, len(file.Data))
+func estimateFilePartTokens(count func(string) int64, file fantasy.FilePart) int64 {
+	return estimateMediaTokens(count, file.MediaType, file.Filename, len(file.Data))
 }
 
-func estimateGeneratedFileTokens(file fantasy.FileContent) int64 {
-	return estimateMediaTokens(file.MediaType, "", len(file.Data))
+func estimateGeneratedFileTokens(count func(string) int64, file fantasy.FileContent) int64 {
+	return estimateMediaTokens(count, file.MediaType, "", len(file.Data))
 }
 
-func estimateMediaTokens(mediaType, text string, dataBytes int) int64 {
+func estimateMediaTokens(count func(string) int64, mediaType, text string, dataBytes int) int64 {
 	if dataBytes == 0 {
-		return approxTokenCount(mediaType) + approxTokenCount(text)
+		return count(mediaType) + count(text)
 	}
-	return approxTokenCount(fmt.Sprintf("%s %s %d bytes", mediaType, text, dataBytes))
+	return count(fmt.Sprintf("%s %s %d bytes", mediaType, text, dataBytes))
 }
 
-func estimateSourceTokens(source fantasy.SourceContent) int64 {
-	return approxTokenCount(string(source.SourceType)) +
-		approxTokenCount(source.ID) +
-		approxTokenCount(source.URL) +
-		approxTokenCount(source.Title) +
-		approxTokenCount(source.MediaType) +
-		approxTokenCount(source.Filename)
+func estimateSourceTokens(count func(string) int64, source fantasy.SourceContent) int64 {
+	return count(string(source.SourceType)) +
+		count(source.ID) +
+		count(source.URL) +
+		count(source.Title) +
+		count(source.MediaType) +
+		count(source.Filename)
 }
 
 // tokenCodec is the tokenizer every estimate goes through: cl100k_base,
@@ -213,7 +281,7 @@ func approxTokenCount(s string) int64 {
 	if len(s) < tokenCacheMinBytes {
 		return countTokens(codec, s)
 	}
-	key := fnvHash(s)
+	key := maphash.String(tokenCacheSeed, s)
 	tokenCountCache.Lock()
 	n, ok := tokenCountCache.counts[key]
 	tokenCountCache.Unlock()
@@ -238,10 +306,9 @@ func countTokens(codec tokenizer.Codec, s string) int64 {
 	return int64(n)
 }
 
-// fnvHash keys the count cache. Collisions cost an estimate that is off
-// for one string, never anything worse, so a 64-bit hash is plenty.
-func fnvHash(s string) uint64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(s))
-	return h.Sum64()
-}
+// tokenCacheSeed keys the count cache. maphash reads the string in
+// place, many bytes at a time, where FNV went byte by byte over a copy.
+// Collisions cost an estimate that is off for one string, never
+// anything worse, so a 64-bit hash is plenty, and the cache lives only
+// in memory, so a seed per process is fine.
+var tokenCacheSeed = maphash.MakeSeed()

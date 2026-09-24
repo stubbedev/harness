@@ -1104,6 +1104,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// landed since the last reported usage. The reported counters alone
 	// cannot see those, so the stop condition checks both.
 	var projectedRequestTokens int64
+	// requestTokens estimates each step's request. A step's history is
+	// the last one's plus a little, and it recounts only what is new.
+	requestTokens := newHistoryTokenEstimator()
 	// Drain any debounced message updates before returning. message.Service
 	// already flushes synchronously on terminal updates, but a defer here
 	// guarantees the contract at every Run exit (success, error, panic
@@ -1405,9 +1408,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// and requeue while leaving nothing behind for a turn that never
 			// happened.
 			if cw := usableContextWindow(a.largeModel.Get()); cw > 0 && !a.disableAutoSummarize {
+				projected := requestTokens.Messages(prepared.Messages)
 				sessionLock.Lock()
-				projectedRequestTokens = estimateMessageTokens(prepared.Messages)
-				projected := projectedRequestTokens
+				projectedRequestTokens = projected
 				sessionLock.Unlock()
 				threshold := autoSummarizeThreshold(cw, a.autoSummarizeRatio, a.autoSummarizeBuffer)
 				if projected+threshold >= cw {
@@ -1629,7 +1632,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if getSessionErr != nil {
 				return getSessionErr
 			}
-			usage, estimated := fallbackStepUsage(stepMessages, stepResult)
+			usage, estimated := fallbackStepUsageWith(requestTokens.Messages, stepMessages, stepResult)
 			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
 			_, sessionErr := a.sessions.Save(ctx, updatedSession)
 			if sessionErr != nil {

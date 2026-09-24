@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"charm.land/fantasy"
@@ -329,4 +330,35 @@ func TestUpdateSessionUsageAddsProviderCost(t *testing.T) {
 	require.Equal(t, int64(1000), currentSession.PromptTokens)
 	require.Equal(t, int64(2000), currentSession.CompletionTokens)
 	require.False(t, currentSession.EstimatedUsage)
+}
+
+func TestHistoryTokenEstimatorMatchesFullEstimate(t *testing.T) {
+	t.Parallel()
+
+	history := []fantasy.Message{
+		fantasy.NewSystemMessage("You are a coding agent."),
+		fantasy.NewUserMessage(strings.Repeat("please fix the failing test in the parser package ", 20)),
+		{Role: fantasy.MessageRoleAssistant, Content: []fantasy.MessagePart{
+			fantasy.ToolCallPart{ToolCallID: "call-1", ToolName: "shell", Input: `{"command":"go test ./parser/..."}`},
+		}},
+		{Role: fantasy.MessageRoleTool, Content: []fantasy.MessagePart{
+			fantasy.ToolResultPart{ToolCallID: "call-1", Output: fantasy.ToolResultOutputContentText{Text: strings.Repeat("--- FAIL: TestParse (0.00s)\n", 40)}},
+		}},
+	}
+	estimator := newHistoryTokenEstimator()
+	require.Equal(t, estimateMessageTokens(history), estimator.Messages(history))
+
+	// The next step appends to the same history.
+	history = append(history, fantasy.NewUserMessage(strings.Repeat("and then run the whole suite again ", 10)))
+	require.Equal(t, estimateMessageTokens(history), estimator.Messages(history))
+
+	// A rewrite in place (aging, a merge, compaction) holds new strings
+	// of the same length, which must be counted rather than recognized.
+	rewritten := append([]fantasy.Message(nil), history...)
+	result := rewritten[3].Content[0].(fantasy.ToolResultPart)
+	body := result.Output.(fantasy.ToolResultOutputContentText).Text
+	result.Output = fantasy.ToolResultOutputContentText{Text: strings.Repeat("x", len(body))}
+	rewritten[3].Content = []fantasy.MessagePart{result}
+	require.NotEqual(t, estimateMessageTokens(history), estimateMessageTokens(rewritten))
+	require.Equal(t, estimateMessageTokens(rewritten), estimator.Messages(rewritten))
 }
