@@ -146,7 +146,7 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			},
 			"blocking": map[string]any{
 				"type":        "boolean",
-				"description": "Wait for this sub-agent and return its result in this call. Default false: the call returns a handle immediately while the sub-agent runs, its `send_message` output reaches you between your steps, and a later `agent` call with no prompt collects its result. Set true only when no further step is possible without the result.",
+				"description": "Wait for this sub-agent and return its result in this call instead of a handle. Set true only when no further step is possible without the result.",
 			},
 			"handles": map[string]any{
 				"type":        "array",

@@ -21,11 +21,13 @@ import (
 //
 // Memory is deliberately not here: the coder prompt tells the model to
 // save what it learns the moment it learns it, which only happens if the
-// tool is already in hand.
+// tool is already in hand. Question is: asking the user is the exception
+// the prompt keeps it to, and its schema is one of the largest.
 var deferredBuiltinTools = []string{
 	tools.HarnessToolName,
 	tools.LSPToolName,
 	tools.MCPResourceToolName,
+	tools.QuestionToolName,
 	tools.ResearchToolName,
 }
 
