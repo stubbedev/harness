@@ -166,15 +166,31 @@ func ttyReadBlocked(pid, wchan, slave string) bool {
 	if err != nil {
 		return false
 	}
-	fd, err := strconv.ParseInt(strings.TrimPrefix(fields[1], "0x"), 16, 64)
-	if err != nil {
-		return false
+	arg := func(i int) (int64, bool) {
+		if len(fields) <= i {
+			return 0, false
+		}
+		v, err := strconv.ParseInt(strings.TrimPrefix(fields[i], "0x"), 16, 64)
+		return v, err == nil
 	}
 	switch {
-	case nr == unix.SYS_READ || nr == unix.SYS_READV || nr == unix.SYS_PREAD64:
-		return fdIsTerminal(pid, fd, slave)
+	case nr == unix.SYS_READ || nr == unix.SYS_READV || nr == unix.SYS_PREAD64 ||
+		nr == unix.SYS_PREADV || nr == unix.SYS_PREADV2:
+		fd, ok := arg(1)
+		return ok && fdIsTerminal(pid, fd, slave)
+	case nr == unix.SYS_SPLICE || nr == unix.SYS_COPY_FILE_RANGE:
+		// The zero-copy reads: current coreutils cat splices its input
+		// rather than reading it, and blocks there on a terminal just as
+		// a read would. The source descriptor is the first argument.
+		fd, ok := arg(1)
+		return ok && fdIsTerminal(pid, fd, slave)
+	case nr == unix.SYS_SENDFILE:
+		// sendfile(out, in, ...): the source is the second argument.
+		fd, ok := arg(2)
+		return ok && fdIsTerminal(pid, fd, slave)
 	case wchan == "ep_poll":
-		return epollWatchesTerminal(pid, fd, slave)
+		fd, ok := arg(1)
+		return ok && epollWatchesTerminal(pid, fd, slave)
 	}
 	return false
 }
