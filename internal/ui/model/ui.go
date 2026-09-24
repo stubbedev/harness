@@ -3874,6 +3874,12 @@ func (m *UI) openEditor(value string) tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
+	// The editor's stderr is the terminal its stdout is. Left unset it
+	// would be os.Stderr, which while the TUI runs is the tee that keeps
+	// a panic's stack trace (see cmd.teeStderr) - a pipe, not a tty.
+	if cmd.Stderr == nil {
+		cmd.Stderr = os.Stdout
+	}
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		defer func() {
 			_ = os.Remove(tmpPath)

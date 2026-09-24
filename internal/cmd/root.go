@@ -134,14 +134,18 @@ harness --continue
 			newPanicCapturingModel(model),
 			tea.WithEnvironment(env),
 			tea.WithContext(cmd.Context()),
-			tea.WithFilter(inputFilter.Filter),
+			tea.WithFilter(captureTUIFilter(inputFilter.Filter)),
 		)
 		go ws.Subscribe(program)
 
-		if _, err := program.Run(); err != nil {
+		reportsBefore := crash.Written()
+		tee := teeStderr()
+		_, err = program.Run()
+		printed := tee.stop(errors.Is(err, tea.ErrProgramPanic))
+		if err != nil {
 			slog.Error("TUI run error", "error", err)
 			if errors.Is(err, tea.ErrProgramPanic) {
-				return fmt.Errorf("Harness crashed; the panic report with the stack trace is in %s (see `harness crashes`)", crash.Dir()) //nolint:staticcheck
+				return tuiPanicError(reportsBefore, printed)
 			}
 			return errors.New("Harness crashed. If metrics are enabled, we were notified about it. If you'd like to report it, please copy the stacktrace above and open an issue at https://github.com/stubbedev/harness/issues/new?template=bug.yml") //nolint:staticcheck
 		}
@@ -175,57 +179,6 @@ func printSessionResume(model *ui.UI, banner config.ExitBanner, theme string) {
 		return
 	}
 	fmt.Fprintln(colorprofile.NewWriter(os.Stderr, os.Environ()), body)
-}
-
-// newPanicCapturingModel wraps the TUI model so a panic in Init, Update,
-// View, or a command they return is persisted with its stack trace before
-// bubbletea's own recovery swallows it: bubbletea restores the terminal and
-// kills the program, but the stack it prints to stderr is lost as soon as
-// the terminal closes. The panic is re-raised after capture so bubbletea's
-// graceful shutdown still runs.
-func newPanicCapturingModel(model tea.Model) tea.Model {
-	return panicCapturingModel{model}
-}
-
-type panicCapturingModel struct {
-	tea.Model
-}
-
-// captureTUIPanic is deferred around the wrapped model's methods and
-// commands. It persists the panic with its stack, then re-raises it.
-func captureTUIPanic() {
-	if r := recover(); r != nil {
-		crash.Capture("tui", r)
-		panic(r)
-	}
-}
-
-// captureTUICmd wraps a command so a panic while it runs in one of
-// bubbletea's command goroutines is captured too.
-func captureTUICmd(cmd tea.Cmd) tea.Cmd {
-	if cmd == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		defer captureTUIPanic()
-		return cmd()
-	}
-}
-
-func (m panicCapturingModel) Init() tea.Cmd {
-	defer captureTUIPanic()
-	return captureTUICmd(m.Model.Init())
-}
-
-func (m panicCapturingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	defer captureTUIPanic()
-	model, cmd := m.Model.Update(msg)
-	return panicCapturingModel{model}, captureTUICmd(cmd)
-}
-
-func (m panicCapturingModel) View() tea.View {
-	defer captureTUIPanic()
-	return m.Model.View()
 }
 
 // copied from cobra:
