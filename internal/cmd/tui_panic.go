@@ -164,42 +164,51 @@ const (
 )
 
 // stderrTee passes everything written to os.Stderr through to the real
-// stderr and keeps the tail of it.
+// stderr and keeps the tail of it while it records.
+//
+// os.Stderr is replaced once, before the program starts, and never put
+// back: bubbletea reads it from goroutines of its own - a command
+// goroutine's panic is reported to the program before its stack is
+// printed - so restoring the variable when the program returns would
+// race with a print still in flight. Stopping only ends the recording;
+// the pipe keeps forwarding for the rest of the process.
 type stderrTee struct {
 	orig *os.File
-	w    *os.File
 
-	mu   sync.Mutex
-	buf  []byte
-	last time.Time
+	mu        sync.Mutex
+	recording bool
+	buf       []byte
+	last      time.Time
 }
 
 // teeStderr starts a tee of os.Stderr, or returns nil when it cannot;
-// stop on a nil tee is a no-op.
+// stop on a nil tee is a no-op. Call it before anything that may write
+// to os.Stderr from another goroutine has started.
 func teeStderr() *stderrTee {
 	r, w, err := os.Pipe()
 	if err != nil {
 		return nil
 	}
-	t := &stderrTee{orig: os.Stderr, w: w}
+	t := &stderrTee{orig: os.Stderr, recording: true}
 	os.Stderr = w
 	go t.copy(r)
 	return t
 }
 
 func (t *stderrTee) copy(r *os.File) {
-	defer r.Close()
 	chunk := make([]byte, 32<<10)
 	for {
 		n, err := r.Read(chunk)
 		if n > 0 {
 			_, _ = t.orig.Write(chunk[:n])
 			t.mu.Lock()
-			t.buf = append(t.buf, chunk[:n]...)
-			if over := len(t.buf) - teeStderrLimit; over > 0 {
-				t.buf = t.buf[over:]
+			if t.recording {
+				t.buf = append(t.buf, chunk[:n]...)
+				if over := len(t.buf) - teeStderrLimit; over > 0 {
+					t.buf = t.buf[over:]
+				}
+				t.last = time.Now()
 			}
-			t.last = time.Now()
 			t.mu.Unlock()
 		}
 		if err != nil {
@@ -208,16 +217,12 @@ func (t *stderrTee) copy(r *os.File) {
 	}
 }
 
-// stop restores os.Stderr and returns what the tee kept. With panicked
+// stop ends the recording and returns what the tee kept. With panicked
 // set it first gives a panic print still in flight a moment to land.
-// The pipe is closed on this side only: a child process that inherited
-// it keeps writing through the copy, which ends when the last writer
-// goes.
 func (t *stderrTee) stop(panicked bool) string {
 	if t == nil {
 		return ""
 	}
-	os.Stderr = t.orig
 	if panicked {
 		deadline := time.Now().Add(teeSettle)
 		for time.Now().Before(deadline) {
@@ -230,8 +235,8 @@ func (t *stderrTee) stop(panicked bool) string {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	_ = t.w.Close()
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.recording = false
 	return string(t.buf)
 }
