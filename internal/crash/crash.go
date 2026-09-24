@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/stubbedev/harness/internal/home"
@@ -37,6 +38,10 @@ const reportTimeFormat = "2006-01-02T15:04:05.000Z07:00"
 
 var mu sync.Mutex
 
+// written counts the reports this process has written, so a caller can
+// tell whether a crash it observed left one behind (see Written).
+var written atomic.Uint64
+
 // Dir returns the directory crash reports are written to. The
 // HARNESS_CRASH_DIR environment variable overrides the default location
 // under the global data root.
@@ -51,7 +56,25 @@ func Dir() string {
 // string when the report could not be written. Call it from a recovering
 // defer so the stack still contains the panicking frames.
 func Capture(component string, r any) string {
-	stack := debug.Stack()
+	return write(component, fmt.Sprint(r), string(debug.Stack()))
+}
+
+// CaptureText writes a report for a panic known only by what was
+// printed about it - a value and a stack trace that some other
+// recovery already formatted - and returns its path, or an empty string
+// when it could not be written.
+func CaptureText(component, panicValue, stack string) string {
+	return write(component, panicValue, stack)
+}
+
+// Written reports how many reports this process has written so far.
+func Written() uint64 {
+	return written.Load()
+}
+
+// write persists one report and returns its path, or an empty string
+// when it could not be written.
+func write(component, panicValue, stack string) string {
 	now := time.Now()
 
 	var b strings.Builder
@@ -63,19 +86,27 @@ func Capture(component string, r any) string {
 		fmt.Fprintf(&b, "cwd: %s\n", cwd)
 	}
 	fmt.Fprintf(&b, "goroutines: %d\n", runtime.NumGoroutine())
-	fmt.Fprintf(&b, "\npanic: %v\n\n", r)
+	fmt.Fprintf(&b, "\npanic: %s\n\n", panicValue)
 	fmt.Fprintf(&b, "stack:\n%s\n", stack)
 
 	mu.Lock()
 	defer mu.Unlock()
 
+	// The directory is created on first use: a machine that has never
+	// crashed has none, and a report that cannot be written is exactly
+	// the one nobody sees again.
+	if err := os.MkdirAll(Dir(), 0o755); err != nil {
+		slog.Error("Failed to create crash report directory", "component", component, "error", err)
+		return ""
+	}
 	path := reportPath(now, component)
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		slog.Error("Failed to write crash report", "component", component, "error", err)
 		return ""
 	}
+	written.Add(1)
 	pruneLocked()
-	slog.Error("Captured panic report", "component", component, "panic", r, "path", path)
+	slog.Error("Captured panic report", "component", component, "panic", panicValue, "path", path)
 	return path
 }
 

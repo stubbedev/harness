@@ -35,6 +35,27 @@ func TestCaptureWritesReport(t *testing.T) {
 	require.Contains(t, filepath.Base(path), "test-component")
 }
 
+func TestCaptureCreatesMissingDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "never", "crashed")
+	t.Setenv("HARNESS_CRASH_DIR", dir)
+	before := Written()
+
+	path := Capture("tui", "boom")
+	require.NotEmpty(t, path)
+	require.Equal(t, dir, filepath.Dir(path))
+	require.Equal(t, before+1, Written())
+}
+
+func TestCaptureTextKeepsGivenStack(t *testing.T) {
+	setupTestDir(t)
+
+	path := CaptureText("tui", "index out of range", "goroutine 1 [running]:\nmain.boom()")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "panic: index out of range\n")
+	require.Contains(t, string(data), "main.boom()")
+}
+
 func TestCaptureKeepsStackOfPanickingFrames(t *testing.T) {
 	setupTestDir(t)
 
