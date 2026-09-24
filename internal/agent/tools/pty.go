@@ -355,12 +355,30 @@ type ptyRunner struct {
 	// then the session is not reaped: the verdict is the reason the
 	// session is kept at all.
 	exitVerdict *shellExit
+
+	// startupQuietMs is the quiet window that ends shell startup
+	// output before the first command. historySettle is the grace the
+	// history-off line gets to land. Both default to the production
+	// constants; tests override them with shorter values so the ~1.6s
+	// of quiet waiting does not dominate every test.
+	startupQuietMs int
+	historySettle  time.Duration
 }
 
 var (
 	ptyRunnersMu  sync.Mutex
 	ptyRunners    = map[string]*ptyRunner{}
 	ptyReaperOnce sync.Once
+)
+
+// defaultStartupQuietMs and defaultHistorySettle are the timing
+// defaults the production factory builds runners with. They are vars
+// (not constants) so test builds can shorten them: the 800ms quiet
+// window that makes interactive shells reliable in production adds
+// ~1.6s of pure waiting to every test that opens a session.
+var (
+	defaultStartupQuietMs = ptyStartupMs
+	defaultHistorySettle  = 300 * time.Millisecond
 )
 
 const (
@@ -563,7 +581,11 @@ func ptyRunnerFor(agentID, sessionID, sessionName, cwd string, ask question.Serv
 			go victim.Close()
 		}
 	}
-	r := &ptyRunner{agentID: agentID, key: key, cwd: cwd, ask: ask, lastUsed: time.Now()}
+	r := &ptyRunner{
+		agentID: agentID, key: key, cwd: cwd, ask: ask, lastUsed: time.Now(),
+		startupQuietMs: defaultStartupQuietMs,
+		historySettle:  defaultHistorySettle,
+	}
 	ptyRunners[key] = r
 	ptyReaperStart()
 	// Warm start in the background: interactive shells (nix,
@@ -725,7 +747,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	r.sentinel = newSentinel(dialect)
 	// Let the shell settle past its startup output so the first
 	// command's output starts clean.
-	_ = s.WaitForQuiet(ctx, ptyStartupMs*time.Millisecond, 5*time.Second)
+	_ = s.WaitForQuiet(ctx, time.Duration(r.startupQuietMs)*time.Millisecond, 5*time.Second)
 	s.Drain()
 
 	// Sandbox history before anything else: see ptyHistoryOffCmd. The
@@ -733,7 +755,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	// accepted, so the setup line itself cannot be recorded either.
 	if dialect.historyOffCmd != "" {
 		if err := s.Send([]byte(dialect.historyOffCmd + term.Enter)); err == nil {
-			_ = s.WaitForQuiet(ctx, 300*time.Millisecond, 2*time.Second)
+			_ = s.WaitForQuiet(ctx, r.historySettle, 2*time.Second)
 			s.Drain()
 		}
 	}
@@ -749,7 +771,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 		} else {
 			slog.Warn("Terminal session prompt marker not seen; using fallback prompt detection")
 		}
-		_ = s.WaitForQuiet(ctx, ptyStartupMs*time.Millisecond, 5*time.Second)
+		_ = s.WaitForQuiet(ctx, time.Duration(r.startupQuietMs)*time.Millisecond, 5*time.Second)
 		s.Drain()
 	}
 	return s, nil

@@ -20,6 +20,13 @@ import (
 	"github.com/stubbedev/harness/internal/term"
 )
 
+func init() {
+	// /bin/sh settles in <10ms; the production 800ms quiet window adds
+	// ~1.6s of pure waiting to every test that opens a session.
+	defaultStartupQuietMs = 100
+	defaultHistorySettle = 100 * time.Millisecond
+}
+
 // newTestRunner opens a runner over a real /bin/sh session in a temp
 // directory: fast, deterministic, no rc files.
 func newTestRunner(t *testing.T) *ptyRunner {
