@@ -4481,13 +4481,18 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 	return tea.Batch(cmds...)
 }
 
-// quit handles the quit key press: the first press arms a short window and
-// hints the user; a second press within the window quits the application
-// without a confirmation dialog.
+// quit handles the quit key press. Claude-style: with a drafted prompt
+// the first press just clears the input; with an empty input the first
+// press arms a short window and hints the user, and a second press
+// within the window quits without a confirmation dialog.
 func (m *UI) quit() tea.Cmd {
 	if m.quitArm.state {
 		m.quitArm.clear()
 		return tea.Quit
+	}
+
+	if m.textarea.Value() != "" {
+		return m.clearEditorDraft()
 	}
 
 	keyHint := "ctrl+c"

@@ -42,6 +42,29 @@ func TestQuitRequiresDoublePress(t *testing.T) {
 	require.True(t, isQuitCmd(cmd), "second ctrl+c must quit")
 }
 
+// TestCtrlCClearsDraftBeforeArming pins the Claude-style guard: with a
+// drafted prompt the first ctrl+c clears the input instead of arming the
+// quit window; the arm-then-quit sequence only starts from an empty input.
+func TestCtrlCClearsDraftBeforeArming(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.textarea.InsertString("draft")
+
+	_, cmd := m.Update(ctrlC())
+	require.Empty(t, m.textarea.Value(), "first ctrl+c must clear the draft")
+	require.False(t, m.quitArm.state, "clearing must not arm the quit window")
+	require.False(t, isQuitCmd(cmd))
+
+	_, cmd = m.Update(ctrlC())
+	require.True(t, m.quitArm.state, "with the input empty the first press arms")
+	require.False(t, isQuitCmd(cmd))
+	_, cmd = m.Update(ctrlC())
+	require.True(t, isQuitCmd(cmd), "the press inside the window quits")
+}
+
 // TestQuitTimerExpiryDisarms: once the window expires, a press only arms
 // again instead of quitting outright.
 func TestQuitTimerExpiryDisarms(t *testing.T) {

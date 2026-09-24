@@ -181,6 +181,16 @@ func (m *UI) historyReset() {
 	m.promptHistory.draft = ""
 }
 
+// clearEditorDraft empties the input together with the state riding it
+// — history navigation and bang mode — leaving a pristine prompt.
+func (m *UI) clearEditorDraft() tea.Cmd {
+	prevHeight := m.textarea.Height()
+	m.textarea.Reset()
+	m.historyReset()
+	m.syncBangModeFromTextarea()
+	return m.handleTextareaHeightChange(prevHeight)
+}
+
 // isAtEditorStart returns true if we are at the 0 line and 0 col in the textarea.
 func (m *UI) isAtEditorStart() bool {
 	return m.textarea.Line() == 0 && m.textarea.LineInfo().ColumnOffset == 0
