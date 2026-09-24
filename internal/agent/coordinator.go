@@ -1123,8 +1123,13 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// agent reach for a terminal it does not have, and its description
 	// could not name the shell to write for.
 	if tools.ShellAvailable() {
-		allTools = append(allTools,
-			tools.NewShellTool(store.WorkingDir(), agent.ID, c.questions))
+		shellTool := tools.NewShellTool(store.WorkingDir(), agent.ID, c.questions)
+		if shellTool != nil {
+			// Spread parallel shell calls across terminals: the first keeps
+			// the stable default, the rest get their own, so several shell
+			// calls in one step run concurrently instead of queuing on one.
+			allTools = append(allTools, newShellSessionSpreadTool(shellTool))
+		}
 	} else {
 		slog.Warn("No shell could be identified; the shell tool is not available this session")
 	}

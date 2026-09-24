@@ -27,7 +27,7 @@ type ShellParams struct {
 	// demanded a command would reject the very call this tool's own
 	// description asks for.
 	Command             string `json:"command,omitempty" description:"What to type into the terminal: a command line at the prompt, or text and keys for the program that is running. Named keys go in angle brackets (<enter>, <escape>, <ctrl+c>). Leave empty to wait for the running command's next event."`
-	Session             string `json:"session,omitempty" description:"Which named terminal to use (default \"main\"). Sessions are independent terminals: state, working directory and running programs are per name. Keep long-lived programs (servers, watchers) in their own named session and work in another; poll that session empty to stream its output or collect its exit code."`
+	Session             string `json:"session,omitempty" description:"Omit to let the tool assign a terminal: the first of several shell calls in a step reuses the stable default (state persists across calls), the rest each get their own, so they run in parallel. Name one to pin a terminal - e.g. keep a server or watcher running and poll it with empty calls."`
 	Reset               bool   `json:"reset,omitempty" description:"Kill a wedged session and start a fresh one, losing everything the old shell held"`
 	WorkingDir          string `json:"working_dir,omitempty" description:"Directory for a new session to open in; defaults to the directory Harness was spawned from. Has no effect on an existing session - use cd inside it."`
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to hold a command that has gone completely idle before returning it as still running (default 60, ceiling 15 minutes)"`
@@ -193,7 +193,7 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 	// (session) the call runs in - so every agent, and every concurrent
 	// dispatch of the same agent, drives its own shell: none of them can
 	// type into, reset or pollute another's.
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		ShellToolName,
 		shellDescription(shellPath),
 		func(ctx context.Context, params ShellParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

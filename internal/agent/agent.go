@@ -753,7 +753,11 @@ func (a *sessionAgent) publishRunComplete(ctx context.Context, call SessionAgent
 func stepToolContext(ctx context.Context, assistantID string, model Model) context.Context {
 	ctx = context.WithValue(ctx, tools.MessageIDContextKey, assistantID)
 	ctx = context.WithValue(ctx, tools.SupportsImagesContextKey, model.CatalogCfg.SupportsImages)
-	return context.WithValue(ctx, tools.ModelNameContextKey, model.CatalogCfg.Name)
+	ctx = context.WithValue(ctx, tools.ModelNameContextKey, model.CatalogCfg.Name)
+	// A fresh shell session counter per step lets the shell tool spread
+	// several parallel shell calls across distinct terminals while the
+	// first keeps the stable default; see shellSessionSpreadTool.
+	return withShellSessionCounter(ctx)
 }
 
 // turnComplete builds the terminal RunComplete for a turn that streamed:
