@@ -240,15 +240,33 @@ var (
 	lastSearchTime time.Time
 )
 
-// maybeDelaySearch adds a random delay if the last search was recent.
-func maybeDelaySearch() {
+// maybeDelaySearch spaces searches out: each one starts a random 0.5 to 2
+// seconds after the one before it, so a burst does not read as a scraper
+// to the search backend. A search reserves its start time under the lock
+// and waits for it outside, so the lock is never held across a sleep, and
+// a caller that gives up - a turn interrupted with searches queued - stops
+// waiting at once instead of sitting out every gap ahead of it. It returns
+// the context's error when that happens.
+func maybeDelaySearch(ctx context.Context) error {
 	lastSearchMu.Lock()
-	defer lastSearchMu.Unlock()
-
 	minGap := time.Duration(500+rand.IntN(1500)) * time.Millisecond
-	elapsed := time.Since(lastSearchTime)
-	if elapsed < minGap {
-		time.Sleep(minGap - elapsed)
+	start := time.Now()
+	if next := lastSearchTime.Add(minGap); next.After(start) {
+		start = next
 	}
-	lastSearchTime = time.Now()
+	lastSearchTime = start
+	lastSearchMu.Unlock()
+
+	wait := time.Until(start)
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
