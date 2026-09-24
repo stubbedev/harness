@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -239,7 +240,12 @@ func TestConnect_LockedConnectAfterUnlockedTakesLock(t *testing.T) {
 func TestConnect_DataDirWithURIMetacharacters(t *testing.T) {
 	t.Cleanup(ResetPool)
 
-	dataDir := filepath.Join(t.TempDir(), "odd?name#with%25")
+	// Windows forbids ? in file names; # and % still exercise escaping.
+	name := "odd?name#with%25"
+	if runtime.GOOS == "windows" {
+		name = "odd#name%25"
+	}
+	dataDir := filepath.Join(t.TempDir(), name)
 	conn, err := Connect(context.Background(), dataDir)
 	require.NoError(t, err)
 	require.NoError(t, conn.PingContext(context.Background()))
