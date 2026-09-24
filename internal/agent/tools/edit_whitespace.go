@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/stubbedev/harness/internal/stringext"
 )
@@ -360,8 +361,13 @@ func bestFuzzyWindow(contentLines, trimmedOld []string) (int, int) {
 		return -1, 0
 	}
 	best, bestNear := -1, 0
-	for _, a := range anchorIndices(trimmedOld) {
-		c, _ := bestSimilarLine(contentLines, trimmedOld[a])
+	anchors := anchorIndices(trimmedOld)
+	patterns := make([]string, len(anchors))
+	for i, a := range anchors {
+		patterns[i] = trimmedOld[a]
+	}
+	for i, c := range bestSimilarLines(contentLines, patterns) {
+		a := anchors[i]
 		if c < 0 {
 			continue
 		}
@@ -395,18 +401,51 @@ func anchorIndices(lines []string) []int {
 	return anchors
 }
 
-// bestSimilarLine returns the content line most similar to pattern, and -1
-// when no line shares any bigrams with it.
-func bestSimilarLine(contentLines []string, pattern string) (int, float64) {
-	want := bigramSet([]rune(pattern))
-	best, bestSim := -1, 0.0
+// bestSimilarLines returns, for each pattern, the index of the first content
+// line most similar to it, or -1 when no line shares any bigrams with it.
+// All patterns are scored in one pass over the file, each line's bigrams
+// are computed once for all of them, and a line is skipped outright when
+// its length alone rules out beating every pattern's best so far.
+func bestSimilarLines(contentLines, patterns []string) []int {
+	wants := make([][]uint64, len(patterns))
+	best := make([]int, len(patterns))
+	bestSim := make([]float64, len(patterns))
+	for p, pattern := range patterns {
+		wants[p], _ = lineBigrams(nil, pattern)
+		best[p] = -1
+	}
+	var got []uint64
 	for i, line := range contentLines {
-		sim := bigramSimilarity(strings.TrimSpace(line), want)
-		if sim > bestSim {
-			best, bestSim = i, sim
+		line = strings.TrimSpace(line)
+		pairs := utf8.RuneCountInString(line) - 1
+		if pairs < 1 || !canBeatBest(wants, bestSim, pairs) {
+			continue
+		}
+		got, _ = lineBigrams(got, line)
+		for p, want := range wants {
+			if sim := bigramDice(want, got, pairs); sim > bestSim[p] {
+				best[p], bestSim[p] = i, sim
+			}
 		}
 	}
-	return best, bestSim
+	return best
+}
+
+// canBeatBest reports whether a line with the given number of bigrams could
+// score above any pattern's best so far. A line shares at most
+// min(len(want), pairs) distinct bigrams with a pattern, and the bound is
+// computed with the same denominator bigramDice divides by, so a line that
+// fails it can never have scored strictly higher.
+func canBeatBest(wants [][]uint64, bestSim []float64, pairs int) bool {
+	for p, want := range wants {
+		if len(want) == 0 {
+			continue
+		}
+		if 2*float64(min(len(want), pairs))/float64(len(want)+pairs) > bestSim[p] {
+			return true
+		}
+	}
+	return false
 }
 
 // nearMatchedCount counts the aligned lines of the window at start that
@@ -446,38 +485,53 @@ func lineSimilarity(a, b string) float64 {
 	if len(a) < 2 || len(b) < 2 {
 		return 0
 	}
-	return bigramSimilarity(b, bigramSet([]rune(a)))
+	want, _ := lineBigrams(nil, a)
+	got, pairs := lineBigrams(nil, b)
+	return bigramDice(want, got, pairs)
 }
 
-// bigramSimilarity scores a line against a precomputed bigram set as a
-// Sorensen-Dice coefficient. Empty or single-rune lines score 0.
-func bigramSimilarity(line string, want map[string]struct{}) float64 {
-	r := []rune(line)
-	if len(r) < 2 || len(want) == 0 {
+// bigramDice scores a line against a pattern as a Sorensen-Dice
+// coefficient: twice the distinct bigrams they share over the pattern's
+// distinct bigrams plus the line's bigrams counting repeats. want and got
+// are the sorted distinct bigrams of the pattern and the line, and pairs is
+// the line's bigram count. Empty or single-rune lines score 0.
+func bigramDice(want, got []uint64, pairs int) float64 {
+	if pairs < 1 || len(want) == 0 {
 		return 0
 	}
-	seen := make(map[string]struct{}, len(r))
 	matched := 0
-	for i := 0; i+1 < len(r); i++ {
-		gram := string(r[i : i+2])
-		if _, dup := seen[gram]; dup {
-			continue
-		}
-		seen[gram] = struct{}{}
-		if _, ok := want[gram]; ok {
+	for i, j := 0, 0; i < len(want) && j < len(got); {
+		switch {
+		case want[i] < got[j]:
+			i++
+		case want[i] > got[j]:
+			j++
+		default:
 			matched++
+			i++
+			j++
 		}
 	}
-	return 2 * float64(matched) / float64(len(want)+len(r)-1)
+	return 2 * float64(matched) / float64(len(want)+pairs)
 }
 
-// bigramSet returns the set of adjacent character pairs of r.
-func bigramSet(r []rune) map[string]struct{} {
-	set := make(map[string]struct{}, len(r))
-	for i := 0; i+1 < len(r); i++ {
-		set[string(r[i:i+2])] = struct{}{}
+// lineBigrams returns the distinct adjacent rune pairs of s, sorted, in
+// buf's storage, and the number of pairs s has counting repeats. Each pair
+// is packed into one integer, first rune in the high half, so comparing
+// pairs costs no string allocation. Decoding yields only valid runes and
+// utf8.RuneError, so no two different pairs pack to the same integer.
+func lineBigrams(buf []uint64, s string) ([]uint64, int) {
+	buf, pairs := buf[:0], 0
+	prev := rune(-1)
+	for _, r := range s {
+		if prev >= 0 {
+			buf = append(buf, uint64(prev)<<32|uint64(r))
+			pairs++
+		}
+		prev = r
 	}
-	return set
+	slices.Sort(buf)
+	return slices.Compact(buf), pairs
 }
 
 // formatLineMatchHint renders the closest-match hint. Lines of the window

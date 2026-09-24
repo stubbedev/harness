@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"fmt"
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -199,6 +201,134 @@ func TestApplyEditToContentReportsWhitespaceCorrection(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, corrected)
 	require.Equal(t, "func main() {\n\tbar()\n}\n", result)
+}
+
+// benchmarkSource returns a Go-like file of n distinct lines for the edit
+// benchmarks.
+func benchmarkSource(n int) string {
+	var b strings.Builder
+	for i := range n {
+		fmt.Fprintf(&b, "\tvalue%d := compute(%d, \"item-%d\") // step %d\n", i, i*7, i%13, i%101)
+	}
+	return b.String()
+}
+
+// bigramSetReference, bigramSimilarityReference, lineSimilarityReference
+// and bestSimilarLineReference are the original map-of-strings similarity
+// search, kept as the specification the packed-bigram version must match
+// score for score.
+func bigramSetReference(r []rune) map[string]struct{} {
+	set := make(map[string]struct{}, len(r))
+	for i := 0; i+1 < len(r); i++ {
+		set[string(r[i:i+2])] = struct{}{}
+	}
+	return set
+}
+
+func bigramSimilarityReference(line string, want map[string]struct{}) float64 {
+	r := []rune(line)
+	if len(r) < 2 || len(want) == 0 {
+		return 0
+	}
+	seen := make(map[string]struct{}, len(r))
+	matched := 0
+	for i := 0; i+1 < len(r); i++ {
+		gram := string(r[i : i+2])
+		if _, dup := seen[gram]; dup {
+			continue
+		}
+		seen[gram] = struct{}{}
+		if _, ok := want[gram]; ok {
+			matched++
+		}
+	}
+	return 2 * float64(matched) / float64(len(want)+len(r)-1)
+}
+
+func lineSimilarityReference(a, b string) float64 {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if a == b {
+		return 1
+	}
+	if len(a) < 2 || len(b) < 2 {
+		return 0
+	}
+	return bigramSimilarityReference(b, bigramSetReference([]rune(a)))
+}
+
+func bestSimilarLineReference(contentLines []string, pattern string) int {
+	want := bigramSetReference([]rune(pattern))
+	best, bestSim := -1, 0.0
+	for i, line := range contentLines {
+		sim := bigramSimilarityReference(strings.TrimSpace(line), want)
+		if sim > bestSim {
+			best, bestSim = i, sim
+		}
+	}
+	return best
+}
+
+// similarityCorpus returns random short lines over an alphabet mixing
+// ASCII, whitespace, multi-byte and astral runes, a combining mark, invalid
+// UTF-8 and U+FFFD itself, so repeated and colliding bigrams are common.
+func similarityCorpus(rng *rand.Rand, n int) []string {
+	alphabet := []string{"a", "b", "c", "ab", " ", "\t", "é", "é", "世", "界", "🙂", "\xff", "\xe4\xb8", "�", "(", ")", "x := 1"}
+	lines := make([]string, n)
+	for i := range lines {
+		var b strings.Builder
+		for range rng.IntN(12) {
+			b.WriteString(alphabet[rng.IntN(len(alphabet))])
+		}
+		lines[i] = b.String()
+	}
+	return lines
+}
+
+func TestLineSimilarityMatchesReference(t *testing.T) {
+	t.Parallel()
+	rng := rand.New(rand.NewPCG(1, 2))
+	lines := append(similarityCorpus(rng, 400), "", "a", "ab", "aa", "aaaa", "abab", "\xff\xff\xff", "��")
+	for _, a := range lines {
+		for _, b := range lines[:120] {
+			require.Equal(t, lineSimilarityReference(a, b), lineSimilarity(a, b), "a=%q b=%q", a, b)
+		}
+	}
+}
+
+func TestBestSimilarLinesMatchesReference(t *testing.T) {
+	t.Parallel()
+	rng := rand.New(rand.NewPCG(3, 4))
+	for range 300 {
+		content := similarityCorpus(rng, rng.IntN(40))
+		patterns := similarityCorpus(rng, 1+rng.IntN(3))
+		// A pattern copied from the file, possibly padded, exercises ties
+		// and perfect scores.
+		if len(content) > 0 {
+			patterns = append(patterns, "  "+content[rng.IntN(len(content))])
+		}
+		want := make([]int, len(patterns))
+		for p, pattern := range patterns {
+			want[p] = bestSimilarLineReference(content, pattern)
+		}
+		require.Equal(t, want, bestSimilarLines(content, patterns), "content=%q patterns=%q", content, patterns)
+	}
+}
+
+// BenchmarkEditNotFound times an edit whose old_string matches nothing, not
+// even after whitespace normalization, so the error carries the
+// similarity-anchored closest-match hint.
+func BenchmarkEditNotFound(b *testing.B) {
+	old := "\tresult := computeAll(x, \"thing\")\n\tif result == nil {\n\t\treturn errMissing\n\t}"
+	for _, size := range []int{5_000, 50_000} {
+		b.Run(fmt.Sprintf("lines=%d", size), func(b *testing.B) {
+			content := benchmarkSource(size)
+			b.ReportAllocs()
+			for b.Loop() {
+				_, _, err := findAndReplace(content, old, "replacement", false)
+				require.Error(b, err)
+			}
+		})
+	}
 }
 
 func TestLineAtOffset(t *testing.T) {
