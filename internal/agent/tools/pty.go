@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,9 +43,13 @@ import (
 // session's tty.
 
 const (
-	// ptyStartupMs is the quiet window that ends shell startup output
-	// (prompt, motd, rc noise) before the first command.
-	ptyStartupMs = 800
+	// ptyStartupWait bounds how long a fresh shell gets to run the setup
+	// typed ahead of it, and then to show its first prompt.
+	ptyStartupWait = 5 * time.Second
+	// ptyStartupQuiet is the silence that ends a shell's startup output
+	// when its setup has to be retyped after startup (see
+	// setupSessionLocked).
+	ptyStartupQuiet = 800 * time.Millisecond
 	// ptySettleMs is how long Input waits for output to go quiet
 	// before returning the screen.
 	ptySettleMs = 600
@@ -355,30 +360,27 @@ type ptyRunner struct {
 	// then the session is not reaped: the verdict is the reason the
 	// session is kept at all.
 	exitVerdict *shellExit
-
-	// startupQuietMs is the quiet window that ends shell startup
-	// output before the first command. historySettle is the grace the
-	// history-off line gets to land. Both default to the production
-	// constants; tests override them with shorter values so the ~1.6s
-	// of quiet waiting does not dominate every test.
-	startupQuietMs int
-	historySettle  time.Duration
+	// promptTail records whether this shell's prompt is followed by a
+	// mode tail (the bracketed-paste enable a line editor sends after
+	// the prompt marker), learned from its first prompt. A shell without
+	// one ends its prompt at the marker, and nothing is waited for after
+	// it.
+	promptTail bool
+	// settled records that the last command's result was collected
+	// through to the prompt after its sentinel, leaving the session at
+	// a known point with nothing unread: the next command need not
+	// fence it. Anything that happens to the session since clears it.
+	settled bool
+	// typedSetup opens the shell without its startup hook, so the
+	// setup is typed at it (see setupSessionLocked) - the path shells
+	// without one take, kept reachable for tests on shells that have.
+	typedSetup bool
 }
 
 var (
 	ptyRunnersMu  sync.Mutex
 	ptyRunners    = map[string]*ptyRunner{}
 	ptyReaperOnce sync.Once
-)
-
-// defaultStartupQuietMs and defaultHistorySettle are the timing
-// defaults the production factory builds runners with. They are vars
-// (not constants) so test builds can shorten them: the 800ms quiet
-// window that makes interactive shells reliable in production adds
-// ~1.6s of pure waiting to every test that opens a session.
-var (
-	defaultStartupQuietMs = ptyStartupMs
-	defaultHistorySettle  = 300 * time.Millisecond
 )
 
 const (
@@ -583,8 +585,6 @@ func ptyRunnerFor(agentID, sessionID, sessionName, cwd string, ask question.Serv
 	}
 	r := &ptyRunner{
 		agentID: agentID, key: key, cwd: cwd, ask: ask, lastUsed: time.Now(),
-		startupQuietMs: defaultStartupQuietMs,
-		historySettle:  defaultHistorySettle,
 	}
 	ptyRunners[key] = r
 	ptyReaperStart()
@@ -735,46 +735,97 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 			time.Sleep(ptyRestartDelay)
 		}
 	}
-	s, err := term.Start(r.cwd, ptySessionEnv...)
+	shellPath, _ := term.Shell()
+	dialect := dialectFor(shellPath)
+	var launch shellLaunch
+	native := false
+	if !r.typedSetup {
+		launch, native = launchFor(shellPath, dialect)
+	}
+	s, err := term.StartShell(r.cwd, launch.args, append(slices.Clone(ptySessionEnv), launch.env...)...)
 	if err != nil {
 		return nil, err
 	}
 	r.session = s
 	r.startedAt = time.Now()
 	r.lastScreen = ""
-	shellPath, _ := term.Shell()
-	dialect := dialectFor(shellPath)
+	r.settled = false
 	r.sentinel = newSentinel(dialect)
-	// Let the shell settle past its startup output so the first
-	// command's output starts clean.
-	_ = s.WaitForQuiet(ctx, time.Duration(r.startupQuietMs)*time.Millisecond, 5*time.Second)
-	s.Drain()
-
-	// Sandbox history before anything else: see ptyHistoryOffCmd. The
-	// short settle lets the assignment land before the setup line is
-	// accepted, so the setup line itself cannot be recorded either.
-	if dialect.historyOffCmd != "" {
-		if err := s.Send([]byte(dialect.historyOffCmd + term.Enter)); err == nil {
-			_ = s.WaitForQuiet(ctx, r.historySettle, 2*time.Second)
-			s.Drain()
-		}
-	}
-
-	// Strip aliases and install the prompt marker. If the marker never
-	// arrives - an exotic shell, a prompt framework that reinstalls its
-	// own PS1 - fall back to the bracketed-paste heuristic rather than
-	// leaving every command waiting for a marker that will never come.
-	r.promptRe = ptyPasteRe
-	if err := s.Send([]byte(dialect.setupCmd + term.Enter)); err == nil {
-		if s.WaitForAny(ctx, []*regexp.Regexp{ptyPromptRe}, 5*time.Second) == 0 {
-			r.promptRe = ptyPromptRe
-		} else {
-			slog.Warn("Terminal session prompt marker not seen; using fallback prompt detection")
-		}
-		_ = s.WaitForQuiet(ctx, time.Duration(r.startupQuietMs)*time.Millisecond, 5*time.Second)
+	if native && s.WaitForAny(ctx, []*regexp.Regexp{ptyPromptRe}, ptyStartupWait) == 0 {
+		// The shell ran the setup from its own rc file (see launchFor):
+		// its first prompt is the marker, and startup is over. The same
+		// rc file turned the line editor off, so no mode tail follows.
+		r.promptRe = ptyPromptRe
+		r.promptTail = false
 		s.Drain()
+	} else {
+		r.promptRe = r.setupSessionLocked(ctx, s, dialect)
 	}
 	return s, nil
+}
+
+// setupSessionLocked sandboxes a fresh shell's history, strips its
+// aliases and installs the prompt marker, and returns the pattern that
+// recognises the shell's prompt from then on. Callers must hold r.mu.
+//
+// The setup lines are typed ahead, the moment the shell exists, rather
+// than after its startup output has gone quiet: the tty holds them until
+// the shell first reads, and the shell runs them in order - so the
+// history switch lands before the setup line is accepted and cannot
+// record it - and the fence behind them prints only once both have run.
+// Its marker coming back is the event that ends startup: a shell is
+// ready in the time its rc files take, not after a fixed silence that
+// cost every session the better part of two seconds.
+//
+// This is the path for shells with no startup hook to hand the setup
+// (see launchFor), and for one whose hook did not produce the marker.
+// A shell whose startup ate the typeahead (an rc file that reads the
+// terminal, a line editor that discards input typed before it started)
+// never answers the fence; it is set up the slow way instead, once its
+// startup output has gone quiet. If the prompt marker never arrives - an
+// exotic shell, a prompt framework that reinstalls its own PS1 - the
+// bracketed-paste heuristic stands in rather than leaving every command
+// waiting for a marker that will never come.
+func (r *ptyRunner) setupSessionLocked(ctx context.Context, s ptyTerminal, dialect shellDialect) *regexp.Regexp {
+	lines := make([]string, 0, 3)
+	if dialect.historyOffCmd != "" {
+		lines = append(lines, dialect.historyOffCmd)
+	}
+	lines = append(lines, dialect.setupCmd, r.sentinel.begin)
+	setup := func() bool {
+		for _, line := range lines {
+			if err := s.Send([]byte(line + term.Enter)); err != nil {
+				return false
+			}
+		}
+		return s.WaitForAny(ctx, []*regexp.Regexp{r.sentinel.beginRe}, ptyStartupWait) == 0
+	}
+	ready := setup()
+	if !ready && s.Alive() && ctx.Err() == nil {
+		slog.Warn("Terminal session ignored typed-ahead setup; retrying after startup output")
+		_ = s.WaitForQuiet(ctx, ptyStartupQuiet, ptyStartupWait)
+		s.Drain()
+		ready = setup()
+	}
+	promptRe := ptyPasteRe
+	if ready && s.WaitForAny(ctx, []*regexp.Regexp{ptyPromptRe}, ptyStartupWait) == 0 {
+		promptRe = ptyPromptRe
+	} else {
+		slog.Warn("Terminal session prompt marker not seen; using fallback prompt detection")
+	}
+	r.takePromptTail(ctx, s)
+	return promptRe
+}
+
+// takePromptTail drains a fresh session up to and including its first
+// prompt, and learns whether the shell's prompts carry a mode tail. The
+// tail - bracketed-paste enable and friends - trails the marker by a
+// write or two; it is taken with the prompt so the first command starts
+// from a clean buffer. Callers must hold r.mu.
+func (r *ptyRunner) takePromptTail(ctx context.Context, s ptyTerminal) {
+	m, _ := s.WaitForAnyOrQuiet(ctx, []*regexp.Regexp{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
+	r.promptTail = m == 0
+	s.Drain()
 }
 
 // captureExitLocked records a dead session's verdict before its shell
@@ -853,7 +904,8 @@ func (r *ptyRunner) attachShellExit(res *PTYResult) {
 func (r *ptyRunner) fence(ctx context.Context, s ptyTerminal) {
 	var mark sentinel
 	var promptRe *regexp.Regexp
-	r.setState(func() { mark, promptRe = r.sentinel, r.promptRe })
+	var tail bool
+	r.setState(func() { mark, promptRe, tail = r.sentinel, r.promptRe, r.promptTail })
 	if mark.beginRe == nil || promptRe == nil {
 		return
 	}
@@ -869,10 +921,13 @@ func (r *ptyRunner) fence(ctx context.Context, s ptyTerminal) {
 	_ = s.WaitForAny(ctx, []*regexp.Regexp{promptRe}, ptyFenceSettle)
 	// A line editor's prompt does not end at its marker: the mode tail -
 	// the bracketed-paste enable included - trails it by a write or two.
-	// Wait for that too (or a short quiet spell, for prompts without
-	// one) so the paste tracking the next command's delivery depends on
-	// has settled before the drain.
-	_, _ = s.WaitForAnyOrQuiet(ctx, []*regexp.Regexp{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
+	// Wait for that too (or a short quiet spell, should it not come) so
+	// the paste tracking the next command's delivery depends on has
+	// settled before the drain. A shell whose prompts have no tail is
+	// done at the marker.
+	if tail {
+		_, _ = s.WaitForAnyOrQuiet(ctx, []*regexp.Regexp{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
+	}
 	s.Drain()
 }
 
@@ -1002,8 +1057,13 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 	// Start this command from a known point: everything the previous
 	// call left behind is drained first, so nothing it printed can end
 	// up in this call's output and its prompt cannot be mistaken for
-	// this command finishing.
-	r.fence(ctx, s)
+	// this command finishing. A session the last command left settled
+	// at its prompt, with nothing arrived since, is at that point
+	// already, and the fence's round trip - a whole prompt, precmd hooks
+	// and all - is skipped.
+	if !r.takeSettled(s) {
+		r.fence(ctx, s)
+	}
 
 	// Enter is implied: at a prompt, a line nobody presses Enter on
 	// does nothing. Text that ends in a newline or a named key (a tab,
@@ -1031,6 +1091,17 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 		return PTYResult{}, err
 	}
 	return r.awaitCompletion(ctx, s, echo, waitSeconds)
+}
+
+// takeSettled reports whether the session is still exactly where the
+// last command's result left it (see ptyRunner.settled), and clears the
+// mark: whatever the caller does next moves the session on.
+func (r *ptyRunner) takeSettled(s ptyTerminal) bool {
+	r.mu.Lock()
+	settled := r.settled
+	r.settled = false
+	r.mu.Unlock()
+	return settled && s.PendingLen() == 0 && !s.AltScreen()
 }
 
 // driveProgram types into the program the session has running and
@@ -1545,6 +1616,16 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 		return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: s.Alive()}, nil
 	}
 
+	// Take the prompt that follows the sentinel along with it, so the
+	// session is left at a known point and the next command can start
+	// without fencing it (see runCommand).
+	var promptRe *regexp.Regexp
+	var tail bool
+	r.setState(func() { promptRe, tail = r.promptRe, r.promptTail })
+	settled := s.WaitForAny(ctx, []*regexp.Regexp{promptRe}, ptyFenceSettle) == 0
+	if settled && tail {
+		_, _ = s.WaitForAnyOrQuiet(ctx, []*regexp.Regexp{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
+	}
 	drained := string(s.Drain())
 	cut := drained
 	var match []string
@@ -1558,7 +1639,10 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 			res.ExitCode = &code
 		}
 		res.Cwd = match[2]
-		r.setState(func() { r.lastCwd = res.Cwd })
+		r.setState(func() {
+			r.lastCwd = res.Cwd
+			r.settled = settled
+		})
 	}
 	return res, nil
 }

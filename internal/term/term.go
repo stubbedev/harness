@@ -205,6 +205,13 @@ func parentShell() string {
 // It fails rather than guessing when no shell can be identified; callers
 // that can avoid offering a terminal at all should check Shell first.
 func Start(cwd string, env ...string) (*Session, error) {
+	return StartShell(cwd, nil, env...)
+}
+
+// StartShell is Start with arguments for the shell: the hook a caller
+// uses to have the shell configure itself as it starts (an rc file of
+// its own) instead of being typed at once it is up.
+func StartShell(cwd string, args []string, env ...string) (*Session, error) {
 	shell, ok := Shell()
 	if !ok {
 		return nil, errors.New("no shell could be identified for a terminal session")
@@ -219,7 +226,7 @@ func Start(cwd string, env ...string) (*Session, error) {
 	// once, on startup, and the shell's first prompt is laid out for it.
 	_ = p.Resize(cols, rows)
 
-	cmd := p.Command(shell)
+	cmd := p.Command(shell, args...)
 	cmd.Dir = cwd
 	cmd.Env = append(withoutSizeEnv(os.Environ()), withoutSizeEnv(env)...)
 	cmd.Env = append(cmd.Env, "TERM="+termValue())

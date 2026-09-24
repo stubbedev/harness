@@ -20,13 +20,6 @@ import (
 	"github.com/stubbedev/harness/internal/term"
 )
 
-func init() {
-	// /bin/sh settles in <10ms; the production 800ms quiet window adds
-	// ~1.6s of pure waiting to every test that opens a session.
-	defaultStartupQuietMs = 100
-	defaultHistorySettle = 100 * time.Millisecond
-}
-
 // newTestRunner opens a runner over a real /bin/sh session in a temp
 // directory: fast, deterministic, no rc files.
 func newTestRunner(t *testing.T) *ptyRunner {
@@ -57,7 +50,10 @@ func newBracketedPasteRunner(t *testing.T) *ptyRunner {
 		if _, err := os.Stat(shell); err != nil {
 			continue
 		}
-		r := newRunnerWithShell(t, shell)
+		// The shell's own startup hook turns its line editor off, and
+		// with it bracketed paste; typed setup keeps the editor, as it is
+		// for the shells that have no hook.
+		r := newTypedRunnerWithShell(t, shell)
 		if r.session.BracketedPaste() {
 			return r
 		}
@@ -72,11 +68,22 @@ func newBracketedPasteRunner(t *testing.T) *ptyRunner {
 // newRunnerWithShell opens a runner over the given shell in a temp directory.
 func newRunnerWithShell(t *testing.T, shell string) *ptyRunner {
 	t.Helper()
+	return openRunner(t, shell, &ptyRunner{cwd: t.TempDir()})
+}
+
+// newTypedRunnerWithShell is newRunnerWithShell with the setup typed at
+// the shell rather than handed to its startup hook.
+func newTypedRunnerWithShell(t *testing.T, shell string) *ptyRunner {
+	t.Helper()
+	return openRunner(t, shell, &ptyRunner{cwd: t.TempDir(), typedSetup: true})
+}
+
+func openRunner(t *testing.T, shell string, r *ptyRunner) *ptyRunner {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("pty sessions are unsupported on windows")
 	}
 	t.Setenv("SHELL", shell)
-	r := &ptyRunner{cwd: t.TempDir()}
 	t.Cleanup(func() {
 		if r.session != nil {
 			r.session.Close()
@@ -968,7 +975,7 @@ func TestPtySentinelParsing(t *testing.T) {
 	t.Parallel()
 
 	s := newSentinel(posixDialect)
-	tag := strings.TrimSuffix(strings.TrimPrefix(s.cmd, "printf '__exit_"), `:%d@%s__' "$?" "$PWD"`)
+	tag, _, _ := strings.Cut(strings.TrimPrefix(s.cmd, "printf '__exit_"), ":")
 	require.Len(t, tag, 16)
 
 	require.True(t, s.loose.MatchString("__exit_"+tag+":0@"))

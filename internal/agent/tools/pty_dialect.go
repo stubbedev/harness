@@ -36,10 +36,14 @@ const (
 // posixDialect drives bash, zsh and the rest of the Bourne family.
 //
 // The sentinel's %%d/%%s keep the echoed command line from matching the
-// parse pattern. The fence re-asserts the session guard before every
-// command: a command that re-sources the user's rc files (source
+// parse pattern. The sentinel and the fence both re-assert the session
+// guard: a command that re-sources the user's rc files (source
 // ~/.zshrc, direnv, a nested shell) can bring aliases and history
-// settings back, and the next command must not inherit them.
+// settings back, and the next command must not inherit them. The
+// sentinel runs after every command and the fence only before a command
+// that finds the session in an unknown state (see runCommand), so the
+// sentinel is what carries the guard from one command to the next; its
+// printf goes first, while $? is still the command's.
 //
 // Each switch in setupCmd is stderr-guarded so one line works across
 // zsh (setopt/unalias -a), bash (shopt) and plain POSIX shells, where
@@ -49,7 +53,7 @@ const (
 // no `set +o history` may appear here -- it would silently keep the
 // prompt marker from ever installing.
 var posixDialect = shellDialect{
-	sentinelCmd:   `printf '__exit_%s:%%d@%%s__' "$?" "$PWD"`,
+	sentinelCmd:   `printf '__exit_%s:%%d@%%s__' "$?" "$PWD"; unalias -a 2>/dev/null; HISTFILE=/dev/null`,
 	sentinelRe:    dialectSentinelRe,
 	sentinelLoose: dialectSentinelLoose,
 	fenceCmd:      `unalias -a 2>/dev/null; HISTFILE=/dev/null; printf '__begin_%s:%%s__' "ok"`,
@@ -67,8 +71,8 @@ var posixDialect = shellDialect{
 // code of the last native program and is null until one has run, while
 // $? is a boolean covering cmdlets too. $? has to be captured first,
 // because the assignment that reads $LASTEXITCODE sets it to true.
-// The fence clears $LASTEXITCODE so a code left over from an earlier
-// native command is never reported as this one's.
+// The sentinel and the fence clear $LASTEXITCODE so a code left over
+// from an earlier native command is never reported as this one's.
 //
 // Aliases are deliberately left alone, unlike POSIX. In PowerShell ls,
 // cat and rm are shipped aliases for real cmdlets, so stripping them
@@ -76,7 +80,7 @@ var posixDialect = shellDialect{
 var powershellDialect = shellDialect{
 	sentinelCmd: `$__ok = $?; $__hc = $LASTEXITCODE; ` +
 		`if ($null -eq $__hc) { $__hc = $(if ($__ok) { 0 } else { 1 }) }; ` +
-		`[Console]::Write("__exit_%s:$__hc@$($PWD.Path)__")`,
+		`[Console]::Write("__exit_%s:$__hc@$($PWD.Path)__"); $global:LASTEXITCODE = $null`,
 	sentinelRe:    dialectSentinelRe,
 	sentinelLoose: dialectSentinelLoose,
 	fenceCmd:      `$global:LASTEXITCODE = $null; [Console]::Write("__begin_%s:ok__")`,
