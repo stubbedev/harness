@@ -222,7 +222,7 @@ func newViewToolForTest(workingDir string) fantasy.AgentTool {
 	return NewViewTool(nil, mockFileTracker{}, nil, workingDir)
 }
 
-func runViewTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params ViewParams) fantasy.ToolResponse {
+func runViewTool(t testing.TB, tool fantasy.AgentTool, ctx context.Context, params ViewParams) fantasy.ToolResponse {
 	t.Helper()
 
 	input, err := json.Marshal(params)

@@ -145,10 +145,24 @@ func lineRange(content []byte, offset, limit int) filetracker.Range {
 	return filetracker.Range{Start: start, End: end}
 }
 
+// seenTextRanges returns the byte ranges of data whose lines a view returned
+// verbatim as text, starting at line offset. The returned lines are
+// consecutive, so the first one is located once and each following one is
+// the next line in data; locating every line with its own lineRange scan
+// made a view of a late page cost the whole file once per returned line.
 func seenTextRanges(data []byte, offset int, text string) []filetracker.Range {
 	var ranges []filetracker.Range
+	next := lineRange(data, offset, 0).Start
 	for i, line := range strings.Split(text, "\n") {
-		r := lineRange(data, offset+i, 1)
+		// Lines before the start of the file all resolve to line 0, the
+		// way lineRange clamps a negative offset.
+		r := filetracker.Range{Start: next, End: len(data)}
+		if j := bytes.IndexByte(data[next:], '\n'); j >= 0 {
+			r.End = next + j + 1
+		}
+		if offset+i >= 0 {
+			next = r.End
+		}
 		raw := strings.TrimSuffix(strings.TrimSuffix(string(data[r.Start:r.End]), "\n"), "\r")
 		if len(raw) > MaxLineLength {
 			prefix := strings.ToValidUTF8(raw[:MaxLineLength], "")

@@ -14,7 +14,7 @@ import (
 
 // writeViewFixture writes a small text file for the multi-file tests and
 // returns its absolute path.
-func writeViewFixture(t *testing.T, dir, name, content string) string {
+func writeViewFixture(t testing.TB, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))

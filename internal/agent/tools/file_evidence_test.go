@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +17,7 @@ import (
 	"github.com/stubbedev/harness/internal/filetracker"
 )
 
-func runFileTool(t *testing.T, tool fantasy.AgentTool, ctx context.Context, params any) fantasy.ToolResponse {
+func runFileTool(t testing.TB, tool fantasy.AgentTool, ctx context.Context, params any) fantasy.ToolResponse {
 	t.Helper()
 	input, err := json.Marshal(params)
 	require.NoError(t, err)
@@ -209,4 +210,94 @@ func TestFileEvidenceLineEndingChangeBeforeCommitIsStale(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, "alpha\r\nbeta\r\n", string(data))
+}
+
+// seenTextRangesReference is the original seenTextRanges, which located
+// every returned line with its own lineRange scan from the top of the file.
+// It is kept as the specification the single-pass version must match.
+func seenTextRangesReference(data []byte, offset int, text string) []filetracker.Range {
+	var ranges []filetracker.Range
+	for i, line := range strings.Split(text, "\n") {
+		r := lineRange(data, offset+i, 1)
+		raw := strings.TrimSuffix(strings.TrimSuffix(string(data[r.Start:r.End]), "\n"), "\r")
+		if len(raw) > MaxLineLength {
+			prefix := strings.ToValidUTF8(raw[:MaxLineLength], "")
+			if line == prefix+"..." {
+				ranges = append(ranges, filetracker.Range{Start: r.Start, End: r.Start + len(prefix)})
+			}
+		} else if line == raw {
+			ranges = append(ranges, r)
+		}
+	}
+	return ranges
+}
+
+func TestSeenTextRangesMatchesReference(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("é", MaxLineLength)
+	files := []string{
+		"",
+		"one",
+		"one\n",
+		"one\ntwo\nthree",
+		"one\ntwo\nthree\n",
+		"one\r\ntwo\r\n\r\nfour\r\n",
+		"\n\n\n",
+		"first\n" + long + "\nlast\n",
+		"first\n" + strings.Repeat("x", MaxLineLength+5) + "\nlast",
+	}
+	for _, file := range files {
+		data := []byte(file)
+		lines := strings.Split(file, "\n")
+		for offset := -2; offset <= len(lines)+2; offset++ {
+			for limit := 0; limit <= len(lines)+2; limit++ {
+				// The text a view returns for the window, and a copy with
+				// one line altered, which must not be credited as seen.
+				from, to := min(max(offset, 0), len(lines)), min(max(offset, 0)+limit, len(lines))
+				window := slices.Clone(lines[from:to])
+				for i, l := range window {
+					l = strings.TrimSuffix(l, "\r")
+					if len(l) > MaxLineLength {
+						l = strings.ToValidUTF8(l[:MaxLineLength], "") + "..."
+					}
+					window[i] = l
+				}
+				texts := []string{strings.Join(window, "\n")}
+				if len(window) > 0 {
+					altered := slices.Clone(window)
+					altered[len(altered)/2] += "!"
+					texts = append(texts, strings.Join(altered, "\n"))
+				}
+				for _, text := range texts {
+					require.Equal(t, seenTextRangesReference(data, offset, text), seenTextRanges(data, offset, text),
+						"file %q offset %d text %q", file, offset, text)
+				}
+			}
+		}
+	}
+}
+
+// BenchmarkViewOffset times a view of the last page of a large file, the
+// read whose evidence ranges used to be located by rescanning the file from
+// the top once per returned line.
+func BenchmarkViewOffset(b *testing.B) {
+	for _, size := range []int{5_000, 50_000} {
+		for _, offset := range []int{0, size - DefaultReadLimit} {
+			b.Run(fmt.Sprintf("lines=%d/offset=%d", size, offset), func(b *testing.B) {
+				dir := b.TempDir()
+				var content strings.Builder
+				for i := range size {
+					fmt.Fprintf(&content, "line %d of the benchmark fixture\n", i)
+				}
+				path := writeViewFixture(b, dir, "file", content.String())
+				ctx := context.WithValue(b.Context(), SessionIDContextKey, "s")
+				view := NewViewTool(nil, filetracker.NewService(nil), nil, dir)
+				params := ViewParams{FilePath: path, Offset: offset}
+				b.ReportAllocs()
+				for b.Loop() {
+					require.False(b, runViewTool(b, view, ctx, params).IsError)
+				}
+			})
+		}
+	}
 }
