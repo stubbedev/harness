@@ -126,14 +126,14 @@ func skillActivationEvents(messages []fantasy.Message) []skills.ActivationEvent 
 			if !ok {
 				continue
 			}
-			events = appendSkillActivationEvents(events, call.ToolName, json.RawMessage(call.Input), 0)
+			events = appendSkillActivationEvents(events, call.ToolName, json.RawMessage(call.Input))
 		}
 	}
 	return events
 }
 
-func appendSkillActivationEvents(events []skills.ActivationEvent, name string, input json.RawMessage, depth int) []skills.ActivationEvent {
-	if depth > 4 || len(events) >= skillActivationEventLimit {
+func appendSkillActivationEvents(events []skills.ActivationEvent, name string, input json.RawMessage) []skills.ActivationEvent {
+	if len(events) >= skillActivationEventLimit {
 		return events
 	}
 	var args struct {
@@ -144,10 +144,6 @@ func appendSkillActivationEvents(events []skills.ActivationEvent, name string, i
 		Files      []struct {
 			FilePath string `json:"file_path"`
 		} `json:"files"`
-		Steps []struct {
-			Tool  string          `json:"tool"`
-			Input json.RawMessage `json:"input"`
-		} `json:"steps"`
 	}
 	if len(input) > 1024*1024 || json.Unmarshal(input, &args) != nil {
 		return events
@@ -166,13 +162,7 @@ func appendSkillActivationEvents(events []skills.ActivationEvent, name string, i
 			event.Paths = append(event.Paths, file.FilePath)
 		}
 	}
-	events = append(events, event)
-	if name == "batch" {
-		for _, step := range args.Steps {
-			events = appendSkillActivationEvents(events, step.Tool, step.Input, depth+1)
-		}
-	}
-	return events
+	return append(events, event)
 }
 
 func (c *coordinator) skillActivationConfig(isSubAgent bool) *SkillActivationConfig {

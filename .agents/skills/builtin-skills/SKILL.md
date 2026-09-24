@@ -17,7 +17,7 @@ These are always available without user configuration.
 - The tree is embedded at compile time via `//go:embed builtin/*` in
   `internal/skills/embed.go`.
 - `DiscoverBuiltin()` walks the embedded FS, parses each `SKILL.md`, and sets
-  paths with the `harness://skills/` prefix (e.g., `harness://skills/jq/SKILL.md`).
+  paths with the `harness://skills/` prefix (e.g., `harness://skills/harness-hooks/SKILL.md`).
 - The View tool resolves `harness://` paths from the embedded FS, not disk.
 - User skills with the same name override builtins (last occurrence wins in
   `Deduplicate()`).
@@ -39,4 +39,3 @@ These are always available without user configuration.
 | -------------- | ----------------------- | ------------------------------------------ |
 | `harness-config` | `builtin/harness-config/` | Harness configuration help                   |
 | `harness-hooks`  | `builtin/harness-hooks/`  | Authoring, configuring and debugging hooks |
-| `jq`           | `builtin/jq/`           | gojq-backed builtin jq: differences from standard jq |

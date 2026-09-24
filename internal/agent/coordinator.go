@@ -1241,7 +1241,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 
 	// The list is complete here, and everything below it -- the sort, the
-	// hook wrap, batch closing over its siblings, the deferral -- should
+	// hook wrap, the deferral -- should
 	// see only tools the provider will accept. MCP and extension names
 	// are the ones that can be unusable; see validateToolNames.
 	filteredTools = validateToolNames(filteredTools)
@@ -1262,23 +1262,8 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	filteredTools = wrapToolsResilient(filteredTools)
 	filteredTools = wrapToolsWithHooks(filteredTools, c.hooks, c.queueArrivalEpoch)
 
-	// The batch tool composes the tools above, so it is built from the
-	// finished list and appended after it. Calling the wrapped tools
-	// means a call made from inside a plan fires the same PreToolUse
-	// hooks as one the model makes directly, and a hook that denies a
-	// tool still denies it here. Batch is not in the list it closes
-	// over, so a plan cannot nest another plan.
-	if slices.Contains(agent.AllowedTools, tools.BatchToolName) {
-		callable := withResultCap(slices.Clone(filteredTools))
-		filteredTools = append(filteredTools, tools.NewBatchTool(func() []fantasy.AgentTool {
-			return callable
-		}))
-	}
-
 	// The long tail of built-in tools waits behind tool_search until the
-	// model asks for it; see deferredBuiltinTools. Batch keeps closing
-	// over the full list above, so a plan can call a deferred tool
-	// without loading it first.
+	// model asks for it; see deferredBuiltinTools.
 	filteredTools = c.deferBuiltinTools(filteredTools, isSubAgent)
 
 	return filteredTools, nil

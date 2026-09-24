@@ -324,6 +324,14 @@ var knownToolNames = func() map[string]bool {
 	return set
 }()
 
+// retiredToolNames are built-in tools Harness has removed. A definition
+// written while one existed still loads: the name is ignored with a
+// warning rather than failing the whole file, which is what an unknown
+// name would do.
+var retiredToolNames = map[string]bool{
+	"batch": true,
+}
+
 // unknownToolErrors reports every name in list that is not a built-in tool.
 // Without this an unknown name is not an error anywhere: `tools:` intersects
 // against the base pool and simply matches nothing (leaving the subagent with
@@ -334,6 +342,11 @@ func unknownToolErrors(field string, list ToolList) []error {
 	var errs []error
 	for _, tool := range list {
 		if knownToolNames[tool] {
+			continue
+		}
+		if retiredToolNames[tool] {
+			slog.Warn("Subagent references a tool Harness no longer has; ignoring it",
+				"field", field, "tool", tool)
 			continue
 		}
 		msg := fmt.Sprintf("%s references unknown tool %q", field, tool)

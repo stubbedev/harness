@@ -6,10 +6,9 @@ UTF-8-safe preview of the first 4,000 bytes, so a spilled result costs almost
 no context. Use `view` with `offset` and `limit`, or search the saved file
 through `shell`.
 
-This applies to built-in tools and MCP tools through the common result wrapper,
-and to individual tools invoked by `batch`. A large JSON result becomes a text
-preview with a file reference; batch expressions must not assume that an oversized
-response remains inline JSON. Media and binary payloads are not converted.
+This applies to built-in tools and MCP tools through the common result wrapper.
+A large JSON result becomes a text preview with a file reference. Media and
+binary payloads are not converted.
 
 Spill files are collision-safe and created with mode 0600 in private scratch
 directories, outside the project checkout. Status, error flags, stop-turn flags,

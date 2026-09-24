@@ -98,10 +98,11 @@ Windows.
 
 What this means in practice:
 
-- **Windows without Unix tooling**: inline shell (`echo`, pipelines, `jq`,
+- **Windows without Unix tooling**: inline shell (`echo`, pipelines,
   `grep`), shebang-less `.sh` scripts, inline PowerShell
   (`powershell -Command …`), and `.exe` invocations all work out of the box
-  with no WSL, Git Bash, Cygwin, or MSYS required.
+  with no WSL, Git Bash, Cygwin, or MSYS required. Other programs a hook
+  calls - `jq` included - come from `PATH` like any other command.
 - **PowerShell scripts** (`.ps1`) are not auto-dispatched by extension.
   Invoke them explicitly: `powershell -File ./audit.ps1` (or
   `pwsh -File ./audit.ps1`).

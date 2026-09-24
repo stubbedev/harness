@@ -1233,6 +1233,17 @@ func TestValidate_RejectsUnknownToolNames(t *testing.T) {
 		require.ErrorContains(t, err, "not-a-real-tool")
 	})
 
+	t.Run("retired_tool_is_ignored", func(t *testing.T) {
+		t.Parallel()
+
+		sa := Subagent{
+			Name:        "reviewer",
+			Description: "Reviews things.",
+			Tools:       ToolList{"view", "batch"},
+		}
+		require.NoError(t, sa.Validate(), "a definition written while batch existed still loads")
+	})
+
 	t.Run("unknown_name_in_disallowed_tools", func(t *testing.T) {
 		t.Parallel()
 

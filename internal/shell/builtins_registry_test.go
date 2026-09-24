@@ -87,11 +87,3 @@ func TestBuiltinHandler_UnknownFallsThrough(t *testing.T) {
 		t.Fatalf("stdout = %q, want %q", got, "fallthrough\n")
 	}
 }
-
-// TestRegisterBuiltin_JQRegistered verifies that jq is registered through the
-// same registry as every other builtin (no special-cased dispatch path).
-func TestRegisterBuiltin_JQRegistered(t *testing.T) {
-	if _, ok := builtins["jq"]; !ok {
-		t.Fatal("jq is not registered in the builtins map")
-	}
-}

@@ -27,8 +27,7 @@ all descendants before an operation.
 - `shell`: inspects only an explicit `working_dir`. Shell commands, prose,
   redirects, `cd`, and persistent terminal state are not parsed. Shell execution
   is not guarded as a file mutation.
-- MCP and unrelated tools are not inspected. Batch execution must resolve to the
-  wrapped built-in tools rather than parsing arbitrary batch or MCP payloads.
+- MCP and unrelated tools are not inspected.
 
 This is instruction delivery, not a permission mechanism or security sandbox.
 Existing approvals and hooks are unchanged. Symlinks must not cause discovery to

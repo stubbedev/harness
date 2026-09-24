@@ -17,7 +17,6 @@ type BuiltinHandler func(ctx context.Context, args []string, stdin io.Reader, st
 var builtins = make(map[string]BuiltinHandler)
 
 func init() {
-	RegisterBuiltin("jq", handleJQ)
 	RegisterBuiltin("git", handleGit)
 }
 

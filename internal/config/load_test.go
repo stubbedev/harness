@@ -1005,7 +1005,7 @@ func TestConfig_setupAgentsWithNoDisabledTools(t *testing.T) {
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
-	assert.Equal(t, []string{"batch", "shell", "edit", "lsp", "fetch", "web_search", "send_message", "view", "write"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"shell", "edit", "lsp", "fetch", "web_search", "send_message", "view", "write"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
@@ -1022,19 +1022,18 @@ func TestConfig_setupAgentsWithDisabledTools(t *testing.T) {
 	coderAgent, ok := cfg.Agents[AgentCoder]
 	require.True(t, ok)
 
-	assert.Equal(t, []string{"agent", "batch", "shell", "harness", "lsp", "research", "memory", "question", "web_search", "send_message", "view", "verify", "write", "mcp_resource"}, coderAgent.AllowedTools)
+	assert.Equal(t, []string{"agent", "shell", "harness", "lsp", "research", "memory", "question", "web_search", "send_message", "view", "verify", "write", "mcp_resource"}, coderAgent.AllowedTools)
 
 	taskAgent, ok := cfg.Agents[AgentTask]
 	require.True(t, ok)
 	// edit is in the disabled set, so it drops out of the subagent tool set.
-	assert.Equal(t, []string{"batch", "shell", "lsp", "web_search", "send_message", "view", "write"}, taskAgent.AllowedTools)
+	assert.Equal(t, []string{"shell", "lsp", "web_search", "send_message", "view", "write"}, taskAgent.AllowedTools)
 }
 
 func TestConfig_setupAgentsWithEveryReadOnlyToolDisabled(t *testing.T) {
 	cfg := &Config{
 		Options: &Options{
 			DisabledTools: []string{
-				"batch",
 				"fetch",
 				"lsp",
 				"send_message",

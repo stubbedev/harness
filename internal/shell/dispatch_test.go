@@ -250,22 +250,22 @@ func TestDispatch_EmptyFile(t *testing.T) {
 
 // TestDispatch_ShellSourceComposesWithPipe confirms the dispatch handler
 // plays nicely with mvdan's pipeline logic: a shell-source script on the
-// left feeds the jq builtin on the right.
+// left feeds the command on the right.
 func TestDispatch_ShellSourceComposesWithPipe(t *testing.T) {
 	dir := t.TempDir()
 	script := writeScript(t, dir, "emit.sh", `printf '"value"'`)
 
 	var stdout bytes.Buffer
 	err := Run(t.Context(), RunOptions{
-		Command: script + ` | jq -r .`,
+		Command: script + ` | { read -r v; echo "got $v"; }`,
 		Cwd:     dir,
 		Stdout:  &stdout,
 	})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if got := stdout.String(); got != "value\n" {
-		t.Fatalf("stdout = %q, want %q", got, "value\n")
+	if got := stdout.String(); got != "got \"value\"\n" {
+		t.Fatalf("stdout = %q, want %q", got, "got \"value\"\n")
 	}
 }
 

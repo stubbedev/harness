@@ -23,7 +23,6 @@ import (
 // save what it learns the moment it learns it, which only happens if the
 // tool is already in hand.
 var deferredBuiltinTools = []string{
-	tools.BatchToolName,
 	tools.HarnessToolName,
 	tools.LSPToolName,
 	tools.MCPResourceToolName,

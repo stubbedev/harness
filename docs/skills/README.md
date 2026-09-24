@@ -67,10 +67,9 @@ skill validation. Omit the block entirely to opt out.
 
 The main agent checks project rules before its first model request and checks
 structured tool calls before each subsequent model request. File evidence comes
-from `file_path`, `path`, `working_dir`, or `files[].file_path` arguments. Literal
-`batch.steps[].input` calls are also inspected (up to four nested batches).
-Shell command text, tool output prose, descriptions, user prose, and dynamic
-batch expressions are not classified or executed to infer activation.
+from `file_path`, `path`, `working_dir`, or `files[].file_path` arguments.
+Shell command text, tool output prose, descriptions, and user prose are not
+classified or executed to infer activation.
 
 Tool-driven activation cannot affect a tool call already executed: its
 instructions arrive before the **next model step**. For instructions required

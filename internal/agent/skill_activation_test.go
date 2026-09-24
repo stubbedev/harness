@@ -92,7 +92,7 @@ func TestSkillActivationBoundaries(t *testing.T) {
 	}
 }
 
-func TestSkillActivationProjectAndBatch(t *testing.T) {
+func TestSkillActivationProjectAndToolCalls(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example"), 0o600))
@@ -105,9 +105,11 @@ func TestSkillActivationProjectAndBatch(t *testing.T) {
 	messages := activation.Prepare(t.Context(), nil)
 	require.Len(t, messages, 1)
 	require.Contains(t, activationTestText(messages), "Follow project")
-	messages = append(messages, activationTestCall("batch", `{"steps":[{"tool":"lsp","input":{"action":"rename"}},{"tool":"view","input":{"files":[{"file_path":"docs/usage.md"}]}}]}`))
+	messages = append(messages,
+		activationTestCall("lsp", `{"action":"rename"}`),
+		activationTestCall("view", `{"files":[{"file_path":"docs/usage.md"}]}`))
 	prepared := activation.Prepare(t.Context(), messages)
-	require.Len(t, prepared, 4)
+	require.Len(t, prepared, 5)
 	require.Contains(t, activationTestText(prepared), "Follow rename")
 	require.Contains(t, activationTestText(prepared), "Follow docs")
 }

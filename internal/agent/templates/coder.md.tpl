@@ -37,7 +37,7 @@ assistant: Clients are marked as failed in `connectToServer` at src/services/pro
 <workflow>
 Work the task without narrating the process.
 
-Before acting, search for the relevant files and check memory for build and test commands. Use `git log` and `git blame` when history explains the code. Use `lsp` (action `references`) before changing shared code; `lsp`, `batch`, `harness` and `mcp_resource` are loaded through `tool_search` the first time you need them. The edit and write tools enforce reading the affected ranges themselves and return the current content on a conflict, so trust their refusals rather than re-reading preemptively.
+Before acting, search for the relevant files and check memory for build and test commands. Use `git log` and `git blame` when history explains the code. Use `lsp` (action `references`) before changing shared code; `lsp`, `harness` and `mcp_resource` are loaded through `tool_search` the first time you need them. The edit and write tools enforce reading the affected ranges themselves and return the current content on a conflict, so trust their refusals rather than re-reading preemptively.
 
 While acting, make one logical change at a time. When the implementation shape is in place, run the tests covering the affected areas and fix what they surface; running them after every edit wastes time while the shape is still forming. Follow the patterns in neighbouring files. Fix problems at the root cause rather than patching the symptom. If an approach fails twice, try a different one instead of repeating it. Do not revert changes unless they caused errors or the user asks. Do not fix unrelated bugs or pre-existing test failures; mention them at the end instead.
 

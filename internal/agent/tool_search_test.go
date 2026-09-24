@@ -48,15 +48,15 @@ func TestDeferredBuiltinToolsHideBehindToolSearch(t *testing.T) {
 	built := []fantasy.AgentTool{
 		namedTool(tools.ShellToolName, "Run commands."),
 		namedTool(tools.LSPToolName, "Ask the language server about code by symbol name rather than by text. Set action."),
-		namedTool(tools.BatchToolName, "Run several tool calls as one plan."),
+		namedTool(tools.HarnessToolName, "Inspect Harness itself."),
 		namedTool(tools.MemoryToolName, "Save memories."),
 	}
 
 	top := c.deferBuiltinTools(built, false)
 	assert.ElementsMatch(t, []string{tools.ShellToolName, tools.MemoryToolName, ToolSearchToolName}, toolNames(top),
-		"lsp and batch are deferred; shell and memory stay inline")
+		"lsp and harness are deferred; shell and memory stay inline")
 	search := findTool(t, top, ToolSearchToolName).Info()
-	assert.Contains(t, search.Description, "batch, lsp")
+	assert.Contains(t, search.Description, "harness, lsp")
 	assert.Contains(t, search.Description, "- lsp: Ask the language server about code by symbol name rather than by text")
 	assert.NotContains(t, search.Description, "Set action", "one sentence per tool")
 
@@ -72,7 +72,7 @@ func TestDeferredBuiltinToolsRespectTheAllowList(t *testing.T) {
 	// The allow-list filter already dropped lsp.
 	built := []fantasy.AgentTool{
 		namedTool(tools.ShellToolName, "Run commands."),
-		namedTool(tools.BatchToolName, "Run several tool calls as one plan."),
+		namedTool(tools.HarnessToolName, "Inspect Harness itself."),
 	}
 	top := c.deferBuiltinTools(built, false)
 	search := findTool(t, top, ToolSearchToolName).Info()
@@ -91,7 +91,7 @@ func TestToolSearchLoadsForTheSession(t *testing.T) {
 	c := &coordinator{expandedBuiltins: csync.NewMap[string, bool]()}
 	built := []fantasy.AgentTool{
 		namedTool(tools.LSPToolName, "Ask the language server."),
-		namedTool(tools.BatchToolName, "Run several tool calls as one plan."),
+		namedTool(tools.HarnessToolName, "Inspect Harness itself."),
 	}
 
 	first := c.deferBuiltinTools(built, false)
@@ -104,12 +104,12 @@ func TestToolSearchLoadsForTheSession(t *testing.T) {
 
 	second := c.deferBuiltinTools(built, false)
 	assert.ElementsMatch(t, []string{tools.LSPToolName, ToolSearchToolName}, toolNames(second),
-		"lsp is inline from the next build; batch still waits behind the search")
+		"lsp is inline from the next build; harness still waits behind the search")
 	assert.NotContains(t, findTool(t, second, ToolSearchToolName).Info().Description, "- lsp:")
 
-	_, err = findTool(t, second, ToolSearchToolName).Run(t.Context(), fantasy.ToolCall{ID: "y", Name: ToolSearchToolName, Input: `{"load":["batch"]}`})
+	_, err = findTool(t, second, ToolSearchToolName).Run(t.Context(), fantasy.ToolCall{ID: "y", Name: ToolSearchToolName, Input: `{"load":["harness"]}`})
 	require.NoError(t, err)
 	third := c.deferBuiltinTools(built, false)
-	assert.ElementsMatch(t, []string{tools.LSPToolName, tools.BatchToolName}, toolNames(third),
+	assert.ElementsMatch(t, []string{tools.LSPToolName, tools.HarnessToolName}, toolNames(third),
 		"with everything loaded there is nothing to search for")
 }

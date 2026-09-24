@@ -94,21 +94,6 @@ func TestRun_Cwd(t *testing.T) {
 	}
 }
 
-func TestRun_JqBuiltin(t *testing.T) {
-	var stdout bytes.Buffer
-	err := Run(t.Context(), RunOptions{
-		Command: `echo '{"a":1}' | jq .a`,
-		Cwd:     t.TempDir(),
-		Stdout:  &stdout,
-	})
-	if err != nil {
-		t.Fatalf("Run returned error: %v", err)
-	}
-	if got := stdout.String(); got != "1\n" {
-		t.Fatalf("stdout = %q, want %q", got, "1\n")
-	}
-}
-
 func TestRun_ParallelIsolation(t *testing.T) {
 	const n = 10
 	var wg sync.WaitGroup
