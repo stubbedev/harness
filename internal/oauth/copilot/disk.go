@@ -33,6 +33,8 @@ func tokenFilePath() string {
 	case "windows":
 		return filepath.Join(home.AppData(), "github-copilot/apps.json")
 	default:
-		return filepath.Join(home.Dir(), ".config/github-copilot/apps.json")
+		// Copilot's own clients honour XDG_CONFIG_HOME, and resolving
+		// through it keeps tests that isolate XDG off the real token.
+		return filepath.Join(home.Config(), "github-copilot/apps.json")
 	}
 }
