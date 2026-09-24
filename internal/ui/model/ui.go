@@ -3250,16 +3250,24 @@ func (m *UI) applyProgressBar(v *tea.View) {
 	}
 }
 
-// editorPrefixHints returns the editor's first-character triggers: "!"
-// enters shell mode, ":" opens the command palette and "/" the skills
-// palette. They only work as the editor's first character and none applies
-// while shell mode is already active, so they are hinted only while the
-// editor is empty and idle.
-func editorPrefixHints(k *KeyMap, show bool) []key.Binding {
+// commandHints returns the hints for opening the palettes. Both a global
+// chord (ctrl+p) and the editor's first-character triggers (":" and
+// "/") open them, but they are never hinted together: the triggers
+// stand in while the editor is empty and idle — carrying "!" for shell
+// mode with them — and the global chord covers every other state,
+// where a trigger would just type a character.
+func commandHints(k *KeyMap, show bool) []key.Binding {
 	if !show {
-		return nil
+		return []key.Binding{k.Commands}
 	}
 	return []key.Binding{k.Editor.ShellMode, k.Editor.Commands, k.Editor.Skills}
+}
+
+// editorPalettesLive reports whether the editor's first-character palette
+// triggers ("!", ":", "/") would fire: the editor is focused, empty, and
+// not already in shell mode.
+func (m *UI) editorPalettesLive() bool {
+	return m.focus == uiFocusEditor && m.textarea.Value() == "" && !m.bangMode
 }
 
 // attachmentHelpBinds returns the attachment bindings that work in the
@@ -3301,10 +3309,6 @@ func (m *UI) ShortHelp() []key.Binding {
 	}
 
 	tab := k.Tab
-	// "!" enters shell mode and ":" and "/" open the command and skills
-	// palettes only as the editor's first character, so they are hinted
-	// beside commands only while the editor is empty and idle.
-	showEditorPalettes := m.focus == uiFocusEditor && m.textarea.Value() == "" && !m.bangMode
 
 	switch m.state {
 	case uiChat:
@@ -3319,8 +3323,8 @@ func (m *UI) ShortHelp() []key.Binding {
 			tab.SetHelp(keys.HelpKeys(tab), "focus editor")
 		}
 
-		binds = append(binds, tab, k.Commands)
-		binds = append(binds, editorPrefixHints(k, showEditorPalettes)...)
+		binds = append(binds, tab)
+		binds = append(binds, commandHints(k, m.editorPalettesLive())...)
 		binds = append(binds, k.Models)
 		// Details only routes in a chat session, so it is only hinted there;
 		// the details dialog itself declares the close/toggle hints while open.
@@ -3358,11 +3362,12 @@ func (m *UI) ShortHelp() []key.Binding {
 		// no session selected
 		binds = append(
 			binds,
-			k.Commands,
-			k.Models,
-			k.Editor.Newline,
+			append(
+				commandHints(k, m.editorPalettesLive()),
+				k.Models,
+				k.Editor.Newline,
+			)...,
 		)
-		binds = append(binds, editorPrefixHints(k, showEditorPalettes)...)
 		if m.focus == uiFocusEditor {
 			binds = append(binds, attachmentHelpBinds(k, m.hasAttachments(), deleting, m.isAgentBusy())...)
 		}
@@ -3398,10 +3403,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 	help.SetHelp(keys.HelpKeys(help), "less")
 	hasAttachments := m.hasAttachments()
 	hasSession := m.hasSession()
-	// "!" enters shell mode and ":" and "/" open the command and skills
-	// palettes only as the editor's first character, so they are hinted
-	// beside commands only while the editor is empty and idle.
-	showEditorPalettes := m.focus == uiFocusEditor && m.textarea.Value() == "" && !m.bangMode
 
 	switch m.state {
 	case uiChat:
@@ -3418,12 +3419,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 			tab.SetHelp(keys.HelpKeys(tab), "focus editor")
 		}
 
-		mainBinds = append(
-			mainBinds,
-			tab,
-			k.Commands,
-		)
-		mainBinds = append(mainBinds, editorPrefixHints(k, showEditorPalettes)...)
+		mainBinds = append(mainBinds, tab)
+		mainBinds = append(mainBinds, commandHints(k, m.editorPalettesLive())...)
 		mainBinds = append(
 			mainBinds,
 			k.Models,
@@ -3494,16 +3491,13 @@ func (m *UI) FullHelp() [][]key.Binding {
 			// no session selected
 			binds = append(
 				binds,
-				[]key.Binding{
-					k.Commands,
+				append(
+					commandHints(k, m.editorPalettesLive()),
 					k.Models,
 					k.Sessions,
 					k.Themes,
-				},
+				),
 			)
-			if showEditorPalettes {
-				binds[len(binds)-1] = append(binds[len(binds)-1], editorPrefixHints(k, true)...)
-			}
 			editorBinds := []key.Binding{
 				k.Editor.Newline,
 				k.Editor.MentionFile,

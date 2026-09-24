@@ -44,26 +44,31 @@ func flatHelp(cols [][]key.Binding) []key.Binding {
 }
 
 // TestCommandsHintDerivesFromKeymap pins that the commands hint names the
-// keys the commands binding actually carries. "/" opens the skills palette,
-// not commands, so the commands hint must never advertise it — and a
-// keybind override must change the hint.
+// keys the commands binding actually carries, and that the two palette
+// entry points are never hinted together: while the editor is empty the
+// first-character triggers ("!", ":", "/") stand in for the global chord,
+// and once the editor holds text the chord returns. "/" opens the skills
+// palette, not commands, so the commands hint must never advertise it —
+// and a keybind override must change the hint.
 func TestCommandsHintDerivesFromKeymap(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
 
 	short := m.ShortHelp()
-	require.Equal(t, "ctrl+p", helpKey(t, short, "commands"))
 	require.Equal(t, ":", helpKey(t, short, "command palette"))
 	require.Equal(t, "/", helpKey(t, short, "skills"))
+	require.False(t, hasDesc(short, "commands"), "the global chord must not repeat the palette hint")
 
-	var flat []key.Binding
-	for _, col := range m.FullHelp() {
-		flat = append(flat, col...)
-	}
-	require.Equal(t, "ctrl+p", helpKey(t, flat, "commands"))
+	flat := flatHelp(m.FullHelp())
 	require.Equal(t, ":", helpKey(t, flat, "command palette"))
 	require.Equal(t, "/", helpKey(t, flat, "skills"))
+	require.False(t, hasDesc(flat, "commands"))
+
+	m.textarea.SetValue("partial prompt")
+	short = m.ShortHelp()
+	require.Equal(t, "ctrl+p", helpKey(t, short, "commands"))
+	require.False(t, hasDesc(short, "command palette"))
 
 	m.keyMap.ApplyKeybinds(map[string][]string{"commands": {"ctrl+k"}})
 	require.Equal(t, "ctrl+k", helpKey(t, m.ShortHelp(), "commands"))
