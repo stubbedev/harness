@@ -2,7 +2,6 @@
 package exitbanner
 
 import (
-	"math/rand/v2"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -52,19 +51,15 @@ func Render(banner config.ExitBanner, sess *session.Session, width int, theme st
 	}
 }
 
-// logoSection returns the ASCII art logo followed by the parting message.
+// logoSection returns the ASCII art logo with its right-aligned version.
 func logoSection(contentWidth int, theme string) string {
 	t := styles.ThemeFromConfig(theme)
-	harnessLogo := logo.Render(t.Logo.GradCanvas, version.Version, logo.Opts{
+	return logo.Render(t.Logo.GradCanvas, version.Version, logo.Opts{
 		TitleColorA:  t.Logo.TitleColorA,
 		TitleColorB:  t.Logo.TitleColorB,
 		VersionColor: t.Logo.VersionColor,
 		Width:        contentWidth,
 	})
-	// Wrap the greeting and the message together: wrapping only the message
-	// leaves the greeting's own width unaccounted for and overflows the frame.
-	return harnessLogo + "\n" +
-		lipgloss.NewStyle().Width(contentWidth).Render("Thanks for using Harness! "+randomExitMessage())
 }
 
 // sessionResumeLines returns the "Session  <title>\nContinue harness -s <hash>"
@@ -83,19 +78,4 @@ func sessionResumeLines(sess *session.Session, contentWidth int) string {
 	sessionLine := label.Render("Session  ") + title
 	continueLine := label.Render("Continue ") + "harness -s " + hash
 	return sessionLine + "\n" + continueLine
-}
-
-// randomExitMessage returns a random exit message.
-func randomExitMessage() string {
-	messages := []string{
-		"",
-		"See you soon.",
-		"Nice work.",
-		"Well done.",
-		"Take care.",
-		"Come back soon.",
-		"Until next time.",
-		"Session saved.",
-	}
-	return messages[rand.IntN(len(messages))]
 }

@@ -84,7 +84,7 @@ func init() {
 var rootCmd = &cobra.Command{
 	Use:   "harness",
 	Short: "A terminal-first AI assistant for software development",
-	Long:  "A terminal-first AI assistant for software development and adjacent tasks",
+	Long:  "A terminal-first AI assistant for software development",
 	Example: `
 # Run in interactive mode
 harness
