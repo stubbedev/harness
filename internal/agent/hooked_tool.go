@@ -15,17 +15,17 @@ import (
 // hookedTool wraps a fantasy.AgentTool to run PreToolUse hooks before
 // delegating to the inner tool, and PostToolUse hooks after it completes.
 type hookedTool struct {
-	inner fantasy.AgentTool
-	hooks *hooks.Registry
+	toolDecorator
 	// queueEpoch, when set, snapshots the session's queued-prompt epoch
 	// around the inner run: a user prompt that arrived while the tool was
 	// executing is announced in the tool result, so the model reads it on
 	// the next step instead of continuing blind.
 	queueEpoch func(sessionID string) uint64
+	hooks      *hooks.Registry
 }
 
 func newHookedTool(inner fantasy.AgentTool, registry *hooks.Registry, queueEpoch func(sessionID string) uint64) *hookedTool {
-	return &hookedTool{inner: inner, hooks: registry, queueEpoch: queueEpoch}
+	return &hookedTool{AgentTool: inner, hooks: registry, queueEpoch: queueEpoch}
 }
 
 // wrapToolsWithHooks returns a tool slice with each entry wrapped in a
@@ -46,30 +46,6 @@ func wrapToolsWithHooks(tools []fantasy.AgentTool, registry *hooks.Registry, que
 		out[i] = newHookedTool(tool, registry, queueEpoch)
 	}
 	return out
-}
-
-func (h *hookedTool) Info() fantasy.ToolInfo {
-	return h.inner.Info()
-}
-
-func (h *hookedTool) ProviderOptions() fantasy.ProviderOptions {
-	return h.inner.ProviderOptions()
-}
-
-// MCP forwards the wrapped tool's server name, or "" when the tool does not
-// come from an MCP server. Callers that group a built tool list by server --
-// the system prompt's instruction gating -- see only the wrapper, so without
-// this every tool looks non-MCP the moment a PreToolUse or PostToolUse hook
-// is configured.
-func (h *hookedTool) MCP() string {
-	if inner, ok := h.inner.(interface{ MCP() string }); ok {
-		return inner.MCP()
-	}
-	return ""
-}
-
-func (h *hookedTool) SetProviderOptions(opts fantasy.ProviderOptions) {
-	h.inner.SetProviderOptions(opts)
 }
 
 func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -101,7 +77,7 @@ func (h *hookedTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.To
 		}
 	}
 
-	resp, err := h.inner.Run(ctx, call)
+	resp, err := h.AgentTool.Run(ctx, call)
 	if err != nil {
 		return resp, err
 	}

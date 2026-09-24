@@ -19,11 +19,10 @@ func StripShellDisplayPrefix(cmd string) string {
 		if token != "cd" {
 			break
 		}
-		path, sep, rest, ok := splitCdBareword(afterCd)
-		if !ok || sep == "" {
+		rest, ok := splitCdBareword(afterCd)
+		if !ok {
 			break
 		}
-		_ = path
 		cmd = rest
 	}
 	if strings.TrimSpace(cmd) == "" {
@@ -44,58 +43,50 @@ func firstToken(cmd string) (token, rest string) {
 }
 
 // splitCdBareword parses what follows the "cd" token: whitespace, a bare
-// or quoted path, and the command separator that bounds it. ok is false
-// when the structure is not a "cd <path><sep>" prefix.
-func splitCdBareword(afterCd string) (path, sep, rest string, ok bool) {
+// or quoted path, and the command separator that bounds it. It returns
+// the remainder after the separator and whether the structure matched a
+// "cd <path><sep>" prefix.
+func splitCdBareword(afterCd string) (rest string, ok bool) {
 	s := strings.TrimLeft(afterCd, " \t")
 	if s == "" {
-		return "", "", "", false
+		return "", false
 	}
 	switch s[0] {
 	case '"':
 		i := strings.IndexByte(s[1:], '"')
 		if i < 0 {
-			return "", "", "", false
+			return "", false
 		}
-		path = s[1 : 1+i]
 		s = s[1+i+1:]
 	case '\'':
 		i := strings.IndexByte(s[1:], '\'')
 		if i < 0 {
-			return "", "", "", false
+			return "", false
 		}
-		path = s[1 : 1+i]
 		s = s[1+i+1:]
 	default:
-		// Bare path: run up to the first separator or whitespace-then-sep.
+		// Bare path: run up to the first separator or whitespace.
 		for i := 0; i < len(s); i++ {
 			c := s[i]
 			if c == '&' || c == ';' || c == '\n' {
-				path = strings.TrimRight(s[:i], " \t")
 				s = s[i:]
 				break
 			}
 			if c == ' ' || c == '\t' {
-				// Whitespace after the path: the next non-space run must
-				// be a separator, else this is not a cd prefix.
-				path = s[:i]
 				s = s[i:]
 				break
 			}
-		}
-		if path == "" {
-			return "", "", "", false
 		}
 	}
 	// Find the separator (&&, ;, \n) after any optional whitespace.
 	s = strings.TrimLeft(s, " \t")
 	switch {
 	case strings.HasPrefix(s, "&&"):
-		return path, "&&", s[len("&&"):], true
+		return s[len("&&"):], true
 	case strings.HasPrefix(s, ";"):
-		return path, ";", s[1:], true
+		return s[1:], true
 	case strings.HasPrefix(s, "\n"):
-		return path, "\n", s[1:], true
+		return s[1:], true
 	}
-	return "", "", "", false
+	return "", false
 }

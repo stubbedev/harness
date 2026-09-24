@@ -54,7 +54,7 @@ type directoryInstruction struct {
 }
 
 type directoryInstructionTool struct {
-	fantasy.AgentTool
+	toolDecorator
 	tracker *DirectoryInstructions
 }
 
@@ -130,13 +130,6 @@ func (d *DirectoryInstructions) WrapTools(input []fantasy.AgentTool) []fantasy.A
 		}
 	}
 	return output
-}
-
-func (t *directoryInstructionTool) MCP() string {
-	if inner, ok := t.AgentTool.(interface{ MCP() string }); ok {
-		return inner.MCP()
-	}
-	return ""
 }
 
 func (t *directoryInstructionTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

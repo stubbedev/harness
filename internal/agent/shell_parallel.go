@@ -25,29 +25,11 @@ import (
 // session is the model's intent to reuse one terminal, and two calls the
 // model deliberately pointed at the same name should still meet there.
 type shellSessionSpreadTool struct {
-	inner fantasy.AgentTool
+	toolDecorator
 }
 
 func newShellSessionSpreadTool(inner fantasy.AgentTool) fantasy.AgentTool {
-	return &shellSessionSpreadTool{inner: inner}
-}
-
-func (s *shellSessionSpreadTool) Info() fantasy.ToolInfo { return s.inner.Info() }
-func (s *shellSessionSpreadTool) ProviderOptions() fantasy.ProviderOptions {
-	return s.inner.ProviderOptions()
-}
-
-func (s *shellSessionSpreadTool) SetProviderOptions(o fantasy.ProviderOptions) {
-	s.inner.SetProviderOptions(o)
-}
-
-// MCP forwards the wrapped tool's server name so grouping built tools by
-// MCP server still sees it through the wrapper.
-func (s *shellSessionSpreadTool) MCP() string {
-	if m, ok := s.inner.(interface{ MCP() string }); ok {
-		return m.MCP()
-	}
-	return ""
+	return &shellSessionSpreadTool{AgentTool: inner}
 }
 
 func (s *shellSessionSpreadTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -64,7 +46,7 @@ func (s *shellSessionSpreadTool) Run(ctx context.Context, call fantasy.ToolCall)
 			}
 		}
 	}
-	return s.inner.Run(ctx, call)
+	return s.AgentTool.Run(ctx, call)
 }
 
 // parallelSessionName is the terminal name a later default shell call in

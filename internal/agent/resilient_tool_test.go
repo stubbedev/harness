@@ -13,7 +13,7 @@ func TestResilientToolConvertsErrorToResponse(t *testing.T) {
 	t.Parallel()
 
 	inner := &fakeTool{name: "memory", err: errors.New("id is required for read")}
-	tool := &resilientTool{inner: inner}
+	tool := &resilientTool{AgentTool: inner}
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-1", Name: "memory"})
 	require.NoError(t, err)
@@ -26,7 +26,7 @@ func TestResilientToolKeepsCancellationFatal(t *testing.T) {
 	t.Parallel()
 
 	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
-		tool := &resilientTool{inner: &fakeTool{name: "shell", err: cause}}
+		tool := &resilientTool{AgentTool: &fakeTool{name: "shell", err: cause}}
 
 		_, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-2", Name: "shell"})
 		require.ErrorIs(t, err, cause)
@@ -36,7 +36,7 @@ func TestResilientToolKeepsCancellationFatal(t *testing.T) {
 func TestResilientToolPassesSuccessThrough(t *testing.T) {
 	t.Parallel()
 
-	tool := &resilientTool{inner: &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}}
+	tool := &resilientTool{AgentTool: &fakeTool{name: "view", resp: fantasy.NewTextResponse("ok")}}
 
 	resp, err := tool.Run(t.Context(), fantasy.ToolCall{ID: "call-3", Name: "view"})
 	require.NoError(t, err)
