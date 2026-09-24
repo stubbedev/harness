@@ -183,7 +183,7 @@ func sourceTracker(ctx context.Context) filetracker.Service {
 	return tracker
 }
 
-func checkEditRanges(edit editContext, session, path, content string, crlf bool, operations []EditOperation) error {
+func checkEditRanges(edit editContext, norm *normCache, session, path, content string, crlf bool, operations []EditOperation) error {
 	if _, ok := edit.filetracker.(filetracker.Evidence); !ok {
 		return nil
 	}
@@ -212,8 +212,9 @@ func checkEditRanges(edit editContext, session, path, content string, crlf bool,
 			cursor = end
 		}
 		if !found {
-			for _, match := range findNormalizedMatches(content, operation.OldString) {
-				r := lineRange([]byte(content), match.startLine, match.endLine-match.startLine+1)
+			nc := norm.of(content)
+			for _, match := range nc.matches(operation.OldString) {
+				r := nc.lineRange(match.startLine, match.endLine)
 				ranges = append(ranges, filetracker.Range{Start: toRaw(r.Start), End: toRaw(r.End)})
 			}
 		}

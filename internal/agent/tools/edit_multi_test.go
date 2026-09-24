@@ -43,7 +43,7 @@ func TestApplyEditToContentPartialSuccess(t *testing.T) {
 	content := "line 1\nline 2\nline 3\n"
 
 	// Test successful edit.
-	newContent, _, err := applyEditToContent(content, EditOperation{
+	newContent, _, err := applyEditToContent(nil, content, EditOperation{
 		OldString: "line 1",
 		NewString: "LINE 1",
 	})
@@ -52,7 +52,7 @@ func TestApplyEditToContentPartialSuccess(t *testing.T) {
 	require.Contains(t, newContent, "line 2")
 
 	// Test failed edit (string not found).
-	_, _, err = applyEditToContent(content, EditOperation{
+	_, _, err = applyEditToContent(nil, content, EditOperation{
 		OldString: "line 99",
 		NewString: "LINE 99",
 	})
@@ -65,7 +65,7 @@ func TestApplyEditToContentReplacementModes(t *testing.T) {
 
 	content := "alpha\nbeta\nalpha\n"
 
-	newContent, _, err := applyEditToContent(content, EditOperation{
+	newContent, _, err := applyEditToContent(nil, content, EditOperation{
 		OldString:  "alpha",
 		NewString:  "ALPHA",
 		ReplaceAll: true,
@@ -73,14 +73,14 @@ func TestApplyEditToContentReplacementModes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "ALPHA\nbeta\nALPHA\n", newContent)
 
-	_, _, err = applyEditToContent(content, EditOperation{
+	_, _, err = applyEditToContent(nil, content, EditOperation{
 		OldString: "alpha",
 		NewString: "ALPHA",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "multiple times")
 
-	newContent, _, err = applyEditToContent(content, EditOperation{})
+	newContent, _, err = applyEditToContent(nil, content, EditOperation{})
 	require.NoError(t, err)
 	require.Equal(t, content, newContent)
 }
@@ -111,7 +111,7 @@ func TestMultiEditSequentialApplication(t *testing.T) {
 	successCount := 0
 
 	for i, edit := range edits {
-		newContent, _, err := applyEditToContent(currentContent, edit)
+		newContent, _, err := applyEditToContent(nil, currentContent, edit)
 		if err != nil {
 			failedEdits = append(failedEdits, FailedEdit{
 				Index: i + 1,
@@ -155,7 +155,7 @@ func TestMultiEditAllEditsSucceed(t *testing.T) {
 	successCount := 0
 
 	for _, edit := range edits {
-		newContent, _, err := applyEditToContent(currentContent, edit)
+		newContent, _, err := applyEditToContent(nil, currentContent, edit)
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
@@ -183,7 +183,7 @@ func TestMultiEditAllEditsFail(t *testing.T) {
 	var failedEdits []FailedEdit
 
 	for i, edit := range edits {
-		newContent, _, err := applyEditToContent(currentContent, edit)
+		newContent, _, err := applyEditToContent(nil, currentContent, edit)
 		if err != nil {
 			failedEdits = append(failedEdits, FailedEdit{
 				Index: i + 1,

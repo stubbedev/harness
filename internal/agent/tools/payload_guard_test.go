@@ -139,19 +139,19 @@ func TestVerifyReplacement(t *testing.T) {
 	t.Parallel()
 
 	edit := EditOperation{OldString: "foo", NewString: "bar"}
-	require.NoError(t, verifyReplacement("a bar b", edit, false))
-	require.ErrorContains(t, verifyReplacement("a foo b", edit, false), "still present")
-	require.ErrorContains(t, verifyReplacement("a qux b", edit, false), "missing")
+	require.NoError(t, verifyReplacement(nil, "a bar b", edit, false))
+	require.ErrorContains(t, verifyReplacement(nil, "a foo b", edit, false), "still present")
+	require.ErrorContains(t, verifyReplacement(nil, "a qux b", edit, false), "missing")
 
 	// A new_string that contains old_string is a legal overlap.
 	overlap := EditOperation{OldString: "foo", NewString: "foobar"}
-	require.NoError(t, verifyReplacement("a foobar b", overlap, false))
+	require.NoError(t, verifyReplacement(nil, "a foobar b", overlap, false))
 
 	// Whitespace-corrected edits verify on normalized text, where the
 	// re-indented new_string matches and the old text is gone.
 	indent := EditOperation{OldString: "if (x) {", NewString: "    if (x) {"}
-	require.NoError(t, verifyReplacement("\tif (x) {", indent, true))
-	require.ErrorContains(t, verifyReplacement("\tfoo", EditOperation{OldString: "foo", NewString: "bar"}, true), "still present")
+	require.NoError(t, verifyReplacement(nil, "\tif (x) {", indent, true))
+	require.ErrorContains(t, verifyReplacement(nil, "\tfoo", EditOperation{OldString: "foo", NewString: "bar"}, true), "still present")
 }
 
 func TestApplyEditsToContentVerifiesCorrectedEdits(t *testing.T) {
@@ -161,7 +161,7 @@ func TestApplyEditsToContentVerifiesCorrectedEdits(t *testing.T) {
 
 	// The space-indented old_string only matches after whitespace
 	// normalization, and the replacement is re-indented to the file's tabs.
-	result, failed, corrected, err := applyEditsToContent(content, []EditOperation{
+	result, failed, corrected, err := applyEditsToContent(nil, content, []EditOperation{
 		{OldString: "  return 1", NewString: "    return 2"},
 	}, 0)
 	require.NoError(t, err)
@@ -171,7 +171,7 @@ func TestApplyEditsToContentVerifiesCorrectedEdits(t *testing.T) {
 
 	// Sequential edits where one edit's new_string contains a later edit's
 	// old_string must not trip the overlap guard.
-	result, failed, corrected, err = applyEditsToContent("a\nb\n", []EditOperation{
+	result, failed, corrected, err = applyEditsToContent(nil, "a\nb\n", []EditOperation{
 		{OldString: "a", NewString: "a1"},
 		{OldString: "a1", NewString: "a2"},
 	}, 0)

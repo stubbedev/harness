@@ -3,9 +3,11 @@ package tools
 import (
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/stringext"
 )
 
@@ -27,14 +29,114 @@ const (
 // matches the search pattern after whitespace normalization.
 type normMatch struct{ startLine, endLine int }
 
-// findNormalizedMatches searches content for old after collapsing each line's
+// normalizedContent is content split into lines next to the
+// whitespace-normalized form of every line. An edit that falls back to
+// whitespace-tolerant matching needs that form for the evidence check, the
+// match search, the replacement, its verification and the mismatch hint;
+// building it once per content, instead of once per step, is what keeps the
+// fallback from normalizing a large file three or four times.
+type normalizedContent struct {
+	content string
+	// lines is content split on "\n", and rawStarts the byte offset of each
+	// line in content.
+	lines     []string
+	rawStarts []int
+	// norm is the normalized lines joined with "\n", exactly as
+	// joinNormalized(lines) would build it, and normStarts the offset of
+	// each normalized line in norm.
+	norm       string
+	normStarts []int
+}
+
+// newNormalizedContent normalizes content line by line into one string.
+func newNormalizedContent(content string) *normalizedContent {
+	lines := strings.Split(content, "\n")
+	nc := &normalizedContent{
+		content:    content,
+		lines:      lines,
+		rawStarts:  make([]int, len(lines)),
+		normStarts: make([]int, len(lines)),
+	}
+	var b strings.Builder
+	b.Grow(len(content))
+	raw := 0
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		nc.rawStarts[i], nc.normStarts[i] = raw, b.Len()
+		writeNormalizedWS(&b, line)
+		raw += len(line) + 1
+	}
+	nc.norm = b.String()
+	return nc
+}
+
+// assembleNormalized builds the normalizedContent of lines joined with
+// "\n", given each line's already normalized form, so a replacement can
+// reuse the normalized text of every line it did not touch.
+func assembleNormalized(lines, normLines []string) *normalizedContent {
+	content := strings.Join(lines, "\n")
+	nc := &normalizedContent{
+		content:    content,
+		lines:      lines,
+		rawStarts:  make([]int, len(lines)),
+		normStarts: make([]int, len(lines)),
+	}
+	var b strings.Builder
+	b.Grow(len(content))
+	raw := 0
+	for i, norm := range normLines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		nc.rawStarts[i], nc.normStarts[i] = raw, b.Len()
+		b.WriteString(norm)
+		raw += len(lines[i]) + 1
+	}
+	nc.norm = b.String()
+	return nc
+}
+
+// normLine returns line i of the normalized content.
+func (nc *normalizedContent) normLine(i int) string {
+	return nc.norm[nc.normStarts[i]:nc.normEnd(i)]
+}
+
+// normEnd returns the offset in norm just past normalized line i, where
+// its "\n" separator (if any) sits.
+func (nc *normalizedContent) normEnd(i int) int {
+	if i+1 < len(nc.normStarts) {
+		return nc.normStarts[i+1] - 1
+	}
+	return len(nc.norm)
+}
+
+// lineAtOffset returns the index of the first normalized line that ends
+// at or after offset in norm, or the last line when none does.
+func (nc *normalizedContent) lineAtOffset(offset int) int {
+	i := sort.Search(len(nc.normStarts), func(i int) bool { return nc.normEnd(i) >= offset })
+	return min(i, len(nc.normStarts)-1)
+}
+
+// lineRange returns the byte range of lines startLine through endLine of
+// content, including the newline that ends endLine when there is one. It
+// is lineRange over content, answered from the line offset table.
+func (nc *normalizedContent) lineRange(startLine, endLine int) filetracker.Range {
+	end := len(nc.content)
+	if endLine+1 < len(nc.rawStarts) {
+		end = nc.rawStarts[endLine+1]
+	}
+	return filetracker.Range{Start: nc.rawStarts[startLine], End: end}
+}
+
+// matches searches the content for old after collapsing each line's
 // whitespace runs to single spaces. It returns the line ranges of all
 // non-overlapping matches, mapped back to the original content's line numbers.
 // Only matches that span whole lines are reported: replacements happen at line
 // granularity, so accepting a partial-line match would discard the rest of the
 // line.
-func findNormalizedMatches(content, old string) []normMatch {
-	contentLines := strings.Split(content, "\n")
+func (nc *normalizedContent) matches(old string) []normMatch {
 	oldLines := strings.Split(old, "\n")
 
 	normOld := joinNormalized(oldLines)
@@ -42,12 +144,7 @@ func findNormalizedMatches(content, old string) []normMatch {
 		return nil
 	}
 
-	normContentLines := make([]string, len(contentLines))
-	for i, l := range contentLines {
-		normContentLines[i] = normalizeWS(l)
-	}
-	normContent := strings.Join(normContentLines, "\n")
-
+	normContent := nc.norm
 	var matches []normMatch
 	searchFrom := 0
 	for searchFrom <= len(normContent) {
@@ -63,9 +160,9 @@ func findNormalizedMatches(content, old string) []normMatch {
 			searchFrom = absIdx + 1
 			continue
 		}
-		startLine := lineAtOffset(normContentLines, absIdx)
+		startLine := nc.lineAtOffset(absIdx)
 		endLine := startLine + len(oldLines) - 1
-		if endLine >= len(contentLines) {
+		if endLine >= len(nc.lines) {
 			break
 		}
 		matches = append(matches, normMatch{startLine, endLine})
@@ -76,33 +173,70 @@ func findNormalizedMatches(content, old string) []normMatch {
 	return matches
 }
 
-// normalizedReplace attempts a whitespace-normalized find-and-replace when an
-// exact match fails. If a unique match is found (or replaceAll is set), it
-// extracts the actual text from the file, adapts new's indentation to match
-// the file's style, and performs the replacement. Returns the new content and
-// true on success, or ("", false) if no safe match was found.
-func normalizedReplace(content, old, new string, replaceAll bool) (string, bool) {
-	matches := findNormalizedMatches(content, old)
+// normCache holds the normalizedContent of the content an edit call last
+// needed it for. The evidence check and the first edit search the same
+// content, and a whitespace-tolerant replacement leaves the normalized form
+// of its result behind for the verification and the next edit, so each
+// content is normalized at most once. A nil cache normalizes every time.
+type normCache struct{ nc *normalizedContent }
+
+// of returns the normalizedContent of content, reusing the cached one when
+// it was built for the same text.
+func (c *normCache) of(content string) *normalizedContent {
+	if c == nil {
+		return newNormalizedContent(content)
+	}
+	if c.nc == nil || c.nc.content != content {
+		c.nc = newNormalizedContent(content)
+	}
+	return c.nc
+}
+
+// remember caches nc as the normalized form of nc.content.
+func (c *normCache) remember(nc *normalizedContent) {
+	if c != nil {
+		c.nc = nc
+	}
+}
+
+// replaceNormalized performs a whitespace-normalized find-and-replace, given
+// the matches of old in nc, when an exact match fails. If a unique match is
+// found (or replaceAll is set), it extracts the actual text from the file,
+// adapts new's indentation to match the file's style, and performs the
+// replacement. It returns the normalizedContent of the result and true on
+// success, or (nil, false) if no safe match was found.
+func replaceNormalized(nc *normalizedContent, matches []normMatch, old, new string, replaceAll bool) (*normalizedContent, bool) {
 	if len(matches) == 0 {
-		return "", false
+		return nil, false
 	}
 	if !replaceAll && len(matches) > 1 {
-		return "", false // Ambiguous; let the model disambiguate.
+		return nil, false // Ambiguous; let the model disambiguate.
 	}
 
-	contentLines := strings.Split(content, "\n")
+	contentLines := nc.lines
 	fileUnit := detectIndentUnit(contentLines)
 
-	// Replace in reverse order to preserve line indices.
+	// Replace in reverse order to preserve line indices. normResult tracks
+	// the normalized form of every result line alongside it, so the lines
+	// the replacement leaves alone are never normalized again.
 	result := slices.Clone(contentLines)
+	normResult := make([]string, len(contentLines))
+	for i := range normResult {
+		normResult[i] = nc.normLine(i)
+	}
 	for _, m := range slices.Backward(matches) {
 		actual := strings.Join(contentLines[m.startLine:m.endLine+1], "\n")
 		adapted := adaptIndentation(actual, old, new, fileUnit)
 		adaptedLines := strings.Split(adapted, "\n")
+		normAdapted := make([]string, len(adaptedLines))
+		for i, l := range adaptedLines {
+			normAdapted[i] = normalizeWS(l)
+		}
 		result = slices.Concat(result[:m.startLine], adaptedLines, result[m.endLine+1:])
+		normResult = slices.Concat(normResult[:m.startLine], normAdapted, normResult[m.endLine+1:])
 	}
 
-	return strings.Join(result, "\n"), true
+	return assembleNormalized(result, normResult), true
 }
 
 // joinNormalized normalizes each line and joins with newlines.
@@ -224,25 +358,26 @@ func measureDepth(leading, unit string) int {
 	return spaces / len(unit)
 }
 
-// diagnoseMismatch produces a diagnostic hint when old_string is not found
-// in content and normalized matching also failed. It helps models
-// self-correct by showing what the file actually contains near the best
-// match.
-func diagnoseMismatch(content, old string) string {
-	contentLines := strings.Split(content, "\n")
+// mismatchHint produces a diagnostic hint when old_string is not found in
+// the content and normalized matching also failed; matches are the
+// whitespace-normalized matches of old in nc. It helps models self-correct
+// by showing what the file actually contains near the best match.
+func mismatchHint(nc *normalizedContent, matches []normMatch, old string) string {
 	oldLines := strings.Split(old, "\n")
 
 	if len(oldLines) == 0 {
 		return ""
 	}
 
-	// Strategy 1: whitespace-normalized search.
-	if hint := diagnoseWhitespaceMismatch(contentLines, oldLines); hint != "" {
-		return hint
+	// Strategy 1: whitespace-normalized search. Matches that exist but were
+	// not used are ambiguous, so the hint reports the actual lines of the
+	// first.
+	if len(matches) > 0 {
+		return formatWhitespaceHint(nc.lines, matches[0].startLine, matches[0].endLine)
 	}
 
 	// Strategy 2: line-similarity search.
-	if hint := diagnoseBestLineMatch(contentLines, oldLines); hint != "" {
+	if hint := diagnoseBestLineMatch(nc.lines, oldLines); hint != "" {
 		return hint
 	}
 
@@ -254,27 +389,39 @@ func normalizeWS(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// diagnoseWhitespaceMismatch checks whether old matches content after
-// whitespace normalization. If so, it reports the actual lines.
-func diagnoseWhitespaceMismatch(contentLines, oldLines []string) string {
-	matches := findNormalizedMatches(strings.Join(contentLines, "\n"), strings.Join(oldLines, "\n"))
-	if len(matches) == 0 {
-		return ""
-	}
-	return formatWhitespaceHint(contentLines, matches[0].startLine, matches[0].endLine)
-}
-
-// lineAtOffset returns the line index for a character offset in
-// newline-joined lines.
-func lineAtOffset(lines []string, offset int) int {
-	pos := 0
-	for i, line := range lines {
-		if pos+len(line) >= offset {
-			return i
+// writeNormalizedWS writes normalizeWS(s) to b. ASCII lines, nearly every
+// line of source code, are normalized in place without splitting them into
+// fields; strings.Fields treats exactly these six bytes as ASCII
+// whitespace, so the output is the same. Other lines take normalizeWS,
+// which knows the Unicode spaces.
+func writeNormalizedWS(b *strings.Builder, s string) {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			b.WriteString(normalizeWS(s))
+			return
 		}
-		pos += len(line) + 1 // +1 for the "\n" join separator.
 	}
-	return len(lines) - 1
+	isSpace := func(c byte) bool {
+		return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r'
+	}
+	wrote := false
+	for i := 0; i < len(s); {
+		for i < len(s) && isSpace(s[i]) {
+			i++
+		}
+		start := i
+		for i < len(s) && !isSpace(s[i]) {
+			i++
+		}
+		if start == i {
+			break
+		}
+		if wrote {
+			b.WriteByte(' ')
+		}
+		b.WriteString(s[start:i])
+		wrote = true
+	}
 }
 
 func formatWhitespaceHint(contentLines []string, startLine, endLine int) string {

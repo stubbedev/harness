@@ -1,12 +1,15 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/filetracker"
 )
 
 func TestDiagnoseMismatch(t *testing.T) {
@@ -74,7 +77,7 @@ func TestDiagnoseMismatch(t *testing.T) {
 	t.Run("ambiguous error lists occurrence lines", func(t *testing.T) {
 		t.Parallel()
 		content := "x := 1\ny := 2\nx := 1\nz := 3\nx := 1\n"
-		_, _, err := findAndReplace(content, "x := 1", "x := 9", false)
+		_, _, err := findAndReplace(nil, content, "x := 1", "x := 9", false)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "appears multiple times")
 		require.Contains(t, err.Error(), "line 1")
@@ -130,7 +133,7 @@ func TestFindAndReplaceWithDiagnostics(t *testing.T) {
 		t.Parallel()
 		content := "package main\n\nfunc main() {}\n"
 		old := "this does not exist"
-		_, _, err := findAndReplace(content, old, "new", false)
+		_, _, err := findAndReplace(nil, content, old, "new", false)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "old_string not found")
 	})
@@ -139,7 +142,7 @@ func TestFindAndReplaceWithDiagnostics(t *testing.T) {
 		t.Parallel()
 		content := "package main\n\nfunc main() {}\n"
 		old := "this does not exist"
-		_, _, err := findAndReplace(content, old, "new", true)
+		_, _, err := findAndReplace(nil, content, old, "new", true)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "old_string not found")
 	})
@@ -148,7 +151,7 @@ func TestFindAndReplaceWithDiagnostics(t *testing.T) {
 		t.Parallel()
 		content := "func main() {\n\tfmt.Println(\"hello\")\n}\n"
 		old := "func main() {\n\tfmt.Println(\"hello\")\n}"
-		result, corrected, err := findAndReplace(content, old, "replaced", false)
+		result, corrected, err := findAndReplace(nil, content, old, "replaced", false)
 		require.NoError(t, err)
 		require.False(t, corrected)
 		require.Equal(t, "replaced\n", result)
@@ -158,7 +161,7 @@ func TestFindAndReplaceWithDiagnostics(t *testing.T) {
 		t.Parallel()
 		content := "func main() {\n\tfmt.Println(\"hello\")\n}\n"
 		old := "func main() {\n    fmt.Println(\"hello\")\n}"
-		result, corrected, err := findAndReplace(content, old, "func main() {\n    fmt.Println(\"goodbye\")\n}", false)
+		result, corrected, err := findAndReplace(nil, content, old, "func main() {\n    fmt.Println(\"goodbye\")\n}", false)
 		require.NoError(t, err)
 		require.True(t, corrected)
 		require.Equal(t, "func main() {\n\tfmt.Println(\"goodbye\")\n}\n", result)
@@ -168,7 +171,7 @@ func TestFindAndReplaceWithDiagnostics(t *testing.T) {
 		t.Parallel()
 		content := "package main\n"
 		old := "zzzzz nothing like this"
-		_, _, err := findAndReplace(content, old, "x", false)
+		_, _, err := findAndReplace(nil, content, old, "x", false)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "old_string not found")
 		require.NotContains(t, err.Error(), "whitespace-normalized")
@@ -186,7 +189,7 @@ func TestApplyEditToContentReportsWhitespaceCorrection(t *testing.T) {
 	t.Parallel()
 
 	content := "func main() {\n\tfoo()\n}\n"
-	result, corrected, err := applyEditToContent(content, EditOperation{
+	result, corrected, err := applyEditToContent(nil, content, EditOperation{
 		OldString: "    foo()",
 		NewString: "    bar()",
 	})
@@ -194,7 +197,7 @@ func TestApplyEditToContentReportsWhitespaceCorrection(t *testing.T) {
 	require.True(t, corrected)
 	require.Equal(t, "func main() {\n\tbar()\n}\n", result)
 
-	result, corrected, err = applyEditToContent(content, EditOperation{
+	result, corrected, err = applyEditToContent(nil, content, EditOperation{
 		OldString: "\tfoo()",
 		NewString: "\tbar()",
 	})
@@ -324,21 +327,212 @@ func BenchmarkEditNotFound(b *testing.B) {
 			content := benchmarkSource(size)
 			b.ReportAllocs()
 			for b.Loop() {
-				_, _, err := findAndReplace(content, old, "replacement", false)
+				_, _, err := findAndReplace(nil, content, old, "replacement", false)
 				require.Error(b, err)
 			}
 		})
 	}
 }
 
+// benchmarkFileEdit times one edit tool call on a file of benchmarkSource
+// lines. Each iteration restores the file and the session's evidence for
+// all of it outside the timer, so every call edits the same content.
+func benchmarkFileEdit(b *testing.B, lines int, edit EditOperation) {
+	dir := b.TempDir()
+	content := benchmarkSource(lines)
+	path := writeViewFixture(b, dir, "file.go", content)
+	ctx := context.WithValue(b.Context(), SessionIDContextKey, "s")
+	tracker := filetracker.NewService(nil)
+	tool := NewEditTool(nil, &mockHistoryService{}, tracker, dir)
+	params := EditParams{FilePath: path, Edits: []EditOperation{edit}}
+	b.ReportAllocs()
+	for b.Loop() {
+		b.StopTimer()
+		require.NoError(b, os.WriteFile(path, []byte(content), 0o644))
+		filetracker.Observe(ctx, tracker, "s", path, []byte(content), []filetracker.Range{{Start: 0, End: len(content)}})
+		b.StartTimer()
+		resp := runFileTool(b, tool, ctx, params)
+		require.False(b, resp.IsError, resp.Content)
+	}
+}
+
+// BenchmarkEditWhitespaceTolerant times an edit whose old_string only
+// matches after whitespace normalization (spaces where the file has a
+// tab), next to the same edit matching exactly.
+func BenchmarkEditWhitespaceTolerant(b *testing.B) {
+	for _, size := range []int{5_000, 50_000} {
+		line := size / 2
+		target := fmt.Sprintf("value%d := compute(%d, \"item-%d\") // step %d", line, line*7, line%13, line%101)
+		b.Run(fmt.Sprintf("lines=%d/exact", size), func(b *testing.B) {
+			benchmarkFileEdit(b, size, EditOperation{OldString: "\t" + target, NewString: "\tchanged := 1"})
+		})
+		b.Run(fmt.Sprintf("lines=%d/whitespace", size), func(b *testing.B) {
+			benchmarkFileEdit(b, size, EditOperation{OldString: "    " + target, NewString: "    changed := 1"})
+		})
+	}
+}
+
+// diagnoseMismatch and normalizedReplace run the hint and the
+// whitespace-tolerant replacement on plain strings, the way the tests call
+// them.
+func diagnoseMismatch(content, old string) string {
+	nc := newNormalizedContent(content)
+	return mismatchHint(nc, nc.matches(old), old)
+}
+
+func normalizedReplace(content, old, new string, replaceAll bool) (string, bool) {
+	nc := newNormalizedContent(content)
+	result, ok := replaceNormalized(nc, nc.matches(old), old, new, replaceAll)
+	if !ok {
+		return "", false
+	}
+	return result.content, true
+}
+
+// lineAtOffsetReference and findNormalizedMatchesReference are the
+// original line lookup and match search, which normalized the whole
+// content on every call and walked its lines from the top per match. They
+// are kept as the specification normalizedContent must match.
+func lineAtOffsetReference(lines []string, offset int) int {
+	pos := 0
+	for i, line := range lines {
+		if pos+len(line) >= offset {
+			return i
+		}
+		pos += len(line) + 1
+	}
+	return len(lines) - 1
+}
+
+func findNormalizedMatchesReference(content, old string) []normMatch {
+	contentLines := strings.Split(content, "\n")
+	oldLines := strings.Split(old, "\n")
+	normOld := joinNormalized(oldLines)
+	if strings.TrimSpace(normOld) == "" {
+		return nil
+	}
+	normContentLines := make([]string, len(contentLines))
+	for i, l := range contentLines {
+		normContentLines[i] = normalizeWS(l)
+	}
+	normContent := strings.Join(normContentLines, "\n")
+	var matches []normMatch
+	searchFrom := 0
+	for searchFrom <= len(normContent) {
+		idx := strings.Index(normContent[searchFrom:], normOld)
+		if idx == -1 {
+			break
+		}
+		absIdx := searchFrom + idx
+		end := absIdx + len(normOld)
+		atLineStart := absIdx == 0 || normContent[absIdx-1] == '\n'
+		atLineEnd := end == len(normContent) || normContent[end] == '\n'
+		if !atLineStart || !atLineEnd {
+			searchFrom = absIdx + 1
+			continue
+		}
+		startLine := lineAtOffsetReference(normContentLines, absIdx)
+		endLine := startLine + len(oldLines) - 1
+		if endLine >= len(contentLines) {
+			break
+		}
+		matches = append(matches, normMatch{startLine, endLine})
+		searchFrom = end + 1
+	}
+	return matches
+}
+
 func TestLineAtOffset(t *testing.T) {
 	t.Parallel()
-	lines := []string{"aaa", "bb", "ccccc"}
-	require.Equal(t, 0, lineAtOffset(lines, 0))
-	require.Equal(t, 0, lineAtOffset(lines, 2))
-	require.Equal(t, 1, lineAtOffset(lines, 4))
-	require.Equal(t, 2, lineAtOffset(lines, 7))
-	require.Equal(t, 2, lineAtOffset(lines, 100))
+	nc := newNormalizedContent("aaa\nbb\nccccc")
+	require.Equal(t, 0, nc.lineAtOffset(0))
+	require.Equal(t, 0, nc.lineAtOffset(2))
+	require.Equal(t, 1, nc.lineAtOffset(4))
+	require.Equal(t, 2, nc.lineAtOffset(7))
+	require.Equal(t, 2, nc.lineAtOffset(100))
+}
+
+// whitespaceCorpus returns random multi-line texts built from fragments
+// heavy in whitespace, including Unicode spaces strings.Fields knows
+// (U+0085, U+00A0, U+3000) and invalid UTF-8, so the ASCII fast path and
+// the Unicode fallback both get exercised.
+func whitespaceCorpus(rng *rand.Rand, n int) []string {
+	fragments := []string{"a", "bc", "x := 1", " ", "  ", "\t", "\t\t", "\v", "\f", "\r", "\n", "\n", "\u0085", " ", "　", "é", "\xff", "{", "}"}
+	texts := make([]string, n)
+	for i := range texts {
+		var b strings.Builder
+		for range rng.IntN(24) {
+			b.WriteString(fragments[rng.IntN(len(fragments))])
+		}
+		texts[i] = b.String()
+	}
+	return texts
+}
+
+func TestNormalizedContentMatchesReference(t *testing.T) {
+	t.Parallel()
+	rng := rand.New(rand.NewPCG(5, 6))
+	for _, content := range whitespaceCorpus(rng, 2000) {
+		nc := newNormalizedContent(content)
+		lines := strings.Split(content, "\n")
+		require.Equal(t, lines, nc.lines)
+		require.Equal(t, normalizeText(content), nc.norm, "content %q", content)
+		normLines := make([]string, len(lines))
+		for i := range lines {
+			normLines[i] = normalizeWS(lines[i])
+			require.Equal(t, normLines[i], nc.normLine(i))
+			for j := i; j < len(lines); j++ {
+				require.Equal(t, lineRange([]byte(content), i, j-i+1), nc.lineRange(i, j), "content %q lines %d-%d", content, i, j)
+			}
+		}
+		for offset := 0; offset <= len(nc.norm)+1; offset++ {
+			require.Equal(t, lineAtOffsetReference(normLines, offset), nc.lineAtOffset(offset))
+		}
+		assembled := assembleNormalized(lines, normLines)
+		require.Equal(t, content, assembled.content)
+		require.Equal(t, nc.norm, assembled.norm)
+		require.Equal(t, nc.normStarts, assembled.normStarts)
+		require.Equal(t, nc.rawStarts, assembled.rawStarts)
+	}
+}
+
+func TestNormalizedMatchesAndReplaceMatchReference(t *testing.T) {
+	t.Parallel()
+	rng := rand.New(rand.NewPCG(7, 8))
+	contents := whitespaceCorpus(rng, 300)
+	olds := append(whitespaceCorpus(rng, 40), "a", "bc", "x := 1", "{\na\n}", " a ", "\ta\n\tbc")
+	for _, content := range contents {
+		nc := newNormalizedContent(content)
+		for _, old := range olds {
+			matches := nc.matches(old)
+			require.Equal(t, findNormalizedMatchesReference(content, old), matches, "content %q old %q", content, old)
+			for _, replaceAll := range []bool{false, true} {
+				result, ok := replaceNormalized(nc, matches, old, "  y\n\tz", replaceAll)
+				if !ok {
+					continue
+				}
+				// The normalized form a replacement leaves behind is what
+				// verification and the next edit use in place of
+				// normalizing the result again.
+				require.Equal(t, newNormalizedContent(result.content), result)
+			}
+		}
+	}
+}
+
+func TestWhitespaceTolerantEditsShareNormalization(t *testing.T) {
+	t.Parallel()
+	content := "func a() {\n\tx := 1\n}\n\nfunc b() {\n\ty := 2\n}\n"
+	norm := &normCache{}
+	result, failed, corrected, err := applyEditsToContent(norm, content, []EditOperation{
+		{OldString: "    x := 1", NewString: "    x := 10"},
+		{OldString: "    y := 2", NewString: "    y := 20"},
+	}, 0)
+	require.NoError(t, err)
+	require.Empty(t, failed)
+	require.True(t, corrected)
+	require.Equal(t, "func a() {\n\tx := 10\n}\n\nfunc b() {\n\ty := 20\n}\n", result)
+	require.Equal(t, newNormalizedContent(result), norm.nc, "the cache holds the normalized final content")
 }
 
 func TestVisualizeWSPreservesInterior(t *testing.T) {

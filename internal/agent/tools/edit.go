@@ -126,12 +126,14 @@ func validateEdits(edits []EditOperation) error {
 // applyEditsToContent applies edits sequentially, collecting the ones that
 // failed. It also reports whether any edit only matched after whitespace
 // normalization. An error means an applied edit failed the post-replacement
-// verification: nothing downstream should be written.
-func applyEditsToContent(currentContent string, edits []EditOperation, startIndex int) (string, []FailedEdit, bool, error) {
+// verification: nothing downstream should be written. norm carries the
+// normalized content from the evidence check through every edit and its
+// verification; nil normalizes afresh each time.
+func applyEditsToContent(norm *normCache, currentContent string, edits []EditOperation, startIndex int) (string, []FailedEdit, bool, error) {
 	var failedEdits []FailedEdit
 	var whitespaceCorrected bool
 	for i, edit := range edits {
-		newContent, corrected, err := applyEditToContent(currentContent, edit)
+		newContent, corrected, err := applyEditToContent(norm, currentContent, edit)
 		if err != nil {
 			failedEdits = append(failedEdits, FailedEdit{
 				Index: startIndex + i + 1,
@@ -140,7 +142,7 @@ func applyEditsToContent(currentContent string, edits []EditOperation, startInde
 			})
 			continue
 		}
-		if err := verifyReplacement(newContent, edit, corrected); err != nil {
+		if err := verifyReplacement(norm, newContent, edit, corrected); err != nil {
 			return "", nil, false, fmt.Errorf("edit %d failed internal verification (%w); no changes were written, re-read the section and resend the edit", startIndex+i+1, err)
 		}
 		whitespaceCorrected = whitespaceCorrected || corrected
@@ -167,7 +169,7 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
 	}
 
-	currentContent, failedEdits, whitespaceCorrected, err := applyEditsToContent(firstEdit.NewString, params.Edits[1:], 1)
+	currentContent, failedEdits, whitespaceCorrected, err := applyEditsToContent(&normCache{}, firstEdit.NewString, params.Edits[1:], 1)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -229,10 +231,11 @@ func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolR
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
-	if err := checkEditRanges(edit, sessionID, params.FilePath, oldContent, isCrlf, params.Edits); err != nil {
+	norm := &normCache{}
+	if err := checkEditRanges(edit, norm, sessionID, params.FilePath, oldContent, isCrlf, params.Edits); err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
-	currentContent, failedEdits, whitespaceCorrected, err := applyEditsToContent(oldContent, params.Edits, 0)
+	currentContent, failedEdits, whitespaceCorrected, err := applyEditsToContent(norm, oldContent, params.Edits, 0)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -289,7 +292,7 @@ func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolR
 
 // applyEditToContent applies a single edit, reporting whether it only matched
 // after whitespace normalization.
-func applyEditToContent(content string, edit EditOperation) (string, bool, error) {
+func applyEditToContent(norm *normCache, content string, edit EditOperation) (string, bool, error) {
 	if edit.OldString == "" && edit.NewString == "" {
 		return content, false, nil
 	}
@@ -298,5 +301,5 @@ func applyEditToContent(content string, edit EditOperation) (string, bool, error
 		return "", false, fmt.Errorf("old_string cannot be empty for content replacement")
 	}
 
-	return findAndReplace(content, edit.OldString, edit.NewString, edit.ReplaceAll)
+	return findAndReplace(norm, content, edit.OldString, edit.NewString, edit.ReplaceAll)
 }

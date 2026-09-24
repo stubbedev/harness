@@ -27,8 +27,10 @@ type editContext struct {
 // to whitespace-normalized matching and, failing that, returns a diagnostic
 // hint describing why the replacement could not be made. The returned boolean
 // reports whether the replacement relied on the whitespace-normalized
-// fallback rather than an exact match.
-func findAndReplace(content, old, new string, replaceAll bool) (string, bool, error) {
+// fallback rather than an exact match. The fallback and the hint share the
+// normalized content held in norm, and a fallback replacement leaves the
+// normalized form of its result there.
+func findAndReplace(norm *normCache, content, old, new string, replaceAll bool) (string, bool, error) {
 	if replaceAll {
 		if strings.Contains(content, old) {
 			return strings.ReplaceAll(content, old, new), false, nil
@@ -45,10 +47,13 @@ func findAndReplace(content, old, new string, replaceAll bool) (string, bool, er
 		}
 	}
 
-	if result, ok := normalizedReplace(content, old, new, replaceAll); ok {
-		return result, true, nil
+	nc := norm.of(content)
+	matches := nc.matches(old)
+	if result, ok := replaceNormalized(nc, matches, old, new, replaceAll); ok {
+		norm.remember(result)
+		return result.content, true, nil
 	}
-	return "", false, notFoundError(content, old)
+	return "", false, notFoundError(nc, matches, old)
 }
 
 // withWhitespaceNote appends the whitespace auto-correction note to a tool
@@ -62,9 +67,9 @@ func withWhitespaceNote(message string, whitespaceCorrected bool) string {
 
 // notFoundError builds the "old_string not found" error, appending a
 // diagnostic hint when one is available to help the caller self-correct.
-func notFoundError(content, old string) error {
+func notFoundError(nc *normalizedContent, matches []normMatch, old string) error {
 	msg := "old_string not found in file. Make sure it matches exactly, including whitespace and line breaks"
-	if hint := diagnoseMismatch(content, old); hint != "" {
+	if hint := mismatchHint(nc, matches, old); hint != "" {
 		msg += "\n\n" + hint
 	}
 	return errors.New(msg)

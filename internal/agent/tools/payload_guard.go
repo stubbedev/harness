@@ -138,14 +138,16 @@ func repeatedUnit(line string, limits repetitionLimits) (string, int) {
 // verifyReplacement checks the invariant every applied edit must hold: the
 // old text is gone and the new text is in. Exact matches are verified on
 // the raw strings; whitespace-corrected matches on normalized text,
-// because that path re-indents new_string to the file's style.
-func verifyReplacement(result string, edit EditOperation, corrected bool) error {
+// because that path re-indents new_string to the file's style. The
+// normalized result comes from norm, which a whitespace-tolerant
+// replacement has already filled with it.
+func verifyReplacement(norm *normCache, result string, edit EditOperation, corrected bool) error {
 	if edit.OldString == "" {
 		return nil
 	}
 	oldText, newText, resultText := edit.OldString, edit.NewString, result
 	if corrected {
-		oldText, newText, resultText = normalizeText(oldText), normalizeText(newText), normalizeText(result)
+		oldText, newText, resultText = normalizeText(oldText), normalizeText(newText), norm.of(result).norm
 	}
 	if !strings.Contains(newText, oldText) && strings.Contains(resultText, oldText) {
 		return fmt.Errorf("old_string is still present after replacement")
