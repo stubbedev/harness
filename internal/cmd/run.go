@@ -37,16 +37,16 @@ var runCmd = &cobra.Command{
 The prompt can be provided as arguments or piped from stdin.`,
 	Example: `
 # Run a simple prompt
-harness run "Guess my 5 favorite Pokémon"
+harness run "Summarize this repository"
 
 # Pipe input from stdin
 curl https://example.com | harness run "Summarize this website"
 
 # Read from a file
-harness run "What is this code doing?" <<< prrr.go
+harness run "What is this code doing?" <<< main.go
 
 # Redirect output to a file
-harness run "Generate a hot README for this project" > MY_HOT_README.md
+harness run "Generate a README for this project" > README_DRAFT.md
 
 # Run in quiet mode (hide the spinner)
 harness run --quiet "Generate a README for this project"
@@ -57,7 +57,7 @@ harness run --verbose "Generate a README for this project"
 # Use a specific reasoning effort
 # Levels depend on the model, unsupported values are rejected
 # with the accepted values listed
-harness run --reasoning-effort high "What is the meaning of life?"
+harness run --reasoning-effort high "Diagnose why this test fails"
 
 # Continue a previous session
 harness run --session {session-id} "Follow up on your last response"

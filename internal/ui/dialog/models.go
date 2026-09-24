@@ -257,7 +257,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.TitleInfo = m.modelTypeRadioView()
 
 	if m.isOnboarding {
-		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
+		titleText := t.Dialog.PrimaryText.Render("Choose a provider and model to get started.")
 		rc.AddPart(titleText)
 	}
 

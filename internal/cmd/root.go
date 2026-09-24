@@ -84,16 +84,16 @@ func init() {
 var rootCmd = &cobra.Command{
 	Use:   "harness",
 	Short: "A terminal-first AI assistant for software development",
-	Long:  "A glamorous, terminal-first AI assistant for software development and adjacent tasks",
+	Long:  "A terminal-first AI assistant for software development and adjacent tasks",
 	Example: `
 # Run in interactive mode
 harness
 
 # Run non-interactively
-harness run "Guess my 5 favorite Pokémon"
+harness run "Summarize this repository"
 
-# Run a non-interactively with pipes and redirection
-cat README.md | harness run "make this more glamorous" > GLAMOROUS_README.md
+# Run non-interactively with pipes and redirection
+git diff | harness run "Review this diff" > REVIEW.md
 
 # Run with debug logging in a specific directory
 harness --debug --cwd /path/to/project

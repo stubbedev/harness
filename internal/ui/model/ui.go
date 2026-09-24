@@ -4124,19 +4124,16 @@ func mimeOf(content []byte) string {
 }
 
 var readyPlaceholders = [...]string{
-	"Ready!",
-	"Ready...",
-	"Ready?",
+	"Ready",
 	"Ready for instructions",
+	"Awaiting instructions",
 }
 
 var workingPlaceholders = [...]string{
-	"Working!",
 	"Working...",
-	"Brrrrr...",
-	"Prrrrrrrr...",
-	"Processing...",
 	"Thinking...",
+	"Processing...",
+	"Analyzing...",
 }
 
 // randomizePlaceholders selects random placeholder text for the textarea's

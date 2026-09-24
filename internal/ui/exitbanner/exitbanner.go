@@ -89,26 +89,13 @@ func sessionResumeLines(sess *session.Session, contentWidth int) string {
 func randomExitMessage() string {
 	messages := []string{
 		"",
-		"See ya later.",
-		"You look great.",
-		"Have a gorgeous time.",
-		"Get some rest.",
-		"Come back soon.",
-		"You worked handsomely.",
-		"Time for a snack.",
-		"Who’s hungry?",
-		"That was fun.",
-		"See you at breakfast?",
-		"Time for a nap.",
-		"Who wants some spaghetti?",
-		"Take care of yourself.",
-		"Remember to hydrate.",
-		"Time for a swim?",
-		"You’re quite glamorous, you know.",
+		"See you soon.",
 		"Nice work.",
-		"You’re a sensation.",
-		"Where’s my eyeliner?",
-		"It’s tea time.",
+		"Well done.",
+		"Take care.",
+		"Come back soon.",
+		"Until next time.",
+		"Session saved.",
 	}
 	return messages[rand.IntN(len(messages))]
 }

@@ -315,7 +315,7 @@ func (m *OAuth) innerDialogContent() string {
 		url := statusTextStyle.
 			Width(innerWidth).
 			Padding(0, 1).
-			Render("Browser not opening? Pay a visit to:\n" + link)
+			Render("Browser not opening? Visit:\n" + link)
 
 		waiting := statusTextStyle.
 			Width(innerWidth).
