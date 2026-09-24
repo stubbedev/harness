@@ -1527,29 +1527,94 @@ func consumeEchoChunks(line, echo string) (int, bool) {
 // output padded that far past a % or # is unheard of.
 var promptPartialRe = regexp.MustCompile(`^(.*?)[%#] {12,}$`)
 
-// resolveBackspaces turns "e\becho hello" into "echo hello": the line
-// editor echoes a character before the rest of the line arrives, then
-// backspaces over it to redraw. A backspace erases the preceding rune,
-// exactly as the terminal would display it.
-func resolveBackspaces(s string) string {
-	if !strings.Contains(s, "\b") {
-		return s
+// renderLines reduces each line of raw terminal output to the text a
+// terminal would show on it, dropping escape sequences. A line editor
+// does not only append: it echoes a character, backspaces over it and
+// redraws ("e\becho hi"), and when it recolors a line it walks the
+// cursor back over it, reprints part of it and skips forward over the
+// rest ("echo hi" 7x\b "echo" ESC[3C). A backspace and a cursor move
+// are motions, not erasures, and text written after them overwrites
+// what is there; read as erasures, or stripped as noise, the redraw
+// leaves "echo" where the screen said "echo hi" - the debris that used
+// to survive as the first line of a command's output. Motions within
+// the line (backspace, cursor forward/back/column) and line erasure are
+// followed; every other sequence is dropped as ansi.Strip would.
+func renderLines(s string) string {
+	if !strings.ContainsAny(s, "\b\x1b") {
+		return ansi.Strip(s)
 	}
-	var b []byte
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '\b':
-			for len(b) > 0 && b[len(b)-1]&0xC0 == 0x80 {
-				b = b[:len(b)-1]
-			}
-			if len(b) > 0 {
-				b = b[:len(b)-1]
-			}
-		default:
-			b = append(b, s[i])
+	lines := strings.Split(s, "\n")
+	p := ansi.NewParser()
+	for i, line := range lines {
+		if strings.ContainsAny(line, "\b\x1b") {
+			lines[i] = renderLine(line, p)
+		} else {
+			lines[i] = ansi.Strip(line)
 		}
 	}
-	return string(b)
+	return strings.Join(lines, "\n")
+}
+
+// renderLine is renderLines for one line: a row of cells, each holding
+// one grapheme, and a cursor moving over it. A wide grapheme takes its
+// cell and leaves the ones it covers empty.
+func renderLine(line string, p *ansi.Parser) string {
+	var cells []string
+	cur := 0
+	put := func(g string, width int) {
+		for len(cells) < cur+width {
+			cells = append(cells, " ")
+		}
+		// Writing over half of a wide grapheme leaves the other half
+		// blank, as a terminal shows it.
+		for k := cur; k > 0 && cells[k] == ""; k-- {
+			cells[k-1] = " "
+		}
+		for k := cur + width; k < len(cells) && cells[k] == ""; k++ {
+			cells[k] = " "
+		}
+		cells[cur] = g
+		for k := 1; k < width; k++ {
+			cells[cur+k] = ""
+		}
+		cur += width
+	}
+	var state byte
+	for len(line) > 0 {
+		seq, width, n, next := ansi.DecodeSequence(line, state, p)
+		state = next
+		line = line[n:]
+		switch {
+		case width > 0:
+			put(seq, width)
+		case seq == "\b":
+			cur = max(cur-1, 0)
+		case seq == "\t":
+			put("\t", 1)
+		case ansi.HasCsiPrefix(seq):
+			arg, _ := p.Param(0, 1)
+			switch ansi.Cmd(p.Command()).Final() {
+			case 'C':
+				cur += max(arg, 1)
+			case 'D':
+				cur = max(cur-max(arg, 1), 0)
+			case 'G':
+				cur = max(arg, 1) - 1
+			case 'K':
+				switch mode, _ := p.Param(0, 0); mode {
+				case 0:
+					cells = cells[:min(cur, len(cells))]
+				case 1:
+					for k := 0; k <= cur && k < len(cells); k++ {
+						cells[k] = " "
+					}
+				case 2:
+					cells = cells[:0]
+				}
+			}
+		}
+	}
+	return strings.Join(cells, "")
 }
 
 // interrupt stops whatever is running with ctrl-c and reports the
@@ -2193,8 +2258,7 @@ func (r *ptyRunner) cleanWith(mark sentinel, raw string, echo []string) string {
 	out = strings.ReplaceAll(out, "\x1b[?2004h", "\n")
 	out = strings.ReplaceAll(out, "\x1b[?2004l", "\n")
 	out = strings.ReplaceAll(out, "\r", "\n")
-	out = ansi.Strip(out)
-	out = resolveBackspaces(out)
+	out = renderLines(out)
 
 	var lines []string
 	for line := range strings.SplitSeq(out, "\n") {

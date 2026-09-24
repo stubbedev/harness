@@ -849,6 +849,16 @@ func TestPtyCleanZshStream(t *testing.T) {
 			want: "hello",
 		},
 		{
+			// zle recoloring the command word with backspaces rather than
+			// a cursor-back sequence, then skipping over the rest.
+			name: "backspace redraw",
+			raw: "e\becho hi\b\b\b\b\b\b\b\x1b[36me\x1b[36mc\x1b[36mh\x1b[36mo\x1b[39m\x1b[3C" +
+				"\x1b[?1l\x1b>\x1b[?2004l\r\r\nhi\r\n" + zshPromptSp(215) +
+				r.sentinel.cmd + "\r\n",
+			echo: []string{"echo hi"},
+			want: "hi",
+		},
+		{
 			name: "partial line",
 			raw: "p\bprintf %s partial-output\x1b[24D\x1b[36mp\x1b[36mr\x1b[36mi\x1b[36mn\x1b[36mt\x1b[36mf\x1b[39m \x1b[33m%\x1b[33ms\x1b[39m\x1b[15C" +
 				"\x1b[?1l\x1b>\x1b[?2004l\r\r\npartial-output" + zshPromptSp(215) +
@@ -928,13 +938,29 @@ func TestPtyRunner_ZshUserShellHeredoc(t *testing.T) {
 		"a heredoc's body goes into the file, not the output")
 }
 
-func TestResolveBackspaces(t *testing.T) {
+func TestRenderLines(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, "echo hello", resolveBackspaces("e\becho hello"))
-	require.Equal(t, "", resolveBackspaces("x\b"))
-	require.Equal(t, "ün", resolveBackspaces("üü\bn"))
-	require.Equal(t, "no backspaces", resolveBackspaces("no backspaces"))
+	cases := map[string]string{
+		"e\becho hello": "echo hello",
+		// A backspace moves the cursor; it does not erase what it passes.
+		"x\b":   "x",
+		"üü\bn": "ün",
+		// zle recoloring a line: back over it, reprint the command word,
+		// skip forward over the rest.
+		"e\becho hi\b\b\b\b\b\b\b\x1b[36me\x1b[36mc\x1b[36mh\x1b[36mo\x1b[39m\x1b[3C": "echo hi",
+		"echo hello\x1b[10D\x1b[36mecho\x1b[39m\x1b[6C":                               "echo hello",
+		"abc\x1b[2D\x1b[K":   "a",
+		"abc\x1b[2G\x1b[1K!": " !c",
+		"a\x1b[3Cb":          "a   b",
+		"漢字\b\bx":            "漢x ",
+		"no escapes":         "no escapes",
+		"\x1b]133;A\a$ ls":   "$ ls",
+		"one\ntwo\b\bo":      "one\ntoo",
+	}
+	for raw, want := range cases {
+		require.Equal(t, want, renderLines(raw), "%q", raw)
+	}
 }
 
 func TestPtyCredPromptPattern(t *testing.T) {
