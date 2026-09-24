@@ -40,6 +40,11 @@ type EditResponseMetadata struct {
 	NewContent   string       `json:"new_content,omitempty"`
 	EditsApplied int          `json:"edits_applied"`
 	EditsFailed  []FailedEdit `json:"edits_failed,omitempty"`
+	// FileMutations is filled from the content the edit wrote. It is the
+	// last field so the JSON is what withFileMutations produced by
+	// appending the key to the marshalled metadata, without reading the
+	// file back or re-parsing metadata that holds the whole file twice.
+	FileMutations []fileMutation `json:"file_mutations,omitempty"`
 }
 
 const EditToolName = "edit"
@@ -102,7 +107,7 @@ func NewEditTool(
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
 			text += reportDiagnosticsNow(ctx, lspManager, params.FilePath)
 			response.Content = text
-			return withFileMutations(response, params.FilePath), nil
+			return response, nil
 		},
 	)
 }
@@ -186,7 +191,8 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 	editsApplied := len(params.Edits) - len(failedEdits)
 
 	// Write the file
-	err = guardedWrite(params.FilePath, nil, []byte(currentContent), true)
+	written := []byte(currentContent)
+	err = guardedWrite(params.FilePath, nil, written, true)
 	if err != nil {
 		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -195,7 +201,7 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 		return fantasy.ToolResponse{}, err
 	}
 
-	filetracker.Observe(edit.ctx, edit.filetracker, sessionID, params.FilePath, []byte(currentContent), []filetracker.Range{{Start: 0, End: len(currentContent)}})
+	filetracker.Observe(edit.ctx, edit.filetracker, sessionID, params.FilePath, written, []filetracker.Range{{Start: 0, End: len(currentContent)}})
 
 	var message string
 	if len(failedEdits) > 0 {
@@ -208,12 +214,13 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(message),
 		EditResponseMetadata{
-			OldContent:   "",
-			NewContent:   currentContent,
-			Additions:    additions,
-			Removals:     removals,
-			EditsApplied: editsApplied,
-			EditsFailed:  failedEdits,
+			OldContent:    "",
+			NewContent:    currentContent,
+			Additions:     additions,
+			Removals:      removals,
+			EditsApplied:  editsApplied,
+			EditsFailed:   failedEdits,
+			FileMutations: []fileMutation{newFileMutation(params.FilePath, written)},
 		},
 	), nil
 }
@@ -265,7 +272,8 @@ func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolR
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	if err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent, isCrlf); err != nil {
+	mutation, err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent, isCrlf)
+	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
@@ -280,12 +288,13 @@ func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolR
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(message),
 		EditResponseMetadata{
-			OldContent:   oldContent,
-			NewContent:   currentContent,
-			Additions:    additions,
-			Removals:     removals,
-			EditsApplied: editsApplied,
-			EditsFailed:  failedEdits,
+			OldContent:    oldContent,
+			NewContent:    currentContent,
+			Additions:     additions,
+			Removals:      removals,
+			EditsApplied:  editsApplied,
+			EditsFailed:   failedEdits,
+			FileMutations: []fileMutation{mutation},
 		},
 	), nil
 }

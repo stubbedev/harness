@@ -16,7 +16,9 @@ type Range struct{ Start, End int }
 type Evidence interface {
 	Observe(context.Context, string, string, []byte, []Range)
 	Check(context.Context, string, string, []byte, []Range) error
-	Advance(context.Context, string, string, []byte, []byte)
+	// Advance moves the evidence for a file from before to after, given
+	// changes, the udiff.Bytes edits that turn one into the other.
+	Advance(ctx context.Context, session, path string, before, after []byte, changes []udiff.Edit)
 }
 
 var (
@@ -101,12 +103,11 @@ func (s *service) Check(_ context.Context, session, path string, content []byte,
 	return nil
 }
 
-func (s *service) Advance(ctx context.Context, session, path string, before, after []byte) {
+func (s *service) Advance(ctx context.Context, session, path string, before, after []byte, changes []udiff.Edit) {
 	s.evidence.mu.Lock()
 	key := evidenceKey(session, path)
 	obs := s.evidence.seen[key]
 	var ranges []Range
-	changes := udiff.Bytes(before, after)
 	if obs.version == sha256.Sum256(before) {
 		for _, seen := range obs.ranges {
 			cursor, shift := seen.Start, 0
@@ -153,12 +154,28 @@ func Observe(ctx context.Context, tracker Service, session, path string, content
 	}
 }
 
+// Advance moves the session's evidence for path from before to after,
+// diffing the two to find what changed.
 func Advance(ctx context.Context, tracker Service, session, path string, before, after []byte) {
 	if tracker == nil {
 		return
 	}
 	if evidence, ok := tracker.(Evidence); ok {
-		evidence.Advance(ctx, session, path, before, after)
+		evidence.Advance(ctx, session, path, before, after, udiff.Bytes(before, after))
+	} else {
+		tracker.RecordRead(ctx, session, path)
+	}
+}
+
+// AdvanceChanges is Advance for a caller that already diffed before and
+// after with udiff.Bytes (or udiff.Strings, which returns the same edits),
+// so a large file is not diffed a second time.
+func AdvanceChanges(ctx context.Context, tracker Service, session, path string, before, after []byte, changes []udiff.Edit) {
+	if tracker == nil {
+		return
+	}
+	if evidence, ok := tracker.(Evidence); ok {
+		evidence.Advance(ctx, session, path, before, after, changes)
 	} else {
 		tracker.RecordRead(ctx, session, path)
 	}

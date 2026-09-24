@@ -206,7 +206,8 @@ func TestFileEvidenceLineEndingChangeBeforeCommitIsStale(t *testing.T) {
 	require.False(t, runViewTool(t, NewViewTool(nil, tracker, nil, dir), ctx, ViewParams{FilePath: path}).IsError)
 	require.NoError(t, os.WriteFile(path, []byte("alpha\r\nbeta\r\n"), 0o644))
 	edit := editContext{ctx: ctx, files: &mockHistoryService{}, filetracker: tracker, workingDir: dir}
-	require.ErrorIs(t, commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false), filetracker.ErrStale)
+	_, err := commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false)
+	require.ErrorIs(t, err, filetracker.ErrStale)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, "alpha\r\nbeta\r\n", string(data))
@@ -274,6 +275,53 @@ func TestSeenTextRangesMatchesReference(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// BenchmarkEditLargeFile times exact edits on files of roughly 300 KB and
+// 3 MB: one replacement, and three in one call.
+func BenchmarkEditLargeFile(b *testing.B) {
+	for _, size := range []int{6_000, 60_000} {
+		target := func(line int) string {
+			return fmt.Sprintf("\tvalue%d := compute(%d, \"item-%d\") // step %d", line, line*7, line%13, line%101)
+		}
+		b.Run(fmt.Sprintf("lines=%d/single", size), func(b *testing.B) {
+			benchmarkFileEdit(b, size, EditOperation{OldString: target(size / 2), NewString: "\tchanged := 1"})
+		})
+		b.Run(fmt.Sprintf("lines=%d/multi", size), func(b *testing.B) {
+			benchmarkFileEdit(b, size,
+				EditOperation{OldString: target(size / 4), NewString: "\tfirst := 1"},
+				EditOperation{OldString: target(size / 2), NewString: "\tsecond := 2"},
+				EditOperation{OldString: target(3 * size / 4), NewString: "\tthird := 3"},
+			)
+		})
+	}
+}
+
+// BenchmarkWriteLargeFile times the write tool replacing a file of roughly
+// 300 KB and 1.5 MB (write caps a call at 2 MB) with a copy that differs in
+// one line.
+func BenchmarkWriteLargeFile(b *testing.B) {
+	for _, size := range []int{6_000, 30_000} {
+		b.Run(fmt.Sprintf("lines=%d", size), func(b *testing.B) {
+			dir := b.TempDir()
+			content := benchmarkSource(size)
+			updated := strings.Replace(content, "value17 :=", "renamed17 :=", 1)
+			path := writeViewFixture(b, dir, "file.go", content)
+			ctx := context.WithValue(b.Context(), SessionIDContextKey, "s")
+			tracker := filetracker.NewService(nil)
+			tool := NewWriteTool(nil, &mockHistoryService{}, tracker, dir)
+			params := WriteParams{FilePath: path, Content: updated}
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				require.NoError(b, os.WriteFile(path, []byte(content), 0o644))
+				filetracker.Observe(ctx, tracker, "s", path, []byte(content), []filetracker.Range{{Start: 0, End: len(content)}})
+				b.StartTimer()
+				resp := runFileTool(b, tool, ctx, params)
+				require.False(b, resp.IsError, resp.Content)
+			}
+		})
 	}
 }
 

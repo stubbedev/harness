@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+	"github.com/aymanbagabas/go-udiff"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/history"
@@ -108,42 +109,49 @@ func ambiguityHint(content, old string) string {
 
 // commitFileChange writes newContent to filePath, updates the file history,
 // and records the read in the file tracker. Callers must convert line endings
-// before calling this function.
-func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf bool) error {
+// before calling this function. It returns the file_mutations entry for the
+// written content, hashed from memory rather than by reading the file back.
+func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf bool) (fileMutation, error) {
 	current, err := os.ReadFile(filePath)
 	if err != nil {
-		return err
+		return fileMutation{}, err
 	}
 	expected := oldContent
 	if crlf {
 		expected, _ = fsext.ToWindowsLineEndings(oldContent)
 	}
 	if string(current) != expected {
-		return conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, filetracker.ErrStale)
+		return fileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, filetracker.ErrStale)
 	}
-	oldContent = string(current)
-	ranges := changedRanges(oldContent, newContent)
+	// expected now holds exactly the bytes of current, so it stands in for
+	// them as a string without another copy of the file.
+	oldContent = expected
+	newBytes := []byte(newContent)
+	// One diff serves both the evidence check and advancing the evidence
+	// past the write; each used to diff the whole file on its own.
+	changes := udiff.Bytes(current, newBytes)
+	ranges := changedRanges(changes, len(current))
 	if err := checkFileEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, ranges); err != nil {
 		at := 0
 		if len(ranges) > 0 {
 			at = ranges[0].Start
 		}
-		return conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, at, err)
+		return fileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, at, err)
 	}
 
-	if err := guardedWrite(filePath, []byte(oldContent), []byte(newContent), false); err != nil {
+	if err := guardedWrite(filePath, current, newBytes, false); err != nil {
 		if current, readErr := os.ReadFile(filePath); readErr == nil {
-			return conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, err)
+			return fileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, err)
 		}
-		return fmt.Errorf("failed to write file: %w", err)
+		return fileMutation{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
 	if err := recordFileVersion(edit.ctx, edit.files, sessionID, filePath, oldContent, newContent); err != nil {
-		return err
+		return fileMutation{}, err
 	}
 
-	filetracker.Advance(edit.ctx, edit.filetracker, sessionID, filePath, []byte(oldContent), []byte(newContent))
-	return nil
+	filetracker.AdvanceChanges(edit.ctx, edit.filetracker, sessionID, filePath, current, newBytes, changes)
+	return newFileMutation(filePath, newBytes), nil
 }
 
 // recordFileVersion stores filePath in the session's file history: the

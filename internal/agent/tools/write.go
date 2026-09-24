@@ -29,6 +29,9 @@ type WriteResponseMetadata struct {
 	Diff      string `json:"diff"`
 	Additions int    `json:"additions"`
 	Removals  int    `json:"removals"`
+	// FileMutations is filled from the content the write put on disk, as
+	// the last field so the JSON matches what withFileMutations appended.
+	FileMutations []fileMutation `json:"file_mutations,omitempty"`
 }
 
 const WriteToolName = "write"
@@ -84,7 +87,8 @@ func NewWriteTool(
 				strings.TrimPrefix(filePath, workingDir),
 			)
 
-			err = guardedWrite(filePath, oldBytes, []byte(params.Content), create)
+			written := []byte(params.Content)
+			err = guardedWrite(filePath, oldBytes, written, create)
 			if err != nil {
 				if current, readErr := os.ReadFile(filePath); readErr == nil {
 					err = conflictEvidence(ctx, tracker, sessionID, filePath, current, 0, err)
@@ -96,21 +100,22 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, err
 			}
 
-			filetracker.Observe(ctx, tracker, sessionID, filePath, []byte(params.Content), []filetracker.Range{{Start: 0, End: len(params.Content)}})
+			filetracker.Observe(ctx, tracker, sessionID, filePath, written, []filetracker.Range{{Start: 0, End: len(params.Content)}})
 
 			lspManager.NotifyChangeAsync(ctx, filePath)
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
 			result += reportDiagnosticsNow(ctx, lspManager, filePath)
-			return withFileMutations(fantasy.WithResponseMetadata(
+			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
-					Diff:      diff,
-					Additions: additions,
-					Removals:  removals,
+					Diff:          diff,
+					Additions:     additions,
+					Removals:      removals,
+					FileMutations: []fileMutation{newFileMutation(filePath, written)},
 				},
-			), filePath), nil
+			), nil
 		},
 	)
 }

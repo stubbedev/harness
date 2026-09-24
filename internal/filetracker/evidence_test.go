@@ -4,6 +4,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/aymanbagabas/go-udiff"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,7 +32,7 @@ func TestEvidenceAdvancePreservesOnlyObservedAndCreatedBytes(t *testing.T) {
 	before := []byte("alpha\nbeta\ngamma\n")
 	after := []byte("longer alpha\nbeta\nGAMMA\n")
 	tracker.Observe(ctx, "s", "file", before, []Range{{0, 6}, {11, len(before)}})
-	tracker.Advance(ctx, "s", "file", before, after)
+	tracker.Advance(ctx, "s", "file", before, after, udiff.Bytes(before, after))
 	require.NoError(t, tracker.Check(ctx, "s", "file", after, []Range{{0, 13}, {18, len(after)}}))
 	require.ErrorIs(t, tracker.Check(ctx, "s", "file", after, []Range{{13, 17}}), ErrUnread)
 	require.ErrorIs(t, tracker.Check(ctx, "s", "file", after, []Range{{0, len(after)}}), ErrUnread)

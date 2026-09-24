@@ -72,13 +72,16 @@ func conflictEvidence(ctx context.Context, tracker filetracker.Service, session,
 	return fmt.Errorf("%w\nCurrent file %q, bytes %d-%d (bounded excerpt; retry explicitly):\n%s", reason, path, start, end, excerpt)
 }
 
-func changedRanges(before, after string) []filetracker.Range {
+// changedRanges returns the ranges of before that changes, its udiff edits
+// to the new content, touch. A pure insertion is widened to the bytes on
+// either side of it, so inserting still requires having seen where.
+func changedRanges(changes []udiff.Edit, beforeLen int) []filetracker.Range {
 	var ranges []filetracker.Range
-	for _, change := range udiff.Strings(before, after) {
+	for _, change := range changes {
 		start, end := change.Start, change.End
-		if start == end && len(before) > 0 {
+		if start == end && beforeLen > 0 {
 			start = max(0, start-1)
-			end = min(len(before), end+1)
+			end = min(beforeLen, end+1)
 		}
 		ranges = append(ranges, filetracker.Range{Start: start, End: end})
 	}
@@ -219,9 +222,19 @@ func checkEditRanges(edit editContext, norm *normCache, session, path, content s
 			}
 		}
 	}
+	if len(ranges) == 0 {
+		return nil
+	}
+	// Every range passing is the common case, and one check of all of them
+	// hashes the file once instead of once per range. Only a failure needs
+	// the per-range pass, to report the first range that failed.
+	rawBytes := []byte(raw)
+	if checkFileEvidence(edit.ctx, edit.filetracker, session, path, rawBytes, ranges) == nil {
+		return nil
+	}
 	for _, affected := range ranges {
-		if err := checkFileEvidence(edit.ctx, edit.filetracker, session, path, []byte(raw), []filetracker.Range{affected}); err != nil {
-			return conflictEvidence(edit.ctx, edit.filetracker, session, path, []byte(raw), affected.Start, err)
+		if err := checkFileEvidence(edit.ctx, edit.filetracker, session, path, rawBytes, []filetracker.Range{affected}); err != nil {
+			return conflictEvidence(edit.ctx, edit.filetracker, session, path, rawBytes, affected.Start, err)
 		}
 	}
 

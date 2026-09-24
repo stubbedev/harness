@@ -337,14 +337,14 @@ func BenchmarkEditNotFound(b *testing.B) {
 // benchmarkFileEdit times one edit tool call on a file of benchmarkSource
 // lines. Each iteration restores the file and the session's evidence for
 // all of it outside the timer, so every call edits the same content.
-func benchmarkFileEdit(b *testing.B, lines int, edit EditOperation) {
+func benchmarkFileEdit(b *testing.B, lines int, edits ...EditOperation) {
 	dir := b.TempDir()
 	content := benchmarkSource(lines)
 	path := writeViewFixture(b, dir, "file.go", content)
 	ctx := context.WithValue(b.Context(), SessionIDContextKey, "s")
 	tracker := filetracker.NewService(nil)
 	tool := NewEditTool(nil, &mockHistoryService{}, tracker, dir)
-	params := EditParams{FilePath: path, Edits: []EditOperation{edit}}
+	params := EditParams{FilePath: path, Edits: edits}
 	b.ReportAllocs()
 	for b.Loop() {
 		b.StopTimer()
