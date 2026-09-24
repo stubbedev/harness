@@ -21,6 +21,7 @@ import (
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/question"
+	"github.com/stubbedev/harness/internal/shell"
 	"github.com/stubbedev/harness/internal/term"
 )
 
@@ -405,7 +406,10 @@ const (
 // meant to read, and color is noise for the model even where the
 // cleaner strips it. Set per command when one call really wants them
 // ("PAGER=less git log"); these only set the session's default.
-var ptySessionEnv = []string{
+// The agent markers (HARNESS=1 and friends) are the ones every shell
+// Harness spawns carries, so a program that asks whether an agent runs it
+// gets the same answer here as in a hook.
+var ptySessionEnv = append(shell.HarnessEnvMarkers(),
 	"PAGER=cat",
 	"GIT_PAGER=cat",
 	"MANPAGER=cat",
@@ -415,7 +419,7 @@ var ptySessionEnv = []string{
 	"CLICOLOR=0",
 	"CLICOLOR_FORCE=0",
 	"FORCE_COLOR=0",
-}
+)
 
 // shellIdle reports whether the shell itself is waiting at its prompt,
 // so that text typed now is a command line. It is not idle while the

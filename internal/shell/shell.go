@@ -33,8 +33,9 @@ const (
 )
 
 // HarnessEnvMarkers returns a fresh slice of the environment variables that
-// Harness unconditionally sets on every shell it spawns — both the interactive
-// shell tool's [Shell] and the hook runner's [Run] calls. Tools that want to
+// Harness unconditionally sets on every shell it spawns — this package's
+// [Shell] and [Run] (hooks, user shell commands) and the shell tool's
+// terminal sessions. Tools that want to
 // detect "am I being invoked by an AI agent?" can check any of these.
 // Keeping them in one place guarantees the two shell surfaces cannot drift.
 // A fresh slice is returned on every call so callers may append freely.

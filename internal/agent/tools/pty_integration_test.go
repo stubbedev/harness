@@ -88,3 +88,8 @@ func TestIntegrationDir_IsContentAddressed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "one", string(got))
 }
+
+func TestShellSession_CarriesAgentMarkers(t *testing.T) {
+	sh := shellOrSkip(t, "sh")
+	require.Equal(t, "1 harness harness", runOne(t, sh, `echo "$HARNESS $AGENT $AI_AGENT"`))
+}

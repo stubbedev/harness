@@ -510,8 +510,8 @@ options:
 
 ## Environment interpolation
 
-Selected string fields are expanded through the embedded shell — the same
-interpreter the `bash` tool uses — at load time:
+Selected string fields are expanded through Harness's embedded POSIX shell
+(`mvdan.cc/sh`, the one hooks run in) at load time:
 
 | Surface                                                         | Expansion                          |
 | --------------------------------------------------------------- | ---------------------------------- |

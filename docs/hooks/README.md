@@ -90,8 +90,8 @@ That's basically it. For the full guide on how hooks work, however, read on.
 
 ## Execution model
 
-Hooks run through Harness's embedded POSIX shell (`mvdan.cc/sh`) — the same
-interpreter the `bash` tool uses. Inline commands and shebang-less scripts
+Hooks run through Harness's embedded POSIX shell (`mvdan.cc/sh`), not the
+user's shell the `shell` tool drives. Inline commands and shebang-less scripts
 execute in-process; scripts with a `#!` shebang dispatch to the named
 interpreter via `os/exec`. This contract is identical on macOS, Linux, and
 Windows.
@@ -117,7 +117,7 @@ What this means in practice:
   "no opinion".
 - **Environment**: every hook sees `HARNESS=1`, `AGENT=harness`, and
   `AI_AGENT=harness` on top of the `HARNESS_*` hook-specific variables. These
-  three markers are guaranteed and match what the `bash` tool sets, so
+  three markers are guaranteed and match what the `shell` tool sets, so
   scripts that detect "am I being run by an AI agent?" behave the same in
   both contexts.
 - **Timeout behavior**: when a hook exceeds its timeout, Harness cancels the
