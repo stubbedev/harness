@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/openaicompat"
@@ -393,4 +394,159 @@ func TestDirectoryInstructionsLSPAndShellScopes(t *testing.T) {
 	tracker.Prepare(ctx, nil)
 	response = directoryTestRun(t, ctx, wrapped[1], map[string]any{"action": "replace_symbol", "file_path": "nested/file.go"})
 	require.False(t, response.IsError)
+}
+
+// directoryTestBackdate moves the modification time of every entry under
+// root an hour back, past the window in which the tracker distrusts an
+// unchanged time, so the following lookups are served from its caches and
+// a later change is only seen through the modification time it leaves.
+func directoryTestBackdate(t *testing.T, root string) {
+	t.Helper()
+	old := time.Now().Add(-time.Hour)
+	require.NoError(t, filepath.Walk(root, func(path string, _ os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, old, old)
+	}))
+}
+
+func TestDirectoryInstructionsCacheSeesChanges(t *testing.T) {
+	t.Parallel()
+	for _, change := range []string{"create", "edit", "delete"} {
+		t.Run(change, func(t *testing.T) {
+			t.Parallel()
+			root := directoryTestRoot(t)
+			directoryTestFile(t, root, "nested/deeper/file.go", "content")
+			path := filepath.Join(root, "nested", "AGENTS.md")
+			if change != "create" {
+				directoryTestFile(t, root, "nested/AGENTS.md", "first rules")
+			}
+			directoryTestBackdate(t, root)
+			tracker := NewDirectoryInstructions(root, nil)
+			var calls atomic.Int32
+			tool := tracker.WrapTools([]fantasy.AgentTool{directoryTestTool("view", &calls)})[0]
+			ctx := directoryTestContext(t, "one")
+			args := map[string]any{"file_path": "nested/deeper/file.go"}
+			response := directoryTestRun(t, ctx, tool, args)
+			if change == "create" {
+				require.Equal(t, "underlying content", response.Content)
+			} else {
+				require.Contains(t, response.Content, "first rules")
+			}
+			tracker.Prepare(ctx, nil)
+			// A repeat lookup in the unchanged tree is answered from the
+			// caches and reports nothing new.
+			require.Equal(t, "underlying content", directoryTestRun(t, ctx, tool, args).Content)
+			tracker.cache.mu.Lock()
+			require.NotEmpty(t, tracker.cache.dirs)
+			tracker.cache.mu.Unlock()
+
+			switch change {
+			case "create":
+				directoryTestFile(t, root, "nested/AGENTS.md", "created rules")
+				require.Contains(t, directoryTestRun(t, ctx, tool, args).Content, "created rules")
+			case "edit":
+				// The same size, so only the modification time differs.
+				require.NoError(t, os.WriteFile(path, []byte("other rules"), 0o644))
+				response := directoryTestRun(t, ctx, tool, args)
+				require.Contains(t, response.Content, "other rules")
+				require.NotContains(t, response.Content, "first rules")
+				updated := tracker.Prepare(ctx, nil)
+				require.True(t, directoryInstructionPresent(updated, "other rules"))
+			case "delete":
+				require.NoError(t, os.Remove(path))
+				require.Empty(t, tracker.Prepare(ctx, nil))
+				require.Equal(t, "underlying content", directoryTestRun(t, ctx, tool, args).Content)
+			}
+		})
+	}
+}
+
+func TestDirectoryInstructionsRacyEditSeen(t *testing.T) {
+	t.Parallel()
+	root := directoryTestRoot(t)
+	path := directoryTestFile(t, root, "AGENTS.md", "first rules")
+	tracker := NewDirectoryInstructions(root, nil)
+	var calls atomic.Int32
+	tool := tracker.WrapTools([]fantasy.AgentTool{directoryTestTool("view", &calls)})[0]
+	ctx := directoryTestContext(t, "one")
+	args := map[string]any{"file_path": "file.go"}
+	require.Contains(t, directoryTestRun(t, ctx, tool, args).Content, "first rules")
+	// Rewritten to the same size and stamped with the time it had when it
+	// was read, as a change within one clock tick of the read leaves it.
+	// That time is recent, so it is not trusted and the file is read again.
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte("other rules"), 0o644))
+	require.NoError(t, os.Chtimes(path, info.ModTime(), info.ModTime()))
+	require.Contains(t, directoryTestRun(t, ctx, tool, args).Content, "other rules")
+}
+
+func TestDirectoryInstructionsSharedScopeKeepsShallowest(t *testing.T) {
+	t.Parallel()
+	root := directoryTestRoot(t)
+	directoryTestFile(t, root, "a/sub/CLAUDE.md", "shared rules")
+	tracker := NewDirectoryInstructions(root, []string{"sub/CLAUDE.md"})
+	var calls atomic.Int32
+	tool := tracker.WrapTools([]fantasy.AgentTool{directoryTestTool("view", &calls)})[0]
+	// The file is found from a through the configured nested name and
+	// from a/sub as its CLAUDE.md. The second path reaches it from a/sub
+	// after the first already walked a, and it still ends up scoped to a,
+	// the directory its walk visits last.
+	args := map[string]any{"files": []map[string]string{{"file_path": "a/file.go"}, {"file_path": "a/sub/file.go"}}}
+	response := directoryTestRun(t, directoryTestContext(t, "one"), tool, args)
+	require.Equal(t, 1, strings.Count(response.Content, "shared rules"))
+	require.Contains(t, response.Content, directoryScopeMarker(t, filepath.Join(root, "a")))
+}
+
+func TestDirectoryInstructionsPrepareRemembersInjection(t *testing.T) {
+	t.Parallel()
+	root := directoryTestRoot(t)
+	directoryTestFile(t, root, "AGENTS.md", "root rules")
+	tracker := NewDirectoryInstructions(root, nil)
+	var calls atomic.Int32
+	tool := tracker.WrapTools([]fantasy.AgentTool{directoryTestTool("view", &calls)})[0]
+	ctx := directoryTestContext(t, "one")
+	directoryTestRun(t, ctx, tool, map[string]any{"file_path": "file.go"})
+	history := tracker.Prepare(ctx, []fantasy.Message{fantasy.NewUserMessage("start")})
+	require.Len(t, history, 2)
+	history = append(history, fantasy.NewUserMessage("more"))
+	require.Len(t, tracker.Prepare(ctx, history), 3)
+	// A compacted history no longer has it where it was, and it is found
+	// or injected again rather than trusted to be there.
+	compacted := []fantasy.Message{fantasy.NewUserMessage("summary"), fantasy.NewUserMessage("more")}
+	replayed := tracker.Prepare(ctx, compacted)
+	require.Len(t, replayed, 3)
+	require.True(t, directoryInstructionPresent(replayed, "root rules"))
+	require.Len(t, tracker.Prepare(ctx, replayed), 3)
+}
+
+func TestDirectoryInstructionsConcurrentSessionsAndChanges(t *testing.T) {
+	t.Parallel()
+	root := directoryTestRoot(t)
+	path := directoryTestFile(t, root, "nested/AGENTS.md", "rules 0")
+	directoryTestFile(t, root, "AGENTS.md", "root rules")
+	tracker := NewDirectoryInstructions(root, nil)
+	var calls atomic.Int32
+	tool := tracker.WrapTools([]fantasy.AgentTool{directoryTestTool("view", &calls)})[0]
+	var wg sync.WaitGroup
+	for worker := range 8 {
+		ctx := directoryTestContext(t, fmt.Sprintf("session-%d", worker%3))
+		wg.Go(func() {
+			for range 20 {
+				_, _ = tool.Run(ctx, fantasy.ToolCall{Name: "view", Input: `{"file_path":"nested/file.go"}`})
+				tracker.Prepare(ctx, nil)
+			}
+		})
+	}
+	wg.Go(func() {
+		for i := range 20 {
+			_ = os.WriteFile(path, fmt.Appendf(nil, "rules %d", i), 0o644)
+		}
+	})
+	wg.Wait()
+	require.NoError(t, os.WriteFile(path, []byte("final rules"), 0o644))
+	ctx := directoryTestContext(t, "late")
+	require.Contains(t, directoryTestRun(t, ctx, tool, map[string]any{"file_path": "nested/file.go"}).Content, "final rules")
 }

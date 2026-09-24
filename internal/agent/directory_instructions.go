@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools"
@@ -24,6 +26,19 @@ const (
 	directoryInstructionTotalLimit = 96 << 10
 	directoryInstructionCountLimit = 128
 	directoryInstructionRetry      = "Directory instructions require review. No mutation was executed. Read the instructions, then explicitly retry this operation in your next model turn."
+	// directoryInstructionCacheLimit bounds each of the listing and content
+	// caches. Past it a cache is dropped whole and refilled by the lookups
+	// that follow, which is cheaper to reason about than an eviction order
+	// and only ever costs a round of fresh reads.
+	directoryInstructionCacheLimit = 4096
+	// directoryInstructionRacyWindow is how old a modification time must be,
+	// relative to the moment its directory was listed or its file read,
+	// before an unchanged time is taken to mean unchanged content. File
+	// systems stamp times from a coarse clock (and some store them in
+	// seconds or two), so a change landing in the same tick as the read
+	// leaves the time exactly as it was; for a file edited to the same size
+	// nothing else would tell the versions apart.
+	directoryInstructionRacyWindow = 2 * time.Second
 )
 
 var directoryInstructionDefaults = []string{
@@ -34,17 +49,59 @@ var directoryInstructionDefaults = []string{
 }
 
 type DirectoryInstructions struct {
-	mu       sync.Mutex
-	root     string
-	names    []string
-	initErr  error
-	excluded map[string][32]byte
-	sessions map[string]*directoryInstructionSession
+	// mu guards excluded and the sessions. It is shared by every session
+	// and sub-agent in the workspace, so no filesystem I/O happens under
+	// it: discovery and reads go through cache, whose own lock is held
+	// only around map access, and mu is taken afterwards to apply what
+	// they found.
+	mu    sync.Mutex
+	root  string
+	names []string
+	// parts holds every name split into its path components, and
+	// components the set of all of them. A directory listing is reduced
+	// to the entries in components before it is cached, so the cache
+	// holds a handful of names per directory rather than its contents.
+	parts      [][]string
+	components map[string]struct{}
+	initErr    error
+	excluded   map[string][32]byte
+	sessions   map[string]*directoryInstructionSession
+	cache      directoryInstructionCache
+}
+
+// directoryInstructionCache remembers directory listings and instruction
+// file contents across lookups. Every tool call touching a path walks the
+// directories from it up to the workspace root, and without the cache each
+// walk listed every one of them in full and read every file it found.
+type directoryInstructionCache struct {
+	mu    sync.Mutex
+	dirs  map[string]directoryInstructionListing
+	files map[string]directoryInstructionFile
+}
+
+type directoryInstructionListing struct {
+	info    os.FileInfo
+	checked time.Time
+	present []string
+}
+
+type directoryInstructionFile struct {
+	info    os.FileInfo
+	checked time.Time
+	content string
+	// instruction is the file rendered for the scope it was last read
+	// for, which is the only scope a path is ever found under in practice.
+	instruction directoryInstruction
 }
 
 type directoryInstructionSession struct {
 	active       map[string]directoryInstruction
 	acknowledged map[string][32]byte
+	// injected remembers, per active path, the index of the message that
+	// last carried its instruction text. The per-step re-check looks there
+	// first instead of searching the whole history, and falls back to the
+	// search when the history was compacted or rewritten underneath it.
+	injected map[string]int
 }
 
 type directoryInstruction struct {
@@ -60,8 +117,13 @@ type directoryInstructionTool struct {
 
 func NewDirectoryInstructions(root string, contextPaths []string) *DirectoryInstructions {
 	d := &DirectoryInstructions{
-		excluded: make(map[string][32]byte),
-		sessions: make(map[string]*directoryInstructionSession),
+		components: make(map[string]struct{}),
+		excluded:   make(map[string][32]byte),
+		sessions:   make(map[string]*directoryInstructionSession),
+		cache: directoryInstructionCache{
+			dirs:  make(map[string]directoryInstructionListing),
+			files: make(map[string]directoryInstructionFile),
+		},
 	}
 	d.root, d.initErr = filepath.Abs(root)
 	if d.initErr == nil {
@@ -88,6 +150,13 @@ func NewDirectoryInstructions(root string, contextPaths []string) *DirectoryInst
 	}
 	slices.Sort(d.names)
 	d.names = slices.Compact(d.names)
+	for _, name := range d.names {
+		parts := strings.Split(filepath.ToSlash(name), "/")
+		d.parts = append(d.parts, parts)
+		for _, part := range parts {
+			d.components[part] = struct{}{}
+		}
+	}
 	return d
 }
 
@@ -95,22 +164,24 @@ func (d *DirectoryInstructions) ExcludePromptPaths(paths []string) {
 	if d == nil || d.initErr != nil {
 		return
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
 	root, err := os.OpenRoot(d.root)
 	if err != nil {
 		return
 	}
 	defer root.Close()
+	excluded := make(map[string][32]byte)
 	for _, path := range paths {
 		joined := filepathext.SmartJoin(d.root, path)
 		if resolved, ok := directoryInstructionName(root, d.root, d.root, filepath.ToSlash(path)); ok {
 			joined = resolved
 		}
-		if instruction, err := d.read(joined); err == nil && instruction.body != "" {
-			d.excluded[joined] = instruction.hash
+		if instruction, err := d.read(root, joined, filepath.Dir(joined)); err == nil && instruction.body != "" {
+			excluded[joined] = instruction.hash
 		}
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	maps.Copy(d.excluded, excluded)
 }
 
 func (d *DirectoryInstructions) WrapTools(input []fantasy.AgentTool) []fantasy.AgentTool {
@@ -205,34 +276,51 @@ func (d *DirectoryInstructions) session(ctx context.Context) *directoryInstructi
 	id := tools.GetSessionFromContext(ctx)
 	s := d.sessions[id]
 	if s == nil {
-		s = &directoryInstructionSession{active: make(map[string]directoryInstruction), acknowledged: make(map[string][32]byte)}
+		s = &directoryInstructionSession{
+			active:       make(map[string]directoryInstruction),
+			acknowledged: make(map[string][32]byte),
+			injected:     make(map[string]int),
+		}
 		d.sessions[id] = s
 	}
 	return s
 }
 
+func (s *directoryInstructionSession) forget(path string) {
+	delete(s.active, path)
+	delete(s.acknowledged, path)
+	delete(s.injected, path)
+}
+
 func (d *DirectoryInstructions) activate(ctx context.Context, paths []string) (string, bool, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
 	if d.initErr != nil {
 		return "", false, fmt.Errorf("cannot resolve workspace root: %w", d.initErr)
 	}
-	candidates := make(map[string]string)
 	instructionRoot, err := os.OpenRoot(d.root)
 	if err != nil {
 		return "", false, fmt.Errorf("open instruction root: %w", err)
 	}
 	defer instructionRoot.Close()
+	candidates := make(map[string]string)
+	// Several paths of one call share most of their ancestors. What a
+	// directory holds is looked up once per call and replayed on every
+	// later visit, rather than skipped: the scope recorded for a file is
+	// the one of its last visit, and a later walk can reach the same file
+	// from a deeper directory before arriving at the shallower one again.
+	found := make(map[string][]string)
 	for _, path := range paths {
 		dir, err := d.scope(path)
 		if err != nil {
 			return "", false, err
 		}
 		for dir != "" {
-			for _, name := range d.names {
-				if resolved, ok := directoryInstructionName(instructionRoot, d.root, dir, name); ok {
-					candidates[resolved] = dir
-				}
+			files, ok := found[dir]
+			if !ok {
+				files = d.discover(instructionRoot, dir)
+				found[dir] = files
+			}
+			for _, file := range files {
+				candidates[file] = dir
 			}
 			if dir == d.root {
 				break
@@ -240,27 +328,41 @@ func (d *DirectoryInstructions) activate(ctx context.Context, paths []string) (s
 			dir = filepath.Dir(dir)
 		}
 	}
+	order := directoryInstructionOrder(candidates)
+	read := make([]directoryInstruction, 0, len(order))
+	var readErr error
+	for _, path := range order {
+		if readErr = ctx.Err(); readErr != nil {
+			break
+		}
+		instruction, err := d.read(instructionRoot, path, candidates[path])
+		if err != nil {
+			readErr = err
+			break
+		}
+		read = append(read, instruction)
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	s := d.session(ctx)
 	loaded := make(map[string]directoryInstruction)
-	for _, path := range directoryInstructionOrder(candidates) {
-		if err := ctx.Err(); err != nil {
-			return "", false, err
-		}
-		instruction, err := d.read(path, candidates[path])
-		if err != nil {
-			return "", false, err
-		}
+	// The files read before a failure still update the session, as they
+	// did when each was applied as soon as it was read.
+	for i, instruction := range read {
+		path := order[i]
 		if instruction.body == "" {
-			delete(s.active, path)
-			delete(s.acknowledged, path)
+			s.forget(path)
 			continue
 		}
 		if hash, ok := d.excluded[path]; ok && hash == instruction.hash {
-			delete(s.active, path)
-			delete(s.acknowledged, path)
+			s.forget(path)
 			continue
 		}
 		loaded[path] = instruction
+	}
+	if readErr != nil {
+		return "", false, readErr
 	}
 	total, count := 0, len(loaded)
 	for path, instruction := range s.active {
@@ -309,12 +411,109 @@ func (d *DirectoryInstructions) scope(path string) (string, error) {
 	return resolved, nil
 }
 
-// directoryInstructionName resolves a configured instruction name against
-// the directory listing of dir, component by component, requiring exact
+// discover returns the configured instruction files present in dir,
+// resolved against its listing component by component and requiring exact
 // name matches. On case-insensitive filesystems a Stat of every configured
 // casing variant would find the same file several times and load its body
 // once per variant; matching listing entries keeps discovery exact and the
-// resulting path carries the on-disk casing.
+// resulting path carries the on-disk casing. Every name is matched against
+// one listing of dir, where resolving them one at a time listed it once per
+// name.
+func (d *DirectoryInstructions) discover(root *os.Root, dir string) []string {
+	present, ok := d.entries(root, dir)
+	if !ok || len(present) == 0 {
+		return nil
+	}
+	var files []string
+	for _, parts := range d.parts {
+		if !slices.Contains(present, parts[0]) {
+			continue
+		}
+		path := filepath.Join(dir, parts[0])
+		for _, part := range parts[1:] {
+			nested, ok := d.entries(root, path)
+			if !ok || !slices.Contains(nested, part) {
+				path = ""
+				break
+			}
+			path = filepath.Join(path, part)
+		}
+		if path != "" {
+			files = append(files, path)
+		}
+	}
+	return files
+}
+
+// entries returns the entries of dir that are components of a configured
+// instruction name, listing dir only when it changed since it was last
+// listed. Adding, removing or renaming an entry updates a directory's
+// modification time, so an unchanged time on the same directory means an
+// unchanged listing, and a lookup that finds nothing new costs a Stat per
+// directory. The listing itself goes through root, which keeps it inside
+// the workspace; the Stat only confirms that the directory is still the
+// one root listed.
+func (d *DirectoryInstructions) entries(root *os.Root, dir string) ([]string, bool) {
+	if current, err := os.Stat(dir); err == nil {
+		d.cache.mu.Lock()
+		cached, ok := d.cache.dirs[dir]
+		d.cache.mu.Unlock()
+		if ok && directoryInstructionFresh(cached.info, cached.checked, current) {
+			return cached.present, true
+		}
+	}
+	rel, inside := filepathext.RelWithin(d.root, dir)
+	if !inside {
+		return nil, false
+	}
+	checked := time.Now()
+	file, err := root.Open(rel)
+	if err != nil {
+		return nil, false
+	}
+	defer file.Close()
+	// The directory is stamped before it is read, so an entry created
+	// while reading moves its time past the stamp and the next lookup
+	// lists it again.
+	info, err := file.Stat()
+	if err != nil || !info.IsDir() {
+		return nil, false
+	}
+	names, err := file.Readdirnames(-1)
+	if err != nil {
+		return nil, false
+	}
+	var present []string
+	for _, name := range names {
+		if _, ok := d.components[name]; ok {
+			present = append(present, name)
+		}
+	}
+	d.cache.mu.Lock()
+	if len(d.cache.dirs) >= directoryInstructionCacheLimit {
+		clear(d.cache.dirs)
+	}
+	d.cache.dirs[dir] = directoryInstructionListing{info: info, checked: checked, present: present}
+	d.cache.mu.Unlock()
+	return present, true
+}
+
+// directoryInstructionFresh reports whether current describes the same,
+// unchanged file or directory that cached did when it was read at checked.
+// A modification time inside the racy window of the read is never taken as
+// proof: the entry is read again until its time is old enough to be.
+func directoryInstructionFresh(cached os.FileInfo, checked time.Time, current os.FileInfo) bool {
+	return os.SameFile(cached, current) &&
+		cached.ModTime().Equal(current.ModTime()) &&
+		cached.Size() == current.Size() &&
+		cached.Mode() == current.Mode() &&
+		cached.ModTime().Before(checked.Add(-directoryInstructionRacyWindow))
+}
+
+// directoryInstructionName resolves a configured instruction name against
+// the directory listing of dir the way discover does, without the cache.
+// It serves ExcludePromptPaths, whose paths are arbitrary configured
+// context paths rather than instruction names, and which runs once.
 func directoryInstructionName(root *os.Root, workspace, dir, name string) (string, bool) {
 	current := dir
 	for part := range strings.SplitSeq(filepath.ToSlash(name), "/") {
@@ -354,17 +553,30 @@ func directoryInstructionEntries(root *os.Root, rel string) ([]os.DirEntry, bool
 	return entries, true
 }
 
-func (d *DirectoryInstructions) read(path string, scopes ...string) (directoryInstruction, error) {
+// read loads the instruction file at path, rendered for scope. A file whose
+// identity, size and modification time are unchanged since it was last read
+// is served from the cache without being opened; anything else is read
+// through root, which keeps a symlink from reaching outside the workspace.
+// The cache is keyed on what root read, so a symlink retargeted outside
+// names a different file, fails the comparison and is refused by root.
+func (d *DirectoryInstructions) read(root *os.Root, path, scope string) (directoryInstruction, error) {
 	var instruction directoryInstruction
 	rel, inside := filepathext.RelWithin(d.root, path)
 	if !inside {
 		return instruction, nil
 	}
-	root, err := os.OpenRoot(d.root)
-	if err != nil {
-		return instruction, fmt.Errorf("open instruction root: %w", err)
+	if current, err := os.Stat(path); err == nil {
+		d.cache.mu.Lock()
+		cached, ok := d.cache.files[path]
+		d.cache.mu.Unlock()
+		if ok && directoryInstructionFresh(cached.info, cached.checked, current) {
+			if cached.instruction.scope == scope {
+				return cached.instruction, nil
+			}
+			return directoryInstructionRender(path, scope, cached.content, cached.instruction.hash), nil
+		}
 	}
-	defer root.Close()
+	checked := time.Now()
 	info, err := root.Stat(rel)
 	if errors.Is(err, os.ErrNotExist) {
 		return instruction, nil
@@ -403,13 +615,23 @@ func (d *DirectoryInstructions) read(path string, scopes ...string) (directoryIn
 	if len(body) > directoryInstructionFileLimit {
 		return instruction, fmt.Errorf("instruction %q exceeds the %d-byte per-file limit; no instruction body was truncated", path, directoryInstructionFileLimit)
 	}
-	instruction.scope = filepath.Dir(path)
-	if len(scopes) > 0 {
-		instruction.scope = scopes[0]
+	content := string(body)
+	instruction = directoryInstructionRender(path, scope, content, sha256.Sum256(body))
+	d.cache.mu.Lock()
+	if len(d.cache.files) >= directoryInstructionCacheLimit {
+		clear(d.cache.files)
 	}
-	instruction.hash = sha256.Sum256(body)
-	instruction.body = fmt.Sprintf("<directory_instructions path=%q scope=%q version=%x>\nApplies only within this directory scope; deeper instructions take precedence.\n%s\n</directory_instructions>", path, instruction.scope, instruction.hash, body)
+	d.cache.files[path] = directoryInstructionFile{info: info, checked: checked, content: content, instruction: instruction}
+	d.cache.mu.Unlock()
 	return instruction, nil
+}
+
+func directoryInstructionRender(path, scope, content string, hash [32]byte) directoryInstruction {
+	return directoryInstruction{
+		scope: scope,
+		hash:  hash,
+		body:  fmt.Sprintf("<directory_instructions path=%q scope=%q version=%x>\nApplies only within this directory scope; deeper instructions take precedence.\n%s\n</directory_instructions>", path, scope, hash, content),
+	}
 }
 
 func directoryInstructionOrder[V any](entries map[string]V) []string {
@@ -438,62 +660,141 @@ func directoryInstructionOrder[V any](entries map[string]V) []string {
 	return keys
 }
 
+// directoryInstructionInjection is text Prepare makes sure the history
+// carries, with where it was last seen.
+type directoryInstructionInjection struct {
+	path string
+	text string
+	hint int
+}
+
 func (d *DirectoryInstructions) Prepare(ctx context.Context, messages []fantasy.Message) []fantasy.Message {
 	if d == nil || ctx.Err() != nil {
 		return messages
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	s := d.session(ctx)
+	order := directoryInstructionOrder(s.active)
+	scopes := make([]string, len(order))
+	for i, path := range order {
+		scopes[i] = s.active[path].scope
+	}
+	d.mu.Unlock()
+	if len(order) == 0 {
+		return messages
+	}
+
+	// Re-read every active file outside the lock. The cache makes this a
+	// Stat per file unless one changed.
+	instructions := make([]directoryInstruction, len(order))
+	errs := make([]error, len(order))
+	if root, err := os.OpenRoot(d.root); err != nil {
+		for i := range errs {
+			errs[i] = fmt.Errorf("open instruction root: %w", err)
+		}
+	} else {
+		for i, path := range order {
+			instructions[i], errs[i] = d.read(root, path, scopes[i])
+		}
+		root.Close()
+	}
+
+	d.mu.Lock()
+	var injections []directoryInstructionInjection
 	total := 0
-	for _, path := range directoryInstructionOrder(s.active) {
-		instruction, err := d.read(path, s.active[path].scope)
+	for i, path := range order {
+		// A file dropped by a concurrent call stays dropped.
+		if _, ok := s.active[path]; !ok {
+			continue
+		}
+		instruction, err := instructions[i], errs[i]
 		if err == nil && instruction.body == "" {
-			delete(s.active, path)
-			delete(s.acknowledged, path)
+			s.forget(path)
 			continue
 		}
 		if err == nil && total+len(instruction.body) > directoryInstructionTotalLimit {
 			err = fmt.Errorf("active instruction budget exceeds %d bytes; instruction %q was not injected or truncated", directoryInstructionTotalLimit, path)
 		}
+		hint, ok := s.injected[path]
+		if !ok {
+			hint = -1
+		}
 		if err != nil {
 			delete(s.acknowledged, path)
-			note := "Directory instructions: " + err.Error()
-			if !directoryInstructionPresent(messages, note) {
-				messages = append(slices.Clone(messages), fantasy.NewUserMessage(note))
-			}
+			injections = append(injections, directoryInstructionInjection{path: path, text: "Directory instructions: " + err.Error(), hint: hint})
 			continue
 		}
 		total += len(instruction.body)
 		s.active[path] = instruction
-		if !directoryInstructionPresent(messages, instruction.body) {
-			messages = append(slices.Clone(messages), fantasy.NewUserMessage(instruction.body))
-		}
+		injections = append(injections, directoryInstructionInjection{path: path, text: instruction.body, hint: hint})
 		s.acknowledged[path] = instruction.hash
 	}
+	d.mu.Unlock()
+
+	// The history is searched outside the lock too; only the positions
+	// found are written back.
+	cloned := false
+	for i := range injections {
+		injection := &injections[i]
+		injection.hint = directoryInstructionIndex(messages, injection.text, injection.hint)
+		if injection.hint >= 0 {
+			continue
+		}
+		if !cloned {
+			messages = slices.Clone(messages)
+			cloned = true
+		}
+		injection.hint = len(messages)
+		messages = append(messages, fantasy.NewUserMessage(injection.text))
+	}
+	d.mu.Lock()
+	for _, injection := range injections {
+		if _, ok := s.active[injection.path]; ok {
+			s.injected[injection.path] = injection.hint
+		}
+	}
+	d.mu.Unlock()
 	return messages
 }
 
 func directoryInstructionPresent(messages []fantasy.Message, body string) bool {
-	for _, message := range messages {
-		for _, part := range message.Content {
-			if text, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok && strings.Contains(text.Text, body) {
-				return true
-			}
-			if result, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
-				switch output := result.Output.(type) {
-				case fantasy.ToolResultOutputContentText:
-					if strings.Contains(output.Text, body) {
-						return true
-					}
-				case fantasy.ToolResultOutputContentError:
-					if output.Error != nil && strings.Contains(output.Error.Error(), body) {
-						return true
-					}
-				case fantasy.ToolResultOutputContentMedia:
-					if strings.Contains(output.Text, body) {
-						return true
-					}
+	return directoryInstructionIndex(messages, body, -1) >= 0
+}
+
+// directoryInstructionIndex returns the index of the first message carrying
+// body, or -1. The message at hint is checked first, which is where the body
+// was found or injected on the previous step, so a history that only grew
+// since then is not searched at all.
+func directoryInstructionIndex(messages []fantasy.Message, body string, hint int) int {
+	if hint >= 0 && hint < len(messages) && directoryInstructionCarries(messages[hint], body) {
+		return hint
+	}
+	for i, message := range messages {
+		if directoryInstructionCarries(message, body) {
+			return i
+		}
+	}
+	return -1
+}
+
+func directoryInstructionCarries(message fantasy.Message, body string) bool {
+	for _, part := range message.Content {
+		if text, ok := fantasy.AsMessagePart[fantasy.TextPart](part); ok && strings.Contains(text.Text, body) {
+			return true
+		}
+		if result, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part); ok {
+			switch output := result.Output.(type) {
+			case fantasy.ToolResultOutputContentText:
+				if strings.Contains(output.Text, body) {
+					return true
+				}
+			case fantasy.ToolResultOutputContentError:
+				if output.Error != nil && strings.Contains(output.Error.Error(), body) {
+					return true
+				}
+			case fantasy.ToolResultOutputContentMedia:
+				if strings.Contains(output.Text, body) {
+					return true
 				}
 			}
 		}
