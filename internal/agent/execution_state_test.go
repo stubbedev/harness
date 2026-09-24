@@ -155,3 +155,49 @@ func TestExecutionStatePartialEditAndVerificationRetry(t *testing.T) {
 	state.Ingest(executionMessages("verify3", "verify", `{}`, `{"verification":{"status":"passed"}}`, false))
 	require.Len(t, state.Failures, 1)
 }
+
+func TestExecutionStateIgnoresRewrittenResultBodies(t *testing.T) {
+	t.Parallel()
+	state := newExecutionState("")
+	failed := executionMessages("first", "shell", `{"command":"go test ./..."}`, `{"exit_code":1}`, false)
+	result := failed[1].Parts[0].(message.ToolResult)
+	result.Content = strings.Repeat("FAIL\n", 200)
+	failed[1].Parts[0] = result
+	passed := executionMessages("second", "shell", `{"command":"go test ./..."}`, `{"exit_code":0}`, false)
+	history := append(append([]message.Message(nil), failed...), passed...)
+	state.Ingest(history)
+	require.Empty(t, state.Failures)
+	snapshot := state.Render()
+
+	// Aging rewrites an old body into a stub under the same ID; the next
+	// turn's replay must not take the stale failure back in.
+	aged := ageMessages(history, len(history)-1)
+	require.NotEqual(t, result.Content, aged[1].Parts[0].(message.ToolResult).Content)
+	state.Ingest(aged)
+	require.Empty(t, state.Failures)
+	require.Equal(t, snapshot, state.Render())
+}
+
+func TestExecutionStateReusedToolCallID(t *testing.T) {
+	t.Parallel()
+	state := newExecutionState("")
+	state.Ingest(executionMessages("call_0", "shell", `{"command":"make"}`, `{"exit_code":2}`, false))
+	require.Len(t, state.Failures, 1)
+	// A provider that numbers calls per step sends call_0 again for a
+	// different call; its outcome still counts.
+	state.Ingest(executionMessages("call_0", "shell", `{"command":"make"}`, `{"exit_code":0}`, false))
+	require.Empty(t, state.Failures)
+}
+
+func TestExecutionStateResultsWithoutID(t *testing.T) {
+	t.Parallel()
+	state := newExecutionState("")
+	result := func(content string) []message.Message {
+		return []message.Message{{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{Name: "edit", Content: content, IsError: true}}}}
+	}
+	state.Ingest(result("first"))
+	state.Ingest(result("first"))
+	require.Equal(t, uint64(1), state.Sequence)
+	state.Ingest(result("second"))
+	require.Equal(t, uint64(2), state.Sequence)
+}

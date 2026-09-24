@@ -1340,9 +1340,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				if options.StepNumber > 0 {
 					return msgs
 				}
-				sessionLock.Lock()
 				snapshot := execution.Render()
-				sessionLock.Unlock()
 				if snapshot == "" || snapshot == lastTaggedUserText(msgs, "<execution_state>") {
 					return msgs
 				}
@@ -1562,9 +1560,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				Finished:         true,
 			}
 			currentAssistant.AddToolCall(toolCall)
-			sessionLock.Lock()
+			// The execution state locks itself; holding sessionLock over
+			// it too only made the other callbacks wait on it.
 			execution.Ingest([]message.Message{{Parts: []message.ContentPart{toolCall}}})
-			sessionLock.Unlock()
 			// Use parent ctx instead of genCtx to ensure the update succeeds
 			// even if the request is canceled mid-stream
 			return a.messages.Update(ctx, *currentAssistant)
@@ -1575,9 +1573,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				toolResult.Content = "Tool call failed: arguments were not valid JSON. Please check your tool call format and try again."
 				toolResult.IsError = true
 			}
-			sessionLock.Lock()
 			execution.Ingest([]message.Message{{Parts: []message.ContentPart{toolResult}}})
-			sessionLock.Unlock()
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
 			_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{

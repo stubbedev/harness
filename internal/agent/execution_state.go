@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"hash/maphash"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -46,7 +48,7 @@ type executionState struct {
 	Verification []executionEntry  `json:"verification,omitempty"`
 	Omitted      map[string]uint64 `json:"omitted,omitempty"`
 	calls        map[string]message.ToolCall
-	seen         map[string]string
+	seen         map[string]uint64
 	mu           sync.Mutex
 }
 
@@ -223,6 +225,45 @@ func boundedExecutionMetadata(data json.RawMessage) json.RawMessage {
 	return bounded
 }
 
+// executionSeed seeds resultFingerprint. The fingerprints only live in
+// the in-memory seen map, never in a summary, so a seed that changes
+// with every process is fine.
+var executionSeed = maphash.MakeSeed()
+
+// resultFingerprint tells Ingest whether it has taken in a result
+// already. The tool call ID is the identity; the fingerprint beside it
+// covers what the state is built from, so a provider that reuses IDs
+// across steps still has each outcome taken in. The body is left out
+// on purpose, and not only because hashing every image and every large
+// output again on each turn cost milliseconds: history aging and
+// deduplication rewrite old bodies into stubs under the same ID, and
+// taking a rewritten result in again would put the stub in as a failure
+// detail, or bring back a failure a later result had cleared. A result
+// without an ID has nothing else to be known by, so its body is hashed.
+func resultFingerprint(result message.ToolResult) uint64 {
+	var h maphash.Hash
+	h.SetSeed(executionSeed)
+	var flags byte
+	if result.IsError {
+		flags |= 1
+	}
+	if result.Canceled {
+		flags |= 2
+	}
+	_, _ = h.WriteString(result.Name)
+	_ = h.WriteByte(0)
+	_, _ = h.WriteString(result.Metadata)
+	_ = h.WriteByte(flags)
+	if result.ToolCallID == "" {
+		_, _ = h.WriteString(result.Content)
+		_ = h.WriteByte(0)
+		_, _ = h.WriteString(result.MIMEType)
+		_ = h.WriteByte(0)
+		_, _ = h.WriteString(result.Data)
+	}
+	return h.Sum64()
+}
+
 func (s *executionState) Ingest(msgs []message.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -230,25 +271,28 @@ func (s *executionState) Ingest(msgs []message.Message) {
 		s.calls = make(map[string]message.ToolCall)
 	}
 	if s.seen == nil {
-		s.seen = make(map[string]string)
+		s.seen = make(map[string]uint64)
 	}
+	changed := false
 	for _, msg := range msgs {
 		for _, part := range msg.Parts {
 			switch part := part.(type) {
 			case message.ToolCall:
 				s.calls[part.ID] = part
 			case message.ToolResult:
-				encoded, _ := json.Marshal(part)
-				fingerprint := executionKey("result", string(encoded))
+				fingerprint := resultFingerprint(part)
 				id := part.ToolCallID
 				if id == "" {
-					id = fingerprint
+					// A NUL cannot start a provider's ID, so this key
+					// never lands on a real one.
+					id = "\x00" + strconv.FormatUint(fingerprint, 16)
 				}
-				if s.seen[id] == fingerprint {
+				if seen, ok := s.seen[id]; ok && seen == fingerprint {
 					continue
 				}
 				s.seen[id] = fingerprint
 				s.Sequence++
+				changed = true
 				call := s.calls[part.ToolCallID]
 				if call.Name == "" {
 					call.Name = part.Name
@@ -257,12 +301,16 @@ func (s *executionState) Ingest(msgs []message.Message) {
 			}
 		}
 	}
-	s.bound()
+	// Bounding encodes the whole state to measure it, and a replayed
+	// history or a lone tool call changes nothing that needs it.
+	if changed {
+		s.bound()
+	}
 	if len(s.calls) > 512 {
 		s.calls = make(map[string]message.ToolCall)
 	}
 	if len(s.seen) > 1024 {
-		s.seen = make(map[string]string)
+		s.seen = make(map[string]uint64)
 	}
 }
 
