@@ -343,7 +343,7 @@ func benchmarkFileEdit(b *testing.B, lines int, edits ...EditOperation) {
 	path := writeViewFixture(b, dir, "file.go", content)
 	ctx := context.WithValue(b.Context(), SessionIDContextKey, "s")
 	tracker := filetracker.NewService(nil)
-	tool := NewEditTool(nil, &mockHistoryService{}, tracker, dir)
+	tool := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
 	params := EditParams{FilePath: path, Edits: edits}
 	b.ReportAllocs()
 	for b.Loop() {

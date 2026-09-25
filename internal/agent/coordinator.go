@@ -39,6 +39,7 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/oauth/copilot"
+	"github.com/stubbedev/harness/internal/presence"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
@@ -156,6 +157,7 @@ type coordinator struct {
 	notify      pubsub.Publisher[notify.Notification]
 	runComplete pubsub.Publisher[notify.RunComplete]
 	interactive bool
+	presence    *presence.Registry
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
@@ -301,6 +303,10 @@ type CoordinatorOptions struct {
 	// Checkpoints records per-turn working-tree snapshots so a session
 	// can be rewound. Optional: nil disables checkpoints.
 	Checkpoints *checkpoints.Service
+	// Presence publishes this instance in the workspace's cross-process
+	// registry and feeds the concurrent-instance context note. Optional:
+	// nil disables both directions (tests).
+	Presence    *presence.Registry
 	Interactive bool
 }
 
@@ -335,6 +341,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 		activeSkills:       activeSkills,
 		skillTracker:       skillTracker,
 		interactive:        opts.Interactive,
+		presence:           opts.Presence,
 		hooks:              hooks.NewRegistry(opts.Config, opts.Config.WorkingDir(), opts.Config.WorkingDir(), opts.Extensions),
 		extensions:         opts.Extensions,
 		expandedMCPTools:   csync.NewMap[string, map[string]bool](),
@@ -1047,6 +1054,10 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		// same shape: children are never waited on through the wait tool.
 		SubagentInbox: c,
 		QueueNotify:   c,
+		// Only top-level agents speak for the process in the presence
+		// registry; sub-agents still publish file activity through the
+		// edit/write tools, which hold the registry directly.
+		Presence: presenceFor(c.presence, isSubAgent),
 	})
 
 	// The readiness goroutines below perform one-time setup — building the
@@ -1080,6 +1091,16 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 	})
 
 	return result, nil
+}
+
+// presenceFor returns the registry an agent may speak through, or nil
+// for sub-agents: only the process's top-level sessions mark the
+// instance busy and own its published session identity.
+func presenceFor(r *presence.Registry, isSubAgent bool) *presence.Registry {
+	if isSubAgent {
+		return nil
+	}
+	return r
 }
 
 // shouldExposeDispatcher reports whether the dispatcher agent tool should be
@@ -1137,11 +1158,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	allTools = append(
 		allTools,
 		tools.NewHarnessTool(store, manager, c.skillLists, c.skillTracker, c.extensions, logFile),
-		tools.NewEditTool(manager, c.history, c.filetracker, store.WorkingDir()),
+		tools.NewEditTool(manager, c.history, c.filetracker, c.presence, store.WorkingDir()),
 		tools.NewFetchTool(nil),
 		tools.NewWebSearchTool(nil),
 		tools.NewViewTool(manager, c.filetracker, c.skillTracker, store.WorkingDir(), store.Config().Options.SkillsPaths...),
-		tools.NewWriteTool(manager, c.history, c.filetracker, store.WorkingDir()),
+		tools.NewWriteTool(manager, c.history, c.filetracker, c.presence, store.WorkingDir()),
 	)
 
 	if len(c.cfg.Config().Verification.Rules) > 0 {

@@ -14,6 +14,7 @@ import (
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
+	"github.com/stubbedev/harness/internal/presence"
 )
 
 type EditOperation struct {
@@ -56,6 +57,7 @@ func NewEditTool(
 	lspManager *lsp.Manager,
 	files history.Service,
 	filetracker filetracker.Service,
+	presence *presence.Registry,
 	workingDir string,
 ) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
@@ -104,7 +106,16 @@ func NewEditTool(
 			// an edit.
 			lspManager.NotifyChangeAsync(ctx, params.FilePath)
 
+			// Publish the mutation to concurrent harness instances, and
+			// warn when one of them wrote this file recently: a soft note,
+			// not a refusal — the evidence layer remains the hard line.
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
+			if presence != nil {
+				presence.Touch(params.FilePath)
+				if warn := presence.Contention(params.FilePath); warn != "" {
+					text += warn + "\n"
+				}
+			}
 			text += reportDiagnosticsNow(ctx, lspManager, params.FilePath)
 			response.Content = text
 			return response, nil

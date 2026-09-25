@@ -197,6 +197,7 @@ const (
 	ContextNoteDirectoryInstructions = "directory_instructions"
 	ContextNoteSkill                 = "skill"
 	ContextNoteDiagnostics           = "diagnostics"
+	ContextNotePeers                 = "peers"
 )
 
 func (ContextNote) partType() partType { return contextNoteType }

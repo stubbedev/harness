@@ -48,6 +48,7 @@ import (
 	"github.com/stubbedev/harness/internal/hooks"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/presence"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/stringext"
@@ -242,6 +243,12 @@ type sessionAgent struct {
 	// busy session (see QueueArrivalNotifier).
 	queueNotify QueueArrivalNotifier
 
+	// presence publishes this instance's liveness, session and recent
+	// file activity to every other harness instance working in the same
+	// workspace, and feeds the concurrent-instance context note. Nil for
+	// sub-agents and in tests.
+	presence *presence.Registry
+
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
 
@@ -318,6 +325,10 @@ type SessionAgentOptions struct {
 	// a busy session, so a wait blocked on that session can surface it
 	// at once instead of sleeping to its timeout.
 	QueueNotify QueueArrivalNotifier
+	// Presence publishes this instance in the workspace's cross-process
+	// registry and supplies the concurrent-instance context note. Nil
+	// (sub-agents, tests) disables both directions.
+	Presence *presence.Registry
 }
 
 func NewSessionAgent(
@@ -347,6 +358,7 @@ func NewSessionAgent(
 		hooks:                 opts.Hooks,
 		subagentInbox:         opts.SubagentInbox,
 		queueNotify:           opts.QueueNotify,
+		presence:              opts.Presence,
 		messageQueue:          csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:        csync.NewMap[string, *activeCancel](),
 		dispatchMu:            csync.NewMap[string, *sync.Mutex](),
@@ -1079,6 +1091,20 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	}
 	userMsgCreated = true
 
+	// Publish this instance as mid-turn in the workspace presence
+	// registry, so concurrent harness instances see the session being
+	// worked on. Sub-agents hold no registry; their edits still publish
+	// file activity through the tools.
+	if a.presence != nil {
+		title := ""
+		if sess, sessErr := a.sessions.Get(ctx, call.SessionID); sessErr == nil {
+			title = sess.Title
+		}
+		a.presence.SetSession(call.SessionID, title)
+		a.presence.BeginTurn()
+		defer a.presence.EndTurn()
+	}
+
 	// Add the session to the context. The run context (genCtx) and its
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
@@ -1329,6 +1355,23 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 						"Fix what you caused; ignore the rest. Do not mention this reminder.\n%s</system_reminder>",
 					report,
 				)))
+			}); err != nil {
+				return callContext, prepared, err
+			}
+
+			// Concurrent harness instances publish themselves and their
+			// recent file activity to the workspace presence registry. The
+			// note is diff-gated against the last one sent, so a steady
+			// state — or no peers at all — sends nothing.
+			if err = inject(message.ContextNotePeers, func(msgs []fantasy.Message) []fantasy.Message {
+				if a.presence == nil {
+					return msgs
+				}
+				note := peerNote(msgs, a.presence.Peers())
+				if note == "" {
+					return msgs
+				}
+				return append(msgs, fantasy.NewUserMessage(note))
 			}); err != nil {
 				return callContext, prepared, err
 			}

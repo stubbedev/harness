@@ -127,11 +127,11 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 
 	allTools := []fantasy.AgentTool{
 		tools.NewShellTool(env.workingDir, "coder", nil),
-		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
-		tools.NewEditTool(nil, env.history, *env.filetracker, env.workingDir),
+		tools.NewEditTool(nil, env.history, *env.filetracker, nil, env.workingDir),
+		tools.NewEditTool(nil, env.history, *env.filetracker, nil, env.workingDir),
 		tools.NewFetchTool(client),
 		tools.NewViewTool(nil, *env.filetracker, nil, env.workingDir),
-		tools.NewWriteTool(nil, env.history, *env.filetracker, env.workingDir),
+		tools.NewWriteTool(nil, env.history, *env.filetracker, nil, env.workingDir),
 	}
 
 	agent := testSessionAgent(env, large, small, systemPrompt, allTools...)

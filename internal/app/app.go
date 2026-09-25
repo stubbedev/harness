@@ -37,6 +37,7 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/memory"
 	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/presence"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
@@ -67,6 +68,10 @@ type App struct {
 	// session can be rewound. Nil-safe: a nil service disables the
 	// feature.
 	Checkpoints *checkpoints.Service
+	// Presence publishes this instance in the workspace's cross-process
+	// registry so concurrent harness instances can discover each other.
+	// Nil-safe: a failed registry disables discovery, nothing else.
+	Presence *presence.Registry
 
 	AgentCoordinator agent.Coordinator
 
@@ -101,6 +106,19 @@ type App struct {
 	// Nil outside their environments.
 	herdrClient *herdr.Client
 	tmuxClient  *tmux.Client
+}
+
+// newPresence creates and starts the workspace presence registry. A
+// failure only disables cross-instance discovery; it never blocks the
+// app from coming up.
+func newPresence(ctx context.Context, dataDir string) *presence.Registry {
+	registry, err := presence.New(dataDir)
+	if err != nil {
+		slog.Warn("Failed to create presence registry", "error", err)
+		return nil
+	}
+	registry.Start(ctx)
+	return registry
 }
 
 // New initializes a new application instance. skillsMgr carries the
@@ -140,6 +158,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Skills:     skillsMgr,
 		Extensions: extensions.New(ctx, extensionOptions(store)),
 		Subagents:  subagentsMgr,
+		Presence:   newPresence(ctx, cfg.Options.DataDirectory),
 
 		// Created eagerly (rather than lazily in initCoderAgent) so
 		// Subscribe's one-time nil check always finds a live Runtime: on an
@@ -785,6 +804,7 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		SubagentsMgr: app.Subagents,
 		Runtime:      app.SubagentRuntime,
 		Memory:       app.Memory,
+		Presence:     app.Presence,
 		Interactive:  interactive,
 	})
 	if err != nil {
@@ -851,6 +871,12 @@ func (app *App) Subscribe(program *tea.Program) {
 func (app *App) Shutdown() {
 	start := time.Now()
 	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
+
+	// Retire from the workspace presence registry first: no turn is
+	// running anymore, and peers should see this instance leave.
+	if app.Presence != nil {
+		app.Presence.Stop()
+	}
 
 	// First, cancel all agents and wait for them to finish. This must complete
 	// before closing the DB so agents can finish writing their state.

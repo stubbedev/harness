@@ -15,6 +15,7 @@ import (
 	"github.com/stubbedev/harness/internal/history"
 
 	"github.com/stubbedev/harness/internal/lsp"
+	"github.com/stubbedev/harness/internal/presence"
 )
 
 //go:embed write.md
@@ -40,6 +41,7 @@ func NewWriteTool(
 	lspManager *lsp.Manager,
 	files history.Service,
 	tracker filetracker.Service,
+	presence *presence.Registry,
 	workingDir string,
 ) fantasy.AgentTool {
 	return fantasy.NewParallelAgentTool(
@@ -106,6 +108,15 @@ func NewWriteTool(
 
 			result := fmt.Sprintf("File successfully written: %s", filePath)
 			result = fmt.Sprintf("<result>\n%s\n</result>", result)
+			// Publish the mutation to concurrent harness instances, and warn
+			// when one of them wrote this file recently: a soft note, not a
+			// refusal — the evidence layer remains the hard line.
+			if presence != nil {
+				presence.Touch(filePath)
+				if warn := presence.Contention(filePath); warn != "" {
+					result += "\n" + warn
+				}
+			}
 			result += reportDiagnosticsNow(ctx, lspManager, filePath)
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(result),

@@ -24,8 +24,8 @@ func TestEditAndWriteMetadataMatchReadBackMutations(t *testing.T) {
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
 	tracker := filetracker.NewService(nil)
 	view := NewViewTool(nil, tracker, nil, dir)
-	edit := NewEditTool(nil, &mockHistoryService{}, tracker, dir)
-	write := NewWriteTool(nil, &mockHistoryService{}, tracker, dir)
+	edit := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
+	write := NewWriteTool(nil, &mockHistoryService{}, tracker, nil, dir)
 
 	readBack := func(t *testing.T, resp fantasy.ToolResponse, path string, metadata any, clear func()) {
 		t.Helper()

@@ -33,7 +33,7 @@ func TestFileEvidenceSameSecondConflictAndRetry(t *testing.T) {
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
 	tracker := filetracker.NewService(nil)
 	view := NewViewTool(nil, tracker, nil, dir)
-	edit := NewEditTool(nil, &mockHistoryService{}, tracker, dir)
+	edit := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
 	require.False(t, runViewTool(t, view, ctx, ViewParams{FilePath: path}).IsError)
 	stamp := time.Now().Truncate(time.Second)
 	require.NoError(t, os.WriteFile(path, []byte("alpha\nBETA\n"), 0o644))
@@ -57,8 +57,8 @@ func TestFileEvidencePartialEditDoesNotAuthorizeFullWrite(t *testing.T) {
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
 	tracker := filetracker.NewService(nil)
 	view := NewViewTool(nil, tracker, nil, dir)
-	edit := NewEditTool(nil, &mockHistoryService{}, tracker, dir)
-	write := NewWriteTool(nil, &mockHistoryService{}, tracker, dir)
+	edit := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
+	write := NewWriteTool(nil, &mockHistoryService{}, tracker, nil, dir)
 	require.False(t, runViewTool(t, view, ctx, ViewParams{FilePath: path, Limit: 1}).IsError)
 	require.False(t, runFileTool(t, edit, ctx, EditParams{FilePath: path, Edits: []EditOperation{{OldString: "alpha", NewString: "ALPHA"}}}).IsError)
 	resp := runFileTool(t, write, ctx, WriteParams{FilePath: path, Content: "replacement"})
@@ -141,7 +141,7 @@ func TestFileEvidenceConcurrentEditsSerialize(t *testing.T) {
 	tracker := filetracker.NewService(nil)
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
 	require.False(t, runViewTool(t, NewViewTool(nil, tracker, nil, dir), ctx, ViewParams{FilePath: path}).IsError)
-	tool := NewEditTool(nil, &mockHistoryService{}, tracker, dir)
+	tool := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
 	var wg sync.WaitGroup
 	for _, pair := range [][2]string{{"alpha", "ALPHA"}, {"beta", "BETA"}} {
 		wg.Go(func() {
@@ -162,7 +162,7 @@ func TestFileEvidenceStaleWriteAndReplaceAll(t *testing.T) {
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
 	view := NewViewTool(nil, tracker, nil, dir)
 	require.False(t, runViewTool(t, view, ctx, ViewParams{FilePath: path, Limit: 1}).IsError)
-	edit := NewEditTool(nil, &mockHistoryService{}, tracker, dir)
+	edit := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
 	resp := runFileTool(t, edit, ctx, EditParams{FilePath: path, Edits: []EditOperation{{OldString: "same", NewString: "changed", ReplaceAll: true}}})
 	require.True(t, resp.IsError)
 	data, err := os.ReadFile(path)
@@ -173,7 +173,7 @@ func TestFileEvidenceStaleWriteAndReplaceAll(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, data, 0o644))
 	stamp := time.Now().Truncate(time.Second)
 	require.NoError(t, os.Chtimes(path, stamp, stamp))
-	write := NewWriteTool(nil, &mockHistoryService{}, tracker, dir)
+	write := NewWriteTool(nil, &mockHistoryService{}, tracker, nil, dir)
 	resp = runFileTool(t, write, ctx, WriteParams{FilePath: path, Content: "replacement"})
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "modified since")
@@ -191,9 +191,9 @@ func TestFileEvidenceCreatedFileAllowsRewrite(t *testing.T) {
 	path := filepath.Join(dir, "new")
 	tracker := filetracker.NewService(nil)
 	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
-	edit := NewEditTool(nil, &mockHistoryService{}, tracker, dir)
+	edit := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
 	require.False(t, runFileTool(t, edit, ctx, EditParams{FilePath: path, Edits: []EditOperation{{NewString: "created"}}}).IsError)
-	write := NewWriteTool(nil, &mockHistoryService{}, tracker, dir)
+	write := NewWriteTool(nil, &mockHistoryService{}, tracker, nil, dir)
 	require.False(t, runFileTool(t, write, ctx, WriteParams{FilePath: path, Content: "rewritten"}).IsError)
 }
 
@@ -310,7 +310,7 @@ func BenchmarkWriteLargeFile(b *testing.B) {
 			path := writeViewFixture(b, dir, "file.go", content)
 			ctx := context.WithValue(b.Context(), SessionIDContextKey, "s")
 			tracker := filetracker.NewService(nil)
-			tool := NewWriteTool(nil, &mockHistoryService{}, tracker, dir)
+			tool := NewWriteTool(nil, &mockHistoryService{}, tracker, nil, dir)
 			params := WriteParams{FilePath: path, Content: updated}
 			b.ReportAllocs()
 			for b.Loop() {
