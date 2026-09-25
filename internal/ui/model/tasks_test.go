@@ -12,8 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/subagents"
-	"github.com/stubbedev/harness/internal/ui/chat"
+	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
@@ -183,27 +185,35 @@ func TestBackgroundTasksStrip(t *testing.T) {
 
 	task := u.agentTaskByToolCall("a1")
 	require.NotNil(t, task)
-	assert.Equal(t, "researcher", task.name)
+	assert.Equal(t, "dig into the git history", task.description, "the prompt excerpt is the fallback description")
 	assert.True(t, u.tasksSpinning(), "a fresh dispatch with no result is running")
 
-	// The strip renders one row per task and names it.
+	// The strip renders one row per task: the Agent word plus the
+	// description, no type and no spinner glyph.
 	u.tasksAreaHeight()
 	require.NotEmpty(t, u.tasksView)
-	assert.Contains(t, ansi.Strip(u.tasksView), "researcher")
+	out := ansi.Strip(u.tasksView)
+	assert.Contains(t, out, "Agent")
+	assert.Contains(t, out, "dig into the git history")
+	assert.NotContains(t, out, "researcher", "the subagent type is not shown")
 	require.Len(t, u.taskRows, 1)
 
-	// Expanding via the recorded row shows the task's detail but not the
-	// dispatch prompt — that is context for the model, not the
-	// transcript; clicking again collapses it.
-	assert.True(t, u.handleTaskClick(2, 0))
-	assert.Equal(t, "a1", u.expandedTaskID)
+	// The generated title replaces the excerpt once the child session's
+	// title lands.
+	assert.True(t, u.applyTaskTitle(task.childSessionID, "Dig into git history for the culprit"))
 	u.tasksAreaHeight()
-	assert.NotContains(t, ansi.Strip(u.tasksView), "dig into the git history")
-	assert.True(t, u.handleTaskClick(2, 0))
-	assert.Empty(t, u.expandedTaskID)
+	assert.Contains(t, ansi.Strip(u.tasksView), "Dig into git history for the culprit")
+	assert.False(t, u.applyTaskTitle(task.childSessionID, "New Agent Session"), "the placeholder title is ignored")
 
-	// The final result completes the task — and reaps it: the strip is a
-	// viewer for ongoing work only.
+	// Clicking a row activates it: the transcript switches to the
+	// agent's session.
+	clicked, clickCmd := u.handleTaskClick(2, 0)
+	assert.True(t, clicked)
+	assert.NotNil(t, clickCmd)
+	assert.Equal(t, task.childSessionID, u.viewedAgentSessionID)
+
+	// The final result completes the task — and reaps it: the strip is
+	// a viewer for ongoing work only.
 	assert.True(t, u.resolveAgentTaskResult(message.ToolResult{
 		ToolCallID: "a1", Name: "agent", Content: "found the culprit",
 	}))
@@ -217,51 +227,27 @@ func TestBackgroundTasksStrip(t *testing.T) {
 	assert.Equal(t, 0, u.tasksAreaHeight())
 }
 
-// TestSubagentNoteBumpsTaskCount pins the report-back path: a
-// background sub-agent's send_message content never renders in the
-// transcript; it counts up on its task's strip row instead.
-func TestSubagentNoteBumpsTaskCount(t *testing.T) {
+// TestSubagentNoteNeverRenders pins that a background sub-agent's
+// send_message content is LLM-to-LLM mail: it never renders in the
+// transcript, no matter which session is being viewed.
+func TestSubagentNoteNeverRenders(t *testing.T) {
 	t.Parallel()
 	u := newTestUI()
 	u.state = uiChat
 	u.width = 100
 
-	msg := &message.Message{ID: "m1", Role: message.Assistant}
-	bg := agentToolCall("a1")
-	bg.Input = `{"subagent_type":"researcher","prompt":"dig"}`
-	_ = u.upsertAgentTask(msg, bg)
-	task := u.agentTaskByToolCall("a1")
-	require.NotNil(t, task)
-	task.childSessionID = "child-1"
-
-	before := u.chat.Len()
 	note := message.Message{ID: "n1", SessionID: "s1", Role: message.User, Parts: []message.ContentPart{
 		message.SubagentNote{AgentName: "researcher", Handle: "bg-1", ChildSessionID: "child-1", Text: "halfway there"},
 	}}
+	before := u.chat.Len()
 	_ = u.appendSessionMessage(note)
-	assert.Equal(t, 1, task.messages, "the report-back counts on its task")
 	assert.Equal(t, before, u.chat.Len(), "the note renders nowhere in the transcript")
-
-	// A second note for another child bumps only that child's task.
-	otherCall := agentToolCall("a2")
-	otherCall.Input = `{"prompt":"more"}`
-	_ = u.upsertAgentTask(msg, otherCall)
-	other := u.agentTaskByToolCall("a2")
-	require.NotNil(t, other)
-	other.childSessionID = "child-2"
-	_ = u.appendSessionMessage(message.Message{ID: "n2", SessionID: "s1", Role: message.User, Parts: []message.ContentPart{
-		message.SubagentNote{AgentName: "researcher", Handle: "bg-2", ChildSessionID: "child-2", Text: "done"},
-	}})
-	assert.Equal(t, 1, other.messages)
-	assert.Equal(t, 1, task.messages)
-
-	u.tasksAreaHeight()
-	assert.Contains(t, ansi.Strip(u.tasksView), "1 msg")
 }
 
-// TestLoadAgentTasksCountsNotes pins the reload path: report-backs
-// persisted before the reload count onto the rebuilt tasks.
-func TestLoadAgentTasksCountsNotes(t *testing.T) {
+// TestLoadAgentTasksUsesPromptExcerpt pins the reload path: a rebuilt
+// task's description falls back to the dispatch-prompt excerpt until a
+// generated title arrives.
+func TestLoadAgentTasksUsesPromptExcerpt(t *testing.T) {
 	t.Parallel()
 	u := newTestUI()
 	u.state = uiChat
@@ -271,20 +257,14 @@ func TestLoadAgentTasksCountsNotes(t *testing.T) {
 	require.NotEmpty(t, child)
 	msgs := []*message.Message{
 		{ID: "m1", Role: message.Assistant, Parts: []message.ContentPart{
-			message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"dig"}`, Finished: true},
-		}},
-		{ID: "n1", Role: message.User, Parts: []message.ContentPart{
-			message.SubagentNote{AgentName: "researcher", Handle: "bg-1", ChildSessionID: child, Text: "halfway there"},
-		}},
-		{ID: "n2", Role: message.User, Parts: []message.ContentPart{
-			message.SubagentNote{AgentName: "researcher", Handle: "bg-1", ChildSessionID: child, Text: "done digging"},
+			message.ToolCall{ID: "a1", Name: "agent", Input: `{"prompt":"dig into the parser"}`, Finished: true},
 		}},
 	}
 	u.loadAgentTasks(msgs, nil)
 
 	task := u.agentTaskByToolCall("a1")
 	require.NotNil(t, task)
-	assert.Equal(t, 2, task.messages)
+	assert.Equal(t, "dig into the parser", task.description)
 }
 
 func TestBackgroundTasksWindowScrolls(t *testing.T) {
@@ -296,22 +276,23 @@ func TestBackgroundTasksWindowScrolls(t *testing.T) {
 	// Four running tasks: only three rows render, and the window
 	// follows the cursor.
 	for _, id := range []string{"a1", "a2", "a3", "a4"} {
-		_ = u.upsertAgentTask(&message.Message{ID: "m", Role: message.Assistant}, agentToolCall(id))
+		bg := agentToolCall(id)
+		bg.Input = fmt.Sprintf(`{"prompt":"dig %s"}`, id)
+		_ = u.upsertAgentTask(&message.Message{ID: "m", Role: message.Assistant}, bg)
 	}
 	require.Len(t, u.agentTasks, 4)
 
 	u.tasksAreaHeight()
 	out := ansi.Strip(u.tasksView)
 	// The window renders at most three task rows.
-	assert.LessOrEqual(t, strings.Count(out, "researcher"), 3)
+	assert.LessOrEqual(t, strings.Count(out, "Agent"), 3)
 	assert.LessOrEqual(t, strings.Count(out, "\n")+1, 3)
 
 	// Move the cursor past the window end: the window scrolls with it.
 	u.taskCursor = 3
-	window, start := u.taskWindow()
-	require.Len(t, window, 3)
-	assert.Equal(t, 1, start, "the window follows the cursor onto the last task")
-	assert.Equal(t, "a4", window[len(window)-1].toolCallID)
+	u.tasksAreaHeight()
+	assert.Contains(t, ansi.Strip(u.tasksView), "dig a4", "the window follows the cursor onto the last task")
+	assert.NotContains(t, ansi.Strip(u.tasksView), "dig a1")
 
 	// Reaping the task under the cursor clamps the cursor back in range.
 	u.reapAgentTask("a4")
@@ -319,76 +300,197 @@ func TestBackgroundTasksWindowScrolls(t *testing.T) {
 	assert.Equal(t, 2, u.taskCursor)
 }
 
-func TestBackgroundTasksKeyboardNavigation(t *testing.T) {
+// activateAgentView is the test-side act of entering an agent's
+// transcript: focus the strip, press enter, run the fetch the switch
+// returns, and apply it.
+func activateAgentView(t *testing.T, u *UI) {
+	t.Helper()
+	u.focusTasks()
+	cmd := u.activateTaskAtCursor()
+	require.NotNil(t, cmd, "activating a row returns the transcript fetch")
+	applyAgentTranscript(t, u, cmd())
+}
+
+// applyAgentTranscript runs a fetched transcript through the handler,
+// as Update would.
+func applyAgentTranscript(t *testing.T, u *UI, msg tea.Msg) {
+	t.Helper()
+	tr, ok := msg.(agentTranscriptMsg)
+	require.True(t, ok, "the view switch fetches the transcript")
+	_ = u.handleAgentTranscriptMsg(tr)
+}
+
+// TestEnterSwitchesToAgentAndMainBack pins the strip's core gesture:
+// enter on an agent row shows that agent's session in the transcript
+// with a Main Agent row pinned above, and enter (or escape) on Main
+// returns to the main session.
+func TestEnterSwitchesToAgentAndMainBack(t *testing.T) {
 	t.Parallel()
 	u := newTestUI()
 	u.state = uiChat
-	u.width = 100
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+	u.session = &session.Session{ID: "s1"}
 
-	// One finished task with two nested calls, like a completed run.
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
 	task := u.agentTaskByToolCall("a1")
-	task.status = subagents.StatusCompleted
-	task.nested = []chat.ToolMessageItem{
-		chat.NewToolMessageItem(u.com.Styles, "c1", message.ToolCall{ID: "n1", Name: "Bash", Input: `{"command":"ls"}`, Finished: true}, nil, false),
-		chat.NewToolMessageItem(u.com.Styles, "c1", message.ToolCall{ID: "n2", Name: "View", Input: `{"file_path":"a.go"}`, Finished: true}, nil, false),
-	}
-	for _, nested := range task.nested {
-		nested.(chat.Compactable).SetCompact(true)
-	}
+	require.Equal(t, "agent-tool-m1-a1", task.childSessionID)
 
-	// ctrl+b-style focus parks the cursor on the task row.
+	// Enter on the agent row: the transcript shows its session, focus
+	// moves to the transcript, and Main Agent appears in the strip.
+	activateAgentView(t, u)
+	require.Equal(t, "agent-tool-m1-a1", u.viewedAgentSessionID)
+	require.Equal(t, uiFocusMain, u.focus, "activating a row moves focus to the transcript")
+	require.Equal(t, 2, u.taskRowCount(), "the Main row is pinned above the agent row")
+	u.tasksAreaHeight()
+	out := ansi.Strip(u.tasksView)
+	assert.Contains(t, out, "Main Agent")
+	assert.Contains(t, out, "Agent")
+
+	// Enter on the Main row (row 0) returns to the main session and
+	// drops the pinned row. The main reload also rebuilds the strip from
+	// the main session's history; the stub returns none, so the strip
+	// empties here.
 	u.focusTasks()
-	require.Equal(t, uiFocusTasks, u.focus)
-	require.Equal(t, 0, u.taskCursor)
+	u.taskCursor = 0
+	cmd := u.activateTaskAtCursor()
+	require.NotNil(t, cmd)
+	require.Empty(t, u.viewedAgentSessionID)
+	applyAgentTranscript(t, u, cmd())
+	require.Equal(t, 0, u.taskRowCount(), "the reload rebuilds the strip from the main session's history")
+}
 
-	// Enter expands the task and descends onto its first call; enter
-	// again opens that call's full view.
-	u.enterTaskAtCursor()
-	require.Equal(t, "a1", u.expandedTaskID)
-	require.Equal(t, 0, u.taskSubCursor)
-	u.enterTaskAtCursor()
-	assert.False(t, task.nested[0].(interface{ IsCompact() bool }).IsCompact(), "the cursor's call renders its full view")
-	assert.True(t, task.nested[1].(interface{ IsCompact() bool }).IsCompact())
+// TestEscapeFromAgentViewReturnsToMain pins escape as the fast way out
+// of an agent's transcript.
+func TestEscapeFromAgentViewReturnsToMain(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+	u.session = &session.Session{ID: "s1"}
+	u.keyMap = DefaultKeyMap()
 
-	// Escape climbs out: the call's full view collapses to its one-liner,
-	// the next escape collapses the task, and with nothing left to leave,
-	// focus returns to the editor.
-	u.ascendTaskAtCursor()
-	assert.True(t, task.nested[0].(interface{ IsCompact() bool }).IsCompact(), "escape collapses the call to its one-liner")
-	u.ascendTaskAtCursor()
-	require.Empty(t, u.expandedTaskID)
-	require.Equal(t, -1, u.taskSubCursor)
-	u.ascendTaskAtCursor()
-	require.Equal(t, uiFocusEditor, u.focus)
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
+	activateAgentView(t, u)
+	require.Equal(t, "agent-tool-m1-a1", u.viewedAgentSessionID)
 
-	// A selection that is already a one-liner collapses the task in a
-	// single escape: clearing the selection marker alone would waste a
-	// keypress.
 	u.focusTasks()
-	u.enterTaskAtCursor()
-	require.Equal(t, 0, u.taskSubCursor)
-	u.ascendTaskAtCursor()
-	require.Empty(t, u.expandedTaskID)
-	require.Equal(t, -1, u.taskSubCursor)
+	consumed, cmd := u.handleTaskKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.True(t, consumed)
+	require.NotNil(t, cmd)
+	_ = cmd()
+	assert.Empty(t, u.viewedAgentSessionID, "escape returns to the main session")
+}
 
-	// Re-enter and walk the calls: down to the last (stays put past it),
-	// up climbs back to the task row.
-	u.enterTaskAtCursor()
-	require.Equal(t, 0, u.taskSubCursor)
-	u.taskCursorDown()
-	require.Equal(t, 1, u.taskSubCursor)
-	u.taskCursorDown()
-	require.Equal(t, 1, u.taskSubCursor, "no further down at the last entry")
-	u.taskCursorUp()
-	u.taskCursorUp()
-	require.Equal(t, -1, u.taskSubCursor)
+// TestActivateUnstartedAgentReports pins the edge: a dispatch that is
+// still streaming has no child session yet, so activating its row
+// reports instead of switching to an empty transcript.
+func TestActivateUnstartedAgentReports(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
 
-	// Esc-style leave returns the editor.
-	u.ascendTaskAtCursor()
-	u.ascendTaskAtCursor()
-	require.Equal(t, uiFocusEditor, u.focus)
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
+	task := u.agentTaskByToolCall("a1")
+	require.NotNil(t, task)
+	task.childSessionID = ""
+
+	u.focusTasks()
+	cmd := u.activateTaskAtCursor()
+	require.NotNil(t, cmd, "activating an unstarted agent reports instead of switching")
+	report := cmd()
+	info, ok := report.(util.InfoMsg)
+	require.True(t, ok, "the report is an info message")
+	assert.Contains(t, info.Msg, "not started")
+	assert.Empty(t, u.viewedAgentSessionID, "nothing to switch to")
+}
+
+// TestSessionEventTitlesTaskRow pins the live path: the child session's
+// generated title arrives as a session event and becomes the row's
+// description, replacing the prompt excerpt.
+func TestSessionEventTitlesTaskRow(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+	u.session = &session.Session{ID: "s1"}
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
+	task := u.agentTaskByToolCall("a1")
+	require.NotNil(t, task)
+	require.False(t, task.titled)
+
+	_, _ = u.Update(pubsub.Event[session.Session]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: session.Session{ID: task.childSessionID, Title: "Investigating parser drift"},
+	})
+	assert.Equal(t, "Investigating parser drift", task.description)
+	assert.True(t, task.titled)
+
+	// A later dispatch-prompt update (the step-finish message update)
+	// must not overwrite the title with the excerpt again.
+	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
+	assert.Equal(t, "Investigating parser drift", task.description)
+}
+
+// TestViewedAgentIgnoresMainTraffic pins the one-session invariant of
+// the chat: while an agent's session is viewed, main-session message
+// events do not paint into the transcript (the main reload on
+// switch-back picks them up instead).
+func TestViewedAgentIgnoresMainTraffic(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	u.session = &session.Session{ID: "s1"}
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
+	activateAgentView(t, u)
+	require.Equal(t, "agent-tool-m1-a1", u.viewedAgentSessionID)
+
+	before := u.chat.Len()
+	_, _ = u.Update(pubsub.Event[message.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: message.Message{ID: "main-1", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
+			message.TextContent{Text: "main session reply"},
+		}},
+	})
+	assert.Equal(t, before, u.chat.Len(), "main traffic does not paint into the agent's transcript")
+
+	// The viewed agent's own traffic does render.
+	_, _ = u.Update(pubsub.Event[message.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: message.Message{ID: "child-1", SessionID: "agent-tool-m1-a1", Role: message.Assistant, Parts: []message.ContentPart{
+			message.TextContent{Text: "agent reply"},
+		}},
+	})
+	assert.Equal(t, before+1, u.chat.Len(), "the viewed agent's messages render")
+}
+
+// TestSteerWhileViewingSendsToAgent pins the editor's routing: with an
+// agent's session viewed, a submitted prompt goes to that agent, not to
+// the main session.
+func TestSteerWhileViewingSendsToAgent(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	ws := &testWorkspace{cfg: &config.Config{}}
+	u.com.Workspace = ws
+	u.session = &session.Session{ID: "s1"}
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
+	activateAgentView(t, u)
+	require.Equal(t, "agent-tool-m1-a1", u.viewedAgentSessionID)
+
+	cmd := u.steerAgent("focus on the parser")
+	require.NotNil(t, cmd)
+	assert.Nil(t, cmd(), "a successful steer reports nothing")
+	assert.Equal(t, "agent-tool-m1-a1", ws.steeredSession)
+	assert.Equal(t, "focus on the parser", ws.steeredText)
 }
 
 // TestRunningDispatchesLiveOnlyInTheStrip pins that a dispatch shows up
@@ -682,9 +784,8 @@ func TestStripDoesNotResurrectFinishedDispatch(t *testing.T) {
 // TestAgentWaitCallGetsNoStripRow pins that the waiting form of the
 // agent tool -- a call with no prompt, which dispatches nothing and
 // blocks until the background subagents already running report back --
-// never gets a strip row of its own. It used to raise a second spinner
-// titled "subagent" (the fallback title, since a wait names no
-// subagent_type) alongside the row for the agent it was waiting on.
+// never gets a strip row of its own. It would double every row it
+// waits on with a descriptionless Agent row.
 func TestAgentWaitCallGetsNoStripRow(t *testing.T) {
 	t.Parallel()
 	u := newTestUI()
@@ -704,11 +805,11 @@ func TestAgentWaitCallGetsNoStripRow(t *testing.T) {
 	})
 
 	require.Len(t, u.agentTasks, 1)
-	assert.Equal(t, "fast", u.agentTasks[0].name)
+	assert.Equal(t, "read the diff", u.agentTasks[0].description)
 	assert.Nil(t, u.agentTaskByToolCall("a2"))
 
 	u.tasksAreaHeight()
-	assert.NotContains(t, ansi.Strip(u.tasksView), subagentDisplayName)
+	assert.NotContains(t, ansi.Strip(u.tasksView), "subagent")
 }
 
 // TestLoadAgentTasksSkipsWaitCalls pins the same policy on the reload

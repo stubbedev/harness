@@ -150,10 +150,15 @@ Consecutive tool calls are folded into one `ToolGroupMessageItem`
 (`chat/toolgroup.go`): a collapsed "Ran (N tool calls)" row that expands
 first to one-liners and then to the calls' full renderers. Children are
 never list items of their own — `Chat.ToolItem` resolves through groups.
-Subagent dispatches (`agent`, `research`) never render in the transcript;
-they live in the background tasks strip (`model/tasks.go`) between the
-chat and the editor; its rows borrow the tool group's Ran/Running
-styles.
+Subagent dispatches (`agent`, `research`) never render in the
+transcript; they live in the background tasks strip (`model/tasks.go`)
+between the chat and the editor. Each strip row is one line,
+`Agent <description>` — the child session's generated title, falling
+back to the dispatch-prompt excerpt — with no fold-out. Enter or click
+on a row switches the transcript into that agent's session (live; its
+messages render like main-session ones), where the editor steers the
+agent via `Workspace.SteerAgent`; a pinned `Main Agent` row (and
+escape) switches back. Rows are removed when the run finishes.
 
 ### Styling
 

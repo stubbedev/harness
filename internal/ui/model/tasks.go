@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -16,44 +15,25 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
-	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // agentTask tracks one subagent run for the background tasks strip.
-// Subagents do not render in the transcript; this is their holder.
+// Subagents do not render in the transcript; this is their holder, and
+// the transcript shows their session when the row is activated.
 type agentTask struct {
-	toolCallID       string
-	name             string
-	color            string
-	model            string
-	status           string
-	prompt           string
-	result           *message.ToolResult
-	nested           []chat.ToolMessageItem
-	startedAt        time.Time
-	promptTokens     int64
-	completionTokens int64
-	// messages counts report-backs the sub-agent sent mid-run via
-	// send_message; the row shows the count instead of the messages,
-	// which are LLM-to-LLM context.
-	messages int
-
-	// background marks a dispatch whose tool call already returned a
-	// handle: the child session keeps running past that result, so the
-	// result must not settle the task.
-	background bool
-	// dispatched marks a background dispatch whose tool call has
-	// returned (the handle result landed, or history already held one
-	// at load). Until then the child session does not exist in the
-	// runtime — a wide fan-out streams its dispatches for minutes
-	// before fantasy executes any of them — so only a dispatched task
-	// may be settled for being absent from the running list.
-	dispatched bool
-	// childSessionID is the sub-session behind the dispatch, learned
-	// from runtime events or derived at load, used to reconcile the
-	// strip against the authoritative running list.
+	toolCallID     string
 	childSessionID string
+	description    string
+	status         string
+	startedAt      time.Time
+	background     bool
+	dispatched     bool
+	// titled marks a description that came from the child session's
+	// generated title rather than the dispatch-prompt excerpt, so a
+	// later message update cannot overwrite it with the excerpt again.
+	titled bool
 }
 
 // taskRow maps a rendered strip row to its task for click handling.
@@ -96,22 +76,17 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 	task := m.agentTaskByToolCall(tc.ID)
 	if task == nil {
 		task = &agentTask{
-			toolCallID: tc.ID,
-			status:     subagents.StatusRunning,
-			startedAt:  time.Now(),
+			toolCallID:  tc.ID,
+			status:      subagents.StatusRunning,
+			startedAt:   time.Now(),
+			description: promptExcerpt(params.Prompt),
 		}
 		m.agentTasks = append(m.agentTasks, task)
 	}
-
-	task.name = params.SubagentType
-	if task.name == "" {
-		task.name = subagentDisplayName
-	}
-	if task.color == "" {
-		task.color = subagents.AutoColor(task.name)
-	}
-	task.prompt = params.Prompt
 	task.background = !params.Blocking
+	if !task.titled {
+		task.description = promptExcerpt(params.Prompt)
+	}
 	task.childSessionID = m.childSessionIDFor(msg.ID, tc.ID)
 
 	if m.tasksSpinning() {
@@ -141,7 +116,6 @@ func (m *UI) resolveAgentTaskResult(tr message.ToolResult) bool {
 	// so no terminal event can ever arrive.
 	task.dispatched = true
 	if task.background && tr.IsError {
-		task.result = &tr
 		task.status = subagents.StatusFailed
 		m.reapAgentTask(tr.ToolCallID)
 		return true
@@ -149,7 +123,6 @@ func (m *UI) resolveAgentTaskResult(tr message.ToolResult) bool {
 	if task.background {
 		return true
 	}
-	task.result = &tr
 	task.status = subagents.StatusCompleted
 	if tr.IsError {
 		task.status = subagents.StatusFailed
@@ -176,19 +149,11 @@ func (m *UI) reapAgentTask(toolCallID string) {
 			break
 		}
 	}
-	if m.expandedTaskID == toolCallID {
-		m.expandedTaskID = ""
-		m.taskSubCursor = -1
-	}
 	m.clampTaskCursor()
-	if m.focus == uiFocusTasks && len(m.agentTasks) == 0 {
+	if m.focus == uiFocusTasks && m.taskRowCount() == 0 {
 		m.focusEditor()
 	}
 }
-
-// subagentDisplayName is the strip title for a dispatch that did not
-// name a subagent type.
-const subagentDisplayName = "subagent"
 
 // isAgentWaitCall reports whether an agent tool call is the waiting form
 // rather than a dispatch. The agent tool doubles as both: with a prompt
@@ -226,7 +191,6 @@ func (m *UI) tasksSpinning() bool {
 // resetAgentTasks drops task state on session switches.
 func (m *UI) resetAgentTasks() {
 	m.agentTasks = nil
-	m.expandedTaskID = ""
 	m.lastTaskFocusID = ""
 	m.taskRows = nil
 }
@@ -270,57 +234,40 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 				status:         subagents.StatusRunning,
 				background:     !params.Blocking,
 				dispatched:     hasResult,
+				description:    promptExcerpt(params.Prompt),
 				childSessionID: m.childSessionIDFor(msg.ID, tc.ID),
 			}
-			task.name = params.SubagentType
-			if task.name == "" {
-				task.name = subagentDisplayName
-			}
-			task.color = subagents.AutoColor(task.name)
-			task.prompt = params.Prompt
 			m.agentTasks = append(m.agentTasks, task)
-
-			m.loadTaskNestedTools(msg, tc, task)
-		}
-	}
-	// Count the report-backs each running task already received.
-	noteCounts := subagentNoteCounts(msgs)
-	for _, t := range m.agentTasks {
-		if t.childSessionID != "" {
-			t.messages = noteCounts[t.childSessionID]
 		}
 	}
 	m.clampTaskCursor()
 }
 
-// subagentNoteCounts counts report-backs per child session across a
-// session's messages, keyed the way tasks are (by child session ID).
-func subagentNoteCounts(msgs []*message.Message) map[string]int {
-	var counts map[string]int
-	for _, msg := range msgs {
-		for _, note := range msg.SubagentNotes() {
-			if note.ChildSessionID == "" {
-				continue
-			}
-			if counts == nil {
-				counts = make(map[string]int)
-			}
-			counts[note.ChildSessionID]++
-		}
-	}
-	return counts
+// promptExcerpt builds a strip row's fallback description: the first
+// line of the dispatch prompt, ellipsized. The child session's generated
+// title replaces it once it lands (applyTaskTitle).
+func promptExcerpt(prompt string) string {
+	const max = 64
+	line := strings.TrimSpace(chat.FirstLine(prompt))
+	return ansi.Truncate(line, max, "…")
 }
 
-// countSubagentNote bumps the report-back count on the task running the
-// note's child session. The note itself never renders: the count is the
-// user-facing trace that a background agent reported back.
-func (m *UI) countSubagentNote(note message.SubagentNote) {
-	if note.ChildSessionID == "" {
-		return
+// applyTaskTitle adopts a child session's generated title as its task's
+// description. The "New Agent Session" placeholder the dispatch created
+// the session with is ignored: it says nothing the prompt excerpt does
+// not.
+func (m *UI) applyTaskTitle(childSessionID, title string) bool {
+	title = strings.TrimSpace(title)
+	if title == "" || title == "New Agent Session" {
+		return false
 	}
-	if task := m.agentTaskByChildSession(note.ChildSessionID); task != nil {
-		task.messages++
+	task := m.agentTaskByChildSession(childSessionID)
+	if task == nil || task.titled && task.description == title {
+		return false
 	}
+	task.description = title
+	task.titled = true
+	return true
 }
 
 // agentTaskByChildSession returns the task running the given child
@@ -334,74 +281,104 @@ func (m *UI) agentTaskByChildSession(childSessionID string) *agentTask {
 	return nil
 }
 
-// loadTaskNestedTools fetches a finished subagent's own tool calls from
-// its child session so the expanded strip entry can show them.
-func (m *UI) loadTaskNestedTools(msg *message.Message, tc message.ToolCall, task *agentTask) {
-	agentSessionID := m.com.Workspace.CreateAgentToolSessionID(msg.ID, tc.ID)
-	nestedMsgs, err := m.com.Workspace.ListMessages(context.Background(), agentSessionID)
-	if err != nil {
-		return
+// agentTranscriptMsg carries the messages of the session whose
+// transcript the strip switched to (an agent's, or back to main),
+// fetched off-thread. forSession guards against a session switch
+// racing the fetch, childSessionID against a newer view switch.
+type agentTranscriptMsg struct {
+	forSession     string
+	childSessionID string
+	msgs           []message.Message
+}
+
+// viewAgentSession switches the transcript to a subagent's session: its
+// dispatch prompt is its first user message, so its work renders exactly
+// like the main chat. The fetch is off-thread; the switch back is
+// viewMainSession.
+func (m *UI) viewAgentSession(childSessionID string) tea.Cmd {
+	if childSessionID == "" {
+		return util.ReportWarn("Agent has not started yet")
 	}
-	nestedPtrs := make([]*message.Message, len(nestedMsgs))
-	for i := range nestedMsgs {
-		nestedPtrs[i] = &nestedMsgs[i]
+	if m.viewedAgentSessionID == childSessionID || m.session == nil {
+		return nil
 	}
-	resultMap := chat.BuildToolResultMap(nestedPtrs)
-	for _, nestedMsg := range nestedPtrs {
-		for _, item := range chat.ExtractMessageItems(m.com.Styles, nestedMsg, resultMap) {
-			if nestedTool, ok := item.(chat.ToolMessageItem); ok {
-				if simplifiable, ok := nestedTool.(chat.Compactable); ok {
-					simplifiable.SetCompact(true)
-				}
-				task.nested = append(task.nested, nestedTool)
-			}
+	m.viewedAgentSessionID = childSessionID
+	m.focusTranscript()
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), childSessionID)
+		if err != nil {
+			return util.InfoMsg{Type: util.InfoTypeError, Msg: fmt.Sprintf("Failed to load agent transcript: %v", err)}
 		}
+		return agentTranscriptMsg{forSession: sessionID, childSessionID: childSessionID, msgs: msgs}
 	}
 }
 
-// updateAgentTaskFromChildSession folds a child-session message into its
-// task: tool calls and results become the task's nested one-liners.
-func (m *UI) updateAgentTaskFromChildSession(event message.Message) {
-	_, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(event.SessionID)
-	if !ok {
-		return
+// viewMainSession switches the transcript back to the main session and
+// reloads it: messages that arrived while an agent was viewed were
+// never applied to the chat.
+func (m *UI) viewMainSession() tea.Cmd {
+	if m.viewedAgentSessionID == "" || m.session == nil {
+		return nil
 	}
-	task := m.agentTaskByToolCall(toolCallID)
-	if task == nil {
-		return
+	m.viewedAgentSessionID = ""
+	m.focusTranscript()
+	sessionID := m.session.ID
+	return func() tea.Msg {
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), sessionID)
+		if err != nil {
+			return util.InfoMsg{Type: util.InfoTypeError, Msg: fmt.Sprintf("Failed to load session transcript: %v", err)}
+		}
+		return agentTranscriptMsg{forSession: sessionID, msgs: msgs}
 	}
+}
 
-	for _, tc := range event.ToolCalls() {
-		// Context plumbing (skill_search, tool_search) is noise even in
-		// the expanded task view.
-		if chat.IsInternalContextTool(tc.Name) {
-			continue
-		}
-		found := false
-		for _, existing := range task.nested {
-			if existing.ToolCall().ID == tc.ID {
-				existing.SetToolCall(tc)
-				found = true
-				break
-			}
-		}
-		if !found {
-			nested := chat.NewToolMessageItem(m.com.Styles, event.ID, tc, nil, false)
-			if simplifiable, ok := nested.(chat.Compactable); ok {
-				simplifiable.SetCompact(true)
-			}
-			task.nested = append(task.nested, nested)
-		}
+// handleAgentTranscriptMsg applies a fetched transcript. Both guards
+// discard a fetch that raced a newer switch: a session change, or the
+// user moving to another agent (or back to main) before it resolved.
+func (m *UI) handleAgentTranscriptMsg(msg agentTranscriptMsg) tea.Cmd {
+	if m.session == nil || msg.forSession != m.session.ID {
+		return nil
 	}
-	for _, tr := range event.ToolResults() {
-		for _, nested := range task.nested {
-			if nested.ToolCall().ID == tr.ToolCallID {
-				res := tr
-				nested.SetResult(&res)
-				break
-			}
-		}
+	if msg.childSessionID != m.viewedAgentSessionID {
+		return nil
 	}
+	if msg.childSessionID == "" {
+		return m.setSessionMessages(msg.msgs)
+	}
+	m.setChildSessionMessages(msg.msgs)
+	return nil
+}
+
+// setChildSessionMessages renders a subagent's session into the
+// transcript, mirroring setSessionMessages minus the main-session
+// bookkeeping (the task strip is not rebuilt from a child's history,
+// queued prompts are a main-session concept, and assistant-info items
+// are only defined for the main turn).
+func (m *UI) setChildSessionMessages(msgs []message.Message) {
+	msgPtrs := make([]*message.Message, len(msgs))
+	for i := range msgs {
+		msgPtrs[i] = &msgs[i]
+	}
+	toolResultMap := chat.BuildToolResultMap(msgPtrs)
+	items := make([]chat.MessageItem, 0, len(msgs))
+	for _, msg := range msgPtrs {
+		items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+	}
+	// A viewed agent is by definition working; keep the animation clock
+	// running so its in-flight tool spinners move.
+	m.chat.SetAnimationsAllowed(true)
+	m.chat.SetMessages(items...)
+	m.chat.SelectLast()
+}
+
+// focusTranscript moves focus onto the transcript after a view switch:
+// the point of switching is reading the transcript, so the user lands
+// there with the editor blurred.
+func (m *UI) focusTranscript() {
+	m.setState(m.state, uiFocusMain)
+	m.textarea.Blur()
+	m.chat.Focus()
 }
 
 // applyRunningSubagentInfo merges live runtime info (name, color, model,
@@ -427,20 +404,9 @@ func (m *UI) applyRunningSubagentInfo(info childSessionInfo) {
 		m.reapAgentTask(toolCallID)
 		return
 	}
-	if info.Name != "" {
-		task.name = info.Name
-	}
-	if info.Color != "" {
-		task.color = info.Color
-	}
-	if info.Model != "" {
-		task.model = info.Model
-	}
 	if info.Status != "" {
 		task.status = info.Status
 	}
-	task.promptTokens = info.PromptTokens
-	task.completionTokens = info.CompletionTokens
 }
 
 // tasksReconcileInterval paces the backstop refresh of the running
@@ -509,23 +475,46 @@ func (m *UI) reconcileBackgroundTasks(list []workspace.RunningSubagentInfo) {
 	}
 }
 
-// childSessionInfo is the subset of runtime/running-subagent data the
-// strip consumes, so both the RuntimeEvent and the enriched
-// runningSubagentsMsg paths can feed it.
+// childSessionInfo is the subset of runtime data the strip consumes, so
+// both the RuntimeEvent and the enriched runningSubagentsMsg paths can
+// feed it.
 type childSessionInfo struct {
-	ChildSessionID   string
-	Name             string
-	Color            string
-	Model            string
-	Status           string
-	PromptTokens     int64
-	CompletionTokens int64
+	ChildSessionID string
+	Status         string
 }
 
-// tasksAreaHeight returns the strip height: one row per visible task
-// plus the expanded entry's detail block.
+// mainRowCount is the number of pinned rows ahead of the task rows:
+// the Main Agent row exists only while an agent's session is viewed.
+func (m *UI) mainRowCount() int {
+	if m.viewedAgentSessionID != "" {
+		return 1
+	}
+	return 0
+}
+
+// taskRowCount is the strip's row count: one per tracked task, plus the
+// pinned Main row while an agent's session is viewed.
+func (m *UI) taskRowCount() int {
+	return len(m.agentTasks) + m.mainRowCount()
+}
+
+// taskRowAt resolves a strip row index to its task, or to the Main row
+// (task nil, isMain true). While an agent is viewed the Main row is
+// pinned first; the tasks follow in dispatch order.
+func (m *UI) taskRowAt(row int) (task *agentTask, isMain bool) {
+	if row < m.mainRowCount() {
+		return nil, true
+	}
+	row -= m.mainRowCount()
+	if row < 0 || row >= len(m.agentTasks) {
+		return nil, false
+	}
+	return m.agentTasks[row], false
+}
+
+// tasksAreaHeight returns the strip height: one line per visible row.
 func (m *UI) tasksAreaHeight() int {
-	if m.state != uiChat || len(m.agentTasks) == 0 {
+	if m.state != uiChat || m.taskRowCount() == 0 {
 		m.tasksView = ""
 		m.taskRows = nil
 		return 0
@@ -534,61 +523,44 @@ func (m *UI) tasksAreaHeight() int {
 	return lipgloss.Height(m.tasksView)
 }
 
-// taskWindow returns the strip's scrolling window: at most three rows
-// around the cursor, so the list scrolls with selection instead of
-// growing past three lines.
-func (m *UI) taskWindow() ([]*agentTask, int) {
-	const windowSize = 3
-	n := len(m.agentTasks)
-	if n == 0 {
-		return nil, 0
-	}
-	cursor := min(max(m.taskCursor, 0), n-1)
-	start := max(0, min(cursor-1, n-windowSize))
-	if n <= windowSize {
-		start = 0
-	}
-	end := min(n, start+windowSize)
-	return m.agentTasks[start:end], start
-}
-
-// clampTaskCursor keeps the cursor inside the task list after tasks
+// clampTaskCursor keeps the cursor inside the row list after rows
 // arrive, finish, or the strip is focused.
 func (m *UI) clampTaskCursor() {
-	n := len(m.agentTasks)
+	n := m.taskRowCount()
 	if n == 0 {
-		m.taskCursor, m.taskSubCursor = 0, -1
+		m.taskCursor = 0
 		return
 	}
 	m.taskCursor = min(max(m.taskCursor, 0), n-1)
-	task := m.agentTasks[m.taskCursor]
-	if task.toolCallID != m.expandedTaskID || m.taskSubCursor >= len(task.nested) {
-		m.taskSubCursor = -1
-	}
 }
 
-// noteTaskFocus records the task under the strip cursor so focus can
+// noteTaskFocus records the row under the strip cursor so focus can
 // return to it later. Reaps shift indices, so an index alone can drift
-// onto a different task between visits.
+// onto a different row between visits.
 func (m *UI) noteTaskFocus() {
-	if m.focus == uiFocusTasks && len(m.agentTasks) > 0 {
-		m.lastTaskFocusID = m.agentTasks[m.taskCursor].toolCallID
+	if m.focus != uiFocusTasks {
+		return
+	}
+	if task, isMain := m.taskRowAt(m.taskCursor); isMain || task == nil {
+		m.lastTaskFocusID = ""
+	} else {
+		m.lastTaskFocusID = task.toolCallID
 	}
 }
 
-// focusTasks moves focus to the strip, returning the cursor to the task
+// focusTasks moves focus to the strip, returning the cursor to the row
 // the user last focused when it is still tracked, and leaving it where
 // clampTaskCursor parks it otherwise.
 func (m *UI) focusTasks() {
-	if len(m.agentTasks) == 0 {
+	if m.taskRowCount() == 0 {
 		return
 	}
 	if m.lastTaskFocusID != "" {
-		if i := slices.IndexFunc(m.agentTasks, func(t *agentTask) bool {
-			return t.toolCallID == m.lastTaskFocusID
-		}); i >= 0 {
-			m.taskCursor = i
-			m.taskSubCursor = -1
+		for i, t := range m.agentTasks {
+			if t.toolCallID == m.lastTaskFocusID {
+				m.taskCursor = i + m.mainRowCount()
+				break
+			}
 		}
 	}
 	m.focus = uiFocusTasks
@@ -597,139 +569,59 @@ func (m *UI) focusTasks() {
 	m.clampTaskCursor()
 }
 
-// taskCursorDown moves the strip cursor down: through the cursor
-// task's nested calls when expanded, otherwise to the next task. It
-// reports whether the cursor moved.
+// taskCursorDown moves the strip cursor down one row. It reports
+// whether the cursor moved.
 func (m *UI) taskCursorDown() bool {
-	if len(m.agentTasks) == 0 {
+	if m.taskRowCount() == 0 {
 		return false
 	}
 	m.clampTaskCursor()
-	task := m.agentTasks[m.taskCursor]
-	if task.toolCallID == m.expandedTaskID && m.taskSubCursor < len(task.nested)-1 {
-		m.taskSubCursor++
-		m.noteTaskFocus()
-		return true
-	}
-	if m.taskCursor < len(m.agentTasks)-1 {
+	if m.taskCursor < m.taskRowCount()-1 {
 		m.taskCursor++
-		m.taskSubCursor = -1
 		m.noteTaskFocus()
 		return true
 	}
 	return false
 }
 
-// taskCursorUp moves the strip cursor up, mirroring taskCursorDown. It
-// reports whether the cursor moved.
+// taskCursorUp moves the strip cursor up one row, mirroring
+// taskCursorDown. It reports whether the cursor moved.
 func (m *UI) taskCursorUp() bool {
-	if len(m.agentTasks) == 0 {
+	if m.taskRowCount() == 0 {
 		return false
 	}
 	m.clampTaskCursor()
-	if m.taskSubCursor > 0 {
-		m.taskSubCursor--
-		m.noteTaskFocus()
-		return true
-	}
-	if m.taskSubCursor == 0 {
-		m.taskSubCursor = -1
-		return true
-	}
 	if m.taskCursor > 0 {
 		m.taskCursor--
-		task := m.agentTasks[m.taskCursor]
-		if task.toolCallID == m.expandedTaskID && len(task.nested) > 0 {
-			m.taskSubCursor = len(task.nested) - 1
-		} else {
-			m.taskSubCursor = -1
-		}
 		m.noteTaskFocus()
 		return true
 	}
 	return false
 }
 
-// toggleTaskAtCursor expands or collapses whatever the strip cursor is
-// on: a nested call toggles between its one-liner and full view, a task
-// row toggles the task's detail block.
-func (m *UI) toggleTaskAtCursor() {
-	if len(m.agentTasks) == 0 {
-		return
-	}
-	m.clampTaskCursor()
-	task := m.agentTasks[m.taskCursor]
-	if m.taskSubCursor >= 0 && m.taskSubCursor < len(task.nested) {
-		chat.ToggleFullView(task.nested[m.taskSubCursor])
-		m.updateLayoutAndSize()
-		return
-	}
-	if m.expandedTaskID == task.toolCallID {
-		m.expandedTaskID = ""
-	} else {
-		m.expandedTaskID = task.toolCallID
-	}
-	m.taskSubCursor = -1
-	m.updateLayoutAndSize()
-}
-
-// enterTaskAtCursor implements the enter key: go in one level. On a task
-// row that expands the task and drops the cursor on its first call; on
-// a call line it opens that call's full view.
-func (m *UI) enterTaskAtCursor() {
-	if len(m.agentTasks) == 0 {
-		return
-	}
-	m.clampTaskCursor()
-	task := m.agentTasks[m.taskCursor]
-	if m.taskSubCursor >= 0 && m.taskSubCursor < len(task.nested) {
-		nested := task.nested[m.taskSubCursor]
-		if !chat.ShowsFullView(nested) {
-			chat.ToggleFullView(nested)
-			m.updateLayoutAndSize()
-		}
-		return
-	}
-	if m.expandedTaskID != task.toolCallID {
-		m.expandedTaskID = task.toolCallID
-	}
-	if len(task.nested) > 0 {
-		m.taskSubCursor = 0
-	}
-	m.updateLayoutAndSize()
-}
-
-// ascendTaskAtCursor implements the escape key: go out one level. A
-// fully rendered call collapses back to its one-liner; with the
-// selection already collapsed (or on the task row), the task itself
-// collapses. With nothing left to leave, the strip hands focus back to
-// the editor.
-func (m *UI) ascendTaskAtCursor() tea.Cmd {
-	if len(m.agentTasks) == 0 {
-		return m.focusEditorFromTasks()
-	}
-	m.clampTaskCursor()
-	task := m.agentTasks[m.taskCursor]
-	if m.taskSubCursor >= 0 && m.taskSubCursor < len(task.nested) {
-		nested := task.nested[m.taskSubCursor]
-		if chat.ShowsFullView(nested) {
-			chat.ToggleFullView(nested)
-			m.updateLayoutAndSize()
-			return nil
-		}
-	}
-	if m.expandedTaskID == task.toolCallID {
-		m.expandedTaskID = ""
-		m.taskSubCursor = -1
-		m.updateLayoutAndSize()
+// activateTaskAtCursor implements the enter key and clicks: switch the
+// transcript to the cursor row's session — the agent's from a task row,
+// back to main from the Main row.
+func (m *UI) activateTaskAtCursor() tea.Cmd {
+	if m.taskRowCount() == 0 {
 		return nil
 	}
-	return m.focusEditorFromTasks()
+	m.clampTaskCursor()
+	task, isMain := m.taskRowAt(m.taskCursor)
+	if isMain {
+		return m.viewMainSession()
+	}
+	if task == nil {
+		return nil
+	}
+	return m.viewAgentSession(task.childSessionID)
 }
 
 // handleTaskKey processes a keypress while the strip is focused. Arrows
-// (plain or shifted) move the cursor within the current level, enter
-// goes in, escape goes out, tab leaves for the editor.
+// (plain or shifted) move the cursor or hand focus off at the edges,
+// enter/space switch the transcript to the row's session, escape
+// returns to main while an agent is viewed (otherwise it leaves for the
+// editor), tab leaves for the editor.
 func (m *UI) handleTaskKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keyMap.Chat.Up):
@@ -753,14 +645,15 @@ func (m *UI) handleTaskKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			return true, m.focusEditorFromTasks()
 		}
 		return true, nil
-	case key.Matches(msg, m.keyMap.Chat.DigIn):
-		m.enterTaskAtCursor()
-		return true, nil
-	case key.Matches(msg, m.keyMap.Chat.Expand):
-		m.toggleTaskAtCursor()
-		return true, nil
+	case key.Matches(msg, m.keyMap.Chat.DigIn), key.Matches(msg, m.keyMap.Chat.Expand):
+		return true, m.activateTaskAtCursor()
 	case key.Matches(msg, m.keyMap.Chat.ClearHighlight):
-		return true, m.ascendTaskAtCursor()
+		// Escape is the fast way back: from an agent's transcript it
+		// returns to main without hunting for the Main row.
+		if m.viewedAgentSessionID != "" {
+			return true, m.viewMainSession()
+		}
+		return true, m.focusEditorFromTasks()
 	case key.Matches(msg, m.keyMap.Tab):
 		return true, m.focusEditorFromTasks()
 	case key.Matches(msg, m.keyMap.ShiftTab):
@@ -804,7 +697,7 @@ func (m *UI) focusChatFromTasks(entry chatEntry) tea.Cmd {
 // it: the background tasks strip when present, otherwise the editor.
 func (m *UI) focusBelowChat() tea.Cmd {
 	m.chat.Blur()
-	if m.state == uiChat && len(m.agentTasks) > 0 {
+	if m.state == uiChat && m.taskRowCount() > 0 {
 		m.focusTasks()
 		return nil
 	}
@@ -816,7 +709,7 @@ func (m *UI) focusBelowChat() tea.Cmd {
 // transcript, entered with the given gesture's landing rule. The
 // landing state has no transcript, so it stays put.
 func (m *UI) focusAboveEditor(entry chatEntry) tea.Cmd {
-	if m.state == uiChat && len(m.agentTasks) > 0 {
+	if m.state == uiChat && m.taskRowCount() > 0 {
 		m.focusTasks()
 		return nil
 	}
@@ -830,15 +723,17 @@ func (m *UI) focusAboveEditor(entry chatEntry) tea.Cmd {
 
 // renderTasks renders the background tasks strip and records the row
 // layout for mouse handling. Rows carry the same focused/blurred prefix
-// bar as transcript items, and the list is a three-row scrolling window
-// around the cursor.
+// bar as transcript items, the word is styled like a tool group's verb
+// (pending while the agent runs, error/cancelled when it did not
+// survive), and the description is the child session's generated title
+// or, until that lands, the dispatch-prompt excerpt. The list is a
+// three-row scrolling window around the cursor.
 func (m *UI) renderTasks(width int) string {
 	t := m.com.Styles
 	m.taskRows = nil
 	m.clampTaskCursor()
-
-	visible, start := m.taskWindow()
-	if len(visible) == 0 {
+	n := m.taskRowCount()
+	if n == 0 {
 		return ""
 	}
 	focused := m.focus == uiFocusTasks
@@ -846,69 +741,51 @@ func (m *UI) renderTasks(width int) string {
 	blurredPrefix := t.Messages.ToolCallBlurred.Render()
 	prefixWidth := lipgloss.Width(focusedPrefix)
 
-	renderRow := func(task *agentTask) string {
-		dot := t.SubagentDot(task.color)
-
-		statusStyle := t.Resource.AdditionalText
-		var status string
-		switch task.status {
-		case subagents.StatusRunning, subagents.StatusRetrying:
-			status = m.taskSpinner.View()
-			if task.status == subagents.StatusRetrying {
-				status += " retrying"
-			}
-		default:
-			status = statusStyle.Render(task.status)
-		}
-
-		line := dot + " " + t.Resource.Name.Render(task.name) + " " + status
-		if task.model != "" {
-			meta := task.model
-			if count := common.FormatSubagentTokenCount(task.promptTokens, task.completionTokens); count != "" {
-				meta += " " + count
-			}
-			line += " " + t.Resource.AdditionalText.Render(meta)
-		}
-		if task.messages > 0 {
-			line += " " + t.Resource.AdditionalText.Render(fmt.Sprintf("%d msg", task.messages))
-		}
-		if len(task.nested) > 0 {
-			line += " " + t.Resource.AdditionalText.Render(fmtToolCalls(len(task.nested)))
-		}
-		return ansi.Truncate(line, max(width-prefixWidth, 1), "…")
+	const windowSize = 3
+	start := 0
+	if n > windowSize {
+		start = max(0, min(m.taskCursor-1, n-windowSize))
 	}
+	end := min(n, start+windowSize)
 
 	var rows []string
-	for i, task := range visible {
-		onCursor := focused && start+i == m.taskCursor
-		subCursor := -1
-		if onCursor && task.toolCallID == m.expandedTaskID {
-			subCursor = m.taskSubCursor
-		}
+	for row := start; row < end; row++ {
+		task, isMain := m.taskRowAt(row)
+		onCursor := focused && row == m.taskCursor
 		prefix := blurredPrefix
-		// The bar marks one row at a time: once the sub-cursor is down
-		// in the task's own calls it moves there instead of staying on
-		// the task row in a second color.
-		if onCursor && subCursor < 0 {
+		if onCursor {
 			prefix = focusedPrefix
 		}
-		rows = append(rows, prefix+renderRow(task))
-
-		if task.toolCallID == m.expandedTaskID {
-			rows = append(rows, m.renderTaskDetails(task, width, subCursor)...)
+		var line string
+		switch {
+		case isMain:
+			word := t.Tool.NameNormal
+			if onCursor {
+				word = t.Tool.NameNormalSelected
+			}
+			line = word.Render("Main Agent")
+		default:
+			running := task.status == subagents.StatusRunning || task.status == subagents.StatusRetrying
+			word := chat.GroupVerbStyle(t, running,
+				task.status == subagents.StatusCancelled,
+				boolToInt(task.status == subagents.StatusFailed),
+				boolToInt(task.status == subagents.StatusCompleted),
+				onCursor)
+			line = word.Render("Agent")
+			if task.description != "" {
+				line += " " + t.Tool.Body.Render(task.description)
+			}
 		}
+		rows = append(rows, prefix+ansi.Truncate(line, max(width-prefixWidth, 1), "…"))
 	}
 
-	// Record row bounds for click handling: each task occupies its own
-	// row (expanded details belong to the task's own rows).
-	y := 0
-	for _, task := range visible {
-		height := 1
-		if task.toolCallID == m.expandedTaskID {
-			height += lipgloss.Height(strings.Join(m.renderTaskDetails(task, width, -1), "\n"))
+	// Record row bounds for click handling: one line per row.
+	for row := start; row < end; row++ {
+		toolCallID := ""
+		if task, isMain := m.taskRowAt(row); !isMain && task != nil {
+			toolCallID = task.toolCallID
 		}
-		m.taskRows = append(m.taskRows, taskRow{yStart: y, yEnd: y + height, toolCallID: task.toolCallID})
-		y += height
+		m.taskRows = append(m.taskRows, taskRow{yStart: row - start, yEnd: row - start + 1, toolCallID: toolCallID})
 	}
 
 	// The strip borrows the tool group's row style (the one behind
@@ -917,68 +794,35 @@ func (m *UI) renderTasks(width int) string {
 	return t.Tool.Body.Render(strings.Join(rows, "\n"))
 }
 
-// renderTaskDetails renders the expanded block under a task row: the
-// subagent's own tool calls as one-liners and its result. The dispatch
-// prompt and any send_message content stay out — they are context for
-// the model, not the transcript; the row's msg count covers report-backs.
-// Detail lines fill the row's content width - the body width the
-// transcript's ToolBodyWidth derives - under the strip's two-column
-// indent, which the sub-cursor recolors into the focused bar.
-func (m *UI) renderTaskDetails(task *agentTask, width, subCursor int) []string {
-	t := m.com.Styles
-	bodyWidth := chat.ToolBodyWidth(width, 0)
-	var lines []string
-	for j, nested := range task.nested {
-		indent := "  "
-		if j == subCursor {
-			indent = t.Messages.ToolCallFocused.Render()
-		}
-		lines = append(lines, chat.NestedToolLines(t, nested, bodyWidth, indent, j == subCursor)...)
+func boolToInt(b bool) int {
+	if b {
+		return 1
 	}
-	if task.result != nil && task.result.Content != "" {
-		excerpt := chat.FirstLine(task.result.Content)
-		if excerpt != "" {
-			label := "Result: "
-			lines = append(lines, "  "+t.Resource.AdditionalText.Render(label)+ansi.Truncate(excerpt, max(bodyWidth-lipgloss.Width(label), 1), "…"))
-		}
-	}
-	if len(lines) == 0 {
-		lines = append(lines, "  "+t.Resource.AdditionalText.Render("No activity recorded"))
-	}
-	return lines
+	return 0
 }
 
-// handleTaskClick toggles the expanded task for a click inside the strip
-// and moves the keyboard cursor onto the clicked row.
-func (m *UI) handleTaskClick(_, y int) bool {
+// handleTaskClick moves the cursor onto the clicked row and activates
+// it: the transcript switches to the clicked agent's session, or back
+// to main from the Main row. It reports whether a row was hit.
+func (m *UI) handleTaskClick(_, y int) (bool, tea.Cmd) {
 	if len(m.taskRows) == 0 {
-		return false
+		return false, nil
 	}
 	for _, row := range m.taskRows {
 		if y >= row.yStart && y < row.yEnd {
-			for i, task := range m.agentTasks {
-				if task.toolCallID == row.toolCallID {
-					m.taskCursor = i
-					m.taskSubCursor = -1
-					m.lastTaskFocusID = row.toolCallID
-					break
+			if row.toolCallID == "" {
+				m.taskCursor, m.lastTaskFocusID = 0, ""
+			} else {
+				for i, task := range m.agentTasks {
+					if task.toolCallID == row.toolCallID {
+						m.taskCursor = i + m.mainRowCount()
+						m.lastTaskFocusID = row.toolCallID
+						break
+					}
 				}
 			}
-			if m.expandedTaskID == row.toolCallID {
-				m.expandedTaskID = ""
-			} else {
-				m.expandedTaskID = row.toolCallID
-			}
-			m.updateLayoutAndSize()
-			return true
+			return true, m.activateTaskAtCursor()
 		}
 	}
-	return false
-}
-
-func fmtToolCalls(n int) string {
-	if n == 1 {
-		return "(1 tool call)"
-	}
-	return fmt.Sprintf("(%d tool calls)", n)
+	return false, nil
 }

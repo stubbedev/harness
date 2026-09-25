@@ -512,6 +512,15 @@ func (w *AppWorkspace) CancelSubagent(childSessionID string) {
 	w.app.AgentCoordinator.Cancel(childSessionID)
 }
 
+// SteerAgent delivers a user message to a running sub-agent's own session.
+// It errors when AgentCoordinator is nil or the child is not running.
+func (w *AppWorkspace) SteerAgent(ctx context.Context, childSessionID, text string) error {
+	if w.app.AgentCoordinator == nil {
+		return fmt.Errorf("agent is not initialized")
+	}
+	return w.app.AgentCoordinator.SteerSubagent(ctx, childSessionID, text)
+}
+
 // AllSubagents returns all discovered subagent definitions projected to the
 // frontend-facing SubagentDefInfo shape, with scope detection relative to the
 // workspace working directory. Definitions that failed to parse or validate

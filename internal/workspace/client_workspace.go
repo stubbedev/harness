@@ -586,6 +586,12 @@ func (w *ClientWorkspace) RunningSubagents(_ string) []RunningSubagentInfo {
 // CancelSubagent is a no-op in client mode.
 func (w *ClientWorkspace) CancelSubagent(_ string) {}
 
+// SteerAgent returns an error in client mode: the remote protocol does
+// not carry subagent steering yet.
+func (w *ClientWorkspace) SteerAgent(_ context.Context, _, _ string) error {
+	return fmt.Errorf("steering a subagent is not supported in client/server mode")
+}
+
 // AllSubagents returns nil in client mode.
 func (w *ClientWorkspace) AllSubagents() []SubagentDefInfo {
 	return nil

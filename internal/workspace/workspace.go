@@ -264,6 +264,11 @@ type Workspace interface {
 	ActiveSubagents() []SubagentInfo
 	RunningSubagents(parentSessionID string) []RunningSubagentInfo
 	CancelSubagent(childSessionID string)
+	// SteerAgent delivers a user message to a running sub-agent's own
+	// session: persisted to the child session and injected into its next
+	// step. It errors when the child is not running or (in client mode)
+	// steering is not wired for the remote protocol yet.
+	SteerAgent(ctx context.Context, childSessionID, text string) error
 	AllSubagents() []SubagentDefInfo
 	DeleteUserSubagent(name string) error
 	SetSubagentDisabled(name string, disabled bool) error

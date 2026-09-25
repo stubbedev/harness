@@ -377,11 +377,10 @@ type UI struct {
 	// Background tasks (subagents) render in a strip under the chat, not
 	// in the transcript. agentTasks is insertion-ordered; taskRows maps
 	// rendered strip rows back to tasks for click handling.
-	agentTasks     []*agentTask
-	expandedTaskID string
-	taskRows       []taskRow
-	taskSpinner    spinner.Model
-	tasksView      string
+	agentTasks  []*agentTask
+	taskRows    []taskRow
+	taskSpinner spinner.Model
+	tasksView   string
 	// reapedAgentTasks records dispatches whose task was already reaped
 	// (result landed or terminal runtime status). Assistant-message
 	// updates keep arriving after that — the step-finish update publishes
@@ -394,15 +393,18 @@ type UI struct {
 	// lost in flight would otherwise leave a spinner that nothing ever
 	// settles, because no further event for that child arrives.
 	lastTasksReconcile time.Time
-	// taskCursor / taskSubCursor drive keyboard navigation of the
-	// strip: taskCursor indexes the visible entries, taskSubCursor the
-	// cursor task's nested calls (-1 = on the task row itself).
-	taskCursor    int
-	taskSubCursor int
+	// taskCursor drives keyboard navigation of the strip; it indexes
+	// the combined row list (the pinned Main row while an agent is
+	// viewed, then the tasks).
+	taskCursor int
 	// lastTaskFocusID is the task the cursor last rested on while the
 	// strip was focused, so focus can return to it after reaps shift
 	// the indices.
 	lastTaskFocusID string
+	// viewedAgentSessionID is the child session whose transcript the
+	// chat is showing; empty means the main session. Set by activating
+	// a strip row, cleared by the Main row, escape, or a session switch.
+	viewedAgentSessionID string
 	// promptQueueItems mirrors the session's queued prompts. It is
 	// event-driven with a TTL backstop, fetched off-thread by
 	// dispatchPromptQueueRefresh (see workspace_cache.go).
@@ -1020,6 +1022,12 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.session != nil && msg.Payload.ID == m.session.ID {
 			m.session = &msg.Payload
 		}
+		// A child session's generated title becomes its strip row's
+		// description: what the agent is doing is the signal the row
+		// exists to show.
+		if m.applyTaskTitle(msg.Payload.ID, msg.Payload.Title) {
+			m.updateLayoutAndSize()
+		}
 	case pubsub.Event[message.Message]:
 		// Any tool result may have written to the tree - edit, write,
 		// bash, even an MCP tool - so ask the git segment to re-check
@@ -1032,38 +1040,57 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.session == nil {
 			break
 		}
-		if msg.Payload.SessionID != m.session.ID {
-			// This might be a child session message from an agent tool.
-			if cmd := m.handleChildSessionMessage(msg); cmd != nil {
+		isMain := msg.Payload.SessionID == m.session.ID
+		isViewed := m.viewedAgentSessionID != "" && msg.Payload.SessionID == m.viewedAgentSessionID
+		if !isMain && !isViewed {
+			// Other sessions' traffic (unviewed subagents, unrelated
+			// sessions) never touches the transcript; child traffic
+			// keeps the strip's animation and reconcile clocks alive.
+			if cmd := m.handleChildSessionMessage(msg.Payload); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			break
 		}
+		// The chat renders exactly one session: main when no agent is
+		// viewed, that agent's session otherwise. Other traffic of the
+		// pair still runs its side effects (busy caches, queue, retry
+		// notice) — it just does not paint into the wrong transcript.
+		showInTranscript := isViewed || (isMain && m.viewedAgentSessionID == "")
 		switch msg.Type {
 		case pubsub.CreatedEvent:
-			cmds = append(cmds, m.appendSessionMessage(msg.Payload))
-			// A new message is a run boundary — a user prompt starting
-			// a turn or the agent replying/dequeueing. Drop the
-			// memoized busy state and re-fetch it and the queue
-			// off-thread. Per-chunk UpdatedEvents deliberately do NOT
-			// trigger this: during streaming that would put workspace
-			// probes on every token.
-			m.invalidateBusyCaches()
-			m.invalidatePromptQueue()
-			if cmd := m.dispatchBusyRefresh(); cmd != nil {
-				cmds = append(cmds, cmd)
+			if showInTranscript {
+				cmds = append(cmds, m.appendSessionMessage(msg.Payload))
 			}
-			if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
-				cmds = append(cmds, cmd)
+			if isMain {
+				// A new message is a run boundary — a user prompt starting
+				// a turn or the agent replying/dequeueing. Drop the
+				// memoized busy state and re-fetch it and the queue
+				// off-thread. Per-chunk UpdatedEvents deliberately do NOT
+				// trigger this: during streaming that would put workspace
+				// probes on every token.
+				m.invalidateBusyCaches()
+				m.invalidatePromptQueue()
+				if cmd := m.dispatchBusyRefresh(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 		case pubsub.UpdatedEvent:
-			cmds = append(cmds, m.updateSessionMessage(msg.Payload))
+			if showInTranscript {
+				cmds = append(cmds, m.updateSessionMessage(msg.Payload))
+			}
 		case pubsub.DeletedEvent:
-			m.chat.RemoveMessage(msg.Payload.ID)
+			if showInTranscript {
+				m.chat.RemoveMessage(msg.Payload.ID)
+			}
 		}
 		// Any message traffic on the current session means the turn
 		// moved past the backoff: drop a lingering retry notice.
-		m.clearRetryNotice()
+		if isMain {
+			m.clearRetryNotice()
+		}
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
@@ -1079,6 +1106,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[skills.Event]:
 		m.skillStates = msg.Payload.States
+	case agentTranscriptMsg:
+		cmds = append(cmds, m.handleAgentTranscriptMsg(msg))
 	case pubsub.Event[subagents.RuntimeEvent]:
 		switch {
 		case m.session == nil:
@@ -1095,9 +1124,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.knownChildSessionIDs[e.ChildSessionID] = true
 				m.applyRunningSubagentInfo(childSessionInfo{
 					ChildSessionID: e.ChildSessionID,
-					Name:           e.Name,
-					Color:          e.Color,
-					Model:          e.Model,
 					Status:         e.Status,
 				})
 			}
@@ -1105,8 +1131,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.knownChildSessionIDs[f.ChildSessionID] = true
 				m.applyRunningSubagentInfo(childSessionInfo{
 					ChildSessionID: f.ChildSessionID,
-					Name:           f.Name,
-					Color:          f.Color,
 					Status:         f.Status,
 				})
 			}
@@ -1132,13 +1156,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.runningSubagents = msg.list
 			for _, info := range msg.list {
 				m.applyRunningSubagentInfo(childSessionInfo{
-					ChildSessionID:   info.ChildSessionID,
-					Name:             info.Name,
-					Color:            info.Color,
-					Model:            info.Model,
-					Status:           info.Status,
-					PromptTokens:     info.PromptTokens,
-					CompletionTokens: info.CompletionTokens,
+					ChildSessionID: info.ChildSessionID,
+					Status:         info.Status,
 				})
 			}
 			// Seed the child-session set from the fetch as well. On a session
@@ -1264,10 +1283,13 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch m.state {
 		case uiChat:
-			// Clicks in the background tasks strip toggle its entries
-			// before the chat sees them.
+			// Clicks in the background tasks strip switch the transcript
+			// to the clicked agent before the chat sees them.
 			if image.Pt(msg.X, msg.Y).In(m.layout.tasks) {
-				if m.handleTaskClick(msg.X, msg.Y-m.layout.tasks.Min.Y) {
+				if handled, clickCmd := m.handleTaskClick(msg.X, msg.Y-m.layout.tasks.Min.Y); handled {
+					if clickCmd != nil {
+						cmds = append(cmds, clickCmd)
+					}
 					return m, tea.Batch(cmds...)
 				}
 			}
@@ -1644,7 +1666,9 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	}
 
 	// Rebuild the background task list (subagents) from the same
-	// messages; they do not render in the transcript.
+	// messages; they do not render in the transcript. A session load
+	// also leaves any agent view: the transcript shows the new session.
+	m.viewedAgentSessionID = ""
 	m.loadAgentTasks(msgPtrs, toolResultMap)
 
 	// The rebuilt list drops the old session's queued-prompt
@@ -1714,13 +1738,9 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 
 	switch msg.Role {
 	case message.User:
-		// A background sub-agent's report-back bumps its task strip
-		// entry instead of rendering in the transcript.
+		// A background sub-agent's report-back is LLM-to-LLM mail and
+		// never renders in the transcript.
 		if msg.SubagentNotesOnly() {
-			for _, note := range msg.SubagentNotes() {
-				m.countSubagentNote(note)
-			}
-			m.updateLayoutAndSize()
 			return nil
 		}
 		// A harness context note is history for the model only.
@@ -1774,9 +1794,11 @@ func (m *UI) handleClickFocus(msg tea.MouseClickMsg) (cmd tea.Cmd) {
 	switch {
 	case m.state != uiChat:
 		return nil
-	case m.focus != uiFocusTasks && len(m.agentTasks) > 0 && image.Pt(msg.X, msg.Y).In(m.layout.tasks):
+	case m.focus != uiFocusTasks && m.taskRowCount() > 0 && image.Pt(msg.X, msg.Y).In(m.layout.tasks):
 		m.focusTasks()
-		m.handleTaskClick(msg.X, msg.Y-m.layout.tasks.Min.Y)
+		if _, clickCmd := m.handleTaskClick(msg.X, msg.Y-m.layout.tasks.Min.Y); clickCmd != nil {
+			return clickCmd
+		}
 		return nil
 	case m.focus != uiFocusEditor && image.Pt(msg.X, msg.Y).In(m.layout.editor):
 		cmd = m.focusEditor()
@@ -1866,24 +1888,16 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 }
 
 // handleChildSessionMessage handles messages from child sessions
-// (agent tools): their tool activity feeds the background tasks strip,
-// not the transcript.
-func (m *UI) handleChildSessionMessage(event pubsub.Event[message.Message]) tea.Cmd {
-	// Only process messages with tool calls or results.
-	if len(event.Payload.ToolCalls()) == 0 && len(event.Payload.ToolResults()) == 0 {
-		return nil
-	}
-
+// (agent tools) that are not currently viewed: their work is not shown
+// in the transcript, so they only keep the strip's animation and
+// reconcile clocks alive.
+func (m *UI) handleChildSessionMessage(event message.Message) tea.Cmd {
 	// Check if this is an agent tool session and parse it.
-	if _, _, ok := m.com.Workspace.ParseAgentToolSessionID(event.Payload.SessionID); !ok {
+	if _, _, ok := m.com.Workspace.ParseAgentToolSessionID(event.SessionID); !ok {
 		return nil
 	}
-
-	m.updateAgentTaskFromChildSession(event.Payload)
-	m.updateLayoutAndSize()
-
-	// Subagent activity means the agent is running; keep the strip
-	// spinner alive.
+	// Subagent activity means work is running; keep the strip spinner
+	// (and with it the reconcile backstop) alive.
 	if m.tasksSpinning() {
 		return m.taskSpinner.Tick
 	}
@@ -2494,7 +2508,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case key.Matches(msg, m.keyMap.Chat.BackgroundTasks):
 			if m.focus == uiFocusTasks {
 				m.focusEditorFromTasks()
-			} else if m.state == uiChat && len(m.agentTasks) > 0 {
+			} else if m.state == uiChat && m.taskRowCount() > 0 {
 				m.focusTasks()
 			}
 			return true
@@ -2663,6 +2677,14 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				m.randomizePlaceholders()
 				m.historyReset()
+
+				if m.viewedAgentSessionID != "" {
+					// Viewing an agent: the prompt steers its session
+					// instead of starting a main-session turn. Its message
+					// arrives through the normal Created event, so the
+					// transcript picks it up without extra plumbing.
+					return tea.Batch(m.steerAgent(value), m.loadPromptHistory())
+				}
 
 				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
@@ -2840,7 +2862,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			switch {
 			case key.Matches(msg, m.keyMap.Tab):
 				// Tab cycles chat -> background tasks (when present) -> editor.
-				if m.state == uiChat && len(m.agentTasks) > 0 {
+				if m.state == uiChat && m.taskRowCount() > 0 {
 					m.chat.Blur()
 					m.focusTasks()
 				} else {
@@ -2935,8 +2957,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		case uiFocusTasks:
 			// The background tasks strip: up/down move the cursor through
-			// tasks and their calls, enter/space expands, esc or tab leaves.
-			if m.state != uiChat || len(m.agentTasks) == 0 {
+			// the rows, enter/space switch the transcript to the row's
+			// session, esc or tab leave.
+			if m.state != uiChat || m.taskRowCount() == 0 {
 				m.focusEditorFromTasks()
 				break
 			}
@@ -4182,6 +4205,25 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 		return agentRunSubmittedMsg{}
 	})
 	return tea.Batch(cmds...)
+}
+
+// steerAgent delivers an editor prompt to the subagent whose session the
+// transcript is showing. The workspace persists it to the child session
+// and injects it into the agent's next step; the resulting message
+// events arrive through the normal stream, so the viewed transcript
+// picks the message up without extra plumbing. Errors when the agent is
+// not running — a finished run cannot be steered.
+func (m *UI) steerAgent(text string) tea.Cmd {
+	childSessionID := m.viewedAgentSessionID
+	return func() tea.Msg {
+		if err := m.com.Workspace.SteerAgent(context.Background(), childSessionID, text); err != nil {
+			return util.InfoMsg{
+				Type: util.InfoTypeError,
+				Msg:  fmt.Sprintf("Could not steer agent: %v", err),
+			}
+		}
+		return nil
+	}
 }
 
 // runShellCommand executes a shell command server-side without triggering

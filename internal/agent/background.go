@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"charm.land/fantasy"
+
+	"github.com/stubbedev/harness/internal/message"
 )
 
 // maxLiveInboxMessages caps how many unread background-agent messages may
@@ -27,6 +29,12 @@ type SubagentInboxMessage struct {
 	// attribute the report-back to its background task.
 	ChildSessionID string
 	Text           string
+	// Steering carries a user message that was already persisted to the
+	// child session (the steer path, see Coordinator.SteerSubagent). The
+	// draining fold injects it into the child's context as-is instead of
+	// creating a SubagentNote, so the steering message reads as plain
+	// user text and is stored exactly once.
+	Steering *message.Message
 }
 
 // SubagentInboxSource supplies the messages background sub-agents sent to a

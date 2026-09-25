@@ -118,6 +118,9 @@ func newTestUIWithConfig(t *testing.T, cfg *config.Config) *UI {
 type testWorkspace struct {
 	workspace.Workspace
 	cfg *config.Config
+	// steeredSession/steeredText record the last SteerAgent call.
+	steeredSession string
+	steeredText    string
 }
 
 func (w *testWorkspace) Config() *config.Config {
@@ -151,4 +154,11 @@ func (w *testWorkspace) AgentCancelTurn(string) {}
 
 func (w *testWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
 	return nil, nil
+}
+
+// SteerAgent records the steering request so tests can assert on it.
+func (w *testWorkspace) SteerAgent(_ context.Context, childSessionID, text string) error {
+	w.steeredSession = childSessionID
+	w.steeredText = text
+	return nil
 }

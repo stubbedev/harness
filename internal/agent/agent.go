@@ -1291,17 +1291,27 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// the next live step instead of failing to persist here.
 			if a.subagentInbox != nil && callContext.Err() == nil {
 				for _, msg := range a.subagentInbox.DrainSubagentInbox(call.SessionID) {
-					userMessage, createErr := a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
-						Role: message.User,
-						Parts: []message.ContentPart{message.SubagentNote{
-							AgentName:      msg.AgentName,
-							Handle:         msg.Handle,
-							ChildSessionID: msg.ChildSessionID,
-							Text:           msg.Text,
-						}},
-					})
-					if createErr != nil {
-						return callContext, prepared, createErr
+					// A steering message was already persisted to this
+					// session by SteerSubagent; inject it as the plain
+					// user text it is. Report-backs are LLM-to-LLM mail:
+					// they are created here as SubagentNote user rows.
+					var userMessage message.Message
+					if msg.Steering != nil {
+						userMessage = *msg.Steering
+					} else {
+						var createErr error
+						userMessage, createErr = a.messages.Create(callContext, call.SessionID, message.CreateMessageParams{
+							Role: message.User,
+							Parts: []message.ContentPart{message.SubagentNote{
+								AgentName:      msg.AgentName,
+								Handle:         msg.Handle,
+								ChildSessionID: msg.ChildSessionID,
+								Text:           msg.Text,
+							}},
+						})
+						if createErr != nil {
+							return callContext, prepared, createErr
+						}
 					}
 					note := userMessage.ToAIMessage()
 					injections.add(appendAt, note...)

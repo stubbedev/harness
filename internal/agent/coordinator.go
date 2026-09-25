@@ -144,6 +144,13 @@ type Coordinator interface {
 	Model() Model
 	UpdateModels(ctx context.Context) error
 	GenerateTitle(ctx context.Context, sessionID, prompt string)
+	// SteerSubagent delivers a user message to a running sub-agent's own
+	// session: it is persisted to the child session immediately (so the
+	// transcript shows it whether or not the run folds it in) and
+	// injected into the child's next step. It errors when the child is
+	// not running — a finished run never takes another step, so the
+	// message could not be delivered.
+	SteerSubagent(ctx context.Context, childSessionID, text string) error
 }
 
 type coordinator struct {
@@ -2326,6 +2333,39 @@ func (c *coordinator) notifySubagentInbox(parentSessionID string) {
 	if c.liveInbox != nil {
 		c.liveInbox.notify(parentSessionID)
 	}
+}
+
+// SteerSubagent implements Coordinator: it delivers a user message to a
+// running sub-agent's own session. The message is persisted to the child
+// session first, so the transcript shows it whether or not the run folds
+// it in, then recorded on the child's live inbox; the child's next step
+// drains it and injects it as user text (see PrepareStep's inbox fold —
+// the Steering field makes that fold reuse the persisted message instead
+// of creating a SubagentNote). Errors when the child is not running: a
+// finished run never takes another step, so the message could not be
+// delivered.
+func (c *coordinator) SteerSubagent(ctx context.Context, childSessionID, text string) error {
+	if _, running := c.subagentCancels.Get(childSessionID); !running {
+		return fmt.Errorf("agent is not running")
+	}
+	msg, err := c.messages.Create(ctx, childSessionID, message.CreateMessageParams{
+		Role:  message.User,
+		Parts: []message.ContentPart{message.TextContent{Text: text}},
+	})
+	if err != nil {
+		return fmt.Errorf("persist steering message: %w", err)
+	}
+	if c.liveInbox == nil {
+		return nil
+	}
+	if err := c.liveInbox.record(childSessionID, SubagentInboxMessage{
+		ChildSessionID: childSessionID,
+		Text:           text,
+		Steering:       &msg,
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // NotifyQueueArrival implements QueueArrivalNotifier: a prompt was

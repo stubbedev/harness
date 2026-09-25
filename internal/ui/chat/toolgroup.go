@@ -478,7 +478,7 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 	// once it descends to a call the grey returns and the selected
 	// call's own name takes the color instead.
 	header := fmt.Sprintf("%s %s",
-		groupVerbStyle(g.sty, running, cancelled, failed, succeeded, g.focused && g.selectedChild < 0).Render(g.groupVerb()),
+		GroupVerbStyle(g.sty, running, cancelled, failed, succeeded, g.focused && g.selectedChild < 0).Render(g.groupVerb()),
 		g.sty.Tool.Body.Render("("+calls+")"))
 
 	lines = append(lines, header)
@@ -555,12 +555,13 @@ func (g *ToolGroupMessageItem) groupVerb() string {
 	return "Ran"
 }
 
-// groupVerbStyle picks the style for a collapsed group's verb
+// GroupVerbStyle picks the style for a collapsed group's verb
 // from the run's outcome: pending while in flight, error when every
 // call failed, partial when some did, cancelled when nothing else
 // happened, normal otherwise. A selected group row carries the status
-// color; an unselected one stays in the understated grey.
-func groupVerbStyle(sty *styles.Styles, running, cancelled bool, failed, succeeded int, selected bool) lipgloss.Style {
+// color; an unselected one stays in the understated grey. Shared with
+// the background tasks strip, whose Agent rows use the same treatment.
+func GroupVerbStyle(sty *styles.Styles, running, cancelled bool, failed, succeeded int, selected bool) lipgloss.Style {
 	var style lipgloss.Style
 	switch {
 	case cancelled && failed == 0:
