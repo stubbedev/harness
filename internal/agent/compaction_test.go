@@ -258,6 +258,62 @@ func TestStubAgedResultsLeavesShortAlone(t *testing.T) {
 	assert.Equal(t, strings.Repeat("x", 5000), msgs[0].Parts[0].(message.ToolResult).Content, "the input is not mutated")
 }
 
+// A history nothing ages in is returned as-is: aging runs on every
+// request, so a turn with nothing to stub must not pay for a copy.
+func TestAgeMessagesWithoutRewritesSharesTheInput(t *testing.T) {
+	t.Parallel()
+	msgs := []message.Message{
+		{Role: message.User, Parts: []message.ContentPart{message.TextContent{Text: "question"}}},
+		{Role: message.Assistant, Parts: []message.ContentPart{message.TextContent{Text: "answer"}}},
+	}
+	out := ageMessages(msgs, len(msgs)-1)
+	assert.Same(t, &msgs[0], &out[0], "nothing changed, so the input's backing array is shared")
+}
+
+// benchAgedHistory builds a session-shaped history: turns of a question,
+// a tool call and a bulky result, with the last turn still current so
+// everything before it is what aging and deduplication see.
+func benchAgedHistory(turns int) []message.Message {
+	msg := func(role message.MessageRole, parts ...message.ContentPart) message.Message {
+		return message.Message{Role: role, Parts: parts}
+	}
+	msgs := make([]message.Message, 0, turns*3)
+	for i := range turns {
+		result := strings.Repeat(fmt.Sprintf("line %d of the output\n", i%10), 300)
+		if i == turns-1 {
+			result = "current turn, not aged"
+		}
+		msgs = append(msgs,
+			msg(message.User, message.TextContent{Text: fmt.Sprintf("question %d", i)}),
+			msg(message.Assistant, message.ToolCall{ID: fmt.Sprintf("call-%d", i), Name: "view", Input: `{"file_path":"x"}`, Finished: true}),
+			msg(message.Tool, message.ToolResult{ToolCallID: fmt.Sprintf("call-%d", i), Name: "view", Content: result}),
+		)
+	}
+	return msgs
+}
+
+func BenchmarkAgeMessages(b *testing.B) {
+	msgs := benchAgedHistory(200)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		ageMessages(msgs, len(msgs)-4)
+	}
+}
+
+func BenchmarkDedupToolResults(b *testing.B) {
+	msgs := benchAgedHistory(200)
+	// Half the results repeat, the way a file re-read does.
+	for i := 1; i < len(msgs); i += 6 {
+		msgs[i+1].Parts[0] = msgs[0].Parts[0]
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		dedupToolResults(msgs)
+	}
+}
+
 // uncomparableModel has the shape of the fantasy providers' language
 // models: a struct value, not a pointer, with function fields. Two of
 // them cannot be compared with ==, and summarizeMessages once compared

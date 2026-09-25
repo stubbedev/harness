@@ -152,52 +152,66 @@ func ageMessages(msgs []message.Message, agedIdx int) []message.Message {
 	if agedIdx < 0 {
 		return msgs
 	}
-	out := make([]message.Message, len(msgs))
-	copy(out, msgs)
 	latestExecutionState := -1
-	for i, m := range slices.Backward(msgs) {
-		if slices.ContainsFunc(m.ContextNotes(), func(n message.ContextNote) bool { return n.Kind == message.ContextNoteExecutionState }) {
-			latestExecutionState = i
-			break
+	for i := len(msgs) - 1; i >= 0 && latestExecutionState < 0; i-- {
+		for _, part := range msgs[i].Parts {
+			if n, ok := part.(message.ContextNote); ok && n.Kind == message.ContextNoteExecutionState {
+				latestExecutionState = i
+				break
+			}
 		}
 	}
-	for i := 0; i <= agedIdx && i < len(out); i++ {
-		switch out[i].Role {
+	// The result shares the input until the first rewrite: most turns
+	// change nothing in most messages, and this runs on every request.
+	out := msgs
+	cloned := false
+	for i := 0; i <= agedIdx && i < len(msgs); i++ {
+		switch msgs[i].Role {
 		case message.Tool, message.User, message.Assistant:
 		default:
 			continue
 		}
-		parts := make([]message.ContentPart, 0, len(out[i].Parts))
-		for _, part := range out[i].Parts {
+		parts := make([]message.ContentPart, 0, len(msgs[i].Parts))
+		rewritten := false
+		for _, part := range msgs[i].Parts {
 			switch p := part.(type) {
 			case message.ToolResult:
 				switch {
 				case p.Data != "":
 					p.Data, p.MIMEType = "", ""
 					p.Content = fmt.Sprintf("[%s image output from earlier in the session omitted to save context]", toolLabel(p.Name))
+					rewritten = true
 				case len(p.Content) > compactionStubMaxChars:
 					p.Content = toolResultStub(p)
+					rewritten = true
 				}
-				parts = append(parts, p)
+				part = p
 			case message.BinaryContent:
-				if strings.HasPrefix(p.MIMEType, "text/") {
-					parts = append(parts, p)
-					continue
+				if !strings.HasPrefix(p.MIMEType, "text/") {
+					part = message.TextContent{Text: fmt.Sprintf("[attached image %s from an earlier turn omitted to save context]", filepathBase(p.Path))}
+					rewritten = true
 				}
-				parts = append(parts, message.TextContent{Text: fmt.Sprintf("[attached image %s from an earlier turn omitted to save context]", filepathBase(p.Path))})
 			case message.TextContent:
-				if out[i].Role == message.Assistant && len(p.Text) > compactionAnswerMaxChars {
+				if msgs[i].Role == message.Assistant && len(p.Text) > compactionAnswerMaxChars {
 					p.Text = cutAnswer(p.Text)
+					part = p
+					rewritten = true
 				}
-				parts = append(parts, p)
 			case message.ContextNote:
 				if p.Kind == message.ContextNoteExecutionState && i < latestExecutionState {
 					p.Text = "<execution_state>\n[superseded by a later snapshot]\n</execution_state>"
+					part = p
+					rewritten = true
 				}
-				parts = append(parts, p)
-			default:
-				parts = append(parts, part)
 			}
+			parts = append(parts, part)
+		}
+		if !rewritten {
+			continue
+		}
+		if !cloned {
+			out = slices.Clone(msgs)
+			cloned = true
 		}
 		out[i].Parts = parts
 	}
@@ -250,8 +264,17 @@ func toolResultStub(tr message.ToolResult) string {
 // it instead would rewrite a message the provider has cached and cost
 // the cache on everything after it, every time the model repeats a
 // command.
+// toolResultKey identifies a tool result by name and content. A struct
+// key compares the two strings by reference into the existing slices,
+// so deduplicating never copies a result's bytes the way building a
+// joined key string would.
+type toolResultKey struct {
+	name    string
+	content string
+}
+
 func dedupToolResults(msgs []message.Message) []message.Message {
-	seen := map[string]bool{}
+	seen := map[toolResultKey]struct{}{}
 	var out []message.Message
 	for i, m := range msgs {
 		if m.Role != message.Tool {
@@ -263,9 +286,9 @@ func dedupToolResults(msgs []message.Message) []message.Message {
 			if !ok || tr.Data != "" || len(tr.Content) <= compactionStubMaxChars {
 				continue
 			}
-			key := tr.Name + "\x00" + tr.Content
-			if !seen[key] {
-				seen[key] = true
+			key := toolResultKey{name: tr.Name, content: tr.Content}
+			if _, dup := seen[key]; !dup {
+				seen[key] = struct{}{}
 				continue
 			}
 			if parts == nil {
