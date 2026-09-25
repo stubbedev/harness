@@ -118,6 +118,10 @@ func newTestUIWithConfig(t *testing.T, cfg *config.Config) *UI {
 type testWorkspace struct {
 	workspace.Workspace
 	cfg *config.Config
+	// messages backs ListMessages, keyed by session ID; listed records
+	// the IDs ListMessages was asked for.
+	messages map[string][]message.Message
+	listed   []string
 	// steeredSession/steeredText record the last SteerAgent call.
 	steeredSession string
 	steeredText    string
@@ -152,8 +156,9 @@ func (w *testWorkspace) AgentIsReady() bool {
 // Workspace would panic, and stress tests press escape while busy.
 func (w *testWorkspace) AgentCancelTurn(string) {}
 
-func (w *testWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
-	return nil, nil
+func (w *testWorkspace) ListMessages(_ context.Context, sessionID string) ([]message.Message, error) {
+	w.listed = append(w.listed, sessionID)
+	return w.messages[sessionID], nil
 }
 
 // SteerAgent records the steering request so tests can assert on it.

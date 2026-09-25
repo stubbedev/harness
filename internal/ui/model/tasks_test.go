@@ -346,15 +346,17 @@ func TestEnterSwitchesToAgentAndMainBack(t *testing.T) {
 	require.Equal(t, "agent-tool-m1-a1", task.childSessionID)
 
 	// Enter on the agent row: the transcript shows its session, focus
-	// moves to the transcript, and Main Agent appears in the strip.
+	// moves to the transcript, and the Main Agent row is the strip's
+	// only row — the strip is one level deep, so the main session's
+	// other dispatches stay hidden while an agent is viewed.
 	activateAgentView(t, u)
 	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
 	require.Equal(t, uiFocusMain, u.focus, "activating a row moves focus to the transcript")
-	require.Equal(t, 2, u.taskRowCount(), "the Main row is pinned above the agent row")
+	require.Equal(t, 1, u.taskRowCount(), "only the pinned Main row shows while an agent is viewed")
 	u.tasksAreaHeight()
 	out := ansi.Strip(u.tasksView)
 	assert.Contains(t, out, "Main Agent")
-	assert.Contains(t, out, "Agent")
+	assert.NotContains(t, out, "dig into the git history", "main-session dispatches do not render in an agent's strip")
 
 	// Enter on the Main row (row 0) returns to the main session and
 	// drops the pinned row. The main reload also rebuilds the strip from
@@ -391,6 +393,69 @@ func TestEscapeFromAgentViewReturnsToMain(t *testing.T) {
 	require.NotNil(t, cmd)
 	applyAgentTranscript(t, u, cmd())
 	assert.Empty(t, u.agentView.shown, "escape returns to the main session")
+}
+
+// TestSwitchBackReloadsMainTranscript pins the main leg of the view
+// switch: returning to main lists the main session's messages by ID —
+// an empty ID would query nothing and blank the transcript — repaints
+// them, and retraces once so events racing the snapshot are not lost.
+func TestSwitchBackReloadsMainTranscript(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	ws := &testWorkspace{cfg: &config.Config{}}
+	u.com.Workspace = ws
+	u.session = &session.Session{ID: "s1"}
+
+	ws.messages = map[string][]message.Message{
+		"s1": {
+			{ID: "u1", SessionID: "s1", Role: message.User, Parts: []message.ContentPart{
+				message.TextContent{Text: "the initial ask"},
+			}},
+		},
+		"agent-tool-m1-a1": {
+			{ID: "c1", SessionID: "agent-tool-m1-a1", Role: message.User, Parts: []message.ContentPart{
+				message.TextContent{Text: "the dispatch prompt"},
+			}},
+		},
+	}
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
+	activateAgentView(t, u)
+	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
+	require.NotNil(t, u.chat.MessageItem("c1"), "the agent's transcript shows its dispatch prompt")
+	assert.Nil(t, u.chat.MessageItem("u1"), "main history does not leak into the agent's view")
+
+	// Enter on the Main row returns to main: the fetch lists the main
+	// session by ID and repaints its history.
+	u.focusTasks()
+	u.taskCursor = 0
+	cmd := u.activateTaskAtCursor()
+	require.NotNil(t, cmd)
+	tr := cmd().(agentTranscriptMsg)
+	require.Empty(t, tr.childSessionID)
+	require.Empty(t, u.agentView.requested, "main is requested")
+	retrace := u.handleAgentTranscriptMsg(tr)
+	require.NotNil(t, retrace, "the main swap retraces once")
+	require.NotNil(t, u.chat.MessageItem("u1"), "the main transcript is reloaded, not blanked")
+	assert.NotContains(t, ws.listed, "", "the fetch never lists an empty session ID")
+
+	// The retrace folds in a message that raced the first snapshot —
+	// main traffic does not paint mid-switch, so without it the gap
+	// between snapshot and swap would stay missing until a reload.
+	ws.messages["s1"] = append(ws.messages["s1"], message.Message{
+		ID: "raced", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
+			message.TextContent{Text: "landed mid-switch"},
+		},
+	})
+	tr2 := retrace().(agentTranscriptMsg)
+	require.True(t, tr2.retraced)
+	assert.Nil(t, u.handleAgentTranscriptMsg(tr2), "the retrace does not retrace again")
+	assert.NotNil(t, u.chat.MessageItem("raced"), "the retrace picks up events that raced the snapshot")
+	assert.Empty(t, u.agentView.shown, "the switch back completes on the main session")
+	assert.Equal(t, []string{"agent-tool-m1-a1", "agent-tool-m1-a1", "s1", "s1"}, ws.listed,
+		"every fetch targets the viewed session by ID")
 }
 
 // TestActivateUnstartedAgentReports pins the edge: a dispatch that is

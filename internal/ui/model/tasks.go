@@ -333,10 +333,15 @@ func (m *UI) viewMainSession() tea.Cmd {
 
 // fetchAgentTranscript builds the off-thread transcript fetch. The
 // session ID is captured so a session switch during the fetch invalidates
-// the result.
+// the result. An empty child session ID means main and lists the main
+// session itself: the workspace keys on a concrete session ID.
 func (m *UI) fetchAgentTranscript(sessionID, childSessionID string, retraced bool) tea.Cmd {
 	return func() tea.Msg {
-		msgs, err := m.com.Workspace.ListMessages(context.Background(), childSessionID)
+		listID := childSessionID
+		if listID == "" {
+			listID = sessionID
+		}
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), listID)
 		if err != nil {
 			return util.InfoMsg{Type: util.InfoTypeError, Msg: fmt.Sprintf("Failed to load transcript: %v", err)}
 		}
@@ -348,9 +353,9 @@ func (m *UI) fetchAgentTranscript(sessionID, childSessionID string, retraced boo
 // discarded when it raced a newer switch: a session change, or the user
 // moving to another agent (or back to main) before it resolved. The swap
 // is atomic — the old transcript stays visible until the fetched one is
-// complete, so a switch never shows a half-populated view — and a child
+// complete, so a switch never shows a half-populated view — and either
 // view retraces once to fold in events that landed between snapshot and
-// swap.
+// swap (the viewed session's own traffic does not paint mid-switch).
 func (m *UI) handleAgentTranscriptMsg(msg agentTranscriptMsg) tea.Cmd {
 	if m.session == nil || msg.forSession != m.session.ID {
 		return nil
@@ -360,7 +365,13 @@ func (m *UI) handleAgentTranscriptMsg(msg agentTranscriptMsg) tea.Cmd {
 	}
 	if msg.childSessionID == "" {
 		m.agentView.shown = ""
-		return m.setSessionMessages(msg.msgs)
+		// The set's animation ticks are dropped, mirroring the child
+		// path below: the retrace applies again with fresh messages.
+		m.setSessionMessages(msg.msgs)
+		if msg.retraced {
+			return nil
+		}
+		return m.fetchAgentTranscript(msg.forSession, "", true)
 	}
 	m.setChildSessionMessages(msg.msgs)
 	m.agentView.shown = msg.childSessionID
@@ -527,18 +538,27 @@ func (m *UI) mainRowCount() int {
 	return 0
 }
 
-// taskRowCount is the strip's row count: one per tracked task, plus the
-// pinned Main row while an agent's session is viewed.
+// taskRowCount is the strip's row count. The strip is one level deep:
+// its task rows are the children of the viewed session — the main
+// session's dispatches, or none at all while an agent is viewed
+// (subagents never dispatch), where only the pinned Main row shows.
 func (m *UI) taskRowCount() int {
-	return len(m.agentTasks) + m.mainRowCount()
+	if m.agentView.shown != "" {
+		return m.mainRowCount()
+	}
+	return len(m.agentTasks)
 }
 
 // taskRowAt resolves a strip row index to its task, or to the Main row
 // (task nil, isMain true). While an agent is viewed the Main row is
-// pinned first; the tasks follow in dispatch order.
+// pinned first and is the only row; from main, the tasks follow in
+// dispatch order.
 func (m *UI) taskRowAt(row int) (task *agentTask, isMain bool) {
 	if row < m.mainRowCount() {
 		return nil, true
+	}
+	if m.agentView.shown != "" {
+		return nil, false
 	}
 	row -= m.mainRowCount()
 	if row < 0 || row >= len(m.agentTasks) {
