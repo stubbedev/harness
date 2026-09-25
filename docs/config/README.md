@@ -302,6 +302,12 @@ options:
   auto_summarize_ratio: 0.2 # share of a <=200k window kept free (default 0.2)
   auto_summarize_buffer: 20000 # tokens kept free in a >200k window
 
+  # inherent_goals: a turn that ends by declaring what it will do next
+  # ("I will now run the tests") is continued automatically instead of
+  # waiting for you to type continue. Capped at 3 chained continuations;
+  # anything you queue while it runs takes precedence.
+  inherent_goals: true
+
   disable_metrics: false
   disable_update_check: false
   disable_provider_auto_update: false # stop refreshing the provider catalog

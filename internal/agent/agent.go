@@ -123,6 +123,11 @@ type SessionAgentCall struct {
 	// does not loop on a session that still exceeds the window after
 	// summarizing.
 	OverflowRecovered bool
+	// GoalContinuations counts consecutive inherent-goal continuations
+	// behind this call: turns harness started because the previous one
+	// ended by declaring next steps. A real user prompt starts from
+	// zero; the chain is capped at maxGoalContinuations.
+	GoalContinuations int
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -218,6 +223,7 @@ type sessionAgent struct {
 	disableAutoSummarize bool
 	autoSummarizeRatio   float64
 	autoSummarizeBuffer  int64
+	inherentGoals        bool
 	maxRetries           *int
 	notify               pubsub.Publisher[notify.Notification]
 	runComplete          pubsub.Publisher[notify.RunComplete]
@@ -303,9 +309,12 @@ type SessionAgentOptions struct {
 	AutoSummarizeRatio    float64
 	AutoSummarizeBuffer   int64
 	MaxRetries            *int
-	Sessions              session.Service
-	Messages              message.Service
-	Files                 history.Service
+	// InherentGoals continues a turn that ended by declaring next
+	// steps instead of leaving the plan for the user to trigger.
+	InherentGoals bool
+	Sessions      session.Service
+	Messages      message.Service
+	Files         history.Service
 	// LSPManager supplies the diagnostics swept into each step. Nil
 	// disables the sweep.
 	LSPManager *lsp.Manager
@@ -351,6 +360,7 @@ func NewSessionAgent(
 		disableAutoSummarize:  opts.DisableAutoSummarize,
 		autoSummarizeRatio:    opts.AutoSummarizeRatio,
 		autoSummarizeBuffer:   opts.AutoSummarizeBuffer,
+		inherentGoals:         opts.InherentGoals,
 		maxRetries:            opts.MaxRetries,
 		tools:                 csync.NewSliceFrom(withResultCap(opts.Tools)),
 		notify:                opts.Notify,
@@ -1910,6 +1920,18 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			SessionTitle: currentSession.Title,
 			Type:         notify.TypeAgentFinished,
 		})
+	}
+
+	// Inherent goals: a turn that ended by declaring what it will do
+	// next is continued with a synthesized prompt instead of waiting
+	// for the user to say "continue". Queueing keeps the handoff below
+	// atomic against a cancel, and a queued user prompt wins: the guard
+	// skips when one is already waiting.
+	if a.goalContinuation(call, currentAssistant, result) {
+		continued := call
+		continued.Prompt = goalContinuationPrompt
+		continued.GoalContinuations++
+		a.appendQueued(call.SessionID, continued)
 	}
 
 	// Hand off to the next queued prompt (if any) under dispatchMu so

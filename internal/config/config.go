@@ -497,7 +497,12 @@ type Options struct {
 	Debug                bool           `json:"debug,omitempty" jsonschema:"description=Enable debug logging,default=false"`
 	DebugLSP             bool           `json:"debug_lsp,omitempty" jsonschema:"description=Enable debug logging for LSP servers,default=false"`
 	DisableAutoSummarize bool           `json:"disable_auto_summarize,omitempty" jsonschema:"description=Disable automatic conversation summarization,default=false"`
-	MaxRetries           *int           `json:"max_retries,omitempty" jsonschema:"description=Maximum retries for failed model requests. Unset uses the Fantasy default of 3.,minimum=0,default=3"`
+	// InherentGoals continues a turn that ended by declaring next steps
+	// ("I will now run the tests") instead of ending and waiting for
+	// the user to say continue. Chained continuations are capped; a
+	// queued user prompt always takes precedence.
+	InherentGoals *bool `json:"inherent_goals,omitempty" jsonschema:"description=Continue a turn that ended by declaring next steps instead of waiting for the user to say continue,default=true"`
+	MaxRetries    *int  `json:"max_retries,omitempty" jsonschema:"description=Maximum retries for failed model requests. Unset uses the Fantasy default of 3.,minimum=0,default=3"`
 	// AutoSummarizeRatio is the share of a context window of up to 200k
 	// tokens that is kept free before the session is summarized. Zero keeps
 	// the default of 0.2.
