@@ -51,6 +51,7 @@ var (
 	_ KeyEventHandler     = (*ToolGroupMessageItem)(nil)
 	_ list.MouseClickable = (*ToolGroupMessageItem)(nil)
 	_ ToolGroupContainer  = (*ToolGroupMessageItem)(nil)
+	_ list.SubSelectable  = (*ToolGroupMessageItem)(nil)
 )
 
 // ToolGroupContainer is implemented by tool group items so the chat can
@@ -107,6 +108,13 @@ func (g *ToolGroupMessageItem) SetFocused(focused bool) {
 // ExpandedLevel reports whether the group shows its one-liner level.
 func (g *ToolGroupMessageItem) ExpandedLevel() bool { return g.expanded }
 
+// showsChildRows reports whether the group renders one row per call:
+// the one-liner level open on a multi-call run. A singleton never
+// does; its only line is the call itself.
+func (g *ToolGroupMessageItem) showsChildRows() bool {
+	return g.expanded && len(g.tools) > 1
+}
+
 // FullyRenderedChildren counts the calls currently showing their full
 // view, so callers can tell whether a level change shrank the render.
 func (g *ToolGroupMessageItem) FullyRenderedChildren() int {
@@ -153,13 +161,31 @@ func (g *ToolGroupMessageItem) SelectChildPrev() bool {
 // the call itself, keeps the cursor on the group row.
 func (g *ToolGroupMessageItem) SelectChildFromBelow() {
 	child := -1
-	if g.expanded && len(g.tools) > 1 {
+	if g.showsChildRows() {
 		child = len(g.tools) - 1
 	}
 	if g.selectedChild != child {
 		g.selectedChild = child
 		g.invalidate()
 	}
+}
+
+// SelectedLineRange implements [list.SubSelectable]: the inclusive
+// line range of the selection within the group's rendered output at
+// the given width — the sub-cursor's child while it sits on one, the
+// group row itself while the one-liner level is open. ok is false
+// when the group renders as a single row (collapsed, or a singleton
+// whose only line is the call), where item-level visibility already
+// says it all.
+func (g *ToolGroupMessageItem) SelectedLineRange(width int) (start, end int, ok bool) {
+	if !g.showsChildRows() {
+		return 0, 0, false
+	}
+	if g.selectedChild < 0 {
+		return 0, 0, true
+	}
+	_, start, end = g.renderLines(width)
+	return start, end, start >= 0
 }
 
 // ToggleSelectedChild expands or collapses the sub-cursor's child
@@ -404,10 +430,10 @@ func (g *ToolGroupMessageItem) RawRender(width int) string {
 
 // renderLines builds the group's output lines and reports the inclusive
 // line range occupied by the sub-cursor's child (-1s when the cursor
-// sits on the group row or the group is unfocused), so Render can
-// recolor that child's focus bar. Children live at the nesting level
-// ToolBodyWidth defines: one indent column inside the group's bar,
-// whether their one-liner or their full view.
+// sits on the group row), so Render can recolor that child's focus
+// bar. Children live at the nesting level ToolBodyWidth defines: one
+// indent column inside the group's bar, whether their one-liner or
+// their full view.
 func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart, selEnd int) {
 	selStart, selEnd = -1, -1
 
@@ -463,7 +489,7 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 		for i, t := range g.tools {
 			start := len(lines)
 			lines = append(lines, NestedToolLines(g.sty, t, bodyWidth, toolNestIndentString, g.focused && i == g.selectedChild)...)
-			if g.focused && i == g.selectedChild {
+			if i == g.selectedChild {
 				selStart, selEnd = start, len(lines)-1
 			}
 		}

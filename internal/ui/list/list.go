@@ -750,9 +750,14 @@ func (l *List) ScrollToBottom() {
 // item at the given index fully visible. An item taller than the viewport
 // is top-aligned rather than bottom-aligned, so its start stays where the
 // user invoked the expansion. No-op when the item is already fully
-// visible.
+// visible. An item carrying a sub-selection scrolls to the
+// sub-selection's lines instead, which may sit deep inside an item
+// taller than the viewport.
 func (l *List) ScrollItemIntoView(idx int) {
 	if idx < 0 || idx >= len(l.items) || l.height <= 0 {
+		return
+	}
+	if l.scrollSubSelectionIntoView(idx) {
 		return
 	}
 
@@ -762,15 +767,7 @@ func (l *List) ScrollItemIntoView(idx int) {
 		return
 	}
 
-	// Distance from the top of the viewport to the top of the item,
-	// counting the partially scrolled first item as negative.
-	top := -l.offsetLine
-	for i := l.offsetIdx; i < idx; i++ {
-		top += l.getItem(i).height
-		if l.gap > 0 {
-			top += l.gap
-		}
-	}
+	top := l.itemTop(idx)
 	if top < 0 {
 		l.offsetIdx = idx
 		l.offsetLine = 0
@@ -790,7 +787,76 @@ func (l *List) ScrollItemIntoView(idx int) {
 	l.ScrollBy(overhang)
 }
 
-// ScrollToSelected scrolls the list to the selected item.
+// itemTop returns the distance from the viewport's top to the top of
+// the item at idx, counting the partially scrolled first item as
+// negative. Only valid for idx at or after the viewport's first item;
+// callers handle items entirely above the viewport themselves.
+func (l *List) itemTop(idx int) int {
+	top := -l.offsetLine
+	for i := l.offsetIdx; i < idx; i++ {
+		top += l.getItem(i).height
+		if l.gap > 0 {
+			top += l.gap
+		}
+	}
+	return top
+}
+
+// scrollSubSelectionIntoView scrolls the item's internal sub-selection
+// into view when it carries one, reporting whether it did. Without a
+// sub-selection the item as a whole is the selection and the caller
+// falls back to its item-level scroll.
+func (l *List) scrollSubSelectionIntoView(idx int) bool {
+	if idx < 0 || idx >= len(l.items) {
+		return false
+	}
+	ss, ok := l.items[idx].(SubSelectable)
+	if !ok {
+		return false
+	}
+	start, end, has := ss.SelectedLineRange(l.width)
+	if !has {
+		return false
+	}
+	l.scrollLineRangeIntoView(idx, start, end)
+	return true
+}
+
+// scrollLineRangeIntoView scrolls the minimum distance needed to bring
+// the item's inclusive [start, end] line range into view. A range taller
+// than the viewport top-aligns, matching ScrollItemIntoView.
+func (l *List) scrollLineRangeIntoView(idx, start, end int) {
+	if idx < 0 || idx >= len(l.items) || l.height <= 0 {
+		return
+	}
+	height := l.getItem(idx).height
+	start = max(start, 0)
+	end = min(max(end, start), height-1)
+
+	if idx < l.offsetIdx {
+		l.offsetIdx = idx
+		l.offsetLine = start
+		return
+	}
+
+	top := l.itemTop(idx)
+	switch {
+	case top+start >= 0 && top+end < l.height:
+		// Already in view.
+	case top+start < 0 || end-start+1 >= l.height:
+		// The range hides above the viewport or cannot fit: align its
+		// top with the viewport's top.
+		l.offsetIdx = idx
+		l.offsetLine = start
+	default:
+		// The range spills below the viewport: uncover its bottom.
+		l.ScrollBy(top + end - l.height + 1)
+	}
+}
+
+// ScrollToSelected scrolls the list to the selected item, or to the
+// selected item's sub-selection lines when it carries one, which may
+// sit deep inside an item taller than the viewport.
 func (l *List) ScrollToSelected() {
 	if l.selectedIdx < 0 || l.selectedIdx >= len(l.items) {
 		return
@@ -805,6 +871,10 @@ func (l *List) ScrollToSelected() {
 	if l.height <= 0 {
 		l.offsetIdx = l.selectedIdx
 		l.offsetLine = 0
+		return
+	}
+
+	if l.scrollSubSelectionIntoView(l.selectedIdx) {
 		return
 	}
 

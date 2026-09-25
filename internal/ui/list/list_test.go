@@ -871,3 +871,104 @@ func TestList_AtBottom_TallFirstVisibleItem(t *testing.T) {
 		require.True(t, l.AtBottom(), "gap=%d: back at bottom after scrolling down", gap)
 	}
 }
+
+// subSelectionItem is a multiLineItem carrying a mutable internal
+// sub-selection, so the line-level scroll geometry can be tested
+// without a real chat item.
+type subSelectionItem struct {
+	*multiLineItem
+	subStart, subEnd int
+}
+
+func (s *subSelectionItem) SelectedLineRange(int) (start, end int, ok bool) {
+	return s.subStart, s.subEnd, true
+}
+
+// newSubSelectionList builds a selected 30-line item in a 10-line
+// viewport, the shape every case below starts from.
+func newSubSelectionList(t *testing.T) (*List, *subSelectionItem) {
+	t.Helper()
+	item := &subSelectionItem{multiLineItem: newMultiLineItem("g", 30)}
+	l := NewList(item)
+	l.SetSize(40, 10)
+	l.SetSelected(0)
+	return l, item
+}
+
+// TestScrollToSelected_FollowsSubSelection pins the line-level rule:
+// scrolling to the selection of an item taller than the viewport must
+// bring the sub-selection's own lines on screen, not settle for any
+// visible part of the item.
+func TestScrollToSelected_FollowsSubSelection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("range below the viewport uncovers its bottom", func(t *testing.T) {
+		t.Parallel()
+		l, item := newSubSelectionList(t)
+		item.subStart, item.subEnd = 28, 29
+
+		l.ScrollToSelected()
+
+		require.Equal(t, 0, l.offsetIdx)
+		require.Equal(t, 20, l.offsetLine, "the range must end at the viewport's bottom")
+	})
+
+	t.Run("range above the viewport aligns its top", func(t *testing.T) {
+		t.Parallel()
+		l, item := newSubSelectionList(t)
+		l.offsetLine = 20
+		item.subStart, item.subEnd = 2, 3
+
+		l.ScrollToSelected()
+
+		require.Equal(t, 0, l.offsetIdx)
+		require.Equal(t, 2, l.offsetLine, "the range's top must align with the viewport's top")
+	})
+
+	t.Run("range in view leaves the viewport alone", func(t *testing.T) {
+		t.Parallel()
+		l, item := newSubSelectionList(t)
+		l.offsetLine = 25
+		item.subStart, item.subEnd = 28, 29
+
+		l.ScrollToSelected()
+
+		require.Equal(t, 25, l.offsetLine)
+	})
+
+	t.Run("range taller than the viewport top-aligns", func(t *testing.T) {
+		t.Parallel()
+		l, item := newSubSelectionList(t)
+		item.subStart, item.subEnd = 10, 25
+
+		l.ScrollToSelected()
+
+		require.Equal(t, 10, l.offsetLine, "a range that cannot fit top-aligns")
+	})
+
+	t.Run("ScrollItemIntoView shares the rule", func(t *testing.T) {
+		t.Parallel()
+		l, item := newSubSelectionList(t)
+		item.subStart, item.subEnd = 28, 29
+
+		l.ScrollItemIntoView(0)
+
+		require.Equal(t, 20, l.offsetLine, "the expansion re-anchor must also find the sub-selection")
+	})
+}
+
+// TestScrollToSelected_WithoutSubSelectionKeepsItemRule pins the
+// fallback: an item with no sub-selection (ok=false) keeps the
+// any-visible-part rule, so a mid-item viewport is left alone.
+func TestScrollToSelected_WithoutSubSelectionKeepsItemRule(t *testing.T) {
+	t.Parallel()
+
+	l := NewList(newMultiLineItem("g", 30))
+	l.SetSize(40, 10)
+	l.SetSelected(0)
+	l.offsetLine = 15
+
+	l.ScrollToSelected()
+
+	require.Equal(t, 15, l.offsetLine, "a partially visible item must not be yanked around")
+}

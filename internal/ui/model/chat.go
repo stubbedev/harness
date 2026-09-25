@@ -887,7 +887,9 @@ func (m *Chat) ScrollBy(lines int) tea.Cmd {
 	return m.showScrollbar()
 }
 
-// ScrollToSelected scrolls the chat view to the selected item.
+// ScrollToSelected scrolls the chat view to the selected item — to
+// the sub-selection's lines when the selection sits inside an expanded
+// tool group, which may be far inside a run taller than the viewport.
 func (m *Chat) ScrollToSelected() tea.Cmd {
 	m.list.ScrollToSelected()
 	m.follow = m.AtBottom() // Disable follow mode if user scrolls up
@@ -1035,7 +1037,7 @@ func (m *Chat) SetSelected(index int) {
 // the run's calls instead of skipping them. Every other item is a
 // single row and keeps no cursor of its own.
 func (m *Chat) landSelectionFromBelow() {
-	if g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem); ok {
+	if g, ok := m.selectedGroup(); ok {
 		g.SelectChildFromBelow()
 	}
 }
@@ -1169,16 +1171,22 @@ func (m *Chat) MessageItem(id string) chat.MessageItem {
 	return item
 }
 
+// selectedGroup returns the selected item as a tool group when it is
+// one — the single place that decides which chat item is a group.
+func (m *Chat) selectedGroup() (*chat.ToolGroupMessageItem, bool) {
+	g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem)
+	return g, ok
+}
+
 // ToggleExpandedSelectedItem expands the selected message item if it is expandable.
 func (m *Chat) ToggleExpandedSelectedItem() {
-	selected := m.list.SelectedItem()
 	// With the sub-cursor on a child line, toggle that one call
 	// between its one-liner and full view.
-	if g, ok := selected.(*chat.ToolGroupMessageItem); ok && g.ToggleSelectedChild() {
+	if g, ok := m.selectedGroup(); ok && g.ToggleSelectedChild() {
 		m.reanchorAfterExpand()
 		return
 	}
-	if expandable, ok := selected.(chat.Expandable); ok {
+	if expandable, ok := m.list.SelectedItem().(chat.Expandable); ok {
 		_ = expandable.ToggleExpanded()
 		m.reanchorAfterExpand()
 	}
@@ -1189,7 +1197,7 @@ func (m *Chat) ToggleExpandedSelectedItem() {
 // drops the sub-cursor on the first call, and enter on a call line
 // opens that call's full view; anything else expands like space.
 func (m *Chat) EnterSelectedItem() {
-	if g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem); ok {
+	if g, ok := m.selectedGroup(); ok {
 		g.DigIn()
 		m.reanchorAfterExpand()
 		return
@@ -1204,7 +1212,7 @@ func (m *Chat) EnterSelectedItem() {
 // the escape shrank the render, the view re-anchors on the item so the
 // content the expansion pushed off-screen comes back.
 func (m *Chat) AscendSelectedItem() bool {
-	g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem)
+	g, ok := m.selectedGroup()
 	if !ok {
 		return false
 	}
@@ -1214,28 +1222,37 @@ func (m *Chat) AscendSelectedItem() bool {
 		return false
 	}
 	if (wasOpen && !g.ExpandedLevel()) || g.FullyRenderedChildren() < wasRendered {
-		m.ScrollToIndex(m.list.Selected())
+		m.ScrollItemIntoView(m.list.Selected())
 	}
 	return true
 }
 
-// SubCursorDown handles down-navigation into an expanded group's
-// children. It reports whether the sub-cursor consumed the key, in
-// which case list selection must not move.
-func (m *Chat) SubCursorDown() bool {
-	if g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem); ok {
-		return g.SelectChildNext()
+// subCursorMove advances the selected group's sub-cursor with step,
+// keeping the sub-selection's lines on screen, and reports whether the
+// sub-cursor consumed the key — in which case list selection must not
+// move.
+func (m *Chat) subCursorMove(step func(*chat.ToolGroupMessageItem) bool) bool {
+	g, ok := m.selectedGroup()
+	if !ok || !step(g) {
+		return false
 	}
-	return false
+	m.ScrollToSelected()
+	return true
 }
 
-// SubCursorUp handles up-navigation out of a group's children. It
-// reports whether the sub-cursor consumed the key.
+// SubCursorDown handles down-navigation into an expanded group's
+// children, keeping the sub-cursor's lines on screen. It reports
+// whether the sub-cursor consumed the key, in which case list
+// selection must not move.
+func (m *Chat) SubCursorDown() bool {
+	return m.subCursorMove((*chat.ToolGroupMessageItem).SelectChildNext)
+}
+
+// SubCursorUp handles up-navigation out of a group's children, keeping
+// the sub-cursor's lines on screen. It reports whether the sub-cursor
+// consumed the key.
 func (m *Chat) SubCursorUp() bool {
-	if g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem); ok {
-		return g.SelectChildPrev()
-	}
-	return false
+	return m.subCursorMove((*chat.ToolGroupMessageItem).SelectChildPrev)
 }
 
 // IsSelectedShellItem returns true if the currently selected item is a

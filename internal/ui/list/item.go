@@ -83,6 +83,20 @@ type Focusable interface {
 	SetFocused(focused bool)
 }
 
+// SubSelectable represents an item that carries an internal
+// sub-selection with its own on-screen location, such as an expanded
+// tool group with the keyboard sub-cursor on one of its calls. For
+// such items the list's selection scrolls to the sub-selection's
+// lines instead of treating the whole item as the selection, which an
+// item taller than the viewport would otherwise satisfy with any
+// visible part.
+type SubSelectable interface {
+	// SelectedLineRange returns the inclusive line range of the
+	// sub-selection within the item's rendered output at the given
+	// width. ok is false when the item as a whole is the selection.
+	SelectedLineRange(width int) (start, end int, ok bool)
+}
+
 // Highlightable represents an item that can highlight a portion of its content.
 type Highlightable interface {
 	// SetHighlight highlights the content from the given start to end

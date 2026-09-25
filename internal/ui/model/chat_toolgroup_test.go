@@ -2,9 +2,11 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
@@ -285,4 +287,86 @@ func TestCollapseRestoresView(t *testing.T) {
 	require.False(t, g.ExpandedLevel())
 	offsetAfter, _ := u.chat.list.ScrollPosition()
 	assert.Equal(t, 0, offsetAfter, "collapsing must restore the view to the group")
+}
+
+// commandToolItem builds a finished shell tool item whose one-liner
+// shows the given command, so tests can tell the calls apart in
+// rendered output.
+func commandToolItem(u *UI, id, command string) chat.MessageItem {
+	return chat.NewToolMessageItem(
+		u.com.Styles,
+		"msg",
+		message.ToolCall{ID: id, Name: "Bash", Input: fmt.Sprintf(`{"command":%q}`, command), Finished: true},
+		&message.ToolResult{ToolCallID: id, Name: "Bash", Content: "ok"},
+		false,
+	)
+}
+
+// viewShows renders the chat viewport and reports which of the given
+// needles are on screen.
+func viewShows(u *UI, needles ...string) (shown, hidden []string) {
+	view := ansi.Strip(u.chat.list.Render())
+	for _, needle := range needles {
+		if strings.Contains(view, needle) {
+			shown = append(shown, needle)
+		} else {
+			hidden = append(hidden, needle)
+		}
+	}
+	return shown, hidden
+}
+
+// TestSubCursorStaysInView pins the user-facing invariant for runs
+// expanded past the viewport: walking the sub-cursor, parking on the
+// group row, and arriving from below all keep the selected call's
+// line on screen instead of leaving the selection outside the
+// viewport.
+func TestSubCursorStaysInView(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+
+	items := make([]chat.MessageItem, 0, 15)
+	for i := range 15 {
+		items = append(items, commandToolItem(u, fmt.Sprintf("t%02d", i), fmt.Sprintf("cmd-%02d", i)))
+	}
+	u.chat.SetMessages(items...)
+	u.chat.SetSize(80, 6)
+	u.chat.Focus()
+	u.chat.SelectLast()
+	u.chat.EnterSelectedItem()
+
+	// Walking the sub-cursor down to the last call scrolls along; the
+	// first call is long gone off screen.
+	for range 14 {
+		require.True(t, u.chat.SubCursorDown())
+	}
+	shown, hidden := viewShows(u, "cmd-00", "cmd-14")
+	require.Contains(t, shown, "cmd-14")
+	require.Contains(t, hidden, "cmd-00")
+
+	// Walking back up to the first call brings it back.
+	for range 14 {
+		require.True(t, u.chat.SubCursorUp())
+	}
+	shown, hidden = viewShows(u, "cmd-00", "cmd-14")
+	require.Contains(t, shown, "cmd-00")
+	require.Contains(t, hidden, "cmd-14")
+
+	// Parking on the group row keeps the header line visible.
+	require.True(t, u.chat.SubCursorUp())
+	shown, _ = viewShows(u, "Ran (15 tool calls)")
+	require.Contains(t, shown, "Ran (15 tool calls)")
+
+	// Arriving from below lands on the bottommost call, on screen.
+	text := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID: "m-text", Role: message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "after the run"}},
+	})
+	u.chat.AppendMessages(text)
+	u.chat.SelectLast()
+	require.True(t, u.chat.SelectPrev())
+	u.chat.ScrollToSelected()
+	shown, hidden = viewShows(u, "cmd-00", "cmd-14")
+	require.Contains(t, shown, "cmd-14", "the from-below landing must show the bottommost call")
+	require.Contains(t, hidden, "cmd-00")
 }
