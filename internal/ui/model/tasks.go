@@ -43,6 +43,13 @@ type agentTask struct {
 	// handle: the child session keeps running past that result, so the
 	// result must not settle the task.
 	background bool
+	// dispatched marks a background dispatch whose tool call has
+	// returned (the handle result landed, or history already held one
+	// at load). Until then the child session does not exist in the
+	// runtime — a wide fan-out streams its dispatches for minutes
+	// before fantasy executes any of them — so only a dispatched task
+	// may be settled for being absent from the running list.
+	dispatched bool
 	// childSessionID is the sub-session behind the dispatch, learned
 	// from runtime events or derived at load, used to reconcile the
 	// strip against the authoritative running list.
@@ -127,6 +134,18 @@ func (m *UI) resolveAgentTaskResult(tr message.ToolResult) bool {
 	// A background dispatch's tool result is only the start handle — the
 	// subagent has not returned yet. Keep it spinning; a terminal
 	// RuntimeEvent (or reconciliation against the running list) reaps it.
+	// An error result is different: the dispatch never started (unknown
+	// type, build or session failure), so it is the run's terminal
+	// signal and settles the task. Without this an unstarted background
+	// dispatch would spin forever — it never registers with the runtime,
+	// so no terminal event can ever arrive.
+	task.dispatched = true
+	if task.background && tr.IsError {
+		task.result = &tr
+		task.status = subagents.StatusFailed
+		m.reapAgentTask(tr.ToolCallID)
+		return true
+	}
 	if task.background {
 		return true
 	}
@@ -250,6 +269,7 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 				startedAt:      time.Unix(msg.CreatedAt, 0),
 				status:         subagents.StatusRunning,
 				background:     !params.Blocking,
+				dispatched:     hasResult,
 				childSessionID: m.childSessionIDFor(msg.ID, tc.ID),
 			}
 			task.name = params.SubagentType
@@ -461,8 +481,13 @@ func (m *UI) maybeReconcileSpinningTasks() tea.Cmd {
 // flight, or the session was reloaded from history): the fetched
 // running list is authoritative, so a task whose child session is
 // absent from it is done — blocking and background dispatches alike.
-// Young tasks are left alone so a fetch that raced the runtime Register
-// cannot reap a dispatch that is about to start (see
+// Only dispatched tasks qualify: a dispatch that is still streaming
+// its input registers a strip row long before fantasy executes the
+// call and creates the child session, so its absence from the list is
+// expected, not terminal — settling it there reaped all but the newest
+// row of a wide fan-out while the model was still emitting it. Young
+// dispatched tasks are also left alone so a fetch that raced the
+// runtime Register cannot reap a dispatch that is about to start (see
 // tasksReconcileGrace).
 func (m *UI) reconcileBackgroundTasks(list []workspace.RunningSubagentInfo) {
 	running := make(map[string]bool, len(list))
@@ -474,7 +499,7 @@ func (m *UI) reconcileBackgroundTasks(list []workspace.RunningSubagentInfo) {
 		if t.status != subagents.StatusRunning && t.status != subagents.StatusRetrying {
 			continue
 		}
-		if t.childSessionID == "" || running[t.childSessionID] {
+		if !t.dispatched || t.childSessionID == "" || running[t.childSessionID] {
 			continue
 		}
 		if time.Since(t.startedAt) < tasksReconcileGrace {

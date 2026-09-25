@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -489,9 +490,13 @@ func TestBackgroundDispatchStaysVisible(t *testing.T) {
 }
 
 // TestBackgroundDispatchReconcileAgainstRunningList pins the
-// reconciliation path: a running background task whose child session is
-// absent from the authoritative running list is settled, while one still
-// present stays.
+// reconciliation path: a dispatched background task whose child session
+// is absent from the authoritative running list is settled, while one
+// still present stays. A dispatch that has not returned its handle yet
+// is never settled this way: during a wide fan-out the strip rows
+// register while the model is still streaming the message, minutes
+// before fantasy executes the calls and the runtime registers the
+// children, so absence from the list is expected, not terminal.
 func TestBackgroundDispatchReconcileAgainstRunningList(t *testing.T) {
 	t.Parallel()
 	u := newTestUI()
@@ -513,26 +518,114 @@ func TestBackgroundDispatchReconcileAgainstRunningList(t *testing.T) {
 	// Register of a just-dispatched task must not settle it, so only a
 	// task that has been spinning a while may be reaped this way.
 	t2.startedAt = time.Now().Add(-2 * tasksReconcileGrace)
+	// The handle results mark both dispatches as started.
+	assert.True(t, u.resolveAgentTaskResult(message.ToolResult{
+		ToolCallID: "a1", Name: "agent", Content: "Started background agent",
+	}))
+	assert.True(t, u.resolveAgentTaskResult(message.ToolResult{
+		ToolCallID: "a2", Name: "agent", Content: "Started background agent",
+	}))
 
 	// child-1 is still running; child-2 is not.
 	u.reconcileBackgroundTasks([]workspace.RunningSubagentInfo{
 		{ChildSessionID: "child-1"},
 	})
-	assert.Nil(t, u.agentTaskByToolCall("a2"), "a background task missing from the running list is reaped")
+	assert.Nil(t, u.agentTaskByToolCall("a2"), "a dispatched background task missing from the running list is reaped")
 	assert.NotNil(t, u.agentTaskByToolCall("a1"), "a background task still running stays")
 
-	// A task younger than the grace is left alone even when absent from
-	// the list: its Register may simply not have landed yet.
+	// A dispatch still streaming its input (no handle result yet) is
+	// left alone even when absent from the list and long past the
+	// grace: its child session does not exist until fantasy executes
+	// the call, which for a fan-out is only after the whole message has
+	// finished streaming.
 	bg := agentToolCall("a3")
 	bg.Input = `{"prompt":"dig"}`
 	_ = u.upsertAgentTask(msg, bg)
 	t3 := u.agentTaskByToolCall("a3")
 	require.NotNil(t, t3)
 	t3.childSessionID = "child-3"
+	t3.startedAt = time.Now().Add(-2 * tasksReconcileGrace)
 	u.reconcileBackgroundTasks([]workspace.RunningSubagentInfo{
 		{ChildSessionID: "child-1"},
 	})
-	assert.NotNil(t, u.agentTaskByToolCall("a3"), "a task inside the reconcile grace is not reaped")
+	assert.NotNil(t, u.agentTaskByToolCall("a3"), "a streaming dispatch must not be settled for absence from the running list")
+
+	// Once its handle result lands, the same absence settles it.
+	assert.True(t, u.resolveAgentTaskResult(message.ToolResult{
+		ToolCallID: "a3", Name: "agent", Content: "Started background agent",
+	}))
+	u.reconcileBackgroundTasks(nil)
+	assert.Nil(t, u.agentTaskByToolCall("a3"), "a dispatched task absent from the running list is reaped")
+}
+
+// TestStreamingFanOutKeepsAllRows pins the wide fan-out: seven
+// dispatches stream in one message and register rows as their inputs
+// complete, but the child sessions do not exist until the message
+// finishes. Reconcile fetches during that window used to settle every
+// row older than the grace, leaving one spinner for a seven-agent
+// fan-out; none of them may be reaped before their handles return.
+func TestStreamingFanOutKeepsAllRows(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+
+	msg := message.Message{ID: "m1", SessionID: "s1", Role: message.Assistant}
+	for i, id := range []string{"a1", "a2", "a3", "a4", "a5", "a6", "a7"} {
+		msg.Parts = append(msg.Parts, message.ToolCall{
+			ID: id, Name: "agent",
+			Input: fmt.Sprintf(`{"subagent_type":"task","prompt":"survey %d"}`, i),
+		})
+		_ = u.updateSessionMessage(msg)
+	}
+	require.Len(t, u.agentTasks, 7, "each streaming dispatch registers its row")
+
+	// Reconcile runs while the model is still streaming: the running
+	// list is empty and the first rows are far past the grace.
+	for _, task := range u.agentTasks {
+		task.startedAt = time.Now().Add(-2 * tasksReconcileGrace)
+	}
+	u.reconcileBackgroundTasks(nil)
+	assert.Len(t, u.agentTasks, 7, "streaming dispatches survive reconcile before their handles return")
+
+	// The message finishes; all seven start and their handles return.
+	for _, id := range []string{"a1", "a2", "a3", "a4", "a5", "a6", "a7"} {
+		assert.True(t, u.resolveAgentTaskResult(message.ToolResult{
+			ToolCallID: id, Name: "agent", Content: "Started background agent",
+		}))
+	}
+	require.Len(t, u.agentTasks, 7, "a handle keeps its task spinning")
+
+	// Terminal runtime events then settle them one by one.
+	for i, task := range append([]*agentTask(nil), u.agentTasks...) {
+		u.applyRunningSubagentInfo(childSessionInfo{
+			ChildSessionID: task.childSessionID,
+			Status:         subagents.StatusCompleted,
+		})
+		assert.Len(t, u.agentTasks, 6-i)
+	}
+}
+
+// TestFailedBackgroundDispatchSettles pins that an error handle result
+// settles a background dispatch: the run never started (unknown type,
+// build or session failure), so it never registers with the runtime and
+// no terminal event would ever arrive.
+func TestFailedBackgroundDispatchSettles(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	bg := agentToolCall("a1")
+	bg.Input = `{"subagent_type":"nope","prompt":"dig"}`
+	_ = u.upsertAgentTask(msg, bg)
+	require.NotNil(t, u.agentTaskByToolCall("a1"))
+
+	assert.True(t, u.resolveAgentTaskResult(message.ToolResult{
+		ToolCallID: "a1", Name: "agent", IsError: true, Content: "unknown subagent type",
+	}))
+	assert.Empty(t, u.agentTasks, "an error handle settles the background dispatch")
+	assert.False(t, u.tasksSpinning())
 }
 
 // TestStripDoesNotResurrectFinishedDispatch pins the ordering that ghosts
