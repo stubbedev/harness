@@ -37,7 +37,7 @@ func newLSPToolMessageItem(
 ) ToolMessageItem {
 	r := &lspToolRenderer{}
 	return &LSPToolMessageItem{
-		baseToolMessageItem: newBaseToolMessageItem(sty, toolCall, result, r, canceled),
+		baseToolMessageItem: newBaseToolMessageItem(sty, toolCall, result, r, canceled, nil),
 		renderer:            r,
 	}
 }

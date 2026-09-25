@@ -152,13 +152,20 @@ first to one-liners and then to the calls' full renderers. Children are
 never list items of their own — `Chat.ToolItem` resolves through groups.
 Subagent dispatches (`agent`, `research`) never render in the
 transcript; they live in the background tasks strip (`model/tasks.go`)
-between the chat and the editor. Each strip row is one line,
-`Agent <description>` — the child session's generated title, falling
-back to the dispatch-prompt excerpt — with no fold-out. Enter or click
-on a row switches the transcript into that agent's session (live; its
-messages render like main-session ones), where the editor steers the
-agent via `Workspace.SteerAgent`; a pinned `Main Agent` row (and
-escape) switches back. Rows are removed when the run finishes.
+between the chat and the editor. Each strip row is one line — accent
+robot icon, `Agent`/`Main Agent`, then the description (the child
+session's generated title, falling back to the dispatch-prompt
+excerpt) — with no fold-out. Enter or click on a row switches the
+transcript into that agent's session: the switch is atomic (the old
+view keeps painting until the fetched transcript replaces it, then one
+retrace folds in events that raced the fetch). In an agent's session
+the editor steers the agent via `Workspace.SteerAgent`; a pinned `Main
+Agent` row and escape switch back. Rows are removed when the run
+finishes. The dispatcher tool's waiting form (no prompt) does render:
+it is the turn's visible "Waiting for N agents" state (`chat/
+wait_tool.go`, live count via `chat.ItemEnv`). What renders on screen
+is decided once by `chat.RendersInTranscript`, shared by extraction
+and export so the two cannot drift.
 
 ### Styling
 

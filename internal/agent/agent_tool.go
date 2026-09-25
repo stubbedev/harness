@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,6 +53,22 @@ type AgentDispatchParams struct {
 const (
 	AgentToolName = "agent"
 )
+
+// IsAgentWaitCall reports whether a tool call is the dispatcher tool's
+// waiting form — the one with no prompt, which blocks until background
+// agents already dispatched report back — rather than a dispatch. A
+// call still streaming its input parses to zero params and therefore
+// looks like a wait until its prompt arrives, which is also when there
+// is an agent worth showing. Single source for the task strip's row
+// filter and the transcript's wait-call renderer.
+func IsAgentWaitCall(name, input string) bool {
+	if name != AgentToolName {
+		return false
+	}
+	var params AgentDispatchParams
+	_ = json.Unmarshal([]byte(input), &params)
+	return params.Prompt == ""
+}
 
 // dispatcherTool implements fantasy.AgentTool with a dynamically-built schema.
 type dispatcherTool struct {

@@ -14,7 +14,7 @@ func TestBaseToolMessageItemElapsed(t *testing.T) {
 
 	sty := styles.CharmtonePantera()
 	tc := message.ToolCall{ID: "toolu_1", Name: "shell", Finished: false}
-	item := newBaseToolMessageItem(&sty, tc, nil, &ShellToolRenderContext{}, false)
+	item := newBaseToolMessageItem(&sty, tc, nil, &ShellToolRenderContext{}, false, nil)
 
 	// A live tool's timer runs from the moment the item was built. How
 	// soon that shows as more than zero is the clock's business, not the

@@ -15,6 +15,7 @@ import (
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/subagents"
+	"github.com/stubbedev/harness/internal/ui/chat"
 	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/workspace"
 )
@@ -206,11 +207,11 @@ func TestBackgroundTasksStrip(t *testing.T) {
 	assert.False(t, u.applyTaskTitle(task.childSessionID, "New Agent Session"), "the placeholder title is ignored")
 
 	// Clicking a row activates it: the transcript switches to the
-	// agent's session.
+	// agent's session once the fetch lands.
 	clicked, clickCmd := u.handleTaskClick(2, 0)
 	assert.True(t, clicked)
 	assert.NotNil(t, clickCmd)
-	assert.Equal(t, task.childSessionID, u.viewedAgentSessionID)
+	assert.Equal(t, task.childSessionID, u.agentView.requested)
 
 	// The final result completes the task — and reaps it: the strip is
 	// a viewer for ongoing work only.
@@ -312,12 +313,20 @@ func activateAgentView(t *testing.T, u *UI) {
 }
 
 // applyAgentTranscript runs a fetched transcript through the handler,
-// as Update would.
+// as Update would, and follows the switch's single retrace (which folds
+// in events that raced the first snapshot and must not retrace again).
 func applyAgentTranscript(t *testing.T, u *UI, msg tea.Msg) {
 	t.Helper()
 	tr, ok := msg.(agentTranscriptMsg)
 	require.True(t, ok, "the view switch fetches the transcript")
-	_ = u.handleAgentTranscriptMsg(tr)
+	retrace := u.handleAgentTranscriptMsg(tr)
+	if retrace == nil {
+		return
+	}
+	tr2, ok := retrace().(agentTranscriptMsg)
+	require.True(t, ok)
+	require.True(t, tr2.retraced, "the retrace is marked so it stops after one round")
+	assert.Nil(t, u.handleAgentTranscriptMsg(tr2))
 }
 
 // TestEnterSwitchesToAgentAndMainBack pins the strip's core gesture:
@@ -339,7 +348,7 @@ func TestEnterSwitchesToAgentAndMainBack(t *testing.T) {
 	// Enter on the agent row: the transcript shows its session, focus
 	// moves to the transcript, and Main Agent appears in the strip.
 	activateAgentView(t, u)
-	require.Equal(t, "agent-tool-m1-a1", u.viewedAgentSessionID)
+	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
 	require.Equal(t, uiFocusMain, u.focus, "activating a row moves focus to the transcript")
 	require.Equal(t, 2, u.taskRowCount(), "the Main row is pinned above the agent row")
 	u.tasksAreaHeight()
@@ -355,8 +364,9 @@ func TestEnterSwitchesToAgentAndMainBack(t *testing.T) {
 	u.taskCursor = 0
 	cmd := u.activateTaskAtCursor()
 	require.NotNil(t, cmd)
-	require.Empty(t, u.viewedAgentSessionID)
+	require.Empty(t, u.agentView.requested, "main is requested")
 	applyAgentTranscript(t, u, cmd())
+	require.Empty(t, u.agentView.shown)
 	require.Equal(t, 0, u.taskRowCount(), "the reload rebuilds the strip from the main session's history")
 }
 
@@ -373,14 +383,14 @@ func TestEscapeFromAgentViewReturnsToMain(t *testing.T) {
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
 	activateAgentView(t, u)
-	require.Equal(t, "agent-tool-m1-a1", u.viewedAgentSessionID)
+	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
 
 	u.focusTasks()
 	consumed, cmd := u.handleTaskKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	require.True(t, consumed)
 	require.NotNil(t, cmd)
-	_ = cmd()
-	assert.Empty(t, u.viewedAgentSessionID, "escape returns to the main session")
+	applyAgentTranscript(t, u, cmd())
+	assert.Empty(t, u.agentView.shown, "escape returns to the main session")
 }
 
 // TestActivateUnstartedAgentReports pins the edge: a dispatch that is
@@ -405,7 +415,7 @@ func TestActivateUnstartedAgentReports(t *testing.T) {
 	info, ok := report.(util.InfoMsg)
 	require.True(t, ok, "the report is an info message")
 	assert.Contains(t, info.Msg, "not started")
-	assert.Empty(t, u.viewedAgentSessionID, "nothing to switch to")
+	assert.Empty(t, u.agentView.shown, "nothing to switch to")
 }
 
 // TestSessionEventTitlesTaskRow pins the live path: the child session's
@@ -449,7 +459,7 @@ func TestViewedAgentIgnoresMainTraffic(t *testing.T) {
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
 	activateAgentView(t, u)
-	require.Equal(t, "agent-tool-m1-a1", u.viewedAgentSessionID)
+	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
 
 	before := u.chat.Len()
 	_, _ = u.Update(pubsub.Event[message.Message]{
@@ -484,13 +494,110 @@ func TestSteerWhileViewingSendsToAgent(t *testing.T) {
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
 	activateAgentView(t, u)
-	require.Equal(t, "agent-tool-m1-a1", u.viewedAgentSessionID)
+	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
 
 	cmd := u.steerAgent("focus on the parser")
 	require.NotNil(t, cmd)
 	assert.Nil(t, cmd(), "a successful steer reports nothing")
 	assert.Equal(t, "agent-tool-m1-a1", ws.steeredSession)
 	assert.Equal(t, "focus on the parser", ws.steeredText)
+}
+
+// TestViewSwitchIsAtomicUntilPopulated pins the no-blank-swap: while the
+// agent transcript is still being fetched, the old view keeps rendering
+// and keeps receiving its own session's traffic; only the completed
+// fetch swaps the view over.
+func TestViewSwitchIsAtomicUntilPopulated(t *testing.T) {
+	t.Parallel()
+	u := newFrameTestUI(t)
+	u.session = &session.Session{ID: "s1"}
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
+	u.focusTasks()
+	cmd := u.activateTaskAtCursor()
+	require.NotNil(t, cmd)
+
+	// Mid-switch: main is still shown and still paints; the agent's
+	// traffic waits for the swap.
+	require.Empty(t, u.agentView.shown)
+	require.Equal(t, "agent-tool-m1-a1", u.agentView.requested)
+	_, _ = u.Update(pubsub.Event[message.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: message.Message{ID: "main-2", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
+			message.TextContent{Text: "still main"},
+		}},
+	})
+	mainItem := u.chat.MessageItem("main-2")
+	require.NotNil(t, mainItem, "the old view keeps painting until the swap")
+
+	// The fetch lands: the agent's transcript takes over, and the
+	// retrace folds in anything that raced the first snapshot.
+	tr := cmd().(agentTranscriptMsg)
+	retrace := u.handleAgentTranscriptMsg(tr)
+	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
+	require.NotNil(t, retrace, "a child swap retraces once")
+	_, _ = u.Update(pubsub.Event[message.Message]{
+		Type: pubsub.CreatedEvent,
+		Payload: message.Message{ID: "child-race", SessionID: "agent-tool-m1-a1", Role: message.User, Parts: []message.ContentPart{
+			message.TextContent{Text: "steer"},
+		}},
+	})
+	tr2 := retrace().(agentTranscriptMsg)
+	require.True(t, tr2.retraced)
+	assert.Nil(t, u.handleAgentTranscriptMsg(tr2), "the retrace does not retrace again")
+}
+
+// TestWaitingCallRendersAgentsPins pins the wait form's transcript
+// rendering: the agent tool's no-prompt call renders as "Waiting for N
+// agents" with a live count, and its result carries the collected
+// reports.
+func TestWaitingCallRendersAgentsPins(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+	u.session = &session.Session{ID: "s1"}
+
+	for _, id := range []string{"a1", "a2"} {
+		_ = u.upsertAgentTask(&message.Message{ID: "m1", Role: message.Assistant}, agentToolCall(id))
+	}
+	require.Equal(t, 2, u.runningAgentCount())
+
+	wait := message.Message{ID: "m2", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
+		message.ToolCall{ID: "w1", Name: "agent", Input: `{}`},
+	}}
+	_ = u.updateSessionMessage(wait)
+
+	item := u.chat.MessageItem("w1")
+	require.NotNil(t, item, "the wait call renders in the transcript")
+	out := ansi.Strip(waitCallRender(t, item, 80))
+	assert.Contains(t, out, "Waiting for 2 agents")
+
+	// The collected reports land as the call's result; the assistant
+	// update also flips the call's Finished flag, exactly as the real
+	// step-finish update does.
+	_ = u.appendSessionMessage(message.Message{ID: "tm2", SessionID: "s1", Role: message.Tool, Parts: []message.ContentPart{
+		message.ToolResult{ToolCallID: "w1", Name: "agent", Content: "All waited agents finished."},
+	}})
+	wait.Parts[0] = message.ToolCall{ID: "w1", Name: "agent", Input: `{}`, Finished: true}
+	_ = u.updateSessionMessage(wait)
+	out = ansi.Strip(waitCallRender(t, u.chat.MessageItem("w1"), 80))
+	assert.Contains(t, out, "Waited for agents")
+	assert.Contains(t, out, "All waited agents finished.")
+}
+
+// waitCallRender renders the tool call inside whatever container holds
+// it (a singleton group once folded), at the body width.
+func waitCallRender(t *testing.T, item chat.MessageItem, width int) string {
+	t.Helper()
+	group, ok := item.(interface {
+		ChildTool(string) chat.ToolMessageItem
+	})
+	require.True(t, ok, "tool calls fold into groups")
+	tool := group.ChildTool("w1")
+	require.NotNil(t, tool)
+	return tool.RawRender(width)
 }
 
 // TestRunningDispatchesLiveOnlyInTheStrip pins that a dispatch shows up

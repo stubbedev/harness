@@ -74,6 +74,16 @@ type LiveDiagnosticsSetter interface {
 	SetLiveDiagnostics(live map[string]lsp.DiagnosticCounts)
 }
 
+// ItemEnv carries the live bindings message items need to render
+// session state that lives outside the message history. A nil env (or
+// nil field) is valid: history rebuilds render static fallbacks.
+type ItemEnv struct {
+	// WaitingAgents reports how many subagents are still running in the
+	// session an agent-wait call belongs to. It is read at render time,
+	// so the count tracks agents finishing while the call is pending.
+	WaitingAgents func() int
+}
+
 // ToolRenderOpts contains the data needed to render a tool call.
 type ToolRenderOpts struct {
 	ToolCall        message.ToolCall
@@ -88,6 +98,9 @@ type ToolRenderOpts struct {
 	// Elapsed is how long the tool call has been (or was) running.
 	// Zero when the start time is unknown (restored items).
 	Elapsed time.Duration
+	// WaitingAgents is the live count of still-running subagents for an
+	// agent-wait call, resolved from the item's env at render time.
+	WaitingAgents int
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -128,8 +141,10 @@ type baseToolMessageItem struct {
 	result       *message.ToolResult
 	messageID    string
 	canceled     bool
-	// isCompact indicates this tool should render in compact mode.
-	isCompact bool
+	isCompact    bool
+	// waitingAgents resolves the live subagent count for an agent-wait
+	// call's header; nil for history rebuilds.
+	waitingAgents func() int
 
 	sty             *styles.Styles
 	anim            *anim.Anim
@@ -157,6 +172,7 @@ func newBaseToolMessageItem(
 	result *message.ToolResult,
 	toolRenderer ToolRenderer,
 	canceled bool,
+	env *ItemEnv,
 ) *baseToolMessageItem {
 	v := list.NewVersioned()
 	t := &baseToolMessageItem{
@@ -170,6 +186,9 @@ func newBaseToolMessageItem(
 		result:                   result,
 		canceled:                 canceled,
 		startedAt:                time.Now(),
+	}
+	if env != nil {
+		t.waitingAgents = env.WaitingAgents
 	}
 	t.anim = anim.New(anim.Settings{
 		ID: toolCall.ID,
@@ -188,28 +207,41 @@ func newBaseToolMessageItem(
 //
 // It returns a specific tool message item type if implemented, otherwise it
 // returns a generic tool message item. The messageID is the ID of the assistant
-// message containing this tool call.
+// message containing this tool call. env may be nil; it carries the live
+// bindings (see [ItemEnv]) that only live views can supply.
 func NewToolMessageItem(
 	sty *styles.Styles,
 	messageID string,
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	env ...*ItemEnv,
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch toolCall.Name {
 	case tools.DiagnosticsToolName, tools.LSPToolName:
 		item = newLSPToolMessageItem(sty, toolCall, result, canceled)
 	default:
-		item = newBaseToolMessageItem(sty, toolCall, result, toolRendererFor(toolCall.Name), canceled)
+		item = newBaseToolMessageItem(sty, toolCall, result, toolRendererFor(toolCall), canceled, firstEnv(env))
 	}
 	item.SetMessageID(messageID)
 	return item
 }
 
-// toolRendererFor returns the renderer for a tool, by name.
-func toolRendererFor(name string) ToolRenderer {
-	switch name {
+// firstEnv resolves the optional env to nil when absent.
+func firstEnv(env []*ItemEnv) *ItemEnv {
+	if len(env) == 0 {
+		return nil
+	}
+	return env[0]
+}
+
+// toolRendererFor returns the renderer for a tool call. The whole call
+// is the key: the agent tool renders as a wait while it is in its
+// waiting form (no prompt) and never renders at all as a dispatch, so
+// the name alone cannot decide.
+func toolRendererFor(toolCall message.ToolCall) ToolRenderer {
+	switch toolCall.Name {
 	case tools.ShellToolName:
 		return &ShellToolRenderContext{}
 	case tools.ViewToolName:
@@ -224,8 +256,12 @@ func toolRendererFor(name string) ToolRenderer {
 		return &WebSearchToolRenderContext{}
 	case tools.QuestionToolName:
 		return &QuestionToolRenderContext{}
+	case agent.AgentToolName:
+		if agent.IsAgentWaitCall(toolCall.Name, toolCall.Input) {
+			return &WaitToolRenderContext{}
+		}
 	}
-	if strings.HasPrefix(name, "mcp_") {
+	if strings.HasPrefix(toolCall.Name, "mcp_") {
 		return &MCPToolRenderContext{}
 	}
 	return &GenericToolRenderContext{}
@@ -250,14 +286,18 @@ func IsInternalContextTool(name string) bool {
 		name == agent.SendMessageToolName
 }
 
-// IsHiddenToolCall reports whether a tool call renders nowhere on
-// screen: it is either a subagent dispatch (which lives in the
-// background tasks strip) or harness-internal context plumbing.
-// Single source for the transcript and export filters; the task strip
-// intentionally uses the narrower predicates because it collects the
-// subagent calls IsHiddenToolCall hides.
-func IsHiddenToolCall(name string) bool {
-	return IsSubagentTool(name) || IsInternalContextTool(name)
+// RendersInTranscript reports whether a tool call appears in the
+// transcript, and therefore in the export, which mirrors the screen.
+// Subagent dispatches live in the background tasks strip instead; the
+// dispatcher tool's waiting form does render — it is the turn's
+// visible "waiting for N agents" state — and context plumbing never
+// renders. Single source for the extraction and export filters, so the
+// two cannot drift.
+func RendersInTranscript(name, input string) bool {
+	if IsInternalContextTool(name) {
+		return false
+	}
+	return !IsSubagentTool(name) || agent.IsAgentWaitCall(name, input)
 }
 
 // SetCompact implements the Compactable interface.
@@ -331,7 +371,7 @@ func (t *baseToolMessageItem) BodyRender(bodyWidth int) string {
 	content, height, ok := t.getCachedRender(bodyWidth)
 	// if we are spinning or there is no cache rerender
 	if !ok || t.isSpinning() {
-		content = t.toolRenderer.RenderTool(t.sty, bodyWidth, &ToolRenderOpts{
+		opts := ToolRenderOpts{
 			ToolCall:        t.toolCall,
 			Result:          t.result,
 			ExpandedContent: t.expandedContent,
@@ -339,7 +379,14 @@ func (t *baseToolMessageItem) BodyRender(bodyWidth int) string {
 			Status:          t.EffectiveStatus(),
 			StartedAt:       t.startedAt,
 			Elapsed:         t.elapsed(),
-		})
+		}
+		// Read at render time so a pending wait's header tracks agents
+		// finishing while it runs. The item re-renders per tick while
+		// pending (the waiting state line), so the count stays fresh.
+		if t.waitingAgents != nil {
+			opts.WaitingAgents = t.waitingAgents()
+		}
+		content = t.toolRenderer.RenderTool(t.sty, bodyWidth, &opts)
 
 		// Prepend hook indicator if hooks ran for this tool call.
 		if t.result != nil {

@@ -401,10 +401,12 @@ type UI struct {
 	// strip was focused, so focus can return to it after reaps shift
 	// the indices.
 	lastTaskFocusID string
-	// viewedAgentSessionID is the child session whose transcript the
-	// chat is showing; empty means the main session. Set by activating
-	// a strip row, cleared by the Main row, escape, or a session switch.
-	viewedAgentSessionID string
+	// agentView tracks which session the transcript renders (shown)
+	// and which it has been asked to render (requested). A difference
+	// is an in-flight switch: the old view stays visible until the new
+	// session's transcript is fully fetched, so a switch never shows a
+	// half-populated screen. Empty strings mean the main session.
+	agentView agentViewRef
 	// promptQueueItems mirrors the session's queued prompts. It is
 	// event-driven with a TTL backstop, fetched off-thread by
 	// dispatchPromptQueueRefresh (see workspace_cache.go).
@@ -1041,7 +1043,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		isMain := msg.Payload.SessionID == m.session.ID
-		isViewed := m.viewedAgentSessionID != "" && msg.Payload.SessionID == m.viewedAgentSessionID
+		isViewed := m.agentView.shown != "" && msg.Payload.SessionID == m.agentView.shown
 		if !isMain && !isViewed {
 			// Other sessions' traffic (unviewed subagents, unrelated
 			// sessions) never touches the transcript; child traffic
@@ -1055,7 +1057,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// viewed, that agent's session otherwise. Other traffic of the
 		// pair still runs its side effects (busy caches, queue, retry
 		// notice) — it just does not paint into the wrong transcript.
-		showInTranscript := isViewed || (isMain && m.viewedAgentSessionID == "")
+		showInTranscript := isViewed || (isMain && m.agentView.shown == "")
 		switch msg.Type {
 		case pubsub.CreatedEvent:
 			if showInTranscript {
@@ -1647,28 +1649,29 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 		m.lastUserMessageTime = msgPtrs[0].CreatedAt
 	}
 
-	// Add messages to chat with linked tool results
+	// Add messages to chat with linked tool results, plus the per-turn
+	// info rows only a main-session load carries.
 	items := make([]chat.MessageItem, 0, len(msgs)*2)
 	for _, msg := range msgPtrs {
 		switch msg.Role {
 		case message.User:
 			m.lastUserMessageTime = msg.CreatedAt
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.itemEnv())...)
 		case message.Assistant:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.itemEnv())...)
 			if chat.ShouldShowAssistantInfo(msg) {
 				infoItem := chat.NewAssistantInfoItem(m.com.Styles, msg, m.com.Config(), time.Unix(m.lastUserMessageTime, 0))
 				items = append(items, infoItem)
 			}
 		default:
-			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
+			items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.itemEnv())...)
 		}
 	}
 
 	// Rebuild the background task list (subagents) from the same
 	// messages; they do not render in the transcript. A session load
 	// also leaves any agent view: the transcript shows the new session.
-	m.viewedAgentSessionID = ""
+	m.agentView = agentViewRef{}
 	m.loadAgentTasks(msgPtrs, toolResultMap)
 
 	// The rebuilt list drops the old session's queued-prompt
@@ -1760,7 +1763,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 		// the same pass so the swap is invisible.
 		m.materializeQueuedPrompt(msg.Content().Text)
 	case message.Assistant:
-		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil)
+		items := chat.ExtractMessageItems(m.com.Styles, &msg, nil, m.itemEnv())
 		m.chat.AppendMessages(items...)
 		if m.chat.Follow() {
 			m.chat.ScrollToBottom()
@@ -1850,16 +1853,15 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	var items []chat.MessageItem
 	for _, tc := range msg.ToolCalls() {
-		// Subagent dispatches live in the background tasks strip.
-		if chat.IsSubagentTool(tc.Name) {
-			if cmd := m.upsertAgentTask(&msg, tc); cmd != nil {
-				cmds = append(cmds, cmd)
+		if !chat.RendersInTranscript(tc.Name, tc.Input) {
+			// Subagent dispatches live in the background tasks strip;
+			// context plumbing (skill_search, tool_search) is noise in
+			// the transcript. One predicate with extraction and export.
+			if chat.IsSubagentTool(tc.Name) {
+				if cmd := m.upsertAgentTask(&msg, tc); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
-			continue
-		}
-		// Context plumbing (skill_search, tool_search) stays in the
-		// history the model sees but is noise in the transcript.
-		if chat.IsInternalContextTool(tc.Name) {
 			continue
 		}
 		if toolItem := m.chat.ToolItem(tc.ID); toolItem != nil {
@@ -1873,7 +1875,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 			}
 			continue
 		}
-		items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false))
+		items = append(items, chat.NewToolMessageItem(m.com.Styles, msg.ID, tc, nil, false, m.itemEnv()))
 	}
 
 	m.chat.AppendMessages(items...)
@@ -2678,7 +2680,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				m.randomizePlaceholders()
 				m.historyReset()
 
-				if m.viewedAgentSessionID != "" {
+				if m.agentView.shown != "" {
 					// Viewing an agent: the prompt steers its session
 					// instead of starting a main-session turn. Its message
 					// arrives through the normal Created event, so the
@@ -4214,7 +4216,7 @@ func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.
 // picks the message up without extra plumbing. Errors when the agent is
 // not running — a finished run cannot be steered.
 func (m *UI) steerAgent(text string) tea.Cmd {
-	childSessionID := m.viewedAgentSessionID
+	childSessionID := m.agentView.shown
 	return func() tea.Msg {
 		if err := m.com.Workspace.SteerAgent(context.Background(), childSessionID, text); err != nil {
 			return util.InfoMsg{

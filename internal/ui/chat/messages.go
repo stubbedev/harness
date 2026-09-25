@@ -528,7 +528,7 @@ func cappedMessageWidth(availableWidth int) int {
 //
 // For assistant messages with tool calls, pass a toolResults map to link results.
 // Use BuildToolResultMap to create this map from all messages in a session.
-func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult) []MessageItem {
+func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults map[string]message.ToolResult, env ...*ItemEnv) []MessageItem {
 	switch msg.Role {
 	case message.User:
 		// A background sub-agent's report-back is LLM-to-LLM context:
@@ -568,11 +568,10 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			items = append(items, NewAssistantMessageItem(sty, msg))
 		}
 		for _, tc := range msg.ToolCalls() {
-			// Subagent dispatches render in the background tasks strip,
-			// not the transcript; context plumbing (skill_search,
-			// tool_search) stays in the history the model sees but is
-			// noise in the transcript.
-			if IsHiddenToolCall(tc.Name) {
+			// Dispatches render in the background tasks strip; context
+			// plumbing stays in the history the model sees but is noise
+			// here. One predicate decides for transcript and export both.
+			if !RendersInTranscript(tc.Name, tc.Input) {
 				continue
 			}
 			var result *message.ToolResult
@@ -585,6 +584,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 				tc,
 				result,
 				msg.FinishReason() == message.FinishReasonCanceled,
+				firstEnv(env),
 			)
 			// History items have no trustworthy start time; clear the
 			// constructor timestamp so no misleading timer is shown.

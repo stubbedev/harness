@@ -45,6 +45,16 @@ const (
 	// keeps working); terminals without a nerd font show tofu there.
 	QueuedIcon string = "\U000f051b"
 
+	// AgentIcon marks a subagent row in the background tasks strip:
+	// nf-md-robot. Private-use area, one cell wide by nerd fonts; see
+	// QueuedIcon for the width and tofu story.
+	AgentIcon string = "\U000f06a9"
+
+	// MainAgentIcon marks the main session's row in the background
+	// tasks strip: nf-md-home. Private-use area, one cell wide by
+	// nerd fonts; see QueuedIcon for the width and tofu story.
+	MainAgentIcon string = "\U000f007c"
+
 	RadioOn  string = "◉"
 	RadioOff string = "○"
 
@@ -371,6 +381,9 @@ type Styles struct {
 		HookDeniedLabel  lipgloss.Style // "Hook" label when denied
 		HookDeniedReason lipgloss.Style // Denied reason text
 		HookRewrote      lipgloss.Style // "Rewrote Input" indicator
+
+		// Subagents
+		AgentIcon lipgloss.Style // Strip row icon, accent-colored so agent rows pop
 
 		ResultItemName lipgloss.Style // Item name (left column in result lists)
 	}

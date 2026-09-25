@@ -15,6 +15,7 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
+	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/workspace"
 )
@@ -69,7 +70,7 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 
 	var params agent.AgentDispatchParams
 	_ = json.Unmarshal([]byte(tc.Input), &params)
-	if isAgentWaitCall(tc.Name, params) {
+	if agent.IsAgentWaitCall(tc.Name, tc.Input) {
 		return nil
 	}
 
@@ -155,19 +156,6 @@ func (m *UI) reapAgentTask(toolCallID string) {
 	}
 }
 
-// isAgentWaitCall reports whether an agent tool call is the waiting form
-// rather than a dispatch. The agent tool doubles as both: with a prompt
-// it starts a subagent, without one it blocks until the background
-// subagents already running report back (see coordinator.waitForSubagents).
-// A wait starts nothing, so it gets no strip row -- the rows it is waiting
-// on are already there, and a second spinner named "subagent" (the
-// fallback title, since a wait names no subagent_type) only doubles them.
-// A call still streaming its input looks the same until its prompt
-// arrives, which is also when there is a subagent worth showing a row for.
-func isAgentWaitCall(name string, params agent.AgentDispatchParams) bool {
-	return name == agent.AgentToolName && params.Prompt == ""
-}
-
 // childSessionIDFor derives the sub-session ID behind a dispatch. Empty
 // when no workspace is wired (unit tests); the task then learns the ID
 // from runtime events instead.
@@ -180,12 +168,20 @@ func (m *UI) childSessionIDFor(msgID, toolCallID string) string {
 
 // tasksSpinning reports whether any tracked task is still in flight.
 func (m *UI) tasksSpinning() bool {
+	return m.runningAgentCount() > 0
+}
+
+// runningAgentCount is how many tracked tasks are still running. One
+// source for the wait call's "Waiting for N agents" header (via
+// itemEnv) and the strip's spinning state.
+func (m *UI) runningAgentCount() int {
+	n := 0
 	for _, t := range m.agentTasks {
 		if t.status == subagents.StatusRunning || t.status == subagents.StatusRetrying {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 // resetAgentTasks drops task state on session switches.
@@ -225,7 +221,7 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			if canceled || (params.Blocking && (hasResult || !busy)) {
 				continue
 			}
-			if isAgentWaitCall(tc.Name, params) {
+			if agent.IsAgentWaitCall(tc.Name, tc.Input) {
 				continue
 			}
 			task := &agentTask{
@@ -281,6 +277,13 @@ func (m *UI) agentTaskByChildSession(childSessionID string) *agentTask {
 	return nil
 }
 
+// agentViewRef is the shown/requested session pair behind the
+// transcript's agent view; see UI.agentView. Empty strings mean main.
+type agentViewRef struct {
+	shown     string
+	requested string
+}
+
 // agentTranscriptMsg carries the messages of the session whose
 // transcript the strip switched to (an agent's, or back to main),
 // fetched off-thread. forSession guards against a session switch
@@ -289,6 +292,10 @@ type agentTranscriptMsg struct {
 	forSession     string
 	childSessionID string
 	msgs           []message.Message
+	// retraced marks the second fetch of a switch, sent to pick up
+	// events that landed between the first snapshot and the swap; its
+	// handler must not retrace again.
+	retraced bool
 }
 
 // viewAgentSession switches the transcript to a subagent's session: its
@@ -299,55 +306,68 @@ func (m *UI) viewAgentSession(childSessionID string) tea.Cmd {
 	if childSessionID == "" {
 		return util.ReportWarn("Agent has not started yet")
 	}
-	if m.viewedAgentSessionID == childSessionID || m.session == nil {
+	if m.agentView.requested == childSessionID && m.agentView.shown == childSessionID {
 		return nil
 	}
-	m.viewedAgentSessionID = childSessionID
+	if m.session == nil {
+		return nil
+	}
+	m.agentView.requested = childSessionID
 	m.focusTranscript()
 	sessionID := m.session.ID
-	return func() tea.Msg {
-		msgs, err := m.com.Workspace.ListMessages(context.Background(), childSessionID)
-		if err != nil {
-			return util.InfoMsg{Type: util.InfoTypeError, Msg: fmt.Sprintf("Failed to load agent transcript: %v", err)}
-		}
-		return agentTranscriptMsg{forSession: sessionID, childSessionID: childSessionID, msgs: msgs}
-	}
+	return m.fetchAgentTranscript(sessionID, childSessionID, false)
 }
 
 // viewMainSession switches the transcript back to the main session and
 // reloads it: messages that arrived while an agent was viewed were
 // never applied to the chat.
 func (m *UI) viewMainSession() tea.Cmd {
-	if m.viewedAgentSessionID == "" || m.session == nil {
+	if m.agentView.shown == "" && m.agentView.requested == "" || m.session == nil {
 		return nil
 	}
-	m.viewedAgentSessionID = ""
+	m.agentView.requested = ""
 	m.focusTranscript()
 	sessionID := m.session.ID
+	return m.fetchAgentTranscript(sessionID, "", false)
+}
+
+// fetchAgentTranscript builds the off-thread transcript fetch. The
+// session ID is captured so a session switch during the fetch invalidates
+// the result.
+func (m *UI) fetchAgentTranscript(sessionID, childSessionID string, retraced bool) tea.Cmd {
 	return func() tea.Msg {
-		msgs, err := m.com.Workspace.ListMessages(context.Background(), sessionID)
+		msgs, err := m.com.Workspace.ListMessages(context.Background(), childSessionID)
 		if err != nil {
-			return util.InfoMsg{Type: util.InfoTypeError, Msg: fmt.Sprintf("Failed to load session transcript: %v", err)}
+			return util.InfoMsg{Type: util.InfoTypeError, Msg: fmt.Sprintf("Failed to load transcript: %v", err)}
 		}
-		return agentTranscriptMsg{forSession: sessionID, msgs: msgs}
+		return agentTranscriptMsg{forSession: sessionID, childSessionID: childSessionID, msgs: msgs, retraced: retraced}
 	}
 }
 
-// handleAgentTranscriptMsg applies a fetched transcript. Both guards
-// discard a fetch that raced a newer switch: a session change, or the
-// user moving to another agent (or back to main) before it resolved.
+// handleAgentTranscriptMsg applies a fetched transcript. A fetch is
+// discarded when it raced a newer switch: a session change, or the user
+// moving to another agent (or back to main) before it resolved. The swap
+// is atomic — the old transcript stays visible until the fetched one is
+// complete, so a switch never shows a half-populated view — and a child
+// view retraces once to fold in events that landed between snapshot and
+// swap.
 func (m *UI) handleAgentTranscriptMsg(msg agentTranscriptMsg) tea.Cmd {
 	if m.session == nil || msg.forSession != m.session.ID {
 		return nil
 	}
-	if msg.childSessionID != m.viewedAgentSessionID {
+	if msg.childSessionID != m.agentView.requested {
 		return nil
 	}
 	if msg.childSessionID == "" {
+		m.agentView.shown = ""
 		return m.setSessionMessages(msg.msgs)
 	}
 	m.setChildSessionMessages(msg.msgs)
-	return nil
+	m.agentView.shown = msg.childSessionID
+	if msg.retraced {
+		return nil
+	}
+	return m.fetchAgentTranscript(msg.forSession, msg.childSessionID, true)
 }
 
 // setChildSessionMessages renders a subagent's session into the
@@ -361,15 +381,30 @@ func (m *UI) setChildSessionMessages(msgs []message.Message) {
 		msgPtrs[i] = &msgs[i]
 	}
 	toolResultMap := chat.BuildToolResultMap(msgPtrs)
-	items := make([]chat.MessageItem, 0, len(msgs))
-	for _, msg := range msgPtrs {
-		items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap)...)
-	}
+	items := m.buildTranscriptItems(msgPtrs, toolResultMap)
 	// A viewed agent is by definition working; keep the animation clock
 	// running so its in-flight tool spinners move.
 	m.chat.SetAnimationsAllowed(true)
 	m.chat.SetMessages(items...)
 	m.chat.SelectLast()
+}
+
+// buildTranscriptItems converts messages into transcript items. One
+// path for every transcript build — main or agent, load or live append
+// is delegated through it — so the item shape cannot drift between
+// them.
+func (m *UI) buildTranscriptItems(msgs []*message.Message, toolResultMap map[string]message.ToolResult) []chat.MessageItem {
+	items := make([]chat.MessageItem, 0, len(msgs))
+	for _, msg := range msgs {
+		items = append(items, chat.ExtractMessageItems(m.com.Styles, msg, toolResultMap, m.itemEnv())...)
+	}
+	return items
+}
+
+// itemEnv carries the live bindings message items render from: the
+// still-running subagent count behind an agent-wait call's header.
+func (m *UI) itemEnv() *chat.ItemEnv {
+	return &chat.ItemEnv{WaitingAgents: m.runningAgentCount}
 }
 
 // focusTranscript moves focus onto the transcript after a view switch:
@@ -486,7 +521,7 @@ type childSessionInfo struct {
 // mainRowCount is the number of pinned rows ahead of the task rows:
 // the Main Agent row exists only while an agent's session is viewed.
 func (m *UI) mainRowCount() int {
-	if m.viewedAgentSessionID != "" {
+	if m.agentView.shown != "" {
 		return 1
 	}
 	return 0
@@ -650,7 +685,7 @@ func (m *UI) handleTaskKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	case key.Matches(msg, m.keyMap.Chat.ClearHighlight):
 		// Escape is the fast way back: from an agent's transcript it
 		// returns to main without hunting for the Main row.
-		if m.viewedAgentSessionID != "" {
+		if m.agentView.shown != "" {
 			return true, m.viewMainSession()
 		}
 		return true, m.focusEditorFromTasks()
@@ -756,25 +791,30 @@ func (m *UI) renderTasks(width int) string {
 		if onCursor {
 			prefix = focusedPrefix
 		}
-		var line string
+		// Both rows share the accent-colored icon: agent rows must pop
+		// out of the grey tool-call surroundings they sit beside, not
+		// blend into them.
+		icon := t.Tool.AgentIcon.Render(styles.MainAgentIcon)
+		var word lipgloss.Style
+		var label string
 		switch {
 		case isMain:
-			word := t.Tool.NameNormal
+			word, label = t.Tool.NameNormal, "Main Agent"
 			if onCursor {
 				word = t.Tool.NameNormalSelected
 			}
-			line = word.Render("Main Agent")
 		default:
 			running := task.status == subagents.StatusRunning || task.status == subagents.StatusRetrying
-			word := chat.GroupVerbStyle(t, running,
+			word = chat.GroupVerbStyle(t, running,
 				task.status == subagents.StatusCancelled,
 				boolToInt(task.status == subagents.StatusFailed),
 				boolToInt(task.status == subagents.StatusCompleted),
 				onCursor)
-			line = word.Render("Agent")
-			if task.description != "" {
-				line += " " + t.Tool.Body.Render(task.description)
-			}
+			label = "Agent"
+		}
+		line := icon + " " + word.Render(label)
+		if !isMain && task.description != "" {
+			line += " " + t.Tool.Body.Render(task.description)
 		}
 		rows = append(rows, prefix+ansi.Truncate(line, max(width-prefixWidth, 1), "…"))
 	}

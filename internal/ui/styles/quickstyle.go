@@ -696,6 +696,10 @@ func quickStyle(o quickStyleOpts) Styles {
 	// Tool-call action verbs and result-list styling.
 	s.Tool.ResultItemName = muted
 
+	// Subagent strip rows: the icon carries the accent so agent rows
+	// read as agents, not as one more subdued tool call.
+	s.Tool.AgentIcon = base.Foreground(o.accent).SetString(AgentIcon)
+
 	// Buttons
 	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)
 	s.Button.Blurred = lipgloss.NewStyle().Foreground(o.fgBase).Background(o.bgLessVisible)
