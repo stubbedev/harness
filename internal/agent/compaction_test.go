@@ -258,6 +258,72 @@ func TestStubAgedResultsLeavesShortAlone(t *testing.T) {
 	assert.Equal(t, strings.Repeat("x", 5000), msgs[0].Parts[0].(message.ToolResult).Content, "the input is not mutated")
 }
 
+// uncomparableModel has the shape of the fantasy providers' language
+// models: a struct value, not a pointer, with function fields. Two of
+// them cannot be compared with ==, and summarizeMessages once compared
+// the fantasy.LanguageModel interface values directly, which panicked
+// at runtime whenever the small and the large model were two instances
+// of such a type.
+type uncomparableModel struct {
+	*scriptedModel
+	// unusedHook is never called; it makes this struct uncomparable.
+	unusedHook func()
+}
+
+func uncomparableAgent(t *testing.T, env fakeEnv, smallWindow int64) *sessionAgent {
+	t.Helper()
+	return NewSessionAgent(SessionAgentOptions{
+		LargeModel: Model{
+			Model:      uncomparableModel{scriptedModel: newScriptedModel(scriptedTurn{text: "ok"}), unusedHook: func() {}},
+			CatalogCfg: catalog.Model{ID: "large", ContextWindow: 1_000_000, DefaultMaxTokens: 1000},
+			ModelCfg:   config.SelectedModel{Model: "large", Provider: "scripted"},
+		},
+		SmallModel: Model{
+			Model:      uncomparableModel{scriptedModel: textModel("summary from the small model"), unusedHook: func() {}},
+			CatalogCfg: catalog.Model{ID: "small", ContextWindow: smallWindow, DefaultMaxTokens: 100},
+			ModelCfg:   config.SelectedModel{Model: "small", Provider: "scripted"},
+		},
+		SystemPrompt: "system",
+		Sessions:     env.sessions,
+		Messages:     env.messages,
+	}).(*sessionAgent)
+}
+
+// Compaction must not compare the language models themselves: for
+// providers whose model type is an uncomparable struct, the comparison
+// panicked even though the models differed by every other measure.
+func TestSummarizeWithUncomparableModels(t *testing.T) {
+	env := testEnv(t)
+	sess, err := env.sessions.Create(t.Context(), "uncomparable")
+	require.NoError(t, err)
+	sa := uncomparableAgent(t, env, 1_000_000)
+	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "question"})
+	createMessage(t, env, sess.ID, message.Assistant, message.TextContent{Text: "answer"})
+
+	require.NoError(t, sa.Summarize(t.Context(), sess.ID, nil, nil, ""))
+
+	updated, err := env.sessions.Get(t.Context(), sess.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "summary from the small model", updated.CompactionSummary)
+}
+
+// The escalation to the large model, whose branch holds the same
+// comparison, has to survive the same models too.
+func TestSummarizeEscalatesWithUncomparableModels(t *testing.T) {
+	env := testEnv(t)
+	sess, err := env.sessions.Create(t.Context(), "uncomparable-escalation")
+	require.NoError(t, err)
+	sa := uncomparableAgent(t, env, 500)
+	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "question"})
+	createMessage(t, env, sess.ID, message.Assistant, message.TextContent{Text: strings.Repeat("answer ", 400)})
+
+	require.NoError(t, sa.Summarize(t.Context(), sess.ID, nil, nil, ""))
+
+	updated, err := env.sessions.Get(t.Context(), sess.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "ok", updated.CompactionSummary, "the small window forced the fold onto the large model")
+}
+
 // A session compacted before the boundary existed still resumes from its
 // summary message, re-rooted as the user's turn.
 func TestLegacySummaryMessageStillRootsTheHistory(t *testing.T) {

@@ -92,6 +92,12 @@ type SelectedModel struct {
 	ProviderOptions map[string]any `json:"provider_options,omitempty" jsonschema:"description=Additional provider-specific options for the model"`
 }
 
+// Equal reports whether both selections point at the same provider model.
+// SelectedModel itself cannot be compared with == because it carries a map.
+func (m SelectedModel) Equal(other SelectedModel) bool {
+	return m.Provider == other.Provider && m.Model == other.Model
+}
+
 type ProviderConfig struct {
 	// The provider's id.
 	ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`

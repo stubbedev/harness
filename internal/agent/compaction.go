@@ -523,7 +523,10 @@ func (a *sessionAgent) summarizeMessages(
 	}
 	history, _ := a.preparePrompt(folded, model.CatalogCfg.SupportsImages)
 	history = withSummary(state.Summary(narrative), history)
-	if cw := usableContextWindow(model); model.Model != large.Model && cw > 0 &&
+	// Compare by configured identity: the fantasy.LanguageModel values
+	// themselves are uncomparable structs (func fields) for some providers,
+	// and comparing the interface panics at runtime.
+	if cw := usableContextWindow(model); !model.ModelCfg.Equal(large.ModelCfg) && cw > 0 &&
 		approxTokenCount(string(summaryPrompt))+estimateMessageTokens(history) > cw {
 		model = large
 		history, _ = a.preparePrompt(folded, model.CatalogCfg.SupportsImages)

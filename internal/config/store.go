@@ -946,10 +946,6 @@ func nextRecentModels(cfg *Config, modelType SelectedModelType, model SelectedMo
 		return nil, false
 	}
 
-	eq := func(a, b SelectedModel) bool {
-		return a.Provider == b.Provider && a.Model == b.Model
-	}
-
 	entry := SelectedModel{
 		Provider: model.Provider,
 		Model:    model.Model,
@@ -957,7 +953,7 @@ func nextRecentModels(cfg *Config, modelType SelectedModelType, model SelectedMo
 
 	current := cfg.RecentModels[modelType]
 	withoutCurrent := slices.DeleteFunc(slices.Clone(current), func(existing SelectedModel) bool {
-		return eq(existing, entry)
+		return existing.Equal(entry)
 	})
 
 	updated := append([]SelectedModel{entry}, withoutCurrent...)
@@ -965,7 +961,7 @@ func nextRecentModels(cfg *Config, modelType SelectedModelType, model SelectedMo
 		updated = updated[:maxRecentModelsPerType]
 	}
 
-	if slices.EqualFunc(current, updated, eq) {
+	if slices.EqualFunc(current, updated, SelectedModel.Equal) {
 		return current, false
 	}
 
