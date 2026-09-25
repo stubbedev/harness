@@ -712,9 +712,10 @@ func (m *UI) handleTaskKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		return true, nil
 	case key.Matches(msg, m.keyMap.Chat.UpOneItem):
 		// Shift+up at the top of the strip continues into the
-		// transcript; the plain arrow stops at the edge.
+		// transcript, landing on its newest entry; the plain arrow
+		// stops at the edge.
 		if !m.taskCursorUp() {
-			return true, m.focusChatFromTasks()
+			return true, m.focusChatFromTasks(chatEntryFromBelow)
 		}
 		return true, nil
 	case key.Matches(msg, m.keyMap.Chat.Down):
@@ -738,7 +739,7 @@ func (m *UI) handleTaskKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	case key.Matches(msg, m.keyMap.Tab):
 		return true, m.focusEditorFromTasks()
 	case key.Matches(msg, m.keyMap.ShiftTab):
-		return true, m.focusChatFromTasks()
+		return true, m.focusChatFromTasks(chatEntryCycled)
 	}
 	return false, nil
 }
@@ -747,9 +748,31 @@ func (m *UI) focusEditorFromTasks() tea.Cmd {
 	return m.focusEditor()
 }
 
-func (m *UI) focusChatFromTasks() tea.Cmd {
-	m.focus = uiFocusMain
+// chatEntry names the gesture that moves focus into the transcript,
+// since the two land differently: the tab cycle restores the last
+// selection, an upward arrow arriving from below always lands on the
+// newest entry.
+type chatEntry uint8
+
+// Possible chatEntry values.
+const (
+	chatEntryCycled chatEntry = iota
+	chatEntryFromBelow
+)
+
+// focusChat enters the transcript with the entry gesture's landing
+// rule. It only picks the Chat entry point; the caller owns moving
+// focus off the region it came from.
+func (m *UI) focusChat(entry chatEntry) tea.Cmd {
+	if entry == chatEntryFromBelow {
+		return m.chat.FocusSelectingNewest()
+	}
 	return m.chat.FocusRestoringSelection()
+}
+
+func (m *UI) focusChatFromTasks(entry chatEntry) tea.Cmd {
+	m.focus = uiFocusMain
+	return m.focusChat(entry)
 }
 
 // focusBelowChat moves focus out of the transcript to the region below
@@ -765,8 +788,9 @@ func (m *UI) focusBelowChat() tea.Cmd {
 
 // focusAboveEditor moves focus out of the editor to the region above
 // it: the background tasks strip when present, otherwise the
-// transcript. The landing state has no transcript, so it stays put.
-func (m *UI) focusAboveEditor() tea.Cmd {
+// transcript, entered with the given gesture's landing rule. The
+// landing state has no transcript, so it stays put.
+func (m *UI) focusAboveEditor(entry chatEntry) tea.Cmd {
 	if m.state == uiChat && len(m.agentTasks) > 0 {
 		m.focusTasks()
 		return nil
@@ -776,7 +800,7 @@ func (m *UI) focusAboveEditor() tea.Cmd {
 	}
 	m.setState(m.state, uiFocusMain)
 	m.textarea.Blur()
-	return m.chat.FocusRestoringSelection()
+	return m.focusChat(entry)
 }
 
 // renderTasks renders the background tasks strip and records the row

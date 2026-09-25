@@ -56,6 +56,79 @@ func TestShiftArrowsChainTranscriptTasksEditor(t *testing.T) {
 	require.Equal(t, uiFocusMain, u.focus, "up off the strip's first row returns to the transcript")
 }
 
+// TestTranscriptEntryGestures pins the landing rule for every way
+// focus enters the transcript: the tab cycle restores the kept
+// selection, an upward arrow arriving from below (from the editor or
+// off the strip's top) always lands on the newest entry.
+func TestTranscriptEntryGestures(t *testing.T) {
+	t.Parallel()
+
+	// An older item, kept on screen, that focus could return to.
+	pinKeptSelection := func(t *testing.T) *UI {
+		t.Helper()
+		u := newFrameTestUI(t)
+		u.chat.SetSelected(10)
+		_ = u.chat.ScrollItemIntoView(10)
+		require.True(t, u.chat.HasManualSelection())
+		return u
+	}
+	toEditor := func(u *UI) {
+		u.focus = uiFocusEditor
+		u.textarea.Focus()
+		u.chat.Blur()
+	}
+	withStrip := func(u *UI) {
+		_ = u.upsertAgentTask(&message.Message{ID: "m1", Role: message.Assistant}, agentToolCall("a1"))
+		u.focusTasks()
+	}
+
+	t.Run("tab from editor restores", func(t *testing.T) {
+		t.Parallel()
+		u := pinKeptSelection(t)
+		toEditor(u)
+		_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		require.Equal(t, uiFocusMain, u.focus)
+		require.Equal(t, 10, u.chat.Selected())
+	})
+
+	t.Run("shift+tab from editor restores", func(t *testing.T) {
+		t.Parallel()
+		u := pinKeptSelection(t)
+		toEditor(u)
+		_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+		require.Equal(t, uiFocusMain, u.focus)
+		require.Equal(t, 10, u.chat.Selected())
+	})
+
+	t.Run("shift+up from editor lands on newest", func(t *testing.T) {
+		t.Parallel()
+		u := pinKeptSelection(t)
+		toEditor(u)
+		_, _ = u.Update(shiftUp())
+		require.Equal(t, uiFocusMain, u.focus)
+		require.Equal(t, u.chat.Len()-1, u.chat.Selected())
+		require.False(t, u.chat.HasManualSelection())
+	})
+
+	t.Run("shift+tab from strip restores", func(t *testing.T) {
+		t.Parallel()
+		u := pinKeptSelection(t)
+		withStrip(u)
+		_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+		require.Equal(t, uiFocusMain, u.focus)
+		require.Equal(t, 10, u.chat.Selected())
+	})
+
+	t.Run("shift+up off strip top lands on newest", func(t *testing.T) {
+		t.Parallel()
+		u := pinKeptSelection(t)
+		withStrip(u)
+		_, _ = u.Update(shiftUp())
+		require.Equal(t, uiFocusMain, u.focus)
+		require.Equal(t, u.chat.Len()-1, u.chat.Selected())
+	})
+}
+
 // TestPlainArrowsStopAtStripEdges pins that the unshifted arrows keep
 // their meaning inside the strip: they move the cursor and stop at the
 // edges instead of handing focus off.

@@ -344,6 +344,51 @@ func TestToolGroupRenderLevels(t *testing.T) {
 	})
 }
 
+// TestSelectChildFromBelow pins the group's from-below landing: a
+// selection arriving from the item below parks the sub-cursor on the
+// bottommost call while the one-liner level is open, and on the group
+// row for a collapsed run or a singleton whose only line is the call
+// itself.
+func TestSelectChildFromBelow(t *testing.T) {
+	t.Parallel()
+	sty := groupStyles()
+
+	done := func(id string) ToolMessageItem {
+		item := bashTool(id, "ls", true)
+		item.SetResult(&message.ToolResult{ToolCallID: id, Name: "shell", Content: "ok"})
+		return item
+	}
+
+	t.Run("expanded run takes the bottommost call", func(t *testing.T) {
+		t.Parallel()
+		g := NewToolGroupMessageItem(sty, done("t1"))
+		g.AddTool(done("t2"))
+		g.AddTool(done("t3"))
+		require.True(t, g.ToggleExpanded())
+
+		g.SelectChildFromBelow()
+		require.Equal(t, 2, g.SelectedChild(), "the bottommost call wins, not the group row")
+	})
+
+	t.Run("collapsed run keeps the group row", func(t *testing.T) {
+		t.Parallel()
+		g := NewToolGroupMessageItem(sty, done("t1"))
+		g.AddTool(done("t2"))
+
+		g.SelectChildFromBelow()
+		require.Equal(t, -1, g.SelectedChild())
+	})
+
+	t.Run("expanded singleton keeps the group row", func(t *testing.T) {
+		t.Parallel()
+		g := NewToolGroupMessageItem(sty, done("t1"))
+		require.True(t, g.ToggleExpanded())
+
+		g.SelectChildFromBelow()
+		require.Equal(t, -1, g.SelectedChild(), "a singleton's only line is the call itself")
+	})
+}
+
 // TestSelectionColorsToolNames pins the two-tone rule the transcript
 // lives by: tool names stay in the understated grey until the entry is
 // selected or expanded, then say their status in color (blue done,

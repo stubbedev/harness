@@ -147,6 +147,21 @@ func (g *ToolGroupMessageItem) SelectChildPrev() bool {
 	return true
 }
 
+// SelectChildFromBelow places the sub-cursor for a selection arriving
+// from the item below: on the bottommost child while the one-liner
+// level is open. A collapsed group, or a singleton whose only line is
+// the call itself, keeps the cursor on the group row.
+func (g *ToolGroupMessageItem) SelectChildFromBelow() {
+	child := -1
+	if g.expanded && len(g.tools) > 1 {
+		child = len(g.tools) - 1
+	}
+	if g.selectedChild != child {
+		g.selectedChild = child
+		g.invalidate()
+	}
+}
+
 // ToggleSelectedChild expands or collapses the sub-cursor's child
 // between its one-liner and full render. Reports whether a child was
 // selected.

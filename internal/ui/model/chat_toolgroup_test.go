@@ -177,6 +177,71 @@ func TestGroupSubCursorNavigation(t *testing.T) {
 	require.Equal(t, -1, group.SelectedChild())
 }
 
+// TestSelectPrevLandsOnGroupFromBelow pins the from-below landing
+// while walking the transcript upward: an expanded run parks the
+// sub-cursor on its bottommost call so the next up walks the run's
+// calls, while a collapsed run keeps the group row.
+func TestSelectPrevLandsOnGroupFromBelow(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.chat.SetMessages(
+		newToolItemForGroup(u, "t1"),
+		newToolItemForGroup(u, "t2"),
+		chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+			ID: "m-text", Role: message.Assistant,
+			Parts: []message.ContentPart{message.TextContent{Text: "after the run"}},
+		}),
+	)
+	u.chat.Focus()
+	u.chat.SelectLast()
+
+	group, ok := u.chat.list.ItemAt(0).(*chat.ToolGroupMessageItem)
+	require.True(t, ok)
+
+	// Collapsed: the group row wins.
+	require.True(t, u.chat.SelectPrev())
+	require.Equal(t, 0, u.chat.Selected())
+	require.Equal(t, -1, group.SelectedChild())
+
+	// Expanded: walking up onto the run lands on its bottommost call,
+	// and the next up walks the calls instead of skipping the run.
+	require.True(t, group.ToggleExpanded())
+	require.True(t, u.chat.SelectNext())
+	require.True(t, u.chat.SelectPrev())
+	require.Equal(t, 1, group.SelectedChild())
+	require.True(t, u.chat.SubCursorUp())
+	require.Equal(t, 0, group.SelectedChild())
+}
+
+// TestFocusSelectingNewestLandsFromBelow pins the directional focus
+// entry: it always lands on the newest entry, with the same from-below
+// sub-cursor landing SelectPrev applies when that entry is an expanded
+// run.
+func TestFocusSelectingNewestLandsFromBelow(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.chat.SetMessages(
+		chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+			ID: "m-text", Role: message.Assistant,
+			Parts: []message.ContentPart{message.TextContent{Text: "before the run"}},
+		}),
+		newToolItemForGroup(u, "t1"),
+		newToolItemForGroup(u, "t2"),
+	)
+	group, ok := u.chat.list.ItemAt(1).(*chat.ToolGroupMessageItem)
+	require.True(t, ok)
+	require.True(t, group.ToggleExpanded())
+
+	// A kept selection elsewhere must not survive the directional entry.
+	u.chat.SetSelected(0)
+	require.True(t, u.chat.HasManualSelection())
+
+	_ = u.chat.FocusSelectingNewest()
+	require.Equal(t, 1, u.chat.Selected())
+	require.False(t, u.chat.HasManualSelection())
+	require.Equal(t, 1, group.SelectedChild(), "arrival from below parks the sub-cursor on the bottommost call")
+}
+
 // TestCollapseRestoresView is the "reset the render after collapsing"
 // regression: expanding a group pushes later content off-screen, and
 // collapsing it (via escape) must re-anchor the view on the group so

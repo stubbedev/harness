@@ -787,6 +787,17 @@ func (m *Chat) FocusRestoringSelection() tea.Cmd {
 	return nil
 }
 
+// FocusSelectingNewest focuses the transcript the way an upward key
+// gesture enters it from below: the selection always lands on the
+// newest entry, scrolled into view when the conversation has scrolled
+// past it, with the same from-below landing SelectPrev applies.
+func (m *Chat) FocusSelectingNewest() tea.Cmd {
+	m.Focus()
+	m.SelectLast()
+	m.landSelectionFromBelow()
+	return m.ScrollToSelected()
+}
+
 // ScrollPosition returns the list's first visible item index and the line
 // offset into it.
 func (m *Chat) ScrollPosition() (offsetIdx, offsetLine int) {
@@ -1018,12 +1029,28 @@ func (m *Chat) SetSelected(index int) {
 	m.selectFrom(index, m.list.IndexBefore)
 }
 
+// landSelectionFromBelow places the selected item's internal cursor
+// for a keyboard arrival from the item below: an expanded tool group
+// parks the sub-cursor on its bottommost child, so the next up walks
+// the run's calls instead of skipping them. Every other item is a
+// single row and keeps no cursor of its own.
+func (m *Chat) landSelectionFromBelow() {
+	if g, ok := m.list.SelectedItem().(*chat.ToolGroupMessageItem); ok {
+		g.SelectChildFromBelow()
+	}
+}
+
 // SelectPrev selects the previous selectable message in the chat list.
 // It reports whether one exists above the current selection; when none
-// does, the selection is left untouched.
+// does, the selection is left untouched. Arriving from below, an
+// expanded tool group parks the sub-cursor on its bottommost child.
 func (m *Chat) SelectPrev() bool {
 	defer m.refreshManualSelection()
-	return m.selectFrom(m.list.Selected(), m.list.IndexBefore)
+	if !m.selectFrom(m.list.Selected(), m.list.IndexBefore) {
+		return false
+	}
+	m.landSelectionFromBelow()
+	return true
 }
 
 // SelectNext selects the next selectable message in the chat list. It

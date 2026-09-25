@@ -2688,7 +2688,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		if m.focus == uiFocusEditor {
 			m.focus = uiFocusMain
 			m.activeInline.SetFocused(false)
-			cmds = append(cmds, m.chat.FocusRestoringSelection())
+			cmds = append(cmds, m.focusChat(chatEntryCycled))
 		} else {
 			cmds = append(cmds, m.focusEditor())
 		}
@@ -2798,19 +2798,20 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if m.state != uiLanding {
 					m.setState(m.state, uiFocusMain)
 					m.textarea.Blur()
-					cmds = append(cmds, m.chat.FocusRestoringSelection())
+					cmds = append(cmds, m.focusChat(chatEntryCycled))
 				}
 			case key.Matches(msg, m.keyMap.ShiftTab):
-				if cmd := m.focusAboveEditor(); cmd != nil {
+				if cmd := m.focusAboveEditor(chatEntryCycled); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Chat.UpOneItem) && msg.String() == "shift+up" && m.isAtEditorTopRow():
 				// Shift+up extends a selection upward while there are
 				// display rows above; on the top row, where the selection
-				// cannot grow, it leaves the editor the same way shift+tab
-				// does. Only the arrow key qualifies: the binding's letter
-				// alias (K) must stay typeable.
-				if cmd := m.focusAboveEditor(); cmd != nil {
+				// cannot grow, it leaves the editor toward the region
+				// above. Unlike the shift+tab cycle it always lands on the
+				// transcript's newest entry. Only the arrow key qualifies:
+				// the binding's letter alias (K) must stay typeable.
+				if cmd := m.focusAboveEditor(chatEntryFromBelow); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
