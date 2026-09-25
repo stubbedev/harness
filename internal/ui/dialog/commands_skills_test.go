@@ -92,7 +92,7 @@ func TestSkillsPaletteListsOnlySkills(t *testing.T) {
 func TestCommandsPaletteUserTabExcludesSkills(t *testing.T) {
 	t.Parallel()
 
-	c, err := NewCommands(paletteTestCommon(), "", false, false, false, paletteTestCommands(), nil)
+	c, err := NewCommands(paletteTestCommon(), "", false, false, paletteTestCommands(), nil)
 	require.NoError(t, err)
 
 	c.setCommandItems(UserCommands)

@@ -48,10 +48,6 @@ const (
 	RadioOn  string = "◉"
 	RadioOff string = "○"
 
-	TodoCompletedIcon  string = "✓"
-	TodoPendingIcon    string = "•"
-	TodoInProgressIcon string = "→"
-
 	SubagentIcon string = "●"
 
 	ScrollbarThumb string = "┃"
@@ -350,11 +346,8 @@ type Styles struct {
 		NoteTag     lipgloss.Style // NOTE tag (yellow background)
 		NoteMessage lipgloss.Style // Note message text
 
-		TodoCompletedIcon  lipgloss.Style // Completed todo icon
-		TodoInProgressIcon lipgloss.Style // In-progress todo icon
-		TodoPendingIcon    lipgloss.Style // Pending todo icon
-		TodoStatusNote     lipgloss.Style // " · completed N" / " · starting task" trailing note
-		TodoItem           lipgloss.Style // Default body text for todo list items
+		TodoCompletedIcon lipgloss.Style // Completed marker (question forms)
+		TodoStatusNote    lipgloss.Style // " · completed N" / " · starting task" trailing note
 
 		// MCP tools
 		MCPName     lipgloss.Style // The mcp name
@@ -494,18 +487,6 @@ type Styles struct {
 		InfoMessage    lipgloss.Style
 		UpdateMessage  lipgloss.Style
 		SuccessMessage lipgloss.Style
-	}
-
-	// Pills styles for the todo pill
-	Pills struct {
-		Focused         lipgloss.Style // Pill with visible rounded border
-		TodoLabel       lipgloss.Style // "To-Do" label
-		TodoProgress    lipgloss.Style // Todo ratio (e.g. "2/5")
-		TodoCurrentTask lipgloss.Style // Current in-progress task name
-		TodoSpinner     lipgloss.Style // Todo spinner style
-		HelpKey         lipgloss.Style // Keystroke hint style
-		HelpText        lipgloss.Style // Help action text style
-		Area            lipgloss.Style // Pills area container
 	}
 }
 

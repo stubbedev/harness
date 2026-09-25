@@ -374,10 +374,6 @@ type UI struct {
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
 
-	// pills state
-	pillsExpanded     bool
-	pillsAutoExpanded bool
-
 	// Background tasks (subagents) render in a strip under the chat, not
 	// in the transcript. agentTasks is insertion-ordered; taskRows maps
 	// rendered strip rows back to tasks for click handling.
@@ -445,11 +441,6 @@ type UI struct {
 	// like promptQueueGen it lets a stale in-flight probe result be
 	// discarded and re-fetched instead of clobbering newer state.
 	busyFetchGen uint64
-	pillsView    string
-
-	// Todo spinner
-	todoSpinner    spinner.Model
-	todoIsSpinning bool
 
 	// retryNotice tracks whether the status bar currently shows a
 	// provider-retry notice. It is set on TypeAgentRetrying and
@@ -522,13 +513,11 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		ScrollRight: keyMap.Chat.ScrollRight,
 	})
 
-	todoSpinner := spinner.New(
-		spinner.WithSpinner(spinner.MiniDot),
-		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
-	)
 	taskSpinner := spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
-		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
+		// The running status borrows the tool group's "Running" verb
+		// style, so a spinning subagent reads like a spinning tool call.
+		spinner.WithStyle(com.Styles.Tool.NamePending),
 	)
 
 	header := newHeader(com)
@@ -540,7 +529,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		textarea:            ta,
 		chat:                ch,
 		header:              header,
-		todoSpinner:         todoSpinner,
 		taskSpinner:         taskSpinner,
 		frames:              newFrameCache(frameCacheTTL, frameCacheMaxEntries),
 		lspStates:           make(map[string]workspace.LSPClientInfo),
@@ -889,7 +877,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionFiles = msg.files
 		// Session switch: the memoized busy state and queued prompts
 		// belong to the previous session. Drop them and re-fetch
-		// off-thread so the queue pill and esc behavior track the new
+		// off-thread so the queue indicator and esc behavior track the new
 		// session instead of a stale one.
 		m.invalidateBusyCaches()
 		m.invalidatePromptQueue()
@@ -931,20 +919,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.restoreModelFromSession(msgs); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		m.autoExpandPillsIfReasonable()
 		// If a bang command was issued before the session finished
 		// loading, start it now that the chat list is stable.
 		if m.pendingBangCommand != "" {
 			cmds = append(cmds, m.runShellCommandInternal(m.pendingBangCommand, true))
 			m.pendingBangCommand = ""
-		}
-		if hasInProgressTodo(m.session.Todos) {
-			// only start spinner if there is an in-progress todo
-			if m.isAgentBusy() {
-				m.todoIsSpinning = true
-				cmds = append(cmds, m.todoSpinner.Tick)
-			}
-			m.updateLayoutAndSize()
 		}
 		// Reload prompt history for the new session.
 		m.historyReset()
@@ -1039,26 +1018,7 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
-			prevHasInProgress := hasInProgressTodo(m.session.Todos)
-			prevPillsHeight := m.pillsAreaHeight()
 			m.session = &msg.Payload
-			if !prevHasInProgress && hasInProgressTodo(m.session.Todos) {
-				m.todoIsSpinning = true
-				cmds = append(cmds, m.todoSpinner.Tick)
-			}
-			// The pills panel reserves vertical space that the chat area
-			// must yield. Recompute the layout whenever that footprint
-			// changes (todos appearing, the list growing, etc.) so the
-			// box renders on first paint rather than waiting for a toggle.
-			// When the footprint is unchanged we still re-render the pill
-			// content so status changes (e.g. the in-progress spinner)
-			// show up.
-			if m.pillsAreaHeight() != prevPillsHeight {
-				m.updateLayoutAndSize()
-			} else {
-				m.renderPills()
-			}
-			m.autoExpandPillsIfReasonable()
 		}
 	case pubsub.Event[message.Message]:
 		// Any tool result may have written to the tree - edit, write,
@@ -1104,17 +1064,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Any message traffic on the current session means the turn
 		// moved past the backoff: drop a lingering retry notice.
 		m.clearRetryNotice()
-		// start the spinner if there is a new message
-		if hasInProgressTodo(m.session.Todos) && m.isAgentBusy() && !m.todoIsSpinning {
-			m.todoIsSpinning = true
-			cmds = append(cmds, m.todoSpinner.Tick)
-		}
-		// stop the spinner if the agent is not busy anymore
-		if m.todoIsSpinning && !m.isAgentBusy() {
-			m.todoIsSpinning = false
-		}
-		// there is a number of things that could change the pills here so we want to re-render
-		m.renderPills()
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
 	case pubsub.Event[app.LSPEvent]:
@@ -1477,14 +1426,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.dialog.HasDialogs() {
 			// route to dialog
 			if cmd := m.handleDialogMsg(msg); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
-		if m.state == uiChat && m.hasSession() && hasInProgressTodo(m.session.Todos) && m.todoIsSpinning {
-			var cmd tea.Cmd
-			m.todoSpinner, cmd = m.todoSpinner.Update(msg)
-			if cmd != nil {
-				m.renderPills()
 				cmds = append(cmds, cmd)
 			}
 		}
@@ -2100,9 +2041,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		}
 		cmds = append(cmds, m.openEditor(editorValue))
 		m.dialog.CloseDialog(dialog.CommandsID)
-	case dialog.ActionTogglePills:
-		m.togglePillsExpanded()
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 			cfg := m.com.Config()
@@ -2596,11 +2534,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				return true
 			}
-		case key.Matches(msg, m.keyMap.Chat.TogglePills):
-			if m.state == uiChat && m.hasSession() {
-				m.togglePillsExpanded()
-				return true
-			}
 		case key.Matches(msg, m.keyMap.Suspend):
 			if m.isAgentBusy() {
 				cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
@@ -3046,13 +2979,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	if m.layout != layout {
 		m.layout = layout
 		m.updateSize()
-	} else if m.state == uiChat && m.hasSession() {
-		// Re-render pills on every draw so the box appears even when
-		// the layout footprint hasn't changed (e.g. todos arrived
-		// while the panel was collapsed). updateSize already calls
-		// renderPills, but only when the layout actually differs;
-		// this catches the steady-state case.
-		m.renderPills()
 	}
 
 	// Clear the screen first
@@ -3077,9 +3003,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		m.chat.Draw(scr, layout.main)
 		if layout.tasks.Dy() > 0 && m.tasksView != "" {
 			uv.NewStyledString(m.tasksView).Draw(scr, layout.tasks)
-		}
-		if layout.pills.Dy() > 0 && m.pillsView != "" {
-			uv.NewStyledString(m.pillsView).Draw(scr, layout.pills)
 		}
 
 		m.drawEditorArea(scr, layout.editor)
@@ -3577,7 +3500,6 @@ func (m *UI) updateSize() {
 	m.chat.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	m.textarea.MaxHeight = TextareaMaxHeight
 	m.textarea.SetWidth(m.layout.editor.Dx())
-	m.renderPills()
 }
 
 // splitOffEditor slices the compact status line and the prompt textarea off
@@ -3723,19 +3645,7 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 			uiLayout.tasks = tasksRect
 			mainRect = chatRect
 		}
-		pillsHeight := m.pillsAreaHeight()
-		if pillsHeight > 0 {
-			pillsHeight = min(pillsHeight, mainRect.Dy())
-			var chatRect, pillsRect image.Rectangle
-			layout.Vertical(
-				layout.Len(mainRect.Dy()-pillsHeight),
-				layout.Fill(1),
-			).Split(mainRect).Assign(&chatRect, &pillsRect)
-			uiLayout.main = chatRect
-			uiLayout.pills = pillsRect
-		} else {
-			uiLayout.main = mainRect
-		}
+		uiLayout.main = mainRect
 		// Add bottom margin to main
 		uiLayout.main.Max.Y -= 1
 		uiLayout.editor = editorRect
@@ -3756,9 +3666,6 @@ type uiLayout struct {
 
 	// main is the area for the main pane. (e.g. chat, landing)
 	main uv.Rectangle
-
-	// pills is the area for the pills panel.
-	pills uv.Rectangle
 
 	// editor is the area for the editor pane.
 	editor uv.Rectangle
@@ -4175,7 +4082,7 @@ func (m *UI) refreshStyles() {
 	t := m.com.Styles
 	m.header.refresh()
 	m.textarea.SetStyles(t.Editor.Textarea)
-	m.todoSpinner.Style = t.Pills.TodoSpinner
+	m.taskSpinner.Style = t.Tool.NamePending
 	m.status.help.Styles = t.Help
 	m.chat.InvalidateRenderCaches()
 }
@@ -4415,14 +4322,10 @@ func (m *UI) cancelAgent() tea.Cmd {
 		}
 
 		m.com.Workspace.AgentCancelTurn(m.session.ID)
-		// Stop the spinning todo indicator and drop the memoized busy
-		// state the cancel just changed; the pill re-renders now from
-		// last-known state and again when the off-thread refresh (and
-		// the agent's own events) land. The queued-prompt cache stays:
-		// a turn-only cancel keeps the queue.
-		m.todoIsSpinning = false
+		// Drop the memoized busy state the cancel just changed; the
+		// off-thread refresh (and the agent's own events) land next. The
+		// queued-prompt cache stays: a turn-only cancel keeps the queue.
 		m.invalidateBusyCaches()
-		m.renderPills()
 		return m.dispatchBusyRefresh()
 	}
 
@@ -4588,10 +4491,9 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	if hasSession {
 		sessionID = m.session.ID
 	}
-	hasTodos := hasSession && hasIncompleteTodos(m.session.Todos)
 	hasSummary := hasSession && m.session.SummaryMessageID != ""
 
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasSummary, hasTodos, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasSummary, m.customCommands, m.mcpPrompts)
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -4908,13 +4810,10 @@ func (m *UI) newSession() tea.Cmd {
 	m.setState(uiLanding, uiFocusEditor)
 	cmd := m.focusEditor()
 	m.chat.ClearMessages()
-	m.pillsExpanded = false
-	m.pillsAutoExpanded = false
 	m.promptQueueItems = nil
 	m.promptQueueCheckedAt = time.Now()
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
-	m.pillsView = ""
 	m.historyReset()
 	agenttools.ResetCache()
 	return tea.Batch(

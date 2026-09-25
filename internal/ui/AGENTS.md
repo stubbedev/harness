@@ -27,7 +27,7 @@ The UI uses a **hybrid rendering** approach:
    `uv.ScreenBuffer`, and components draw into sub-regions using
    `uv.NewStyledString(str).Draw(scr, rect)`. Layout is rectangle-based via
    a `uiLayout` struct with fields like `layout.header`, `layout.main`,
-   `layout.editor`, `layout.tasks`, `layout.pills`, `layout.status`.
+   `layout.editor`, `layout.tasks`, `layout.status`.
 2. **String-based**: Sub-components like `list.List` and `completions` render
    to strings, which are painted onto the screen buffer.
 3. **`View()`** creates the screen buffer, calls `Draw()`, then
@@ -152,12 +152,13 @@ first to one-liners and then to the calls' full renderers. Children are
 never list items of their own — `Chat.ToolItem` resolves through groups.
 Subagent dispatches (`agent`, `research`) never render in the transcript;
 they live in the background tasks strip (`model/tasks.go`) between the
-chat and the pills.
+chat and the editor; its rows borrow the tool group's Ran/Running
+styles.
 
 ### Styling
 
 - All styles are defined in `styles/styles.go` (massive `Styles` struct with
-  nested groups for Header, Pills, Dialog, Help, etc.).
+  nested groups for Header, Dialog, Help, etc.).
 - Access styles via `*common.Common` passed to components.
 - Use semantic color fields rather than hardcoded colors.
 
@@ -202,7 +203,7 @@ box width — border and padding live *inside* it.
 The status bar's bottom row is the single hint surface: it shows the
 help of whatever owns the keyboard (front dialog, inline editor, or the
 main view) via the `help.KeyMap` implementations. Dialogs must not
-render their own hint row, and rendered labels (header, pills, palette
+render their own hint row, and rendered labels (header, palette
 shortcuts) must come from `binding.Help().Key`, never a hardcoded key
 string, so an `options.tui.keybinds` rebind moves every hint. Hints must
 be gated on the state where the key is actually routed — a binding shown
@@ -219,7 +220,7 @@ through all components that need access to app state or styles.
 ## File Organization
 
 - `model/` — Main UI model and major sub-models (chat, background tasks, header,
-  status, pills, session, onboarding, keys, etc.)
+  status, session, onboarding, keys, etc.)
 - `chat/` — Chat message item types and tool renderers
 - `dialog/` — Dialog implementations (models, sessions, commands,
   permissions, API key, OAuth, filepicker, reasoning, quit)

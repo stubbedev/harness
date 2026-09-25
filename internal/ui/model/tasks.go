@@ -886,7 +886,10 @@ func (m *UI) renderTasks(width int) string {
 		y += height
 	}
 
-	return t.Pills.Area.Render(strings.Join(rows, "\n"))
+	// The strip borrows the tool group's row style (the one behind
+	// "Ran/Running (N tool calls)"), so subagent rows read like the
+	// transcript's tool-call rows they sit beside.
+	return t.Tool.Body.Render(strings.Join(rows, "\n"))
 }
 
 // renderTaskDetails renders the expanded block under a task row: the

@@ -66,7 +66,6 @@ type KeyMap struct {
 		NewSession      key.Binding
 		Cancel          key.Binding
 		Details         key.Binding
-		TogglePills     key.Binding
 		Down            key.Binding
 		Up              key.Binding
 		UpDown          key.Binding
@@ -364,10 +363,6 @@ func DefaultKeyMap() KeyMap {
 	km.Chat.Details = key.NewBinding(
 		key.WithKeys("ctrl+d"),
 		key.WithHelp("ctrl+d", "toggle details"),
-	)
-	km.Chat.TogglePills = key.NewBinding(
-		key.WithKeys("ctrl+t", "ctrl+space"),
-		key.WithHelp("ctrl+t", "toggle tasks"),
 	)
 
 	km.Chat.Down = key.NewBinding(
@@ -730,7 +725,6 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"chat.new_session":            &km.Chat.NewSession,
 		"chat.cancel":                 &km.Chat.Cancel,
 		"chat.details":                &km.Chat.Details,
-		"chat.toggle_pills":           &km.Chat.TogglePills,
 		"chat.down":                   &km.Chat.Down,
 		"chat.up":                     &km.Chat.Up,
 		"chat.up_down":                &km.Chat.UpDown,

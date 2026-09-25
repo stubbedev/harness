@@ -402,7 +402,6 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `chat.page_up` | `pgup`, `b` |
 | `chat.scroll_left` | `shift+left`, `H` |
 | `chat.scroll_right` | `shift+right`, `L` |
-| `chat.toggle_pills` | `ctrl+t`, `ctrl+space` |
 | `chat.up` | `up`, `ctrl+k`, `k` |
 | `chat.up_down` | `up`, `down` |
 | `chat.up_down_one_item` | `shift+up`, `shift+down` |

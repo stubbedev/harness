@@ -25,7 +25,6 @@ package model
 // Update, no model mutation inside commands).
 
 import (
-	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -164,8 +163,8 @@ func (m *UI) updateAgentModelCmd(pre tea.Cmd) tea.Cmd {
 	return tea.Sequence(pre, agentModelChangedCmd)
 }
 
-// applyBusyState stores an off-thread probe result and reacts to busy
-// edges (todo spinner, pills). Runs on the Update goroutine.
+// applyBusyState stores an off-thread probe result. Runs on the
+// Update goroutine.
 func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	m.busyFetchInFlight = false
 	if msg.gen != m.busyFetchGen {
@@ -182,27 +181,15 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 	m.agentBusyCache.set(msg.agentBusy)
 	m.agentReady = msg.ready
 	m.agentModel = msg.model
-	var cmds []tea.Cmd
-	busy := m.isAgentBusy()
-	if m.hasSession() && hasInProgressTodo(m.session.Todos) && busy && !m.todoIsSpinning {
-		m.todoIsSpinning = true
-		cmds = append(cmds, m.todoSpinner.Tick)
-	}
-	if m.todoIsSpinning && !busy {
-		m.todoIsSpinning = false
-	}
-	if prevBusy != busy {
-		m.renderPills()
-	}
 	// A model or effort selection queued while the turn was running
 	// applies now that the agent is idle, so the next turn starts with
 	// the user's choice.
-	if prevBusy && !busy && m.pendingModelAction != nil {
+	if prevBusy && !m.isAgentBusy() && m.pendingModelAction != nil {
 		if cmd := m.applyPendingModelAction(); cmd != nil {
-			cmds = append(cmds, cmd)
+			return []tea.Cmd{cmd}
 		}
 	}
-	return cmds
+	return nil
 }
 
 // dispatchPromptQueueRefresh returns a command that fetches the queued
@@ -254,7 +241,6 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 		return nil
 	}
 	m.promptQueueCheckedAt = time.Now()
-	itemsChanged := !slices.Equal(m.promptQueueItems, msg.prompts)
 	countChanged := len(msg.prompts) != len(m.promptQueueItems)
 	m.promptQueueItems = msg.prompts
 	// The authoritative queue drives the transcript's queued-prompt
@@ -263,8 +249,6 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 	m.reconcileQueuedPrompts(msg.prompts)
 	if countChanged {
 		m.updateLayoutAndSize()
-	} else if itemsChanged {
-		m.renderPills()
 	}
 	return nil
 }

@@ -51,7 +51,6 @@ type Commands struct {
 	sessionID  string
 	hasSession bool
 	hasSummary bool
-	hasTodos   bool
 	selected   CommandType
 
 	spinner spinner.Model
@@ -73,14 +72,13 @@ type Commands struct {
 var _ Dialog = (*Commands)(nil)
 
 // NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary, hasTodos bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
 	c := &Commands{
 		com:            com,
 		selected:       SystemCommands,
 		sessionID:      sessionID,
 		hasSession:     hasSession,
 		hasSummary:     hasSummary,
-		hasTodos:       hasTodos,
 		customCommands: customCommands,
 		mcpPrompts:     mcpPrompts,
 	}
@@ -124,7 +122,7 @@ func (c *Commands) ID() ID {
 // NewSkills creates a dialog listing only agent skills, the palette
 // behind the "/" prefix.
 func NewSkills(com *common.Common, customCommands []commands.CustomCommand) (*Commands, error) {
-	c, err := NewCommands(com, "", false, false, false, customCommands, nil)
+	c, err := NewCommands(com, "", false, false, customCommands, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -526,10 +524,6 @@ func (c *Commands) defaultCommands() []*CommandItem {
 	// antipattern.
 	if os.Getenv("EDITOR") != "" {
 		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", km.Editor.OpenEditor.Help().Key, ActionExternalEditor{}))
-	}
-
-	if c.hasTodos {
-		commands = append(commands, NewCommandItem(c.com.Styles, "toggle_pills", "Toggle To-Dos", km.Chat.TogglePills.Help().Key, ActionTogglePills{}))
 	}
 
 	// Add a command for selecting notification style via picker dialog.

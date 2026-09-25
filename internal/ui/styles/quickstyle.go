@@ -668,10 +668,7 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	// Todo styles
 	s.Tool.TodoCompletedIcon = base.Foreground(o.success)
-	s.Tool.TodoInProgressIcon = base.Foreground(o.successMostSubtle)
-	s.Tool.TodoPendingIcon = base.Foreground(o.fgMoreSubtle)
 	s.Tool.TodoStatusNote = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Tool.TodoItem = lipgloss.NewStyle().Foreground(o.fgBase)
 
 	// MCP styles
 	s.Tool.MCPName = base.Foreground(o.info)
@@ -989,16 +986,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Status.ErrorMessage = s.Status.SuccessMessage.Foreground(o.onPrimary).Background(o.error)
 
 	// Completions styles
-
-	// Pills styles
-	s.Pills.Focused = base.Padding(0, 1).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(o.bgMostVisible)
-	s.Pills.TodoLabel = lipgloss.NewStyle().Foreground(o.fgBase)
-	s.Pills.TodoProgress = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
-	s.Pills.TodoCurrentTask = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Pills.TodoSpinner = lipgloss.NewStyle().Foreground(o.successMostSubtle)
-	s.Pills.HelpKey = lipgloss.NewStyle().Foreground(o.fgMoreSubtle)
-	s.Pills.HelpText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-	s.Pills.Area = base
 
 	return s
 }
