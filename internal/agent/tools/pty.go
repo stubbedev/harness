@@ -122,6 +122,13 @@ const (
 	// the program reads - which a program that is not reading never
 	// does, and the call would hang with it.
 	ptyInputQueueCapacity = 3 << 10
+	// ptyEchoFragment is the least of the echoed sentinel command a
+	// screen line must carry to count as the start of that echo when the
+	// command is not there whole: a narrow terminal wraps the echo at the
+	// window edge, so the line can hold only a leading fragment of it.
+	// The length keeps ordinary output - which would have to quote a
+	// slice of the session's tagged command - from being cut by mistake.
+	ptyEchoFragment = 16
 	// ptyCredentialDialogWait bounds how long a masked credential dialog
 	// may stay open before the prompt is cancelled instead: a dispatch
 	// whose dialog nobody is there to answer must still return.
@@ -2265,8 +2272,24 @@ func (r *ptyRunner) cleanWith(mark sentinel, raw string, echo []string) string {
 	out = renderLines(out)
 
 	var lines []string
+	// The sentinel's echoed command is bookkeeping wherever it lands:
+	// whole, behind a prompt, or - on a terminal narrower than the
+	// command - wrapped at the window edge into consecutive fragments
+	// that only together rebuild it. fragOff tracks how much of the
+	// command consecutive lines have already reconstructed; a line that
+	// does not continue the run resets it. A fragment carries enough of
+	// the session's tagged command that real output cannot match by
+	// accident.
+	fragOff := 0
 	for line := range strings.SplitSeq(out, "\n") {
 		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && fragOff < len(mark.cmd) &&
+			strings.HasPrefix(mark.cmd[fragOff:], trimmed) &&
+			(fragOff > 0 || len(trimmed) >= ptyEchoFragment) {
+			fragOff += len(trimmed)
+			continue
+		}
+		fragOff = 0
 		if strings.Contains(trimmed, mark.cmd) || mark.parse.MatchString(trimmed) || mark.loose.MatchString(trimmed) {
 			continue
 		}
