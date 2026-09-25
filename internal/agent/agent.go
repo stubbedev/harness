@@ -1094,7 +1094,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Publish this instance as mid-turn in the workspace presence
 	// registry, so concurrent harness instances see the session being
 	// worked on. Sub-agents hold no registry; their edits still publish
-	// file activity through the tools.
+	// file activity through the tools. The guard saves the session
+	// lookup when there is nothing to publish into.
 	if a.presence != nil {
 		title := ""
 		if sess, sessErr := a.sessions.Get(ctx, call.SessionID); sessErr == nil {
@@ -1362,11 +1363,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// Concurrent harness instances publish themselves and their
 			// recent file activity to the workspace presence registry. The
 			// note is diff-gated against the last one sent, so a steady
-			// state — or no peers at all — sends nothing.
+			// state — or no peers at all — sends nothing. A nil registry
+			// (sub-agents, tests) has no peers and stays silent.
 			if err = inject(message.ContextNotePeers, func(msgs []fantasy.Message) []fantasy.Message {
-				if a.presence == nil {
-					return msgs
-				}
 				note := peerNote(msgs, a.presence.Peers())
 				if note == "" {
 					return msgs

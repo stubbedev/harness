@@ -873,10 +873,9 @@ func (app *App) Shutdown() {
 	defer func() { slog.Debug("Shutdown took " + time.Since(start).String()) }()
 
 	// Retire from the workspace presence registry first: no turn is
-	// running anymore, and peers should see this instance leave.
-	if app.Presence != nil {
-		app.Presence.Stop()
-	}
+	// running anymore, and peers should see this instance leave. The
+	// call is nil-safe; a failed registry retires nothing.
+	app.Presence.Stop()
 
 	// First, cancel all agents and wait for them to finish. This must complete
 	// before closing the DB so agents can finish writing their state.

@@ -111,11 +111,8 @@ func NewWriteTool(
 			// Publish the mutation to concurrent harness instances, and warn
 			// when one of them wrote this file recently: a soft note, not a
 			// refusal — the evidence layer remains the hard line.
-			if presence != nil {
-				presence.Touch(filePath)
-				if warn := presence.Contention(filePath); warn != "" {
-					result += "\n" + warn
-				}
+			if warn := presence.Report(filePath); warn != "" {
+				result += "\n" + warn
 			}
 			result += reportDiagnosticsNow(ctx, lspManager, filePath)
 			return fantasy.WithResponseMetadata(

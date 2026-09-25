@@ -12,6 +12,9 @@
 // to an instance that is gone; any instance may delete a record long
 // past that mark. An owner whose file was collected simply recreates it
 // on its next beat, so garbage collection is self-healing.
+//
+// Every method is nil-safe: a nil Registry (feature disabled, tests,
+// sub-agents) is a no-op, so callers never branch on nil.
 package presence
 
 import (
@@ -51,8 +54,8 @@ const (
 	// ActivityWindow bounds how long a touched file stays published.
 	ActivityWindow = 5 * time.Minute
 
-	// warnInterval rate-limits Contention per path so repeated edits of
-	// a contended file do not stamp every tool result.
+	// warnInterval rate-limits Report per path so repeated edits of a
+	// contended file do not stamp every tool result.
 	warnInterval = 2 * time.Minute
 )
 
@@ -76,7 +79,7 @@ type Record struct {
 
 // Registry publishes this instance's record and reads the records of
 // every other instance in the same workspace data directory. The zero
-// value is not usable; call New.
+// value is not usable; call New. All methods tolerate a nil Registry.
 type Registry struct {
 	dir string
 
@@ -84,7 +87,7 @@ type Registry struct {
 	self Record
 	// turns counts concurrent agent turns; Busy is turns > 0.
 	turns int
-	// warned remembers when Contention last reported each path.
+	// warned remembers when Report last warned about each path.
 	warned map[string]time.Time
 
 	stop    chan struct{}
@@ -132,8 +135,13 @@ func newID() (string, error) {
 }
 
 // Start publishes the initial record and heartbeats until ctx is
-// cancelled or Stop is called, removing the record on the way out.
+// cancelled or Stop is called. Stop removes the record itself; ctx
+// cancellation hands that to the loop so an owner that never stops
+// explicitly still retires.
 func (r *Registry) Start(ctx context.Context) {
+	if r == nil {
+		return
+	}
 	r.beat()
 	go func() {
 		ticker := time.NewTicker(r.beatInterval)
@@ -144,7 +152,6 @@ func (r *Registry) Start(ctx context.Context) {
 				r.removeSelf()
 				return
 			case <-r.stop:
-				r.removeSelf()
 				return
 			case <-ticker.C:
 				r.beat()
@@ -154,9 +161,12 @@ func (r *Registry) Start(ctx context.Context) {
 }
 
 // Stop removes this instance's record and stops heartbeating. It is
-// idempotent and safe to call alongside context cancellation; whoever
-// observes first wins and the other becomes a no-op.
+// idempotent and safe to call alongside context cancellation: whoever
+// retires the record first wins and the other becomes a no-op.
 func (r *Registry) Stop() {
+	if r == nil {
+		return
+	}
 	r.stopped.Do(func() {
 		close(r.stop)
 		r.removeSelf()
@@ -171,6 +181,9 @@ func (r *Registry) removeSelf() {
 
 // SetSession stamps the session this instance is currently working on.
 func (r *Registry) SetSession(sessionID, title string) {
+	if r == nil {
+		return
+	}
 	r.mu.Lock()
 	r.self.SessionID = sessionID
 	r.self.Title = title
@@ -181,6 +194,9 @@ func (r *Registry) SetSession(sessionID, title string) {
 // BeginTurn marks the instance's agent as mid-turn. Nested and parallel
 // turns are counted; the mark clears when the last one ends.
 func (r *Registry) BeginTurn() {
+	if r == nil {
+		return
+	}
 	r.mu.Lock()
 	r.turns++
 	r.self.Busy = true
@@ -190,6 +206,9 @@ func (r *Registry) BeginTurn() {
 
 // EndTurn releases one BeginTurn mark.
 func (r *Registry) EndTurn() {
+	if r == nil {
+		return
+	}
 	r.mu.Lock()
 	if r.turns > 0 {
 		r.turns--
@@ -199,33 +218,41 @@ func (r *Registry) EndTurn() {
 	r.beat()
 }
 
-// Touch records that this instance mutated the given paths, refreshing
-// entries that already exist. Paths are stored workspace-relative.
-func (r *Registry) Touch(paths ...string) {
+// Report is the single chokepoint for tool-driven mutations: it records
+// that this instance wrote path and returns a warning line when a live
+// peer wrote it within the activity window, or "". The warning is
+// rate-limited per path so repeated edits of a contended file do not
+// stamp every tool result. It is a soft note, never a refusal; the
+// file-evidence layer remains the hard line for stale writes.
+func (r *Registry) Report(path string) string {
+	if r == nil {
+		return ""
+	}
+	r.recordActivity(path)
+	return r.contention(path)
+}
+
+// recordActivity stamps path into the recent-activity list, stored
+// workspace-relative.
+func (r *Registry) recordActivity(path string) {
 	r.mu.Lock()
 	now := r.now()
-	for _, p := range paths {
-		if rel := relative(p); rel != "" {
-			r.self.Files = append(r.self.Files, Activity{Path: rel, At: now})
+	if rel := relative(path); rel != "" {
+		r.self.Files = append(r.self.Files, Activity{Path: rel, At: now})
+		r.self.Files = trimActivity(r.self.Files, now, r.activityWindow)
+		if len(r.self.Files) > MaxFiles {
+			r.self.Files = r.self.Files[:MaxFiles]
 		}
 	}
-	r.trimLocked(now)
 	r.mu.Unlock()
 	r.beat()
 }
 
-// trimLocked keeps the most recent entry per path, drops entries
-// outside the activity window and caps the list at MaxFiles, most
-// recent first. Callers hold mu.
-func (r *Registry) trimLocked(now time.Time) {
-	r.self.Files = trimActivity(r.self.Files, now, r.activityWindow)
-	if len(r.self.Files) > MaxFiles {
-		r.self.Files = r.self.Files[:MaxFiles]
-	}
-}
-
 // Self returns a copy of this instance's record.
 func (r *Registry) Self() Record {
+	if r == nil {
+		return Record{}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rec := r.self
@@ -237,8 +264,12 @@ func (r *Registry) Self() Record {
 // workspace, oldest start first, with file activity trimmed to the
 // activity window. Records long past their beat are collected.
 func (r *Registry) Peers() []Record {
+	if r == nil {
+		return nil
+	}
 	self := r.Self()
-	peers := r.scan(self.ID, r.now(), true)
+	now := r.now()
+	peers := r.scan(self.ID, now, true)
 	slices.SortFunc(peers, func(a, b Record) int {
 		switch {
 		case a.Started.Before(b.Started):
@@ -251,10 +282,9 @@ func (r *Registry) Peers() []Record {
 	return peers
 }
 
-// Contention returns a one-line warning when a live peer recently
-// mutated path, or "". Rate-limited per path: repeated edits of the
-// same contended file do not re-report within warnInterval.
-func (r *Registry) Contention(path string) string {
+// contention returns the rate-limited warning for path when a live peer
+// wrote it recently, or "".
+func (r *Registry) contention(path string) string {
 	rel := relative(path)
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -293,7 +323,7 @@ func (r *Registry) Contention(path string) string {
 
 // scan reads every record in the registry directory except selfID,
 // skipping instances past staleAfter and collecting the long dead. It
-// takes no locks, so it is safe under mu from Contention.
+// takes no locks, so it is safe under mu from contention.
 func (r *Registry) scan(selfID string, now time.Time, collect bool) []Record {
 	entries, err := os.ReadDir(r.dir)
 	if err != nil {
@@ -348,8 +378,15 @@ func (r *Registry) collect(path string, entry os.DirEntry, now time.Time) {
 }
 
 // beat atomically rewrites this instance's record with a fresh beat.
+// After Stop it is a no-op, so a late mutator cannot resurrect a
+// retired record.
 func (r *Registry) beat() {
 	rec := r.Self()
+	select {
+	case <-r.stop:
+		return
+	default:
+	}
 	rec.Beat = r.now()
 	data, err := json.Marshal(rec)
 	if err != nil {

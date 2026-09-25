@@ -106,15 +106,12 @@ func NewEditTool(
 			// an edit.
 			lspManager.NotifyChangeAsync(ctx, params.FilePath)
 
-			// Publish the mutation to concurrent harness instances, and
-			// warn when one of them wrote this file recently: a soft note,
-			// not a refusal — the evidence layer remains the hard line.
+			// Publish the mutation to concurrent harness instances, and warn
+			// when one of them wrote this file recently: a soft note, not a
+			// refusal — the evidence layer remains the hard line.
 			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
-			if presence != nil {
-				presence.Touch(params.FilePath)
-				if warn := presence.Contention(params.FilePath); warn != "" {
-					text += warn + "\n"
-				}
+			if warn := presence.Report(params.FilePath); warn != "" {
+				text += warn + "\n"
 			}
 			text += reportDiagnosticsNow(ctx, lspManager, params.FilePath)
 			response.Content = text

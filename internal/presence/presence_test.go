@@ -83,26 +83,28 @@ func TestPeersDoesNotCollectBarelyStale(t *testing.T) {
 	require.NoError(t, err, "record past stale but under gc threshold must survive")
 }
 
-func TestTouchRecordsMostRecentFirst(t *testing.T) {
+func TestReportRecordsMostRecentFirst(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	base := time.Now()
 	r.now = func() time.Time { return base }
-	r.Touch("b.go", "a.go", "b.go")
+	require.Empty(t, r.Report("b.go"))
+	require.Empty(t, r.Report("a.go"))
+	require.Empty(t, r.Report("b.go"))
 
 	// Equal timestamps tie-break by path; the duplicate b.go collapses.
 	require.Equal(t, []string{"a.go", "b.go"}, activityPaths(r.Self().Files))
 }
 
-func TestTouchAgesOut(t *testing.T) {
+func TestReportAgesOut(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	base := time.Now()
 	current := base
 	r.now = func() time.Time { return current }
-	r.Touch("old.go")
+	require.Empty(t, r.Report("old.go"))
 	current = base.Add(r.activityWindow + time.Second)
-	r.Touch("new.go")
+	require.Empty(t, r.Report("new.go"))
 
 	require.Equal(t, []string{"new.go"}, activityPaths(r.Self().Files))
 }
@@ -140,7 +142,7 @@ func TestPeersTrimsFileWindow(t *testing.T) {
 	require.Equal(t, []string{"fresh.go"}, activityPaths(peers[0].Files))
 }
 
-func TestContentionWarnsThenRateLimits(t *testing.T) {
+func TestReportWarnsThenRateLimits(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	now := time.Now()
@@ -153,16 +155,16 @@ func TestContentionWarnsThenRateLimits(t *testing.T) {
 		Files:   []Activity{{Path: "internal/ui/ui.go", At: now.Add(-10 * time.Second)}},
 	})
 
-	first := r.Contention("internal/ui/ui.go")
+	first := r.Report("internal/ui/ui.go")
 	require.Contains(t, first, "pid 7")
 	require.Contains(t, first, `"fixing the tui"`)
 	require.Contains(t, first, "internal/ui/ui.go")
 
-	require.Empty(t, r.Contention("internal/ui/ui.go"), "rate-limited within the window")
-	require.Empty(t, r.Contention("other.go"), "untouched file")
+	require.Empty(t, r.Report("internal/ui/ui.go"), "rate-limited within the window")
+	require.Empty(t, r.Report("other.go"), "untouched file")
 }
 
-func TestContentionSilentWhenPeerGone(t *testing.T) {
+func TestReportSilentWhenPeerGone(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	now := time.Now()
@@ -173,7 +175,20 @@ func TestContentionSilentWhenPeerGone(t *testing.T) {
 		Beat:    now.Add(-time.Minute),
 		Files:   []Activity{{Path: "x.go", At: now.Add(-time.Minute)}},
 	})
-	require.Empty(t, r.Contention("x.go"))
+	require.Empty(t, r.Report("x.go"))
+}
+
+func TestNilRegistryIsNoOp(t *testing.T) {
+	t.Parallel()
+	var r *Registry
+	r.Start(t.Context())
+	r.SetSession("s", "t")
+	r.BeginTurn()
+	r.EndTurn()
+	require.Empty(t, r.Report("x.go"))
+	require.Empty(t, r.Peers())
+	require.Empty(t, r.Self().ID)
+	r.Stop()
 }
 
 func activityPaths(files []Activity) []string {
