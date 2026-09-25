@@ -137,11 +137,11 @@ const (
 // parseTeaPanic extracts the value and stack of the last panic
 // bubbletea printed in out.
 func parseTeaPanic(out string) (value, stack string, ok bool) {
-	i := strings.LastIndex(out, teaPanicStart)
-	if i < 0 {
+	_, after, ok0 := strings.CutLast(out, teaPanicStart)
+	if !ok0 {
 		return "", "", false
 	}
-	rest := out[i+len(teaPanicStart):]
+	rest := after
 	value, stack, ok = strings.Cut(rest, teaPanicEnd)
 	if !ok {
 		return "", "", false
