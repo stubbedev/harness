@@ -527,6 +527,11 @@
           "description": "Disable automatic conversation summarization",
           "default": false
         },
+        "inherent_goals": {
+          "type": "boolean",
+          "description": "Continue a turn that ended by declaring next steps instead of waiting for the user to say continue",
+          "default": true
+        },
         "max_retries": {
           "type": "integer",
           "minimum": 0,
