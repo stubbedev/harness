@@ -8,8 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
-
-	"github.com/stubbedev/harness/internal/message"
 )
 
 // helpKey finds the help key text of the binding whose description is desc.
@@ -119,42 +117,6 @@ func TestShellModeHintOnlyWhileEditorIdle(t *testing.T) {
 // send shift+enter.
 func TestNewlineHintNamesShiftEnter(t *testing.T) {
 	require.Equal(t, "shift+enter", DefaultKeyMap().Editor.Newline.Help().Key)
-}
-
-// TestAttachmentHintsFollowDeleteMode pins the attachment hints to the
-// live routing: ctrl+r is advertised whenever attachments exist, and once
-// delete mode is armed the advertised keys are the ones that still work —
-// esc leaves the mode and r clears every attachment, except where an
-// idle rewind or a busy cancel would consume esc first.
-func TestAttachmentHintsFollowDeleteMode(t *testing.T) {
-	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
-	warmCaches(m, false)
-
-	m.attachments.Update(message.Attachment{FileName: "a.txt"})
-	require.Equal(t, "ctrl+r+{i}", helpKey(t, m.ShortHelp(), "delete attachment at index i"))
-	require.False(t, hasDesc(flatHelp(m.FullHelp()), "cancel delete mode"))
-	require.False(t, hasDesc(flatHelp(m.FullHelp()), "delete all attachments"))
-
-	// Armed: ctrl+r is spent; esc and r own the moment.
-	m.attachments.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
-	require.False(t, hasDesc(m.ShortHelp(), "delete attachment at index i"))
-	require.Equal(t, "esc", helpKey(t, m.ShortHelp(), "cancel delete mode"))
-	require.Equal(t, "ctrl+r+r", helpKey(t, m.ShortHelp(), "delete all attachments"))
-
-	// Armed and busy: esc cancels the run (cancel is checked before
-	// delete mode), so the delete-mode esc hint yields.
-	warmCaches(m, true)
-	require.True(t, hasDesc(m.ShortHelp(), "cancel"))
-	require.False(t, hasDesc(m.ShortHelp(), "cancel delete mode"))
-	require.True(t, hasDesc(m.ShortHelp(), "delete all attachments"))
-
-	// Armed with rewind armed: esc leaves delete mode first, so the
-	// rewind hint yields instead.
-	warmCaches(m, false)
-	m.esc.set(escRewind)
-	require.False(t, hasDesc(m.ShortHelp(), "press again to rewind"))
-	require.True(t, hasDesc(m.ShortHelp(), "cancel delete mode"))
 }
 
 // TestDetailsHintOnHelpRowOnlyWithSession pins the ctrl+d hint to the

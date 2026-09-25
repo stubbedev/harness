@@ -6,18 +6,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
-	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/dialog"
 )
 
 func newSelectionTestUI() *UI {
 	u := newTestUI()
 	u.dialog = dialog.NewOverlay()
-	sty := u.com.Styles.Attachments
-	u.attachments = attachments.New(
-		attachments.NewRenderer(sty.Normal, sty.Deleting, sty.Image, sty.Text, sty.Skill, sty.Remove),
-		attachments.Keymap{},
-	)
 	u.updateLayoutAndSize()
 	return u
 }
@@ -109,7 +103,7 @@ func TestTextareaMouseSelection(t *testing.T) {
 	// default prompt ("┃ " is 2 cells wide); the origin comes from the
 	// same helper the mouse path uses, so the test cannot drift from
 	// the real geometry.
-	origin := u.textareaOrigin()
+	origin := u.editorContentOrigin()
 	startX := origin.X + 2
 	y := origin.Y
 

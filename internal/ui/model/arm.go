@@ -83,10 +83,7 @@ func (m *UI) armQuit() tea.Cmd {
 // escHintBinding returns the escape hint for the chat, if any: the cancel
 // binding while the agent is busy (relabelled once armed), or the rewind
 // prompt while idle with the first escape pressed. Esc acts only from the
-// editor, so it is hinted only there. The cancel check runs before
-// attachment delete mode consumes esc, so its hint stays accurate while
-// that mode is armed; armed delete mode does consume esc before the
-// rewind path, so the rewind hint yields to it.
+// editor, so it is hinted only there.
 func (m *UI) escHintBinding() (key.Binding, bool) {
 	if m.focus != uiFocusEditor {
 		return key.Binding{}, false
@@ -98,7 +95,7 @@ func (m *UI) escHintBinding() (key.Binding, bool) {
 			b.SetHelp(keys.HelpKeys(b), "press again to cancel")
 		}
 		return b, true
-	case m.esc.state == escRewind && !m.attachments.Deleting():
+	case m.esc.state == escRewind:
 		b.SetHelp(keys.HelpKeys(b), "press again to rewind")
 		return b, true
 	}

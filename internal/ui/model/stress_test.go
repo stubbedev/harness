@@ -40,7 +40,7 @@ func TestBusyTurnRenderSurvivesStress(t *testing.T) {
 	u.updateLayoutAndSize()
 
 	// An inline paste token rides the draft.
-	u.insertPastedAttachment(imagePaste("paste_1.png"))
+	u.insertInlineAttachment(imagePaste("paste_1.png"))
 
 	// A live tool group mid-turn: one done call, one still running.
 	group := chat.NewToolGroupMessageItem(u.com.Styles, busyTurnShellTool(u.com.Styles, "t1", "ls", true))

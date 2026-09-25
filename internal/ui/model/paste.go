@@ -9,34 +9,55 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 )
 
-// pastedAttachmentMsg carries a paste that became an attachment. Rather
-// than joining the attachments strip as a pill, it is referenced inline
-// in the editor by a placeholder token ("[Image #1]",
-// "[Pasted text #1 +24 lines]"), so the prompt reads the way it will be
-// answered and deleting the token deletes the paste.
-type pastedAttachmentMsg struct {
+// inlineAttachmentMsg carries an attachment that rides inline in the
+// editor instead of a pill above it. A paste mints a placeholder token
+// ("[Image #1]", "[Pasted text #1 +24 lines]") inserted at the cursor
+// and stripped again at send, so the prompt reads the way it will be
+// answered. An @-mention (file, MCP resource) rides the path or title
+// the completion already inserted, keeping it in the sent prompt. In
+// both cases deleting the reference deletes the attachment.
+type inlineAttachmentMsg struct {
 	attachment message.Attachment
+	// reference is the editor text a mention rides on. Empty for
+	// pastes: their token is minted on arrival.
+	reference string
 	// lines is the pasted content's line count, shown in a text
 	// paste's token; zero omits the suffix.
 	lines int
 }
 
-// insertPastedAttachment mints the paste's inline token, stores the
-// payload under it, and drops the token into the editor at the cursor.
-func (m *UI) insertPastedAttachment(msg pastedAttachmentMsg) {
+// inlineEntry is a stored attachment plus how its reference leaves the
+// sent prompt: a paste's token is stripped, a mention's text stays.
+type inlineEntry struct {
+	attachment message.Attachment
+	strip      bool
+}
+
+// insertInlineAttachment stores the attachment against its reference.
+// A paste gets a token minted and dropped into the editor at the
+// cursor; a mention is stored against the text already inserted.
+func (m *UI) insertInlineAttachment(msg inlineAttachmentMsg) {
+	if msg.reference != "" {
+		m.storeInlineAttachment(msg.reference, inlineEntry{attachment: msg.attachment})
+		return
+	}
 	kind, lines := msg.attachment.RefKind(), 0
 	if kind == message.RefKindPaste {
 		lines = msg.lines
 	}
 	token := m.mintPasteToken(kind, lines)
-	if m.pastedAttachments == nil {
-		m.pastedAttachments = make(map[string]message.Attachment)
-	}
-	m.pastedAttachments[token] = msg.attachment
+	m.storeInlineAttachment(token, inlineEntry{attachment: msg.attachment, strip: true})
 
 	prevHeight := m.textarea.Height()
 	m.textarea.InsertString(token + " ")
 	_ = m.handleTextareaHeightChange(prevHeight)
+}
+
+func (m *UI) storeInlineAttachment(reference string, entry inlineEntry) {
+	if m.inlineAttachments == nil {
+		m.inlineAttachments = make(map[string]inlineEntry)
+	}
+	m.inlineAttachments[reference] = entry
 }
 
 // mintPasteToken returns the next free inline token for a paste kind:
@@ -46,45 +67,49 @@ func (m *UI) insertPastedAttachment(msg pastedAttachmentMsg) {
 func (m *UI) mintPasteToken(kind string, lines int) string {
 	for n := 1; ; n++ {
 		token := message.FormatRef(kind, n, lines)
-		if _, taken := m.pastedAttachments[token]; !taken {
+		if _, taken := m.inlineAttachments[token]; !taken {
 			return token
 		}
 	}
 }
 
-// resolvePastedAttachments splits the editor text into its clean prompt
-// and the pastes its tokens still reference, consuming the token store:
-// tokens the user deleted take their attachments with them, and a sent
-// prompt leaves nothing behind. Tokens are replaced together with the
-// space that followed their insertion, so the surviving text keeps its
-// shape.
-func (m *UI) resolvePastedAttachments(text string) (string, []message.Attachment) {
-	if len(m.pastedAttachments) == 0 {
+// resolveInlineAttachments splits the editor text into its clean prompt
+// and the attachments its references still carry, consuming the store:
+// a reference the user deleted takes its attachment with it, and a sent
+// prompt leaves nothing behind. Paste tokens are replaced together with
+// the space that followed their insertion; a mention's text stays in
+// the prompt, so the surviving text keeps its shape.
+func (m *UI) resolveInlineAttachments(text string) (string, []message.Attachment) {
+	if len(m.inlineAttachments) == 0 {
 		return text, nil
 	}
 
-	present := make([]string, 0, len(m.pastedAttachments))
-	for token := range m.pastedAttachments {
-		if strings.Contains(text, token) {
-			present = append(present, token)
+	present := make([]string, 0, len(m.inlineAttachments))
+	for reference := range m.inlineAttachments {
+		if strings.Contains(text, reference) {
+			present = append(present, reference)
 		}
 	}
-	// Order by where the tokens sit in the text, so the attachments
+	// Order by where the references sit in the text, so the attachments
 	// array follows the prompt's own order and the output is stable.
 	sort.Slice(present, func(i, j int) bool {
 		return strings.Index(text, present[i]) < strings.Index(text, present[j])
 	})
 
 	attachments := make([]message.Attachment, 0, len(present))
-	for _, token := range present {
-		attachments = append(attachments, m.pastedAttachments[token])
+	for _, reference := range present {
+		entry := m.inlineAttachments[reference]
+		attachments = append(attachments, entry.attachment)
+		if !entry.strip {
+			continue
+		}
 		// Take the space the insertion added with the token, so the
 		// surviving text keeps single spacing; a bare token (cursor
 		// edits) falls through to the plain removal.
-		text = strings.ReplaceAll(text, token+" ", "")
-		text = strings.ReplaceAll(text, token, "")
+		text = strings.ReplaceAll(text, reference+" ", "")
+		text = strings.ReplaceAll(text, reference, "")
 	}
-	clear(m.pastedAttachments)
+	clear(m.inlineAttachments)
 	return strings.TrimSpace(text), attachments
 }
 
@@ -280,7 +305,7 @@ func (m *UI) deleteAsUnits(from, to int) bool {
 	m.textarea.SetCursorColumn(col)
 
 	for _, token := range tokens {
-		delete(m.pastedAttachments, token)
+		delete(m.inlineAttachments, token)
 	}
 	return true
 }

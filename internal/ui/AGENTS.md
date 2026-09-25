@@ -44,7 +44,7 @@ The `UI` struct is the top-level Bubble Tea model. Key fields:
 - `chat *Chat` — wraps `list.List` for the message view
 - `textarea textarea.Model` — the input editor
 - `dialog *dialog.Overlay` — stacked dialog system
-- `completions`, `attachments` — sub-components
+- `completions` — sub-components
 
 Keep most logic and state here. This is where:
 
@@ -56,16 +56,16 @@ Keep most logic and state here. This is where:
 ### Centralized Message Handling
 
 The `UI` model is the **sole Bubble Tea model**. Sub-components (`Chat`,
-`List`, `Attachments`, `Completions`, etc.) do not participate in the
+`List`, `Completions`, etc.) do not participate in the
 standard Elm architecture message loop. They are stateful structs with
 imperative methods that the main model calls directly:
 
 - **`Chat`** and **`List`** have no `Update` method at all. The main model
   calls targeted methods like `HandleMouseDown()`, `ScrollBy()`,
   `SetMessages()`, `Animate()`.
-- **`Attachments`** and **`Completions`** have non-standard `Update`
-  signatures (e.g., returning `bool` for "consumed") that act as guards, not
-  as full Bubble Tea models.
+- **`Completions`** has a non-standard `Update` signature (returning
+  `bool` for "consumed") that acts as a guard, not as a full Bubble Tea
+  model.
 - **Background tasks strip** (subagents) is not its own model: it renders
   from `m.agentTasks` in `model/tasks.go`.
 
@@ -227,7 +227,6 @@ through all components that need access to app state or styles.
 - `common/` — Shared `Common` struct, layout helpers, markdown rendering,
   diff rendering, scrollbar
 - `completions/` — Autocomplete popup with filterable list
-- `attachments/` — File attachment management
 - `styles/` — All style definitions, color tokens, icons
 - `diffview/` — Unified and split diff rendering with syntax highlighting
 - `anim/` — Animated spinnner

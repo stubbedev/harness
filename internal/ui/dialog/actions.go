@@ -98,9 +98,9 @@ type (
 		Skill       *skills.Skill     // Set when this is a skill command
 		ExtensionID string            // Set when this command comes from a Lua extension
 	}
-	// ActionAttachSkill is sent when a skill is selected from the commands
-	// dialog to be attached to the conversation as a markdown attachment.
-	ActionAttachSkill struct {
+	// ActionRunSkill is sent when a skill is selected from the skills
+	// palette: it is loaded and sent as an immediate invocation.
+	ActionRunSkill struct {
 		ID   string
 		Name string
 	}

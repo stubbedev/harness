@@ -457,11 +457,9 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `dialog.sessions.rename` | `ctrl+r` |
 | `dialog.sessions.select` | `enter`, `tab`, `ctrl+y` |
 | `dialog.up_down` | `up`, `down` |
-| `editor.attachment_delete_mode` | `ctrl+r` |
 | `editor.commands` | `:` |
 | `editor.copy_selection` | `ctrl+shift+c` |
 | `editor.cut_selection` | `ctrl+shift+x` |
-| `editor.delete_all_attachments` | `r` |
 | `editor.delete_word_backward` | `ctrl+backspace`, `ctrl+w` |
 | `editor.escape` | `esc` |
 | `editor.history_next` | `down` |

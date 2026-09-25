@@ -12,7 +12,6 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/session"
-	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/dialog"
 )
@@ -39,18 +38,17 @@ func newBangUI() (*UI, *bangWorkspace) {
 	ws := &bangWorkspace{countingWorkspace: &countingWorkspace{ready: true}}
 	com := common.DefaultCommon(ws)
 	m := &UI{
-		com:         com,
-		status:      NewStatus(com, nil),
-		chat:        NewChat(com, config.ScrollbarDefault),
-		textarea:    textarea.New(),
-		state:       uiChat,
-		focus:       uiFocusEditor,
-		width:       140,
-		height:      45,
-		session:     &session.Session{ID: "s1"},
-		keyMap:      DefaultKeyMap(),
-		dialog:      dialog.NewOverlay(),
-		attachments: attachments.New(nil, attachments.Keymap{}),
+		com:      com,
+		status:   NewStatus(com, nil),
+		chat:     NewChat(com, config.ScrollbarDefault),
+		textarea: textarea.New(),
+		state:    uiChat,
+		focus:    uiFocusEditor,
+		width:    140,
+		height:   45,
+		session:  &session.Session{ID: "s1"},
+		keyMap:   DefaultKeyMap(),
+		dialog:   dialog.NewOverlay(),
 	}
 	// Production always has the prompt focused when the user types; the
 	// textarea drops keys while blurred, which would silently skip the

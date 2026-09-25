@@ -79,11 +79,11 @@ func TestSkillsPaletteListsOnlySkills(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "rust-expert", item.title)
 
-	// Enter runs the attach-skill action.
+	// Enter runs the skill immediately.
 	action := item.Action()
-	attach, ok := action.(ActionAttachSkill)
-	require.True(t, ok, "selecting a skill attaches it, got %T", action)
-	assert.Equal(t, "/skills/rust-expert/SKILL.md", attach.ID)
+	run, ok := action.(ActionRunSkill)
+	require.True(t, ok, "selecting a skill runs it, got %T", action)
+	assert.Equal(t, "/skills/rust-expert/SKILL.md", run.ID)
 }
 
 // TestCommandsPaletteUserTabExcludesSkills pins the ":" palette split:
@@ -101,8 +101,8 @@ func TestCommandsPaletteUserTabExcludesSkills(t *testing.T) {
 	item, ok := items[0].(*CommandItem)
 	require.True(t, ok)
 	assert.Equal(t, "review", item.title)
-	_, isAttach := item.Action().(ActionAttachSkill)
-	assert.False(t, isAttach, "the commands palette must not offer skills")
+	_, isRun := item.Action().(ActionRunSkill)
+	assert.False(t, isRun, "the commands palette must not offer skills")
 }
 
 // TestSkillsPaletteQueryRanksNameAboveDescription pins the issue #59

@@ -13,26 +13,26 @@ import (
 // insertPastes is the shared harness for the inline-paste tests: paste
 // the given payloads and return the UI, whose editor now references
 // them by inline tokens.
-func insertPastes(t *testing.T, pastes ...pastedAttachmentMsg) *UI {
+func insertPastes(t *testing.T, pastes ...inlineAttachmentMsg) *UI {
 	t.Helper()
 	m := newBusyUI(&countingWorkspace{ready: true})
 	m.textarea.Focus()
 	for _, p := range pastes {
-		m.insertPastedAttachment(p)
+		m.insertInlineAttachment(p)
 	}
 	return m
 }
 
-func imagePaste(name string) pastedAttachmentMsg {
-	return pastedAttachmentMsg{
+func imagePaste(name string) inlineAttachmentMsg {
+	return inlineAttachmentMsg{
 		attachment: message.Attachment{
 			FileName: name, FilePath: name, MimeType: "image/png", Content: []byte(name),
 		},
 	}
 }
 
-func textPaste(name, content string, lines int) pastedAttachmentMsg {
-	return pastedAttachmentMsg{
+func textPaste(name, content string, lines int) inlineAttachmentMsg {
+	return inlineAttachmentMsg{
 		attachment: message.Attachment{
 			FileName: name, FilePath: name, MimeType: "text/plain", Content: []byte(content),
 		},
@@ -59,17 +59,16 @@ func setEditorText(t *testing.T, m *UI, value string, col int) {
 	m.textarea.SetCursorColumn(col - lineStart)
 }
 
-// TestPastedAttachmentsInsertInlineTokens pins the paste flow: a paste
-// drops a placeholder token into the editor at the cursor instead of a
-// pill in the attachments strip, images and text paste under their own
-// kinds, and numbering stays dense.
-func TestPastedAttachmentsInsertInlineTokens(t *testing.T) {
+// TestInlineAttachmentsInsertPasteTokens pins the paste flow: a paste
+// drops a placeholder token into the editor at the cursor, images and
+// text paste under their own kinds, and numbering stays dense.
+func TestInlineAttachmentsInsertPasteTokens(t *testing.T) {
 	t.Parallel()
 
 	m := insertPastes(t,
 		imagePaste("paste_1.png"),
 		imagePaste("paste_2.png"),
-		pastedAttachmentMsg{
+		inlineAttachmentMsg{
 			attachment: message.Attachment{
 				FileName: "paste_1.txt", FilePath: "paste_1.txt",
 				MimeType: "text/plain", Content: []byte("a\nb\nc"),
@@ -79,45 +78,81 @@ func TestPastedAttachmentsInsertInlineTokens(t *testing.T) {
 	)
 
 	require.Equal(t, "[Image #1] [Image #2] [Pasted text #1 +3 lines] ", m.textarea.Value())
-	require.Len(t, m.attachments.List(), 0, "pastes must not join the attachments strip")
-	require.Len(t, m.pastedAttachments, 3)
+	require.Len(t, m.inlineAttachments, 3)
 }
 
-// TestResolvePastedAttachments pins the send-time resolution: tokens
+// TestResolveInlineAttachments pins the send-time resolution: tokens
 // are swapped for their payloads and stripped from the prompt, a token
 // the user deleted takes its attachment with it, and the store is
 // consumed.
-func TestResolvePastedAttachments(t *testing.T) {
+func TestResolveInlineAttachments(t *testing.T) {
 	t.Parallel()
 
 	m := insertPastes(t, imagePaste("paste_1.png"), imagePaste("paste_2.png"))
 	m.textarea.SetValue("compare [Image #1] with the other one")
 	// The user deleted the second token; its paste goes with it.
-	text, attachments := m.resolvePastedAttachments(m.textarea.Value())
+	text, attachments := m.resolveInlineAttachments(m.textarea.Value())
 	require.Equal(t, "compare with the other one", text)
 	require.Len(t, attachments, 1)
 	require.Equal(t, "paste_1.png", attachments[0].FileName)
-	require.Empty(t, m.pastedAttachments, "sending consumes the token store")
+	require.Empty(t, m.inlineAttachments, "sending consumes the token store")
 
 	// A clean editor resolves to itself with no attachments.
-	text, attachments = m.resolvePastedAttachments("plain prompt")
+	text, attachments = m.resolveInlineAttachments("plain prompt")
 	require.Equal(t, "plain prompt", text)
 	require.Empty(t, attachments)
 }
 
-// TestResolvePastedAttachmentsKeepsOrder pins the attachment order to
+// TestResolveInlineAttachmentsKeepsOrder pins the attachment order to
 // the prompt's own token order.
-func TestResolvePastedAttachmentsKeepsOrder(t *testing.T) {
+func TestResolveInlineAttachmentsKeepsOrder(t *testing.T) {
 	t.Parallel()
 
 	m := insertPastes(t, imagePaste("paste_1.png"), imagePaste("paste_2.png"), imagePaste("paste_3.png"))
 	m.textarea.Reset()
 	m.textarea.InsertString("third [Image #3] then first [Image #1]")
 
-	_, attachments := m.resolvePastedAttachments(m.textarea.Value())
+	_, attachments := m.resolveInlineAttachments(m.textarea.Value())
 	require.Len(t, attachments, 2)
 	require.Equal(t, "paste_3.png", attachments[0].FileName)
 	require.Equal(t, "paste_1.png", attachments[1].FileName)
+}
+
+// TestResolveInlineAttachmentsMentionKeepsText pins the mention flow:
+// an @-mention rides the path text already in the editor, so sending
+// keeps the path in the prompt, and deleting the path drops the
+// content with it.
+func TestResolveInlineAttachmentsMentionKeepsText(t *testing.T) {
+	t.Parallel()
+
+	m := insertPastes(t)
+	m.textarea.InsertString("review internal/ui/model/ui.go please")
+	m.insertInlineAttachment(inlineAttachmentMsg{
+		reference: "internal/ui/model/ui.go",
+		attachment: message.Attachment{
+			FileName: "ui.go", FilePath: "internal/ui/model/ui.go",
+			MimeType: "text/plain", Content: []byte("package model"),
+		},
+	})
+
+	text, attachments := m.resolveInlineAttachments(m.textarea.Value())
+	require.Equal(t, "review internal/ui/model/ui.go please", text)
+	require.Len(t, attachments, 1)
+	require.Equal(t, "ui.go", attachments[0].FileName)
+	require.Empty(t, m.inlineAttachments, "sending consumes the store")
+
+	// The user deleted the path; the content goes with it.
+	m.insertInlineAttachment(inlineAttachmentMsg{
+		reference: "internal/ui/model/ui.go",
+		attachment: message.Attachment{
+			FileName: "ui.go", FilePath: "internal/ui/model/ui.go",
+			MimeType: "text/plain", Content: []byte("package model"),
+		},
+	})
+	m.textarea.SetValue("review please")
+	text, attachments = m.resolveInlineAttachments(m.textarea.Value())
+	require.Equal(t, "review please", text)
+	require.Empty(t, attachments)
 }
 
 // The deletion tests drive the real Update path: one helper per delete
@@ -150,14 +185,14 @@ func TestDeletionBackspaceUnit(t *testing.T) {
 	typeKeys(t, m, backspaceKey())
 	require.Equal(t, "x y", m.textarea.Value())
 	require.Equal(t, 2, m.textarea.Column(), "cursor moves to the token's start")
-	require.Empty(t, m.pastedAttachments, "the payload goes with the token")
+	require.Empty(t, m.inlineAttachments, "the payload goes with the token")
 
 	m = insertPastes(t, imagePaste("paste_1.png"))
 	setEditorText(t, m, "pre [Image #1] post", 7) // inside the token
 	typeKeys(t, m, backspaceKey())
 	require.Equal(t, "pre post", m.textarea.Value())
 	require.Equal(t, 4, m.textarea.Column())
-	require.Empty(t, m.pastedAttachments)
+	require.Empty(t, m.inlineAttachments)
 }
 
 // TestDeletionBackspaceMultiLine pins the cursor restoration when the
@@ -173,7 +208,7 @@ func TestDeletionBackspaceMultiLine(t *testing.T) {
 	require.Equal(t, "see \nnext line", m.textarea.Value())
 	require.Equal(t, 0, m.textarea.Line())
 	require.Equal(t, 4, m.textarea.Column())
-	require.Empty(t, m.pastedAttachments)
+	require.Empty(t, m.inlineAttachments)
 }
 
 // TestDeletionForwardUnit pins the forward delete at the token: the
@@ -188,13 +223,13 @@ func TestDeletionForwardUnit(t *testing.T) {
 	typeKeys(t, m, deleteKey())
 	require.Equal(t, "x y", m.textarea.Value())
 	require.Equal(t, 2, m.textarea.Column())
-	require.Empty(t, m.pastedAttachments)
+	require.Empty(t, m.inlineAttachments)
 
 	m = insertPastes(t, imagePaste("paste_1.png"))
 	setEditorText(t, m, "pre [Image #1] post", 7) // inside the token
 	typeKeys(t, m, deleteKey())
 	require.Equal(t, "pre post", m.textarea.Value())
-	require.Empty(t, m.pastedAttachments)
+	require.Empty(t, m.inlineAttachments)
 }
 
 // TestDeletionWordUnit pins the word deletions (ctrl+w, ctrl+backspace,
@@ -210,7 +245,7 @@ func TestDeletionWordUnit(t *testing.T) {
 		typeKeys(t, m, key)
 		require.Equal(t, "x y", m.textarea.Value())
 		require.Equal(t, 2, m.textarea.Column())
-		require.Empty(t, m.pastedAttachments)
+		require.Empty(t, m.inlineAttachments)
 
 		m = insertPastes(t, imagePaste("paste_1.png"))
 		setEditorText(t, m, "pre [Image #1] post", 7)
@@ -224,7 +259,7 @@ func TestDeletionWordUnit(t *testing.T) {
 	typeKeys(t, m, tea.KeyPressMsg{Code: tea.KeyDelete, Mod: tea.ModAlt})
 	require.Equal(t, "pre post", m.textarea.Value())
 	require.Equal(t, 4, m.textarea.Column())
-	require.Empty(t, m.pastedAttachments)
+	require.Empty(t, m.inlineAttachments)
 }
 
 // TestDeletionKillToEdgeUnit pins the line kills: ctrl+k from inside a
@@ -237,13 +272,13 @@ func TestDeletionKillToEdgeUnit(t *testing.T) {
 	setEditorText(t, m, "pre [Image #1] post", 7)
 	typeKeys(t, m, ctrlKKey())
 	require.Equal(t, "pre ", m.textarea.Value())
-	require.Empty(t, m.pastedAttachments)
+	require.Empty(t, m.inlineAttachments)
 
 	m = insertPastes(t, imagePaste("paste_1.png"))
 	setEditorText(t, m, "pre [Image #1] post", 10)
 	typeKeys(t, m, ctrlUKey())
 	require.Equal(t, "post", m.textarea.Value())
-	require.Empty(t, m.pastedAttachments)
+	require.Empty(t, m.inlineAttachments)
 }
 
 // TestDeletionMisses pins the guard: deletions that do not touch a
@@ -258,19 +293,19 @@ func TestDeletionMisses(t *testing.T) {
 	setEditorText(t, m, "x [Image #1] y", 2)
 	typeKeys(t, m, backspaceKey())
 	require.Equal(t, "x[Image #1] y", m.textarea.Value())
-	require.Len(t, m.pastedAttachments, 1)
+	require.Len(t, m.inlineAttachments, 1)
 
 	// Cursor right after the trailing space: only the space goes.
 	setEditorText(t, m, "x [Image #1] y", 13)
 	typeKeys(t, m, backspaceKey())
 	require.Equal(t, "x [Image #1]y", m.textarea.Value())
-	require.Len(t, m.pastedAttachments, 1)
+	require.Len(t, m.inlineAttachments, 1)
 
 	// A half-deleted token is no longer a reference.
 	setEditorText(t, m, "x [Image #1", 11)
 	typeKeys(t, m, backspaceKey())
 	require.Equal(t, "x [Image #", m.textarea.Value())
-	require.Len(t, m.pastedAttachments, 1)
+	require.Len(t, m.inlineAttachments, 1)
 }
 
 // TestDeletionSelectionUnit pins the selection deletions: a backspace
@@ -288,7 +323,7 @@ func TestDeletionSelectionUnit(t *testing.T) {
 	}
 	typeKeys(t, m, backspaceKey())
 	require.Equal(t, "x y", m.textarea.Value())
-	require.Empty(t, m.pastedAttachments, "a token the selection touches goes whole")
+	require.Empty(t, m.inlineAttachments, "a token the selection touches goes whole")
 
 	// Cut over a token: the clipboard keeps the selected text, the
 	// token goes whole.
@@ -299,7 +334,7 @@ func TestDeletionSelectionUnit(t *testing.T) {
 	}
 	typeKeys(t, m, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl | tea.ModShift})
 	require.Equal(t, "x y", m.textarea.Value())
-	require.Empty(t, m.pastedAttachments)
+	require.Empty(t, m.inlineAttachments)
 }
 
 // TestPasteTokenKinds pins the classification the shared RefKind drives:
@@ -310,7 +345,7 @@ func TestPasteTokenKinds(t *testing.T) {
 
 	m := insertPastes(t,
 		textPaste("paste_1.txt", "a\nb\nc", 3),
-		pastedAttachmentMsg{attachment: message.Attachment{
+		inlineAttachmentMsg{attachment: message.Attachment{
 			FileName: "paste_2.pdf", FilePath: "paste_2.pdf",
 			MimeType: "application/pdf", Content: []byte("%PDF"),
 		}},

@@ -52,11 +52,6 @@ const (
 	TodoPendingIcon    string = "•"
 	TodoInProgressIcon string = "→"
 
-	ImageIcon  string = "■"
-	TextIcon   string = "≡"
-	SkillIcon  string = "▲"
-	RemoveIcon string = "✕"
-
 	SubagentIcon string = "●"
 
 	ScrollbarThumb string = "┃"
@@ -499,16 +494,6 @@ type Styles struct {
 		InfoMessage    lipgloss.Style
 		UpdateMessage  lipgloss.Style
 		SuccessMessage lipgloss.Style
-	}
-
-	// Attachments styles
-	Attachments struct {
-		Normal   lipgloss.Style
-		Image    lipgloss.Style
-		Text     lipgloss.Style
-		Skill    lipgloss.Style
-		Remove   lipgloss.Style
-		Deleting lipgloss.Style
 	}
 
 	// Pills styles for the todo pill

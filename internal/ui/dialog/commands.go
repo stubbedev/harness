@@ -383,7 +383,7 @@ func (m skillsMenu) items() []*CommandItem {
 		if cmd.Skill == nil {
 			continue
 		}
-		action := ActionAttachSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
+		action := ActionRunSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
 		item := NewCommandItem(m.c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
 		item = item.WithDescription(cmd.Skill.Description)
 		// The source prefix (project:/user:/system:) labels where the

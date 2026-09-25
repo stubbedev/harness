@@ -16,7 +16,6 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/session"
-	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/dialog"
 	"github.com/stubbedev/harness/internal/ui/notification"
@@ -178,18 +177,17 @@ func newBusyUI(ws *countingWorkspace) *UI {
 	com := common.DefaultCommon(ws)
 	km := DefaultKeyMap()
 	return &UI{
-		com:         com,
-		status:      NewStatus(com, nil),
-		chat:        NewChat(com, config.ScrollbarDefault),
-		textarea:    textarea.New(),
-		state:       uiChat,
-		focus:       uiFocusEditor,
-		width:       140,
-		height:      45,
-		session:     &session.Session{ID: "s1"},
-		keyMap:      km,
-		dialog:      dialog.NewOverlay(),
-		attachments: attachments.New(nil, attachments.Keymap{DeleteMode: km.Editor.AttachmentDeleteMode, DeleteAll: km.Editor.DeleteAllAttachments, Escape: km.Editor.Escape}),
+		com:      com,
+		status:   NewStatus(com, nil),
+		chat:     NewChat(com, config.ScrollbarDefault),
+		textarea: textarea.New(),
+		state:    uiChat,
+		focus:    uiFocusEditor,
+		width:    140,
+		height:   45,
+		session:  &session.Session{ID: "s1"},
+		keyMap:   km,
+		dialog:   dialog.NewOverlay(),
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/chat"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/dialog"
@@ -181,7 +180,6 @@ func newFrameTestUI(t testing.TB) *UI {
 	u.keyMap = DefaultKeyMap()
 	u.focus = uiFocusMain
 	u.status = NewStatus(u.com, u)
-	u.attachments = attachments.New(nil, attachments.Keymap{})
 	u.chat.scrollbarMode = config.ScrollbarAlways
 	u.chat.SetMessages(frameTestItems("line")...)
 	u.updateLayoutAndSize()

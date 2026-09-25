@@ -51,7 +51,6 @@ import (
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/stringext"
 	"github.com/stubbedev/harness/internal/subagents"
-	"github.com/stubbedev/harness/internal/ui/attachments"
 	"github.com/stubbedev/harness/internal/ui/chat"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/completions"
@@ -68,11 +67,6 @@ const sessionDetailsMaxHeight = 20
 
 // TextareaMaxHeight is the maximum height of the prompt textarea.
 const TextareaMaxHeight = 15
-
-// editorHeightMargin is the height of the attachments strip rendered
-// above the textarea while it has pills; the editor reserves it only
-// then, so with no attachments the frame hugs the textarea.
-const editorHeightMargin = 1
 
 // editorFrameRows is the height of the editor's frame: one rule line
 // above the content and one below it. drawEditorArea draws them and
@@ -317,12 +311,10 @@ type UI struct {
 	// Draw call, used by the cursor positioning logic below.
 	inlineCursor *tea.Cursor
 
-	// Attachment list
-	attachments *attachments.Attachments
-
-	// pastedAttachments holds pastes referenced by the editor's inline
-	// placeholder tokens, keyed by the token text. See paste.go.
-	pastedAttachments map[string]message.Attachment
+	// inlineAttachments holds attachments referenced inline in the
+	// editor - a paste by its placeholder token, a mention by the text
+	// it inserted - keyed by the reference text. See paste.go.
+	inlineAttachments map[string]inlineEntry
 
 	readyPlaceholder   string
 	workingPlaceholder string
@@ -539,23 +531,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		spinner.WithStyle(com.Styles.Pills.TodoSpinner),
 	)
 
-	// Attachments component
-	attachments := attachments.New(
-		attachments.NewRenderer(
-			com.Styles.Attachments.Normal,
-			com.Styles.Attachments.Deleting,
-			com.Styles.Attachments.Image,
-			com.Styles.Attachments.Text,
-			com.Styles.Attachments.Skill,
-			com.Styles.Attachments.Remove,
-		),
-		attachments.Keymap{
-			DeleteMode: keyMap.Editor.AttachmentDeleteMode,
-			DeleteAll:  keyMap.Editor.DeleteAllAttachments,
-			Escape:     keyMap.Editor.Escape,
-		},
-	)
-
 	header := newHeader(com)
 
 	ui := &UI{
@@ -565,7 +540,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		textarea:            ta,
 		chat:                ch,
 		header:              header,
-		attachments:         attachments,
 		todoSpinner:         todoSpinner,
 		taskSpinner:         taskSpinner,
 		frames:              newFrameCache(frameCacheTTL, frameCacheMaxEntries),
@@ -1331,16 +1305,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 
-		// Check if the click landed on an attachment's remove button.
-		// The attachment chips are rendered on the content's first row
-		// (editorContentOrigin), above the textarea.
-		if m.activeInline == nil && msg.Button == uv.MouseLeft && m.hasAttachments() && msg.Y == m.editorContentOrigin().Y {
-			relX := msg.X - m.layout.editor.Min.X
-			if m.attachments.HandleClick(relX) {
-				return m, tea.Batch(cmds...)
-			}
-		}
-
 		// Forward clicks within the textarea region to the textarea so it
 		// can position the cursor and start a selection.
 		if m.activeInline == nil {
@@ -1553,11 +1517,11 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.handlePasteMsg(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case pastedAttachmentMsg:
-		// A paste landed: reference it inline in the editor with a
-		// placeholder token instead of adding a pill to the attachments
-		// strip (see paste.go).
-		m.insertPastedAttachment(msg)
+	case inlineAttachmentMsg:
+		// An inline attachment landed: a paste gains a placeholder
+		// token in the editor, a mention rides the text it inserted
+		// (see paste.go).
+		m.insertInlineAttachment(msg)
 	case openEditorMsg:
 		prevHeight := m.textarea.Height()
 		m.textarea.SetValue(msg.Text)
@@ -1671,14 +1635,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// goroutine.
 	cmds = append(cmds, m.staleWorkspaceRefreshCmds()...)
 
-	// at this point this can only handle [message.Attachment] message, and we
-	// should return all cmds anyway.
-	if m.attachments.Update(msg) {
-		m.invalidateFrames()
-		// The editor reserves a row for the attachments strip, so a
-		// count change is a layout change.
-		m.updateLayoutAndSize()
-	}
 	// Any update may have put a spinner on screen (new message, tool update,
 	// scroll, session load); make sure the clock is running. This is the
 	// sole place the clock is armed so a tick never sits inside a caller's
@@ -2298,9 +2254,9 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, util.CmdHandler(sendMessageMsg{Name: msg.Name, Content: content}))
 		}
 		m.dialog.CloseFrontDialog()
-	case dialog.ActionAttachSkill:
+	case dialog.ActionRunSkill:
 		m.dialog.CloseFrontDialog()
-		cmds = append(cmds, m.attachSkill(msg.ID, msg.Name))
+		cmds = append(cmds, m.runSkill(msg.ID, msg.Name))
 	case dialog.ActionRunMCPPrompt:
 		if len(msg.Arguments) > 0 && msg.Args == nil {
 			m.dialog.CloseFrontDialog()
@@ -2729,11 +2685,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	case uiChat, uiLanding:
 		switch m.focus {
 		case uiFocusEditor:
-			if ok := m.attachments.Update(msg); ok {
-				m.updateLayoutAndSize()
-				return tea.Batch(cmds...)
-			}
-
 			switch {
 			case key.Matches(msg, m.keyMap.Editor.Paste):
 				cmds = append(cmds, m.pasteFromClipboard)
@@ -2769,12 +2720,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					return tea.Batch(m.runShellCommand(value))
 				}
 
-				attachments := m.attachments.List()
-				m.attachments.Reset()
-				// Pasted attachments ride inline tokens in the text; swap
-				// them for the payloads and strip the tokens.
-				value, pasted := m.resolvePastedAttachments(value)
-				attachments = append(attachments, pasted...)
+				// Inline attachments ride references in the text; swap them
+				// for the payloads. Paste tokens are stripped, mention text
+				// stays.
+				value, attachments := m.resolveInlineAttachments(value)
 				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
 					return nil
 				}
@@ -3172,10 +3121,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		}
 
 		if m.textarea.Focused() {
-			// Editor may not start at the screen edge; the origin
-			// carries the attachments-strip offset so the cursor sits
-			// on the field itself.
-			origin := m.textareaOrigin()
+			// Editor may not start at the screen edge; the origin carries
+			// the top frame line so the cursor sits on the field itself.
+			origin := m.editorContentOrigin()
 			return common.OffsetCursor(m.textarea.Cursor(), origin.X, origin.Y, 0, 0)
 		}
 	}
@@ -3271,30 +3219,10 @@ func (m *UI) editorPalettesLive() bool {
 	return m.focus == uiFocusEditor && m.textarea.Value() == "" && !m.bangMode
 }
 
-// attachmentHelpBinds returns the attachment bindings that work in the
-// current mode, so the help never advertises an attachment key the live
-// routing would not honor. ctrl+r arms delete mode whenever attachments
-// exist; once armed, esc leaves it and r clears every attachment. While a
-// busy cancel would consume esc first (it is checked before delete mode),
-// the esc hint steps aside.
-func attachmentHelpBinds(k *KeyMap, hasAttachments, deleting, busy bool) []key.Binding {
-	switch {
-	case deleting && !busy:
-		return []key.Binding{k.Editor.Escape, k.Editor.DeleteAllAttachments}
-	case deleting:
-		return []key.Binding{k.Editor.DeleteAllAttachments}
-	case hasAttachments:
-		return []key.Binding{k.Editor.AttachmentDeleteMode}
-	default:
-		return nil
-	}
-}
-
 // ShortHelp implements [help.KeyMap].
 func (m *UI) ShortHelp() []key.Binding {
 	var binds []key.Binding
 	k := &m.keyMap
-	deleting := m.attachments.Deleting()
 
 	// A dialog owns the keyboard while it is open, so the hints are its
 	// own; the bottom-anchored panels leave that status line visible.
@@ -3339,7 +3267,6 @@ func (m *UI) ShortHelp() []key.Binding {
 				binds,
 				k.Editor.Newline,
 			)
-			binds = append(binds, attachmentHelpBinds(k, m.hasAttachments(), deleting, m.isAgentBusy())...)
 		case uiFocusMain:
 			binds = append(
 				binds,
@@ -3370,7 +3297,7 @@ func (m *UI) ShortHelp() []key.Binding {
 			)...,
 		)
 		if m.focus == uiFocusEditor {
-			binds = append(binds, attachmentHelpBinds(k, m.hasAttachments(), deleting, m.isAgentBusy())...)
+			binds = append(binds, k.Editor.Newline)
 		}
 	}
 
@@ -3399,10 +3326,8 @@ func (m *UI) FullHelp() [][]key.Binding {
 
 	var binds [][]key.Binding
 	k := &m.keyMap
-	deleting := m.attachments.Deleting()
 	help := k.Help
 	help.SetHelp(keys.HelpKeys(help), "less")
-	hasAttachments := m.hasAttachments()
 	hasSession := m.hasSession()
 
 	switch m.state {
@@ -3450,9 +3375,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 				editorBinds = append(editorBinds, k.Editor.Paste)
 			}
 			binds = append(binds, editorBinds)
-			if attBinds := attachmentHelpBinds(k, hasAttachments, deleting, m.isAgentBusy()); len(attBinds) > 0 {
-				binds = append(binds, attBinds)
-			}
 		case uiFocusMain:
 			binds = append(
 				binds,
@@ -3513,9 +3435,6 @@ func (m *UI) FullHelp() [][]key.Binding {
 				editorBinds = append(editorBinds, k.Editor.Paste)
 			}
 			binds = append(binds, editorBinds)
-			if attBinds := attachmentHelpBinds(k, hasAttachments, deleting, m.isAgentBusy()); len(attBinds) > 0 {
-				binds = append(binds, attBinds)
-			}
 		}
 	}
 
@@ -3580,25 +3499,13 @@ func (m *UI) updateTextarea(msg tea.Msg) tea.Cmd {
 }
 
 // editorContentOrigin returns the top-left cell of the editor's
-// content - the attachments strip, or without pills the textarea -
-// directly below the top frame line. Together with textareaOrigin it
-// is the single source for everything that translates between screen
+// content - the textarea - directly below the top frame line. It is
+// the single source for everything that translates between screen
 // space and the editor's local space (cursor positioning, mouse
-// forwarding, the completions popup, the strip's hit-testing), so none
-// of them can drift from what drawEditorArea draws.
+// forwarding, the completions popup), so none of them can drift from
+// what drawEditorArea draws.
 func (m *UI) editorContentOrigin() image.Point {
 	return image.Pt(m.layout.editor.Min.X, m.layout.editor.Min.Y+1) // +1: top frame line
-}
-
-// textareaOrigin returns the textarea's top-left cell in screen space:
-// the content origin, pushed down past the attachments strip when
-// there is one.
-func (m *UI) textareaOrigin() image.Point {
-	origin := m.editorContentOrigin()
-	if m.hasAttachments() {
-		origin.Y += editorHeightMargin
-	}
-	return origin
 }
 
 // forwardMouseToTextarea forwards a mouse event to the textarea with
@@ -3607,9 +3514,8 @@ func (m *UI) textareaOrigin() image.Point {
 func (m *UI) forwardMouseToTextarea(msg tea.MouseMsg) bool {
 	mouse := msg.Mouse()
 
-	// The textarea is rendered inside layout.editor below the
-	// attachments strip when there is one.
-	origin := m.textareaOrigin()
+	// The textarea is rendered inside layout.editor.
+	origin := m.editorContentOrigin()
 
 	// The textarea occupies its own height starting at the origin.
 	area := image.Rectangle{Min: origin, Max: origin.Add(image.Pt(m.layout.editor.Dx(), m.textarea.Height()))}
@@ -3703,14 +3609,10 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 
 	// The help height
 	helpHeight := 1
-	// The editor height: its content (the textarea plus the
-	// attachments strip while it has pills; an active inline editor's
-	// height instead) wrapped in the frame lines drawn above and below
-	// it.
+	// The editor height: its content (the textarea; an active inline
+	// editor's height instead) wrapped in the frame lines drawn above
+	// and below it.
 	editorHeight := m.textarea.Height()
-	if m.hasAttachments() {
-		editorHeight += editorHeightMargin
-	}
 	if m.activeInline != nil {
 		// The editor content width depends only on terminal width
 		// and layout (not on editor height), so passing the current
@@ -3982,7 +3884,9 @@ func (m *UI) insertCompletionText(text string) bool {
 }
 
 // insertFileCompletion inserts the selected file path into the textarea,
-// replacing the @query, and adds the file as an attachment.
+// replacing the @query. The file's content rides the path as an inline
+// attachment: it ships with the next send while the path text stays in
+// the prompt, and deleting the path drops the content.
 func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	prevHeight := m.textarea.Height()
 	if !m.insertCompletionText(path) {
@@ -4015,18 +3919,22 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 			return nil
 		}
 
-		// Add file as attachment.
+		// Add the file's content as an inline attachment riding the
+		// inserted path text.
 		content, err := os.ReadFile(path)
 		if err != nil {
 			// If it fails, let the LLM handle it later.
 			return nil
 		}
 
-		return message.Attachment{
-			FilePath: path,
-			FileName: filepath.Base(path),
-			MimeType: mimeOf(content),
-			Content:  content,
+		return inlineAttachmentMsg{
+			reference: path,
+			attachment: message.Attachment{
+				FilePath: path,
+				FileName: filepath.Base(path),
+				MimeType: mimeOf(content),
+				Content:  content,
+			},
 		}
 	}
 	return tea.Batch(heightCmd, fileCmd)
@@ -4042,7 +3950,8 @@ func (m *UI) insertSubagentCompletion(name string) tea.Cmd {
 }
 
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
-// replacing the @query, and adds the resource as an attachment.
+// replacing the @query. The resource's content rides the inserted text as
+// an inline attachment.
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
 	displayText := cmp.Or(item.Title, item.URI)
 
@@ -4089,11 +3998,14 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 			return util.NewWarnMsg("The current model does not support image attachments")
 		}
 
-		return message.Attachment{
-			FilePath: item.URI,
-			FileName: displayText,
-			MimeType: mimeType,
-			Content:  data,
+		return inlineAttachmentMsg{
+			reference: displayText,
+			attachment: message.Attachment{
+				FilePath: item.URI,
+				FileName: displayText,
+				MimeType: mimeType,
+				Content:  data,
+			},
 		}
 	}
 	return tea.Batch(heightCmd, resourceCmd)
@@ -4192,27 +4104,9 @@ func (m *UI) drawEditorArea(scr uv.Screen, editorRect uv.Rectangle) {
 		}
 		return
 	}
-	editor := uv.NewStyledString(m.renderEditorView(scr.Bounds().Dx()))
+	editor := uv.NewStyledString(m.textarea.View())
 	editor.Draw(scr, editorRect)
 	m.inlineCursor = nil
-}
-
-// hasAttachments reports whether the attachments strip has pills to
-// show. The single source for the layout row reservation, the strip
-// render, the mouse hit region and the help gating, so they cannot
-// drift apart.
-func (m *UI) hasAttachments() bool {
-	return m.attachments != nil && len(m.attachments.List()) > 0
-}
-
-// renderEditorView renders the editor view with attachments if any.
-// With no attachments the textarea is the whole area - no blank
-// placeholder row is reserved.
-func (m *UI) renderEditorView(width int) string {
-	if m.hasAttachments() {
-		return m.attachments.Render(width) + "\n" + m.textarea.View()
-	}
-	return m.textarea.View()
 }
 
 // applyThemeForProvider swaps the active theme to the one associated with
@@ -4281,40 +4175,33 @@ func (m *UI) refreshStyles() {
 	t := m.com.Styles
 	m.header.refresh()
 	m.textarea.SetStyles(t.Editor.Textarea)
-	m.attachments.Renderer().SetStyles(
-		t.Attachments.Normal,
-		t.Attachments.Deleting,
-		t.Attachments.Image,
-		t.Attachments.Text,
-		t.Attachments.Skill,
-		t.Attachments.Remove,
-	)
 	m.todoSpinner.Style = t.Pills.TodoSpinner
 	m.status.help.Styles = t.Help
 	m.chat.InvalidateRenderCaches()
 }
 
-// attachSkill reads a skill's content by ID and returns it as a markdown
-// attachment to be added to the attachment toolbar. The user can then
-// compose a message and send it with the skill attached.
+// runSkill loads a skill's body by ID and sends it as an immediate
+// invocation. Selecting a skill runs it; there is no intermediate
+// attachment to compose against. The content keeps its
+// <loaded_skill> wrapper, which the transcript renders compactly.
 // The name parameter is used as a fallback when the server does not
 // return one.
-func (m *UI) attachSkill(skillID, name string) tea.Cmd {
+func (m *UI) runSkill(skillID, name string) tea.Cmd {
 	return func() tea.Msg {
 		content, result, err := m.com.Workspace.ReadSkill(context.Background(), skillID)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
-		fileName := result.Name
-		if fileName == "" {
-			fileName = name
+		skill, err := skills.ParseContent(content)
+		if err != nil {
+			return util.NewErrorMsg(fmt.Errorf("parse skill %q: %w", name, err))
 		}
-		return message.Attachment{
-			FilePath: fileName,
-			FileName: fileName,
-			MimeType: "text/markdown",
-			Content:  content,
+		skill.Name = cmp.Or(result.Name, skill.Name)
+		skill.SkillFilePath = skillID
+		if skill.Description == "" {
+			skill.Description = result.Description
 		}
+		return sendMessageMsg{Content: skill.FormatInvocation()}
 	}
 }
 
@@ -5149,7 +5036,7 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
 			mimeBufferSize := min(512, len(content))
 			mimeType := http.DetectContentType(content[:mimeBufferSize])
-			return pastedAttachmentMsg{
+			return inlineAttachmentMsg{
 				attachment: message.Attachment{
 					FileName: name,
 					FilePath: name,
@@ -5234,7 +5121,7 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 		mimeBufferSize := min(512, len(content))
 		mimeType := http.DetectContentType(content[:mimeBufferSize])
 		fileName := filepath.Base(path)
-		return pastedAttachmentMsg{
+		return inlineAttachmentMsg{
 			attachment: message.Attachment{
 				FilePath: path,
 				FileName: fileName,
@@ -5274,7 +5161,7 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 	}
 	name := fmt.Sprintf("paste_%d.png", m.pasteIdx())
 	if err == nil {
-		return pastedAttachmentMsg{
+		return inlineAttachmentMsg{
 			attachment: message.Attachment{
 				FilePath: name,
 				FileName: name,
@@ -5321,7 +5208,7 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		}
 	}
 
-	return pastedAttachmentMsg{
+	return inlineAttachmentMsg{
 		attachment: message.Attachment{
 			FilePath: path,
 			FileName: filepath.Base(path),
@@ -5358,14 +5245,10 @@ func (m *UI) pasteIdx() int {
 			result = max(result, idx)
 		}
 	}
-	// Pastes live inline in the editor now, but names minted before a
-	// send can still sit in either store; scan both so numbering never
-	// collides.
-	for _, at := range m.attachments.List() {
-		note(at.FileName)
-	}
-	for _, at := range m.pastedAttachments {
-		note(at.FileName)
+	// Pastes live inline in the editor; scan the token store so
+	// numbering never collides.
+	for _, at := range m.inlineAttachments {
+		note(at.attachment.FileName)
 	}
 	return result + 1
 }
