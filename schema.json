@@ -1094,6 +1094,8 @@
               "editor.open_editor",
               "editor.paste",
               "editor.select_all",
+              "editor.select_line_down",
+              "editor.select_line_up",
               "editor.send_message",
               "editor.shell_mode",
               "editor.skills",
