@@ -17,7 +17,7 @@ type FetchToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (f *FetchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	var params tools.FetchParams
-	return renderStandardTool(sty, width, opts, ToolDisplayName(opts.ToolCall), func() ([]string, bool) {
+	return renderStandardTool(sty, width, opts, opts.Name, func() ([]string, bool) {
 		if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 			return nil, false
 		}
@@ -57,7 +57,7 @@ type WebSearchToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WebSearchToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	return renderStandardTool(sty, width, opts, ToolDisplayName(opts.ToolCall), func() ([]string, bool) {
+	return renderStandardTool(sty, width, opts, opts.Name, func() ([]string, bool) {
 		var params tools.WebSearchParams
 		if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
 			return nil, false

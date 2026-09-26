@@ -214,13 +214,6 @@ func copyAttachments(msg *message.Message) string {
 // Tool calls
 // -----------------------------------------------------------------------------
 
-// copyTitle names a tool call in a heading. It reads the same label
-// table the transcript renders, so what a paste says matches what was
-// on screen, including the lsp tool's per-action names.
-func copyTitle(tc message.ToolCall) string {
-	return ToolDisplayName(tc)
-}
-
 // formatToolForCopy formats a standalone tool call for the clipboard.
 func (t *baseToolMessageItem) formatToolForCopy() string {
 	return t.copyText(copyBaseDepth)
@@ -229,7 +222,7 @@ func (t *baseToolMessageItem) formatToolForCopy() string {
 // copyText formats the tool call with its heading at the given depth.
 // The body is identical whether the call is collapsed or expanded.
 func (t *baseToolMessageItem) copyText(depth int) string {
-	sections := []string{copyHeading(depth, copyTitle(t.toolCall)+" Tool Call")}
+	sections := []string{copyHeading(depth, t.DisplayName()+" Tool Call")}
 
 	if t.toolCall.Input != "" {
 		if params := t.formatParametersForCopy(); params != "" {

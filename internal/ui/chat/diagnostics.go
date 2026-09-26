@@ -107,7 +107,7 @@ type DiagnosticsToolRenderContext struct {
 // RenderTool implements the [ToolRenderer] interface.
 func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	var params tools.DiagnosticsParams
-	return renderStandardTool(sty, width, opts, ToolDisplayName(opts.ToolCall), func() ([]string, bool) {
+	return renderStandardTool(sty, width, opts, opts.Name, func() ([]string, bool) {
 		_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 		// Show "project" if no file path, otherwise show the file path.
 		if params.FilePath == "" {

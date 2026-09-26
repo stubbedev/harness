@@ -21,7 +21,7 @@ type ViewToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	if opts.IsPending() {
-		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
+		return pendingToolView(sty, opts, opts.Name, "", width)
 	}
 
 	var params tools.ViewParams
@@ -38,7 +38,7 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "offset", fmt.Sprintf("%d", params.Offset))
 	}
 
-	header := toolHeader(sty, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
+	header := toolHeader(sty, opts.Name, width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}
@@ -90,9 +90,9 @@ type WriteToolRenderContext struct{}
 func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	if opts.IsPending() {
 		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
-			return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), fsext.PrettyPath(path), width)
+			return pendingToolView(sty, opts, opts.Name, fsext.PrettyPath(path), width)
 		}
-		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
+		return pendingToolView(sty, opts, opts.Name, "", width)
 	}
 
 	var params tools.WriteParams
@@ -101,7 +101,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	}
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, ToolDisplayName(opts.ToolCall), width, opts, file)
+	header := toolHeader(sty, opts.Name, width, opts, file)
 	if opts.Compact {
 		return header
 	}
@@ -145,9 +145,9 @@ func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// Edit tool uses full width for diffs.
 	if opts.IsPending() {
 		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
-			return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), fsext.PrettyPath(path), width)
+			return pendingToolView(sty, opts, opts.Name, fsext.PrettyPath(path), width)
 		}
-		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
+		return pendingToolView(sty, opts, opts.Name, "", width)
 	}
 
 	var params tools.EditParams
@@ -161,7 +161,7 @@ func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		toolParams = append(toolParams, "edits", fmt.Sprintf("%d", len(params.Edits)))
 	}
 
-	header := toolHeader(sty, ToolDisplayName(opts.ToolCall), width, opts, toolParams...)
+	header := toolHeader(sty, opts.Name, width, opts, toolParams...)
 	if opts.Compact {
 		return header
 	}

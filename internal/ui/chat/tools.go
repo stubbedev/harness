@@ -56,6 +56,9 @@ type ToolMessageItem interface {
 	// result decides once there is one, otherwise it is canceled or
 	// still running.
 	EffectiveStatus() ToolStatus
+	// DisplayName is the call's label as every view shows it: the full
+	// render's header, a collapsed one-liner and the clipboard heading.
+	DisplayName() string
 }
 
 // Compactable is an interface for tool items that can render in a compacted mode.
@@ -87,7 +90,11 @@ type ItemEnv struct {
 
 // ToolRenderOpts contains the data needed to render a tool call.
 type ToolRenderOpts struct {
-	ToolCall        message.ToolCall
+	ToolCall message.ToolCall
+	// Name is the call's label, [ToolMessageItem.DisplayName] resolved
+	// at render time. Renderers take their header name from it, never
+	// from the call directly, so every surface shows the same label.
+	Name            string
 	Result          *message.ToolResult
 	ExpandedContent bool
 	Compact         bool
@@ -99,9 +106,6 @@ type ToolRenderOpts struct {
 	// Elapsed is how long the tool call has been (or was) running.
 	// Zero when the start time is unknown (restored items).
 	Elapsed time.Duration
-	// WaitingAgents is the live count of still-running subagents for an
-	// agent-wait call, resolved from the item's env at render time.
-	WaitingAgents int
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -373,19 +377,18 @@ func (t *baseToolMessageItem) BodyRender(bodyWidth int) string {
 	// if we are spinning or there is no cache rerender
 	if !ok || t.isSpinning() {
 		opts := ToolRenderOpts{
-			ToolCall:        t.toolCall,
+			ToolCall: t.toolCall,
+			// Resolved at render time so a pending wait's label tracks
+			// agents finishing while it runs. The item re-renders per
+			// tick until its result lands (see isSpinning), so the
+			// count stays fresh.
+			Name:            t.DisplayName(),
 			Result:          t.result,
 			ExpandedContent: t.expandedContent,
 			Compact:         t.isCompact,
 			Status:          t.EffectiveStatus(),
 			StartedAt:       t.startedAt,
 			Elapsed:         t.elapsed(),
-		}
-		// Read at render time so a pending wait's header tracks agents
-		// finishing while it runs. The item re-renders per tick until
-		// its result lands (see isSpinning), so the count stays fresh.
-		if t.waitingAgents != nil {
-			opts.WaitingAgents = t.waitingAgents()
 		}
 		content = t.toolRenderer.RenderTool(t.sty, bodyWidth, &opts)
 
@@ -1227,12 +1230,29 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 	return sty.Tool.Body.Render(strings.Join(out, "\n"))
 }
 
-// ToolDisplayName returns the label the UI shows for a tool call. It is
-// the one place tool names become display text, so a full renderer's
-// header, a collapsed group's one-liner, the background task strip and
-// the clipboard heading cannot drift apart. The lsp tool folds several
-// actions into one wire name; the label follows the action it carries.
-func ToolDisplayName(tc message.ToolCall) string {
+// DisplayName implements [ToolMessageItem]. It is the one place a call's
+// label is decided, so a full renderer's header (through
+// [ToolRenderOpts.Name]), a collapsed group's one-liner and the
+// clipboard heading cannot drift apart. A wait call is labeled by what it
+// is doing, live agent count included: its wire name cannot tell it from
+// a dispatch, and the count is item state. Every other call is labeled
+// from its wire name by [callLabel].
+func (t *baseToolMessageItem) DisplayName() string {
+	if _, ok := t.toolRenderer.(*WaitToolRenderContext); ok {
+		waiting := 0
+		if t.waitingAgents != nil {
+			waiting = t.waitingAgents()
+		}
+		return waitLabel(t.EffectiveStatus() == ToolStatusRunning, waiting)
+	}
+	return callLabel(t.toolCall)
+}
+
+// callLabel maps a call's wire name to its label. Only
+// [baseToolMessageItem.DisplayName] reads it; everything else asks the
+// item. The lsp tool folds several actions into one wire name; the label
+// follows the action it carries.
+func callLabel(tc message.ToolCall) string {
 	if name := lspDisplayName(tc); name != "" {
 		return name
 	}

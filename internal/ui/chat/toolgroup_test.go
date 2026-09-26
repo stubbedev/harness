@@ -147,7 +147,7 @@ func TestToolLabelsStableAcrossRenders(t *testing.T) {
 
 			call.Input = `{"query":"updated parameters"}`
 			item.SetToolCall(call)
-			wantUpdated := ToolDisplayName(call) + " updated parameters"
+			wantUpdated := callLabel(call) + " updated parameters"
 			require.Equal(t, wantUpdated, ansi.Strip(ToolOneLiner(sty, item, 120, false)))
 			require.Contains(t, ansi.Strip(group.Render(120)), wantUpdated)
 		})

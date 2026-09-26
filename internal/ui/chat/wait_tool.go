@@ -16,9 +16,8 @@ type WaitToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WaitToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	running := opts.Status == ToolStatusRunning
-	label := waitLabel(running, opts.WaitingAgents)
-	if running {
+	label := opts.Name
+	if opts.Status == ToolStatusRunning {
 		// The header already says the turn is waiting and on how many
 		// agents; the generic "Waiting for tool response" line under it
 		// would only repeat that, so a running wait is its header.
@@ -45,8 +44,8 @@ func (w *WaitToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 }
 
 // waitLabel names a wait call: the live count while it runs, the past
-// tense once the wait returned. The full render and the collapsed
-// one-liner share it, so the two cannot disagree.
+// tense once the wait returned. It is the call's
+// [ToolMessageItem.DisplayName], so every surface shows it.
 func waitLabel(running bool, waiting int) string {
 	if running {
 		if waiting > 0 {
@@ -55,21 +54,6 @@ func waitLabel(running bool, waiting int) string {
 		return "Waiting for agents"
 	}
 	return "Waited for agents"
-}
-
-// liveDisplayName labels a wait call by what it is doing, the live
-// agent count included, where [ToolDisplayName] could only say "Agent":
-// the name alone cannot tell a wait from a dispatch, and the count is
-// item state. Other calls report false and keep their display name.
-func (t *baseToolMessageItem) liveDisplayName() (string, bool) {
-	if _, ok := t.toolRenderer.(*WaitToolRenderContext); !ok {
-		return "", false
-	}
-	waiting := 0
-	if t.waitingAgents != nil {
-		waiting = t.waitingAgents()
-	}
-	return waitLabel(t.EffectiveStatus() == ToolStatusRunning, waiting), true
 }
 
 // splitWaitResult separates a wait result's first line, the outcome

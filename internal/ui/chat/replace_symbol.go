@@ -14,14 +14,14 @@ type ReplaceSymbolToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	if opts.IsPending() {
-		return pendingToolView(sty, opts, ToolDisplayName(opts.ToolCall), "", width)
+		return pendingToolView(sty, opts, opts.Name, "", width)
 	}
 
 	var params tools.ReplaceSymbolParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
 	file := fsext.PrettyPath(params.FilePath)
-	header := toolHeader(sty, ToolDisplayName(opts.ToolCall), width, opts, params.Symbol, file)
+	header := toolHeader(sty, opts.Name, width, opts, params.Symbol, file)
 	if opts.Compact {
 		return header
 	}

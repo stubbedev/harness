@@ -12,7 +12,7 @@ type LSPRestartToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *LSPRestartToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	return renderStandardTool(sty, width, opts, ToolDisplayName(opts.ToolCall), func() ([]string, bool) {
+	return renderStandardTool(sty, width, opts, opts.Name, func() ([]string, bool) {
 		var params tools.LSPRestartParams
 		_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 		if params.Name == "" {

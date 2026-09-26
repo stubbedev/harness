@@ -13,7 +13,7 @@ type DefinitionToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (r *DefinitionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	var params tools.DefinitionParams
-	return renderStandardTool(sty, width, opts, ToolDisplayName(opts.ToolCall), func() ([]string, bool) {
+	return renderStandardTool(sty, width, opts, opts.Name, func() ([]string, bool) {
 		_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 		return []string{params.Symbol}, true
 	}, func() string {

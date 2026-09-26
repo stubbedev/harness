@@ -45,7 +45,7 @@ func (q *QuestionToolRenderContext) parseBlocks(content string) []questionBlock 
 
 // RenderTool implements the [ToolRenderer] interface.
 func (q *QuestionToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	return renderStandardTool(sty, width, opts, ToolDisplayName(opts.ToolCall), func() ([]string, bool) {
+	return renderStandardTool(sty, width, opts, opts.Name, func() ([]string, bool) {
 		params, ok := q.parseParams(opts.ToolCall.Input)
 		return []string{questionSummary(params)}, ok
 	}, func() string {
