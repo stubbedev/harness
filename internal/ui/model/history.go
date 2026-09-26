@@ -208,39 +208,3 @@ func (m *UI) isAtEditorEnd() bool {
 	info := m.textarea.LineInfo()
 	return info.CharOffset >= info.CharWidth-1 || info.CharWidth == 0
 }
-
-// isAtEditorTopRow returns true if the cursor is on the input's top
-// display row, counting wrapped rows of the first line individually.
-// There, an upward selection cannot extend any further, so shift+up
-// hands focus to the region above instead.
-func (m *UI) isAtEditorTopRow() bool {
-	return m.textarea.Line() == 0 && m.textarea.LineInfo().RowOffset == 0
-}
-
-// isAtEditorBottomRow returns true if the cursor is on the input's last
-// display row, counting wrapped rows of the last line individually.
-func (m *UI) isAtEditorBottomRow() bool {
-	if m.textarea.Line() != m.textarea.LineCount()-1 {
-		return false
-	}
-	info := m.textarea.LineInfo()
-	return info.RowOffset+1 >= info.Height
-}
-
-// selectToEditorEdge extends the editor's keyboard selection to the end
-// of the input when forward is set, otherwise to its start. It steps the
-// textarea's own character selection, so the anchor of a selection in
-// progress is kept and a fresh one anchors at the cursor.
-func (m *UI) selectToEditorEdge(forward bool) {
-	step := tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift}
-	if forward {
-		step.Code = tea.KeyRight
-	}
-	for range len(m.textarea.Value()) {
-		line, info := m.textarea.Line(), m.textarea.LineInfo()
-		m.textarea, _ = m.textarea.Update(step)
-		if m.textarea.Line() == line && m.textarea.LineInfo() == info {
-			return
-		}
-	}
-}

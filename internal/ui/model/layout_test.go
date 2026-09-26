@@ -64,6 +64,7 @@ func newTestUI() *UI {
 	ta.DynamicHeight = true
 	ta.MinHeight = TextareaMinHeight
 	ta.MaxHeight = TextareaMaxHeight
+	bindEditorKeys(&ta, DefaultKeyMap())
 	ta.Focus()
 
 	u := &UI{

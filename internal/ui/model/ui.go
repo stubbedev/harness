@@ -493,21 +493,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.DynamicHeight = true
 	ta.MinHeight = com.Config().Options.TUI.MinTextareaHeight()
 	ta.MaxHeight = TextareaMaxHeight
-	// Keep "ctrl+a" for line-start (the textarea default); bind select-all
-	// to "ctrl+shift+a" instead (line-start is also available via "home").
-	ta.KeyMap.LineStart = keyMap.Editor.LineStart
-	ta.KeyMap.SelectAll = keyMap.Editor.SelectAll
-	// Line selection flows through the rebindable keymap too; shift+up
-	// still leaves the editor from the top row via Chat.UpOneItem.
-	ta.KeyMap.SelectLineUp = keyMap.Editor.SelectLineUp
-	ta.KeyMap.SelectLineDown = keyMap.Editor.SelectLineDown
-	// Word deletion flows through the rebindable keymap like every
-	// other editor binding.
-	ta.KeyMap.DeleteWordBackward = keyMap.Editor.DeleteWordBackward
-	// Copying is handled by harness's keymap (Editor.CopySelection) so it can
-	// use harness's clipboard backend and user feedback; disable the
-	// textarea's built-in copy binding.
-	ta.KeyMap.CopySelection = key.NewBinding()
+	bindEditorKeys(&ta, keyMap)
 	ta.Focus()
 
 	ch := NewChat(com, com.Config().Options.TUI.ScrollbarMode())

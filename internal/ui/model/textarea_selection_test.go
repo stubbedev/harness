@@ -3,6 +3,7 @@ package model
 import (
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stretchr/testify/require"
@@ -177,4 +178,16 @@ func TestTextareaMouseClickOutsideDoesNotSelect(t *testing.T) {
 
 	require.False(t, u.textareaMouseSelecting)
 	require.False(t, u.textarea.HasSelection())
+}
+
+// TestEditorSelectionStepMatchesBinding pins that the steps
+// selectToEditorEdge feeds the textarea are the keys its character
+// selection is bound to, so the edge extension cannot silently stop
+// selecting if either side changes.
+func TestEditorSelectionStepMatchesBinding(t *testing.T) {
+	t.Parallel()
+
+	u := newSelectionTestUI()
+	require.True(t, key.Matches(editorSelectBackwardKey, u.textarea.KeyMap.SelectCharacterBackward))
+	require.True(t, key.Matches(editorSelectForwardKey, u.textarea.KeyMap.SelectCharacterForward))
 }
