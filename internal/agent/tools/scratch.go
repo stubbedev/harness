@@ -46,14 +46,16 @@ func ScratchDir(sessionID, kind string) (string, error) {
 	if dir == root || !filepathext.Within(root, dir) {
 		return "", fmt.Errorf("scratch directory must stay inside the scratch root: %s", dir)
 	}
+	// Each level is created and checked in turn. The segments below are
+	// sanitizePathSegment outputs - no separators, no traversal - and
+	// dir is verified to stay inside root above, so the path
+	// expressions only ever touch directories under the root.
 	for _, path := range []string{root, filepath.Join(root, session), dir} {
-		// codeql[go/path-injection] path is built from separator- and
-		// traversal-free segments and verified to stay inside root.
+		// codeql[go/path-injection] sanitized segments, verified inside root.
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			return "", fmt.Errorf("failed to create scratch directory: %w", err)
 		}
-		// codeql[go/path-injection] path is built from separator- and
-		// traversal-free segments and verified to stay inside root.
+		// codeql[go/path-injection] sanitized segments, verified inside root.
 		info, err := os.Lstat(path)
 		if err != nil {
 			return "", fmt.Errorf("failed to inspect scratch directory: %w", err)

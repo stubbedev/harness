@@ -40,13 +40,16 @@ func toolResultPrefix(content string, limit int) string {
 	return strings.ToValidUTF8(content[:min(len(content), limit)], "")
 }
 
+// spillToolResult writes an oversized tool result into the session's
+// scratch directory and returns the file's path. The directory is
+// ScratchDir output: sanitized segments, verified to stay inside the
+// scratch root.
 func spillToolResult(sessionID, content string) (string, error) {
 	dir, err := ScratchDir(sessionID, "tool-results")
 	if err != nil {
 		return "", err
 	}
-	// codeql[go/path-injection] dir comes from ScratchDir: sanitized
-	// segments, verified inside the scratch root.
+	// codeql[go/path-injection] dir is ScratchDir output, verified inside root.
 	file, err := os.CreateTemp(dir, "result-*.txt")
 	if err != nil {
 		return "", err
