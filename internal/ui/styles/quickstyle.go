@@ -698,7 +698,7 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	// Subagent strip rows: the icon carries the accent so agent rows
 	// read as agents, not as one more subdued tool call.
-	s.Tool.AgentIcon = base.Foreground(o.accent).SetString(AgentIcon)
+	s.Tool.AgentIcon = base.Foreground(o.accent)
 
 	// Buttons
 	s.Button.Focused = lipgloss.NewStyle().Foreground(o.onPrimary).Background(o.secondary)

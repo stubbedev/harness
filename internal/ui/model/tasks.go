@@ -811,14 +811,15 @@ func (m *UI) renderTasks(width int) string {
 		if onCursor {
 			prefix = focusedPrefix
 		}
-		// Both rows share the accent-colored icon: agent rows must pop
-		// out of the grey tool-call surroundings they sit beside, not
-		// blend into them.
-		icon := t.Tool.AgentIcon.Render(styles.MainAgentIcon)
+		// Both rows share the accent color: agent rows must pop out of
+		// the grey tool-call surroundings they sit beside, not blend
+		// into them. The glyph tells the main session from a subagent.
+		icon := t.Tool.AgentIcon.Render(styles.AgentIcon)
 		var word lipgloss.Style
 		var label string
 		switch {
 		case isMain:
+			icon = t.Tool.AgentIcon.Render(styles.MainAgentIcon)
 			word, label = t.Tool.NameNormal, "Main Agent"
 			if onCursor {
 				word = t.Tool.NameNormalSelected

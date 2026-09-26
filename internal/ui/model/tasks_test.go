@@ -16,6 +16,7 @@ import (
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
+	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/workspace"
 )
@@ -197,6 +198,8 @@ func TestBackgroundTasksStrip(t *testing.T) {
 	assert.Contains(t, out, "Agent")
 	assert.Contains(t, out, "dig into the git history")
 	assert.NotContains(t, out, "researcher", "the subagent type is not shown")
+	assert.Contains(t, out, styles.AgentIcon, "a subagent row carries the robot glyph")
+	assert.NotContains(t, out, styles.MainAgentIcon, "a subagent row does not carry the main glyph")
 	require.Len(t, u.taskRows, 1)
 
 	// The generated title replaces the excerpt once the child session's
@@ -356,6 +359,8 @@ func TestEnterSwitchesToAgentAndMainBack(t *testing.T) {
 	u.tasksAreaHeight()
 	out := ansi.Strip(u.tasksView)
 	assert.Contains(t, out, "Main Agent")
+	assert.Contains(t, out, styles.MainAgentIcon, "the Main row carries the main glyph")
+	assert.NotContains(t, out, styles.AgentIcon, "the Main row does not carry the subagent glyph")
 	assert.NotContains(t, out, "dig into the git history", "main-session dispatches do not render in an agent's strip")
 
 	// Enter on the Main row (row 0) returns to the main session and
