@@ -76,6 +76,12 @@ builtin unset HARNESS_USER_ZDOTDIR
 const (
 	zshNoEditor  = `unsetopt zle`
 	bashNoEditor = `set +o emacs +o vi`
+	// shNoEditor is the no-editor setup for the sh launch path, where
+	// /bin/sh may be bash or mksh, which have the options, or dash,
+	// which has neither and must keep going. Without it, a sh that is
+	// really bash keeps its line editor - and its redraws, which are
+	// the debris a big multiline command's echo cannot be cleaned of.
+	shNoEditor = `set +o emacs +o vi 2>/dev/null || :`
 )
 
 // bashIntegration is the --rcfile of a bash session: the user's
@@ -98,7 +104,7 @@ func shIntegration(setup string) map[string]string {
 		"env.sh": `if [ -n "$HARNESS_USER_ENV" ]; then ENV=$HARNESS_USER_ENV; else unset ENV; fi
 unset HARNESS_USER_ENV
 [ -n "$ENV" ] && [ -r "$ENV" ] && . "$ENV"
-` + setup + "\n",
+` + setup + "\n" + shNoEditor + "\n",
 	}
 }
 
