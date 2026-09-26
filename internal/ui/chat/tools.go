@@ -39,6 +39,7 @@ const (
 // ToolMessageItem represents a tool call message in the chat UI.
 type ToolMessageItem interface {
 	MessageItem
+	Expandable
 
 	// BodyRender renders the call's full view at exactly the given
 	// body width, with no left chrome of its own; callers derive the
@@ -482,11 +483,6 @@ func (t *baseToolMessageItem) Result() *message.ToolResult {
 	return t.result
 }
 
-// Expanded reports whether the item renders its full content.
-func (t *baseToolMessageItem) Expanded() bool {
-	return t.expandedContent
-}
-
 // MessageID returns the ID of the message containing this tool call.
 func (t *baseToolMessageItem) MessageID() string {
 	return t.messageID
@@ -520,11 +516,24 @@ func (t *baseToolMessageItem) isSpinning() bool {
 	return (!t.toolCall.Finished || t.result == nil) && !t.canceled
 }
 
-// ToggleExpanded toggles the expanded state of the thinking box.
+// ToggleExpanded implements [Expandable]: it flips the call between its
+// one-liner and its full output.
 func (t *baseToolMessageItem) ToggleExpanded() bool {
-	t.expandedContent = !t.expandedContent
-	t.invalidate()
+	t.SetExpansionLevel(expansionLevel(!t.expandedContent))
 	return t.expandedContent
+}
+
+// ExpansionLevel implements [Expandable]: 1 while the call shows its
+// full output.
+func (t *baseToolMessageItem) ExpansionLevel() uint8 {
+	return expansionLevel(t.expandedContent)
+}
+
+// SetExpansionLevel implements [Expandable].
+func (t *baseToolMessageItem) SetExpansionLevel(level uint8) {
+	if applyExpansionLevel(&t.expandedContent, level) {
+		t.invalidate()
+	}
 }
 
 // Finished implements list.Item. A tool call is freezable once the

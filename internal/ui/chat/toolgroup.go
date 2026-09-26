@@ -38,9 +38,10 @@ type ToolGroupMessageItem struct {
 	tools    []ToolMessageItem
 	expanded bool
 	// selectedChild is the keyboard sub-cursor: -1 sits on the group
-	// row itself, >=0 on that child's line. Only meaningful while the
-	// group is selected, expanded and the list is focused; cleared when
-	// the group loses focus.
+	// row itself, >=0 on that child's line. It only shows while the
+	// group is focused, and is cleared when the selection moves off the
+	// group - not when focus merely leaves the list, so it is still
+	// there when focus comes back.
 	selectedChild int
 }
 
@@ -52,6 +53,7 @@ var (
 	_ list.MouseClickable = (*ToolGroupMessageItem)(nil)
 	_ ToolGroupContainer  = (*ToolGroupMessageItem)(nil)
 	_ list.SubSelectable  = (*ToolGroupMessageItem)(nil)
+	_ list.SelectionAware = (*ToolGroupMessageItem)(nil)
 )
 
 // ToolGroupContainer is implemented by tool group items so the chat can
@@ -95,14 +97,14 @@ func NewToolGroupMessageItem(sty *styles.Styles, first ToolMessageItem) *ToolGro
 // ID implements [Identifiable].
 func (g *ToolGroupMessageItem) ID() string { return g.id }
 
-// SetFocused implements [list.Focusable], clearing the sub-cursor when
-// the selection moves off the group.
-func (g *ToolGroupMessageItem) SetFocused(focused bool) {
-	if !focused && g.selectedChild != -1 {
+// SetSelected implements [list.SelectionAware], clearing the sub-cursor
+// when the selection moves off the group, so a later arrival starts on
+// the group row.
+func (g *ToolGroupMessageItem) SetSelected(selected bool) {
+	if !selected && g.selectedChild != -1 {
 		g.selectedChild = -1
 		g.clearCache()
 	}
-	g.focusableMessageItem.SetFocused(focused)
 }
 
 // ExpandedLevel reports whether the group shows its one-liner level.
@@ -195,10 +197,7 @@ func (g *ToolGroupMessageItem) ToggleSelectedChild() bool {
 	if g.selectedChild < 0 || g.selectedChild >= len(g.tools) {
 		return false
 	}
-	child := g.tools[g.selectedChild]
-	if e, ok := child.(Expandable); ok {
-		_ = e.ToggleExpanded()
-	}
+	g.tools[g.selectedChild].ToggleExpanded()
 	g.invalidate()
 	return true
 }
@@ -267,29 +266,60 @@ func (g *ToolGroupMessageItem) ToggleExpanded() bool {
 	if g.expanded {
 		g.collapse()
 	} else {
-		g.expanded = true
-		if len(g.tools) == 1 {
-			// A singleton is its own one-liner; expanding it goes
-			// straight to the call's full view.
-			if e, ok := g.tools[0].(Expandable); ok && !isToolExpanded(g.tools[0]) {
-				_ = e.ToggleExpanded()
-			}
-		}
+		g.open()
+	}
+	return g.expanded
+}
+
+// ExpansionLevel implements [Expandable]: 1 while the group shows its
+// one-liner level. Each call carries its own level.
+func (g *ToolGroupMessageItem) ExpansionLevel() uint8 {
+	return expansionLevel(g.expanded)
+}
+
+// SetExpansionLevel implements [Expandable]. It sets the group's own
+// level only: its calls are items with levels of their own, which a
+// restore sets by their own IDs, so the group must not second-guess
+// them here. The space and escape keys, which do move the calls with
+// the group, go through open and collapse.
+func (g *ToolGroupMessageItem) SetExpansionLevel(level uint8) {
+	if !applyExpansionLevel(&g.expanded, level) {
+		return
+	}
+	if !g.expanded {
+		g.selectedChild = -1
 	}
 	g.invalidate()
-	return g.expanded
+}
+
+// SetSelectedChild places the sub-cursor on the given call, or on the
+// group row for -1. It only lands where the cursor could have walked
+// to: a call of an expanded multi-call group.
+func (g *ToolGroupMessageItem) SetSelectedChild(child int) {
+	if child < -1 || child >= len(g.tools) || child >= 0 && !g.showsChildRows() {
+		return
+	}
+	if child != g.selectedChild {
+		g.selectedChild = child
+		g.invalidate()
+	}
+}
+
+// open opens the one-liner level. A singleton is its own one-liner, so
+// opening it goes straight to the call's full view.
+func (g *ToolGroupMessageItem) open() {
+	g.SetExpansionLevel(1)
+	if len(g.tools) == 1 {
+		g.tools[0].SetExpansionLevel(1)
+	}
+	g.invalidate()
 }
 
 // ExpandAndDescend opens the one-liner level and drops the sub-cursor
 // onto the first call. Called from the group row.
 func (g *ToolGroupMessageItem) ExpandAndDescend() {
 	if !g.expanded {
-		g.expanded = true
-		if len(g.tools) == 1 {
-			if e, ok := g.tools[0].(Expandable); ok && !isToolExpanded(g.tools[0]) {
-				_ = e.ToggleExpanded()
-			}
-		}
+		g.open()
 	}
 	if len(g.tools) > 1 {
 		g.selectedChild = 0
@@ -302,12 +332,7 @@ func (g *ToolGroupMessageItem) ExpandAndDescend() {
 // (the cursor stays put); from the group row it expands and descends.
 func (g *ToolGroupMessageItem) DigIn() {
 	if g.selectedChild >= 0 && g.selectedChild < len(g.tools) {
-		child := g.tools[g.selectedChild]
-		if !isToolExpanded(child) {
-			if e, ok := child.(Expandable); ok {
-				_ = e.ToggleExpanded()
-			}
-		}
+		g.tools[g.selectedChild].SetExpansionLevel(1)
 		g.invalidate()
 		return
 	}
@@ -322,9 +347,7 @@ func (g *ToolGroupMessageItem) DigIn() {
 func (g *ToolGroupMessageItem) Ascend() bool {
 	switch {
 	case g.selectedChild >= 0 && g.selectedChild < len(g.tools) && ShowsFullView(g.tools[g.selectedChild]):
-		if e, ok := g.tools[g.selectedChild].(Expandable); ok {
-			_ = e.ToggleExpanded()
-		}
+		g.tools[g.selectedChild].SetExpansionLevel(0)
 	case g.expanded:
 		g.collapse()
 	default:
@@ -336,23 +359,13 @@ func (g *ToolGroupMessageItem) Ascend() bool {
 
 // collapse closes the group and resets every per-call expansion.
 func (g *ToolGroupMessageItem) collapse() {
-	g.expanded = false
-	g.selectedChild = -1
+	g.SetExpansionLevel(0)
 	for _, t := range g.tools {
-		if e, ok := t.(Expandable); ok && ShowsFullView(t) {
-			_ = e.ToggleExpanded()
+		if ShowsFullView(t) {
+			t.SetExpansionLevel(0)
 		}
 	}
-}
-
-// isToolExpanded reports whether a tool item currently renders its full
-// content. Items without the probe always count as expanded.
-func isToolExpanded(t ToolMessageItem) bool {
-	base, ok := t.(interface{ Expanded() bool })
-	if !ok {
-		return true
-	}
-	return base.Expanded()
+	g.invalidate()
 }
 
 // ShowsFullView reports whether a tool call renders its full view
@@ -363,7 +376,7 @@ func ShowsFullView(t ToolMessageItem) bool {
 	if c, ok := t.(Compactable); ok && c.IsCompact() {
 		return false
 	}
-	return isToolExpanded(t)
+	return t.ExpansionLevel() != 0
 }
 
 // ToggleFullView flips a tool call between its full view and its
@@ -374,9 +387,7 @@ func ShowsFullView(t ToolMessageItem) bool {
 func ToggleFullView(t ToolMessageItem) bool {
 	compact, isCompact := t.(Compactable)
 	if ShowsFullView(t) {
-		if e, ok := t.(Expandable); ok && isToolExpanded(t) {
-			_ = e.ToggleExpanded()
-		}
+		t.SetExpansionLevel(0)
 		if isCompact {
 			compact.SetCompact(true)
 		}
@@ -385,9 +396,7 @@ func ToggleFullView(t ToolMessageItem) bool {
 	if isCompact {
 		compact.SetCompact(false)
 	}
-	if e, ok := t.(Expandable); ok && !isToolExpanded(t) {
-		_ = e.ToggleExpanded()
-	}
+	t.SetExpansionLevel(1)
 	return true
 }
 

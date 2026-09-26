@@ -132,6 +132,16 @@ type Chat struct {
 	// at which point the selection resumes following new items.
 	manualSelection bool
 
+	// transcriptID is the session whose transcript the list holds, and
+	// viewStates how the user left each transcript it has held. Every
+	// replacement of the list goes through SetMessages or ClearMessages,
+	// which save the outgoing transcript's state under its ID and
+	// restore the incoming one's, so switching between the main session
+	// and an agent's keeps expansion, selection and scroll by
+	// construction rather than by each caller remembering to.
+	transcriptID string
+	viewStates   map[string]ChatViewState
+
 	// drawCache memoizes the decoded form of the last list.Render output so
 	// repeat frames with byte-identical content skip the per-cell ANSI
 	// reparse that uv.StyledString.Draw performs every call. See F9
@@ -181,6 +191,7 @@ func NewChat(com *common.Common, scrollbarMode string) *Chat {
 	c := &Chat{
 		com:           com,
 		idInxMap:      make(map[string]int),
+		viewStates:    make(map[string]ChatViewState),
 		scrollbarMode: scrollbarMode,
 		animAllowed:   true,
 		itemKeys:      chat.DefaultItemKeymap(),
@@ -424,16 +435,20 @@ func (m *Chat) InvalidateRenderCaches() {
 	chat.ClearItemCaches(items)
 }
 
-// SetMessages sets the chat messages to the provided list of message items.
-// Consecutive tool calls are folded into collapsed groups.
-func (m *Chat) SetMessages(msgs ...chat.MessageItem) tea.Cmd {
+// SetMessages replaces the list with the transcript of the given
+// session. Consecutive tool calls are folded into collapsed groups. The
+// outgoing transcript's view state is saved, and the incoming one's
+// restored: a session shown before returns as the user left it, one
+// never shown opens on its newest item at the bottom.
+func (m *Chat) SetMessages(transcriptID string, msgs ...chat.MessageItem) tea.Cmd {
+	m.saveViewState()
 	m.scrollbarVisible = false // Reset scrollbar visibility on new session load
 
 	items := m.foldToolGroups(msgs)
 	m.list.SetItems(items...)
 	m.rebuildIndices()
-	m.manualSelection = false
-	m.ScrollToBottom()
+	m.transcriptID = transcriptID
+	m.restoreViewState(m.viewStates[transcriptID])
 	return nil
 }
 
@@ -1123,6 +1138,8 @@ func (m *Chat) SelectNearestInView(scrolledUp bool) {
 
 // ClearMessages removes all messages from the chat list.
 func (m *Chat) ClearMessages() {
+	m.saveViewState()
+	m.transcriptID = ""
 	m.idInxMap = make(map[string]int)
 	m.scrollbarVisible = false
 	m.manualSelection = false

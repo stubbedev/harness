@@ -80,10 +80,42 @@ type Animatable interface {
 }
 
 // Expandable is an interface for items that can be expanded or collapsed.
+//
+// The expansion level is the item's whole expansion state, and
+// SetExpansionLevel is the only way it changes: ToggleExpanded steps the
+// level through it, and a transcript rebuild restores a captured level
+// through it, so what the user expanded survives the rebuild without a
+// second copy of the state to drift from the first.
 type Expandable interface {
-	// ToggleExpanded toggles the expanded state of the item. It returns
-	// whether the item is now expanded.
+	// ToggleExpanded steps the item to its next expansion level. It
+	// returns whether the item is now expanded.
 	ToggleExpanded() bool
+	// ExpansionLevel returns the item's expansion level. Zero is always
+	// the collapsed default; what the other levels mean is the item's
+	// own business.
+	ExpansionLevel() uint8
+	// SetExpansionLevel sets the item's expansion level. A level the item
+	// cannot take - out of range, or nothing to expand - is ignored.
+	SetExpansionLevel(level uint8)
+}
+
+// expansionLevel is the level of a two-level item: 1 expanded, 0 not.
+func expansionLevel(expanded bool) uint8 {
+	if expanded {
+		return 1
+	}
+	return 0
+}
+
+// applyExpansionLevel sets a two-level item's expanded flag from level
+// and reports whether it changed. A level above 1 is out of range and
+// leaves the flag alone.
+func applyExpansionLevel(expanded *bool, level uint8) bool {
+	if level > 1 || (level == 1) == *expanded {
+		return false
+	}
+	*expanded = level == 1
+	return true
 }
 
 // ItemKeymap holds the key bindings chat items consult in HandleKeyEvent.

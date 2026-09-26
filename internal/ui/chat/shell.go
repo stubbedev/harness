@@ -188,11 +188,23 @@ func (s *ShellItem) ScrollHorizontal(delta int) {
 	s.Bump()
 }
 
-// ToggleExpanded toggles the expanded state and invalidates the cache.
+// ToggleExpanded implements [Expandable]: it flips the output between
+// its truncated and full form.
 func (s *ShellItem) ToggleExpanded() bool {
-	s.expandedContent = !s.expandedContent
-	s.Bump()
+	s.SetExpansionLevel(expansionLevel(!s.expandedContent))
 	return s.expandedContent
+}
+
+// ExpansionLevel implements [Expandable]: 1 while the full output shows.
+func (s *ShellItem) ExpansionLevel() uint8 {
+	return expansionLevel(s.expandedContent)
+}
+
+// SetExpansionLevel implements [Expandable].
+func (s *ShellItem) SetExpansionLevel(level uint8) {
+	if applyExpansionLevel(&s.expandedContent, level) {
+		s.Bump()
+	}
 }
 
 func (s *ShellItem) RawRender(width int) string {

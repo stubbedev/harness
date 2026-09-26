@@ -47,7 +47,7 @@ func newAnimTestUI(t *testing.T) (u *UI, top, bottom *spinTestItem) {
 	}
 	bottom = &spinTestItem{id: "bottom", text: "bottom\n1\n2\n3\n4\n5", spinning: true}
 	items = append(items, bottom)
-	u.chat.SetMessages(items...)
+	u.chat.SetMessages("", items...)
 	u.chat.ScrollToBottom()
 	return u, top, bottom
 }
@@ -227,7 +227,7 @@ func TestAnimClock_UnchangedFrameIsScrollOnlyButKeepsClock(t *testing.T) {
 	t.Parallel()
 	u := newFrameTestUI(t)
 	item := &throttledTestItem{id: "th", text: "th", spinning: true}
-	u.chat.SetMessages(item)
+	u.chat.SetMessages("", item)
 	_, _ = u.Update(neutralMsg{})
 	u.View()
 	require.True(t, u.chat.animRunning)

@@ -41,7 +41,7 @@ func buildSession(n int) []chat.MessageItem {
 
 func benchDraw(b *testing.B, items []chat.MessageItem, mutate func(i int)) {
 	u := newTestUI()
-	u.chat.SetMessages(items...)
+	u.chat.SetMessages("", items...)
 	u.updateLayoutAndSize()
 	const w, h = 140, 40
 	scr := uv.NewScreenBuffer(w, h)

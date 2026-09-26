@@ -796,29 +796,41 @@ func (a *AssistantMessageItem) clearCache() {
 // The cycle is collapsed → tail-window → full → collapsed, with the
 // tail-window step skipped when the rendered thinking fits within
 // maxExpandedThinkingTailLines so short blocks remain a two-click
-// toggle. Both the thinking section cache and the F3 prefix cache
-// fold thinkingViewMode into their keys, so no explicit invalidation
-// is required here.
-//
-// When the message carries no thinking text the toggle is a no-op:
-// there is nothing to expand, and mutating the view mode would
-// thrash the thinking-section cache key for no visible benefit.
+// toggle.
 func (a *AssistantMessageItem) ToggleExpanded() bool {
-	if strings.TrimSpace(a.message.ReasoningContent().Thinking) == "" {
-		return a.thinkingViewMode != thinkingCollapsed
-	}
+	next := thinkingCollapsed
 	switch a.thinkingViewMode {
 	case thinkingCollapsed:
+		next = thinkingFullExpanded
 		if a.tailWindowWouldTruncate() {
-			a.thinkingViewMode = thinkingTailWindow
-		} else {
-			a.thinkingViewMode = thinkingFullExpanded
+			next = thinkingTailWindow
 		}
 	case thinkingTailWindow:
-		a.thinkingViewMode = thinkingFullExpanded
-	case thinkingFullExpanded:
-		a.thinkingViewMode = thinkingCollapsed
+		next = thinkingFullExpanded
 	}
+	a.SetExpansionLevel(uint8(next))
+	return a.thinkingViewMode != thinkingCollapsed
+}
+
+// ExpansionLevel implements [Expandable]: the thinking view mode.
+func (a *AssistantMessageItem) ExpansionLevel() uint8 {
+	return uint8(a.thinkingViewMode)
+}
+
+// SetExpansionLevel implements [Expandable]. Both the thinking section
+// cache and the F3 prefix cache fold thinkingViewMode into their keys,
+// so only the streaming prefix cache needs dropping here.
+//
+// When the message carries no thinking text the level is left alone:
+// there is nothing to expand, and mutating the view mode would thrash
+// the thinking-section cache key for no visible benefit.
+func (a *AssistantMessageItem) SetExpansionLevel(level uint8) {
+	mode := thinkingViewMode(level)
+	if mode > thinkingFullExpanded || mode == a.thinkingViewMode ||
+		strings.TrimSpace(a.message.ReasoningContent().Thinking) == "" {
+		return
+	}
+	a.thinkingViewMode = mode
 	// View-mode changes alter the windowing slice applied after
 	// glamour render. The streaming prefix cache may have been
 	// seeded under a different slice regime, and glued renders are
@@ -826,7 +838,6 @@ func (a *AssistantMessageItem) ToggleExpanded() bool {
 	// so the next render is clean.
 	a.streamingThinking.Reset()
 	a.Bump()
-	return a.thinkingViewMode != thinkingCollapsed
 }
 
 // tailWindowWouldTruncate reports whether the current thinking text

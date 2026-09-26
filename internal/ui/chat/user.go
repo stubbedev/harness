@@ -131,12 +131,22 @@ func (m *UserMessageItem) renderPromptInvocation(inv *promptInvocationBody, widt
 // message is a no-op reported collapsed, so the expand key never claims
 // text the user typed.
 func (m *UserMessageItem) ToggleExpanded() bool {
-	if m.promptInvocation() == nil {
-		return false
-	}
-	m.promptExpanded = !m.promptExpanded
-	m.invalidate()
+	m.SetExpansionLevel(expansionLevel(!m.promptExpanded))
 	return m.promptExpanded
+}
+
+// ExpansionLevel implements [Expandable]: 1 while a prompt invocation
+// shows its full body.
+func (m *UserMessageItem) ExpansionLevel() uint8 {
+	return expansionLevel(m.promptExpanded)
+}
+
+// SetExpansionLevel implements [Expandable]. Only a prompt invocation
+// has a body to expand; any other user message stays collapsed.
+func (m *UserMessageItem) SetExpansionLevel(level uint8) {
+	if m.promptInvocation() != nil && applyExpansionLevel(&m.promptExpanded, level) {
+		m.invalidate()
+	}
 }
 
 // renderSkillInvocation renders a loaded_skill XML as a special UI element.

@@ -158,7 +158,13 @@ session's generated title, falling back to the dispatch-prompt
 excerpt) — with no fold-out. Enter or click on a row switches the
 transcript into that agent's session: the switch is atomic (the old
 view keeps painting until the fetched transcript replaces it, then one
-retrace folds in events that raced the fetch). In an agent's session
+retrace folds in events that raced the fetch). Every transcript
+comes back as the user left it: `Chat.SetMessages` takes the session
+the transcript belongs to and saves/restores each session's view state
+(expansion levels by item ID, selection and group sub-cursor, scroll
+anchor, follow) around every replacement (`model/chat_view_state.go`).
+Expansion lives only behind `Expandable.SetExpansionLevel`, which both
+the toggles and the restore go through. In an agent's session
 the editor steers the agent via `Workspace.SteerAgent`; a pinned `Main
 Agent` row and escape switch back. Rows are removed when the run
 finishes. The dispatcher tool's waiting form (no prompt) does render:

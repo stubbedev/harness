@@ -1688,10 +1688,13 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	// session re-enable the clock.
 	m.chat.SetAnimationsAllowed(m.isAgentBusy())
 
-	if cmd := m.chat.SetMessages(items...); cmd != nil {
+	var sessionID string
+	if m.session != nil {
+		sessionID = m.session.ID
+	}
+	if cmd := m.chat.SetMessages(sessionID, items...); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
-	m.chat.SelectLast()
 	return tea.Sequence(cmds...)
 }
 

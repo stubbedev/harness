@@ -181,7 +181,7 @@ func newFrameTestUI(t testing.TB) *UI {
 	u.focus = uiFocusMain
 	u.status = NewStatus(u.com, u)
 	u.chat.scrollbarMode = config.ScrollbarAlways
-	u.chat.SetMessages(frameTestItems("line")...)
+	u.chat.SetMessages("", frameTestItems("line")...)
 	u.updateLayoutAndSize()
 	return u
 }
@@ -269,7 +269,7 @@ func TestView_ContentChangeBetweenScrollsIsNotStale(t *testing.T) {
 
 	// A message update is not scroll-only: the cache must reset.
 	u.beginFrameUpdate()
-	u.chat.SetMessages(frameTestItems("changed")...)
+	u.chat.SetMessages("", frameTestItems("changed")...)
 	u.chat.ScrollToTop()
 	u.endFrameUpdate()
 	after := u.View()

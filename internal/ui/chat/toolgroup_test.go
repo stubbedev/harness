@@ -248,14 +248,14 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		require.True(t, g.ExpandedLevel())
 		require.Equal(t, 0, g.SelectedChild())
 		g.ToggleSelectedChild()
-		require.True(t, isToolExpanded(g.ChildTool("t1")))
+		require.True(t, g.ChildTool("t1").ExpansionLevel() != 0)
 		out := ansi.Strip(g.Render(80))
 		assert.Greater(t, strings.Count(out, "\n")+1, 3, "the expanded call shows its body")
 
 		// Escape: the call collapses with the cursor kept on it, then
 		// the group collapses, then escape stops consuming.
 		require.True(t, g.Ascend())
-		require.False(t, isToolExpanded(g.ChildTool("t1")))
+		require.False(t, g.ChildTool("t1").ExpansionLevel() != 0)
 		require.True(t, g.ExpandedLevel())
 		require.True(t, g.Ascend())
 		require.False(t, g.ExpandedLevel())
@@ -281,8 +281,8 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		require.True(t, g.SelectChildNext())
 		require.True(t, g.Ascend())
 		require.False(t, g.ExpandedLevel())
-		assert.False(t, isToolExpanded(g.ChildTool("t1")))
-		assert.False(t, isToolExpanded(g.ChildTool("t2")))
+		assert.False(t, g.ChildTool("t1").ExpansionLevel() != 0)
+		assert.False(t, g.ChildTool("t2").ExpansionLevel() != 0)
 	})
 
 	t.Run("collapsed group stays one line while a call runs", func(t *testing.T) {
@@ -442,7 +442,7 @@ func TestSelectionColorsToolNames(t *testing.T) {
 		g.AddTool(done("t2"))
 		g.ExpandAndDescend()
 		g.DigIn()
-		require.True(t, isToolExpanded(g.ChildTool("t1")))
+		require.True(t, g.ChildTool("t1").ExpansionLevel() != 0)
 
 		assert.Contains(t, g.Render(120), sty.Tool.NameNormalSelected.Render("Shell"))
 	})

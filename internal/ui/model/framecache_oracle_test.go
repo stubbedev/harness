@@ -34,7 +34,7 @@ func viewChecked(t *testing.T, u *UI, what string) tea.View {
 func TestDiagonalWheelOverShellItem(t *testing.T) {
 	u := newFrameTestUI(t)
 	wide := strings.Repeat("wide output column ", 30)
-	u.chat.SetMessages(chat.NewShellItem(u.com.Styles, "ls", wide+"\n"+wide, 0))
+	u.chat.SetMessages("", chat.NewShellItem(u.com.Styles, "ls", wide+"\n"+wide, 0))
 	u.updateLayoutAndSize()
 	u.chat.ScrollToBottom()
 	u.chat.SetSelected(0)
@@ -142,7 +142,7 @@ func TestFrameSweep_WithShellItems(t *testing.T) {
 	items := frameTestItems("line")
 	items[3] = chat.NewShellItem(u.com.Styles, "ls -la", wide+"\n"+wide+"\n"+wide, 0)
 	items[40] = chat.NewShellItem(u.com.Styles, "cat big.txt", wide+"\n"+wide, 0)
-	u.chat.SetMessages(items...)
+	u.chat.SetMessages("", items...)
 	u.updateLayoutAndSize()
 	u.chat.ScrollToTop()
 	u.chat.SetSelected(3)

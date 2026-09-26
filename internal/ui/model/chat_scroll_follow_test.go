@@ -68,9 +68,23 @@ func (m *expandableTestItem) Render(width int) string {
 }
 
 func (m *expandableTestItem) ToggleExpanded() bool {
-	m.expanded = !m.expanded
-	m.version++
+	m.SetExpansionLevel(1 - m.ExpansionLevel())
 	return m.expanded
+}
+
+func (m *expandableTestItem) ExpansionLevel() uint8 {
+	if m.expanded {
+		return 1
+	}
+	return 0
+}
+
+func (m *expandableTestItem) SetExpansionLevel(level uint8) {
+	if level > 1 || (level == 1) == m.expanded {
+		return
+	}
+	m.expanded = level == 1
+	m.version++
 }
 
 var (
@@ -102,7 +116,7 @@ func TestChatFollowResticksWhenItemGrowsPastViewport(t *testing.T) {
 	u := newTestUI()
 	tall := &growingItem{id: "tall", lines: 3}
 	streaming := &growingItem{id: "stream", lines: 4}
-	u.chat.SetMessages(tall, streaming)
+	u.chat.SetMessages("", tall, streaming)
 	u.chat.SetSize(80, 10)
 	u.chat.ScrollToBottom()
 	require.True(t, u.chat.Follow())
@@ -131,7 +145,7 @@ func TestChatFollowResticksWhenContentShrinks(t *testing.T) {
 	u := newTestUI()
 	tall := &growingItem{id: "tall", lines: 3}
 	streaming := &growingItem{id: "stream", lines: 20}
-	u.chat.SetMessages(tall, streaming)
+	u.chat.SetMessages("", tall, streaming)
 	u.chat.SetSize(80, 10)
 	u.chat.ScrollToBottom()
 	require.True(t, u.chat.Follow())
@@ -159,7 +173,7 @@ func TestChatExpandBottomItemScrollsIntoView(t *testing.T) {
 	u := newTestUI()
 	short := &growingItem{id: "short", lines: 2}
 	bottom := &expandableTestItem{id: "bottom"}
-	u.chat.SetMessages(short, bottom)
+	u.chat.SetMessages("", short, bottom)
 	u.chat.SetSize(80, 10)
 	u.chat.ScrollToBottom()
 	u.chat.SetSelected(1)
@@ -181,7 +195,7 @@ func TestChatExpandBottomItemScrollsIntoViewWhenNotFollowing(t *testing.T) {
 	u := newTestUI()
 	filler := &growingItem{id: "filler", lines: 8}
 	bottom := &expandableTestItem{id: "bottom"}
-	u.chat.SetMessages(filler, bottom)
+	u.chat.SetMessages("", filler, bottom)
 	u.chat.SetSize(80, 10)
 	u.chat.ScrollToBottom()
 	u.chat.ScrollBy(-3)
@@ -207,7 +221,7 @@ func TestChatExpandMidViewItemDoesNotJump(t *testing.T) {
 	u := newTestUI()
 	top := &growingItem{id: "top", lines: 3}
 	mid := &expandableTestItem{id: "mid", expandedLines: 3}
-	u.chat.SetMessages(top, mid)
+	u.chat.SetMessages("", top, mid)
 	u.chat.SetSize(80, 10)
 	u.chat.ScrollToBottom()
 	u.chat.ScrollBy(-2)

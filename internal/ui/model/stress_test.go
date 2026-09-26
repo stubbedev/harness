@@ -45,7 +45,7 @@ func TestBusyTurnRenderSurvivesStress(t *testing.T) {
 	// A live tool group mid-turn: one done call, one still running.
 	group := chat.NewToolGroupMessageItem(u.com.Styles, busyTurnShellTool(u.com.Styles, "t1", "ls", true))
 	group.AddTool(busyTurnShellTool(u.com.Styles, "t2", "npm test", false))
-	u.chat.SetMessages(group)
+	u.chat.SetMessages("", group)
 
 	// The busy agent keeps the task strip alive.
 	warmCaches(u, true)

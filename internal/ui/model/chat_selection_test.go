@@ -73,7 +73,7 @@ func TestChat_ManualSelectionPinLifecycle(t *testing.T) {
 	// Loading a session resets the pin along with the messages.
 	u.chat.SetSelected(0)
 	require.True(t, u.chat.HasManualSelection())
-	u.chat.SetMessages(frameTestItems("reload")...)
+	u.chat.SetMessages("", frameTestItems("reload")...)
 	require.False(t, u.chat.HasManualSelection())
 }
 

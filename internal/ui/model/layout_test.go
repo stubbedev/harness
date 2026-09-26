@@ -167,7 +167,7 @@ func TestHandleTextareaHeightChange_FollowModeStaysAtBottom(t *testing.T) {
 			text: "message " + strconv.Itoa(i),
 		})
 	}
-	u.chat.SetMessages(msgs...)
+	u.chat.SetMessages("", msgs...)
 	u.updateLayoutAndSize()
 
 	// Enter follow mode and verify we're anchored at the bottom first.
@@ -205,7 +205,7 @@ func TestScrollByDown_EnablesFollowAtBottom(t *testing.T) {
 			text: "message " + strconv.Itoa(i),
 		})
 	}
-	u.chat.SetMessages(msgs...)
+	u.chat.SetMessages("", msgs...)
 	u.updateLayoutAndSize()
 
 	// Start at the top with follow disabled, simulating a user that
@@ -249,7 +249,7 @@ func TestFollowStaysAtBottomWhenContentGrows(t *testing.T) {
 	}
 	streaming := &mutableMessageItem{id: "streaming", lines: 1, version: 1}
 	msgs = append(msgs, streaming)
-	u.chat.SetMessages(msgs...)
+	u.chat.SetMessages("", msgs...)
 	u.updateLayoutAndSize()
 
 	// Start at the bottom in follow mode.

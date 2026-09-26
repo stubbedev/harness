@@ -83,6 +83,17 @@ type Focusable interface {
 	SetFocused(focused bool)
 }
 
+// SelectionAware represents an item that must know whether it is the
+// list's selected item, independent of whether the list has focus. An
+// item keeping a sub-selection resets it here, when the selection moves
+// off it, rather than in SetFocused: focus also leaves while the item
+// stays selected (another region takes the keyboard), and the
+// sub-selection must survive that to be there when focus returns.
+type SelectionAware interface {
+	// SetSelected reports whether the item is the list's selection.
+	SetSelected(selected bool)
+}
+
 // SubSelectable represents an item that carries an internal
 // sub-selection with its own on-screen location, such as an expanded
 // tool group with the keyboard sub-cursor on one of its calls. For

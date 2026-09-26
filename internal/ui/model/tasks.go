@@ -373,7 +373,7 @@ func (m *UI) handleAgentTranscriptMsg(msg agentTranscriptMsg) tea.Cmd {
 		}
 		return m.fetchAgentTranscript(msg.forSession, "", true)
 	}
-	m.setChildSessionMessages(msg.msgs)
+	m.setChildSessionMessages(msg.childSessionID, msg.msgs)
 	m.agentView.shown = msg.childSessionID
 	if msg.retraced {
 		return nil
@@ -386,7 +386,7 @@ func (m *UI) handleAgentTranscriptMsg(msg agentTranscriptMsg) tea.Cmd {
 // bookkeeping (the task strip is not rebuilt from a child's history,
 // queued prompts are a main-session concept, and assistant-info items
 // are only defined for the main turn).
-func (m *UI) setChildSessionMessages(msgs []message.Message) {
+func (m *UI) setChildSessionMessages(childSessionID string, msgs []message.Message) {
 	msgPtrs := make([]*message.Message, len(msgs))
 	for i := range msgs {
 		msgPtrs[i] = &msgs[i]
@@ -396,8 +396,7 @@ func (m *UI) setChildSessionMessages(msgs []message.Message) {
 	// A viewed agent is by definition working; keep the animation clock
 	// running so its in-flight tool spinners move.
 	m.chat.SetAnimationsAllowed(true)
-	m.chat.SetMessages(items...)
-	m.chat.SelectLast()
+	m.chat.SetMessages(childSessionID, items...)
 }
 
 // buildTranscriptItems converts messages into transcript items. One

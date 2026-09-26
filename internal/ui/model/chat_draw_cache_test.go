@@ -34,7 +34,7 @@ func TestChatDrawCache_HitOnIdenticalRender(t *testing.T) {
 	t.Parallel()
 
 	u := newTestUI()
-	u.chat.SetMessages(
+	u.chat.SetMessages("",
 		testMessageItem{id: "a", text: "alpha"},
 		testMessageItem{id: "b", text: "beta"},
 	)
@@ -60,7 +60,7 @@ func TestChatDrawCache_MissOnDifferentRender(t *testing.T) {
 	t.Parallel()
 
 	u := newTestUI()
-	u.chat.SetMessages(
+	u.chat.SetMessages("",
 		testMessageItem{id: "a", text: "alpha"},
 	)
 	u.updateLayoutAndSize()
@@ -71,7 +71,7 @@ func TestChatDrawCache_MissOnDifferentRender(t *testing.T) {
 	firstCache := u.chat.drawCache
 
 	// Replace the items so the rendered string differs.
-	u.chat.SetMessages(
+	u.chat.SetMessages("",
 		testMessageItem{id: "c", text: "gamma delta"},
 	)
 	u.updateLayoutAndSize()
@@ -95,7 +95,7 @@ func TestChatDrawCache_ReusedAcrossDifferentArea(t *testing.T) {
 	t.Parallel()
 
 	u := newTestUI()
-	u.chat.SetMessages(
+	u.chat.SetMessages("",
 		testMessageItem{id: "a", text: "alpha"},
 		testMessageItem{id: "b", text: "beta"},
 	)
@@ -137,7 +137,7 @@ func TestChatDrawCache_BoundedSize(t *testing.T) {
 	// drawCache is still a single *chatDrawCache pointing at the most
 	// recent rendered string each time.
 	for i := range 5 {
-		u.chat.SetMessages(
+		u.chat.SetMessages("",
 			testMessageItem{id: "x", text: "tick " + strconv.Itoa(i)},
 		)
 		u.updateLayoutAndSize()
@@ -175,7 +175,7 @@ func TestChatDrawCache_InvalidatedByWidthMethodSwap(t *testing.T) {
 	// reuse would surface as a different rendered cell layout. The
 	// woman-technologist ZWJ sequence is one cell under GraphemeWidth
 	// but two under WcWidth (the components combine).
-	u.chat.SetMessages(
+	u.chat.SetMessages("",
 		testMessageItem{id: "a", text: "hi 👩\u200d💻 there"},
 	)
 	u.updateLayoutAndSize()
@@ -233,7 +233,7 @@ func TestChatDrawCache_FallbackOnNonAnsiMethod(t *testing.T) {
 	t.Parallel()
 
 	u := newTestUI()
-	u.chat.SetMessages(
+	u.chat.SetMessages("",
 		testMessageItem{id: "a", text: "alpha"},
 		testMessageItem{id: "b", text: "beta"},
 	)

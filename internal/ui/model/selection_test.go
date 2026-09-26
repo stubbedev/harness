@@ -23,7 +23,7 @@ func TestDragSelectionIncludesPointerCell(t *testing.T) {
 			message.TextContent{Text: "the quick brown fox jumps over"},
 		},
 	}
-	u.chat.SetMessages(chat.NewUserMessageItem(u.com.Styles, msg))
+	u.chat.SetMessages("", chat.NewUserMessageItem(u.com.Styles, msg))
 	u.updateLayoutAndSize()
 	c := u.chat
 

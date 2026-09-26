@@ -36,7 +36,7 @@ func TestChatFoldsToolRunsIntoGroups(t *testing.T) {
 	info := chat.NewAssistantInfoItem(u.com.Styles, &message.Message{ID: "m-a"}, &config.Config{}, time.Time{})
 
 	// tool, tool, info footer, tool (same run), text, tool (new run).
-	u.chat.SetMessages(
+	u.chat.SetMessages("",
 		newToolItemForGroup(u, "t1"),
 		newToolItemForGroup(u, "t2"),
 		info,
@@ -74,7 +74,7 @@ func TestChatUpdateToolItemMutatesThroughGroup(t *testing.T) {
 	t.Parallel()
 	u := newTestUI()
 
-	u.chat.SetMessages(newToolItemForGroup(u, "t1"), newToolItemForGroup(u, "t2"))
+	u.chat.SetMessages("", newToolItemForGroup(u, "t1"), newToolItemForGroup(u, "t2"))
 	group, ok := u.chat.list.ItemAt(0).(*chat.ToolGroupMessageItem)
 	require.True(t, ok)
 
@@ -131,7 +131,7 @@ func TestChatAppendPreservesBatchOrder(t *testing.T) {
 func TestGroupSubCursorNavigation(t *testing.T) {
 	t.Parallel()
 	u := newTestUI()
-	u.chat.SetMessages(newToolItemForGroup(u, "t1"), newToolItemForGroup(u, "t2"))
+	u.chat.SetMessages("", newToolItemForGroup(u, "t1"), newToolItemForGroup(u, "t2"))
 	u.chat.Focus()
 	u.chat.SelectLast()
 
@@ -171,12 +171,15 @@ func TestGroupSubCursorNavigation(t *testing.T) {
 	require.False(t, group.ExpandedLevel())
 	require.False(t, u.chat.AscendSelectedItem())
 
-	// Losing focus clears the sub-cursor.
+	// Losing focus keeps the sub-cursor, so it is still there when
+	// focus comes back; the selection moving off the group clears it.
 	u.chat.EnterSelectedItem()
 	require.True(t, u.chat.SubCursorDown())
 	u.chat.Blur()
 	group.SetFocused(false)
-	require.Equal(t, -1, group.SelectedChild())
+	require.Equal(t, 1, group.SelectedChild(), "focus leaving keeps the sub-cursor")
+	group.SetSelected(false)
+	require.Equal(t, -1, group.SelectedChild(), "the selection leaving clears it")
 }
 
 // TestSelectPrevLandsOnGroupFromBelow pins the from-below landing
@@ -186,7 +189,7 @@ func TestGroupSubCursorNavigation(t *testing.T) {
 func TestSelectPrevLandsOnGroupFromBelow(t *testing.T) {
 	t.Parallel()
 	u := newTestUI()
-	u.chat.SetMessages(
+	u.chat.SetMessages("",
 		newToolItemForGroup(u, "t1"),
 		newToolItemForGroup(u, "t2"),
 		chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
@@ -222,7 +225,7 @@ func TestSelectPrevLandsOnGroupFromBelow(t *testing.T) {
 func TestFocusSelectingNewestLandsFromBelow(t *testing.T) {
 	t.Parallel()
 	u := newTestUI()
-	u.chat.SetMessages(
+	u.chat.SetMessages("",
 		chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
 			ID: "m-text", Role: message.Assistant,
 			Parts: []message.ContentPart{message.TextContent{Text: "before the run"}},
@@ -253,7 +256,7 @@ func TestCollapseRestoresView(t *testing.T) {
 	u := newTestUI()
 
 	// A group followed by enough text items to fill the viewport.
-	u.chat.SetMessages(
+	u.chat.SetMessages("",
 		newToolItemForGroup(u, "t1"),
 		newToolItemForGroup(u, "t2"),
 	)
@@ -329,7 +332,7 @@ func TestSubCursorStaysInView(t *testing.T) {
 	for i := range 15 {
 		items = append(items, commandToolItem(u, fmt.Sprintf("t%02d", i), fmt.Sprintf("cmd-%02d", i)))
 	}
-	u.chat.SetMessages(items...)
+	u.chat.SetMessages("", items...)
 	u.chat.SetSize(80, 6)
 	u.chat.Focus()
 	u.chat.SelectLast()

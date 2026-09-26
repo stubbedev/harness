@@ -38,7 +38,7 @@ func TestChatToggleExpandedSelectedItem_AssistantMessage(t *testing.T) {
 	exp, ok := item.(chat.Expandable)
 	require.True(t, ok, "AssistantMessageItem must satisfy chat.Expandable")
 
-	u.chat.SetMessages(item)
+	u.chat.SetMessages("", item)
 	u.chat.SetSelected(0)
 
 	// First keyboard toggle should expand. Immediately follow with a
