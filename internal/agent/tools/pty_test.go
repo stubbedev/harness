@@ -962,11 +962,11 @@ func TestPtyRunner_HeredocWithAngleBracketText(t *testing.T) {
 		"angle-bracket text is content, not keystrokes")
 }
 
-// A heredoc far past the terminal's input queue must survive the trip:
-// the command is written faster than the shell drains it, so delivery
-// rides the tty's backpressure, and every byte has to come out the far
-// end - in the file, and nothing but the file's byte count in the
-// output.
+// A heredoc far past what a terminal takes as keystrokes must still run
+// whole: a block this size goes to the session's scratch directory and
+// the shell sources it, so delivery does not depend on any terminal's
+// appetite for typed bytes, and every byte has to come out the far end
+// - in the file, and nothing but the file's byte count in the output.
 func TestPtyRunner_BigHeredoc(t *testing.T) {
 	r := newTestRunner(t)
 

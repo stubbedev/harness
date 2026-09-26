@@ -3,11 +3,13 @@ package tools
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -86,6 +88,18 @@ const (
 	// the send for good, and the caller's own wait budget still
 	// applies to what was written.
 	ptyEchoDrainWait = 2 * time.Second
+
+	// ptyTypeMaxBytes is how much command text still goes into the
+	// terminal as keystrokes. A block past this is written to the
+	// session's scratch directory and sourced from there instead:
+	// typed keystrokes come back as an echo the result depends on
+	// never losing a byte, and terminals have been observed losing
+	// a few bytes of a 40 KB echo under a slow reader no matter how
+	// the writes are paced. One short line - a path - is all that
+	// crosses the terminal then; the shell reads the block from the
+	// filesystem whole, with cd, environment and functions set inside
+	// it staying in the session exactly as if it had been typed.
+	ptyTypeMaxBytes = 8 << 10
 
 	// ptyQuietMs is the silence window after which the runner stops
 	// waiting blindly and looks at what the foreground job is doing:
@@ -1154,7 +1168,10 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 
 	var err error
 	if echo != nil {
-		err = r.pasteCommand(ctx, s, text)
+		// The delivery decides what its echo is: an oversized block is
+		// sourced from a file, and the one line typed is the path, not
+		// the command the model wrote.
+		echo, err = r.pasteCommand(ctx, s, text)
 	} else {
 		err = r.typeInput(s, text)
 	}
@@ -2059,16 +2076,22 @@ func needsPasteMarkers(s ptySizer, body string) bool {
 // runs the command, so the command's own output starts from a clean
 // slate. Short single-line commands and programs without bracketed
 // paste keep the plain send path: its one-line echo the cleaner already
-// strips.
-func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command string) error {
+// strips. A block too big to type reliably goes to the scratch
+// directory and is sourced from there (see sendSourced). What comes
+// back is the echo the cleaner should strip for this delivery.
+func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command string) ([]string, error) {
 	body := strings.TrimSuffix(command, "\n")
+	echo := strings.Split(body, "\n")
 	if !needsPasteMarkers(s, body) || !s.BracketedPaste() {
-		return r.send(s, []byte(keystrokes(body)+term.Enter))
+		if len(body) > ptyTypeMaxBytes {
+			return r.sendSourced(s, body)
+		}
+		return echo, r.send(s, []byte(keystrokes(body)+term.Enter))
 	}
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
 	if err := s.Paste(keystrokes(body)); err != nil {
-		return fmt.Errorf("terminal session: %w", err)
+		return nil, fmt.Errorf("terminal session: %w", err)
 	}
 	// Everything on the wire between the paste and this drain is the
 	// line editor echoing the block back; drop it whole instead of
@@ -2095,15 +2118,52 @@ func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command str
 	lines := strings.Split(body, "\n")
 	rows, _ := s.Size()
 	if len(lines) > rows {
-		tail := lines[len(lines)-rows:]
-		r.setState(func() { r.lastEcho = tail })
+		echo = lines[len(lines)-rows:]
 	} else {
-		r.setState(func() { r.lastEcho = nil })
+		echo = nil
 	}
+	r.setState(func() { r.lastEcho = echo })
 	if err := s.Send([]byte("\r")); err != nil {
-		return fmt.Errorf("terminal session: %w", err)
+		return nil, fmt.Errorf("terminal session: %w", err)
 	}
-	return nil
+	return echo, nil
+}
+
+// runnerScratchKey names the scratch subdirectory for one runner: a
+// hash of the registry key, which is unique per runner but carries
+// separators and control characters no filename should hold.
+func runnerScratchKey(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:8])
+}
+
+// sendSourced runs a command too big to type: the block goes to the
+// session's scratch directory byte for byte, and the one line typed is
+// the path to source it with. Typed keystrokes come back as an echo the
+// result depends on not losing bytes of, and terminals have lost a few
+// bytes of a 40 KB echo no matter how the writes were paced - the file
+// keeps the block out of the terminal entirely. Sourcing runs the block
+// in the session's shell, so cd, environment and functions set inside
+// it persist exactly as if it had been typed.
+func (r *ptyRunner) sendSourced(s ptyTerminal, body string) ([]string, error) {
+	dir, err := ScratchDir(runnerScratchKey(r.key), "commands")
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, "cmd.sh")
+	if strings.ContainsAny(path, "'\"") {
+		// A path the shell cannot say safely: type the block and lean
+		// on the paced send, as before this delivery existed.
+		echo := strings.Split(body, "\n")
+		return echo, r.send(s, []byte(keystrokes(body)+term.Enter))
+	}
+	if err := os.WriteFile(path, []byte(body+"\n"), 0o600); err != nil {
+		return nil, fmt.Errorf("failed to write command file: %w", err)
+	}
+	line := ". '" + path + "'"
+	echo := []string{line}
+	r.setState(func() { r.lastEcho = echo })
+	return echo, r.send(s, []byte(keystrokes(line)+term.Enter))
 }
 
 // Poll reads the terminal without typing anything. An idle session
