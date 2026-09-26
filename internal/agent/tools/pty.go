@@ -61,9 +61,16 @@ const (
 	// the alternate screen before rendering it, so the first frame is a
 	// drawn UI rather than a half-painted one.
 	ptyAltSettleMs = 250
-	// ptyKeyGap paces named keys: sent as one burst, a leading escape
-	// reads as a meta prefix and fast programs drop the tail.
+	// ptyKeyGap paces keystroke chunks: sent as one burst, a lone escape
+	// reads as the meta prefix of whatever follows and fast programs
+	// drop the tail.
 	ptyKeyGap = 25 * time.Millisecond
+
+	// ptyPasteEchoWait bounds how long a pasted command waits for its
+	// echo of the block's last line before the drain runs anyway: a
+	// line editor that never echoes it is not settling, and the call
+	// must still return.
+	ptyPasteEchoWait = 30 * time.Second
 
 	// ptyQuietMs is the silence window after which the runner stops
 	// waiting blindly and looks at what the foreground job is doing:
@@ -634,6 +641,12 @@ func (r *ptyRunner) setState(f func()) {
 func (r *ptyRunner) send(s ptyTerminal, b []byte) error {
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
+	return r.sendLocked(s, b)
+}
+
+// sendLocked is send with the write lock already held, so a multi-chunk
+// send cannot interleave with another call's typing.
+func (r *ptyRunner) sendLocked(s ptyTerminal, b []byte) error {
 	// A write into a full input queue blocks until the program reads,
 	// and a program that is not reading blocks it for good - with this
 	// lock held, so every later call on the session would queue behind
@@ -1014,7 +1027,6 @@ func (r *ptyRunner) typeSession(ctx context.Context, text string, waitSeconds in
 	r.cmdMu.Lock()
 	defer r.cmdMu.Unlock()
 
-	segs := parseInput(text)
 	defer r.setState(func() {
 		r.inFlight = false
 		// Remember whether this session still has something in it, so
@@ -1037,13 +1049,13 @@ func (r *ptyRunner) typeSession(ctx context.Context, text string, waitSeconds in
 			res.Queued = true
 			return res, nil
 		}
-		final, err := r.runCommand(ctx, s, text, segs, waitSeconds)
+		final, err := r.runCommand(ctx, s, text, waitSeconds)
 		if err != nil {
 			return final, err
 		}
 		return joinResults(append(ran, final)...), nil
 	}
-	if !hasKeys(segs) && !takesInputNow(s) {
+	if !containsKeyBytes(text) && !takesInputNow(s) {
 		// The foreground claims to read nothing. Type the line anyway
 		// and check shortly: a plain read (echo on) consumes instantly,
 		// so a still-pending line after the window is recalled with the
@@ -1055,7 +1067,7 @@ func (r *ptyRunner) typeSession(ctx context.Context, text string, waitSeconds in
 		r.enqueue(text)
 		return PTYResult{Queued: true, Running: s.Alive()}, nil
 	}
-	return r.driveProgram(ctx, s, text, segs, waitSeconds)
+	return r.driveProgram(ctx, s, text, waitSeconds)
 }
 
 // runCommand types a command line at the shell's prompt and waits for
@@ -1064,7 +1076,7 @@ func (r *ptyRunner) typeSession(ctx context.Context, text string, waitSeconds in
 // masked along the way), a full-screen takeover, output going quiet
 // while the foreground job is blocked reading the terminal (the command
 // stopped to ask something), or the wait budget running out.
-func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, segs []inputSegment, waitSeconds int) (PTYResult, error) {
+func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, waitSeconds int) (PTYResult, error) {
 	// Start this command from a known point: everything the previous
 	// call left behind is drained first, so nothing it printed can end
 	// up in this call's output and its prompt cannot be mistaken for
@@ -1077,14 +1089,13 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 	}
 
 	// Enter is implied: at a prompt, a line nobody presses Enter on
-	// does nothing. Text that ends in a newline or a named key (a tab,
-	// asking for completion) is typed as it is.
-	body := strings.TrimSuffix(text, "\n")
+	// does nothing. Input that already ends in a keystroke is typed as
+	// it is.
 	var echo []string
-	if !hasKeys(segs) {
-		echo = strings.Split(body, "\n")
-	} else if last := segs[len(segs)-1]; last.key == nil && !strings.HasSuffix(last.text, "\n") {
-		segs[len(segs)-1].text += "\n"
+	if !containsKeyBytes(text) {
+		echo = strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	} else if !endsKeyed(text) {
+		text += "\n"
 	}
 	r.setState(func() {
 		r.lastEcho = echo
@@ -1094,9 +1105,9 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 
 	var err error
 	if echo != nil {
-		err = r.pasteCommand(ctx, s, body)
+		err = r.pasteCommand(ctx, s, text)
 	} else {
-		err = r.typeInput(s, segs)
+		err = r.typeInput(s, text)
 	}
 	if err != nil {
 		return PTYResult{}, err
@@ -1121,18 +1132,18 @@ func (r *ptyRunner) takeSettled(s ptyTerminal) bool {
 // is recovered), output going quiet when it has redrawn (its screen) or
 // stopped to ask (waiting), or the budget running out. Nothing here
 // guesses how long a program takes to quit: the shell says when it has.
-func (r *ptyRunner) driveProgram(ctx context.Context, s ptyTerminal, text string, segs []inputSegment, waitSeconds int) (PTYResult, error) {
+func (r *ptyRunner) driveProgram(ctx context.Context, s ptyTerminal, text string, waitSeconds int) (PTYResult, error) {
 	var echo []string
-	if !hasKeys(segs) {
-		// Echo stripping is for typed lines. A sequence with keys in it
-		// leaves no line to strip, and a guess would eat real output.
+	if !containsKeyBytes(text) {
+		// Echo stripping is for typed lines. Keystroke sequences leave
+		// no line to strip, and a guess would eat real output.
 		echo = strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 	}
 	r.setState(func() {
 		r.lastEcho = echo
 		r.inFlight = true
 	})
-	if err := r.typeInput(s, segs); err != nil {
+	if err := r.typeInput(s, text); err != nil {
 		return PTYResult{}, err
 	}
 	// The program may have finished on the keystroke before this wait
@@ -1199,11 +1210,10 @@ func (r *ptyRunner) typeOrRecall(ctx context.Context, s ptyTerminal, text string
 // unconditionally: queueing here would strand the very program the
 // model is talking to.
 func (r *ptyRunner) typeWhileBusy(ctx context.Context, s ptyTerminal, text string) (PTYResult, error) {
-	segs := parseInput(text)
-	if !hasKeys(segs) {
+	if !containsKeyBytes(text) {
 		r.setState(func() { r.lastEcho = strings.Split(strings.TrimSuffix(text, "\n"), "\n") })
 	}
-	if err := r.typeInput(s, segs); err != nil {
+	if err := r.typeInput(s, text); err != nil {
 		return PTYResult{}, err
 	}
 	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 5*time.Second)
@@ -1501,8 +1511,9 @@ func echoDebris(line, echo string) bool {
 }
 
 // consumeEchoChunks greedily consumes line as consecutive chunks that
-// each appear in echo, requiring the first chunk to be a prefix of echo.
-// It reports how many bytes were consumed and whether the whole line was.
+// each appear in echo, requiring the first chunk to be a prefix of echo
+// and every later chunk a substantive run. It reports how many bytes
+// were consumed and whether the whole line was.
 func consumeEchoChunks(line, echo string) (int, bool) {
 	consumed := 0
 	first := true
@@ -1522,11 +1533,23 @@ func consumeEchoChunks(line, echo string) (int, bool) {
 		if best == 0 {
 			return consumed, false
 		}
+		if best < minChunkLen && !first {
+			// A redraw reprints substantive runs; a one-byte fragment
+			// found somewhere in the echo is coincidence, not a chunk.
+			// Letting one through matches near-identical lines against
+			// the wrong echo entry ("line 011" against "line 010"),
+			// which stalls the echo scan and leaks every line after it.
+			return consumed, false
+		}
 		consumed += best
 		first = false
 	}
 	return consumed, true
 }
+
+// minChunkLen is how long a non-leading chunk must be to count as a
+// redraw fragment.
+const minChunkLen = 4
 
 // promptPartialRe matches the residue of zsh's PROMPT_SP partial-line
 // marker: the shell prints a highlighted % (or # for root) followed by a
@@ -1894,29 +1917,27 @@ func keystrokes(text string) string {
 	return strings.ReplaceAll(text, "\n", term.Enter)
 }
 
-// typeInput writes the parsed input to the terminal. Plain text takes
-// the paste path, so a multi-line block still arrives as one paste. A
-// sequence with keys in it goes out one segment per write, with a gap
-// between them, all under the write lock so nothing lands in the middle
-// of it. Sent as a single burst, a leading escape is read as the meta
+// typeInput writes input to the terminal as the bytes it is. Text
+// takes the paste path, so a multi-line block still arrives as one
+// paste. Keystroke input goes out one chunk per write, with a gap
+// between chunks, all under the write lock so nothing lands in the
+// middle of it: sent as a single burst, a lone escape reads as the meta
 // prefix of whatever follows (ESC : is Alt-:, not "escape then colon"),
 // and programs that poll their input can miss the tail of the burst.
-func (r *ptyRunner) typeInput(s ptyTerminal, segs []inputSegment) error {
-	if len(segs) == 1 && segs[0].key == nil {
-		return r.paste(s, segs[0].text)
+// Each chunk passes the input-queue guard, so a program that has
+// stopped reading refuses the input instead of blocking the session.
+func (r *ptyRunner) typeInput(s ptyTerminal, input string) error {
+	if !containsKeyBytes(input) {
+		return r.paste(s, input)
 	}
 	r.sendMu.Lock()
 	defer r.sendMu.Unlock()
-	for i, seg := range segs {
-		b := seg.key
-		if b == nil {
-			b = []byte(keystrokes(seg.text))
-		}
-		if err := s.Send(b); err != nil {
-			return fmt.Errorf("terminal session: %w", err)
-		}
-		if i < len(segs)-1 {
+	for i, chunk := range keyChunks(input) {
+		if i > 0 {
 			time.Sleep(ptyKeyGap)
+		}
+		if err := r.sendLocked(s, []byte(keystrokes(chunk))); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -2001,14 +2022,35 @@ func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command str
 		return fmt.Errorf("terminal session: %w", err)
 	}
 	// Everything on the wire between the paste and this drain is the
-	// line editor echoing the block back; once it has gone quiet, drop
-	// it whole instead of trying to clean it line by line. The
-	// echo-line stripping in clean goes with it: with the echo already
-	// gone it would only eat command output that repeats a line of the
-	// command - a heredoc body catted right back, for one.
-	_ = s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 3*time.Second)
+	// line editor echoing the block back; drop it whole instead of
+	// trying to clean it line by line. The echo-line stripping in clean
+	// goes with it: with the echo already gone it would only eat
+	// command output that repeats a line of the command - a heredoc
+	// body catted right back, for one. The block sits unexecuted in the
+	// editor until the return below, so nothing past the echo can be
+	// lost. Its end cannot be read off silence alone - an editor
+	// redrawing a long paste pauses mid-echo - so wait for the block's
+	// own last line, then let its redraw settle.
+	if tail := lastLine(body); tail != "" {
+		tailRe := regexp.MustCompile(regexp.QuoteMeta(keystrokes(tail)))
+		s.WaitForAny(ctx, []*regexp.Regexp{tailRe}, ptyPasteEchoWait)
+	}
+	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 3*time.Second)
 	s.Drain()
-	r.setState(func() { r.lastEcho = nil })
+	// A block taller than the screen has one more echo after this
+	// drain: on the return, the editor re-displays the lines its
+	// display still tracks - the last screenful - as it accepts them.
+	// Those lines are exactly the echo's tail, so leave the echo list
+	// trimmed to it for the cleaner; a block that fits the screen
+	// leaves nothing to strip, and its echo is dropped whole.
+	lines := strings.Split(body, "\n")
+	rows, _ := s.Size()
+	if len(lines) > rows {
+		tail := lines[len(lines)-rows:]
+		r.setState(func() { r.lastEcho = tail })
+	} else {
+		r.setState(func() { r.lastEcho = nil })
+	}
 	if err := s.Send([]byte("\r")); err != nil {
 		return fmt.Errorf("terminal session: %w", err)
 	}
@@ -2113,7 +2155,7 @@ func (r *ptyRunner) runQueuedLocked(ctx context.Context, s ptyTerminal, waitSeco
 			r.pushFront(cmd)
 			break
 		}
-		res, err := r.runCommand(ctx, s, cmd, parseInput(cmd), waitSeconds)
+		res, err := r.runCommand(ctx, s, cmd, waitSeconds)
 		// runCommand marks the runner as owning the session and leaves
 		// clearing it to its caller; each queued run ends here.
 		r.setState(func() { r.inFlight = false })

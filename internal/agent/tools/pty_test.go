@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -572,12 +573,13 @@ func TestPtyRunner_PlainQuestionIsNotMasked(t *testing.T) {
 		require.True(t, res.Waiting, "an ordinary question waits for input from the model")
 	}
 
-	// The explicit <enter> is the documented way to answer a waiting
-	// program. A bare newline makes the text a multi-line paste, which
-	// queues when the foreground claims to read nothing - true wherever
-	// the tty says so and procfs does not (macOS) - and a program waiting
-	// for that very answer would then never be answered.
-	done, err := r.Type(t.Context(), "alpha<enter>", 10)
+	// The explicit carriage return is the documented way to answer a
+	// waiting program: it types as a keystroke. A newline instead makes
+	// the text a multi-line paste, which queues when the foreground
+	// claims to read nothing - true wherever the tty says so and procfs
+	// does not (macOS) - and a program waiting for that very answer
+	// would then never be answered.
+	done, err := r.Type(t.Context(), "alpha\r", 10)
 	require.NoError(t, err)
 	require.Contains(t, done.Output, "got:alpha")
 }
@@ -771,6 +773,11 @@ func TestEchoDebris(t *testing.T) {
 		{"output ending with sent text", "got:hello", "hello", false},
 		{"output starting mid-command", "hello", "echo hello", false},
 		{"repeated junk", "nananananananana", "banana", false},
+		// Near-identical output must not consume the previous echo entry
+		// off by one: the divergent byte is too short a run to be a
+		// redraw fragment, and a false match here stalls the echo scan
+		// and leaks the rest of a large heredoc's echo.
+		{"next line against stale echo", "line 011: payload", "line 010: payload", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -936,6 +943,47 @@ func TestPtyRunner_ZshUserShellHeredoc(t *testing.T) {
 	// output.
 	require.Contains(t, res.Output, "package main\n\nfunc main() {}",
 		"a heredoc's body goes into the file, not the output")
+}
+
+// Input is the literal keystrokes: nothing is parsed out of a command.
+// A heredoc whose body names keys in angle brackets - the exact shape
+// the old key parser rewrote into control bytes, corrupting both the
+// file and the heredoc - reaches the file with every word intact.
+func TestPtyRunner_HeredocWithAngleBracketText(t *testing.T) {
+	r := newTestRunner(t)
+
+	body := "press <enter> to run, <ctrl+c> to stop, <tab> completes"
+	cmd := "cat > notes.txt <<'EOF'\n" + body + "\nEOF\ncat notes.txt"
+	res, err := r.Type(t.Context(), cmd, 15)
+	require.NoError(t, err)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	require.Contains(t, res.Output, body,
+		"angle-bracket text is content, not keystrokes")
+}
+
+// A heredoc far past the terminal's input queue must survive the trip:
+// the command is written faster than the shell drains it, so delivery
+// rides the tty's backpressure, and every byte has to come out the far
+// end - in the file, and nothing but the file's byte count in the
+// output.
+func TestPtyRunner_BigHeredoc(t *testing.T) {
+	r := newTestRunner(t)
+
+	var body strings.Builder
+	for i := range 400 {
+		fmt.Fprintf(&body, "line %03d: %s\n", i, strings.Repeat("payload ", 12))
+	}
+	cmd := "cat > big.txt <<'EOF'\n" + body.String() + "EOF\nwc -c < big.txt"
+	res, err := r.Type(t.Context(), cmd, 30)
+	require.NoError(t, err)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	size := strings.TrimSpace(res.Output)
+	written, err := strconv.Atoi(size)
+	require.NoError(t, err, "wc output: %q", size)
+	require.Equal(t, body.Len(), written,
+		"the whole heredoc must reach the file byte for byte")
 }
 
 func TestRenderLines(t *testing.T) {

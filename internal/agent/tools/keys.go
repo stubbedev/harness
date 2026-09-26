@@ -1,118 +1,100 @@
 package tools
 
-import "strings"
+// Input to the shell tool is the literal byte stream a terminal would
+// receive: command text, with the keys that have no character of their
+// own sent as their terminal sequences - "\n" (or "\r") for enter,
+// "\u0003" for ctrl-c, "\u001b[A" for up. Nothing is parsed out of the
+// text, so a heredoc body, a commit message or a redirection reaches
+// the terminal exactly as given.
 
-// Input to the shell tool is one string: the text a person would type,
-// with the keys that have no character of their own - escape, arrows,
-// ctrl-c, function keys - written by name in angle brackets, the way a
-// person would say them: "<escape>:wq<enter>", "<ctrl+c>", "y<enter>".
-// The sequences are the xterm defaults every program expects. A
-// bracketed word that is not a key name is text and is typed as such,
-// so "cat <file" or "echo <hello>" needs no escaping.
-
-var namedKeys = map[string][]byte{
-	"enter":     []byte("\r"),
-	"return":    []byte("\r"),
-	"cr":        []byte("\r"),
-	"tab":       []byte("\t"),
-	"backtab":   []byte("\x1b[Z"),
-	"shift+tab": []byte("\x1b[Z"),
-	"escape":    []byte("\x1b"),
-	"esc":       []byte("\x1b"),
-	"space":     []byte(" "),
-	"backspace": []byte("\x7f"),
-	"bs":        []byte("\x7f"),
-	"delete":    []byte("\x1b[3~"),
-	"del":       []byte("\x1b[3~"),
-	"up":        []byte("\x1b[A"),
-	"down":      []byte("\x1b[B"),
-	"right":     []byte("\x1b[C"),
-	"left":      []byte("\x1b[D"),
-	"home":      []byte("\x1b[H"),
-	"end":       []byte("\x1b[F"),
-	"pageup":    []byte("\x1b[5~"),
-	"pgup":      []byte("\x1b[5~"),
-	"pagedown":  []byte("\x1b[6~"),
-	"pgdn":      []byte("\x1b[6~"),
-	"insert":    []byte("\x1b[2~"),
-	"ins":       []byte("\x1b[2~"),
-	"f1":        []byte("\x1bOP"),
-	"f2":        []byte("\x1bOQ"),
-	"f3":        []byte("\x1bOR"),
-	"f4":        []byte("\x1bOS"),
-	"f5":        []byte("\x1b[15~"),
-	"f6":        []byte("\x1b[17~"),
-	"f7":        []byte("\x1b[18~"),
-	"f8":        []byte("\x1b[19~"),
-	"f9":        []byte("\x1b[20~"),
-	"f10":       []byte("\x1b[21~"),
-	"f11":       []byte("\x1b[23~"),
-	"f12":       []byte("\x1b[24~"),
-}
-
-// maxKeyNameLen bounds how far past a "<" the tokenizer looks for the
-// closing ">": longer than the longest key name is text, not a key.
-const maxKeyNameLen = 12
-
-// keyBytes translates one key name to the bytes to write to the
-// terminal, reporting whether the name is a key at all.
-func keyBytes(name string) ([]byte, bool) {
-	n := strings.ToLower(strings.TrimSpace(name))
-	if b, ok := namedKeys[n]; ok {
-		return b, true
-	}
-	// Generic ctrl+<letter>.
-	if rest, ok := strings.CutPrefix(n, "ctrl+"); ok && len(rest) == 1 {
-		if c := rest[0]; c >= 'a' && c <= 'z' {
-			return []byte{c - 'a' + 1}, true
-		}
-	}
-	return nil, false
-}
-
-// inputSegment is one run of an input string: text to be written as it
-// is, or a named key with the bytes it stands for.
-type inputSegment struct {
-	text string
-	key  []byte
-}
-
-// parseInput splits input into runs of text and named keys. Text runs
-// are kept whole so a multi-line block can still be delivered as one
-// paste; keys come out one at a time so the caller can pace them.
-func parseInput(input string) []inputSegment {
-	var segs []inputSegment
-	var text strings.Builder
-	flush := func() {
-		if text.Len() > 0 {
-			segs = append(segs, inputSegment{text: text.String()})
-			text.Reset()
-		}
-	}
-	for i := 0; i < len(input); {
-		if input[i] == '<' {
-			if end := strings.IndexByte(input[i:], '>'); end > 1 && end <= maxKeyNameLen+1 {
-				if b, ok := keyBytes(input[i+1 : i+end]); ok {
-					flush()
-					segs = append(segs, inputSegment{key: b})
-					i += end + 1
-					continue
-				}
-			}
-		}
-		text.WriteByte(input[i])
-		i++
-	}
-	flush()
-	return segs
-}
-
-// hasKeys reports whether any segment is a named key.
-func hasKeys(segs []inputSegment) bool {
-	for _, s := range segs {
-		if s.key != nil {
+// containsKeyBytes reports whether input carries bytes the terminal
+// treats as keys rather than text: escape, delete, or a control
+// character other than newline. Newline is the documented enter and
+// stays text, so a multi-line command still travels as one paste; a
+// carriage return is an explicit enter, typed as such. Keyed input is
+// program-bound keystrokes: it is typed into whatever runs, and it is
+// never wrapped in paste markers, which would deliver its escape
+// sequences as literal characters.
+func containsKeyBytes(input string) bool {
+	for i := 0; i < len(input); i++ {
+		b := input[i]
+		if b == 0x1b || b == 0x7f || b < 0x20 && b != '\n' {
 			return true
 		}
 	}
 	return false
+}
+
+// keyChunks splits input into the runs to write between pacing gaps:
+// every escape sequence (CSI, SS3) and every lone escape is a chunk of
+// its own, so a gap lands between keystrokes and never inside one, and
+// the text between them groups into whole runs. Plain text comes back
+// as one chunk and is sent in a single write.
+func keyChunks(input string) []string {
+	var chunks []string
+	start := 0
+	for i := 0; i < len(input); {
+		if input[i] != 0x1b {
+			i++
+			continue
+		}
+		// A key ends the run it sits in.
+		if start < i {
+			chunks = append(chunks, input[start:i])
+		}
+		if n := escapeSequenceLen(input[i:]); n > 0 {
+			chunks = append(chunks, input[i:i+n])
+			i += n
+		} else {
+			// A lone escape: the gap after it is what keeps the next
+			// bytes from reading as its meta suffix.
+			chunks = append(chunks, input[i:i+1])
+			i++
+		}
+		start = i
+	}
+	if start < len(input) {
+		chunks = append(chunks, input[start:])
+	}
+	return chunks
+}
+
+// escapeSequenceLen returns the length of the escape sequence at the
+// front of b, or 0 when b does not begin one: CSI (\x1b[ through its
+// final byte) and SS3 (\x1bO plus one byte), the two shapes a keypress
+// sends.
+func escapeSequenceLen(b string) int {
+	if len(b) < 2 || b[0] != 0x1b {
+		return 0
+	}
+	switch b[1] {
+	case '[':
+		for i := 2; i < len(b); i++ {
+			if c := b[i]; c >= 0x40 && c <= 0x7e {
+				return i + 1
+			}
+		}
+	case 'O':
+		if len(b) >= 3 {
+			return 3
+		}
+	}
+	return 0
+}
+
+// endsKeyed reports whether input already ends in a keystroke: a
+// control byte, or an escape sequence as the last chunk. Such input is
+// typed exactly as given; anything else at a prompt gets the implied
+// enter.
+func endsKeyed(input string) bool {
+	chunks := keyChunks(input)
+	if len(chunks) == 0 {
+		return false
+	}
+	last := chunks[len(chunks)-1]
+	if last[0] == 0x1b {
+		return true
+	}
+	b := last[len(last)-1]
+	return b < 0x20 || b == 0x7f
 }

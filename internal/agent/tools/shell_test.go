@@ -79,7 +79,7 @@ func TestShellTool_NamedSessionsJuggle(t *testing.T) {
 	// The server terminal feeds its program and shows what it prints.
 	resp = runShellTool(t, tool, ctx, ShellParams{
 		Session: "srv",
-		Command: "hello<enter>",
+		Command: "hello\r",
 	})
 	require.False(t, resp.IsError)
 	require.Contains(t, resp.Content, "hello")
@@ -87,7 +87,7 @@ func TestShellTool_NamedSessionsJuggle(t *testing.T) {
 	// End the program; its session is free for new commands again.
 	resp = runShellTool(t, tool, ctx, ShellParams{
 		Session: "srv",
-		Command: "<ctrl+d>",
+		Command: "\x04",
 	})
 	require.False(t, resp.IsError)
 	resp = runShellTool(t, tool, ctx, ShellParams{

@@ -42,7 +42,7 @@ func TestPtyRunner_EditorIsDrivenNotMistakenForAPrompt(t *testing.T) {
 	require.True(t, poll.Unchanged)
 	require.Empty(t, poll.Output)
 
-	res, err = r.Type(t.Context(), "<escape>:q!<enter>", 10)
+	res, err = r.Type(t.Context(), "\x1b:q!\r", 10)
 	require.NoError(t, err)
 	require.False(t, res.AltScreen, "editor should have quit")
 
@@ -84,7 +84,7 @@ func TestPtyRunner_NestedInteractiveShell(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, res.Output, "nested")
 
-	_, err = r.Type(t.Context(), "<ctrl+d>", 10)
+	_, err = r.Type(t.Context(), "\x04", 10)
 	require.NoError(t, err)
 
 	done, err := r.Type(t.Context(), "echo back", 10)
@@ -110,28 +110,54 @@ func TestPtyRunner_OpensAtConfiguredSize(t *testing.T) {
 	require.Equal(t, "30 100", strings.TrimSpace(res.Output))
 }
 
-func TestParseInput(t *testing.T) {
+func TestKeyChunks(t *testing.T) {
 	t.Parallel()
 
-	// Keys by name between text, the way a person would say them.
-	require.Equal(t, []inputSegment{
-		{key: []byte("\x1b")}, {text: ":wq"}, {key: []byte("\r")},
-	}, parseInput("<escape>:wq<enter>"))
+	// A lone escape is its own chunk, so what follows cannot read as
+	// its meta suffix.
+	require.Equal(t, []string{"\x1b", ":q!\r"}, keyChunks("\x1b:q!\r"))
 
-	// Names are case-insensitive; ctrl+<letter> is generic.
-	require.Equal(t, []inputSegment{{key: []byte{0x03}}}, parseInput("<CTRL+C>"))
+	// A complete escape sequence stays one chunk; the pacing gap lands
+	// after it, never inside it.
+	require.Equal(t, []string{"\x1b[A"}, keyChunks("\x1b[A"))
+	require.Equal(t, []string{"\x1bOP"}, keyChunks("\x1bOP"))
+	require.Equal(t, []string{"abc", "\x1b[B", "def"}, keyChunks("abc\x1b[Bdef"))
 
-	// A bracketed word that is not a key is text, so shell redirections
-	// and the like need no escaping.
-	require.Equal(t, []inputSegment{{text: "cat <file >out\n"}}, parseInput("cat <file >out\n"))
-	require.Equal(t, []inputSegment{{text: "echo <banana>"}}, parseInput("echo <banana>"))
+	// Text without escapes is one chunk and goes out in one write.
+	require.Equal(t, []string{"a\nb\n"}, keyChunks("a\nb\n"))
+	require.Nil(t, keyChunks(""))
+}
 
-	// Plain text is one segment, so a multi-line block stays a paste.
-	require.Equal(t, []inputSegment{{text: "a\nb\n"}}, parseInput("a\nb\n"))
-	require.False(t, hasKeys(parseInput("a\nb\n")))
-	require.True(t, hasKeys(parseInput("y<enter>")))
+func TestContainsKeyBytes(t *testing.T) {
+	t.Parallel()
 
-	require.Empty(t, parseInput(""))
+	// Newline is the documented enter, not a key: command text with
+	// newlines still travels as one paste.
+	require.False(t, containsKeyBytes("echo hi\n"))
+	require.False(t, containsKeyBytes("cat <<EOF\nbody\nEOF\n"))
+
+	// Angle brackets are literal text; nothing is parsed out of a
+	// command, so a heredoc or message that says "press <enter>"
+	// reaches the terminal with the word intact.
+	require.False(t, containsKeyBytes("cat <file >out\n"))
+	require.False(t, containsKeyBytes("press <enter> to continue"))
+
+	require.True(t, containsKeyBytes("y\r"))
+	require.True(t, containsKeyBytes("\x03"))
+	require.True(t, containsKeyBytes("\x1b[A"))
+	require.True(t, containsKeyBytes("\x7f"))
+}
+
+func TestEndsKeyed(t *testing.T) {
+	t.Parallel()
+
+	// Input already ending in a keystroke is typed as given; text gets
+	// the implied enter.
+	require.True(t, endsKeyed("\x1b:wq\r"))
+	require.True(t, endsKeyed("\x1b[A"))
+	require.True(t, endsKeyed("abc\t"))
+	require.False(t, endsKeyed("abc"))
+	require.False(t, endsKeyed(""))
 }
 
 func TestEchoedLine(t *testing.T) {
@@ -175,7 +201,7 @@ func TestPtyRunner_TypingGoesToWhateverIsRunning(t *testing.T) {
 	require.Contains(t, res.Output, "echo beside", "the text went into the buffer")
 
 	// Quitting hands the terminal back, and the same text now runs.
-	res, err = r.Type(t.Context(), "<escape>:q!<enter>", 10)
+	res, err = r.Type(t.Context(), "\x1b:q!\r", 10)
 	require.NoError(t, err)
 	require.False(t, res.AltScreen)
 	done, err := r.Type(t.Context(), "echo beside", 10)
@@ -306,6 +332,6 @@ func TestPtyRunner_ReadsDoNotWaitForARunningCommand(t *testing.T) {
 	require.True(t, res.WhileBusy)
 
 	// Stop the sleeper so the session is clean for teardown.
-	_, err = r.Type(t.Context(), "<ctrl+c>", 10)
+	_, err = r.Type(t.Context(), "\x03", 10)
 	require.NoError(t, err)
 }
