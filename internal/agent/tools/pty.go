@@ -72,6 +72,15 @@ const (
 	// must still return.
 	ptyPasteEchoWait = 30 * time.Second
 
+	// ptySendChunk is the largest single write into the terminal: a
+	// block bigger than this goes out in paced pieces. With echo on,
+	// the kernel echoes every byte written, and its echo buffer drops
+	// what it cannot flush to the output side - a 43 KB burst echoed
+	// back ~8 KB short under a slow reader, with the surviving pieces
+	// spliced mid-line. A chunk's echo fits the buffer and drains
+	// within the gap between chunks even when the reader lags.
+	ptySendChunk = 1 << 10
+
 	// ptyQuietMs is the silence window after which the runner stops
 	// waiting blindly and looks at what the foreground job is doing:
 	// blocked on the terminal means the command is waiting for input.
@@ -651,12 +660,24 @@ func (r *ptyRunner) sendLocked(s ptyTerminal, b []byte) error {
 	// and a program that is not reading blocks it for good - with this
 	// lock held, so every later call on the session would queue behind
 	// it. Refuse instead; the caller reports it and the session stays
-	// usable.
-	if queued := s.PendingInput(); queued > 0 && queued+len(b) > ptyInputQueueCapacity {
-		return errTerminalInputFull
-	}
-	if err := s.Send(b); err != nil {
-		return fmt.Errorf("terminal session: %w", err)
+	// usable. The guard runs per chunk, so a program that stops
+	// reading mid-send is refused at the first chunk that would not
+	// fit rather than after the whole block.
+	for len(b) > 0 {
+		if queued := s.PendingInput(); queued > 0 && queued+ptySendChunk > ptyInputQueueCapacity {
+			return errTerminalInputFull
+		}
+		chunk := b
+		if len(chunk) > ptySendChunk {
+			chunk = chunk[:ptySendChunk]
+		}
+		if err := s.Send(chunk); err != nil {
+			return fmt.Errorf("terminal session: %w", err)
+		}
+		b = b[len(chunk):]
+		if len(b) > 0 {
+			time.Sleep(ptyKeyGap)
+		}
 	}
 	return nil
 }
