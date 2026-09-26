@@ -591,7 +591,13 @@ func GroupVerbStyle(sty *styles.Styles, running, cancelled bool, failed, succeed
 // spinner either. Shared by the transcript's expanded groups and the
 // background task strip's nested lines.
 func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int, selected bool) string {
-	name := toolNameStyle(sty, t.EffectiveStatus(), false, selected).Render(ToolDisplayName(t.ToolCall()))
+	label := ToolDisplayName(t.ToolCall())
+	if l, ok := t.(interface{ liveDisplayName() (string, bool) }); ok {
+		if live, ok := l.liveDisplayName(); ok {
+			label = live
+		}
+	}
+	name := toolNameStyle(sty, t.EffectiveStatus(), false, selected).Render(label)
 	line := name
 	if summary := ToolCallSummary(t.ToolCall()); summary != "" {
 		line += " " + sty.Tool.Body.Render(summary)

@@ -381,8 +381,8 @@ func (t *baseToolMessageItem) BodyRender(bodyWidth int) string {
 			Elapsed:         t.elapsed(),
 		}
 		// Read at render time so a pending wait's header tracks agents
-		// finishing while it runs. The item re-renders per tick while
-		// pending (the waiting state line), so the count stays fresh.
+		// finishing while it runs. The item re-renders per tick until
+		// its result lands (see isSpinning), so the count stays fresh.
 		if t.waitingAgents != nil {
 			opts.WaitingAgents = t.waitingAgents()
 		}

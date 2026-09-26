@@ -643,18 +643,23 @@ func TestWaitingCallRendersAgentsPins(t *testing.T) {
 	require.NotNil(t, item, "the wait call renders in the transcript")
 	out := ansi.Strip(waitCallRender(t, item, 80))
 	assert.Contains(t, out, "Waiting for 2 agents")
+	assert.NotContains(t, out, "Waiting for tool response", "the header already says the call is waiting")
+	assert.Contains(t, ansi.Strip(item.Render(80)), "Waiting for 2 agents", "the collapsed row names the wait, not the bare tool")
 
 	// The collected reports land as the call's result; the assistant
 	// update also flips the call's Finished flag, exactly as the real
 	// step-finish update does.
 	_ = u.appendSessionMessage(message.Message{ID: "tm2", SessionID: "s1", Role: message.Tool, Parts: []message.ContentPart{
-		message.ToolResult{ToolCallID: "w1", Name: "agent", Content: "All waited agents finished."},
+		message.ToolResult{ToolCallID: "w1", Name: "agent", Content: "All waited agents finished.\n\nworker (a1): completed\n  Result:\n**found** the culprit"},
 	}})
 	wait.Parts[0] = message.ToolCall{ID: "w1", Name: "agent", Input: `{}`, Finished: true}
 	_ = u.updateSessionMessage(wait)
 	out = ansi.Strip(waitCallRender(t, u.chat.MessageItem("w1"), 80))
 	assert.Contains(t, out, "Waited for agents")
 	assert.Contains(t, out, "All waited agents finished.")
+	assert.Contains(t, ansi.Strip(u.chat.MessageItem("w1").Render(80)), "Waited for agents")
+	assert.Contains(t, out, "found the culprit", "the reports render as markdown")
+	assert.NotContains(t, out, "**found**")
 }
 
 // waitCallRender renders the tool call inside whatever container holds
