@@ -448,6 +448,13 @@ definitions:
         items:
           type: string
         type: array
+      inherent_goals:
+        description: |-
+          InherentGoals continues a turn that ended by declaring next steps
+          ("I will now run the tests") instead of ending and waiting for
+          the user to say continue. Chained continuations are capped; a
+          queued user prompt always takes precedence.
+        type: boolean
       initialize_as:
         type: string
       max_concurrent_subagents:

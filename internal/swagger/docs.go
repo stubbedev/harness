@@ -3883,6 +3883,10 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "inherent_goals": {
+                    "description": "InherentGoals continues a turn that ended by declaring next steps\n(\"I will now run the tests\") instead of ending and waiting for\nthe user to say continue. Chained continuations are capped; a\nqueued user prompt always takes precedence.",
+                    "type": "boolean"
+                },
                 "initialize_as": {
                     "type": "string"
                 },
