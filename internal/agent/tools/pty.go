@@ -77,9 +77,15 @@ const (
 	// the kernel echoes every byte written, and its echo buffer drops
 	// what it cannot flush to the output side - a 43 KB burst echoed
 	// back ~8 KB short under a slow reader, with the surviving pieces
-	// spliced mid-line. A chunk's echo fits the buffer and drains
-	// within the gap between chunks even when the reader lags.
+	// spliced mid-line. A chunk's echo fits the buffer, and the wait
+	// in sendLocked keeps it to one chunk in the queue at a time.
 	ptySendChunk = 1 << 10
+	// ptyEchoDrainWait bounds how long a paced send waits for the
+	// terminal's reader to take in a chunk's echo before writing the
+	// next chunk anyway: a reader that never catches up must not stall
+	// the send for good, and the caller's own wait budget still
+	// applies to what was written.
+	ptyEchoDrainWait = 2 * time.Second
 
 	// ptyQuietMs is the silence window after which the runner stops
 	// waiting blindly and looks at what the foreground job is doing:
@@ -671,15 +677,37 @@ func (r *ptyRunner) sendLocked(s ptyTerminal, b []byte) error {
 		if len(chunk) > ptySendChunk {
 			chunk = chunk[:ptySendChunk]
 		}
+		mark := s.PendingLen()
 		if err := s.Send(chunk); err != nil {
 			return fmt.Errorf("terminal session: %w", err)
 		}
 		b = b[len(chunk):]
 		if len(b) > 0 {
-			time.Sleep(ptyKeyGap)
+			// The next chunk goes out only after the reader has taken
+			// this chunk's echo in: the kernel's echo output queue then
+			// holds at most one chunk, and no rate a slow reader reads
+			// at can lose bytes. Bounded, so a wedged reader delays
+			// the send instead of freezing it.
+			awaitEchoDrain(s, mark, len(chunk))
 		}
 	}
 	return nil
+}
+
+// awaitEchoDrain waits for the session's reader to ingest the echo of
+// a chunk just written: every written byte echoes as at least one byte,
+// except the odd control character a line discipline swallows, so three
+// quarters of the chunk is proof enough. An echo that never comes - a
+// session gone quiet or exited - ends the wait.
+func awaitEchoDrain(s ptyTerminal, mark, n int) {
+	want := mark + n - n/4 + 16
+	deadline := time.Now().Add(ptyEchoDrainWait)
+	for s.PendingLen() < want {
+		if !s.Alive() || time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(ptyKeyGap)
+	}
 }
 
 // commandInFlight reports whether a command is running here and owns
