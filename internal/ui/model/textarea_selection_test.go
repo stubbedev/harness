@@ -56,8 +56,9 @@ func TestTextareaCutSelection(t *testing.T) {
 
 // TestShiftUpSelectsUntilTopEdge pins the editor's shift+up contract:
 // while display rows remain above the cursor the key extends the
-// selection in place, and on the top row, where the selection cannot
-// grow, it hands focus to the region above like it always did.
+// selection in place, on the top row it grows the selection to the start
+// of the input, and only from there, where the selection cannot grow,
+// does it hand focus to the region above.
 func TestShiftUpSelectsUntilTopEdge(t *testing.T) {
 	t.Parallel()
 
@@ -70,15 +71,20 @@ func TestShiftUpSelectsUntilTopEdge(t *testing.T) {
 	require.True(t, u.textarea.HasSelection())
 	require.Contains(t, u.textarea.SelectedText(), "world")
 
-	// The cursor is now on the top row; the same key leaves.
+	// The cursor is now on the top row; the key selects to the start.
 	_, _ = u.Update(shiftUp())
-	require.Equal(t, uiFocusMain, u.focus, "shift+up on the top row must leave the editor")
+	require.Equal(t, uiFocusEditor, u.focus, "shift+up short of the start must keep editing")
+	require.Equal(t, "hello\nworld", u.textarea.SelectedText())
+
+	// At the start the selection cannot grow; the same key leaves.
+	_, _ = u.Update(shiftUp())
+	require.Equal(t, uiFocusMain, u.focus, "shift+up at the start must leave the editor")
 }
 
-// TestShiftUpWithoutRowsAboveLeavesEditor pins that a single-line input,
-// whose cursor is always on the top row, keeps the old gesture: shift+up
-// leaves the editor immediately.
-func TestShiftUpWithoutRowsAboveLeavesEditor(t *testing.T) {
+// TestShiftUpSelectsSingleLineBackward pins that a single-line input,
+// whose cursor is always on the top row, can be selected bottom to top:
+// shift+up selects back to the start before it leaves the editor.
+func TestShiftUpSelectsSingleLineBackward(t *testing.T) {
 	t.Parallel()
 
 	u := newSelectionTestUI()
@@ -86,7 +92,39 @@ func TestShiftUpWithoutRowsAboveLeavesEditor(t *testing.T) {
 	u.textarea.InsertString("hello")
 
 	_, _ = u.Update(shiftUp())
+	require.Equal(t, uiFocusEditor, u.focus)
+	require.Equal(t, "hello", u.textarea.SelectedText())
+
+	_, _ = u.Update(shiftUp())
 	require.Equal(t, uiFocusMain, u.focus)
+}
+
+// TestShiftUpFromEmptyInputLeavesEditor pins that an empty input, which
+// has nothing to select, keeps the direct gesture out of the editor.
+func TestShiftUpFromEmptyInputLeavesEditor(t *testing.T) {
+	t.Parallel()
+
+	u := newSelectionTestUI()
+	u.keyMap = DefaultKeyMap()
+
+	_, _ = u.Update(shiftUp())
+	require.Equal(t, uiFocusMain, u.focus)
+}
+
+// TestShiftDownSelectsToEnd pins that shift+down on the bottom row grows
+// the selection through the last rune of the input.
+func TestShiftDownSelectsToEnd(t *testing.T) {
+	t.Parallel()
+
+	u := newSelectionTestUI()
+	u.keyMap = DefaultKeyMap()
+	u.textarea.InsertString("hello\nworld")
+	u.textarea.MoveToBegin()
+
+	_, _ = u.Update(shiftDown())
+	_, _ = u.Update(shiftDown())
+	require.Equal(t, uiFocusEditor, u.focus)
+	require.Equal(t, "hello\nworld", u.textarea.SelectedText())
 }
 
 func TestTextareaMouseSelection(t *testing.T) {

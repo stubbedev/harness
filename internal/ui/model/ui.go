@@ -2712,14 +2712,26 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			case key.Matches(msg, m.keyMap.Chat.UpOneItem) && msg.String() == "shift+up" && m.isAtEditorTopRow():
 				// Shift+up extends a selection upward while there are
-				// display rows above; on the top row, where the selection
-				// cannot grow, it leaves the editor toward the region
-				// above. Unlike the shift+tab cycle it always lands on the
-				// transcript's newest entry. Only the arrow key qualifies:
-				// the binding's letter alias (K) must stay typeable.
+				// display rows above. On the top row it first grows the
+				// selection to the start of the input, so a selection can
+				// be built bottom to top as well as top to bottom; only
+				// once there, where it cannot grow, does it leave the
+				// editor toward the region above. Unlike the shift+tab
+				// cycle it always lands on the transcript's newest entry.
+				// Only the arrow key qualifies: the binding's letter alias
+				// (K) must stay typeable.
+				if !m.isAtEditorStart() {
+					m.selectToEditorEdge(false)
+					break
+				}
 				if cmd := m.focusAboveEditor(chatEntryFromBelow); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
+			case key.Matches(msg, m.keyMap.Editor.SelectLineDown) && m.isAtEditorBottomRow():
+				// On the bottom row shift+down grows the selection to the
+				// end of the input; the textarea's own line move stops one
+				// rune short of it there.
+				m.selectToEditorEdge(true)
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
 				if m.isAgentBusy() {
 					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
