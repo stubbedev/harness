@@ -506,8 +506,17 @@ type Styles struct {
 // ChromaTheme converts the current markdown chroma styles to a chroma
 // StyleEntries map.
 func (s *Styles) ChromaTheme() chroma.StyleEntries {
-	rules := s.Markdown.CodeBlock
+	return CodeBlockChromaEntries(s.Markdown.CodeBlock)
+}
 
+// CodeBlockChromaEntries converts a markdown code block style to the
+// chroma entries its code is highlighted with. A style without chroma
+// rules highlights nothing: every token takes the block's own text
+// style, which is how such a block rendered before it had a lexer.
+func CodeBlockChromaEntries(rules ansi.StyleCodeBlock) chroma.StyleEntries {
+	if rules.Chroma == nil {
+		return chroma.StyleEntries{chroma.Text: chromaStyle(rules.StylePrimitive)}
+	}
 	return chroma.StyleEntries{
 		chroma.Text:                chromaStyle(rules.Chroma.Text),
 		chroma.Error:               chromaStyle(rules.Chroma.Error),

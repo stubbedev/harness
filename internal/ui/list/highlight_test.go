@@ -147,3 +147,27 @@ func TestHighlightContentRestoresWrappedCodespanBackticks(t *testing.T) {
 	result := HighlightContent(rendered, uv.Rect(0, 0, width, lipgloss.Height(rendered)), 0, 0, -1, -1)
 	require.Contains(t, result, "`codespan`", "wrapped pill must reassemble in copy, got:\n%s", result)
 }
+
+// TestSelectionSkipsConcealedCells pins that a selection treats
+// concealed cells as not there: copying leaves them out, and painting
+// does not mark them selected, so what shows as selected is exactly
+// what copies. Renderers conceal layout that is not content, such as a
+// code block's margin.
+func TestSelectionSkipsConcealedCells(t *testing.T) {
+	t.Parallel()
+
+	margin := ansi.Style{}.Conceal(true).Styled("  ")
+	content := margin + "ls -la\n" + margin + "  make"
+	area := uv.Rect(0, 0, 20, 2)
+
+	require.Equal(t, "ls -la\n  make\n", HighlightContent(content, area, 0, 0, -1, -1))
+
+	buf := HighlightBuffer(content, area, 0, 0, -1, -1, nil)
+	for y := range 2 {
+		line := buf.Line(y)
+		for x := range 2 {
+			require.Zero(t, line.At(x).Style.Attrs&uv.AttrReverse, "row %d col %d: the margin is not painted", y, x)
+		}
+		require.NotZero(t, line.At(2).Style.Attrs&uv.AttrReverse, "row %d: the text is painted", y)
+	}
+}

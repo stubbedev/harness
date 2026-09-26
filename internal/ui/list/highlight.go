@@ -20,6 +20,12 @@ var DefaultHighlighter Highlighter = func(x, y int, c *uv.Cell) *uv.Cell {
 	return c
 }
 
+// concealed reports whether a cell is concealed: rendered, but not shown
+// as text. A selection neither paints nor copies such cells.
+func concealed(c *uv.Cell) bool {
+	return c.Style.Attrs&uv.AttrConceal != 0
+}
+
 // Highlighter represents a function that defines how to highlight text.
 type Highlighter func(x, y int, c *uv.Cell) *uv.Cell
 
@@ -83,17 +89,24 @@ func extractRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, heig
 // spaces: renderers like glamour pad rows with real space cells, so content
 // usually reaches the full width).
 //
+// Concealed cells are left out: concealed text is not shown, so it is not
+// part of what was selected. Renderers conceal layout that is not
+// content, such as a code block's margin, so copied code carries no
+// indent its source did not have.
+//
 // Codespan padding cells are converted back into backticks: markdown inline
 // code renders blank padding in place of its backticks
 // ([styles.CodespanPadding]), and a copy of a selection must reproduce the
 // original source text, not the rendered blank padding. The sentinel is a
-// no-break space tagged with a variation selector, so a real no-break space
-// in the message text does not match it and is copied verbatim.
+// plain no-break space (see [styles.CodespanPadding] for why), so a
+// no-break space in the message text itself also copies as a backtick.
 func extractRow(line uv.Line, colStart, colEnd int) string {
+	copied := func(cell *uv.Cell) bool {
+		return cell != nil && cell.Content != "" && !concealed(cell)
+	}
 	lastCellX := -1
 	for x := colStart; x < colEnd; x++ {
-		cell := line.At(x)
-		if cell != nil && cell.Content != "" {
+		if copied(line.At(x)) {
 			lastCellX = x
 		}
 	}
@@ -101,7 +114,7 @@ func extractRow(line uv.Line, colStart, colEnd int) string {
 	var row strings.Builder
 	for x := colStart; x <= lastCellX; x++ {
 		cell := line.At(x)
-		if cell != nil {
+		if copied(cell) {
 			if cell.Content == styles.CodespanPadding {
 				row.WriteString("`")
 			} else {
@@ -262,13 +275,16 @@ func HighlightBuffer(content string, area image.Rectangle, startLine, startCol, 
 			highlightEnd = colStart // No content on this line
 		}
 
-		// Apply highlight style only to cells with content
+		// Apply highlight style only to cells with content. Concealed
+		// cells are not part of a selection (see extractRow), so they are
+		// not painted as selected either: what shows as selected is
+		// exactly what copies.
 		for x := colStart; x < highlightEnd; x++ {
 			if !image.Pt(x, y).In(area) {
 				continue
 			}
 			cell := line.At(x)
-			if cell != nil {
+			if cell != nil && !concealed(cell) {
 				highlighter(x, y, cell)
 			}
 		}

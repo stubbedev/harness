@@ -272,6 +272,14 @@ through all components that need access to app state or styles.
     call `TotalHeight` per frame during a resize — the chat suppresses the
     scrollbar mid-drag and warms the cache incrementally (`list.Prewarm`)
     on settle instead.
+- Markdown code blocks are highlighted by harness, not glamour
+  (`common/markdown_codeblock.go`): every renderer is built through
+  `newMarkdownRenderer`, chroma's registries are written only in `init`
+  (they are unlocked maps, so a runtime registration is a data race),
+  and a block's margin renders as concealed cells.
+- A selection neither paints nor copies concealed cells
+  (`list/highlight.go`). Conceal layout that must look like whitespace
+  but is not content, and a mouse copy will leave it out.
 - Dialog messages are intercepted first in `Update` before other routing.
 - Focus state determines key event routing: `uiFocusEditor` sends keys to
   the textarea, `uiFocusMain` sends them to the chat list.

@@ -73,3 +73,27 @@ func TestDragSelectionIncludesPointerCell(t *testing.T) {
 	_ = renderToBuffer(t, c, 80, 20)
 	require.Equal(t, "the quick brown fox jumps over", c.HighlightContent())
 }
+
+// TestDragCopyOfCodeBlockHasNoMargin pins issue #68: dragging over an
+// assistant's code block copies the code as written, without the
+// block's rendered margin in front of every line, while the code's own
+// indentation survives.
+func TestDragCopyOfCodeBlockHasNoMargin(t *testing.T) {
+	u := newTestUI()
+	msg := &message.Message{
+		ID:   "m1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "Run:\n\n```bash\nls -la\n  cd /tmp && make\n```\n\nDone."},
+		},
+	}
+	u.chat.SetMessages("", chat.NewAssistantMessageItem(u.com.Styles, msg))
+	u.updateLayoutAndSize()
+	c := u.chat
+
+	c.mouseDown = true
+	c.mouseDownItem, c.mouseDownY, c.mouseDownX = 0, 0, 0
+	c.mouseDragItem, c.mouseDragY, c.mouseDragX = 0, 10, 79
+	_ = renderToBuffer(t, c, 80, 20)
+	require.Equal(t, "Run:\n\nls -la\n  cd /tmp && make\n\nDone.", c.HighlightContent())
+}

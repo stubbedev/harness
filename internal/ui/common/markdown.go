@@ -1,23 +1,12 @@
 package common
 
 import (
-	"image/color"
 	"sync"
 
 	"charm.land/glamour/v2"
-	"github.com/alecthomas/chroma/v2/formatters"
+	"charm.land/glamour/v2/ansi"
 	"github.com/stubbedev/harness/internal/ui/styles"
-	"github.com/stubbedev/harness/internal/ui/xchroma"
 )
-
-const formatterName = "harness"
-
-func init() {
-	// NOTE: Glamour does not offer us an option to pass the formatter
-	// implementation directly. We need to register and use by name.
-	var zero color.Color
-	formatters.Register(formatterName, xchroma.Formatter(zero, nil))
-}
 
 // mdCacheMu guards mdCache and quietMDCache.
 //
@@ -49,11 +38,7 @@ func MarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 	if r, ok := mdCache[width]; ok {
 		return r
 	}
-	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(sty.Markdown),
-		glamour.WithWordWrap(width),
-		glamour.WithChromaFormatter(formatterName),
-	)
+	r := newMarkdownRenderer(markdownCodeTheme, sty.Markdown, width)
 	mdCache[width] = r
 	return r
 }
@@ -80,12 +65,7 @@ func UserMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer {
 	if r, ok := userMDCache[width]; ok {
 		return r
 	}
-	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(sty.Markdown),
-		glamour.WithWordWrap(width),
-		glamour.WithChromaFormatter(formatterName),
-		glamour.WithPreservedNewLines(),
-	)
+	r := newMarkdownRenderer(markdownCodeTheme, sty.Markdown, width, glamour.WithPreservedNewLines())
 	userMDCache[width] = r
 	return r
 }
@@ -100,12 +80,20 @@ func QuietMarkdownRenderer(sty *styles.Styles, width int) *glamour.TermRenderer 
 	if r, ok := quietMDCache[width]; ok {
 		return r
 	}
-	r, _ := glamour.NewTermRenderer(
-		glamour.WithStyles(sty.QuietMarkdown),
+	r := newMarkdownRenderer(quietCodeTheme, sty.QuietMarkdown, width)
+	quietMDCache[width] = r
+	return r
+}
+
+// newMarkdownRenderer builds a renderer for cfg at width. Every
+// markdown renderer is built here, so every one highlights its code
+// blocks through the given theme's rules (see codeBlockStyleConfig).
+func newMarkdownRenderer(theme string, cfg ansi.StyleConfig, width int, opts ...glamour.TermRendererOption) *glamour.TermRenderer {
+	r, _ := glamour.NewTermRenderer(append([]glamour.TermRendererOption{
+		glamour.WithStyles(codeBlockStyleConfig(theme, cfg)),
 		glamour.WithWordWrap(width),
 		glamour.WithChromaFormatter(formatterName),
-	)
-	quietMDCache[width] = r
+	}, opts...)...)
 	return r
 }
 
