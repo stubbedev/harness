@@ -39,8 +39,11 @@ func verificationChangedPaths(ctx context.Context, root, sessionID string, files
 	probe := exec.CommandContext(ctx, "git", "rev-parse", "--is-inside-work-tree")
 	probe.Dir = root
 	if err := probe.Run(); err == nil {
-		for _, args := range [][]string{{"diff", "--name-only", "-z"}, {"diff", "--cached", "--name-only", "-z"}, {"ls-files", "--others", "--exclude-standard", "-z"}} {
-			command := exec.CommandContext(ctx, "git", args...)
+		for _, command := range []*exec.Cmd{
+			exec.CommandContext(ctx, "git", "diff", "--name-only", "-z"),
+			exec.CommandContext(ctx, "git", "diff", "--cached", "--name-only", "-z"),
+			exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard", "-z"),
+		} {
 			command.Dir = root
 			output, err := command.Output()
 			if err != nil {

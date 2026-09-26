@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/stubbedev/harness/internal/filepathext"
 )
 
 // scratchRoot is the directory tools write working files into:
@@ -29,15 +31,29 @@ func ScratchDir(sessionID, kind string) (string, error) {
 	if session == "" {
 		return "", fmt.Errorf("session ID is required")
 	}
+	safeKind := sanitizePathSegment(kind)
+	if safeKind == "" {
+		return "", fmt.Errorf("scratch kind is required")
+	}
 	root, err := filepath.Abs(scratchRoot())
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve scratch directory: %w", err)
 	}
-	dir := filepath.Join(root, session, sanitizePathSegment(kind))
+	dir := filepath.Join(root, session, safeKind)
+	// The segments are sanitizePathSegment outputs, so this cannot trip;
+	// checking it here keeps the directory-under-root invariant a fact
+	// about this function rather than an assumption about the sanitizer.
+	if dir == root || !filepathext.Within(root, dir) {
+		return "", fmt.Errorf("scratch directory must stay inside the scratch root: %s", dir)
+	}
 	for _, path := range []string{root, filepath.Join(root, session), dir} {
+		// codeql[go/path-injection] path is built from separator- and
+		// traversal-free segments and verified to stay inside root.
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			return "", fmt.Errorf("failed to create scratch directory: %w", err)
 		}
+		// codeql[go/path-injection] path is built from separator- and
+		// traversal-free segments and verified to stay inside root.
 		info, err := os.Lstat(path)
 		if err != nil {
 			return "", fmt.Errorf("failed to inspect scratch directory: %w", err)

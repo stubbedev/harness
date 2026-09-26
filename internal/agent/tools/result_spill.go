@@ -45,6 +45,8 @@ func spillToolResult(sessionID, content string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// codeql[go/path-injection] dir comes from ScratchDir: sanitized
+	// segments, verified inside the scratch root.
 	file, err := os.CreateTemp(dir, "result-*.txt")
 	if err != nil {
 		return "", err
