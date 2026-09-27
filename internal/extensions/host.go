@@ -96,13 +96,39 @@ func New(ctx context.Context, opts Options) *Host {
 	enabled, disabledStates := Filter(found, opts.Disabled)
 	states = append(states, disabledStates...)
 
-	for _, ext := range enabled {
-		in, err := spawnLoadedInstance(ctx, h, ext)
-		if err != nil {
+	// Load instances in parallel: each one builds an independent VM and
+	// runs its init.lua, so the cost is Σ per extension sequentially but
+	// max in parallel. Results land by index so the registration order
+	// stays deterministic regardless of load order.
+	var (
+		wg     sync.WaitGroup
+		loaded = make([]*instance, len(enabled))
+		fails  = make([]error, len(enabled))
+	)
+	for i, ext := range enabled {
+		wg.Go(func() {
+			defer func() {
+				if r := recover(); r != nil {
+					fails[i] = fmt.Errorf("extension panicked during load: %v", r)
+				}
+			}()
+			in, err := spawnLoadedInstance(ctx, h, ext)
+			if err != nil {
+				fails[i] = err
+				return
+			}
+			loaded[i] = in
+		})
+	}
+	wg.Wait()
+
+	for i, ext := range enabled {
+		if err := fails[i]; err != nil {
 			slog.Warn("Failed to load extension", "extension", ext.Name, "path", ext.EntryFile, "error", err)
 			states = append(states, &State{Name: ext.Name, Path: ext.EntryFile, State: StateError, Err: err})
 			continue
 		}
+		in := loaded[i]
 		slog.Debug(
 			"Loaded extension",
 			"extension", ext.Name,
