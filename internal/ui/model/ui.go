@@ -3085,14 +3085,19 @@ func (m *UI) View() tea.View {
 	canvas := uv.NewScreenBuffer(m.width, m.height)
 	v.Cursor = m.Draw(canvas, canvas.Bounds())
 
-	content := strings.ReplaceAll(canvas.Render(), "\r\n", "\n") // normalize newlines
-	contentLines := strings.Split(content, "\n")
-	for i, line := range contentLines {
-		// Trim trailing spaces for concise rendering
-		contentLines[i] = strings.TrimRight(line, " ")
+	// Normalize newlines and trim trailing spaces in one pass: splitting
+	// first makes the global "\r\n" -> "\n" rewrite a per-line suffix
+	// trim, which saves two full-frame copies per uncached frame.
+	rendered := canvas.Render()
+	var out strings.Builder
+	out.Grow(len(rendered))
+	for i, line := range strings.Split(rendered, "\n") {
+		if i > 0 {
+			out.WriteByte('\n')
+		}
+		out.WriteString(strings.TrimRight(strings.TrimSuffix(line, "\r"), " "))
 	}
-
-	content = strings.Join(contentLines, "\n")
+	content := out.String()
 
 	v.Content = content
 	if cacheable {

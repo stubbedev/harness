@@ -460,6 +460,9 @@ func (m *Chat) SetMessages(transcriptID string, msgs ...chat.MessageItem) tea.Cm
 // its text would merge them into the previous run and render the text
 // after its own tool calls.
 func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
+	if len(msgs) == 0 {
+		return
+	}
 	for _, msg := range msgs {
 		if tool, ok := msg.(chat.ToolMessageItem); ok {
 			m.absorbTool(tool)
