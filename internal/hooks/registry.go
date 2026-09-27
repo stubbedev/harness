@@ -72,15 +72,19 @@ func (r *Registry) Run(ctx context.Context, ec EventContext) (AggregateResult, e
 		results []HookResult
 		infos   []HookInfo
 	)
+	// One payload per event: the shell hooks pipe it to their commands
+	// and the dispatchers hand it to their handlers, so it is marshalled
+	// here once rather than once per source.
+	payload := BuildEventPayload(ec)
 	if r.cfg != nil && len(r.cfg.Config().Hooks[ec.Event]) > 0 {
 		runner := NewRunner(r.cfg.Config().Hooks[ec.Event], r.cwd, r.projectDir)
-		results, infos = runner.results(ctx, ec)
+		results, infos = runner.resultsWithPayload(ctx, ec, payload)
 	}
 	for _, d := range r.dispatchers {
 		if !d.Has(ec.Event) {
 			continue
 		}
-		for _, dispatched := range d.Dispatch(ctx, ec) {
+		for _, dispatched := range d.Dispatch(ctx, ec, payload) {
 			results = append(results, dispatched.Result)
 			infos = append(infos, dispatched.info())
 		}

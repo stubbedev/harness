@@ -243,10 +243,13 @@ func (e errNotObject) Error() string { return string(e) + " is not a JSON object
 // answer the same events without spawning a process.
 //
 // A dispatcher that does not handle an event returns false from Has, so
-// the registry can skip building a payload for it.
+// the registry can skip building a payload for it. The payload is built
+// once by the caller (Registry.Run) and handed to every consumer of the
+// event - shell hooks and dispatchers alike - so an event with both is
+// marshalled once, not once per source.
 type Dispatcher interface {
 	Has(event string) bool
-	Dispatch(ctx context.Context, ec EventContext) []DispatchResult
+	Dispatch(ctx context.Context, ec EventContext, payload []byte) []DispatchResult
 }
 
 // DispatchResult is one in-process handler's outcome, named for the

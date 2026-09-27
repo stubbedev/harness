@@ -116,6 +116,16 @@ func (r *Runner) results(ctx context.Context, ec EventContext) ([]HookResult, []
 	if ec.CWD == "" {
 		ec.CWD = r.cwd
 	}
+	return r.resultsWithPayload(ctx, ec, BuildEventPayload(ec))
+}
+
+// resultsWithPayload is results with the event's stdin payload already
+// in hand, so a caller that dispatches the same event to in-process
+// handlers does not marshal it a second time.
+func (r *Runner) resultsWithPayload(ctx context.Context, ec EventContext, payload []byte) ([]HookResult, []HookInfo) {
+	if ec.CWD == "" {
+		ec.CWD = r.cwd
+	}
 	matching := r.matchingHooks(ec.Subject())
 	if len(matching) == 0 {
 		return nil, nil
@@ -133,7 +143,6 @@ func (r *Runner) results(ctx context.Context, ec EventContext) ([]HookResult, []
 	}
 
 	envVars := BuildEventEnv(ec, r.projectDir)
-	payload := BuildEventPayload(ec)
 
 	results := make([]HookResult, len(deduped))
 	var wg sync.WaitGroup

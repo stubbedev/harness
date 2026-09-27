@@ -24,6 +24,13 @@ func writeExtension(t *testing.T, name, source string) string {
 	return root
 }
 
+// dispatch is host.Dispatch with the payload a registry hands its
+// dispatchers, built from the same event the way Registry.Run does.
+func dispatch(t testing.TB, host *extensions.Host, ec hooks.EventContext) []hooks.DispatchResult {
+	t.Helper()
+	return host.Dispatch(t.Context(), ec, hooks.BuildEventPayload(ec))
+}
+
 func newHost(t *testing.T, paths []string, opts ...func(*extensions.Options)) *extensions.Host {
 	t.Helper()
 	options := extensions.Options{Paths: paths, WorkingDir: t.TempDir()}
@@ -129,7 +136,7 @@ end)
 	require.True(t, host.Has(hooks.EventPreToolUse))
 	require.False(t, host.Has(hooks.EventStop))
 
-	denied := host.Dispatch(t.Context(), hooks.EventContext{
+	denied := dispatch(t, host, hooks.EventContext{
 		Event:     hooks.EventPreToolUse,
 		ToolName:  "shell",
 		ToolInput: `{"command":"rm -rf /"}`,
@@ -138,7 +145,7 @@ end)
 	require.Equal(t, hooks.DecisionDeny, denied[0].Result.Decision)
 	require.Equal(t, "no rm -rf here", denied[0].Result.Reason)
 
-	allowed := host.Dispatch(t.Context(), hooks.EventContext{
+	allowed := dispatch(t, host, hooks.EventContext{
 		Event:     hooks.EventPreToolUse,
 		ToolName:  "shell",
 		ToolInput: `{"command":"ls"}`,
@@ -147,7 +154,7 @@ end)
 	require.Equal(t, hooks.DecisionNone, allowed[0].Result.Decision)
 
 	// A matcher that does not match the subject contributes nothing.
-	require.Empty(t, host.Dispatch(t.Context(), hooks.EventContext{
+	require.Empty(t, dispatch(t, host, hooks.EventContext{
 		Event:    hooks.EventPreToolUse,
 		ToolName: "view",
 	}))
@@ -162,7 +169,7 @@ harness.on("UserPromptSubmit", function(event)
 end)
 `)
 
-	results := newHost(t, []string{root}).Dispatch(t.Context(), hooks.EventContext{
+	results := dispatch(t, newHost(t, []string{root}), hooks.EventContext{
 		Event:  hooks.EventUserPromptSubmit,
 		Prompt: "explain this",
 	})
@@ -300,7 +307,7 @@ func TestNilHostIsInert(t *testing.T) {
 	require.Nil(t, host.States())
 	require.Nil(t, host.Loaded())
 	require.False(t, host.Has(hooks.EventStop))
-	require.Nil(t, host.Dispatch(context.Background(), hooks.EventContext{Event: hooks.EventStop}))
+	require.Nil(t, host.Dispatch(context.Background(), hooks.EventContext{Event: hooks.EventStop}, nil))
 	_, err := host.RunCommand(context.Background(), "ext:x:y", nil)
 	require.Error(t, err)
 	host.Close()

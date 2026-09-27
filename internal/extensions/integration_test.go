@@ -151,7 +151,7 @@ func TestDocumentedExamplesLoad(t *testing.T) {
 	require.Len(t, commands, 1)
 	require.Equal(t, "ext:todos:triage", commands[0].ID)
 
-	denied := host.Dispatch(t.Context(), hooks.EventContext{
+	denied := dispatch(t, host, hooks.EventContext{
 		Event:     hooks.EventPreToolUse,
 		ToolName:  "shell",
 		ToolInput: `{"command":"git push --force origin main"}`,
@@ -159,7 +159,7 @@ func TestDocumentedExamplesLoad(t *testing.T) {
 	require.Len(t, denied, 1)
 	require.Equal(t, hooks.DecisionDeny, denied[0].Result.Decision)
 
-	allowed := host.Dispatch(t.Context(), hooks.EventContext{
+	allowed := dispatch(t, host, hooks.EventContext{
 		Event:     hooks.EventPreToolUse,
 		ToolName:  "shell",
 		ToolInput: `{"command":"git push --force-with-lease origin main"}`,

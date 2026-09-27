@@ -32,7 +32,7 @@ func (h *Host) Has(event string) bool {
 // A context already inside the extension system dispatches nothing. A
 // handler reached from a host function of the same extension would
 // re-enter a VM that is mid-call and deadlock.
-func (h *Host) Dispatch(ctx context.Context, ec hooks.EventContext) []hooks.DispatchResult {
+func (h *Host) Dispatch(ctx context.Context, ec hooks.EventContext, payload []byte) []hooks.DispatchResult {
 	if h == nil || guarded(ctx) {
 		return nil
 	}
@@ -41,7 +41,6 @@ func (h *Host) Dispatch(ctx context.Context, ec hooks.EventContext) []hooks.Disp
 	defer h.mu.RUnlock()
 
 	subject := ec.Subject()
-	payload := hooks.BuildEventPayload(ec)
 
 	var results []hooks.DispatchResult
 	for _, in := range h.instances {

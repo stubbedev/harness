@@ -18,7 +18,7 @@ type stubDispatcher struct {
 
 func (d *stubDispatcher) Has(event string) bool { return event == d.event }
 
-func (d *stubDispatcher) Dispatch(_ context.Context, _ EventContext) []DispatchResult {
+func (d *stubDispatcher) Dispatch(_ context.Context, _ EventContext, _ []byte) []DispatchResult {
 	d.calls++
 	return []DispatchResult{{Name: d.name, Result: d.result}}
 }
