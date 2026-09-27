@@ -81,3 +81,52 @@ func TestCleanKeepsShortLookalikeOutput(t *testing.T) {
 	raw := "printf '__\r\nnull\r\n"
 	require.Equal(t, "printf '__\nnull", r.cleanWith(mark, raw, nil))
 }
+
+// normalizePTY rewrites the raw stream the way the five sequential
+// full-buffer passes it replaced did: CRLF and lone CR become LF, and
+// the prompt markers become the line breaks they imply, terminators
+// included.
+func TestNormalizePTY(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"plain":                        "plain",
+		"a\r\nb":                       "a\nb",
+		"a\rb":                         "a\nb",
+		"a\r\rb":                       "a\n\nb",
+		ptyPromptMarker + "$ ls":       "\n$ ls",
+		ptyPromptMarker + "\x07$ ls":   "\n$ ls",
+		ptyPromptMarker + "\x1b\\$ ls": "\n$ ls",
+		ptyPasteEnable + "$ ls":        "\n$ ls",
+		ptyPasteDisable + "x":          "\nx",
+		"\x1b[36mblue\x1b[0m":          "\x1b[36mblue\x1b[0m",
+		"":                             "",
+	}
+	for raw, want := range cases {
+		var b strings.Builder
+		normalizePTY(&b, raw)
+		require.Equal(t, want, b.String(), "%q", raw)
+	}
+}
+
+// trimBlankEdges keeps the content and drops the blank edges, moving
+// bounds rather than copying: interior blank lines survive, all-blank
+// input comes back empty, and the result never carries a trailing
+// newline.
+func TestTrimBlankEdges(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"a\nb\n":      "a\nb",
+		"a\n\nb\n":    "a\n\nb",
+		"\n\na\n":     "a",
+		"a\n\n\n":     "a",
+		"\n\n":        "",
+		"":            "",
+		"a\n \n\tb\n": "a\n \n\tb",
+		" \na\n ":     "a",
+	}
+	for in, want := range cases {
+		require.Equal(t, want, trimBlankEdges(in), "%q", in)
+	}
+}

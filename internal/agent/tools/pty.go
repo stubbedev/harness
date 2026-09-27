@@ -245,11 +245,17 @@ var (
 	// ptySetupCmd. Seeing it after a command means the shell - not some
 	// program the command started - has control back.
 	ptyPromptRe = regexp.MustCompile("\x1b\\]133;A")
-	// ptyPromptSplitRe is the same marker with its terminator (BEL, or
-	// the ST form some emulators send), so cleaning can replace the
-	// whole sequence with the line break the prompt implies rather than
-	// leaving the text around it joined together.
-	ptyPromptSplitRe = regexp.MustCompile("\x1b\\]133;A(?:\x07|\x1b\\\\)?")
+	// ptyPromptMarker is the OSC 133 prompt marker with the terminators
+	// some emulators append (BEL, or the ST form), as cleaning splits
+	// on it: the whole sequence becomes the line break the prompt
+	// implies, rather than leaving the text around it joined together.
+	ptyPromptMarker = "\x1b]133;A"
+	// ptyPasteEnable is the bracketed-paste enable a line editor sends
+	// just before its prompt; cleaning splits on it the same way. The
+	// disable is split on with it: a paste-mode toggle mid-output is
+	// bookkeeping, not text.
+	ptyPasteEnable  = "\x1b[?2004h"
+	ptyPasteDisable = "\x1b[?2004l"
 	// ptyPasteRe is the fallback prompt heuristic for a shell whose
 	// prompt could not be replaced: bracketed-paste-enable, which POSIX
 	// shells emit before a prompt. It over-matches (TUIs and REPLs send
@@ -2508,26 +2514,44 @@ func (r *ptyRunner) clean(raw string, echo []string) string {
 // callers that hold the state lock or that clean bytes captured before
 // the call began (a dead shell's verdict: its sentinel is the one this
 // session had, even though a fresh one is about to replace it).
+//
+// The passes are fused: one walk normalizes newlines and prompt
+// markers, one walks the lines rendering, filtering and echo-stripping
+// each in turn straight into the output, and the blank-edge trim moves
+// slice bounds instead of copying. The sequential full-buffer
+// ReplaceAll passes, the whole-string split and the final join this
+// used to spend - five to seven copies of the output per shell call -
+// are gone.
 func (r *ptyRunner) cleanWith(mark sentinel, raw string, echo []string) string {
-	out := strings.ReplaceAll(raw, "\r\n", "\n")
-	out = ptyPromptSplitRe.ReplaceAllString(out, "\n")
-	out = strings.ReplaceAll(out, "\x1b[?2004h", "\n")
-	out = strings.ReplaceAll(out, "\x1b[?2004l", "\n")
-	out = strings.ReplaceAll(out, "\r", "\n")
-	out = renderLines(out)
+	var norm strings.Builder
+	norm.Grow(len(raw))
+	normalizePTY(&norm, raw)
 
-	var lines []string
-	// The sentinel's echoed command is bookkeeping wherever it lands:
-	// whole, behind a prompt, or - on a terminal narrower than the
-	// command - wrapped at the window edge into consecutive fragments
-	// that only together rebuild it. fragOff tracks how much of the
-	// command consecutive lines have already reconstructed; a line that
-	// does not continue the run resets it. A fragment carries enough of
-	// the session's tagged command that real output cannot match by
-	// accident.
+	var out strings.Builder
+	p := ansi.NewParser()
+	// fragOff tracks how much of the sentinel's echoed command
+	// consecutive lines have already reconstructed: whole, behind a
+	// prompt, or - on a terminal narrower than the command - wrapped at
+	// the window edge into fragments that only together rebuild it. A
+	// line that does not continue the run resets it. A fragment carries
+	// enough of the session's tagged command that real output cannot
+	// match by accident.
 	fragOff := 0
-	for line := range strings.SplitSeq(out, "\n") {
-		trimmed := strings.TrimSpace(line)
+	// scanning is the echo strip: it blanks the leading lines that echo
+	// what was last sent and stops at the first line that is neither -
+	// real output. A line can be echoed twice (the tty driver, and a
+	// shell regaining the terminal mid-keystroke), so a match may stay
+	// on the current echo line rather than always advancing.
+	echoIdx := 0
+	scanning := len(echo) > 0
+	for line := range strings.SplitSeq(norm.String(), "\n") {
+		var rendered string
+		if strings.ContainsAny(line, "\b\x1b") {
+			rendered = renderLine(line, p)
+		} else {
+			rendered = ansi.Strip(line)
+		}
+		trimmed := strings.TrimSpace(rendered)
 		if trimmed != "" && fragOff < len(mark.cmd) &&
 			strings.HasPrefix(mark.cmd[fragOff:], trimmed) &&
 			(fragOff > 0 || len(trimmed) >= ptyEchoFragment) {
@@ -2544,52 +2568,117 @@ func (r *ptyRunner) cleanWith(mark sentinel, raw string, echo []string) string {
 		if mark.begin != "" && (strings.Contains(trimmed, mark.begin) || mark.beginRe.MatchString(trimmed)) {
 			continue
 		}
-		if m := promptPartialRe.FindStringSubmatch(line); m != nil {
-			line = m[1]
+		if m := promptPartialRe.FindStringSubmatch(rendered); m != nil {
+			rendered = m[1]
 		}
-		lines = append(lines, line)
-	}
-	// Drop leading lines that echo what was last sent. The terminal
-	// prefixes echoes with its prompt and interleaves paste-marker
-	// blank lines, so scan forward and blank each matching line.
-	// A line can be echoed twice: the tty driver echoes what was typed,
-	// and a shell that regains the terminal mid-keystroke (right after a
-	// full-screen program exits) redisplays the same line with its
-	// prompt. So a match may stay on the current echo line rather than
-	// always advancing, and the scan stops at the first line that is
-	// neither - real output.
-	if len(echo) > 0 {
-		echoIdx := 0
-		for i, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" {
-				continue
-			}
-			matched := false
-			for idx := echoIdx; idx < len(echo) && idx <= echoIdx+1; idx++ {
-				line := strings.TrimSpace(echo[idx])
-				if line == "" {
+		if scanning {
+			if lt := strings.TrimSpace(rendered); lt != "" {
+				matched := false
+				for idx := echoIdx; idx < len(echo) && idx <= echoIdx+1; idx++ {
+					if want := strings.TrimSpace(echo[idx]); want != "" && echoDebris(lt, want) {
+						echoIdx = idx
+						matched = true
+						break
+					}
+				}
+				if matched {
+					out.WriteByte('\n')
 					continue
 				}
-				if echoDebris(trimmed, line) {
-					lines[i] = ""
-					echoIdx = idx
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				break
+				scanning = false
 			}
 		}
+		out.WriteString(rendered)
+		out.WriteByte('\n')
 	}
-	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
-		lines = lines[:len(lines)-1]
+	return trimBlankEdges(out.String())
+}
+
+// normalizePTY rewrites the raw terminal stream into newline-separated
+// text in one pass: CRLF and lone CR become LF, and the prompt markers
+// the session installs - the OSC 133 marker, and the bracketed-paste
+// enable a line editor sends just before it - become the line breaks
+// the prompt implies. A prompt is printed the moment a command
+// finishes, so without this, output that did not end in a newline
+// (printf %s, a progress line) glues onto the prompt and onto the echo
+// of whatever is typed next - and since what is typed next is the exit
+// sentinel, the line then matches the sentinel and the output is
+// dropped along with it. Both markers have to be split on: a shell
+// with neither - dash, or bash built without readline - otherwise
+// loses every unterminated line it prints.
+func normalizePTY(b *strings.Builder, raw string) {
+	for len(raw) > 0 {
+		i := strings.IndexAny(raw, "\r\x1b")
+		if i < 0 {
+			b.WriteString(raw)
+			return
+		}
+		b.WriteString(raw[:i])
+		raw = raw[i:]
+		switch {
+		case raw[0] == '\r':
+			b.WriteByte('\n')
+			if len(raw) > 1 && raw[1] == '\n' {
+				raw = raw[2:]
+			} else {
+				raw = raw[1:]
+			}
+		case strings.HasPrefix(raw, ptyPromptMarker):
+			b.WriteByte('\n')
+			raw = raw[len(ptyPromptMarker):]
+			// The marker's terminator - BEL, or the ST form some
+			// emulators send - goes with it.
+			if len(raw) > 0 && raw[0] == '\x07' {
+				raw = raw[1:]
+			} else if strings.HasPrefix(raw, "\x1b\\") {
+				raw = raw[2:]
+			}
+		case strings.HasPrefix(raw, ptyPasteEnable):
+			b.WriteByte('\n')
+			raw = raw[len(ptyPasteEnable):]
+		case strings.HasPrefix(raw, ptyPasteDisable):
+			b.WriteByte('\n')
+			raw = raw[len(ptyPasteDisable):]
+		default:
+			// Some other escape sequence: leave it for the renderer.
+			b.WriteByte(raw[0])
+			raw = raw[1:]
+		}
 	}
-	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
-		lines = lines[1:]
+}
+
+// trimBlankEdges cuts s down to its first through last line with
+// content. Every cleaned line arrives newline-terminated, so the cut
+// ends at the bounds of the content: nothing is copied, and a result
+// of all bookkeeping is the empty string. A blank line is one holding
+// nothing but whitespace, which is what a dropped echo or prompt
+// residue leaves behind.
+func trimBlankEdges(s string) string {
+	start, end := 0, len(s)
+	if end > start && s[end-1] == '\n' {
+		end--
 	}
-	return strings.Join(lines, "\n")
+	for start < end {
+		line := s[start:end]
+		if nl := strings.IndexByte(line, '\n'); nl >= 0 {
+			line = line[:nl]
+		}
+		if strings.TrimSpace(line) != "" {
+			break
+		}
+		start += len(line) + 1
+	}
+	for end > start {
+		line := s[start:end]
+		if ls := strings.LastIndexByte(line, '\n'); ls >= 0 {
+			line = line[ls+1:]
+		}
+		if strings.TrimSpace(line) != "" {
+			break
+		}
+		end -= len(line) + 1
+	}
+	return s[start:end]
 }
 
 // Close terminates the runner's terminal session.

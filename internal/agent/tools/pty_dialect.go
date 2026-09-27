@@ -92,7 +92,7 @@ var powershellDialect = shellDialect{
 // cmdDialect drives cmd.exe. It is the thinnest of the three: cmd keeps
 // no history file to sandbox and has no aliases to strip, and its PROMPT
 // builtin spells an escape as $E, so the marker ends with ST rather than
-// the BEL the other dialects use -- ptyPromptSplitRe accepts both.
+// the BEL the other dialects use -- ptyPromptMarker accepts both.
 var cmdDialect = shellDialect{
 	sentinelCmd:   `echo __exit_%s:%%ERRORLEVEL%%@%%CD%%__`,
 	sentinelRe:    dialectSentinelRe,
