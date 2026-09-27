@@ -115,6 +115,9 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 	}
 
 	var matches []grepMatch
+	lastPath := ""
+	var lastModTime time.Time
+	lastOK := false
 	for line := range bytes.SplitSeq(bytes.TrimSpace(output), []byte{'\n'}) {
 		if len(line) == 0 {
 			continue
@@ -126,14 +129,23 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 		if match.Type != "match" {
 			continue
 		}
-		for _, m := range match.Data.Submatches {
-			fi, err := os.Stat(match.Data.Path.Text)
-			if err != nil {
-				continue // Skip files we can't access
+		// rg groups its matches per file, so one stat per distinct path
+		// covers the whole run instead of one per match line.
+		if match.Data.Path.Text != lastPath {
+			lastPath = match.Data.Path.Text
+			fi, err := os.Stat(lastPath)
+			lastOK = err == nil
+			if lastOK {
+				lastModTime = fi.ModTime()
 			}
+		}
+		if !lastOK {
+			continue // Skip files we can't access
+		}
+		for _, m := range match.Data.Submatches {
 			matches = append(matches, grepMatch{
 				path:     match.Data.Path.Text,
-				modTime:  fi.ModTime(),
+				modTime:  lastModTime,
 				lineNum:  match.Data.LineNumber,
 				charNum:  m.Start + 1, // ensure 1-based
 				lineText: strings.TrimSpace(match.Data.Lines.Text),
