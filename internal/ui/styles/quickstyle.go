@@ -607,6 +607,7 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Header.GitBranch = base.Foreground(o.primary)
 	s.Header.GitStatus = base.Foreground(o.warning)
 	s.Header.GitRemote = base.Foreground(o.info)
+	s.Header.Goal = base.Foreground(o.primary)
 
 	s.CompactDetails.Version = lipgloss.NewStyle().Foreground(o.separator)
 

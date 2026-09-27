@@ -80,8 +80,11 @@ type Session struct {
 	CompactionAgedID     string
 	Cost                 float64
 	Todos                []Todo
-	CreatedAt            int64
-	UpdatedAt            int64
+	// Goal is the completion condition the agent works toward, nil
+	// when none was set. See Goal.
+	Goal      *Goal
+	CreatedAt int64
+	UpdatedAt int64
 }
 
 type Service interface {
@@ -96,6 +99,9 @@ type Service interface {
 	// not recurse into grandchildren.
 	ListChildSessions(ctx context.Context, parentSessionID string) ([]Session, error)
 	Save(ctx context.Context, session Session) (Session, error)
+	// SetGoal stores a session's goal, or clears it when goal is nil.
+	// Save leaves the goal untouched.
+	SetGoal(ctx context.Context, sessionID string, goal *Goal) error
 	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
 	// AddCost atomically adds delta to a session's cost, e.g. accumulating a
 	// completed subagent's cost onto its parent session, without a
@@ -361,6 +367,10 @@ func (s *service) fromDBItem(item db.Session) Session {
 	if err != nil {
 		slog.Error("Failed to unmarshal todos", "session_id", item.ID, "error", err)
 	}
+	goal, err := unmarshalGoal(item.Goal.String)
+	if err != nil {
+		slog.Error("Failed to unmarshal goal", "session_id", item.ID, "error", err)
+	}
 	return Session{
 		ID:                   item.ID,
 		ParentSessionID:      item.ParentSessionID.String,
@@ -374,6 +384,7 @@ func (s *service) fromDBItem(item db.Session) Session {
 		CompactionAgedID:     item.CompactionAgedID.String,
 		Cost:                 item.Cost,
 		Todos:                todos,
+		Goal:                 goal,
 		CreatedAt:            item.CreatedAt,
 		UpdatedAt:            item.UpdatedAt,
 	}

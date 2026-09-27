@@ -19,8 +19,13 @@ type KeyMap struct {
 		OpenEditor  key.Binding
 		Newline     key.Binding
 		MentionFile key.Binding
-		Commands    key.Binding
-		Skills      key.Binding
+		// Commands opens a command invocation when typed first in the
+		// editor ("/compact"): each of its single-character keys is a
+		// prefix the editor reads a command name after.
+		Commands key.Binding
+		// CompleteCommand fills in the command the invocation picker has
+		// selected, leaving the cursor after it for its arguments.
+		CompleteCommand key.Binding
 
 		// ShellMode enters bang mode: the prompt becomes a shell command.
 		ShellMode key.Binding
@@ -304,12 +309,12 @@ func DefaultKeyMap() KeyMap {
 		key.WithHelp("@", "mention file"),
 	)
 	km.Editor.Commands = key.NewBinding(
-		key.WithKeys(":"),
-		key.WithHelp(":", "command palette"),
+		key.WithKeys("/", ":"),
+		key.WithHelp("/", "run command"),
 	)
-	km.Editor.Skills = key.NewBinding(
-		key.WithKeys("/"),
-		key.WithHelp("/", "skills"),
+	km.Editor.CompleteCommand = key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "complete"),
 	)
 	km.Editor.ShellMode = key.NewBinding(
 		key.WithKeys("!"),
@@ -709,7 +714,7 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"editor.newline":              &km.Editor.Newline,
 		"editor.mention_file":         &km.Editor.MentionFile,
 		"editor.commands":             &km.Editor.Commands,
-		"editor.skills":               &km.Editor.Skills,
+		"editor.complete_command":     &km.Editor.CompleteCommand,
 		"editor.shell_mode":           &km.Editor.ShellMode,
 		"editor.escape":               &km.Editor.Escape,
 		"editor.history_prev":         &km.Editor.HistoryPrev,

@@ -207,6 +207,10 @@ type Workspace interface {
 	AgentQueuedPromptsList(sessionID string) []string
 	AgentClearQueue(sessionID string)
 	AgentSummarize(ctx context.Context, sessionID, instructions string) error
+	// AgentSetGoal sets the session goal the agent works toward until a
+	// judge finds it met, replacing any earlier one. An empty condition
+	// clears it. It does not start a turn.
+	AgentSetGoal(ctx context.Context, sessionID, condition string) error
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error

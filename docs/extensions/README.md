@@ -214,10 +214,13 @@ harness.register_command({
 ```
 
 The command appears in the palette as `ext:<extension>:<command>` — here
-`ext:standup:standup`. What the handler returns is sent as the user's message.
+`ext:standup:standup` — and runs from the editor as `/ext:standup:standup`.
+What the handler returns is sent as the user's message.
 
-A command that needs no code can declare a static prompt and the arguments the
-palette should ask for; `$NAME` placeholders are substituted:
+A command that needs no code can declare a static prompt and the arguments it
+takes; `$NAME` placeholders are substituted. Typed after the name, words fill
+the arguments in order (`/ext:<extension>:review main.go`); a required one left out
+is asked for in a form:
 
 ```lua
 harness.register_command({

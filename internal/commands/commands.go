@@ -22,9 +22,11 @@ import (
 
 var namedArgPattern = regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`)
 
-const (
-	userCommandPrefix    = "user:"
-	projectCommandPrefix = "project:"
+// Commands carry the label prefixes skills do, so a command file and a
+// skill from the same place read the same way.
+var (
+	userCommandPrefix    = skills.SourceUser.Prefix()
+	projectCommandPrefix = skills.SourceProject.Prefix()
 )
 
 // Argument represents a command argument with its metadata.
@@ -59,6 +61,9 @@ type CustomCommand struct {
 	ExtensionID string
 	// Description is shown under the command in the palette.
 	Description string
+	// ArgumentHint is an explicit usage hint (argument-hint frontmatter)
+	// overriding the one Spec derives from the arguments.
+	ArgumentHint string
 }
 
 type commandSource struct {
@@ -85,10 +90,10 @@ func newArgument(id, title, description string, required bool) Argument {
 }
 
 // FromSkillCatalog converts catalog entries into custom command entries for
-// the skills palette. Every user-invocable skill is listed — which is the
-// default; only an explicit `user-invocable: false` opts out (background
-// knowledge the user should not invoke directly). Skill bodies stay lazily
-// loaded — only name and description travel here.
+// the Skills tab and the editor. Every user-invocable skill is listed —
+// which is the default; only an explicit `user-invocable: false` opts out
+// (background knowledge the user should not invoke directly). Skill bodies
+// stay lazily loaded — only name, description and hint travel here.
 func FromSkillCatalog(entries []skills.CatalogEntry) []CustomCommand {
 	commands := make([]CustomCommand, 0, len(entries))
 	for _, entry := range entries {
@@ -100,8 +105,9 @@ func FromSkillCatalog(entries []skills.CatalogEntry) []CustomCommand {
 			name = userCommandPrefix + entry.Name
 		}
 		commands = append(commands, CustomCommand{
-			ID:   name,
-			Name: name,
+			ID:           name,
+			Name:         name,
+			ArgumentHint: entry.ArgumentHint,
 			Skill: &skills.Skill{
 				Name:          entry.Name,
 				Description:   entry.Description,
@@ -198,25 +204,29 @@ func loadCommand(path, baseDir, prefix string) (CustomCommand, error) {
 	}
 
 	content := string(raw)
-	var description string
+	var description, hint string
 	if frontmatter, body, err := stringext.SplitFrontmatter(content); err == nil {
 		var meta struct {
-			Description string `yaml:"description"`
+			Description  string `yaml:"description"`
+			ArgumentHint string `yaml:"argument-hint"`
 		}
 		if err := yaml.Unmarshal([]byte(frontmatter), &meta); err == nil {
 			content = strings.TrimLeft(body, "\n")
 			description = meta.Description
+			hint = meta.ArgumentHint
 		}
 	}
+	args := extractArgNames(content)
 
 	id := buildCommandID(path, baseDir, prefix)
 
 	return CustomCommand{
-		ID:          id,
-		Name:        id,
-		Content:     content,
-		Arguments:   extractArgNames(content),
-		Description: description,
+		ID:           id,
+		Name:         id,
+		Content:      content,
+		Arguments:    args,
+		Description:  description,
+		ArgumentHint: hint,
 	}, nil
 }
 
@@ -231,6 +241,10 @@ func extractArgNames(content string) []Argument {
 
 	for _, match := range matches {
 		arg := match[1]
+		// $ARGUMENTS is the free-form text after the name, not a field.
+		if "$"+arg == ArgumentsPlaceholder {
+			continue
+		}
 		if !seen[arg] {
 			seen[arg] = true
 			// for normal custom commands, all args are required

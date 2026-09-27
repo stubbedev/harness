@@ -59,6 +59,7 @@ func SessionFromDomain(s session.Session) Session {
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
 		Todos:            mapSlice(s.Todos, todoFromDomain),
+		Goal:             goalFromDomain(s.Goal),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
 	}
@@ -77,8 +78,37 @@ func (s Session) ToDomain() session.Session {
 		CompletionTokens: s.CompletionTokens,
 		Cost:             s.Cost,
 		Todos:            mapSlice(s.Todos, Todo.toDomain),
+		Goal:             s.Goal.toDomain(),
 		CreatedAt:        s.CreatedAt,
 		UpdatedAt:        s.UpdatedAt,
+	}
+}
+
+func goalFromDomain(g *session.Goal) *Goal {
+	if g == nil {
+		return nil
+	}
+	return &Goal{
+		Condition: g.Condition,
+		Status:    string(g.Status),
+		Reason:    g.Reason,
+		Turns:     g.Turns,
+		CreatedAt: g.CreatedAt,
+		UpdatedAt: g.UpdatedAt,
+	}
+}
+
+func (g *Goal) toDomain() *session.Goal {
+	if g == nil {
+		return nil
+	}
+	return &session.Goal{
+		Condition: g.Condition,
+		Status:    session.GoalStatus(g.Status),
+		Reason:    g.Reason,
+		Turns:     g.Turns,
+		CreatedAt: g.CreatedAt,
+		UpdatedAt: g.UpdatedAt,
 	}
 }
 
@@ -358,6 +388,7 @@ func SkillInfoFromDomain(e skills.CatalogEntry) SkillInfo {
 		Label:         e.Label,
 		Source:        string(e.Source),
 		UserInvocable: e.UserInvocable,
+		ArgumentHint:  e.ArgumentHint,
 	}
 }
 
@@ -370,6 +401,7 @@ func (i SkillInfo) ToDomain() skills.CatalogEntry {
 		Label:         i.Label,
 		Source:        skills.SourceType(i.Source),
 		UserInvocable: i.UserInvocable,
+		ArgumentHint:  i.ArgumentHint,
 	}
 }
 

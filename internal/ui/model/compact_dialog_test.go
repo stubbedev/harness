@@ -19,33 +19,46 @@ type compactWorkspace struct {
 
 func (w *compactWorkspace) Config() *config.Config { return &config.Config{} }
 
-// newCompactUI builds a UI with an idle agent and an active session, opens
-// the command palette and selects the named command by filtering the list
-// the way a user would.
+// newCompactUI builds a UI with an idle agent and an active session, its
+// editor focused and empty.
 func newCompactUI(t *testing.T) (*UI, *countingWorkspace) {
 	t.Helper()
 
 	ws := &countingWorkspace{}
 	m := newBusyUI(ws)
 	m.com = common.DefaultCommon(&compactWorkspace{countingWorkspace: ws})
+	// A real cursor, as the editor has: the virtual one blinks, and every
+	// blink is a timer the command runner would sit through.
+	m.textarea.SetVirtualCursor(false)
+	m.textarea.Focus()
 	warmCaches(m, false)
-
-	cmd := m.openCommandsDialog()
-	runCmds(m, cmd)
-	require.True(t, m.dialog.ContainsDialog(dialog.CommandsID), "command palette should be open")
-
 	return m, ws
 }
 
-// selectCommand filters the command palette down to one entry and confirms
-// it, exactly the key presses a user makes to run a slash command.
-func selectCommand(t *testing.T, m *UI, name string) {
+// openPalette opens the command palette.
+func openPalette(t *testing.T, m *UI) {
 	t.Helper()
 
-	for _, r := range name {
+	runCmds(m, m.openCommandsDialog())
+	require.True(t, m.dialog.ContainsDialog(dialog.CommandsID), "command palette should be open")
+}
+
+// typeText feeds s through the full Update routing one key press at a
+// time, the way a user types it.
+func typeText(m *UI, s string) {
+	for _, r := range s {
 		_, cmd := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		runCmds(m, cmd)
 	}
+}
+
+// selectCommand filters the command palette down to one entry and confirms
+// it, exactly the key presses a user makes to pick a command.
+func selectCommand(t *testing.T, m *UI, name string) {
+	t.Helper()
+
+	openPalette(t, m)
+	typeText(m, name)
 	pressKey(t, m, tea.KeyEnter)
 }
 
@@ -58,75 +71,115 @@ func pressKey(t *testing.T, m *UI, code rune) {
 	runCmds(m, cmd)
 }
 
-// TestCompactWithoutArgumentsOpensDialog verifies the first checklist item
-// of the /compact flow: selecting /compact (no focus given) opens the
-// arguments dialog instead of compacting immediately.
-func TestCompactWithoutArgumentsOpensDialog(t *testing.T) {
+// TestPalettePutsArgumentTakingCommandInEditor pins the palette's pick of
+// a command that takes arguments: it is put in the editor, followed by a
+// space, for its arguments to be typed after it - nothing runs yet.
+func TestPalettePutsArgumentTakingCommandInEditor(t *testing.T) {
 	t.Parallel()
 
 	m, ws := newCompactUI(t)
 
 	selectCommand(t, m, "compact")
 
-	require.Equal(t, dialog.ArgumentsID, m.dialog.DialogLast().ID())
-	require.Empty(t, ws.summarizeCalls, "opening the dialog must not compact")
+	require.False(t, m.dialog.HasDialogs(), "the palette hands over to the editor")
+	require.Equal(t, "/compact ", m.textarea.Value())
+	require.Empty(t, ws.summarizeCalls, "picking must not compact")
 }
 
-// TestCompactDialogSubmitsFocus verifies that a typed focus survives the
-// whole first link: the arguments dialog's submit, the UI's ActionCompact
-// handler, and the AgentSummarize request the workspace receives.
-func TestCompactDialogSubmitsFocus(t *testing.T) {
+// TestCompactInvocationSubmitsFocus pins the whole /compact chain: the text
+// after the name reaches AgentSummarize as the focus.
+func TestCompactInvocationSubmitsFocus(t *testing.T) {
 	t.Parallel()
 
 	m, ws := newCompactUI(t)
 
 	selectCommand(t, m, "compact")
-	for _, r := range "Focus on the auth refactor" {
-		_, cmd := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-		runCmds(m, cmd)
-	}
+	typeText(m, "Focus on the auth refactor")
 	pressKey(t, m, tea.KeyEnter)
 
 	require.Equal(t, []summarizeCall{{sessionID: "s1", instructions: "Focus on the auth refactor"}}, ws.summarizeCalls)
-	require.False(t, m.dialog.HasDialogs(), "submitting must close the dialog")
+	require.Empty(t, m.textarea.Value(), "the invocation is consumed, not sent as a message")
 }
 
-// TestCompactDialogSubmitsEmptyFocus verifies that submitting the dialog
-// without typing still compacts, with a general (empty) summary.
-func TestCompactDialogSubmitsEmptyFocus(t *testing.T) {
+// TestCompactTypedInFullRuns pins that a command name typed out in full
+// runs on enter, even while the picker lists it: /compact takes an
+// optional focus, so it compacts with a general summary.
+func TestCompactTypedInFullRuns(t *testing.T) {
 	t.Parallel()
 
 	m, ws := newCompactUI(t)
 
-	selectCommand(t, m, "compact")
+	typeText(m, "/compact")
+	require.True(t, m.commandPicker.visible(), "a partial invocation opens the picker")
 	pressKey(t, m, tea.KeyEnter)
 
 	require.Equal(t, []summarizeCall{{sessionID: "s1", instructions: ""}}, ws.summarizeCalls)
-	require.False(t, m.dialog.HasDialogs())
+	require.False(t, m.commandPicker.visible())
 }
 
-// TestCompactDialogCancelLeavesSessionAlone verifies cancelling the dialog:
-// no compaction request, no dialog left open, no lingering busy state.
-func TestCompactDialogCancelLeavesSessionAlone(t *testing.T) {
+// TestPickerCompletesPartialName pins the picker: enter on a partial name
+// completes the selected command that takes arguments.
+func TestPickerCompletesPartialName(t *testing.T) {
 	t.Parallel()
 
 	m, ws := newCompactUI(t)
 
-	selectCommand(t, m, "compact")
-	for _, r := range "a focus that must be dropped" {
-		_, cmd := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
-		runCmds(m, cmd)
-	}
-	pressKey(t, m, tea.KeyEscape)
+	typeText(m, "/compa")
+	pressKey(t, m, tea.KeyEnter)
 
-	require.Empty(t, ws.summarizeCalls, "cancelling must not compact")
+	require.Equal(t, "/compact ", m.textarea.Value())
+	require.Empty(t, ws.summarizeCalls)
+}
+
+// TestMissingRequiredArgumentOpensForm pins the fallback: an invocation
+// without a required argument opens the arguments form, and cancelling
+// it does nothing.
+func TestMissingRequiredArgumentOpensForm(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newCompactUI(t)
+
+	typeText(m, "/goal")
+	pressKey(t, m, tea.KeyEnter)
+
+	require.Equal(t, dialog.ArgumentsID, m.dialog.DialogLast().ID())
+	pressKey(t, m, tea.KeyEscape)
 	require.False(t, m.dialog.HasDialogs())
-	require.False(t, m.isAgentBusy(), "cancelling must not leave pending state")
+	require.Nil(t, m.session.Goal)
+}
+
+// TestUnknownInvocationIsAMessage pins that a line naming no command is
+// an ordinary message, so a path like "/etc/hosts" is never swallowed.
+func TestUnknownInvocationIsAMessage(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newCompactUI(t)
+
+	_, ok := m.editorInvocation("/etc/hosts is broken")
+	require.False(t, ok)
+	_, ok = m.editorInvocation("/no-such-command now")
+	require.False(t, ok)
+	inv, ok := m.editorInvocation(":compact keep the notes")
+	require.True(t, ok, "every editor.commands key opens an invocation")
+	require.Equal(t, "keep the notes", inv.Raw)
+}
+
+// TestArgumentsToCommandWithoutArgumentsWarn pins that text after a
+// command that takes nothing is refused rather than dropped.
+func TestArgumentsToCommandWithoutArgumentsWarn(t *testing.T) {
+	t.Parallel()
+
+	m, ws := newCompactUI(t)
+
+	typeText(m, "/summarize now please")
+	pressKey(t, m, tea.KeyEnter)
+
+	require.Empty(t, ws.summarizeCalls)
 }
 
 // TestSummarizeActionPassesEmptyFocus pins the non-/compact entry point:
-// the summarize command never opens the arguments dialog and always asks
-// for a general summary.
+// the summarize command takes nothing, runs on pick and always asks for a
+// general summary.
 func TestSummarizeActionPassesEmptyFocus(t *testing.T) {
 	t.Parallel()
 

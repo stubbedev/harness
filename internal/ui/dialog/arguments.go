@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -37,11 +36,12 @@ type Arguments struct {
 	arguments []commands.Argument
 	inputs    []textinput.Model
 	focused   int
-	spinner   spinner.Model
-	loading   bool
 
-	description  string
-	resultAction Action
+	description string
+	// action receives the arguments once the form is submitted; raw is
+	// what was typed after the command's name, kept for $ARGUMENTS.
+	action ArgAction
+	raw    string
 
 	keyMap struct {
 		Confirm,
@@ -57,14 +57,18 @@ type Arguments struct {
 
 var _ Dialog = (*Arguments)(nil)
 
-// NewArguments creates a new arguments dialog.
-func NewArguments(com *common.Common, title, description string, arguments []commands.Argument, resultAction Action) *Arguments {
+// NewArguments creates the form asking for action's arguments, laid out
+// from its ArgSpec, with the fields args already holds filled in.
+func NewArguments(com *common.Common, action ArgAction, args commands.Args) *Arguments {
+	spec := action.ArgSpec()
+	arguments := spec.Fields
 	a := &Arguments{
-		com:          com,
-		title:        title,
-		description:  description,
-		arguments:    arguments,
-		resultAction: resultAction,
+		com:         com,
+		title:       cmp.Or(spec.Title, "Arguments"),
+		description: spec.Description,
+		arguments:   arguments,
+		action:      action,
+		raw:         args.Raw,
 	}
 
 	km := dialogKeys()
@@ -86,6 +90,7 @@ func NewArguments(com *common.Common, title, description string, arguments []com
 		} else {
 			input.Placeholder = arg.Title
 		}
+		input.SetValue(args.Value(arg.ID))
 
 		if i == 0 {
 			input.Focus()
@@ -95,10 +100,6 @@ func NewArguments(com *common.Common, title, description string, arguments []com
 
 		a.inputs[i] = input
 	}
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = com.Styles.Dialog.Spinner
-	a.spinner = s
 
 	return a
 }
@@ -172,12 +173,6 @@ func (a *Arguments) findVisibleFieldByOffset(fromTop bool) int {
 // HandleMsg implements Dialog.
 func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
-	case spinner.TickMsg:
-		if a.loading {
-			var cmd tea.Cmd
-			a.spinner, cmd = a.spinner.Update(msg)
-			return ActionCmd{Cmd: cmd}
-		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, a.keyMap.Close):
@@ -185,10 +180,10 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, a.keyMap.Confirm):
 			// If we're on the last input or there's only one input, submit.
 			if a.focused == len(a.inputs)-1 || len(a.inputs) == 1 {
-				args := make(map[string]string)
+				values := make(map[string]string)
 				var warning tea.Cmd
 				for i, arg := range a.arguments {
-					args[arg.ID] = a.inputs[i].Value()
+					values[arg.ID] = a.inputs[i].Value()
 					if arg.Required && strings.TrimSpace(a.inputs[i].Value()) == "" {
 						warning = util.ReportWarn("Required argument '" + arg.Title + "' is missing.")
 						break
@@ -198,17 +193,7 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 					return ActionCmd{Cmd: warning}
 				}
 
-				switch action := a.resultAction.(type) {
-				case ActionRunCustomCommand:
-					action.Args = args
-					return action
-				case ActionRunMCPPrompt:
-					action.Args = args
-					return action
-				case ActionCompact:
-					action.Args = args
-					return action
-				}
+				return ActionRun{Action: a.action.WithArgs(commands.Args{Raw: a.raw, Values: values})}
 			}
 			a.focusInput(a.focused + 1)
 		case key.Matches(msg, a.keyMap.Next):
@@ -312,12 +297,7 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		description = descStyle.Render(a.description)
 	}
 
-	var helpView string
-	if a.loading {
-		helpView = s.Dialog.HelpView.Width(width).Render(a.spinner.View() + " Generating Prompt...")
-	}
-
-	availableHeight := area.Dy() - ActiveFrame(s).GetVerticalFrameSize() - dialogContentStyle.GetVerticalFrameSize() - lipgloss.Height(header) - lipgloss.Height(description) - lipgloss.Height(helpView) - 2 // extra spacing
+	availableHeight := area.Dy() - ActiveFrame(s).GetVerticalFrameSize() - dialogContentStyle.GetVerticalFrameSize() - lipgloss.Height(header) - lipgloss.Height(description) - 2 // extra spacing
 	viewportHeight := min(height, maxViewportHeight, availableHeight)
 
 	a.viewport.SetWidth(width) // -1 for scrollbar
@@ -335,7 +315,6 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		lipgloss.Left,
 		titleStyle.Render(header),
 		dialogContentStyle.Render(lipgloss.JoinVertical(lipgloss.Left, contentParts...)),
-		helpView,
 	)
 
 	dialog := ActiveFrame(s).Render(view)
@@ -348,20 +327,6 @@ func (a *Arguments) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	DrawCenterCursor(scr, area, dialog, cur)
 	return cur
-}
-
-// StartLoading implements [LoadingDialog].
-func (a *Arguments) StartLoading() tea.Cmd {
-	if a.loading {
-		return nil
-	}
-	a.loading = true
-	return a.spinner.Tick
-}
-
-// StopLoading implements [LoadingDialog].
-func (a *Arguments) StopLoading() {
-	a.loading = false
 }
 
 // ShortHelp implements help.KeyMap.

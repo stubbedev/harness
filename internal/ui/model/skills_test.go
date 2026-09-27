@@ -99,8 +99,8 @@ func (w *skillWorkspace) ReadSkill(_ context.Context, skillID string) ([]byte, s
 	return []byte(content), skills.SkillReadResult{Name: "review", Description: "Review the diff."}, nil
 }
 
-// TestRunSkillSendsInvocationImmediately pins the skills palette's
-// select behavior: the skill's body is loaded and sent as a
+// TestRunSkillSendsInvocationImmediately pins running a skill: the
+// skill's body is loaded and sent as a
 // <loaded_skill> invocation right away, with no intermediate
 // attachment to compose against.
 func TestRunSkillSendsInvocationImmediately(t *testing.T) {
@@ -109,7 +109,7 @@ func TestRunSkillSendsInvocationImmediately(t *testing.T) {
 	m := newBusyUI(&countingWorkspace{ready: true})
 	m.com.Workspace = &skillWorkspace{countingWorkspace: &countingWorkspace{ready: true}}
 
-	msg := m.runSkill(testSkillID, "review")()
+	msg := m.runSkill(testSkillID, "review", "")()
 	send, ok := msg.(sendMessageMsg)
 	require.True(t, ok, "selecting a skill sends immediately, got %T", msg)
 	require.Empty(t, send.Name, "the <loaded_skill> wrapper is its own invocation shape")

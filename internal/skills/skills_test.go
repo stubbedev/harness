@@ -611,3 +611,18 @@ func TestFilter(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatInvocationWithArgs(t *testing.T) {
+	t.Parallel()
+
+	placeholder := &Skill{Name: "review", Instructions: "Review pull request $ARGUMENTS."}
+	out := placeholder.FormatInvocationWithArgs(" 1234 ")
+	require.Contains(t, out, "Review pull request 1234.")
+	require.Contains(t, out, "<arguments>1234</arguments>", "the transcript shows what was typed")
+
+	plain := &Skill{Name: "tidy", Instructions: "Tidy up."}
+	require.Contains(t, plain.FormatInvocationWithArgs("the parser"), "<arguments>the parser</arguments>")
+	require.NotContains(t, plain.FormatInvocationWithArgs(""), "<arguments>")
+	require.Contains(t, placeholder.FormatInvocation(), "$ARGUMENTS",
+		"a skill loaded without an invocation keeps its placeholder")
+}

@@ -41,54 +41,49 @@ func flatHelp(cols [][]key.Binding) []key.Binding {
 	return out
 }
 
-// TestCommandsHintDerivesFromKeymap pins that the commands hint names the
-// keys the commands binding actually carries, and that the two palette
-// entry points are never hinted together: while the editor is empty the
-// first-character triggers ("!", ":", "/") stand in for the global chord,
-// and once the editor holds text the chord returns. "/" opens the skills
-// palette, not commands, so the commands hint must never advertise it —
-// and a keybind override must change the hint.
+// TestCommandsHintDerivesFromKeymap pins that the commands hints name the
+// keys the bindings actually carry, and that the two ways to a command
+// are never hinted together: while the editor is empty the first
+// characters ("!", "/") stand in for the global chord, and once the
+// editor holds text the chord returns. A keybind override must change
+// the hint.
 func TestCommandsHintDerivesFromKeymap(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
 
 	short := m.ShortHelp()
-	require.Equal(t, ":", helpKey(t, short, "command palette"))
-	require.Equal(t, "/", helpKey(t, short, "skills"))
+	require.Equal(t, "/", helpKey(t, short, "run command"))
 	require.False(t, hasDesc(short, "commands"), "the global chord must not repeat the palette hint")
 
 	flat := flatHelp(m.FullHelp())
-	require.Equal(t, ":", helpKey(t, flat, "command palette"))
-	require.Equal(t, "/", helpKey(t, flat, "skills"))
+	require.Equal(t, "/", helpKey(t, flat, "run command"))
 	require.False(t, hasDesc(flat, "commands"))
 
 	m.textarea.SetValue("partial prompt")
 	short = m.ShortHelp()
 	require.Equal(t, "ctrl+p", helpKey(t, short, "commands"))
-	require.False(t, hasDesc(short, "command palette"))
+	require.False(t, hasDesc(short, "run command"))
 
 	m.keyMap.ApplyKeybinds(map[string][]string{"commands": {"ctrl+k"}})
 	require.Equal(t, "ctrl+k", helpKey(t, m.ShortHelp(), "commands"))
 }
 
-// TestSkillsHintOnlyWhileEditorEmpty: "/" opens the skills palette only as
-// the editor's first character, so the skills hint disappears once the
-// editor holds text.
-func TestSkillsHintOnlyWhileEditorEmpty(t *testing.T) {
+// TestInvocationHintOnlyWhileEditorEmpty: "/" starts a command only as the
+// editor's first character, so its hint disappears once the editor holds
+// text.
+func TestInvocationHintOnlyWhileEditorEmpty(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
 	m.textarea.SetValue("partial prompt")
 
 	for _, b := range m.ShortHelp() {
-		require.NotEqual(t, "skills", b.Help().Desc)
-		require.NotEqual(t, "command palette", b.Help().Desc)
+		require.NotEqual(t, "run command", b.Help().Desc)
 	}
 	for _, col := range m.FullHelp() {
 		for _, b := range col {
-			require.NotEqual(t, "skills", b.Help().Desc)
-			require.NotEqual(t, "command palette", b.Help().Desc)
+			require.NotEqual(t, "run command", b.Help().Desc)
 		}
 	}
 }
@@ -170,4 +165,27 @@ func TestInlineHelpOnlyWhileFocused(t *testing.T) {
 	require.True(t, slices.ContainsFunc(short, func(b key.Binding) bool {
 		return b.Help().Desc == "commands"
 	}))
+}
+
+// TestLandingNewlineHintOnce pins the landing screen's newline hint: it
+// is shown once while the editor is focused, and not at all otherwise.
+func TestLandingNewlineHintOnce(t *testing.T) {
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	m.state = uiLanding
+	warmCaches(m, false)
+
+	count := func() int {
+		n := 0
+		for _, b := range m.ShortHelp() {
+			if b.Help().Desc == m.keyMap.Editor.Newline.Help().Desc {
+				n++
+			}
+		}
+		return n
+	}
+	require.Equal(t, 1, count())
+
+	m.focus = uiFocusMain
+	require.Equal(t, 0, count())
 }

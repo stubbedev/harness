@@ -89,3 +89,7 @@ WHERE id = ?;
 -- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE id = ?;
+-- name: UpdateSessionGoal :exec
+UPDATE sessions
+SET goal = ?
+WHERE id = ?;

@@ -29,6 +29,9 @@ type CommandItem struct {
 	cache       map[int]string
 	focused     bool
 	hideInfo    bool
+	// slashNames are the names the command is invoked by from the editor
+	// ("/compact"), the preferred one first.
+	slashNames []string
 }
 
 var (
@@ -220,3 +223,46 @@ func (c *CommandItem) matchForTitle() fuzzy.Match {
 	m.MatchedIndexes = indexes
 	return m
 }
+
+// WithSlashNames sets the names the command is invoked by from the
+// editor, the preferred one first.
+func (c *CommandItem) WithSlashNames(names ...string) *CommandItem {
+	c.slashNames = names
+	return c
+}
+
+// SlashNames returns the names the command is invoked by from the
+// editor, the preferred one first: the ones it was given, or for a
+// built-in the ones its ID and aliases spell.
+func (c *CommandItem) SlashNames() []string {
+	if len(c.slashNames) > 0 {
+		return c.slashNames
+	}
+	return builtinSlashNames(c.id, c.aliases)
+}
+
+// SlashName returns the preferred name the command is invoked by.
+func (c *CommandItem) SlashName() string {
+	return c.SlashNames()[0]
+}
+
+// ArgumentHint returns the usage hint shown after the command's name,
+// read from its action's ArgSpec; empty for a command that asks for
+// nothing.
+func (c *CommandItem) ArgumentHint() string {
+	spec, _ := argSpecOf(c.action)
+	return spec.HintText()
+}
+
+// SelectAction is what picking the command yields: a command that asks
+// for arguments is put in the editor to be finished there, anything
+// else runs.
+func (c *CommandItem) SelectAction() Action {
+	if c.ArgumentHint() != "" {
+		return ActionInsertInvocation{Name: c.SlashName()}
+	}
+	return ActionInvoke{Action: c.action, Name: c.SlashName()}
+}
+
+// Description returns the text shown under the command.
+func (c *CommandItem) Description() string { return c.description }

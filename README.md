@@ -507,24 +507,39 @@ mv _temp/skills/* . ; rm -r -force _temp
 
 #### User-Invocable Skills
 
-Every skill is user-invocable by default and searchable from the skills
-palette (<kbd>/</kbd>). Set `user-invocable: false` to keep a skill out of
-the palette (background knowledge only the model should load):
+Every skill is user-invocable by default: type <kbd>/</kbd> and its name in the
+editor, or pick it from the Skills tab of the command palette (see
+[Commands](#commands)). Set `user-invocable: false` to keep a skill out of both
+(background knowledge only the model should load):
 
 ```yaml
 ---
 name: my-hot-skill
-description: A skill that stays out of the / palette.
+description: A skill that stays out of the / picker.
 user-invocable: false
 ---
 ```
 
-Skills appear in the palette with a `user:` or `project:` prefix:
+Skills are listed with a `user:` or `project:` prefix, and answer to their
+name with or without it:
 
 - Skills from global directories show as `user:skill-name`
 - Skills from project directories show as `project:skill-name`
 
-When invoked, the skill's instructions are loaded into the conversation context.
+When invoked, the skill's instructions are loaded into the conversation
+context. Text typed after the skill's name is its arguments, as in Claude Code:
+`$ARGUMENTS` in `SKILL.md` is replaced by it, and the skill is handed it
+either way. An `argument-hint` in the frontmatter is shown after the name in
+the picker:
+
+```yaml
+---
+name: review
+description: Review a pull request.
+argument-hint: <pr-number> [focus]
+---
+Review pull request $ARGUMENTS.
+```
 
 To prevent the model from auto-triggering a skill (while still allowing user invocation), add `disable-model-invocation: true`:
 
@@ -537,6 +552,46 @@ disable-model-invocation: true
 ```
 
 Skills with `disable-model-invocation` won't appear in the model's available skills list but can still be invoked manually by users.
+
+### Commands
+
+Every command runs the same way: type <kbd>/</kbd> (or <kbd>:</kbd>) and its
+name at the start of the editor, followed by whatever it takes.
+
+```
+/compact keep the API notes
+/goal all tests pass, or stop after 20 turns
+/review 1234 focus on auth
+```
+
+A picker above the editor lists the commands the name could become:
+<kbd>↑</kbd>/<kbd>↓</kbd> choose, <kbd>tab</kbd> completes the name, and
+<kbd>enter</kbd> runs a command that takes nothing or completes one that
+takes arguments. A line naming no command is sent as an ordinary message, so
+`/etc/hosts is broken` stays a message. <kbd>ctrl+p</kbd> opens the full
+palette for browsing; picking a command that takes arguments there puts it in
+the editor to be finished.
+
+Built-in commands answer to their palette name (`/new-session`,
+`/switch-model`, `/compact`, `/goal`, ...), skills and custom commands to
+theirs. A command missing a required argument opens a form for it with what
+was typed filled in.
+
+Custom commands are Markdown files in `~/.config/harness/commands/` or
+`~/.harness/commands/` (`user:` commands), or in `commands/` under the
+workspace's data directory (`project:` commands); the path below the
+directory is the name, so `git/fixup.md` is `/git:fixup`. The file is the prompt. `$ARGUMENTS` is replaced by everything
+typed after the name, and `$NAME` placeholders become named arguments filled
+in order (quote a value that has spaces); without either, the typed text
+follows the prompt. Optional frontmatter sets the description and the hint:
+
+```markdown
+---
+description: Rebase the branch onto main and fix up the history
+argument-hint: <base-branch>
+---
+Rebase onto $BRANCH and squash the fixup commits.
+```
 
 ### Desktop notifications
 

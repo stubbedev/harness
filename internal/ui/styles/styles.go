@@ -108,6 +108,7 @@ type Styles struct {
 		GitBranch  lipgloss.Style // Style for the git branch glyph and name
 		GitStatus  lipgloss.Style // Style for git working-tree counts
 		GitRemote  lipgloss.Style // Style for git ahead/behind markers
+		Goal       lipgloss.Style // Style for the active session goal marker
 	}
 
 	CompactDetails struct {

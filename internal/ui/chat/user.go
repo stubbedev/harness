@@ -19,6 +19,7 @@ type skillInvocation struct {
 	Description  string `xml:"description"`
 	Location     string `xml:"location"`
 	Instructions string `xml:"instructions"`
+	Arguments    string `xml:"arguments"`
 }
 
 // attachmentHeadTailLines is how many lines a truncated text attachment
@@ -157,7 +158,12 @@ func (m *UserMessageItem) renderSkillInvocation(content string, width int) strin
 		return renderUserMarkdown(m.sty, content, width)
 	}
 
-	return toolOutputSkillContent(m.sty, skill.Name, skill.Description)
+	loaded := toolOutputSkillContent(m.sty, skill.Name, skill.Description)
+	if args := strings.TrimSpace(skill.Arguments); args != "" {
+		// What was typed after the skill's name is the user's own words.
+		return loaded + "\n\n" + renderUserMarkdown(m.sty, args, width)
+	}
+	return loaded
 }
 
 // Render implements MessageItem.

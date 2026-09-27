@@ -825,3 +825,14 @@ func (w *AppWorkspace) ListExtensionCommands(_ context.Context) ([]extensions.Co
 func (w *AppWorkspace) RunExtensionCommand(ctx context.Context, commandID string, args map[string]string) (string, error) {
 	return w.app.Extensions.RunCommand(ctx, commandID, args)
 }
+
+func (w *AppWorkspace) AgentSetGoal(ctx context.Context, sessionID, condition string) error {
+	if strings.TrimSpace(condition) == "" {
+		return w.app.Sessions.SetGoal(ctx, sessionID, nil)
+	}
+	goal, err := session.NewGoal(condition, time.Now())
+	if err != nil {
+		return err
+	}
+	return w.app.Sessions.SetGoal(ctx, sessionID, goal)
+}

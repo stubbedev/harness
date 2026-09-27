@@ -44,15 +44,18 @@ type Skill struct {
 	// knowledge the user should not invoke directly. The Agent Skills
 	// spec itself defines no invocation-control field, so spec-only
 	// skills land on the default.
-	UserInvocable          *bool          `yaml:"user-invocable" json:"user_invocable,omitempty"`
-	DisableModelInvocation bool           `yaml:"disable-model-invocation" json:"disable_model_invocation"`
-	License                string         `yaml:"license,omitempty" json:"license,omitempty"`
-	Compatibility          string         `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
-	Metadata               map[string]any `yaml:"metadata,omitempty" json:"metadata,omitempty"`
-	Instructions           string         `yaml:"-" json:"instructions"`
-	Path                   string         `yaml:"-" json:"path"`
-	SkillFilePath          string         `yaml:"-" json:"skill_file_path"`
-	Builtin                bool           `yaml:"-" json:"builtin"`
+	UserInvocable          *bool `yaml:"user-invocable" json:"user_invocable,omitempty"`
+	DisableModelInvocation bool  `yaml:"disable-model-invocation" json:"disable_model_invocation"`
+	// ArgumentHint mirrors the Claude Code field: what to type after the
+	// skill's name when invoking it, shown greyed out in the picker.
+	ArgumentHint  string         `yaml:"argument-hint,omitempty" json:"argument_hint,omitempty"`
+	License       string         `yaml:"license,omitempty" json:"license,omitempty"`
+	Compatibility string         `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
+	Metadata      map[string]any `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	Instructions  string         `yaml:"-" json:"instructions"`
+	Path          string         `yaml:"-" json:"path"`
+	SkillFilePath string         `yaml:"-" json:"skill_file_path"`
+	Builtin       bool           `yaml:"-" json:"builtin"`
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.
@@ -216,14 +219,31 @@ func ToPromptXML(skills []*Skill) string {
 
 // FormatInvocation generates XML for a skill when invoked as a user command.
 func (s *Skill) FormatInvocation() string {
+	return s.formatInvocation(s.Instructions, "")
+}
+
+// FormatInvocationWithArgs is FormatInvocation for a skill invoked with
+// arguments ("/review 1234"). As in Claude Code, $ARGUMENTS in the
+// instructions is replaced by them. They also ride in an <arguments>
+// element, which is what a skill without the placeholder reads and what
+// the transcript shows.
+func (s *Skill) FormatInvocationWithArgs(args string) string {
+	args = strings.TrimSpace(args)
+	return s.formatInvocation(strings.ReplaceAll(s.Instructions, ArgumentsPlaceholder, args), args)
+}
+
+func (s *Skill) formatInvocation(instructions, args string) string {
 	var sb strings.Builder
 	sb.WriteString("<loaded_skill>\n")
 	fmt.Fprintf(&sb, "  <name>%s</name>\n", stringext.EscapeXML(s.Name))
 	fmt.Fprintf(&sb, "  <description>%s</description>\n", stringext.EscapeXML(s.Description))
 	fmt.Fprintf(&sb, "  <location>%s</location>\n", stringext.EscapeXML(s.SkillFilePath))
 	sb.WriteString("  <instructions>\n")
-	sb.WriteString(stringext.EscapeXML(s.Instructions))
+	sb.WriteString(stringext.EscapeXML(instructions))
 	sb.WriteString("\n  </instructions>\n")
+	if args != "" {
+		fmt.Fprintf(&sb, "  <arguments>%s</arguments>\n", stringext.EscapeXML(args))
+	}
 	sb.WriteString("</loaded_skill>")
 	return sb.String()
 }
@@ -273,3 +293,8 @@ func ApproxTokenCount(s string) int {
 func Filter(all []*Skill, disabled []string) []*Skill {
 	return discovery.Filter(all, disabled, skillName)
 }
+
+// ArgumentsPlaceholder is the Claude Code placeholder for the text typed
+// after a skill's or command's name: "/review 1234 focus on auth" hands
+// "1234 focus on auth" to $ARGUMENTS.
+const ArgumentsPlaceholder = "$ARGUMENTS"

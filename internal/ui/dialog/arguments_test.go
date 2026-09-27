@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/workspace"
@@ -16,19 +17,12 @@ type argumentsWorkspace struct {
 	workspace.Workspace
 }
 
-// newTestArguments builds the dialog exactly the way the /compact flow does:
-// the result action is the ActionCompact message the commands dialog emitted,
-// carrying the /compact argument schema.
+// newTestArguments builds the form the /compact flow opens: the one laid
+// out from ActionCompact's ArgSpec.
 func newTestArguments() *Arguments {
 	st := styles.CharmtonePantera()
 	com := &common.Common{Styles: &st, Workspace: &argumentsWorkspace{}}
-	return NewArguments(
-		com,
-		"Compact Session",
-		"Optionally steer what the compacted summary keeps.",
-		compactArguments,
-		ActionCompact{SessionID: "s1", Arguments: compactArguments},
-	)
+	return NewArguments(com, ActionCompact{SessionID: "s1"}, commands.Args{})
 }
 
 // typeIntoArguments feeds a string to the dialog one key press at a time,
@@ -40,14 +34,14 @@ func typeIntoArguments(d *Arguments, s string) {
 }
 
 // TestCompactArgumentsSchema pins the /compact focus contract: one field,
-// keyed "instructions", optional so an empty submit still compacts.
+// keyed "focus", optional so an empty submit still compacts.
 func TestCompactArgumentsSchema(t *testing.T) {
 	t.Parallel()
 
-	require.Len(t, compactArguments, 1)
-	arg := compactArguments[0]
-	require.Equal(t, "instructions", arg.ID)
-	require.False(t, arg.Required)
+	fields := ActionCompact{}.ArgSpec().Fields
+	require.Len(t, fields, 1)
+	require.Equal(t, "focus", fields[0].ID)
+	require.False(t, fields[0].Required)
 }
 
 // TestArgumentsSubmitsFocusAsActionCompact verifies the first link of the
@@ -61,26 +55,21 @@ func TestArgumentsSubmitsFocusAsActionCompact(t *testing.T) {
 	d := newTestArguments()
 	typeIntoArguments(d, "Focus on the auth refactor")
 
-	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
-	compact, ok := action.(ActionCompact)
-	require.True(t, ok, "enter must submit the dialog, got %T", action)
+	compact := submittedCompact(t, d)
 	require.Equal(t, "s1", compact.SessionID)
-	require.Equal(t, map[string]string{"instructions": "Focus on the auth refactor"}, compact.Args)
+	require.Equal(t, "Focus on the auth refactor", compact.Args.Value("focus"))
 }
 
 // TestArgumentsSubmitsEmptyFocus verifies that submitting without typing
-// still returns the action (with an empty focus, not a nil Args map) so the
+// still returns the action, with an empty focus, so the
 // session compacts with a general summary.
 func TestArgumentsSubmitsEmptyFocus(t *testing.T) {
 	t.Parallel()
 
 	d := newTestArguments()
 
-	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
-	compact, ok := action.(ActionCompact)
-	require.True(t, ok, "enter must submit the dialog, got %T", action)
-	require.NotNil(t, compact.Args)
-	require.Equal(t, "", compact.Args["instructions"])
+	compact := submittedCompact(t, d)
+	require.Equal(t, "", compact.Args.Value("focus"))
 }
 
 // TestArgumentsCancelCloses verifies esc reports a close instead of
@@ -92,4 +81,17 @@ func TestArgumentsCancelCloses(t *testing.T) {
 	typeIntoArguments(d, "a focus that must be dropped")
 
 	require.IsType(t, ActionClose{}, d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape}))
+}
+
+// submittedCompact presses enter on d and returns the ActionCompact the
+// submit runs.
+func submittedCompact(t *testing.T, d *Arguments) ActionCompact {
+	t.Helper()
+
+	action := d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	run, ok := action.(ActionRun)
+	require.True(t, ok, "enter must submit the dialog, got %T", action)
+	compact, ok := run.Action.(ActionCompact)
+	require.True(t, ok, "the submit runs the action the form was opened for, got %T", run.Action)
+	return compact
 }

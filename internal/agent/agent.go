@@ -128,6 +128,13 @@ type SessionAgentCall struct {
 	// ended by declaring next steps. A real user prompt starts from
 	// zero; the chain is capped at maxGoalContinuations.
 	GoalContinuations int
+	// GoalContinuation marks a turn harness started because the judge
+	// found the session goal not yet met.
+	GoalContinuation bool
+	// GoalStalledTurns counts the consecutive goal continuations behind
+	// this call that used no tools; the loop pauses at
+	// maxGoalStalledTurns.
+	GoalStalledTurns int
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -576,6 +583,19 @@ func (a *sessionAgent) appendQueued(sessionID string, calls ...SessionAgentCall)
 	defer dispatchLock.Unlock()
 	existing, _ := a.messageQueue.Get(sessionID)
 	a.messageQueue.Set(sessionID, append(existing, calls...))
+}
+
+// appendQueuedIfIdle queues call only when nothing else is queued, checked
+// and appended under the dispatch lock so a prompt enqueued in between
+// cannot end up ahead of it.
+func (a *sessionAgent) appendQueuedIfIdle(sessionID string, call SessionAgentCall) {
+	dispatchLock := a.sessionMu(sessionID)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
+	if existing, _ := a.messageQueue.Get(sessionID); len(existing) > 0 {
+		return
+	}
+	a.messageQueue.Set(sessionID, []SessionAgentCall{call})
 }
 
 // dequeueNextLocked takes the next turn off the session's queue. The
@@ -1904,6 +1924,14 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 	}
 
+	// Session goal: judge the finished turn while the session still
+	// reads as busy, so a prompt the user sends meanwhile queues behind
+	// it instead of racing the continuation.
+	var goalNext *SessionAgentCall
+	if err == nil {
+		goalNext = a.advanceGoal(genCtx, call, currentAssistant, result)
+	}
+
 	// Release active request before publishing the notification.
 	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
 	// tea.Msg arrives, so the cleanup must precede the notify or
@@ -1914,7 +1942,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// Send notification that agent has finished its turn (skip for
 	// nested/non-interactive sessions, and for turns that ended in an
 	// error or a cancel — those have their own UX).
-	if err == nil && !call.NonInteractive && a.notify != nil {
+	if err == nil && goalNext == nil && !call.NonInteractive && a.notify != nil {
 		a.publishNotification(ctx, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: currentSession.Title,
@@ -1927,7 +1955,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// for the user to say "continue". Queueing keeps the handoff below
 	// atomic against a cancel, and a queued user prompt wins: the guard
 	// skips when one is already waiting.
-	if a.goalContinuation(call, currentAssistant, result) {
+	//
+	// A session goal takes over from both: its continuation restates the
+	// goal. A prompt the user queued while the judge ran wins, and the
+	// turn it starts is judged in turn.
+	if goalNext != nil {
+		a.appendQueuedIfIdle(call.SessionID, *goalNext)
+	} else if a.goalContinuation(call, currentAssistant, result) {
 		continued := call
 		continued.Prompt = goalContinuationPrompt
 		continued.GoalContinuations++

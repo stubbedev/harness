@@ -548,6 +548,7 @@ func (w *ClientWorkspace) ListSkills(ctx context.Context) ([]skills.CatalogEntry
 			Label:         entry.Label,
 			Source:        skills.SourceType(entry.Source),
 			UserInvocable: entry.UserInvocable,
+			ArgumentHint:  entry.ArgumentHint,
 		}
 	}
 	return result, nil
@@ -1124,3 +1125,7 @@ func (w *ClientWorkspace) RunExtensionCommand(ctx context.Context, commandID str
 
 // Compile-time check that ClientWorkspace implements Workspace.
 var _ Workspace = (*ClientWorkspace)(nil)
+
+func (w *ClientWorkspace) AgentSetGoal(ctx context.Context, sessionID, condition string) error {
+	return w.client.SetSessionGoal(ctx, w.workspaceID(), sessionID, condition)
+}

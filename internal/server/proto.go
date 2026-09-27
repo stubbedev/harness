@@ -853,6 +853,25 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseW
 	})
 }
 
+// handlePostWorkspaceAgentSessionGoal sets or clears a session goal.
+//
+//	@Summary		Set session goal
+//	@Tags			agent
+//	@Accept			json
+//	@Param			id		path	string				true	"Workspace ID"
+//	@Param			sid		path	string				true	"Session ID"
+//	@Param			request	body	proto.GoalRequest	true	"Goal condition; empty clears"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/agent/sessions/{sid}/goal [post]
+func (c *controllerV1) handlePostWorkspaceAgentSessionGoal(w http.ResponseWriter, r *http.Request) {
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.GoalRequest) (any, error) {
+		return done(ws.Ops().AgentSetGoal(ctx, r.PathValue("sid"), req.Condition))
+	})
+}
+
 // handlePostWorkspaceAgentSessionShell runs a shell command in the workspace.
 //
 //	@Summary		Run shell command

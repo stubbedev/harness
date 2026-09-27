@@ -63,15 +63,32 @@ func paletteTestCommon() *common.Common {
 	return &common.Common{Workspace: &stubWorkspace{cfg: &config.Config{}}, Styles: &s}
 }
 
-// TestSkillsPaletteListsOnlySkills pins the "/" palette: it shows
-// skills and nothing else, with no tab cycling. Every discovered skill
-// is listed — the user-invocable opt-in does not gate the palette.
-func TestSkillsPaletteListsOnlySkills(t *testing.T) {
+// newTestPalette opens the palette over cmds, with no session.
+func newTestPalette(t *testing.T, cmds []commands.CustomCommand) *Commands {
+	t.Helper()
+
+	com := paletteTestCommon()
+	c, err := NewCommands(com, NewCatalog(com, CommandState{}, cmds, nil))
+	require.NoError(t, err)
+	return c
+}
+
+// newSkillsPalette opens the palette on its Skills tab.
+func newSkillsPalette(t *testing.T, cmds []commands.CustomCommand) *Commands {
+	t.Helper()
+
+	c := newTestPalette(t, cmds)
+	c.setCommandItems(SkillsCommands)
+	return c
+}
+
+// TestSkillsTabListsOnlySkills pins the Skills tab: it shows skills and
+// nothing else. Every discovered skill is listed - the user-invocable
+// opt-in does not gate the palette.
+func TestSkillsTabListsOnlySkills(t *testing.T) {
 	t.Parallel()
 
-	c, err := NewSkills(paletteTestCommon(), paletteTestCommands())
-	require.NoError(t, err)
-	assert.True(t, c.SkillsOnly())
+	c := newSkillsPalette(t, paletteTestCommands())
 
 	items := c.list.FilteredItems()
 	require.Len(t, items, 1)
@@ -79,21 +96,21 @@ func TestSkillsPaletteListsOnlySkills(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "rust-expert", item.title)
 
-	// Enter runs the skill immediately.
-	action := item.Action()
-	run, ok := action.(ActionRunSkill)
-	require.True(t, ok, "selecting a skill runs it, got %T", action)
-	assert.Equal(t, "/skills/rust-expert/SKILL.md", run.ID)
+	// A skill with no argument hint runs as soon as it is picked.
+	inv, ok := item.SelectAction().(ActionInvoke)
+	require.True(t, ok, "picking a skill runs it, got %T", item.SelectAction())
+	run, ok := inv.Action.(ActionRunCustomCommand)
+	require.True(t, ok)
+	require.NotNil(t, run.Command.Skill)
+	assert.Equal(t, "/skills/rust-expert/SKILL.md", run.Command.Skill.SkillFilePath)
 }
 
-// TestCommandsPaletteUserTabExcludesSkills pins the ":" palette split:
-// skills moved to their own palette, so the User tab lists only custom
-// and extension commands.
-func TestCommandsPaletteUserTabExcludesSkills(t *testing.T) {
+// TestUserTabExcludesSkills pins the palette split: skills have their
+// own tab, so the User tab lists only custom and extension commands.
+func TestUserTabExcludesSkills(t *testing.T) {
 	t.Parallel()
 
-	c, err := NewCommands(paletteTestCommon(), "", false, false, paletteTestCommands(), nil)
-	require.NoError(t, err)
+	c := newTestPalette(t, paletteTestCommands())
 
 	c.setCommandItems(UserCommands)
 	items := c.list.FilteredItems()
@@ -101,8 +118,9 @@ func TestCommandsPaletteUserTabExcludesSkills(t *testing.T) {
 	item, ok := items[0].(*CommandItem)
 	require.True(t, ok)
 	assert.Equal(t, "review", item.title)
-	_, isRun := item.Action().(ActionRunSkill)
-	assert.False(t, isRun, "the commands palette must not offer skills")
+	run, ok := item.Action().(ActionRunCustomCommand)
+	require.True(t, ok)
+	assert.Nil(t, run.Command.Skill, "the User tab must not offer skills")
 }
 
 // TestSkillsPaletteQueryRanksNameAboveDescription pins the issue #59
@@ -111,8 +129,7 @@ func TestCommandsPaletteUserTabExcludesSkills(t *testing.T) {
 func TestSkillsPaletteQueryRanksNameAboveDescription(t *testing.T) {
 	t.Parallel()
 
-	c, err := NewSkills(paletteTestCommon(), kontainerPaletteCommands())
-	require.NoError(t, err)
+	c := newSkillsPalette(t, kontainerPaletteCommands())
 
 	c.list.SetFilter("pr")
 	items := c.list.FilteredItems()
@@ -143,8 +160,7 @@ func TestSkillsPaletteIgnoresSourcePrefix(t *testing.T) {
 			SkillFilePath: "/skills/commit/SKILL.md",
 		},
 	}}
-	c, err := NewSkills(paletteTestCommon(), cmds)
-	require.NoError(t, err)
+	c := newSkillsPalette(t, cmds)
 
 	// The prefix is not searchable: "pro" matches nothing even though
 	// the label starts with it.

@@ -605,6 +605,8 @@ definitions:
         type: number
       created_at:
         type: integer
+      goal:
+        $ref: '#/definitions/proto.Goal'
       id:
         type: string
       is_busy:
@@ -779,6 +781,26 @@ definitions:
       path:
         type: string
       session_id:
+        type: string
+    type: object
+  proto.Goal:
+    properties:
+      condition:
+        type: string
+      created_at:
+        type: integer
+      reason:
+        type: string
+      status:
+        type: string
+      turns:
+        type: integer
+      updated_at:
+        type: integer
+    type: object
+  proto.GoalRequest:
+    properties:
+      condition:
         type: string
     type: object
   proto.ImportCopilotResponse:
@@ -1027,6 +1049,8 @@ definitions:
         type: number
       created_at:
         type: integer
+      goal:
+        $ref: '#/definitions/proto.Goal'
       id:
         type: string
       is_busy:
@@ -1573,6 +1597,45 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Cancel the session's active agent turn
+      tags:
+      - agent
+  /workspaces/{id}/agent/sessions/{sid}/goal:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: sid
+        required: true
+        type: string
+      - description: Goal condition; empty clears
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.GoalRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Set session goal
       tags:
       - agent
   /workspaces/{id}/agent/sessions/{sid}/prompts/clear:

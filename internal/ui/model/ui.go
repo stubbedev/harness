@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 	xstrings "github.com/charmbracelet/x/exp/strings"
+	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	agenttools "github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
@@ -162,9 +163,6 @@ type (
 		Content     string
 		Attachments []message.Attachment
 	}
-
-	// closeDialogMsg is sent to close the current dialog.
-	closeDialogMsg struct{}
 
 	// copyChatHighlightMsg is sent to copy the current chat highlight to clipboard.
 	copyChatHighlightMsg struct{}
@@ -323,6 +321,10 @@ type UI struct {
 	// mention picker; the picked mention replaces the query from there.
 	// The picker itself is the shared dialog (dialog.MentionPicker).
 	completionsStartIndex int
+
+	// commandPicker lists the commands a partial "/name" in the editor
+	// could become.
+	commandPicker commandPicker
 
 	// Chat components
 	chat *Chat
@@ -801,6 +803,13 @@ func (m *UI) loadMCPrompts() tea.Msg {
 
 // Update handles updates to the UI model.
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	// The command picker follows the editor's text, whatever changed it.
+	m.refreshCommandPicker()
+	return model, cmd
+}
+
+func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	m.beginFrameUpdate()
 	// Update terminal capabilities
@@ -846,6 +855,8 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case goalSetMsg:
+		cmds = append(cmds, m.sendMessage(agent.GoalPrompt(msg.condition)))
 	case agentRunSubmittedMsg:
 		// A prompt was just accepted (run started or enqueued): fetch the
 		// authoritative busy/queue state to confirm the optimistic values
@@ -994,9 +1005,6 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.promptHistory.messages = msg.messages
 		m.historyReset()
-
-	case closeDialogMsg:
-		m.dialog.CloseFrontDialog()
 
 	case pubsub.Event[session.Session]:
 		if msg.Type == pubsub.DeletedEvent {
@@ -1896,10 +1904,15 @@ func (m *UI) handleChildSessionMessage(event message.Message) tea.Cmd {
 }
 
 func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
+	return m.handleAction(m.dialog.Update(msg))
+}
+
+// handleAction carries out what a dialog, or a command invoked from the
+// editor, asked for.
+func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 	var cmds []tea.Cmd
-	action := m.dialog.Update(msg)
 	if action == nil {
-		return tea.Batch(cmds...)
+		return nil
 	}
 
 	isOnboarding := m.state == uiOnboarding
@@ -1979,7 +1992,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		if cmd := m.newSession(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionSummarize:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
@@ -1992,49 +2004,48 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 			return nil
 		})
-		m.dialog.CloseDialog(dialog.CommandsID)
+	case dialog.ActionInvoke:
+		cmds = append(cmds, m.invoke(msg))
+	case dialog.ActionRun:
+		m.closeCommandDialogs()
+		cmds = append(cmds, m.handleAction(msg.Action))
+	case dialog.ActionOpenArguments:
+		m.closeCommandDialogs()
+		m.dialog.OpenDialog(dialog.NewArguments(m.com, msg.Action, msg.Args))
+	case dialog.ActionInsertInvocation:
+		m.closeCommandDialogs()
+		cmds = append(cmds, m.insertInvocation(msg.Name))
 	case dialog.ActionCompact:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before compacting session..."))
 			break
 		}
-		if len(msg.Arguments) > 0 && msg.Args == nil {
-			m.dialog.CloseFrontDialog()
-			argsDialog := dialog.NewArguments(
-				m.com,
-				"Compact Session",
-				"Optionally steer what the compacted summary keeps.",
-				msg.Arguments,
-				msg,
-			)
-			m.dialog.OpenDialog(argsDialog)
-			break
-		}
-		instructions := msg.Args["instructions"]
+		focus := msg.Args.Value("focus")
 		cmds = append(cmds, func() tea.Msg {
-			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID, instructions)
+			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID, focus)
 			if err != nil {
 				return util.ReportError(err)()
 			}
 			return nil
 		})
-		m.dialog.CloseFrontDialog()
+	case dialog.ActionSetGoal:
+		cmds = append(cmds, m.setGoal(msg.Args.Value("condition")))
+	case dialog.ActionClearGoal:
+		cmds = append(cmds, m.clearGoal())
 	case dialog.ActionSaveSummary:
+
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before saving the summary..."))
 			break
 		}
 		cmds = append(cmds, m.saveSummaryToFile(msg.SessionID))
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExportConversation:
 		cmds = append(cmds, m.exportConversationToFile(msg.SessionID))
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionRewindConfirmed:
 		m.dialog.CloseDialog(dialog.RewindID)
 		cmds = append(cmds, m.rewindSession(msg.SessionID, msg.MessageID, msg.Prompt, msg.Mode))
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionExternalEditor:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
@@ -2045,7 +2056,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			editorValue = "!" + editorValue
 		}
 		cmds = append(cmds, m.openEditor(editorValue))
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 			cfg := m.com.Config()
@@ -2070,7 +2080,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 			return util.NewInfoMsg("Thinking mode " + status)
 		}))
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionToggleMouseSupport:
 		cfg := m.com.Config()
 		if cfg == nil {
@@ -2094,7 +2103,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			}
 			return util.NewInfoMsg("Mouse support " + status)
 		})
-		m.dialog.CloseDialog(dialog.CommandsID)
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionInitializeProject:
@@ -2103,7 +2111,6 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 			break
 		}
 		cmds = append(cmds, m.initializeProject())
-		m.dialog.CloseDialog(dialog.CommandsID)
 
 	case dialog.ActionSelectModel:
 		if cmd := m.handleSelectModel(msg); cmd != nil {
@@ -2164,71 +2171,14 @@ func (m *UI) handleDialogMsg(msg tea.Msg) tea.Cmd {
 		m.closeCompletions()
 
 	case dialog.ActionRunCustomCommand:
-		if len(msg.Arguments) > 0 && msg.Args == nil {
-			m.dialog.CloseFrontDialog()
-			argsDialog := dialog.NewArguments(
-				m.com,
-				"Custom Command Arguments",
-				"",
-				msg.Arguments,
-				msg, // Pass the action as the result
-			)
-			m.dialog.OpenDialog(argsDialog)
-			break
-		}
-		if msg.ExtensionID != "" {
-			// An extension command has no content until the extension
-			// produces it, which may touch the filesystem or the network,
-			// so the expansion happens off the UI loop.
-			cmds = append(cmds, m.runExtensionCommand(msg.Name, msg.ExtensionID, msg.Args))
-			m.dialog.CloseFrontDialog()
-			break
-		}
-		content := msg.Content
-		if msg.Args != nil {
-			content = substituteArgs(content, msg.Args)
-		}
-		if msg.Skill != nil {
-			// A skill invocation keeps its <loaded_skill> wrapper, which
-			// the transcript already renders compactly.
-			content = msg.Skill.FormatInvocation()
-			cmds = append(cmds, m.sendMessage(content))
-		} else {
-			cmds = append(cmds, util.CmdHandler(sendMessageMsg{Name: msg.Name, Content: content}))
-		}
-		m.dialog.CloseFrontDialog()
-	case dialog.ActionRunSkill:
-		m.dialog.CloseFrontDialog()
-		cmds = append(cmds, m.runSkill(msg.ID, msg.Name))
+		cmds = append(cmds, m.runCustomCommand(msg.Command, msg.Args))
 	case dialog.ActionRunMCPPrompt:
-		if len(msg.Arguments) > 0 && msg.Args == nil {
-			m.dialog.CloseFrontDialog()
-			title := cmp.Or(msg.Title, "MCP Prompt Arguments")
-			argsDialog := dialog.NewArguments(
-				m.com,
-				title,
-				msg.Description,
-				msg.Arguments,
-				msg, // Pass the action as the result
-			)
-			m.dialog.OpenDialog(argsDialog)
-			break
-		}
-		cmds = append(cmds, m.runMCPPrompt(cmp.Or(msg.Title, msg.ClientID+":"+msg.PromptID), msg.ClientID, msg.PromptID, msg.Args))
+		cmds = append(cmds, m.runMCPPrompt(msg.Prompt.Spec().Title, msg.Prompt.ClientID, msg.Prompt.PromptID, msg.Args.Values))
 	default:
 		cmds = append(cmds, util.CmdHandler(msg))
 	}
 
 	return tea.Batch(cmds...)
-}
-
-// substituteArgs replaces $ARG_NAME placeholders in content with actual values.
-func substituteArgs(content string, args map[string]string) string {
-	for name, value := range args {
-		placeholder := "$" + name
-		content = strings.ReplaceAll(content, placeholder, value)
-	}
-	return content
 }
 
 // restoreModelFromSession checks the last assistant message in the
@@ -2623,6 +2573,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	case uiChat, uiLanding:
 		switch m.focus {
 		case uiFocusEditor:
+			if cmd, handled := m.handleCommandPickerKey(msg); handled {
+				cmds = append(cmds, cmd)
+				break
+			}
 			switch {
 			case key.Matches(msg, m.keyMap.Editor.Paste):
 				cmds = append(cmds, m.pasteFromClipboard)
@@ -2668,6 +2622,15 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				m.randomizePlaceholders()
 				m.historyReset()
+
+				// A command invocation ("/compact keep the API notes") runs
+				// the command. A line carrying attachments is a message:
+				// commands take text, not files.
+				if len(attachments) == 0 {
+					if inv, ok := m.editorInvocation(value); ok {
+						return m.invoke(inv)
+					}
+				}
 
 				if m.agentView.shown != "" {
 					// Viewing an agent: the prompt steers its session
@@ -2781,14 +2744,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				}
 				cmd := m.handleHistoryEscape(msg)
 				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			case key.Matches(msg, m.keyMap.Editor.Skills) && m.textarea.Value() == "":
-				if cmd := m.openSkillsDialog(); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			case key.Matches(msg, m.keyMap.Editor.Commands) && m.textarea.Value() == "":
-				if cmd := m.openCommandsDialog(); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 			default:
@@ -3034,6 +2989,16 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		m.drawEditorArea(scr, layout.editor)
 	}
 
+	// The command picker sits on top of whatever is above the editor
+	// and its status line.
+	if m.state != uiOnboarding {
+		above := layout.editor
+		if layout.header.Dy() > 0 {
+			above = layout.header
+		}
+		m.drawCommandPicker(scr, above)
+	}
+
 	// Add status and help layer
 	m.status.Draw(scr, layout.status)
 
@@ -3148,22 +3113,22 @@ func (m *UI) applyProgressBar(v *tea.View) {
 	}
 }
 
-// commandHints returns the hints for opening the palettes. Both a global
-// chord (ctrl+p) and the editor's first-character triggers (":" and
-// "/") open them, but they are never hinted together: the triggers
-// stand in while the editor is empty and idle — carrying "!" for shell
-// mode with them — and the global chord covers every other state,
-// where a trigger would just type a character.
+// commandHints returns the hints for reaching commands. The global chord
+// (ctrl+p) opens the palette and the editor's first characters start a
+// command invocation ("/") or a shell command ("!"), but they are never
+// hinted together: the first characters stand in while the editor is
+// empty and idle, and the global chord covers every other state, where
+// they would just be typed.
 func commandHints(k *KeyMap, show bool) []key.Binding {
 	if !show {
 		return []key.Binding{k.Commands}
 	}
-	return []key.Binding{k.Editor.ShellMode, k.Editor.Commands, k.Editor.Skills}
+	return []key.Binding{k.Editor.ShellMode, k.Editor.Commands}
 }
 
-// editorPalettesLive reports whether the editor's first-character palette
-// triggers ("!", ":", "/") would fire: the editor is focused, empty, and
-// not already in shell mode.
+// editorPalettesLive reports whether the editor's first characters ("!",
+// "/") start a shell command or a command invocation: the editor is
+// focused, empty, and not already in shell mode.
 func (m *UI) editorPalettesLive() bool {
 	return m.focus == uiFocusEditor && m.textarea.Value() == "" && !m.bangMode
 }
@@ -3184,6 +3149,11 @@ func (m *UI) ShortHelp() []key.Binding {
 	// show the chat's own hints once focus moves away.
 	if m.activeInline != nil && m.focus == uiFocusEditor {
 		return m.activeInline.ShortHelp()
+	}
+
+	// The command picker owns its keys while it shows.
+	if m.commandPicker.visible() {
+		return m.commandPickerHelp()
 	}
 
 	tab := k.Tab
@@ -3242,7 +3212,6 @@ func (m *UI) ShortHelp() []key.Binding {
 			append(
 				commandHints(k, m.editorPalettesLive()),
 				k.Models,
-				k.Editor.Newline,
 			)...,
 		)
 		if m.focus == uiFocusEditor {
@@ -3271,6 +3240,10 @@ func (m *UI) FullHelp() [][]key.Binding {
 	// keys it handles — and it only handles keys while it is focused.
 	if m.activeInline != nil && m.focus == uiFocusEditor {
 		return [][]key.Binding{m.activeInline.ShortHelp()}
+	}
+
+	if m.commandPicker.visible() {
+		return [][]key.Binding{m.commandPickerHelp()}
 	}
 
 	var binds [][]key.Binding
@@ -4113,13 +4086,12 @@ func (m *UI) refreshStyles() {
 	m.chat.InvalidateRenderCaches()
 }
 
-// runSkill loads a skill's body by ID and sends it as an immediate
-// invocation. Selecting a skill runs it; there is no intermediate
-// attachment to compose against. The content keeps its
-// <loaded_skill> wrapper, which the transcript renders compactly.
-// The name parameter is used as a fallback when the server does not
-// return one.
-func (m *UI) runSkill(skillID, name string) tea.Cmd {
+// runSkill loads a skill's body by ID and sends it as an invocation
+// with args, the text typed after its name. The content keeps its
+// <loaded_skill> wrapper, which the transcript renders compactly. The
+// name parameter is used as a fallback when the server does not return
+// one.
+func (m *UI) runSkill(skillID, name, args string) tea.Cmd {
 	return func() tea.Msg {
 		content, result, err := m.com.Workspace.ReadSkill(context.Background(), skillID)
 		if err != nil {
@@ -4134,7 +4106,7 @@ func (m *UI) runSkill(skillID, name string) tea.Cmd {
 		if skill.Description == "" {
 			skill.Description = result.Description
 		}
-		return sendMessageMsg{Content: skill.FormatInvocation()}
+		return sendMessageMsg{Content: skill.FormatInvocationWithArgs(args)}
 	}
 }
 
@@ -4531,14 +4503,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 		return nil
 	}
 
-	var sessionID string
-	hasSession := m.session != nil
-	if hasSession {
-		sessionID = m.session.ID
-	}
-	hasSummary := hasSession && m.session.SummaryMessageID != ""
-
-	commands, err := dialog.NewCommands(m.com, sessionID, hasSession, hasSummary, m.customCommands, m.mcpPrompts)
+	commands, err := dialog.NewCommands(m.com, m.commandCatalog())
 	if err != nil {
 		return util.ReportError(err)
 	}
@@ -4546,31 +4511,6 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 	m.dialog.OpenDialog(commands)
 
 	return commands.InitialCmd()
-}
-
-// openSkillsDialog opens the skills palette, the "/" counterpart of
-// the commands palette.
-func (m *UI) openSkillsDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.CommandsID) {
-		// Already the skills palette: bring it to front. The commands
-		// palette is swapped for the skills one instead.
-		if front := m.dialog.DialogLast(); front != nil {
-			if c, ok := front.(*dialog.Commands); ok && c.SkillsOnly() {
-				m.dialog.BringToFront(dialog.CommandsID)
-				return nil
-			}
-		}
-		m.dialog.CloseDialog(dialog.CommandsID)
-	}
-
-	skillsDialog, err := dialog.NewSkills(m.com, m.customCommands)
-	if err != nil {
-		return util.ReportError(err)
-	}
-
-	m.dialog.OpenDialog(skillsDialog)
-
-	return skillsDialog.InitialCmd()
 }
 
 // openReasoningDialog opens the reasoning effort dialog.
@@ -5198,7 +5138,7 @@ func (m *UI) pasteIdx() int {
 }
 
 func (m *UI) runMCPPrompt(name, clientID, promptID string, arguments map[string]string) tea.Cmd {
-	load := func() tea.Msg {
+	return func() tea.Msg {
 		prompt, err := m.com.Workspace.GetMCPPrompt(clientID, promptID, arguments)
 		if err != nil {
 			// TODO: make this better
@@ -5213,16 +5153,6 @@ func (m *UI) runMCPPrompt(name, clientID, promptID string, arguments map[string]
 			Content: prompt,
 		}
 	}
-
-	var cmds []tea.Cmd
-	if cmd := m.dialog.StartLoading(); cmd != nil {
-		cmds = append(cmds, cmd)
-	}
-	cmds = append(cmds, load, func() tea.Msg {
-		return closeDialogMsg{}
-	})
-
-	return tea.Sequence(cmds...)
 }
 
 func (m *UI) handleStateChanged() tea.Cmd {

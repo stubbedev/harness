@@ -1,16 +1,13 @@
 package dialog
 
 import (
-	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/commands"
-	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
@@ -48,39 +45,23 @@ type Commands struct {
 		Close key.Binding
 	}
 
-	sessionID  string
-	hasSession bool
-	hasSummary bool
-	selected   CommandType
-
-	spinner spinner.Model
-	loading bool
+	catalog  *Catalog
+	selected CommandType
 
 	input textinput.Model
 	list  *list.FilterableList
 
 	windowWidth int
-
-	customCommands []commands.CustomCommand
-	mcpPrompts     []commands.MCPPrompt
-
-	// skillsOnly restricts the dialog to the skills palette: a single
-	// list of agent skills with no tab cycling.
-	skillsOnly bool
 }
 
 var _ Dialog = (*Commands)(nil)
 
-// NewCommands creates a new commands dialog.
-func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary bool, customCommands []commands.CustomCommand, mcpPrompts []commands.MCPPrompt) (*Commands, error) {
+// NewCommands creates the command palette listing catalog.
+func NewCommands(com *common.Common, catalog *Catalog) (*Commands, error) {
 	c := &Commands{
-		com:            com,
-		selected:       SystemCommands,
-		sessionID:      sessionID,
-		hasSession:     hasSession,
-		hasSummary:     hasSummary,
-		customCommands: customCommands,
-		mcpPrompts:     mcpPrompts,
+		com:      com,
+		selected: SystemCommands,
+		catalog:  catalog,
 	}
 
 	c.list = list.NewFilterableList()
@@ -106,11 +87,6 @@ func NewCommands(com *common.Common, sessionID string, hasSession, hasSummary bo
 	// Set initial commands
 	c.setCommandItems(c.selected)
 
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = com.Styles.Dialog.Spinner
-	c.spinner = s
-
 	return c, nil
 }
 
@@ -119,32 +95,9 @@ func (c *Commands) ID() ID {
 	return CommandsID
 }
 
-// NewSkills creates a dialog listing only agent skills, the palette
-// behind the "/" prefix.
-func NewSkills(com *common.Common, customCommands []commands.CustomCommand) (*Commands, error) {
-	c, err := NewCommands(com, "", false, false, customCommands, nil)
-	if err != nil {
-		return nil, err
-	}
-	c.skillsOnly = true
-	c.setCommandItems(SkillsCommands)
-	return c, nil
-}
-
-// SkillsOnly reports whether the dialog is the skills palette.
-func (c *Commands) SkillsOnly() bool {
-	return c.skillsOnly
-}
-
 // HandleMsg implements [Dialog].
 func (c *Commands) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
-	case spinner.TickMsg:
-		if c.loading {
-			var cmd tea.Cmd
-			c.spinner, cmd = c.spinner.Update(msg)
-			return ActionCmd{Cmd: cmd}
-		}
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, c.keyMap.Close):
@@ -158,7 +111,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, c.keyMap.Select):
 			if selectedItem := c.list.SelectedItem(); selectedItem != nil {
 				if item, ok := selectedItem.(*CommandItem); ok && item != nil {
-					return item.Action()
+					return item.SelectAction()
 				}
 			}
 		case key.Matches(msg, c.keyMap.Tab):
@@ -170,7 +123,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 			for _, item := range c.list.FilteredItems() {
 				if item, ok := item.(*CommandItem); ok && item != nil {
 					if msg.String() == item.Shortcut() {
-						return item.Action()
+						return item.SelectAction()
 					}
 				}
 			}
@@ -238,18 +191,10 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc := NewRenderContext(t, width)
 	rc.Title = "Commands"
 	tabs := c.tabs()
-	if c.skillsOnly {
-		rc.Title = "Skills"
-	} else {
-		rc.TitleInfo = commandsRadioView(t, tabs, c.selected)
-	}
+	rc.TitleInfo = commandsRadioView(t, tabs, c.selected)
 	rc.AddInput(c.input.View())
 	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
 	rc.AddPart(listView)
-
-	if c.loading {
-		rc.AddPart(t.Dialog.HelpView.Width(innerWidth).Render(c.spinner.View() + " Generating Prompt..."))
-	}
 
 	view := rc.Render()
 
@@ -302,112 +247,11 @@ func (c *Commands) cycleTab(step int) {
 	c.setCommandItems(tabs[0].tab())
 }
 
-// commandMenu is one content source of the commands palette: a page of
-// items the tab switcher can land on. Tab presence, the tab hint, the
-// radio row and tab cycling are all derived from the menus registered
-// in menus(), so a future source becomes a tab by implementing this
-// interface and joining that list; nothing else in the dialog learns
-// its name.
-type commandMenu interface {
-	// tab is the palette page this menu fills.
-	tab() CommandType
-	// hasItems reports whether the menu currently contributes a tab.
-	// An empty menu is not a tab: nothing to switch to, nothing to hint.
-	hasItems() bool
-	// items renders the menu's entries.
-	items() []*CommandItem
-}
-
-// systemMenu is the built-in commands page. Always present.
-type systemMenu struct{ c *Commands }
-
-func (systemMenu) tab() CommandType        { return SystemCommands }
-func (systemMenu) hasItems() bool          { return true }
-func (m systemMenu) items() []*CommandItem { return m.c.defaultCommands() }
-
-// userMenu is the user-defined command page: custom and extension
-// commands. Skills are excluded; they have their own palette.
-type userMenu struct{ c *Commands }
-
-func (userMenu) tab() CommandType { return UserCommands }
-func (m userMenu) hasItems() bool { return len(m.c.userCommands()) > 0 }
-func (m userMenu) items() []*CommandItem {
-	var items []*CommandItem
-	for _, cmd := range m.c.userCommands() {
-		action := ActionRunCustomCommand{
-			Name:        cmd.Name,
-			Content:     cmd.Content,
-			Arguments:   cmd.Arguments,
-			Skill:       cmd.Skill,
-			ExtensionID: cmd.ExtensionID,
-		}
-		item := NewCommandItem(m.c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
-		if cmd.Description != "" {
-			item = item.WithDescription(cmd.Description)
-		}
-		items = append(items, item)
-	}
-	return items
-}
-
-// mcpMenu is the MCP prompt page.
-type mcpMenu struct{ c *Commands }
-
-func (mcpMenu) tab() CommandType { return MCPPrompts }
-func (m mcpMenu) hasItems() bool { return len(m.c.mcpPrompts) > 0 }
-func (m mcpMenu) items() []*CommandItem {
-	var items []*CommandItem
-	for _, cmd := range m.c.mcpPrompts {
-		action := ActionRunMCPPrompt{
-			Title:       cmd.Title,
-			Description: cmd.Description,
-			PromptID:    cmd.PromptID,
-			ClientID:    cmd.ClientID,
-			Arguments:   cmd.Arguments,
-		}
-		items = append(items, NewCommandItem(m.c.com.Styles, "mcp_"+cmd.ID, cmd.PromptID, "", action))
-	}
-	return items
-}
-
-// skillsMenu is the skills palette page behind "/".
-type skillsMenu struct{ c *Commands }
-
-func (skillsMenu) tab() CommandType { return SkillsCommands }
-func (m skillsMenu) hasItems() bool { return len(m.items()) > 0 }
-func (m skillsMenu) items() []*CommandItem {
-	var items []*CommandItem
-	for _, cmd := range m.c.customCommands {
-		if cmd.Skill == nil {
-			continue
-		}
-		action := ActionRunSkill{ID: cmd.Skill.SkillFilePath, Name: cmd.Skill.Name}
-		item := NewCommandItem(m.c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", action)
-		item = item.WithDescription(cmd.Skill.Description)
-		// The source prefix (project:/user:/system:) labels where the
-		// skill lives, not its name; match on the name after it.
-		if _, name, ok := strings.Cut(cmd.Name, ":"); ok {
-			item = item.WithFilterTitle(name)
-		}
-		items = append(items, item)
-	}
-	return items
-}
-
-// menus returns the palette's content sources in tab order. The skills
-// palette replaces the whole set: it lists skills and nothing else.
-func (c *Commands) menus() []commandMenu {
-	if c.skillsOnly {
-		return []commandMenu{skillsMenu{c}}
-	}
-	return []commandMenu{systemMenu{c}, userMenu{c}, mcpMenu{c}}
-}
-
 // tabs returns the menus that currently have items: the pages the tab
 // switcher can land on.
 func (c *Commands) tabs() []commandMenu {
 	var tabs []commandMenu
-	for _, m := range c.menus() {
+	for _, m := range c.catalog.menus() {
 		if m.hasItems() {
 			tabs = append(tabs, m)
 		}
@@ -415,23 +259,12 @@ func (c *Commands) tabs() []commandMenu {
 	return tabs
 }
 
-// userCommands returns the custom commands that are not skills.
-func (c *Commands) userCommands() []commands.CustomCommand {
-	var out []commands.CustomCommand
-	for _, cmd := range c.customCommands {
-		if cmd.Skill == nil {
-			out = append(out, cmd)
-		}
-	}
-	return out
-}
-
 // setCommandItems sets the command items based on the specified command type.
 func (c *Commands) setCommandItems(commandType CommandType) {
 	c.selected = commandType
 
 	var commandItems []list.FilterableItem
-	for _, m := range c.menus() {
+	for _, m := range c.catalog.menus() {
 		if m.tab() == commandType {
 			for _, item := range m.items() {
 				commandItems = append(commandItems, item)
@@ -447,113 +280,9 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 	c.input.SetValue("")
 }
 
-// compactArguments defines the optional /compact focus prompt. Declared at
-// package scope because the local variable in defaultCommands shadows the
-// commands package.
-var compactArguments = []commands.Argument{{
-	ID:          "instructions",
-	Title:       "Focus",
-	Description: "Optional: what the compacted summary should keep. Leave empty for a general summary.",
-}}
-
-// defaultCommands returns the list of default system commands.
-// defaultCommands returns the list of default system commands. Shortcut
-// labels follow the keymap: a rebound action shows its new key here, and
-// the palette matches the label literally, so the two never drift apart.
-func (c *Commands) defaultCommands() []*CommandItem {
-	km := c.com.KeyMap()
-	commands := []*CommandItem{
-		NewCommandItem(c.com.Styles, "new_session", "New Session", km.Chat.NewSession.Help().Key, ActionNewSession{}).WithAliases("clear"),
-		NewCommandItem(c.com.Styles, "switch_session", "Sessions", km.Sessions.Help().Key, ActionOpenDialog{SessionsID}).WithAliases("resume", "switch"),
-		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", km.Models.Help().Key, ActionOpenDialog{ModelsID}),
-		NewCommandItem(c.com.Styles, "connect_provider", "Connect Provider", "", ActionOpenDialog{ConnectID}).WithAliases("provider", "auth", "login"),
-		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", km.Themes.Help().Key, ActionOpenDialog{ThemesID}),
-		NewCommandItem(c.com.Styles, "mcp_servers", "MCP Servers", "", ActionOpenDialog{DialogID: MCPServersID}).WithAliases("mcp"),
-		NewCommandItem(c.com.Styles, "lsp_servers", "LSP Servers", "", ActionOpenDialog{DialogID: LSPServersID}).WithAliases("lsp"),
-	}
-
-	// Only show compact command if there's an active session
-	if c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.sessionID}))
-		commands = append(commands, NewCommandItem(c.com.Styles, "rewind", "Rewind to Earlier Turn", "", ActionOpenDialog{RewindID}))
-		commands = append(commands, NewCommandItem(c.com.Styles, "compact", "Compact Session (with focus)", "", ActionCompact{
-			SessionID: c.sessionID,
-			Arguments: compactArguments,
-		}))
-	}
-
-	// Only show the export command when there is a conversation to export
-	if c.hasSession {
-		commands = append(commands, NewCommandItem(c.com.Styles, "export_conversation", "Export Conversation", km.ExportConversation.Help().Key, ActionExportConversation{SessionID: c.sessionID}).WithAliases("export", "transcript", "copy"))
-	}
-
-	// Only show the save summary command if the session already has one
-	if c.hasSession && c.hasSummary {
-		commands = append(commands, NewCommandItem(c.com.Styles, "save_summary", "Save Session Summary", "", ActionSaveSummary{SessionID: c.sessionID}))
-	}
-
-	// Add reasoning toggle for models that support it
-	cfg := c.com.Config()
-	if agentCfg, ok := cfg.Agents[config.AgentCoder]; ok {
-		providerCfg := cfg.GetProviderForModel(agentCfg.Model)
-		model := cfg.GetModelByType(agentCfg.Model)
-		if providerCfg != nil && model != nil && model.CanReason {
-			selectedModel := cfg.Models[agentCfg.Model]
-
-			// Anthropic models: thinking toggle
-			if model.CanReason && len(model.ReasoningLevels) == 0 {
-				status := "Enable"
-				if selectedModel.Think {
-					status = "Disable"
-				}
-				commands = append(commands, NewCommandItem(c.com.Styles, "toggle_thinking", status+" Thinking Mode", "", ActionToggleThinking{}))
-			}
-
-			// OpenAI models: reasoning effort dialog
-			if len(model.ReasoningLevels) > 0 {
-				commands = append(commands, NewCommandItem(c.com.Styles, "select_reasoning_effort", "Select Reasoning Effort", "", ActionOpenDialog{
-					DialogID: ReasoningID,
-				}))
-			}
-		}
-	}
-	// Add external editor command if $EDITOR is available.
-	//
-	// TODO: Use [tea.EnvMsg] to get environment variable instead of os.Getenv;
-	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
-	// antipattern.
-	if os.Getenv("EDITOR") != "" {
-		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", km.Editor.OpenEditor.Help().Key, ActionExternalEditor{}))
-	}
-
-	// Add a command for selecting notification style via picker dialog.
-	notificationLabel := "Notification Style"
-	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
-
-	commands = append(
-		commands,
-		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", km.Help.Help().Key, ActionToggleHelp{}),
-		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
-	)
-
-	// Add mouse support toggle.
-	mouseLabel := "Disable Mouse"
-	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Mouse != nil && !*cfg.Options.TUI.Mouse {
-		mouseLabel = "Enable Mouse"
-	}
-	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mouse", mouseLabel, "", ActionToggleMouseSupport{}))
-
-	commands = append(
-		commands,
-		NewCommandItem(c.com.Styles, "quit", "Quit", km.Quit.Help().Key, tea.QuitMsg{}).WithAliases("exit"),
-	)
-
-	return commands
-}
-
 // SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.
 func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
-	c.customCommands = customCommands
+	c.catalog.customCommands = customCommands
 	if c.selected == UserCommands {
 		c.setCommandItems(c.selected)
 	}
@@ -561,22 +290,8 @@ func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
 
 // SetMCPPrompts sets the MCP prompts and refreshes the view if MCP prompts are currently displayed.
 func (c *Commands) SetMCPPrompts(mcpPrompts []commands.MCPPrompt) {
-	c.mcpPrompts = mcpPrompts
+	c.catalog.mcpPrompts = mcpPrompts
 	if c.selected == MCPPrompts {
 		c.setCommandItems(c.selected)
 	}
-}
-
-// StartLoading implements [LoadingDialog].
-func (c *Commands) StartLoading() tea.Cmd {
-	if c.loading {
-		return nil
-	}
-	c.loading = true
-	return c.spinner.Tick
-}
-
-// StopLoading implements [LoadingDialog].
-func (c *Commands) StopLoading() {
-	c.loading = false
 }

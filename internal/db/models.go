@@ -88,4 +88,5 @@ type Session struct {
 	CompactionSummary    sql.NullString `json:"compaction_summary"`
 	CompactionBoundaryID sql.NullString `json:"compaction_boundary_id"`
 	CompactionAgedID     sql.NullString `json:"compaction_aged_id"`
+	Goal                 sql.NullString `json:"goal"`
 }

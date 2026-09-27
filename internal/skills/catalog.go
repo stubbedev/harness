@@ -19,6 +19,10 @@ const (
 	SourceProject SourceType = "project"
 )
 
+// Prefix is the label prefix a skill or command from this source carries,
+// e.g. "user:".
+func (s SourceType) Prefix() string { return string(s) + ":" }
+
 // CatalogEntry describes an effective visible skill for frontend display.
 type CatalogEntry struct {
 	ID            string     `json:"id"`
@@ -27,6 +31,7 @@ type CatalogEntry struct {
 	Label         string     `json:"label"`
 	Source        SourceType `json:"source"`
 	UserInvocable bool       `json:"user_invocable"`
+	ArgumentHint  string     `json:"argument_hint,omitempty"`
 }
 
 // SkillReadResult holds metadata about a skill returned alongside its
@@ -57,6 +62,7 @@ func Catalog(active []*Skill, skillPaths []string, workingDir string) []CatalogE
 			Label:         label,
 			Source:        source,
 			UserInvocable: skill.IsUserInvocable(),
+			ArgumentHint:  skill.ArgumentHint,
 		})
 	}
 	return entries
@@ -107,7 +113,7 @@ func ReadContent(active []*Skill, skillPaths []string, workingDir string, skillI
 
 func skillLabel(skillPaths []string, workingDir string, skill *Skill) (string, SourceType) {
 	if skill.Builtin {
-		return string(SourceSystem) + ":" + skill.Name, SourceSystem
+		return SourceSystem.Prefix() + skill.Name, SourceSystem
 	}
 
 	cleanFile := filepath.Clean(skill.SkillFilePath)
@@ -118,15 +124,15 @@ func skillLabel(skillPaths []string, workingDir string, skill *Skill) (string, S
 		}
 
 		source := SourceUser
-		prefix := string(SourceUser) + ":"
+		prefix := SourceUser.Prefix()
 		if isProjectSkillPath(cleanBase, workingDir) {
 			source = SourceProject
-			prefix = string(SourceProject) + ":"
+			prefix = SourceProject.Prefix()
 		}
 		return prefix + filepath.Base(filepath.Dir(cleanFile)), source
 	}
 
-	return string(SourceUser) + ":" + filepath.Base(filepath.Dir(cleanFile)), SourceUser
+	return SourceUser.Prefix() + filepath.Base(filepath.Dir(cleanFile)), SourceUser
 }
 
 func isProjectSkillPath(basePath, workingDir string) bool {

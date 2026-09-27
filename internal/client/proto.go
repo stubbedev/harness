@@ -311,6 +311,11 @@ func (c *Client) AgentSummarizeSession(ctx context.Context, id string, sessionID
 	return c.do(ctx, "summarize session", post(wsPath(id, "agent", "sessions", sessionID, "summarize"), body))
 }
 
+// SetSessionGoal sets a session goal; an empty condition clears it.
+func (c *Client) SetSessionGoal(ctx context.Context, id string, sessionID string, condition string) error {
+	return c.do(ctx, "set session goal", post(wsPath(id, "agent", "sessions", sessionID, "goal"), proto.GoalRequest{Condition: condition}))
+}
+
 // InitiateAgentProcessing triggers agent initialization on the server.
 func (c *Client) InitiateAgentProcessing(ctx context.Context, id string, interactive bool) error {
 	return c.do(ctx, "initialize agent", post(wsPath(id, "agent", "init"), proto.AgentInitRequest{Interactive: interactive}))

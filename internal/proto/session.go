@@ -23,6 +23,7 @@ type Session struct {
 	SummaryMessageID string  `json:"summary_message_id"`
 	Cost             float64 `json:"cost"`
 	Todos            []Todo  `json:"todos,omitempty"`
+	Goal             *Goal   `json:"goal,omitempty"`
 	CreatedAt        int64   `json:"created_at"`
 	UpdatedAt        int64   `json:"updated_at"`
 	IsBusy           bool    `json:"is_busy"`
@@ -41,6 +42,21 @@ type Todo struct {
 	Content    string `json:"content"`
 	Status     string `json:"status"`
 	ActiveForm string `json:"active_form"`
+}
+
+// Goal is a session goal in the proto layer.
+type Goal struct {
+	Condition string `json:"condition"`
+	Status    string `json:"status"`
+	Reason    string `json:"reason,omitempty"`
+	Turns     int    `json:"turns"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+// GoalRequest sets a session goal. An empty Condition clears it.
+type GoalRequest struct {
+	Condition string `json:"condition"`
 }
 
 // Checkpoint maps a user message to the working-tree snapshot taken

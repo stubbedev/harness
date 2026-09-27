@@ -68,6 +68,10 @@ func (s *stubSessionService) Save(_ context.Context, sess session.Session) (sess
 	return sess, nil
 }
 
+func (s *stubSessionService) SetGoal(context.Context, string, *session.Goal) error {
+	return nil
+}
+
 func (s *stubSessionService) UpdateTitleAndUsage(context.Context, string, string, int64, int64, float64) error {
 	return nil
 }

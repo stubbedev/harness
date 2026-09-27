@@ -462,7 +462,8 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `dialog.sessions.rename` | `ctrl+r` |
 | `dialog.sessions.select` | `enter`, `tab`, `ctrl+y` |
 | `dialog.up_down` | `up`, `down` |
-| `editor.commands` | `:` |
+| `editor.commands` | `/`, `:` |
+| `editor.complete_command` | `tab` |
 | `editor.copy_selection` | `ctrl+shift+c` |
 | `editor.cut_selection` | `ctrl+shift+x` |
 | `editor.delete_word_backward` | `ctrl+backspace`, `ctrl+w` |
@@ -479,7 +480,6 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 | `editor.select_line_up` | `shift+up` |
 | `editor.send_message` | `enter` |
 | `editor.shell_mode` | `!` |
-| `editor.skills` | `/` |
 | `export_conversation` | `ctrl+shift+e` |
 | `help` | `ctrl+g` |
 | `models` | `ctrl+m`, `ctrl+l` |

@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"context"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stubbedev/harness/internal/catalog"
@@ -9,7 +10,6 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/session"
-	"github.com/stubbedev/harness/internal/skills"
 )
 
 // ActionClose is a message to close the current dialog.
@@ -51,12 +51,17 @@ type (
 		SessionID string
 	}
 	// ActionCompact compacts (summarizes) the session, optionally steered
-	// by focus instructions collected through the arguments dialog.
+	// by focus instructions.
 	ActionCompact struct {
 		SessionID string
-		Arguments []commands.Argument
-		Args      map[string]string
+		Args      commands.Args
 	}
+	// ActionSetGoal sets the session goal and starts working toward it.
+	ActionSetGoal struct {
+		Args commands.Args
+	}
+	// ActionClearGoal clears the current session's goal.
+	ActionClearGoal struct{}
 	// ActionSaveSummary is a message to save the current session summary
 	// to a markdown file in the data directory.
 	ActionSaveSummary struct {
@@ -86,33 +91,123 @@ type (
 	ActionSelectTheme struct {
 		Name string
 	}
-	// ActionRunCustomCommand is a message to run a custom command.
+	// ActionRunCustomCommand runs a custom command: a command file, a
+	// skill or an extension command.
 	ActionRunCustomCommand struct {
-		// Name is the command's display name, shown on the compact
-		// invocation row in the transcript.
-		Name        string
-		Content     string
-		Arguments   []commands.Argument
-		Args        map[string]string // Actual argument values
-		Skill       *skills.Skill     // Set when this is a skill command
-		ExtensionID string            // Set when this command comes from a Lua extension
+		Command commands.CustomCommand
+		Args    commands.Args
 	}
-	// ActionRunSkill is sent when a skill is selected from the skills
-	// palette: it is loaded and sent as an immediate invocation.
-	ActionRunSkill struct {
-		ID   string
+	// ActionRunMCPPrompt runs an MCP server's prompt.
+	ActionRunMCPPrompt struct {
+		Prompt commands.MCPPrompt
+		Args   commands.Args
+	}
+	// ActionInvoke runs a command picked from the palette or typed in the
+	// editor, with the raw text typed after its name. Arguments are bound
+	// through the action's ArgSpec when it has one, and the arguments
+	// form asks for any required field the text left out.
+	ActionInvoke struct {
+		Action Action
+		Name   string
+		Raw    string
+	}
+	// ActionInsertInvocation puts a command's name in the editor for the
+	// user to follow with its arguments.
+	ActionInsertInvocation struct {
 		Name string
 	}
-	// ActionRunMCPPrompt is a message to run a custom command.
-	ActionRunMCPPrompt struct {
-		Title       string
-		Description string
-		PromptID    string
-		ClientID    string
-		Arguments   []commands.Argument
-		Args        map[string]string // Actual argument values
+	// ActionOpenArguments opens the arguments form for Action with what
+	// was already typed filled in.
+	ActionOpenArguments struct {
+		Action ArgAction
+		Args   commands.Args
 	}
 )
+
+// ArgAction is an action that takes arguments. Its ArgSpec is the one
+// description of them: the palette hint, the editor binding and the
+// arguments form all read it, and WithArgs is the one way arguments
+// reach the action.
+type ArgAction interface {
+	ArgSpec() commands.ArgSpec
+	// WithArgs returns the action to run with args bound.
+	WithArgs(args commands.Args) Action
+}
+
+var (
+	_ ArgAction = ActionCompact{}
+	_ ArgAction = ActionSetGoal{}
+	_ ArgAction = ActionRunCustomCommand{}
+	_ ArgAction = ActionRunMCPPrompt{}
+)
+
+// compactSpec is how /compact takes its optional focus.
+var compactSpec = commands.ArgSpec{
+	Fields: []commands.Argument{{
+		ID:          "focus",
+		Title:       "Focus",
+		Description: "Optional: what the compacted summary should keep. Leave empty for a general summary.",
+	}},
+	Title:       "Compact Session",
+	Description: "Optionally steer what the compacted summary keeps.",
+}
+
+// ArgSpec implements ArgAction.
+func (ActionCompact) ArgSpec() commands.ArgSpec { return compactSpec }
+
+// WithArgs implements ArgAction.
+func (a ActionCompact) WithArgs(args commands.Args) Action {
+	a.Args = args
+	return a
+}
+
+// goalSpec is how /goal takes its condition.
+var goalSpec = commands.ArgSpec{
+	Fields: []commands.Argument{{
+		ID:          "condition",
+		Title:       "Goal",
+		Description: "What must be true for the work to be done. Add \"or stop after 20 turns\" to bound it.",
+		Required:    true,
+	}},
+	Hint:        "<condition> | clear",
+	Title:       "Set Goal",
+	Description: "The agent keeps working, across compactions, until a judge finds this met.",
+}
+
+// goalClearWords clear the goal instead of setting one ("/goal clear").
+var goalClearWords = map[string]bool{
+	"clear": true, "stop": true, "off": true, "reset": true, "none": true, "cancel": true,
+}
+
+// ArgSpec implements ArgAction.
+func (ActionSetGoal) ArgSpec() commands.ArgSpec { return goalSpec }
+
+// WithArgs implements ArgAction.
+func (a ActionSetGoal) WithArgs(args commands.Args) Action {
+	if goalClearWords[strings.ToLower(strings.TrimSpace(args.Value("condition")))] {
+		return ActionClearGoal{}
+	}
+	a.Args = args
+	return a
+}
+
+// ArgSpec implements ArgAction.
+func (a ActionRunCustomCommand) ArgSpec() commands.ArgSpec { return a.Command.Spec() }
+
+// WithArgs implements ArgAction.
+func (a ActionRunCustomCommand) WithArgs(args commands.Args) Action {
+	a.Args = args
+	return a
+}
+
+// ArgSpec implements ArgAction.
+func (a ActionRunMCPPrompt) ArgSpec() commands.ArgSpec { return a.Prompt.Spec() }
+
+// WithArgs implements ArgAction.
+func (a ActionRunMCPPrompt) WithArgs(args commands.Args) Action {
+	a.Args = args
+	return a
+}
 
 // Messages for MCP OAuth authentication dialog.
 type (
@@ -176,4 +271,10 @@ type ActionLoadSubagentSession struct {
 // Bubble Tea program loop.
 type ActionCmd struct {
 	Cmd tea.Cmd
+}
+
+// ActionRun runs a command whose arguments are bound: what the palette,
+// the editor and the arguments form all end in.
+type ActionRun struct {
+	Action Action
 }

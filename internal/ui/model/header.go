@@ -115,6 +115,11 @@ func renderHeaderDetails(
 
 	// Right: diagnostics and context usage with the model ID.
 	var rightParts []string
+	// An active goal means the agent will keep taking turns on its own,
+	// which is worth knowing before typing into the session.
+	if session != nil && session.Goal.Active() {
+		rightParts = append(rightParts, t.Header.Goal.Render("◎ goal"))
+	}
 	// Diagnostics are shown broken down by severity, the same rendered
 	// form the LSP section uses; the all-clear case renders nothing.
 	if diagnostics := lspDiagnostics(t, severityCounts(diagnostics)); diagnostics != "" {
