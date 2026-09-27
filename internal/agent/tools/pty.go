@@ -755,8 +755,10 @@ func (r *ptyRunner) sendLocked(s ptyTerminal, b []byte) error {
 // awaitEchoDrain waits for the session's reader to ingest the echo of
 // a chunk just written: every written byte echoes as at least one byte,
 // except the odd control character a line discipline swallows, so three
-// quarters of the chunk is proof enough. An echo that never comes - a
-// session gone quiet or exited - ends the wait.
+// quarters of the chunk is proof enough. The wait wakes on the output
+// the reader produces - the echo itself, if it is keeping up - rather
+// than pacing a poll over it. An echo that never comes - a session
+// gone quiet or exited - ends the wait.
 func awaitEchoDrain(s ptyTerminal, mark, n int) {
 	want := mark + n - n/4 + 16
 	deadline := time.Now().Add(ptyEchoDrainWait)
@@ -764,7 +766,7 @@ func awaitEchoDrain(s ptyTerminal, mark, n int) {
 		if !s.Alive() || time.Now().After(deadline) {
 			return
 		}
-		time.Sleep(ptyKeyGap)
+		s.WaitForOutput(context.Background(), time.Until(deadline))
 	}
 }
 
