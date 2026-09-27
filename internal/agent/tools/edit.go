@@ -234,7 +234,7 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 }
 
 func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, toolErr, err := loadExistingFile(edit, params.FilePath, params.Edits[0].OldString)
+	sessionID, oldContent, isCrlf, stamp, toolErr, err := loadExistingFile(edit, params.FilePath, params.Edits[0].OldString)
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
@@ -280,7 +280,7 @@ func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolR
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	mutation, err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent, isCrlf)
+	mutation, err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent, isCrlf, stamp)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}

@@ -206,11 +206,54 @@ func TestFileEvidenceLineEndingChangeBeforeCommitIsStale(t *testing.T) {
 	require.False(t, runViewTool(t, NewViewTool(nil, tracker, nil, dir), ctx, ViewParams{FilePath: path}).IsError)
 	require.NoError(t, os.WriteFile(path, []byte("alpha\r\nbeta\r\n"), 0o644))
 	edit := editContext{ctx: ctx, files: &mockHistoryService{}, filetracker: tracker, workingDir: dir}
-	_, err := commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false)
+	_, err := commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false, fileStamp{})
 	require.ErrorIs(t, err, filetracker.ErrStale)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, "alpha\r\nbeta\r\n", string(data))
+}
+
+// A fresh stamp - the load's stat still describing the file - is the
+// common case: the edit commits from the content already in hand.
+func TestCommitFileChangeWithFreshStampApplies(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := writeViewFixture(t, dir, "file", "alpha\nbeta\n")
+	tracker := filetracker.NewService(nil)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
+	edit := editContext{ctx: ctx, files: &mockHistoryService{}, filetracker: tracker, workingDir: dir}
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	filetracker.Observe(ctx, tracker, "s", path, []byte("alpha\nbeta\n"), []filetracker.Range{{Start: 0, End: 11}})
+
+	mutation, err := commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false, stampOf(info))
+	require.NoError(t, err)
+	require.Equal(t, path, mutation.Path)
+	require.NotEmpty(t, mutation.Version)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "ALPHA\nbeta\n", string(data))
+}
+
+// An out-of-process write between the load and the commit invalidates
+// the stamp: the write path falls back to reading what is actually
+// there and reports the conflict instead of clobbering it.
+func TestCommitFileChangeDetectsExternalWriteDespiteStamp(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := writeViewFixture(t, dir, "file", "alpha\nbeta\n")
+	tracker := filetracker.NewService(nil)
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
+	edit := editContext{ctx: ctx, files: &mockHistoryService{}, filetracker: tracker, workingDir: dir}
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte("someone else was here"), 0o644))
+
+	_, err = commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false, stampOf(info))
+	require.ErrorIs(t, err, filetracker.ErrStale)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "someone else was here", string(data))
 }
 
 // seenTextRangesReference is the original seenTextRanges, which located

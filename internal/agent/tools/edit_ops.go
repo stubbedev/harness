@@ -111,14 +111,21 @@ func ambiguityHint(content, old string) string {
 // and records the read in the file tracker. Callers must convert line endings
 // before calling this function. It returns the file_mutations entry for the
 // written content, hashed from memory rather than by reading the file back.
-func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf bool) (fileMutation, error) {
-	current, err := os.ReadFile(filePath)
-	if err != nil {
-		return fileMutation{}, err
-	}
+// stamp is the stat that went with oldContent's read; while it still
+// matches, the file on disk is the content already in hand and the
+// read this used to do a second time is skipped.
+func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf bool, stamp fileStamp) (fileMutation, error) {
 	expected := oldContent
 	if crlf {
 		expected, _ = fsext.ToWindowsLineEndings(oldContent)
+	}
+	var current []byte
+	if info, statErr := os.Stat(filePath); statErr == nil && stamp.matches(info) {
+		current = []byte(expected)
+	} else if read, readErr := os.ReadFile(filePath); readErr == nil {
+		current = read
+	} else {
+		return fileMutation{}, readErr
 	}
 	if string(current) != expected {
 		return fileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, filetracker.ErrStale)
@@ -139,7 +146,7 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 		return fileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, at, err)
 	}
 
-	if err := guardedWrite(filePath, current, newBytes, false); err != nil {
+	if err := guardedWriteStamped(filePath, current, newBytes, false, stamp); err != nil {
 		if current, readErr := os.ReadFile(filePath); readErr == nil {
 			return fileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, err)
 		}
@@ -186,18 +193,19 @@ func recordFileVersion(ctx context.Context, files history.Service, sessionID, fi
 // line endings, and checks the session's evidence for it. A problem the
 // model should hear about comes back as toolErr; err is for failures the
 // tool cannot report as a result. hint is text the edit expects to find,
-// which positions a conflict report near it.
-func loadExistingFile(edit editContext, filePath, hint string) (sessionID, oldContent string, isCrlf bool, toolErr *fantasy.ToolResponse, err error) {
-	reject := func(msg string) (string, string, bool, *fantasy.ToolResponse, error) {
+// which positions a conflict report near it. stamp is the stat the read
+// was taken under, for the write path's staleness guard.
+func loadExistingFile(edit editContext, filePath, hint string) (sessionID, oldContent string, isCrlf bool, stamp fileStamp, toolErr *fantasy.ToolResponse, err error) {
+	reject := func(msg string) (string, string, bool, fileStamp, *fantasy.ToolResponse, error) {
 		resp := fantasy.NewTextErrorResponse(msg)
-		return "", "", false, &resp, nil
+		return "", "", false, fileStamp{}, &resp, nil
 	}
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return reject(fmt.Sprintf("file not found: %s", filePath))
 		}
-		return "", "", false, nil, fmt.Errorf("failed to access file: %w", err)
+		return "", "", false, fileStamp{}, nil, fmt.Errorf("failed to access file: %w", err)
 	}
 
 	if fileInfo.IsDir() {
@@ -206,12 +214,12 @@ func loadExistingFile(edit editContext, filePath, hint string) (sessionID, oldCo
 
 	sessionID, err = SessionIDOrError(edit.ctx, "editing a file")
 	if err != nil {
-		return "", "", false, nil, err
+		return "", "", false, fileStamp{}, nil, err
 	}
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", "", false, nil, fmt.Errorf("failed to read file: %w", err)
+		return "", "", false, fileStamp{}, nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	if checkErr := checkFileEvidence(edit.ctx, edit.filetracker, sessionID, filePath, content, nil); checkErr != nil {
@@ -220,5 +228,5 @@ func loadExistingFile(edit editContext, filePath, hint string) (sessionID, oldCo
 	}
 
 	oldContent, isCrlf = fsext.ToUnixLineEndings(string(content))
-	return sessionID, oldContent, isCrlf, nil, nil
+	return sessionID, oldContent, isCrlf, stampOf(fileInfo), nil, nil
 }

@@ -33,6 +33,28 @@ func lockFile(path string) func() {
 	return mu.Unlock
 }
 
+// fileStamp is the identity a file had when its content was read: its
+// modification time and size. Under the per-path edit lock, an
+// unchanged stamp means unchanged bytes, which is what lets the edit
+// path trust the content it already holds instead of reading the file
+// back twice more per call. A writer that changes neither within the
+// filesystem's timestamp granularity is invisible to every
+// mtime-based guard, this one included.
+type fileStamp struct {
+	modSec  int64
+	modNsec int64
+	size    int64
+}
+
+func stampOf(info os.FileInfo) fileStamp {
+	mod := info.ModTime()
+	return fileStamp{mod.Unix(), int64(mod.Nanosecond()), info.Size()}
+}
+
+func (st fileStamp) matches(info os.FileInfo) bool {
+	return st == stampOf(info)
+}
+
 func checkFileEvidence(ctx context.Context, tracker filetracker.Service, session, path string, content []byte, ranges []filetracker.Range) error {
 	if evidence, ok := tracker.(filetracker.Evidence); ok {
 		return evidence.Check(ctx, session, path, content, ranges)
@@ -89,6 +111,14 @@ func changedRanges(changes []udiff.Edit, beforeLen int) []filetracker.Range {
 }
 
 func guardedWrite(path string, before, after []byte, create bool) error {
+	return guardedWriteStamped(path, before, after, create, fileStamp{})
+}
+
+// guardedWriteStamped is guardedWrite with the stamp of the stat that
+// went with `before`: a file whose stamp still matches is exactly the
+// bytes the caller already checked, so the rename happens without
+// reading the file back. Anything else falls back to the comparison.
+func guardedWriteStamped(path string, before, after []byte, create bool, stamp fileStamp) error {
 	if create {
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if err != nil {
@@ -116,6 +146,9 @@ func guardedWrite(path string, before, after []byte, create bool) error {
 	_, writeErr := f.Write(after)
 	if err := errors.Join(writeErr, f.Close()); err != nil {
 		return err
+	}
+	if stamp.matches(info) {
+		return os.Rename(f.Name(), path)
 	}
 	current, err := os.ReadFile(path)
 	if err != nil {
