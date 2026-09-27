@@ -237,6 +237,18 @@ type coordinator struct {
 	// generation. Cleared by UpdateModels to avoid reusing stale clients.
 	subagentModelCache *csync.Map[subagentModelKey, Model]
 
+	// rebuildGen records the generation the coder agent's current large
+	// and small models plus tool palette were built at, so UpdateModels
+	// can skip both builds on turns where nothing they read changed.
+	// rebuildLarge is the large model from that build, which
+	// refreshCoderSystemPrompt still needs on cache-hit turns. All three
+	// are guarded by rebuildGenMu: UpdateModels runs from the per-turn
+	// path and from the server's HTTP handlers concurrently.
+	rebuildGenValid bool
+	rebuildGen      modelToolGen
+	rebuildLarge    Model
+	rebuildGenMu    sync.Mutex
+
 	// subagentCancels maps a running subagent's child session ID to the cancel
 	// func for its run. Dispatched subagents run on ad-hoc SessionAgents whose
 	// activeRequests are invisible to currentAgent, so Cancel consults this
@@ -1684,6 +1696,246 @@ func (c *coordinator) Model() Model {
 	return c.currentAgent.Model()
 }
 
+// fingerprint is an FNV-1a hash under construction. It gives the
+// generation caches allocation-free keys over strings and small structs:
+// modelToolGeneration folds the live inputs of the model and tool builds
+// into one, and the media decode cache keys payloads by theirs.
+type fingerprint uint64
+
+const (
+	fnvOffset64 uint64 = 14695981039346656037
+	fnvPrime64  uint64 = 1099511628211
+)
+
+func newFingerprint() fingerprint { return fingerprint(fnvOffset64) }
+
+func (f fingerprint) addString(s string) fingerprint {
+	h := uint64(f)
+	for i := 0; i < len(s); i++ {
+		h = (h ^ uint64(s[i])) * fnvPrime64
+	}
+	return fingerprint(h)
+}
+
+func (f fingerprint) addUint64(v uint64) fingerprint {
+	h := uint64(f)
+	for range 8 {
+		h = (h ^ (v & 0xff)) * fnvPrime64
+		v >>= 8
+	}
+	return fingerprint(h)
+}
+
+func (f fingerprint) addInt(v int) fingerprint     { return f.addUint64(uint64(v)) }
+func (f fingerprint) addInt64(v int64) fingerprint { return f.addUint64(uint64(v)) }
+
+func (f fingerprint) addBool(b bool) fingerprint {
+	if b {
+		return f.addUint64(1)
+	}
+	return f.addUint64(0)
+}
+
+// modelToolGen captures every live input the UpdateModels rebuilds read,
+// in one comparable value. cfg rides by pointer identity: the config
+// store publishes copy-on-write Configs, so a swapped pointer means
+// something changed and an unchanged pointer means nothing did. The two
+// fingerprints cover state that lives outside that swap: provider
+// credentials written in place into the shared Providers map, the MCP
+// tool registry, the tool-search expansions, and the live subagent and
+// skill sets. forceModelRebuild marks a provider whose credentials are
+// refreshed by a command outside the config store, where no fingerprint
+// can see the change.
+type modelToolGen struct {
+	cfg               *config.Config
+	models            fingerprint
+	tools             fingerprint
+	forceModelRebuild bool
+}
+
+// modelToolGeneration fingerprints what the next model and tool rebuild
+// would consume. It is called once per turn; every walk below is over
+// small maps and slices, far cheaper than the provider builds and the
+// palette assembly it lets UpdateModels skip.
+func (c *coordinator) modelToolGeneration() modelToolGen {
+	cfg := c.cfg.Config()
+	gen := modelToolGen{cfg: cfg, models: newFingerprint()}
+
+	// Models: the two selections plus the build inputs of the providers
+	// they point at. Credentials are hashed rather than left to the
+	// config pointer: OAuth refreshes and API-key re-resolutions write
+	// them into the shared Providers map in place, which no config swap
+	// announces. A provider whose aws_auth_refresh command rotates
+	// credentials behind the store gets an unconditional rebuild.
+	for _, modelType := range []config.SelectedModelType{
+		config.SelectedModelTypeLarge,
+		config.SelectedModelTypeSmall,
+	} {
+		sel, ok := cfg.Models[modelType]
+		gen.models = gen.models.addSelectedModel(sel, ok)
+		if !ok || cfg.Providers == nil {
+			continue
+		}
+		if p, ok := cfg.Providers.Get(sel.Provider); ok {
+			gen.models = gen.models.addProviderBuildInputs(p)
+			gen.forceModelRebuild = gen.forceModelRebuild || p.AWSAuthRefresh != ""
+		}
+	}
+
+	// Tool palette: everything buildTools composes from live state
+	// rather than from the config snapshot.
+	tools := newFingerprint()
+
+	// The dispatcher tool bakes the subagent_type enum in at build time;
+	// its lines are the same ones describeSubagentForEnum feeds it.
+	var subagents strings.Builder
+	for _, sa := range c.activeSubagentsList() {
+		subagents.WriteString(describeSubagentForEnum(sa))
+		subagents.WriteByte('\n')
+	}
+	tools = tools.addString(subagents.String())
+
+	// The skill_search tool appears only when the live skill set has a
+	// model-invocable entry.
+	tools = tools.addInt(c.modelInvocableSkillCount())
+
+	// MCP tools and the deferred-server set come from the registry,
+	// which fills in asynchronously after the config is loaded.
+	tools = c.fingerprintMCPRegistry(tools)
+
+	// tool_search expansions unhide deferred tools on the next rebuild.
+	tools = c.fingerprintExpandedTools(tools)
+
+	// Extension tools join the palette from the live host.
+	for _, tool := range c.extensions.Tools() {
+		tools = tools.addString(tool.Info().Name)
+	}
+	gen.tools = tools
+
+	return gen
+}
+
+// fingerprintMCPRegistry mixes the MCP registry's server and tool names
+// into f. Names are sorted because the registry map iterates in random
+// order; the fingerprint must not. Tool schemas ride by pointer to the
+// live registry entry, so only the set of names can change composition.
+func (c *coordinator) fingerprintMCPRegistry(f fingerprint) fingerprint {
+	type serverTools struct {
+		name  string
+		tools []string
+	}
+	var servers []serverTools
+	for name, list := range mcp.Tools() {
+		st := serverTools{name: name, tools: make([]string, 0, len(list))}
+		for _, tool := range list {
+			st.tools = append(st.tools, tool.Name)
+		}
+		slices.Sort(st.tools)
+		servers = append(servers, st)
+	}
+	slices.SortFunc(servers, func(a, b serverTools) int {
+		return strings.Compare(a.name, b.name)
+	})
+	for _, st := range servers {
+		f = f.addString(st.name)
+		f = f.addInt(len(st.tools))
+		for _, name := range st.tools {
+			f = f.addString(name)
+		}
+	}
+	return f
+}
+
+// fingerprintExpandedTools mixes the tool_search expansion state into f:
+// which MCP servers have loaded tools, by name, and which deferred
+// built-ins have been surfaced. Entries only ever grow, so a changed
+// fingerprint means the palette would now include more.
+func (c *coordinator) fingerprintExpandedTools(f fingerprint) fingerprint {
+	type expandedServer struct {
+		name  string
+		tools []string
+	}
+	var servers []expandedServer
+	if c.expandedMCPTools != nil {
+		for server, loaded := range c.expandedMCPTools.Seq2() {
+			names := slices.Sorted(maps.Keys(loaded))
+			servers = append(servers, expandedServer{name: server, tools: names})
+		}
+	}
+	slices.SortFunc(servers, func(a, b expandedServer) int {
+		return strings.Compare(a.name, b.name)
+	})
+	for _, st := range servers {
+		f = f.addString(st.name)
+		f = f.addInt(len(st.tools))
+		for _, name := range st.tools {
+			f = f.addString(name)
+		}
+	}
+
+	var builtins []string
+	if c.expandedBuiltins != nil {
+		for name := range c.expandedBuiltins.Seq2() {
+			builtins = append(builtins, name)
+		}
+	}
+	slices.Sort(builtins)
+	for _, name := range builtins {
+		f = f.addString(name)
+	}
+	return f
+}
+
+// addSelectedModel mixes a model selection into f.
+func (f fingerprint) addSelectedModel(sel config.SelectedModel, ok bool) fingerprint {
+	f = f.addBool(ok)
+	if !ok {
+		return f
+	}
+	f = f.addString(sel.Provider)
+	f = f.addString(sel.Model)
+	f = f.addString(sel.ReasoningEffort)
+	f = f.addBool(sel.Think)
+	f = f.addInt64(sel.MaxTokens)
+	for _, key := range slices.Sorted(maps.Keys(sel.ProviderOptions)) {
+		f = f.addString(key)
+		f = f.addString(fmt.Sprint(sel.ProviderOptions[key]))
+	}
+	return f
+}
+
+// addProviderBuildInputs mixes the provider fields the provider build
+// consumes into f.
+func (f fingerprint) addProviderBuildInputs(p config.ProviderConfig) fingerprint {
+	f = f.addString(p.ID)
+	f = f.addString(string(p.Type))
+	f = f.addString(p.APIKey)
+	f = f.addString(p.APIKeyTemplate)
+	f = f.addString(p.BaseURL)
+	f = f.addBool(p.DisableHTTP2)
+	f = f.addBool(p.FlatRate)
+	if p.OAuthToken != nil {
+		f = f.addBool(true)
+		f = f.addString(p.OAuthToken.AccessToken)
+		f = f.addInt64(p.OAuthToken.ExpiresAt)
+	} else {
+		f = f.addBool(false)
+	}
+	for _, key := range slices.Sorted(maps.Keys(p.ExtraHeaders)) {
+		f = f.addString(key)
+		f = f.addString(p.ExtraHeaders[key])
+	}
+	for _, key := range slices.Sorted(maps.Keys(p.ExtraParams)) {
+		f = f.addString(key)
+		f = f.addString(p.ExtraParams[key])
+	}
+	for _, key := range slices.Sorted(maps.Keys(p.ExtraBody)) {
+		f = f.addString(key)
+		f = f.addString(fmt.Sprint(p.ExtraBody[key]))
+	}
+	return f
+}
+
 func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// Clear the subagent model cache so that any stale LanguageModel instances
 	// (built against the old config) are not reused after a config reload.
@@ -1691,25 +1943,50 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		c.subagentModelCache.Reset(make(map[subagentModelKey]Model))
 	}
 
-	// build the models again so we make sure we get the latest config
-	large, small, err := c.buildAgentModels(ctx, false)
-	if err != nil {
-		return err
-	}
-	c.currentAgent.SetModels(large, small)
+	// The two builds below are memoized per generation: a turn whose
+	// config, provider credentials, MCP registry, subagent set and
+	// tool-search expansions are all unchanged reuses the models and
+	// palette already installed on the agent. The lock makes the
+	// check-and-store one decision for concurrent callers (the turn path
+	// and the server handlers): a loser waits out the winner's build and
+	// then takes the shared result.
+	gen := c.modelToolGeneration()
 
-	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
-	if !ok {
-		return errCoderAgentNotConfigured
+	c.rebuildGenMu.Lock()
+	defer c.rebuildGenMu.Unlock()
+
+	modelsStale := !c.rebuildGenValid || c.rebuildGen != gen || gen.forceModelRebuild
+	toolsStale := !c.rebuildGenValid || c.rebuildGen != gen
+
+	if modelsStale {
+		// build the models again so we make sure we get the latest config
+		large, small, err := c.buildAgentModels(ctx, false)
+		if err != nil {
+			return err
+		}
+		c.currentAgent.SetModels(large, small)
+		c.rebuildLarge = large
 	}
 
-	tools, err := c.buildTools(ctx, agentCfg, false, nil)
-	if err != nil {
-		return err
-	}
-	c.currentAgent.SetTools(tools)
+	if toolsStale {
+		agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
+		if !ok {
+			return errCoderAgentNotConfigured
+		}
 
-	c.refreshCoderSystemPrompt(ctx, large)
+		tools, err := c.buildTools(ctx, agentCfg, false, nil)
+		if err != nil {
+			return err
+		}
+		c.currentAgent.SetTools(tools)
+	}
+
+	// Stored only after both builds succeed, so a failed turn rebuilds on
+	// the next one instead of caching a half-updated state.
+	c.rebuildGen = gen
+	c.rebuildGenValid = true
+
+	c.refreshCoderSystemPrompt(ctx, c.rebuildLarge)
 	return nil
 }
 

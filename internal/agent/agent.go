@@ -301,6 +301,16 @@ type sessionAgent struct {
 	// across the agent. Cancel uses its current value as the per-session
 	// high-water mark.
 	acceptSeqGen uint64
+
+	// mediaDecodeCache memoizes base64 media payloads the provider
+	// media workaround has already decoded, for the agent's lifetime.
+	// The workaround runs on every step of every turn and rewrites the
+	// whole history, so without it every screenshot a tool ever returned
+	// is re-decoded on every later step. Guarded by mediaDecodeMu: title
+	// generation and queued turns can run steps against the same agent
+	// concurrently.
+	mediaDecodeMu    sync.Mutex
+	mediaDecodeCache map[mediaDecodeKey][]byte
 }
 
 type SessionAgentOptions struct {
@@ -3047,7 +3057,7 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 					continue
 				}
 
-				decoded, err := base64.StdEncoding.DecodeString(media.Data)
+				decoded, err := a.decodeMediaCached(media.Data)
 				if err != nil {
 					slog.Warn("Failed to decode media data", "error", err)
 					textParts = append(textParts, part)
@@ -3086,6 +3096,60 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
+}
+
+// maxDecodedMediaCacheEntries caps the media decode cache. Each entry
+// holds a fully decoded payload (hundreds of kilobytes to a few
+// megabytes), so the cap bounds retained memory over very long
+// sessions; when the cache is full one arbitrary entry is evicted.
+const maxDecodedMediaCacheEntries = 32
+
+// mediaDecodeKey identifies a base64 payload by its length and FNV-64.
+// Both are cheap to compute over multi-megabyte strings and small to
+// retain, unlike the payload itself or the string as the map key.
+type mediaDecodeKey struct {
+	length int
+	hash   fingerprint
+}
+
+// decodeMediaCached base64-decodes media data, reusing a previous decode
+// of the same payload. The converted history is rebuilt every step, so a
+// payload referenced by later steps is decoded once instead of once per
+// step. Decodes run outside the lock: a concurrent duplicate decode
+// wastes work but cannot corrupt the cache, and the insert-if-absent
+// keeps the winner. Callers must treat the returned slice as read-only;
+// it is shared across steps and messages.
+func (a *sessionAgent) decodeMediaCached(data string) ([]byte, error) {
+	key := mediaDecodeKey{length: len(data), hash: newFingerprint().addString(data)}
+
+	a.mediaDecodeMu.Lock()
+	if decoded, ok := a.mediaDecodeCache[key]; ok {
+		a.mediaDecodeMu.Unlock()
+		return decoded, nil
+	}
+	a.mediaDecodeMu.Unlock()
+
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return nil, err
+	}
+
+	a.mediaDecodeMu.Lock()
+	if a.mediaDecodeCache == nil {
+		a.mediaDecodeCache = make(map[mediaDecodeKey][]byte, maxDecodedMediaCacheEntries)
+	}
+	if _, ok := a.mediaDecodeCache[key]; !ok {
+		if len(a.mediaDecodeCache) >= maxDecodedMediaCacheEntries {
+			for cached := range a.mediaDecodeCache {
+				delete(a.mediaDecodeCache, cached)
+				break
+			}
+		}
+		a.mediaDecodeCache[key] = decoded
+	}
+	a.mediaDecodeMu.Unlock()
+
+	return decoded, nil
 }
 
 // historyHasMediaResult reports whether any tool message in the history
