@@ -4915,6 +4915,9 @@ const docTemplate = `{
         "proto.SkillInfo": {
             "type": "object",
             "properties": {
+                "argument_hint": {
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },
