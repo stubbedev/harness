@@ -460,6 +460,10 @@ func floatPtr(v sql.NullFloat64) *float64 {
 // finished, the tool-call set grew, a tool call transitioned to
 // finished, or reasoning just finished. prev is the last-flushed
 // snapshot (or nil if no write has landed yet).
+//
+// The tool-call comparison walks next.Parts directly: this runs once
+// per streamed delta and materializing a []ToolCall per delta cost an
+// allocation on every token just to read two fields.
 func shouldFlushNow(prev *flushBaseline, next *Message) bool {
 	if next.IsFinished() {
 		return true
@@ -471,18 +475,24 @@ func shouldFlushNow(prev *flushBaseline, next *Message) bool {
 		prevCalls = prev.toolCallsFinished
 		prevReasoningFinishedAt = prev.reasoningFinishedAt
 	}
-	nextCalls := next.ToolCalls()
-	if len(nextCalls) != len(prevCalls) {
-		return true
-	}
-	for i := range nextCalls {
-		// Bounds-safe: lengths are equal here.
-		if nextCalls[i].Finished != prevCalls[i] {
+	idx := 0
+	for _, part := range next.Parts {
+		call, ok := part.(ToolCall)
+		if !ok {
+			continue
+		}
+		if idx >= len(prevCalls) {
+			// More tool calls than the baseline flushed.
 			return true
 		}
-		// A tool call's input only matters once it has landed (Finished
-		// flips true). Earlier deltas to Input are debounced with the
-		// rest of the streaming state.
+		if call.Finished != prevCalls[idx] {
+			return true
+		}
+		idx++
+	}
+	if idx != len(prevCalls) {
+		// Fewer tool calls than the baseline flushed.
+		return true
 	}
 	if next.ReasoningContent().FinishedAt > 0 && prevReasoningFinishedAt == 0 {
 		return true
