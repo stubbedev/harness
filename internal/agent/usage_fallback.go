@@ -43,12 +43,14 @@ func fallbackStepUsageWith(estimate func([]fantasy.Message) int64, messages []fa
 	}, true
 }
 
+// cloneFantasyMessages copies the message slice before a step runs so
+// the fallback usage estimator at OnStepFinish sees the request exactly
+// as it was sent. Messages and their parts are immutable from here on —
+// the estimator only reads — so sharing the part slices is safe and
+// avoids a fresh part slice per message per step.
 func cloneFantasyMessages(messages []fantasy.Message) []fantasy.Message {
 	cloned := make([]fantasy.Message, len(messages))
-	for i, msg := range messages {
-		cloned[i] = msg
-		cloned[i].Content = append([]fantasy.MessagePart(nil), msg.Content...)
-	}
+	copy(cloned, messages)
 	return cloned
 }
 

@@ -1627,7 +1627,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		OnAuthRefresh: call.OnAuthRefresh,
 		ModelProvider: func() fantasy.LanguageModel {
 			m := a.largeModel.Get()
-			slog.Info("ModelProvider called",
+			slog.Debug("ModelProvider called",
 				"provider", m.ModelCfg.Provider,
 				"model", m.ModelCfg.Model)
 			return m.Model
@@ -2238,8 +2238,13 @@ func stampToolCacheControl(tools []fantasy.AgentTool, opts fantasy.ProviderOptio
 	tools[len(tools)-1].SetProviderOptions(opts)
 }
 
+var disableAnthropicCache = sync.OnceValue(func() bool {
+	t, _ := strconv.ParseBool(os.Getenv("HARNESS_DISABLE_ANTHROPIC_CACHE"))
+	return t
+})
+
 func (a *sessionAgent) getCacheControlOptions() fantasy.ProviderOptions {
-	if t, _ := strconv.ParseBool(os.Getenv("HARNESS_DISABLE_ANTHROPIC_CACHE")); t {
+	if disableAnthropicCache() {
 		return fantasy.ProviderOptions{}
 	}
 	return fantasy.ProviderOptions{
@@ -3001,6 +3006,13 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 
 	supportsImages := largeModel.CatalogCfg.SupportsImages
 
+	// Conversion rewrites every tool message in history, and a turn can
+	// run dozens of steps, so skip the whole pass when no tool result
+	// carries media — the overwhelmingly common case.
+	if !historyHasMediaResult(messages) {
+		return messages
+	}
+
 	convertedMessages := make([]fantasy.Message, 0, len(messages))
 
 	for _, msg := range messages {
@@ -3074,6 +3086,27 @@ func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Mes
 	}
 
 	return convertedMessages
+}
+
+// historyHasMediaResult reports whether any tool message in the history
+// carries media output that workaroundProviderMediaLimitations would
+// need to rewrite.
+func historyHasMediaResult(messages []fantasy.Message) bool {
+	for _, msg := range messages {
+		if msg.Role != fantasy.MessageRoleTool {
+			continue
+		}
+		for _, part := range msg.Content {
+			toolResult, ok := fantasy.AsMessagePart[fantasy.ToolResultPart](part)
+			if !ok {
+				continue
+			}
+			if _, ok := fantasy.AsToolResultOutputType[fantasy.ToolResultOutputContentMedia](toolResult.Output); ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // buildSummaryPrompt constructs the prompt text for session summarization.

@@ -30,10 +30,25 @@ type SkillActivation struct {
 	config *SkillActivationConfig
 	loaded map[string]string
 	bytes  int
+	// eventCache memoizes tool-call input parsing across the steps of a
+	// turn: history only grows, so every step after the first re-reads
+	// the same inputs. Keyed by (tool, size, hash) so the key never
+	// copies the input bytes.
+	eventCache map[activationEventKey]skills.ActivationEvent
+}
+
+type activationEventKey struct {
+	tool string
+	size int
+	hash uint64
 }
 
 func NewSkillActivation(config *SkillActivationConfig) *SkillActivation {
-	return &SkillActivation{config: config, loaded: make(map[string]string)}
+	return &SkillActivation{
+		config:     config,
+		loaded:     make(map[string]string),
+		eventCache: make(map[activationEventKey]skills.ActivationEvent),
+	}
 }
 
 func (a *SkillActivation) Prepare(ctx context.Context, messages []fantasy.Message) []fantasy.Message {
@@ -50,7 +65,7 @@ func (a *SkillActivation) Prepare(ctx context.Context, messages []fantasy.Messag
 	for _, skill := range available {
 		eligible[skill.Name+"\x00"+skill.SkillFilePath] = true
 	}
-	events := skillActivationEvents(messages)
+	events := a.skillActivationEvents(messages)
 	capabilities := append(slices.Clone(a.config.Capabilities), skills.ProjectCapabilities(a.config.WorkingDir)...)
 	events = append(events, skills.ActivationEvent{Capabilities: capabilities})
 	for _, skill := range available {
@@ -118,7 +133,7 @@ func skillActivationPresent(messages []fantasy.Message, body string) bool {
 	return false
 }
 
-func skillActivationEvents(messages []fantasy.Message) []skills.ActivationEvent {
+func (a *SkillActivation) skillActivationEvents(messages []fantasy.Message) []skills.ActivationEvent {
 	var events []skills.ActivationEvent
 	for i := len(messages) - 1; i >= 0 && len(events) < skillActivationEventLimit; i-- {
 		for _, part := range messages[i].Content {
@@ -126,15 +141,19 @@ func skillActivationEvents(messages []fantasy.Message) []skills.ActivationEvent 
 			if !ok {
 				continue
 			}
-			events = appendSkillActivationEvents(events, call.ToolName, json.RawMessage(call.Input))
+			events = a.appendSkillActivationEvents(events, call.ToolName, json.RawMessage(call.Input))
 		}
 	}
 	return events
 }
 
-func appendSkillActivationEvents(events []skills.ActivationEvent, name string, input json.RawMessage) []skills.ActivationEvent {
+func (a *SkillActivation) appendSkillActivationEvents(events []skills.ActivationEvent, name string, input json.RawMessage) []skills.ActivationEvent {
 	if len(events) >= skillActivationEventLimit {
 		return events
+	}
+	key := activationEventKey{tool: name, size: len(input), hash: fnvBytes(input)}
+	if event, ok := a.eventCache[key]; ok {
+		return append(events, event)
 	}
 	var args struct {
 		Action     string `json:"action"`
@@ -162,7 +181,19 @@ func appendSkillActivationEvents(events []skills.ActivationEvent, name string, i
 			event.Paths = append(event.Paths, file.FilePath)
 		}
 	}
+	a.eventCache[key] = event
 	return append(events, event)
+}
+
+// fnvBytes is FNV-1a over the input without allocating, used for cache
+// keys on the per-step path.
+func fnvBytes(data []byte) uint64 {
+	var h uint64 = 14695981039346656037
+	for _, b := range data {
+		h ^= uint64(b)
+		h *= 1099511628211
+	}
+	return h
 }
 
 func (c *coordinator) skillActivationConfig(isSubAgent bool) *SkillActivationConfig {

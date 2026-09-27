@@ -151,14 +151,14 @@ func TestSkillActivationEventsBoundedAndLiteral(t *testing.T) {
 		activationTestCall("shell", `{"command":"cat main.go"}`),
 		activationTestCall("lsp", `{"action":`),
 	}
-	events := skillActivationEvents(messages)
+	events := NewSkillActivation(nil).skillActivationEvents(messages)
 	require.Len(t, events, 1)
 	require.Empty(t, events[0].Paths)
 	require.Empty(t, events[0].Action)
 	for range skillActivationEventLimit + 1 {
 		messages = append(messages, activationTestCall("view", `{}`))
 	}
-	require.Len(t, skillActivationEvents(messages), skillActivationEventLimit)
+	require.Len(t, NewSkillActivation(nil).skillActivationEvents(messages), skillActivationEventLimit)
 }
 
 func TestSkillActivationLiveBoundariesAndExplicitLoad(t *testing.T) {
