@@ -98,14 +98,13 @@ func (s *catalogSync) load(ctx context.Context) {
 	// auto-update disabled the cache is served at any age.
 	if conn != nil {
 		if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
-			providers, decodeErr := decodeCatalog(row.Data)
-			stale := time.Since(time.Unix(row.FetchedAt, 0)) >= catalogRefreshInterval
-			if decodeErr == nil && len(providers) > 0 && (!stale || !s.autoupdate) {
-				slog.Info("Using cached catalog", "fetched_at", time.Unix(row.FetchedAt, 0))
-				s.serve(providers, nil)
-				return
-			}
-			if decodeErr == nil && len(providers) > 0 {
+			if providers, ok := usableCachedProviders(row.Data); ok {
+				stale := time.Since(time.Unix(row.FetchedAt, 0)) >= catalogRefreshInterval
+				if !stale || !s.autoupdate {
+					slog.Info("Using cached catalog", "fetched_at", time.Unix(row.FetchedAt, 0))
+					s.serve(providers, nil)
+					return
+				}
 				// Stale but sound: hand it out now and let the refresh
 				// land behind the caller's back.
 				slog.Info("Using stale catalog; refreshing in the background", "fetched_at", time.Unix(row.FetchedAt, 0))
@@ -135,7 +134,7 @@ func (s *catalogSync) load(ctx context.Context) {
 	// usable exists at all.
 	if conn != nil {
 		if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
-			if providers, decodeErr := decodeCatalog(row.Data); decodeErr == nil && len(providers) > 0 {
+			if providers, ok := usableCachedProviders(row.Data); ok {
 				slog.Warn("Continuing with stale catalog", "fetched_at", time.Unix(row.FetchedAt, 0), "error", fetchErr)
 				s.serve(providers, nil)
 				return
@@ -222,4 +221,15 @@ func decodeCatalog(data string) ([]catalog.Provider, error) {
 		return nil, fmt.Errorf("failed to decode cached catalog: %w", err)
 	}
 	return providers, nil
+}
+
+// usableCachedProviders decodes a stored catalog row and reports
+// whether it carries a catalog worth serving. Usable is the one notion
+// the fresh-serve, the stale-serve and the offline fallback must agree
+// on, so it is defined once here: a row that decodes and is not empty.
+// An empty list from a corrupt or half-written row must fall through to
+// the live fetch, not masquerade as a working cache.
+func usableCachedProviders(data string) ([]catalog.Provider, bool) {
+	providers, err := decodeCatalog(data)
+	return providers, err == nil && len(providers) > 0
 }

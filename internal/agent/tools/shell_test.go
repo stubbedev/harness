@@ -314,23 +314,33 @@ func TestWaitingHeader(t *testing.T) {
 	require.Equal(t, "[waiting for input]", waitingHeader(PTYResult{Waiting: true}),
 		"a first wait is reported as the state alone")
 	require.Equal(t, "[waiting for input]",
-		waitingHeader(PTYResult{Waiting: true, WaitStreak: 2, WaitSeconds: 90}),
+		waitingHeader(PTYResult{Waiting: true, WaitStreak: ptyWaitingEscalateCalls - 1}),
 		"a question a caller is thinking about is not a wedge")
 
-	stuck := waitingHeader(PTYResult{Waiting: true, WaitStreak: ptyWaitingEscalateCalls, WaitSeconds: 5})
+	stuck := waitingHeader(PTYResult{Waiting: true, WaitStreak: ptyWaitingEscalateCalls})
 	require.Contains(t, stuck, "wedged")
 	require.Contains(t, stuck, "ctrl-c")
 	require.Contains(t, stuck, "reset: true")
 
-	long := waitingHeader(PTYResult{
-		Waiting: true, WaitStreak: 1,
-		WaitSeconds: int(ptyWaitingEscalateAfter/time.Second) + 1,
-	})
+	long := waitingHeader(PTYResult{Waiting: true, WaitStreak: 1, WaitSeconds: 121})
 	require.Contains(t, long, "wedged", "a long wait escalates on age alone")
 
 	unconsumed := waitingHeader(PTYResult{Waiting: true, InputPending: 11})
 	require.Contains(t, unconsumed, "11 bytes")
 	require.Contains(t, unconsumed, "unread")
+}
+
+// The escalation rule is defined once, on the result it reads: age
+// alone escalates past the threshold, and neither counter short of it
+// does. If the threshold moves, this is the boundary that moves with
+// it - the header tests above only pin the wording.
+func TestWaitEscalated(t *testing.T) {
+	t.Parallel()
+
+	require.False(t, PTYResult{WaitStreak: ptyWaitingEscalateCalls - 1}.waitEscalated())
+	require.True(t, PTYResult{WaitStreak: ptyWaitingEscalateCalls}.waitEscalated())
+	require.False(t, PTYResult{WaitSeconds: int(ptyWaitingEscalateAfter/time.Second) - 1}.waitEscalated())
+	require.True(t, PTYResult{WaitSeconds: int(ptyWaitingEscalateAfter / time.Second)}.waitEscalated())
 }
 
 // The queued header reports the depth of the queue once there is more

@@ -345,7 +345,7 @@ func waitingHeader(res PTYResult) string {
 	if res.InputPending > 0 {
 		return fmt.Sprintf("[waiting for input, but %d bytes of typed input are still unread: nothing is consuming input; send \\u0003 (ctrl-c) to break out, or reset: true for a fresh shell]", res.InputPending)
 	}
-	if res.WaitStreak >= ptyWaitingEscalateCalls || res.WaitSeconds >= int(ptyWaitingEscalateAfter/time.Second) {
+	if res.waitEscalated() {
 		return fmt.Sprintf("[waiting for input; no change across %d calls and %ds: the program may be wedged; send \\u0003 (ctrl-c) to interrupt it, or reset: true for a fresh shell]", res.WaitStreak, res.WaitSeconds)
 	}
 	return "[waiting for input]"

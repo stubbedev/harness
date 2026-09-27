@@ -329,6 +329,16 @@ type PTYResult struct {
 	ShellExit *shellExit
 }
 
+// waitEscalated reports whether a waiting verdict has stalled long
+// enough to stop being described as a plain wait: the same verdict
+// ptyWaitingEscalateCalls times in a row, or a single wait held longer
+// than ptyWaitingEscalateAfter. The rule lives beside the counters it
+// reads, so the header and its tests cannot drift from it.
+func (res PTYResult) waitEscalated() bool {
+	return res.WaitStreak >= ptyWaitingEscalateCalls ||
+		res.WaitSeconds >= int(ptyWaitingEscalateAfter/time.Second)
+}
+
 // shellExit is a dead shell's verdict: the output it left undrained
 // when it died, and the shell process's own exit status when that is
 // known. A shell killed outright (or gone through exit or EOF) has no
@@ -864,8 +874,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 		// that is what the model should be told about next -- and only if
 		// something moves away from it.
 		r.announcedCwd = r.cwd
-		r.waitStreak = 0
-		r.waitSince = time.Time{}
+		r.clearWaitingLocked()
 		if time.Since(r.startedAt) < ptyRestartDelay {
 			time.Sleep(ptyRestartDelay)
 		}
@@ -1083,8 +1092,7 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 	r.lastScreen = ""
 	r.lastCwd = ""
 	r.announcedCwd = r.cwd
-	r.waitStreak = 0
-	r.waitSince = time.Time{}
+	r.clearWaitingLocked()
 	// Lines queued behind the old shell's command were meant for that
 	// shell's state; a fresh one would run them against nothing.
 	r.pending = nil
@@ -1252,9 +1260,16 @@ func (r *ptyRunner) noteWaiting() (streak int, waited time.Duration) {
 // next wait, should there be one, starts counting from itself.
 func (r *ptyRunner) clearWaiting() {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.clearWaitingLocked()
+}
+
+// clearWaitingLocked is clearWaiting for callers already holding the
+// state lock - the shell-replacement paths, which reset every other
+// piece of per-session state in the same critical section.
+func (r *ptyRunner) clearWaitingLocked() {
 	r.waitStreak = 0
 	r.waitSince = time.Time{}
-	r.mu.Unlock()
 }
 
 // queueDepth is how many command lines are waiting for the session's
