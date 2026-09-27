@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +23,9 @@ func initGitRepo(t *testing.T, dir string) {
 		t.Skip("git command lines below assume a POSIX shell")
 	}
 	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
