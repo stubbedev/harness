@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/stubbedev/harness/internal/catalog"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/db"
 )
 
@@ -18,6 +19,11 @@ import (
 // live sources. A row younger than this is served from the SQLite cache
 // without a network round trip.
 const catalogRefreshInterval = 24 * time.Hour
+
+// catalogFetchTimeout bounds one live fetch, wherever it runs: the
+// synchronous load that carries a first run with no cache, and the
+// background refresh that keeps a stale catalog from blocking startup.
+const catalogFetchTimeout = 45 * time.Second
 
 // catalogClient fetches a fresh provider catalog from the live sources.
 type catalogClient interface {
@@ -38,8 +44,17 @@ var _ catalogClient = liveCatalogClient{}
 // when it has no row (first run) and the live fetch fails, the snapshot
 // bundled in the binary is used, so harness always starts with a
 // catalog.
+//
+// A row past its refresh interval is a different case: it is still a
+// sound catalog, so it is served at once and the refresh runs in the
+// background. Blocking the TUI on models.dev for up to the fetch
+// timeout on the first launch of the day buys nothing the background
+// does not - and the swap below publishes the fresh catalog to every
+// later Get, which the coordinator reads per turn.
 type catalogSync struct {
 	once       sync.Once
+	refreshing sync.Once
+	mu         sync.RWMutex
 	result     []catalog.Provider
 	err        error
 	client     catalogClient
@@ -57,78 +72,132 @@ func (s *catalogSync) Init(client catalogClient, dataDir string, autoupdate bool
 func (s *catalogSync) Get(ctx context.Context) ([]catalog.Provider, error) {
 	// The result and the error are memoized together so that every
 	// caller sees the same outcome, not just the one that won the once.
-	s.once.Do(func() {
-		conn, connErr := db.Connect(context.WithoutCancel(ctx), s.dataDir)
-		if connErr != nil {
-			slog.Warn("Could not open catalog cache database", "error", connErr)
-		}
-		// The connection is only used inside this once; release the
-		// pooled reference so the handle does not outlive the caller
-		// (tests remove the data directory, and Windows cannot unlink
-		// open files).
-		defer func() {
-			if conn != nil {
-				_ = db.Release(s.dataDir)
-			}
-		}()
-
-		// Serve the cached catalog when it is fresh enough. This is the
-		// common startup path: one small query, no network. With
-		// auto-update disabled the cache is served at any age.
-		if conn != nil {
-			if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
-				providers, decodeErr := decodeCatalog(row.Data)
-				fresh := time.Since(time.Unix(row.FetchedAt, 0)) < catalogRefreshInterval
-				if decodeErr == nil && len(providers) > 0 && (fresh || !s.autoupdate) {
-					slog.Info("Using cached catalog", "fetched_at", time.Unix(row.FetchedAt, 0))
-					s.result = providers
-					return
-				}
-			}
-		}
-
-		slog.Info("Fetching catalog from models.dev")
-		result, fetchErr := s.client.FetchCatalog(ctx)
-		if fetchErr == nil && len(result) > 0 {
-			s.result = result
-			if conn != nil {
-				s.err = storeCatalog(ctx, conn, result)
-			}
-			return
-		}
-
-		// The fetch failed or came back empty. A stale database row is
-		// the next-best answer. Being offline is routine, so this is
-		// logged rather than reported to the caller unless nothing
-		// usable exists at all.
-		if conn != nil {
-			if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
-				if providers, decodeErr := decodeCatalog(row.Data); decodeErr == nil && len(providers) > 0 {
-					slog.Warn("Continuing with stale catalog", "fetched_at", time.Unix(row.FetchedAt, 0), "error", fetchErr)
-					s.result = providers
-					return
-				}
-			}
-		}
-		if fetchErr == nil {
-			fetchErr = errors.New("catalog sources returned no providers")
-		}
-
-		// Nothing live and nothing cached: fall back to the snapshot
-		// bundled at build time. It ages, but a first run offline with
-		// no providers at all cannot even reach the model picker.
-		if seed := catalog.Seed(); len(seed) > 0 {
-			slog.Warn("Could not fetch catalog; using the catalog bundled with this build", "error", fetchErr)
-			s.result = seed
-			s.err = fetchErr
-			return
-		}
-
-		slog.Warn("Could not fetch catalog; only manually configured providers are available", "error", fetchErr)
-		s.result = nil
-		s.err = fetchErr
-	})
+	s.once.Do(func() { s.load(ctx) })
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.result, s.err
+}
+
+func (s *catalogSync) load(ctx context.Context) {
+	conn, connErr := db.Connect(context.WithoutCancel(ctx), s.dataDir)
+	if connErr != nil {
+		slog.Warn("Could not open catalog cache database", "error", connErr)
+	}
+	// The connection is only used inside this once; release the
+	// pooled reference so the handle does not outlive the caller
+	// (tests remove the data directory, and Windows cannot unlink
+	// open files).
+	defer func() {
+		if conn != nil {
+			_ = db.Release(s.dataDir)
+		}
+	}()
+
+	// Serve the cached catalog when it is fresh enough. This is the
+	// common startup path: one small query, no network. With
+	// auto-update disabled the cache is served at any age.
+	if conn != nil {
+		if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
+			providers, decodeErr := decodeCatalog(row.Data)
+			stale := time.Since(time.Unix(row.FetchedAt, 0)) >= catalogRefreshInterval
+			if decodeErr == nil && len(providers) > 0 && (!stale || !s.autoupdate) {
+				slog.Info("Using cached catalog", "fetched_at", time.Unix(row.FetchedAt, 0))
+				s.serve(providers, nil)
+				return
+			}
+			if decodeErr == nil && len(providers) > 0 {
+				// Stale but sound: hand it out now and let the refresh
+				// land behind the caller's back.
+				slog.Info("Using stale catalog; refreshing in the background", "fetched_at", time.Unix(row.FetchedAt, 0))
+				s.serve(providers, nil)
+				s.refreshInBackground()
+				return
+			}
+		}
+	}
+
+	slog.Info("Fetching catalog from models.dev")
+	result, fetchErr := s.fetch(ctx)
+	if fetchErr == nil && len(result) > 0 {
+		if conn != nil {
+			if err := storeCatalog(ctx, conn, result); err != nil {
+				s.serve(result, err)
+				return
+			}
+		}
+		s.serve(result, nil)
+		return
+	}
+
+	// The fetch failed or came back empty. A stale database row is
+	// the next-best answer. Being offline is routine, so this is
+	// logged rather than reported to the caller unless nothing
+	// usable exists at all.
+	if conn != nil {
+		if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
+			if providers, decodeErr := decodeCatalog(row.Data); decodeErr == nil && len(providers) > 0 {
+				slog.Warn("Continuing with stale catalog", "fetched_at", time.Unix(row.FetchedAt, 0), "error", fetchErr)
+				s.serve(providers, nil)
+				return
+			}
+		}
+	}
+	if fetchErr == nil {
+		fetchErr = errors.New("catalog sources returned no providers")
+	}
+
+	// Nothing live and nothing cached: fall back to the snapshot
+	// bundled at build time. It ages, but a first run offline with
+	// no providers at all cannot even reach the model picker.
+	if seed := catalog.Seed(); len(seed) > 0 {
+		slog.Warn("Could not fetch catalog; using the catalog bundled with this build", "error", fetchErr)
+		s.serve(seed, fetchErr)
+		return
+	}
+
+	slog.Warn("Could not fetch catalog; only manually configured providers are available", "error", fetchErr)
+	s.serve(nil, fetchErr)
+}
+
+// serve records the outcome of the load for every caller of Get.
+func (s *catalogSync) serve(providers []catalog.Provider, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.result, s.err = providers, err
+}
+
+// refreshInBackground fetches a fresh catalog off the caller's path and
+// swaps it in once it lands: later Gets serve it, and the store update
+// saves every other harness on the machine the fetch. It runs once per
+// syncer - a refresh that failed is retried on the next launch, not in
+// a loop.
+func (s *catalogSync) refreshInBackground() {
+	s.refreshing.Do(func() {
+		crash.Go("catalog.refresh", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), catalogFetchTimeout)
+			defer cancel()
+			result, err := s.fetch(ctx)
+			if err != nil || len(result) == 0 {
+				slog.Warn("Background catalog refresh failed; keeping the stale catalog", "error", err)
+				return
+			}
+			if conn, connErr := db.Connect(ctx, s.dataDir); connErr == nil {
+				defer func() { _ = db.Release(s.dataDir) }()
+				if err := storeCatalog(ctx, conn, result); err != nil {
+					return
+				}
+			}
+			slog.Info("Catalog refreshed in the background", "providers", len(result))
+			s.serve(result, nil)
+		})
+	})
+}
+
+// fetch performs one live fetch under the shared timeout.
+func (s *catalogSync) fetch(ctx context.Context) ([]catalog.Provider, error) {
+	ctx, cancel := context.WithTimeout(ctx, catalogFetchTimeout)
+	defer cancel()
+	return s.client.FetchCatalog(ctx)
 }
 
 // storeCatalog persists the catalog to the database. A failure only

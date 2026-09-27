@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,22 +16,23 @@ import (
 	"github.com/stubbedev/harness/internal/db"
 )
 
-// mockCatalogClient is a catalogClient stub for tests.
+// mockCatalogClient is a catalogClient stub for tests. calls counts
+// atomically: a stale catalog's background refresh calls the client
+// from another goroutine while the test reads the counter.
 type mockCatalogClient struct {
 	providers []catalog.Provider
 	err       error
-	calls     int
+	calls     atomic.Int64
 }
 
 func (m *mockCatalogClient) FetchCatalog(context.Context) ([]catalog.Provider, error) {
-	m.calls++
+	m.calls.Add(1)
 	return m.providers, m.err
 }
 
 func resetProviderState() {
 	providerOnce = sync.Once{}
-	providerList = nil
-	providerErr = nil
+	providerNoDefault = false
 	catalogSyncer = &catalogSync{}
 	// Close pooled catalog-cache connections so temp data dirs can be
 	// removed on Windows, where open files cannot be unlinked.
@@ -113,10 +115,14 @@ func TestCatalogSync_FreshDBCacheSkipsFetch(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, providers, 1)
 	require.Equal(t, "Cached", providers[0].Name)
-	require.Zero(t, client.calls, "a fresh cache row must not trigger a fetch")
+	require.Zero(t, client.calls.Load(), "a fresh cache row must not trigger a fetch")
 }
 
-func TestCatalogSync_StaleDBCacheUsedWhenFetchFails(t *testing.T) {
+// A stale row is a sound catalog: it is served at once, with no
+// network on the caller's path, and the refresh that follows runs in
+// the background. A refresh that fails leaves the stale answer in
+// place.
+func TestCatalogSync_StaleDBCacheServedWhileRefreshing(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Cleanup(db.ResetPool)
 
@@ -133,6 +139,51 @@ func TestCatalogSync_StaleDBCacheUsedWhenFetchFails(t *testing.T) {
 	require.NoError(t, err, "a stale cache is a sound answer, not an error")
 	require.Len(t, providers, 1)
 	require.Equal(t, "Stale", providers[0].Name)
+
+	// The refresh runs off the caller's path; its failure costs a log
+	// line, not the answer.
+	require.Eventually(t, func() bool { return client.calls.Load() > 0 }, 2*time.Second, 5*time.Millisecond,
+		"a stale row schedules a background refresh")
+	providers, err = syncer.Get(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "Stale", providers[0].Name)
+}
+
+// The background refresh publishes when it lands: the same syncer
+// serves the fresh catalog to every later Get, and the shared store is
+// updated so every other harness on the machine skips the fetch.
+func TestCatalogSync_StaleDBRefreshesInBackground(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(db.ResetPool)
+
+	cached := []catalog.Provider{
+		{Name: "Stale", ID: "c1", Models: []catalog.Model{{ID: "m1"}}},
+	}
+	seedCatalogDB(t, dataDir, cached, time.Now().Add(-48*time.Hour))
+
+	client := &mockCatalogClient{providers: []catalog.Provider{
+		{Name: "Fresh", ID: "f1", Models: []catalog.Model{{ID: "m1"}}},
+	}}
+	syncer := &catalogSync{}
+	syncer.Init(client, dataDir, true)
+
+	providers, err := syncer.Get(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "Stale", providers[0].Name, "the stale row is what startup gets")
+
+	require.Eventually(t, func() bool {
+		providers, err = syncer.Get(t.Context())
+		return err == nil && len(providers) == 1 && providers[0].Name == "Fresh"
+	}, 2*time.Second, 5*time.Millisecond, "the refreshed catalog is published to later callers")
+
+	// The store carries the refresh too: a second syncer over the same
+	// data directory reads the fresh row without fetching.
+	second := &catalogSync{}
+	second.Init(&mockCatalogClient{err: errors.New("offline")}, dataDir, true)
+	cachedNow, err := second.Get(t.Context())
+	require.NoError(t, err)
+	require.Len(t, cachedNow, 1)
+	require.Equal(t, "Fresh", cachedNow[0].Name)
 }
 
 func TestCatalogSync_FetchSuccessStoresInDB(t *testing.T) {

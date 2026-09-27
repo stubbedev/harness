@@ -17,8 +17,9 @@ import (
 
 var (
 	providerOnce sync.Once
-	providerList []catalog.Provider
-	providerErr  error
+	// providerNoDefault records a first config that disables the
+	// default providers: no catalog is loaded at all, at any age.
+	providerNoDefault bool
 )
 
 var catalogSyncer = &catalogSync{}
@@ -37,50 +38,38 @@ func KnownProviderByID(knownProviders []catalog.Provider, id string) *catalog.Pr
 // Providers returns the list of providers, taking into account the
 // shared catalog cache and whether or not auto update is enabled.
 //
-// It will:
-// 1. load the cached catalog from the shared SQLite database when it is
-// less than a day old (at any age when auto update is disabled).
-// 2. otherwise try to get the fresh list from models.dev (plus
-// OpenRouter for the openrouter entry), and return either this new
-// list, the stale cached list, or finally the snapshot bundled with the
-// build if the fetch fails.
-//
 // The catalog is loaded once per process, from the options of the first
-// config passed in; later calls return the memoized list.
+// config passed in; later calls read the syncer's current answer. That
+// is the point of reading through rather than snapshotting: a catalog
+// that was stale at startup is refreshed in the background, and the
+// fresh list is what every later call - the next turn's tool-palette
+// rebuild included - sees.
 //
 // A returned error is advisory: it reports that the catalog could not
 // be refreshed or cached. Callers decide whether an empty catalog is
 // fatal.
 func Providers(cfg *Config) ([]catalog.Provider, error) {
 	providerOnce.Do(func() {
-		autoupdate := !cfg.Options.DisableProviderAutoUpdate
-		customProvidersOnly := cfg.Options.DisableDefaultProviders
-
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		defer cancel()
-
-		if customProvidersOnly {
-			providerList = nil
+		if cfg.Options.DisableDefaultProviders {
+			providerNoDefault = true
 			return
 		}
-
-		client := liveCatalogClient{}
-		catalogSyncer.Init(client, GlobalCatalogDir(), autoupdate)
-
-		// A failure to refresh or cache the catalog is worth reporting
-		// to the caller, which decides whether an empty catalog is
-		// fatal or the manually configured providers suffice.
-		items, err := catalogSyncer.Get(ctx)
-		if err != nil {
-			err = fmt.Errorf( //nolint:staticcheck
-				"Harness was unable to fetch an updated model catalog. You can also update providers manually. For more info see harness update-providers --help.\n\nCause: %w",
-				err,
-			)
-		}
-		providerList = items
-		providerErr = err
+		catalogSyncer.Init(liveCatalogClient{}, GlobalCatalogDir(), !cfg.Options.DisableProviderAutoUpdate)
 	})
-	return providerList, providerErr
+	if providerNoDefault {
+		return nil, nil
+	}
+	// A failure to refresh or cache the catalog is worth reporting to
+	// the caller, which decides whether an empty catalog is fatal or
+	// the manually configured providers suffice.
+	items, err := catalogSyncer.Get(context.Background())
+	if err != nil {
+		err = fmt.Errorf( //nolint:staticcheck
+			"Harness was unable to fetch an updated model catalog. You can also update providers manually. For more info see harness update-providers --help.\n\nCause: %w",
+			err,
+		)
+	}
+	return items, err
 }
 
 // UpdateProviders refreshes the stored model catalog. With no argument
