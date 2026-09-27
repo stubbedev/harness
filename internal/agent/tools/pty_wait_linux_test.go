@@ -43,3 +43,24 @@ func TestPtyRunner_WaitingStreakEscalates(t *testing.T) {
 		require.Empty(t, res.Output)
 	}
 }
+
+// A reset ends a waiting streak with the session it belongs to: the
+// fresh shell starts counting from one.
+func TestPtyRunner_ResetClearsWaitingStreak(t *testing.T) {
+	r := newTestRunner(t)
+
+	res, err := r.Type(t.Context(), "cat > /dev/null", 10)
+	require.NoError(t, err)
+	require.True(t, res.Waiting)
+	res, err = r.Type(t.Context(), "echo probe", 10)
+	require.NoError(t, err)
+	require.Equal(t, 2, res.WaitStreak)
+
+	require.NoError(t, r.Reset(t.Context()))
+	require.Zero(t, r.waitStreak)
+
+	res, err = r.Type(t.Context(), "cat > /dev/null", 10)
+	require.NoError(t, err)
+	require.True(t, res.Waiting)
+	require.Equal(t, 1, res.WaitStreak, "the fresh shell starts a fresh streak")
+}
