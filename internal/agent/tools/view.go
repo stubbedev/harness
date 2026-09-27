@@ -4,15 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"errors"
 	"fmt"
+	"hash"
 	"html/template"
 	"io"
 	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -235,11 +238,7 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 	if isSkillFile {
 		maxContentSize = 0
 	}
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return viewFileContent{}, nil, err
-	}
-	content, hasMore, err := readTextContent(bytes.NewReader(data), params.Offset, params.Limit, maxContentSize)
+	read, err := readTextForView(filePath, params.Offset, params.Limit, maxContentSize, v.filetracker)
 	if err != nil {
 		if tooLarge, ok := errors.AsType[contentTooLargeError](err); ok {
 			return viewFileContent{}, failureResponse(fmt.Sprintf("Content section is too large (%d bytes). Maximum size is %d bytes",
@@ -247,6 +246,7 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 		}
 		return viewFileContent{}, nil, fmt.Errorf("error reading file: %w", err)
 	}
+	content := read.content
 	if !utf8.ValidString(content) {
 		return viewFileContent{}, failureResponse("File content is not valid UTF-8"), nil
 	}
@@ -259,9 +259,9 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 	output := fmt.Sprintf("<file path=%q>\n", filePath)
 	output += addLineNumbers(content, params.Offset+1)
 
-	if hasMore {
+	if read.hasMore {
 		output += fmt.Sprintf("\n\n(File has more lines. Use 'offset' parameter to read beyond line %d)",
-			params.Offset+len(strings.Split(content, "\n")))
+			params.Offset+max(read.lines, 1))
 	}
 	output += "\n</file>\n"
 	output += reportDiagnosticsNow(ctx, v.lspManager, filePath)
@@ -280,7 +280,7 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 	}
 
 	return viewFileContent{output: output, meta: meta, observe: func() {
-		filetracker.Observe(ctx, v.filetracker, sessionID, filePath, data, seenTextRanges(data, params.Offset, content))
+		v.observeTextRead(ctx, sessionID, filePath, read)
 	}}, nil, nil
 }
 
@@ -450,70 +450,248 @@ func addLineNumbers(content string, startLine int) string {
 	return strings.TrimSuffix(result.String(), "\n")
 }
 
-// skipLines advances reader past the first offset lines without
-// materialising them: ReadSlice scans the buffer in place, so a deep
-// offset costs no string allocation per skipped line, only the scans
-// themselves. An overlong line is drained with further ReadSlice calls
-// until its newline or the end of the file turns up.
-func skipLines(reader *bufio.Reader, offset int) error {
-	for range offset {
-		for {
-			_, err := reader.ReadSlice('\n')
-			if err == bufio.ErrBufferFull {
-				continue // keep scanning an overlong line for its end
-			}
-			if err != nil {
-				return err // io.EOF ends the skip
-			}
-			break
-		}
+// textView is the outcome of one read of a file: the requested
+// section, whether lines follow it, the sha256 of the file's full
+// contents — the version the edit guards compare against — and the
+// byte ranges the section covers verbatim. data is set only by the
+// whole-file fallback, which keeps the bytes it read.
+type textView struct {
+	content string
+	lines   int
+	hasMore bool
+	version [sha256.Size]byte
+	ranges  []filetracker.Range
+	data    []byte
+}
+
+// versionObserver is the filetracker capability to register a content
+// version the caller hashed while reading the file, so a streamed view
+// never holds the bytes just to have them hashed. Trackers without it
+// observe whole-file bytes instead.
+type versionObserver interface {
+	ObserveVersion(ctx context.Context, session, path string, version [sha256.Size]byte, ranges []filetracker.Range)
+}
+
+// readTextForView reads one section of filePath for a view. The normal
+// path streams the file and hashes it as it goes; the whole bytes are
+// only materialised when the evidence registry needs them — a negative
+// offset, whose returned lines pair against clamped positions, or an
+// evidence tracker that cannot take a precomputed version.
+func readTextForView(filePath string, offset, limit, maxContentSize int, tracker filetracker.Service) (textView, error) {
+	if offset < 0 || needsWholeFileRead(tracker) {
+		return readTextWhole(filePath, offset, limit, maxContentSize)
 	}
-	return nil
+	return streamTextFile(filePath, offset, limit, maxContentSize)
+}
+
+// needsWholeFileRead reports whether a tracker can only register
+// evidence from whole-file bytes. Evidence trackers observe a version
+// hash, but only versionObserver trackers accept one that was computed
+// outside their own read.
+func needsWholeFileRead(tracker filetracker.Service) bool {
+	if _, ok := tracker.(versionObserver); ok {
+		return false
+	}
+	_, isEvidence := tracker.(filetracker.Evidence)
+	return isEvidence
+}
+
+// observeTextRead registers a text view with the file tracker. A
+// streamed read carries the version hash it computed along the way, so
+// observers that accept one never see the file bytes; the whole-file
+// fallback observes the bytes it read.
+func (v *viewTool) observeTextRead(ctx context.Context, sessionID, filePath string, read textView) {
+	if read.data != nil {
+		filetracker.Observe(ctx, v.filetracker, sessionID, filePath, read.data, read.ranges)
+		return
+	}
+	if observer, ok := v.filetracker.(versionObserver); ok {
+		observer.ObserveVersion(ctx, sessionID, filePath, read.version, read.ranges)
+		return
+	}
+	// Content is only hashed by evidence trackers; plain trackers
+	// record the read alone.
+	filetracker.Observe(ctx, v.filetracker, sessionID, filePath, nil, read.ranges)
 }
 
 func readTextFile(filePath string, offset, limit, maxContentSize int) (string, bool, error) {
+	read, err := streamTextFile(filePath, offset, limit, maxContentSize)
+	return read.content, read.hasMore, err
+}
+
+// streamTextFile reads filePath in one buffered pass, retaining only
+// the requested section. The buffer scales with the file, capped, so a
+// deep section costs a handful of read calls instead of one per
+// bufio-sized chunk of the file.
+func streamTextFile(filePath string, offset, limit, maxContentSize int) (textView, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return "", false, err
+		return textView{}, err
 	}
 	defer file.Close()
 
-	return readTextContent(file, offset, limit, maxContentSize)
+	bufferSize := 4096
+	if info, err := file.Stat(); err == nil && info.Size() > int64(bufferSize) {
+		bufferSize = int(min(info.Size(), 32*1024))
+	}
+	return streamText(bufio.NewReaderSize(file, bufferSize), offset, limit, maxContentSize)
 }
 
-func readTextContent(source io.Reader, offset, limit, maxContentSize int) (string, bool, error) {
-	reader := bufio.NewReader(source)
-	if err := skipLines(reader, offset); err != nil {
-		if err == io.EOF {
-			return "", false, nil
+// readTextWhole reads a section the way views did before streaming:
+// whole file into memory, section cut from the bytes, ranges located
+// in those bytes. It is the fallback for reads whose evidence pairing
+// needs bytes the stream does not keep.
+func readTextWhole(filePath string, offset, limit, maxContentSize int) (textView, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return textView{}, err
+	}
+	read, err := streamText(bufio.NewReader(bytes.NewReader(data)), offset, limit, maxContentSize)
+	if err != nil {
+		return textView{}, err
+	}
+	read.data = data
+	read.version = sha256.Sum256(data)
+	read.ranges = seenTextRanges(data, offset, read.content)
+	return read, nil
+}
+
+// stagedHash feeds a sha256 stream through a staging buffer. The
+// version hash has to cover bytes arriving line by line, and the block
+// cipher underneath amortizes only over contiguous runs, so forty
+// bytes at a time it spends all its time on call overhead.
+type stagedHash struct {
+	stage []byte
+	hash  hash.Hash
+}
+
+func newStagedHash() *stagedHash {
+	return &stagedHash{
+		stage: make([]byte, 0, 32*1024),
+		hash:  sha256.New(),
+	}
+}
+
+// write adds p to the stream: flushing the stage first when p would
+// overflow it, and passing p straight through when it alone overflows
+// a flushed stage. The order of the bytes is never shuffled.
+func (s *stagedHash) write(p []byte) {
+	if len(s.stage)+len(p) > cap(s.stage) {
+		s.flush()
+	}
+	if len(p) > cap(s.stage) {
+		s.hash.Write(p)
+		return
+	}
+	s.stage = append(s.stage, p...)
+}
+
+func (s *stagedHash) flush() {
+	if len(s.stage) > 0 {
+		s.hash.Write(s.stage)
+		s.stage = s.stage[:0]
+	}
+}
+
+// sum flushes the stage and returns the stream's hash.
+func (s *stagedHash) sum() [sha256.Size]byte {
+	s.flush()
+	var version [sha256.Size]byte
+	s.hash.Sum(version[:0])
+	return version
+}
+
+// streamText reads one section of a file in a single buffered pass.
+// Only the section is retained; skipped and trailing lines stream past
+// a fixed buffer so the version hash can cover the whole file without
+// holding it. Viewing 100 lines of a 50k-line file allocates for 100
+// lines, not 50k.
+//
+// ranges pairs each returned line with the file bytes it came from,
+// located the way seenTextRanges locates them in a whole-file
+// snapshot: the whole physical line, newline included, or the
+// truncated prefix of an overlong line without it. It is exact for a
+// non-negative offset and nil for a negative one, whose clamped
+// pairing readTextWhole reproduces from whole-file bytes.
+func streamText(source *bufio.Reader, offset, limit, maxContentSize int) (textView, error) {
+	hash := newStagedHash()
+	pos := 0
+	scratch := make([]byte, 0, 4096)
+
+	// readLine returns the next physical line, newline included, in
+	// scratch — valid only until the next call. Every byte read is
+	// hashed on its way past, so the version covers the file even
+	// where nothing is retained. An overlong line is drained with
+	// further ReadSlice calls until its newline or the end of the
+	// file turns up.
+	readLine := func() ([]byte, error) {
+		scratch = scratch[:0]
+		for {
+			chunk, err := source.ReadSlice('\n')
+			pos += len(chunk)
+			hash.write(chunk)
+			scratch = append(scratch, chunk...)
+			if err == bufio.ErrBufferFull {
+				continue
+			}
+			return scratch, err
 		}
-		return "", false, err
 	}
 
-	lines := make([]string, 0, min(limit, DefaultReadLimit))
-	contentSize := 0
-
-	for len(lines) < limit {
-		lineText, err := reader.ReadString('\n')
-		if err != nil && err != io.EOF {
-			return "", false, err
+	// Skip to the section start. EOF here means the offset is past
+	// the end of the file, so the section is empty and the pairing
+	// anchor sits at the end of the file.
+	for range max(0, offset) {
+		if _, err := readLine(); err != nil {
+			if err != io.EOF {
+				return textView{}, err
+			}
+			return textView{version: hash.sum(), ranges: []filetracker.Range{{Start: pos, End: pos}}}, nil
 		}
-		lineText = strings.TrimSuffix(lineText, "\n")
-		lineText = strings.TrimSuffix(lineText, "\r")
-		if len(lineText) > MaxLineLength {
+	}
+
+	var content []byte
+	contentSize := 0
+	lines := 0
+	var ranges []filetracker.Range
+
+	for lines < limit {
+		lineStart := pos
+		line, err := readLine()
+		if err != nil && err != io.EOF {
+			return textView{}, err
+		}
+		text := bytes.TrimSuffix(bytes.TrimSuffix(line, []byte("\n")), []byte("\r"))
+		truncated := false
+		var prefix []byte
+		if len(text) > MaxLineLength {
 			// Truncate at a rune boundary to avoid splitting
 			// multi-byte characters.
-			lineText = strings.ToValidUTF8(lineText[:MaxLineLength], "") + "..."
+			truncated = true
+			prefix = bytes.ToValidUTF8(text[:MaxLineLength], nil)
+			text = append(slices.Clip(prefix), "..."...)
 		}
-		projectedSize := contentSize + len(lineText)
-		if len(lines) > 0 {
+		projectedSize := contentSize + len(text)
+		if lines > 0 {
 			projectedSize++
 		}
 		if maxContentSize > 0 && projectedSize > maxContentSize {
-			return "", false, contentTooLargeError{Size: projectedSize, Max: maxContentSize}
+			return textView{}, contentTooLargeError{Size: projectedSize, Max: maxContentSize}
 		}
 		contentSize = projectedSize
-		lines = append(lines, lineText)
+		if lines > 0 {
+			content = append(content, '\n')
+		}
+		content = append(content, text...)
+		lines++
+
+		if offset >= 0 {
+			r := filetracker.Range{Start: lineStart, End: pos}
+			if truncated {
+				r.End = lineStart + len(prefix)
+			}
+			ranges = append(ranges, r)
+		}
 		if err == io.EOF {
 			break
 		}
@@ -521,12 +699,30 @@ func readTextContent(source io.Reader, offset, limit, maxContentSize int) (strin
 
 	// Peek one more line only when we filled the limit.
 	hasMore := false
-	if len(lines) == limit {
-		lineText, peekErr := reader.ReadString('\n')
-		hasMore = len(lineText) > 0 || peekErr == nil
+	if lines == limit {
+		peeked, err := readLine()
+		hasMore = len(peeked) > 0 || err == nil
 	}
 
-	return strings.Join(lines, "\n"), hasMore, nil
+	// The rest of the file streams past the hash: the version has
+	// to cover bytes the section never touched.
+	for {
+		if _, err := readLine(); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return textView{}, err
+		}
+	}
+
+	version := hash.sum()
+	return textView{
+		content: string(content),
+		lines:   lines,
+		hasMore: hasMore,
+		version: version,
+		ranges:  ranges,
+	}, nil
 }
 
 func getImageMimeType(filePath string) (bool, string) {

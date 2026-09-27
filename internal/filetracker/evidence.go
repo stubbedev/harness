@@ -57,18 +57,31 @@ func mergeRanges(ranges []Range) []Range {
 }
 
 func (s *service) Observe(ctx context.Context, session, path string, content []byte, ranges []Range) {
+	bounded := make([]Range, 0, len(ranges))
+	for _, r := range ranges {
+		if r.Start >= 0 && r.End >= r.Start && r.End <= len(content) {
+			bounded = append(bounded, r)
+		}
+	}
+	s.ObserveVersion(ctx, session, path, sha256.Sum256(content), bounded)
+}
+
+// ObserveVersion records an observation from a version the caller
+// computed while reading the file, so the bytes never have to be held
+// in memory just to be hashed. Ranges must already lie within the
+// file.
+func (s *service) ObserveVersion(ctx context.Context, session, path string, version [sha256.Size]byte, ranges []Range) {
 	s.evidence.mu.Lock()
 	if s.evidence.seen == nil {
 		s.evidence.seen = make(map[string]observation)
 	}
 	key := evidenceKey(session, path)
-	version := sha256.Sum256(content)
 	obs := s.evidence.seen[key]
 	if obs.version != version {
 		obs = observation{version: version}
 	}
 	for _, r := range ranges {
-		if r.Start >= 0 && r.End >= r.Start && r.End <= len(content) {
+		if r.Start >= 0 && r.End >= r.Start {
 			obs.ranges = append(obs.ranges, r)
 		}
 	}
