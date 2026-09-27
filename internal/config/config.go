@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/stubbedev/harness/internal/catalog"
@@ -775,9 +776,25 @@ type HookConfig struct {
 // applied to one path only. Error policy stays with the caller:
 // validation fails the load, the Runner skips the hook with a warning,
 // and Lua registration raises a Lua error.
+//
+// Successful compilations are cached by pattern: the Runner is rebuilt
+// per hook event and extensions re-register per dispatch, so the same
+// handful of configured patterns would otherwise be recompiled on
+// every tool call. Regexp values are immutable and safe for concurrent
+// use.
 func CompileMatcher(pattern string) (*regexp.Regexp, error) {
-	return regexp.Compile(pattern)
+	if re, ok := matcherCache.Load(pattern); ok {
+		return re.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	matcherCache.Store(pattern, re)
+	return re, nil
 }
+
+var matcherCache sync.Map
 
 // DisplayName returns the hook name for display purposes. It returns Name
 // when set, otherwise falls back to Command.
