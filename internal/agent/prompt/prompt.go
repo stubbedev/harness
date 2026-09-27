@@ -320,10 +320,39 @@ func isGitRepo(dir string) bool {
 	return err == nil
 }
 
+// gitStatusCache memoizes the per-directory summary for a few seconds.
+// Every prompt build pays for it - each subagent dispatch builds one -
+// and a fan-out of dispatches would otherwise fork git three times per
+// prompt within the same moment. The summary is advisory context that
+// is already stale as it prints, so seconds of reuse cost nothing; the
+// TTL is what keeps a long session from serving a fossil.
+var (
+	gitStatusCache    sync.Map
+	gitStatusCacheTTL = 3 * time.Second
+)
+
+type gitStatusEntry struct {
+	at     time.Time
+	status string
+}
+
 // getGitStatus summarizes the repository at dir for the prompt: branch,
-// short status and the last few commits. It is best effort: a git
-// command that fails leaves its part out rather than failing the prompt.
+// short status and the last few commits, cached per directory for the
+// TTL. It is best effort: a git command that fails leaves its part out
+// rather than failing the prompt.
 func getGitStatus(ctx context.Context, dir string) string {
+	if e, ok := gitStatusCache.Load(dir); ok {
+		if entry := e.(gitStatusEntry); time.Since(entry.at) < gitStatusCacheTTL {
+			return entry.status
+		}
+	}
+	status := buildGitStatus(ctx, dir)
+	gitStatusCache.Store(dir, gitStatusEntry{at: time.Now(), status: status})
+	return status
+}
+
+// buildGitStatus is getGitStatus's uncached body.
+func buildGitStatus(ctx context.Context, dir string) string {
 	sh := shell.NewShell(&shell.Options{
 		WorkingDir: dir,
 	})
