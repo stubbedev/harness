@@ -49,7 +49,9 @@ func resolveSessionPrefix[T any](
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "session ID '%s' is ambiguous. Matches:\n\n", id)
 	for _, m := range matches {
-		sb.WriteString("  " + describe(m) + "\n")
+		sb.WriteString("  ")
+		sb.WriteString(describe(m))
+		sb.WriteString("\n")
 	}
 	sb.WriteString("\nUse more characters or the full hash")
 	return zero, errors.New(sb.String())
