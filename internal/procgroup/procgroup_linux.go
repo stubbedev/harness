@@ -3,6 +3,7 @@
 package procgroup
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,21 +43,34 @@ func descendants(root int) []int {
 // parentPid reads a process's parent pid from /proc/<pid>/stat. The comm
 // field can contain spaces and parentheses, so the stat fields are
 // parsed after its last closing parenthesis; PPid is the second field
-// after it (state, then ppid).
+// after it (state, then ppid). Parsing stays on the read buffer: a
+// teardown sweep visits every process on the machine.
 func parentPid(pid int) (int, bool) {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
 		return 0, false
 	}
-	end := strings.LastIndexByte(string(data), ')')
+	end := bytes.LastIndexByte(data, ')')
 	if end < 0 {
 		return 0, false
 	}
-	fields := strings.Fields(string(data)[end+1:])
-	if len(fields) < 2 {
+	// After the comm close-paren: " state ppid pgrp ...". The substring
+	// opens with a space, so skip it before cutting off the state token.
+	data = data[end+1:]
+	for len(data) > 0 && data[0] == ' ' {
+		data = data[1:]
+	}
+	var field []byte
+	var ok bool
+	_, data, ok = bytes.Cut(data, []byte{' '})
+	if !ok {
 		return 0, false
 	}
-	ppid, err := strconv.Atoi(fields[1])
+	field, _, ok = bytes.Cut(data, []byte{' '})
+	if !ok {
+		return 0, false
+	}
+	ppid, err := strconv.Atoi(string(field))
 	if err != nil {
 		return 0, false
 	}
