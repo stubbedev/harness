@@ -49,13 +49,17 @@ WHERE session_id = ? AND role = 'user'
 ORDER BY created_at DESC;
 
 -- name: ListAllUserMessages :many
-SELECT *
+-- Prompt history reads only the parts blob; the rest of the row is
+-- never touched by its callers.
+SELECT parts
 FROM messages
 WHERE role = 'user'
 ORDER BY created_at DESC;
 
 -- name: GetLastAssistantMessageBySession :one
-SELECT *
+-- Only the provider and model of the last assistant message are read;
+-- skip fetching the parts blob and the rest of the row.
+SELECT provider, model
 FROM messages
 WHERE session_id = ? AND role = 'assistant' AND is_summary_message = 0
 ORDER BY created_at DESC

@@ -25,7 +25,9 @@ type Querier interface {
 	GetFileByPathAndSession(ctx context.Context, arg GetFileByPathAndSessionParams) (File, error)
 	GetFileRead(ctx context.Context, arg GetFileReadParams) (ReadFile, error)
 	GetHourDayHeatmap(ctx context.Context) ([]GetHourDayHeatmapRow, error)
-	GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (Message, error)
+	// Only the provider and model of the last assistant message are read;
+	// skip fetching the parts blob and the rest of the row.
+	GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (GetLastAssistantMessageBySessionRow, error)
 	GetLastSession(ctx context.Context) (Session, error)
 	GetLatestFileVersion(ctx context.Context, path string) (int64, error)
 	GetMemory(ctx context.Context, id string) (Memory, error)
@@ -40,7 +42,9 @@ type Querier interface {
 	GetUsageByDayOfWeek(ctx context.Context) ([]GetUsageByDayOfWeekRow, error)
 	GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error)
 	GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error)
-	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	// Prompt history reads only the parts blob; the rest of the row is
+	// never touched by its callers.
+	ListAllUserMessages(ctx context.Context) ([]string, error)
 	ListCheckpointsBySession(ctx context.Context, sessionID string) ([]Checkpoint, error)
 	ListChildSessions(ctx context.Context, parentSessionID sql.NullString) ([]Session, error)
 	ListFilesBySessionWithChildren(ctx context.Context, arg ListFilesBySessionWithChildrenParams) ([]File, error)

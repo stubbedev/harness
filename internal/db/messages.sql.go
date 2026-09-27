@@ -78,32 +78,24 @@ func (q *Queries) DeleteMessage(ctx context.Context, id string) error {
 }
 
 const getLastAssistantMessageBySession = `-- name: GetLastAssistantMessageBySession :one
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+SELECT provider, model
 FROM messages
 WHERE session_id = ? AND role = 'assistant' AND is_summary_message = 0
 ORDER BY created_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (Message, error) {
+type GetLastAssistantMessageBySessionRow struct {
+	Provider sql.NullString `json:"provider"`
+	Model    sql.NullString `json:"model"`
+}
+
+// Only the provider and model of the last assistant message are read;
+// skip fetching the parts blob and the rest of the row.
+func (q *Queries) GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (GetLastAssistantMessageBySessionRow, error) {
 	row := q.db.QueryRowContext(ctx, getLastAssistantMessageBySession, sessionID)
-	var i Message
-	err := row.Scan(
-		&i.ID,
-		&i.SessionID,
-		&i.Role,
-		&i.Parts,
-		&i.Model,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.FinishedAt,
-		&i.Provider,
-		&i.IsSummaryMessage,
-		&i.PrismModelID,
-		&i.PrismModelName,
-		&i.PrismHypercreditSavings,
-		&i.PrismDollarSavings,
-	)
+	var i GetLastAssistantMessageBySessionRow
+	err := row.Scan(&i.Provider, &i.Model)
 	return i, err
 }
 
@@ -136,40 +128,27 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 }
 
 const listAllUserMessages = `-- name: ListAllUserMessages :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+SELECT parts
 FROM messages
 WHERE role = 'user'
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListAllUserMessages(ctx context.Context) ([]Message, error) {
+// Prompt history reads only the parts blob; the rest of the row is
+// never touched by its callers.
+func (q *Queries) ListAllUserMessages(ctx context.Context) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listAllUserMessages)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Message{}
+	items := []string{}
 	for rows.Next() {
-		var i Message
-		if err := rows.Scan(
-			&i.ID,
-			&i.SessionID,
-			&i.Role,
-			&i.Parts,
-			&i.Model,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.FinishedAt,
-			&i.Provider,
-			&i.IsSummaryMessage,
-			&i.PrismModelID,
-			&i.PrismModelName,
-			&i.PrismHypercreditSavings,
-			&i.PrismDollarSavings,
-		); err != nil {
+		var parts string
+		if err := rows.Scan(&parts); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, parts)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

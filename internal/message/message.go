@@ -56,6 +56,10 @@ type Service interface {
 	ListFrom(ctx context.Context, sessionID, fromID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
 	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	// GetLastAssistantMessage returns the provider and model that
+	// produced the latest non-summary assistant message; every other
+	// field of the returned Message is left empty because no caller
+	// reads them.
 	GetLastAssistantMessage(ctx context.Context, sessionID string) (Message, error)
 	Delete(ctx context.Context, id string) error
 
@@ -552,20 +556,37 @@ func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]Mes
 	return s.convertAll(dbMessages)
 }
 
+// ListAllUserMessages returns every user message across sessions, in
+// newest-first order, carrying only the parts prompt history reads:
+// the row's other columns are never projected.
 func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
-	dbMessages, err := s.q.ListAllUserMessages(ctx)
+	partsList, err := s.q.ListAllUserMessages(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.convertAll(dbMessages)
+	messages := make([]Message, len(partsList))
+	for i, partsJSON := range partsList {
+		parts, err := unmarshalParts([]byte(partsJSON))
+		if err != nil {
+			return nil, err
+		}
+		messages[i] = Message{Parts: parts}
+	}
+	return messages, nil
 }
 
+// GetLastAssistantMessage returns the provider and model of the last
+// non-summary assistant message; the query projects only those two
+// columns.
 func (s *service) GetLastAssistantMessage(ctx context.Context, sessionID string) (Message, error) {
-	dbMessage, err := s.q.GetLastAssistantMessageBySession(ctx, sessionID)
+	row, err := s.q.GetLastAssistantMessageBySession(ctx, sessionID)
 	if err != nil {
 		return Message{}, err
 	}
-	return s.fromDBItem(dbMessage)
+	return Message{
+		Model:    row.Model.String,
+		Provider: row.Provider.String,
+	}, nil
 }
 
 // convertAll converts DB rows, stopping at the first parse failure.

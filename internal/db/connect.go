@@ -17,6 +17,11 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
+// pragmas are applied to every new connection. secure_delete is FAST
+// rather than ON: freed pages are still zeroed where that costs no
+// extra I/O, but deletes no longer scrub every freed page. Nothing in
+// the repo relies on full page zeroing, so FAST keeps most of the
+// benefit without the per-delete cost.
 var (
 	pragmas = map[string]string{
 		"foreign_keys":  "ON",
@@ -25,7 +30,7 @@ var (
 		"temp_store":    "MEMORY",
 		"cache_size":    "-8000",
 		"synchronous":   "NORMAL",
-		"secure_delete": "ON",
+		"secure_delete": "FAST",
 		"busy_timeout":  "30000",
 	}
 	gooseInitOnce sync.Once
