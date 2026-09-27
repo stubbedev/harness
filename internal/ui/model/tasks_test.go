@@ -1016,3 +1016,42 @@ func TestLoadAgentTasksSkipsWaitCalls(t *testing.T) {
 	require.Len(t, u.agentTasks, 1)
 	assert.Equal(t, "a1", u.agentTasks[0].toolCallID)
 }
+
+// Switching back to the main view rebuilds the strip from the session's
+// messages. A dispatch that already ran to completion and was reaped
+// stays gone: it re-entered as a running ghost for a second until
+// reconciliation reaped it again, which is the flicker the strip showed
+// on every return from an agent's transcript.
+func TestLoadAgentTasksKeepsReapedTasksGone(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+
+	msgs := []*message.Message{
+		{ID: "m1", Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "done1", Name: "agent", Input: `{"prompt":"finished dig"}`, Finished: true},
+		}},
+		{ID: "m2", Role: message.Assistant, Parts: []message.ContentPart{
+			message.ToolCall{ID: "live1", Name: "agent", Input: `{"prompt":"still digging"}`, Finished: true},
+		}},
+	}
+	toolResults := map[string]message.ToolResult{
+		"done1": {ToolCallID: "done1"},
+	}
+
+	// While the turn is live both dispatches track as running, and the
+	// terminal event for done1 reaps it.
+	for _, msg := range msgs {
+		_ = u.upsertAgentTask(msg, msg.ToolCalls()[0])
+	}
+	require.Len(t, u.agentTasks, 2)
+	u.reapAgentTask("done1")
+	require.Len(t, u.agentTasks, 1)
+
+	// The switch back rebuilds from the same messages: done1 stays gone,
+	// live1 stays on the strip.
+	u.loadAgentTasks(msgs, toolResults)
+	require.Len(t, u.agentTasks, 1)
+	assert.Equal(t, "live1", u.agentTasks[0].toolCallID)
+}

@@ -207,6 +207,15 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			if !chat.IsSubagentTool(tc.Name) {
 				continue
 			}
+			// A dispatch that already ran to completion stays gone. The
+			// strip rebuilds here on every switch back to a session's
+			// transcript, and a reaped background dispatch passes the
+			// blocking-dispatch skip below - its result is just the start
+			// handle - so without this it re-entered as a running ghost
+			// for the second or so until reconciliation reaped it again.
+			if m.reapedAgentTasks[tc.ID] {
+				continue
+			}
 			var params agent.AgentDispatchParams
 			_ = json.Unmarshal([]byte(tc.Input), &params)
 			_, hasResult := toolResults[tc.ID]
