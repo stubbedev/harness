@@ -1438,29 +1438,34 @@ func TestPtyRunner_SessionStartsWithPagersAndColorOff(t *testing.T) {
 	require.Equal(t, "cat:cat:1:0", res.Output)
 }
 
-// A foreground that reads and answers nothing - cat pointed at
-// /dev/null, the shape of the wedge seen in the wild - keeps returning
-// the waiting verdict, and the run of identical verdicts is counted:
-// the first calls say no more than the state, and the escalations that
-// follow name the wedge and the way out instead of confirming the
-// caller's wrong mental model a fourth time.
-func TestPtyRunner_WaitingStreakEscalates(t *testing.T) {
-	r := newTestRunner(t)
+// The waiting streak is a pure state machine over the runner's state
+// lock, so its contract is pinned without a terminal at all, on every
+// platform: noteWaiting counts consecutive verdicts from the first,
+// any evidence of life clears it, and so does a replaced shell. The
+// terminal-level escalation test that drives it lives in
+// pty_wait_linux_test.go - the wedge verdict it needs is kernel-backed
+// only there.
+func TestWaitingStreakStateMachine(t *testing.T) {
+	t.Parallel()
+	r := &ptyRunner{}
 
-	res, err := r.Type(t.Context(), "cat > /dev/null", 10)
-	require.NoError(t, err)
-	require.True(t, res.Waiting)
-	require.Equal(t, 1, res.WaitStreak)
-	require.Zero(t, res.InputPending)
+	streak, waited := r.noteWaiting()
+	require.Equal(t, 1, streak)
+	require.Less(t, waited, time.Second)
+	streak, _ = r.noteWaiting()
+	require.Equal(t, 2, streak)
 
-	for streak := 2; streak <= ptyWaitingEscalateCalls; streak++ {
-		res, err = r.Type(t.Context(), "echo probe", 10)
-		require.NoError(t, err)
-		require.True(t, res.Waiting, "the wedge keeps the verdict")
-		require.Equal(t, streak, res.WaitStreak)
-		require.Zero(t, res.InputPending, "the wedge consumes what it is sent")
-		require.Empty(t, res.Output)
-	}
+	r.clearWaiting()
+	streak, waited = r.noteWaiting()
+	require.Equal(t, 1, streak, "a wait after evidence of life counts from itself")
+	require.Less(t, waited, time.Second)
+
+	r.mu.Lock()
+	r.clearWaitingLocked()
+	r.mu.Unlock()
+	r.mu.Lock()
+	require.Zero(t, r.waitStreak)
+	r.mu.Unlock()
 }
 
 // A reset ends a waiting streak with the session it belongs to: the

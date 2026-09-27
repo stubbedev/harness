@@ -151,10 +151,28 @@ type herdrTestServer struct {
 // and serves until the test ends.
 func startHerdrServer(t *testing.T) *herdrTestServer {
 	t.Helper()
-	s := &herdrTestServer{path: filepath.Join(t.TempDir(), "herdr.sock")}
+	s := &herdrTestServer{path: testSocketPath(t)}
 	s.listen()
 	t.Cleanup(s.stop)
 	return s
+}
+
+// testSocketPath returns a socket path a unix socket can actually
+// bind: macOS caps a sockaddr_un path at 104 bytes, and the runner's
+// $TMPDIR plus t.TempDir's test-name-derived directory blows past it -
+// which is a bind EINVAL, not a skip. When the default path is too
+// long, a short random directory directly under the system temp root
+// keeps the name inside the limit.
+func testSocketPath(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "herdr.sock")
+	if len(path) < 104 {
+		return path
+	}
+	dir, err := os.MkdirTemp("", "herdr-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return filepath.Join(dir, "herdr.sock")
 }
 
 // listen binds the socket and starts accepting connections.
