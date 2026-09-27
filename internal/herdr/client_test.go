@@ -1,9 +1,19 @@
 package herdr
 
 import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"net"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agentstate"
 )
 
@@ -123,4 +133,190 @@ func TestInitDisabledUnderTest(t *testing.T) {
 	t.Setenv("HERDR_SOCKET_PATH", "/tmp/does-not-matter.sock")
 	t.Setenv("HERDR_PANE_ID", "test:pane")
 	assert.Nil(t, newFromEnv())
+}
+
+// herdrTestServer is a stand-in for herdr's socket API. It counts
+// every connection it accepts and records the reports it receives, so
+// tests can tell connection reuse from repeated dialing.
+type herdrTestServer struct {
+	path string
+
+	mu       sync.Mutex
+	listener net.Listener
+	conns    []net.Conn
+	received []reportRequest
+}
+
+// startHerdrServer listens on a Unix socket in a temporary directory
+// and serves until the test ends.
+func startHerdrServer(t *testing.T) *herdrTestServer {
+	t.Helper()
+	s := &herdrTestServer{path: filepath.Join(t.TempDir(), "herdr.sock")}
+	s.listen()
+	t.Cleanup(s.stop)
+	return s
+}
+
+// listen binds the socket and starts accepting connections.
+func (s *herdrTestServer) listen() {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "unix", s.path)
+	if err != nil {
+		panic(err) // Only reachable before startHerdrServer returns.
+	}
+	s.mu.Lock()
+	s.listener = ln
+	s.mu.Unlock()
+	go s.serve(ln)
+}
+
+func (s *herdrTestServer) serve(ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		s.mu.Lock()
+		s.conns = append(s.conns, conn)
+		s.mu.Unlock()
+		go s.handle(conn)
+	}
+}
+
+// handle records one report per line for the life of the connection.
+// Like herdr, the server keeps the connection open, which is what lets
+// the client reuse it across reports.
+func (s *herdrTestServer) handle(conn net.Conn) {
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		var req reportRequest
+		if json.Unmarshal(scanner.Bytes(), &req) != nil {
+			continue
+		}
+		s.mu.Lock()
+		s.received = append(s.received, req)
+		s.mu.Unlock()
+	}
+	// Read errors mean the connection went away, which is exactly
+	// what the restart test simulates; nothing to record.
+	_ = scanner.Err()
+}
+
+// stop closes the listener and every accepted connection, simulating
+// the herdr server disappearing entirely.
+func (s *herdrTestServer) stop() {
+	s.mu.Lock()
+	ln := s.listener
+	s.listener = nil
+	conns := slices.Clone(s.conns)
+	s.mu.Unlock()
+	if ln != nil {
+		_ = ln.Close()
+	}
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
+}
+
+// restart brings a stopped server back on the same socket path.
+func (s *herdrTestServer) restart() {
+	// A closed Unix listener leaves its socket file behind.
+	_ = os.Remove(s.path)
+	s.listen()
+}
+
+// connectionCount returns how many connections the server has ever
+// accepted.
+func (s *herdrTestServer) connectionCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.conns)
+}
+
+// reports returns the reports received so far.
+func (s *herdrTestServer) reports() []reportRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.received)
+}
+
+// reportStates returns the state carried by each received report.
+func reportStates(reports []reportRequest) []string {
+	states := make([]string, 0, len(reports))
+	for _, req := range reports {
+		states = append(states, req.Params.State)
+	}
+	return states
+}
+
+// TestUnixSenderReusesConnection proves the sender dials once and
+// rides that connection across several reports.
+func TestUnixSenderReusesConnection(t *testing.T) {
+	t.Parallel()
+	srv := startHerdrServer(t)
+	c := newClient(srv.path, "test:pane", 0, newUnixSender(srv.path))
+	defer c.Close()
+
+	// Four reports: init idle, working, idle, working.
+	c.registerInitial()
+	c.HandleEvent(agentstate.AssistantMessage{SessionID: "s1"})
+	c.HandleEvent(agentstate.RunComplete{SessionID: "s1"})
+	c.HandleEvent(agentstate.AssistantMessage{SessionID: "s1"})
+
+	want := []string{stateIdle, stateWorking, stateIdle, stateWorking}
+	require.Eventually(t, func() bool {
+		return len(srv.reports()) == len(want)
+	}, 5*time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, want, reportStates(srv.reports()))
+	assert.Equal(t, 1, srv.connectionCount())
+}
+
+// TestUnixSenderRecoversAfterServerRestart proves a failed write does
+// not wedge the sender: the affected report falls back to a dial-once
+// attempt against the downed server and is dropped, no error reaches
+// the caller, and the long-lived connection is re-established once the
+// server returns.
+func TestUnixSenderRecoversAfterServerRestart(t *testing.T) {
+	t.Parallel()
+	srv := startHerdrServer(t)
+	c := newClient(srv.path, "test:pane", 0, newUnixSender(srv.path))
+	defer c.Close()
+
+	c.registerInitial()
+	require.Eventually(t, func() bool {
+		return len(srv.reports()) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, 1, srv.connectionCount())
+
+	// The second report rides the same connection.
+	c.HandleEvent(agentstate.AssistantMessage{SessionID: "s1"})
+	require.Eventually(t, func() bool {
+		return len(srv.reports()) == 2
+	}, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, 1, srv.connectionCount())
+
+	// The herdr server disappears: listener and live connections
+	// all close.
+	srv.stop()
+
+	// The next report hits the dead connection. Its write fails and
+	// the dial-once fallback fails too, so it is dropped. Give the
+	// writer loop time to notice before the server returns, so the
+	// fallback cannot accidentally reach the restarted listener.
+	c.HandleEvent(agentstate.RunComplete{SessionID: "s1"})
+	time.Sleep(250 * time.Millisecond)
+	assert.Equal(t, 1, srv.connectionCount())
+	assert.Len(t, srv.reports(), 2)
+
+	// The server returns; the next report re-dials and is delivered
+	// over a fresh connection.
+	srv.restart()
+	c.HandleEvent(agentstate.AssistantMessage{SessionID: "s1"})
+	require.Eventually(t, func() bool {
+		return len(srv.reports()) == 3
+	}, 5*time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, []string{stateIdle, stateWorking, stateWorking}, reportStates(srv.reports()))
+	assert.Equal(t, 2, srv.connectionCount())
 }

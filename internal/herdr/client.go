@@ -242,10 +242,17 @@ type reportParams struct {
 	AgentSessionID string `json:"agent_session_id"`
 }
 
+// requestTimeout bounds a single dial or write to herdr.
+const requestTimeout = 500 * time.Millisecond
+
 // unixSender sends JSON-RPC requests over a Unix domain socket using
 // a single background writer goroutine and a buffered channel. This
 // serializes writes and avoids spawning unbounded goroutines under
-// high event throughput. Each report opens a short-lived connection.
+// high event throughput. The writer keeps one long-lived connection
+// open across reports and re-dials after a failure; the report that
+// hit the failure falls back to a dial-once send, and the long-lived
+// connection is only retried by the next report, so a missing server
+// never turns into a busy retry loop.
 type unixSender struct {
 	socketPath string
 	ch         chan reportRequest
@@ -278,45 +285,97 @@ func (s *unixSender) close() {
 	s.cancel()
 }
 
+// writeLoop owns the long-lived connection to herdr. It is the only
+// goroutine that touches the connection, so no extra locking is
+// needed beyond the channel handoff in send.
 func (s *unixSender) writeLoop(ctx context.Context) {
+	var conn net.Conn
+	defer func() {
+		if conn != nil {
+			_ = conn.Close()
+		}
+	}()
 	for {
 		select {
 		case req, ok := <-s.ch:
 			if !ok {
 				return
 			}
-			if err := dialSend(s.socketPath, req); err != nil {
-				slog.Debug("Herdr report failed", "error", err)
-			}
+			conn = s.deliver(conn, req)
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-// dialSend opens a short-lived Unix socket connection to herdr,
-// sends a single JSON-RPC request, and drains the response.
-func dialSend(socketPath string, req reportRequest) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+// deliver sends req over conn, dialing first when conn is nil, and
+// returns the connection to use for the next report. A failed write
+// closes the connection and retries req once over a fresh dial-once
+// connection; a failed dial counts as that report's single attempt.
+// Either way the next report re-attempts the long-lived connection.
+func (s *unixSender) deliver(conn net.Conn, req reportRequest) net.Conn {
+	if conn == nil {
+		c, err := dial(s.socketPath)
+		if err != nil {
+			slog.Debug("Herdr report failed", "error", err)
+			return nil
+		}
+		conn = c
+		go discardResponses(conn)
+	}
+	if err := writeReport(conn, req); err != nil {
+		_ = conn.Close()
+		slog.Debug("Herdr report failed", "error", err)
+		if err := dialSend(s.socketPath, req); err != nil {
+			slog.Debug("Herdr report failed", "error", err)
+		}
+		return nil
+	}
+	return conn
+}
+
+// discardResponses drains herdr's responses on conn until the
+// connection closes, so replies to reused connections never pile up
+// in the receive buffer. The writer closing conn unblocks it.
+func discardResponses(conn net.Conn) {
+	_, _ = io.Copy(io.Discard, conn)
+}
+
+// dial opens a Unix socket connection to herdr.
+func dial(socketPath string) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
 
 	dialer := net.Dialer{}
-	conn, err := dialer.DialContext(ctx, "unix", socketPath)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
+	return dialer.DialContext(ctx, "unix", socketPath)
+}
 
-	_ = conn.SetDeadline(time.Now().Add(500 * time.Millisecond))
-
+// writeReport marshals req and writes it to conn as a single line.
+func writeReport(conn net.Conn, req reportRequest) error {
 	data, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
 
+	_ = conn.SetWriteDeadline(time.Now().Add(requestTimeout))
 	_, err = conn.Write(data)
+	return err
+}
+
+// dialSend opens a short-lived Unix socket connection to herdr,
+// sends a single JSON-RPC request, and drains the response. It is
+// the fallback path when the long-lived connection fails.
+func dialSend(socketPath string, req reportRequest) error {
+	conn, err := dial(socketPath)
 	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_ = conn.SetDeadline(time.Now().Add(requestTimeout))
+
+	if err := writeReport(conn, req); err != nil {
 		return err
 	}
 
