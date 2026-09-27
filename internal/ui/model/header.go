@@ -12,6 +12,7 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 const (
@@ -20,8 +21,35 @@ const (
 )
 
 type header struct {
-	com   *common.Common
-	width int
+	com *common.Common
+
+	// view memoizes the rendered header line. drawHeader runs on every
+	// frame, so the line is rebuilt only when an input to it changed:
+	// the draw width, the theme (refresh), or any of the state inputs
+	// in headerState.
+	view      string
+	viewWidth int
+	viewState headerState
+	viewValid bool
+}
+
+// headerState is the memo key for the rendered header line: everything
+// renderHeaderState reads, in its cheapest comparable form. The
+// diagnostics, git segment, context usage and goal state each move
+// through their own watcher or message; the width changes through
+// layout; the theme goes through refresh.
+type headerState struct {
+	breadcrumb  string
+	diagnostics lsp.DiagnosticCounts
+	cwd         string
+	git         string
+	sessionID   string
+	tokens      int64
+	estimated   bool
+	goalActive  bool
+	hasModel    bool
+	modelID     string
+	usable      int64
 }
 
 // newHeader creates a new header model.
@@ -35,7 +63,7 @@ func newHeader(com *common.Common) *header {
 
 // refresh invalidates cached header state. Call after the theme changes.
 func (h *header) refresh() {
-	h.width = 0
+	h.viewValid = false
 }
 
 // drawHeader draws the compact status line for the given session: working
@@ -55,23 +83,60 @@ func (h *header) drawHeader(
 	diagnostics lsp.DiagnosticCounts,
 	breadcrumb string,
 ) {
-	h.width = width
+	state := h.currentState(session, diagnostics, breadcrumb)
+	if !h.viewValid || h.viewWidth != width || h.viewState != state {
+		h.view = h.renderLine(width, state)
+		h.viewWidth = width
+		h.viewState = state
+		h.viewValid = true
+	}
+	uv.NewStyledString(h.view).Draw(scr, area)
+}
 
-	// The compact header is a single status line, like the status bars
-	// other coding agents render: working directory and git state flush
-	// left, diagnostics and context usage with model flush right.
+// currentState snapshots the inputs the compact status line renders
+// from. The state is the memo key, so every read here is one the line
+// actually depends on; the git segment comes from the watcher's cache
+// and the model from config, both cheap enough to read per frame.
+func (h *header) currentState(
+	session *session.Session,
+	diagnostics lsp.DiagnosticCounts,
+	breadcrumb string,
+) headerState {
+	const dirTrimLimit = 4
+	agentCfg := h.com.Config().Agents[config.AgentCoder]
+	model := h.com.Config().GetModelByType(agentCfg.Model)
+
+	state := headerState{
+		breadcrumb:  breadcrumb,
+		diagnostics: diagnostics,
+		cwd:         fsext.DirTrim(fsext.PrettyPath(h.com.Workspace.WorkingDir()), dirTrimLimit),
+		git:         gitSegment(h.com),
+	}
+	if session != nil {
+		state.sessionID = session.ID
+		state.tokens = int64(session.CompletionTokens + session.PromptTokens)
+		state.estimated = session.EstimatedUsage
+		state.goalActive = session.Goal.Active()
+	}
+	if model != nil {
+		state.hasModel = true
+		state.modelID = model.ID
+		state.usable = h.com.Config().UsableContextWindowFor(agentCfg.Model)
+	}
+	return state
+}
+
+// renderLine renders the compact status line: the two halves flush left
+// and right with the gap spread between them; when the halves do not
+// fit, the left side shrinks first so the usage and model stay visible,
+// then whatever still overflows is truncated. The result carries the
+// wrapper's horizontal padding.
+func (h *header) renderLine(width int, state headerState) string {
 	availWidth := width - leftPadding - rightPadding
-	left, right := renderHeaderDetails(
-		h.com,
-		session,
-		diagnostics,
-		breadcrumb,
-	)
+	left, right := renderHeaderState(h.com.Styles, state)
 
 	gap := availWidth - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
-		// Not enough room: shrink the left side first so the usage and
-		// model stay visible, then truncate whatever still overflows.
 		maxLeft := max(0, availWidth-lipgloss.Width(right)-1)
 		left = ansi.Truncate(left, maxLeft, "…")
 		if lipgloss.Width(left)+lipgloss.Width(right) > availWidth {
@@ -82,70 +147,54 @@ func (h *header) drawHeader(
 
 	line := left + strings.Repeat(" ", max(gap, 0)) + right
 
-	view := uv.NewStyledString(
-		h.com.Styles.Header.Wrapper.Padding(0, rightPadding, 0, leftPadding).Render(line),
-	)
-	view.Draw(scr, area)
+	return h.com.Styles.Header.Wrapper.Padding(0, rightPadding, 0, leftPadding).Render(line)
 }
 
-// renderHeaderDetails renders the two halves of the compact status line:
+// renderHeaderState renders the two halves of the compact status line:
 // the left (breadcrumb when viewing a child session, working directory and
 // git state) and the right (LSP errors and context usage with model, or
 // just the model while no session exists yet).
-func renderHeaderDetails(
-	com *common.Common,
-	session *session.Session,
-	diagnostics lsp.DiagnosticCounts,
-	breadcrumb string,
-) (left, right string) {
-	t := com.Styles
-
+func renderHeaderState(t *styles.Styles, state headerState) (left, right string) {
 	// Left: working directory and git state.
-	const dirTrimLimit = 4
-	cwd := fsext.DirTrim(fsext.PrettyPath(com.Workspace.WorkingDir()), dirTrimLimit)
-
 	var leftParts []string
-	if breadcrumb != "" {
-		leftParts = append(leftParts, breadcrumb)
+	if state.breadcrumb != "" {
+		leftParts = append(leftParts, state.breadcrumb)
 	}
-	leftParts = append(leftParts, t.Header.WorkingDir.Render(cwd))
-	if seg := gitSegment(com); seg != "" {
-		leftParts = append(leftParts, seg)
+	leftParts = append(leftParts, t.Header.WorkingDir.Render(state.cwd))
+	if state.git != "" {
+		leftParts = append(leftParts, state.git)
 	}
 
 	// Right: diagnostics and context usage with the model ID.
 	var rightParts []string
 	// An active goal means the agent will keep taking turns on its own,
 	// which is worth knowing before typing into the session.
-	if session != nil && session.Goal.Active() {
+	if state.goalActive {
 		rightParts = append(rightParts, t.Header.Goal.Render("◎ goal"))
 	}
 	// Diagnostics are shown broken down by severity, the same rendered
 	// form the LSP section uses; the all-clear case renders nothing.
-	if diagnostics := lspDiagnostics(t, severityCounts(diagnostics)); diagnostics != "" {
+	if diagnostics := lspDiagnostics(t, severityCounts(state.diagnostics)); diagnostics != "" {
 		rightParts = append(rightParts, diagnostics)
 	}
 
-	agentCfg := com.Config().Agents[config.AgentCoder]
-	model := com.Config().GetModelByType(agentCfg.Model)
-	if model != nil {
+	if state.hasModel {
 		// Measured against the usable window, not the raw one: max_tokens is
 		// reserved from the same window, so a percentage of the raw number
 		// reads lower than the share of the budget actually spent.
-		usable := com.Config().UsableContextWindowFor(agentCfg.Model)
-		if session != nil && session.ID != "" && usable > 0 {
-			percentage := (float64(session.CompletionTokens+session.PromptTokens) / float64(usable)) * 100
+		if state.sessionID != "" && state.usable > 0 {
+			percentage := (float64(state.tokens) / float64(state.usable)) * 100
 			// The model ID rides beside the context percentage so the
 			// line shows what is answering, not just how full it is.
-			percentageText := fmt.Sprintf("%d%% %s", int(percentage), model.ID)
-			if session.EstimatedUsage {
+			percentageText := fmt.Sprintf("%d%% %s", int(percentage), state.modelID)
+			if state.estimated {
 				percentageText = "~" + percentageText
 			}
 			rightParts = append(rightParts, t.Header.Percentage.Render(percentageText))
 		} else {
 			// No session yet (landing): the line still shows what will
 			// answer, just without a context percentage.
-			rightParts = append(rightParts, t.Header.Percentage.Render(model.ID))
+			rightParts = append(rightParts, t.Header.Percentage.Render(state.modelID))
 		}
 	}
 

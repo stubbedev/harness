@@ -35,11 +35,18 @@ type List struct {
 	// renderCallbacks is a list of callbacks to apply when rendering items.
 	renderCallbacks []func(idx, selectedIdx int, item Item) Item
 
-	// totalHeightCache is a cached value of the total rendered height of
-	// all items. It is invalidated whenever the item set changes or the
-	// viewport width changes (which can alter per-item line counts).
-	totalHeightCache int
-	totalHeightValid bool
+	// sums holds prefix sums of the rendered item heights: sums[i] is
+	// the total height of items[0:i] counting one gap between adjacent
+	// items, so sums[len(items)] is TotalHeight and sums[offsetIdx] is
+	// the line offset of the viewport top. Entries below sumsFrom are
+	// valid; renderItemEntry re-bases the sums whenever a re-render
+	// changes an item's height, so a streaming or animating item only
+	// invalidates the suffix above it — in a chat, the few items at
+	// the bottom — and both sums are O(1) once built. A width change
+	// (SetSize) or an item-set change re-bases from zero, since every
+	// item can reflow.
+	sums     []int
+	sumsFrom int
 
 	// cache is the F6 list-level render memo, keyed by item pointer.
 	// Each entry stores the rendered content, a pre-split slice of
@@ -110,9 +117,14 @@ func (l *List) SetSize(width, height int) {
 	l.height = height
 }
 
-// SetGap sets the gap between items.
+// SetGap sets the gap between items. A gap change alters every
+// inter-item boundary, so the prefix sums re-base from zero.
 func (l *List) SetGap(gap int) {
+	if l.gap == gap {
+		return
+	}
 	l.gap = gap
+	l.sumsFrom = 0
 }
 
 // Gap returns the gap between items.
@@ -169,25 +181,49 @@ func (l *List) Len() int {
 }
 
 // TotalHeight returns the total height of all items in the list.
-// The result is cached and only recomputed when the item set or
-// viewport width changes.
+// The total is a prefix sum over the per-item render cache (see
+// List.sums), built once and maintained incrementally: rendering that
+// does not change any item's height makes this a pointer read.
 func (l *List) TotalHeight() int {
-	if l.totalHeightValid {
-		return l.totalHeightCache
+	l.extendSums(len(l.items))
+	if len(l.sums) == 0 {
+		return 0
 	}
-	total := 0
-	for idx := range l.items {
-		entry := l.renderItemEntry(idx)
-		if entry == nil {
-			continue
-		}
-		total += entry.height
-		if l.gap > 0 && idx < len(l.items)-1 {
-			total += l.gap
-		}
+	return l.sums[len(l.items)]
+}
+
+// extendSums builds the prefix sums through index to, rendering the
+// items the sums have not covered yet. Entries at or above sumsFrom
+// are (re)computed from their item's cached render.
+func (l *List) extendSums(to int) {
+	if to < l.sumsFrom {
+		return
 	}
-	l.totalHeightCache = total
-	l.totalHeightValid = true
+	for len(l.sums) < to+1 {
+		l.sums = append(l.sums, 0)
+	}
+	for i := l.sumsFrom; i <= to; i++ {
+		l.sums[i] = l.sumAt(i)
+	}
+	l.sumsFrom = to + 1
+}
+
+// sumAt computes sums[i] from the previous prefix and item i-1's
+// cached height, matching the way TotalHeight and Offset used to walk:
+// one gap between adjacent items, none after the last.
+func (l *List) sumAt(i int) int {
+	if i == 0 {
+		return 0
+	}
+	total := l.sums[i-1]
+	entry := l.renderItemEntry(i - 1)
+	if entry == nil {
+		return total
+	}
+	total += entry.height
+	if l.gap > 0 && i-1 < len(l.items)-1 {
+		total += l.gap
+	}
 	return total
 }
 
@@ -250,17 +286,20 @@ func (l *List) ScrollPosition() (offsetIdx, offsetLine int) {
 }
 
 // Offset returns the current scroll offset in lines from the top.
+// The offset is a prefix sum over the items above the viewport (see
+// List.sums), so a steady frame answers in O(1) instead of re-walking
+// every item above it.
 func (l *List) Offset() int {
-	offset := 0
-	for idx := 0; idx < l.offsetIdx; idx++ {
-		item := l.getItem(idx)
-		offset += item.height
-		if l.gap > 0 && idx < len(l.items)-1 {
-			offset += l.gap
-		}
+	if l.offsetIdx < 0 {
+		// An empty list reports a negative offset index (SetItems
+		// clamps to len-1); there is nothing above the viewport.
+		return l.offsetLine
 	}
-	offset += l.offsetLine
-	return offset
+	l.extendSums(l.offsetIdx)
+	if len(l.sums) == 0 {
+		return l.offsetLine
+	}
+	return l.sums[l.offsetIdx] + l.offsetLine
 }
 
 // lastOffsetItem returns the index and line offsets of the last item that can
@@ -368,10 +407,12 @@ func (l *List) renderItemEntry(idx int) *listCacheEntry {
 		entry = &listCacheEntry{}
 		l.cache[rawItem] = entry
 	}
-	// If the item's rendered height changed, the cached total height is
-	// no longer valid and must be recomputed on the next TotalHeight call.
+	// If the item's rendered height changed, every prefix sum that
+	// includes this item is stale and is recomputed from here on the
+	// next TotalHeight/Offset call. Markdown reflow on a resize walks
+	// this path for every item; steady-state renders skip it.
 	if entry.height != height {
-		l.totalHeightValid = false
+		l.sumsFrom = min(l.sumsFrom, idx+1)
 	}
 	entry.width = l.width
 	entry.version = finalVersion
@@ -382,12 +423,14 @@ func (l *List) renderItemEntry(idx int) *listCacheEntry {
 	return entry
 }
 
-// invalidateAll drops every cache entry. Called on width changes.
+// invalidateAll drops every cache entry. Called on width changes: a
+// re-render at a new width can reflow every item, so the prefix sums
+// re-base from zero.
 func (l *List) invalidateAll() {
 	for k := range l.cache {
 		delete(l.cache, k)
 	}
-	l.totalHeightValid = false
+	l.sumsFrom = 0
 }
 
 // Invalidate drops the cache entry for the given item, forcing a
@@ -660,7 +703,7 @@ func (l *List) PrependItems(items ...Item) {
 	if l.selectedIdx != -1 {
 		l.selectedIdx += len(items)
 	}
-	l.totalHeightValid = false
+	l.sumsFrom = 0
 }
 
 // SetItems sets the items in the list. Cache entries for items that
@@ -672,13 +715,20 @@ func (l *List) SetItems(items ...Item) {
 	l.offsetIdx = min(l.offsetIdx, len(l.items)-1)
 	l.offsetLine = 0
 	l.retainCacheFor(items)
-	l.totalHeightValid = false
+	l.sumsFrom = 0
 }
 
-// AppendItems appends items to the list.
+// AppendItems appends items to the list. Prefix sums over the items
+// already in the list stay valid except for the old total's entry:
+// sums[oldLen] carried no gap after what was then the last item, so it
+// is re-based along with the new tail, which is summed on demand.
 func (l *List) AppendItems(items ...Item) {
+	if len(items) == 0 {
+		return
+	}
+	prev := len(l.items)
 	l.items = append(l.items, items...)
-	l.totalHeightValid = false
+	l.sumsFrom = min(l.sumsFrom, prev)
 }
 
 // RemoveItem removes the item at the given index from the list.
@@ -711,7 +761,9 @@ func (l *List) RemoveItem(idx int) {
 		l.offsetIdx = max(0, len(l.items)-1)
 		l.offsetLine = 0
 	}
-	l.totalHeightValid = false
+	// Items above idx keep their heights, but every index at or after
+	// the removal now names a different item, so the sums re-base.
+	l.sumsFrom = min(l.sumsFrom, idx)
 }
 
 // Focused returns whether the list is focused.

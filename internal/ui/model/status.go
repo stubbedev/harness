@@ -1,11 +1,14 @@
 package model
 
 import (
+	"fmt"
+	"hash/fnv"
 	"image"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -23,6 +26,28 @@ type Status struct {
 	help   help.Model
 	helpKm help.KeyMap
 	msg    util.InfoMsg
+
+	// helpLine memoizes the keymap's rendered help line. Draw runs on
+	// every frame, and help.View plus its styling ran on each one;
+	// the line is rebuilt only when an input to it changed, and every
+	// input lives in helpKey.
+	helpLine string
+	helpKey  statusHelpKey
+	helpSet  bool
+}
+
+// statusHelpKey identifies the rendered help line. Width is the draw
+// area's width (the wrapper pads to it) and helpWidth the help model's
+// truncation width (SetWidth); showAll picks the short or full view;
+// binds hashes the live keymap's bindings, which track mode, focus,
+// dialogs and open panels; styles fingerprints the styles the line is
+// rendered through, so a theme change re-renders it.
+type statusHelpKey struct {
+	width     int
+	helpWidth int
+	showAll   bool
+	binds     uint64
+	styles    uint64
 }
 
 // NewStatus creates a new status bar and help model.
@@ -67,7 +92,7 @@ func (s *Status) ToggleHelp() {
 // The help (and the info message drawn over it) is anchored at the
 // bottom of the area so the hints always hug the terminal's last row.
 func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
-	helpView := s.com.Styles.Status.Help.Render(s.help.View(s.helpKm))
+	helpView := s.com.Styles.Status.Help.Render(s.helpView(area.Dx()))
 	uv.NewStyledString(helpView).Draw(scr, bottomRect(area, lipgloss.Height(helpView)))
 
 	// Render notifications
@@ -108,6 +133,81 @@ func (s *Status) Draw(scr uv.Screen, area uv.Rectangle) {
 
 	// Draw the info message over the help view
 	uv.NewStyledString(ind+info).Draw(scr, bottomRect(area, 1))
+}
+
+// helpView returns the keymap's help line for a draw area of the given
+// width, memoized across frames (see statusHelpKey).
+func (s *Status) helpView(width int) string {
+	key := statusHelpKey{
+		width:     width,
+		helpWidth: s.help.Width(),
+		showAll:   s.help.ShowAll,
+		binds:     s.bindsToken(),
+		styles:    s.stylesToken(),
+	}
+	if !s.helpSet || s.helpKey != key {
+		s.helpLine = s.help.View(s.helpKm)
+		s.helpKey = key
+		s.helpSet = true
+	}
+	return s.helpLine
+}
+
+// bindsToken folds the live keymap's hint state into one number: every
+// binding's enabled flag, key and description, in the order help.View
+// renders them (full help's groups separated by a marker). A hint
+// change — mode, focus, a dialog or panel opening, a rebind — moves
+// the token.
+func (s *Status) bindsToken() uint64 {
+	h := fnv.New64a()
+	hashGroup := func(bindings []key.Binding) {
+		for _, b := range bindings {
+			hlp := b.Help()
+			h.Write([]byte{enabledBit(b)})
+			h.Write([]byte(hlp.Key))
+			h.Write([]byte{0})
+			h.Write([]byte(hlp.Desc))
+			h.Write([]byte{0})
+		}
+		h.Write([]byte{0})
+	}
+	if s.help.ShowAll {
+		for _, group := range s.helpKm.FullHelp() {
+			hashGroup(group)
+		}
+		return h.Sum64()
+	}
+	hashGroup(s.helpKm.ShortHelp())
+	return h.Sum64()
+}
+
+// enabledBit returns the byte a binding hashes to for its enabled flag.
+func enabledBit(b key.Binding) byte {
+	if b.Enabled() {
+		return '1'
+	}
+	return '0'
+}
+
+// stylesToken fingerprints the inputs that decide how the help line is
+// rendered rather than what it says: the help model's key/desc/
+// separator styles, its separator and ellipsis literals, and the
+// wrapper style. Themes restyle them together, so a theme switch moves
+// the token and the cached line re-renders in the new theme.
+func (s *Status) stylesToken() uint64 {
+	h := fnv.New64a()
+	wrap := s.com.Styles.Status.Help
+	sty := s.help.Styles
+	fmt.Fprint(h,
+		wrap.GetForeground(), wrap.GetBackground(),
+		wrap.GetPaddingLeft(), wrap.GetPaddingRight(),
+		s.help.ShortSeparator, s.help.FullSeparator, s.help.Ellipsis,
+		sty.Ellipsis.GetForeground(),
+		sty.ShortKey.GetForeground(), sty.ShortDesc.GetForeground(),
+		sty.ShortSeparator.GetForeground(),
+		sty.FullKey.GetForeground(), sty.FullDesc.GetForeground(),
+		sty.FullSeparator.GetForeground())
+	return h.Sum64()
 }
 
 // bottomRect returns the bottom-most rows of area with the given

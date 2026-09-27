@@ -106,6 +106,12 @@ type ToolRenderOpts struct {
 	// Elapsed is how long the tool call has been (or was) running.
 	// Zero when the start time is unknown (restored items).
 	Elapsed time.Duration
+	// OmitWaitingLine leaves the running state's "Waiting for tool
+	// response..." line out of the rendered output.
+	// baseToolMessageItem sets it while a call is spinning and appends
+	// the line itself per animation tick (see bodySuffix), so the body
+	// is rendered once per content change instead of once per frame.
+	OmitWaitingLine bool
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -156,6 +162,9 @@ type baseToolMessageItem struct {
 	expandedContent bool
 	startedAt       time.Time
 	finishedAt      time.Time
+	// bodyKey is the [bodyKeyToken] the cached body was rendered
+	// under; a changing token forces the next cachedBody to miss.
+	bodyKey uint64
 }
 
 var _ Expandable = (*baseToolMessageItem)(nil)
@@ -370,80 +379,188 @@ func toolFullWidth(tc message.ToolCall) bool {
 // the call's nesting level. This is the one place the readability cap is
 // applied, so renderers treat the width they get as final.
 func (t *baseToolMessageItem) BodyRender(bodyWidth int) string {
+	bodyWidth = t.bodyRenderWidth(bodyWidth)
+	body, height := t.cachedBody(bodyWidth)
+	suffix := t.bodySuffix()
+	if suffix == "" {
+		return t.renderHighlighted(body, bodyWidth, height)
+	}
+	if body != "" {
+		suffix = "\n" + suffix
+	}
+	return t.renderHighlighted(body+suffix, bodyWidth, height+lipgloss.Height(suffix))
+}
+
+// bodyRenderWidth applies the readability cap: only diffs render at
+// the full body width, everything else is capped at [maxTextWidth].
+func (t *baseToolMessageItem) bodyRenderWidth(bodyWidth int) int {
 	if !toolFullWidth(t.toolCall) {
-		bodyWidth = min(bodyWidth, maxTextWidth)
+		return min(bodyWidth, maxTextWidth)
 	}
-	content, height, ok := t.getCachedRender(bodyWidth)
-	// if we are spinning or there is no cache rerender
-	if !ok || t.isSpinning() {
-		opts := ToolRenderOpts{
-			ToolCall: t.toolCall,
-			// Resolved at render time so a pending wait's label tracks
-			// agents finishing while it runs. The item re-renders per
-			// tick until its result lands (see isSpinning), so the
-			// count stays fresh.
-			Name:            t.DisplayName(),
-			Result:          t.result,
-			ExpandedContent: t.expandedContent,
-			Compact:         t.isCompact,
-			Status:          t.EffectiveStatus(),
-			StartedAt:       t.startedAt,
-			Elapsed:         t.elapsed(),
-		}
-		content = t.toolRenderer.RenderTool(t.sty, bodyWidth, &opts)
+	return bodyWidth
+}
 
-		// Prepend hook indicator if hooks ran for this tool call.
-		if t.result != nil {
-			if hookLine := toolOutputHookIndicator(t.sty, t.result.Metadata, bodyWidth); hookLine != "" {
-				content = hookLine + "\n\n" + content
-			}
-		}
+// cachedBody returns the call's body — its full view without the
+// frame-dependent waiting line — served from the render cache across
+// animation ticks. A running call re-renders here only when its content
+// actually changed (tool call, result, expansion, compact mode, live
+// wait label, body width); the waiting line that changes every tick is
+// appended by [BodyRender] from [bodySuffix].
+func (t *baseToolMessageItem) cachedBody(bodyWidth int) (string, int) {
+	key := t.bodyKeyToken()
+	if content, height, ok := t.getCachedRender(bodyWidth); ok && t.bodyKey == key {
+		return content, height
+	}
+	opts := ToolRenderOpts{
+		ToolCall: t.toolCall,
+		// Resolved at render time so a pending wait's label tracks
+		// agents finishing while it runs. The label is folded into
+		// the body cache key (see bodyKeyToken), so the count stays
+		// fresh without re-rendering the body per tick.
+		Name:            t.DisplayName(),
+		Result:          t.result,
+		ExpandedContent: t.expandedContent,
+		Compact:         t.isCompact,
+		Status:          t.EffectiveStatus(),
+		StartedAt:       t.startedAt,
+		Elapsed:         t.elapsed(),
+		// Suppress exactly the waiting line the renderer would draw
+		// while running; bodySuffix appends it per tick.
+		OmitWaitingLine: t.showsWaitingLine(),
+	}
+	content := t.toolRenderer.RenderTool(t.sty, bodyWidth, &opts)
 
-		height = lipgloss.Height(content)
-		// cache the rendered content
-		t.setCachedRender(content, bodyWidth, height)
+	// Prepend hook indicator if hooks ran for this tool call.
+	if t.result != nil {
+		if hookLine := toolOutputHookIndicator(t.sty, t.result.Metadata, bodyWidth); hookLine != "" {
+			content = hookLine + "\n\n" + content
+		}
 	}
 
-	return t.renderHighlighted(content, bodyWidth, height)
+	height := lipgloss.Height(content)
+	// cache the rendered content
+	t.setCachedRender(content, bodyWidth, height)
+	t.bodyKey = key
+	return content, height
+}
+
+// bodySuffix renders a running call's waiting line — the only part of
+// the view that changes per animation tick — exactly as
+// [toolEarlyStateContent] renders it, so appending it keeps the full
+// view byte-identical. Empty when the call's view carries no waiting
+// line.
+func (t *baseToolMessageItem) bodySuffix() string {
+	if !t.showsWaitingLine() {
+		return ""
+	}
+	return t.sty.Tool.StateWaiting.Render(waitingForToolMessage(&ToolRenderOpts{
+		StartedAt: t.startedAt,
+	}))
+}
+
+// showsWaitingLine reports whether a running call's full view carries
+// the "Waiting for tool response" line: every renderer shows it
+// through [toolEarlyStateContent] except the wait tool, whose running
+// header already says what the turn is waiting on, and compact views,
+// which are header-only.
+func (t *baseToolMessageItem) showsWaitingLine() bool {
+	if t.isCompact || t.EffectiveStatus() != ToolStatusRunning {
+		return false
+	}
+	_, isWait := t.toolRenderer.(*WaitToolRenderContext)
+	return !isWait
+}
+
+// bodyKeyToken hashes the render-time input that can change the body
+// without an explicit invalidation: a pending wait's label tracks the
+// live subagent count (see [DisplayName]), so it is folded into the
+// body cache key. Zero for every other renderer, whose render inputs
+// all invalidate through the item's version.
+func (t *baseToolMessageItem) bodyKeyToken() uint64 {
+	if _, ok := t.toolRenderer.(*WaitToolRenderContext); !ok {
+		return 0
+	}
+	return fnv64(t.DisplayName())
 }
 
 // Render renders the tool message item at the given width.
 func (t *baseToolMessageItem) Render(width int) string {
 	// Cache the prefixed output keyed by (width, prefix variant).
-	// Bypass the cache while spinning (RawRender output is
-	// frame-dependent) or while a highlight range is active.
-	useCache := !t.isSpinning() && !t.isHighlighted()
-	var key uint64
-	switch {
-	case t.isCompact:
-		key = 2
-	case t.focused:
-		key = 1
-	default:
-		key = 0
-	}
+	// The cache holds the body WITHOUT the waiting suffix: a running
+	// call's waiting line changes every animation tick, so folding it
+	// in would bypass the cache exactly when the item is re-rendered
+	// most. A hit therefore needs only the O(1) suffix re-attached per
+	// tick instead of a re-split and re-prefix of the whole body (the
+	// [AssistantMessageItem] spinner pattern). Bypass the cache
+	// entirely while a highlight range is active.
+	useCache := !t.isHighlighted()
+	key := t.prefixKey()
 	if useCache {
 		if cached, ok := t.getCachedPrefixedRender(width, key); ok {
-			return cached
+			return cached + t.prefixedSuffix(cached != "")
 		}
 	}
-	var prefix string
-	if t.isCompact {
-		prefix = t.sty.Messages.ToolCallCompact.Render()
-	} else if t.focused {
-		prefix = t.sty.Messages.ToolCallFocused.Render()
-	} else {
-		prefix = t.sty.Messages.ToolCallBlurred.Render()
+	prefixed := t.prefixedBodyRender(width)
+	if useCache {
+		t.setCachedPrefixedRender(prefixed, width, key)
 	}
-	lines := strings.Split(t.RawRender(width), "\n")
+	return prefixed + t.prefixedSuffix(prefixed != "")
+}
+
+// prefixKey packs the focus prefix variant into the low bits of the
+// prefixed-render cache key and the body key token into the upper
+// bits, so a changing live input (a pending wait's agent count) misses
+// the prefixed cache together with the body cache.
+func (t *baseToolMessageItem) prefixKey() uint64 {
+	var variant uint64
+	switch {
+	case t.isCompact:
+		variant = 2
+	case t.focused:
+		variant = 1
+	}
+	return t.bodyKeyToken()<<2 | variant
+}
+
+// focusPrefix returns the per-line bar prefix for the item's current
+// compact/focus state.
+func (t *baseToolMessageItem) focusPrefix() string {
+	if t.isCompact {
+		return t.sty.Messages.ToolCallCompact.Render()
+	} else if t.focused {
+		return t.sty.Messages.ToolCallFocused.Render()
+	}
+	return t.sty.Messages.ToolCallBlurred.Render()
+}
+
+// prefixedBodyRender applies the per-line focus prefix to the cached
+// body without the waiting suffix.
+func (t *baseToolMessageItem) prefixedBodyRender(width int) string {
+	body, _ := t.cachedBody(t.bodyRenderWidth(ToolBodyWidth(width, 0)))
+	if body == "" {
+		return ""
+	}
+	prefix := t.focusPrefix()
+	lines := strings.Split(body, "\n")
 	for i, ln := range lines {
 		lines[i] = prefix + ln
 	}
-	out := strings.Join(lines, "\n")
-	if useCache {
-		t.setCachedPrefixedRender(out, width, key)
+	return strings.Join(lines, "\n")
+}
+
+// prefixedSuffix returns the focus-prefixed waiting line to append
+// after the prefixed body, preceded by the line separator when the
+// body is non-empty. It returns "" when the view carries no waiting
+// line (see showsWaitingLine).
+func (t *baseToolMessageItem) prefixedSuffix(hasBody bool) string {
+	suffix := t.bodySuffix()
+	if suffix == "" {
+		return ""
 	}
-	return out
+	if hasBody {
+		return "\n" + t.focusPrefix() + suffix
+	}
+	return t.focusPrefix() + suffix
 }
 
 // ToolCall returns the tool call associated with this message item.
@@ -661,6 +778,12 @@ func toolEarlyStateContent(sty *styles.Styles, opts *ToolRenderOpts, width int) 
 	case ToolStatusCanceled:
 		msg = sty.Tool.StateCancelled.Render("Canceled.")
 	case ToolStatusRunning:
+		if opts.OmitWaitingLine {
+			// The item appends this line per animation tick (see
+			// baseToolMessageItem.bodySuffix); leaving it out here
+			// keeps the body cacheable while the call runs.
+			return "", false
+		}
 		msg = sty.Tool.StateWaiting.Render(waitingForToolMessage(opts))
 	default:
 		return "", false
