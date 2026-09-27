@@ -25,7 +25,6 @@ import (
 	"github.com/stubbedev/harness/internal/agentstate"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
-	"github.com/stubbedev/harness/internal/clipboard"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/db"
@@ -182,11 +181,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 
 	app.setupEvents()
 
-	// Initialize clipboard support. This is best-effort; if it fails
-	// (e.g., headless environment), clipboard operations will return nil.
-	if err := clipboard.Init(); err != nil {
-		slog.Warn("Clipboard initialization failed", "error", err)
-	}
+	// Clipboard support initializes lazily: every entry point re-runs
+	// the idempotent Init (see internal/clipboard), so touching
+	// X11/Wayland here would only add startup latency, worst on
+	// headless boxes where the probe fails.
 
 	// Check for updates in the background, unless the binary is managed
 	// externally (nix, package manager) and the check was disabled.
