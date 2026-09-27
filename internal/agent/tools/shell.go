@@ -247,11 +247,11 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			case result.Interrupted:
 				header = "[interrupted]"
 			case result.Queued:
-				header = "[queued; the shell runs it when the current command exits]"
+				header = queuedHeader(result)
 			case result.WhileBusy:
 				header = "[another command holds the session; its screen follows]"
 			case result.Waiting:
-				header = "[waiting for input]"
+				header = waitingHeader(result)
 			case result.AltScreen && result.Unchanged:
 				header = "[full-screen program; screen unchanged]"
 			case result.AltScreen:
@@ -321,6 +321,34 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(sb.String()), metadata), nil
 		},
 	)
+}
+
+// queuedHeader is the header for a call whose text was queued rather
+// than typed. The depth rides along once there is more than the one
+// line, so a caller can tell a queue that will drain from one that
+// never will.
+func queuedHeader(res PTYResult) string {
+	if res.QueuedCount > 1 {
+		return fmt.Sprintf("[queued behind %d commands; the shell runs them when the current command exits]", res.QueuedCount)
+	}
+	return "[queued; the shell runs it when the current command exits]"
+}
+
+// waitingHeader is the header for a call that found the session's
+// foreground blocked on input. An ordinary wait names the state and
+// nothing else. A wait that has stopped changing - the same verdict
+// call after call, or typed input nothing consumes - says so and names
+// the way out: an agent reading the same line again has no other
+// signal that polling is the failure, and the loop of identical polls
+// it breaks has cost hundreds of calls in the wild.
+func waitingHeader(res PTYResult) string {
+	if res.InputPending > 0 {
+		return fmt.Sprintf("[waiting for input, but %d bytes of typed input are still unread: nothing is consuming input; send \\u0003 (ctrl-c) to break out, or reset: true for a fresh shell]", res.InputPending)
+	}
+	if res.WaitStreak >= ptyWaitingEscalateCalls || res.WaitSeconds >= int(ptyWaitingEscalateAfter/time.Second) {
+		return fmt.Sprintf("[waiting for input; no change across %d calls and %ds: the program may be wedged; send \\u0003 (ctrl-c) to interrupt it, or reset: true for a fresh shell]", res.WaitStreak, res.WaitSeconds)
+	}
+	return "[waiting for input]"
 }
 
 // shellExitNote is what the model is told when its call landed on a

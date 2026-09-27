@@ -1437,3 +1437,49 @@ func TestPtyRunner_SessionStartsWithPagersAndColorOff(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "cat:cat:1:0", res.Output)
 }
+
+// A foreground that reads and answers nothing - cat pointed at
+// /dev/null, the shape of the wedge seen in the wild - keeps returning
+// the waiting verdict, and the run of identical verdicts is counted:
+// the first calls say no more than the state, and the escalations that
+// follow name the wedge and the way out instead of confirming the
+// caller's wrong mental model a fourth time.
+func TestPtyRunner_WaitingStreakEscalates(t *testing.T) {
+	r := newTestRunner(t)
+
+	res, err := r.Type(t.Context(), "cat > /dev/null", 10)
+	require.NoError(t, err)
+	require.True(t, res.Waiting)
+	require.Equal(t, 1, res.WaitStreak)
+	require.Zero(t, res.InputPending)
+
+	for streak := 2; streak <= ptyWaitingEscalateCalls; streak++ {
+		res, err = r.Type(t.Context(), "echo probe", 10)
+		require.NoError(t, err)
+		require.True(t, res.Waiting, "the wedge keeps the verdict")
+		require.Equal(t, streak, res.WaitStreak)
+		require.Zero(t, res.InputPending, "the wedge consumes what it is sent")
+		require.Empty(t, res.Output)
+	}
+}
+
+// A reset ends a waiting streak with the session it belongs to: the
+// fresh shell starts counting from one.
+func TestPtyRunner_ResetClearsWaitingStreak(t *testing.T) {
+	r := newTestRunner(t)
+
+	res, err := r.Type(t.Context(), "cat > /dev/null", 10)
+	require.NoError(t, err)
+	require.True(t, res.Waiting)
+	res, err = r.Type(t.Context(), "echo probe", 10)
+	require.NoError(t, err)
+	require.Equal(t, 2, res.WaitStreak)
+
+	require.NoError(t, r.Reset(t.Context()))
+	require.Zero(t, r.waitStreak)
+
+	res, err = r.Type(t.Context(), "cat > /dev/null", 10)
+	require.NoError(t, err)
+	require.True(t, res.Waiting)
+	require.Equal(t, 1, res.WaitStreak, "the fresh shell starts a fresh streak")
+}

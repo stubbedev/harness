@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"charm.land/fantasy"
@@ -301,4 +302,44 @@ func TestShellExitNote(t *testing.T) {
 	note := shellExitNote(&shellExit{Code: &code, Output: "DYING-LATE"})
 	require.Contains(t, note, "Its final output:")
 	require.Contains(t, note, "DYING-LATE")
+}
+
+// The waiting header is the wedge loop-breaker: an ordinary wait says
+// no more than the state, and a wait that has stopped changing - the
+// same verdict call after call, or typed input nothing consumes -
+// names the wedge and the way out.
+func TestWaitingHeader(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "[waiting for input]", waitingHeader(PTYResult{Waiting: true}),
+		"a first wait is reported as the state alone")
+	require.Equal(t, "[waiting for input]",
+		waitingHeader(PTYResult{Waiting: true, WaitStreak: 2, WaitSeconds: 90}),
+		"a question a caller is thinking about is not a wedge")
+
+	stuck := waitingHeader(PTYResult{Waiting: true, WaitStreak: ptyWaitingEscalateCalls, WaitSeconds: 5})
+	require.Contains(t, stuck, "wedged")
+	require.Contains(t, stuck, "ctrl-c")
+	require.Contains(t, stuck, "reset: true")
+
+	long := waitingHeader(PTYResult{
+		Waiting: true, WaitStreak: 1,
+		WaitSeconds: int(ptyWaitingEscalateAfter/time.Second) + 1,
+	})
+	require.Contains(t, long, "wedged", "a long wait escalates on age alone")
+
+	unconsumed := waitingHeader(PTYResult{Waiting: true, InputPending: 11})
+	require.Contains(t, unconsumed, "11 bytes")
+	require.Contains(t, unconsumed, "unread")
+}
+
+// The queued header reports the depth of the queue once there is more
+// than the one line, so a caller can tell a queue that will drain from
+// one that never will.
+func TestQueuedHeader(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "[queued; the shell runs it when the current command exits]",
+		queuedHeader(PTYResult{Queued: true, QueuedCount: 1}))
+	require.Contains(t, queuedHeader(PTYResult{Queued: true, QueuedCount: 3}), "3 commands")
 }

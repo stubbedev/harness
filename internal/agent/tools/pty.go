@@ -169,6 +169,19 @@ const (
 	// may stay open before the prompt is cancelled instead: a dispatch
 	// whose dialog nobody is there to answer must still return.
 	ptyCredentialDialogWait = 10 * time.Minute
+
+	// ptyWaitingEscalateCalls is how many calls in a row reporting the
+	// foreground blocked on input it takes before the result says so
+	// plainly. Past this, another bare "waiting" is the bait in the
+	// poll-loop trap: each poll is cheap, looks plausible, and confirms
+	// the caller's wrong mental model, so the message has to name the
+	// wedge and the way out instead.
+	ptyWaitingEscalateCalls = 3
+	// ptyWaitingEscalateAfter is the age of an unanswered wait that
+	// escalates the message however few calls reported it - a single
+	// long-budget call parked on a wedged foreground deserves the same
+	// honesty as a run of short polls.
+	ptyWaitingEscalateAfter = 2 * time.Minute
 )
 
 // errTerminalInputFull reports that the program in the foreground is
@@ -281,6 +294,24 @@ type PTYResult struct {
 	// and needs input or keys before anything else happens. There is no
 	// exit code yet.
 	Waiting bool
+	// WaitStreak counts the calls in a row that have returned this
+	// waiting verdict, this one included; WaitSeconds is how long ago
+	// the first of them found the wait. Any other outcome clears the
+	// streak, so a count still standing is the measure of a wait that
+	// has stopped changing - the state an agent keeps polling because
+	// nothing told it the polls were the failure.
+	WaitStreak  int
+	WaitSeconds int
+	// InputPending is how many bytes of input typed at the session are
+	// still unconsumed. A foreground genuinely blocked in a read takes
+	// what it is sent; bytes left standing mean nothing is reading,
+	// which is a wedged session wearing a question's clothes.
+	InputPending int
+	// QueuedCount is how many command lines are waiting for the
+	// session's current command to finish, this call's contribution
+	// included. It is the queue-depth surface a client needs to tell
+	// one queued command from fifty.
+	QueuedCount int
 	// Queued reports that the text was not typed: the session's
 	// foreground command does not read input, so the line joined a
 	// queue and the shell runs it, in the order typed, the next time it
@@ -419,6 +450,13 @@ type ptyRunner struct {
 	// setup is typed at it (see setupSessionLocked) - the path shells
 	// without one take, kept reachable for tests on shells that have.
 	typedSetup bool
+	// waitStreak and waitSince track the run of consecutive results
+	// that found the session's foreground blocked on input: how many
+	// in a row, and when the run began. They are what lets a later
+	// result say "this wait has stopped changing" instead of repeating
+	// the state line the caller has already misread three times.
+	waitStreak int
+	waitSince  time.Time
 }
 
 var (
@@ -818,6 +856,8 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 		// that is what the model should be told about next -- and only if
 		// something moves away from it.
 		r.announcedCwd = r.cwd
+		r.waitStreak = 0
+		r.waitSince = time.Time{}
 		if time.Since(r.startedAt) < ptyRestartDelay {
 			time.Sleep(ptyRestartDelay)
 		}
@@ -1035,6 +1075,8 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 	r.lastScreen = ""
 	r.lastCwd = ""
 	r.announcedCwd = r.cwd
+	r.waitStreak = 0
+	r.waitSince = time.Time{}
 	// Lines queued behind the old shell's command were meant for that
 	// shell's state; a fresh one would run them against nothing.
 	r.pending = nil
@@ -1110,6 +1152,7 @@ func (r *ptyRunner) typeSession(ctx context.Context, text string, waitSeconds in
 			r.enqueue(text)
 			res = joinResults(ran...)
 			res.Queued = true
+			res.QueuedCount = r.queueDepth()
 			return res, nil
 		}
 		final, err := r.runCommand(ctx, s, text, waitSeconds)
@@ -1128,7 +1171,7 @@ func (r *ptyRunner) typeSession(ctx context.Context, text string, waitSeconds in
 			return res, nil
 		}
 		r.enqueue(text)
-		return PTYResult{Queued: true, Running: s.Alive()}, nil
+		return PTYResult{Queued: true, QueuedCount: r.queueDepth(), Running: s.Alive()}, nil
 	}
 	return r.driveProgram(ctx, s, text, waitSeconds)
 }
@@ -1179,6 +1222,39 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 		return PTYResult{}, err
 	}
 	return r.awaitCompletion(ctx, s, echo, waitSeconds)
+}
+
+// noteWaiting records one more result that found the session's
+// foreground blocked on input, and returns the run of consecutive such
+// results with the age of the run. Callers that report any other
+// outcome call clearWaiting.
+func (r *ptyRunner) noteWaiting() (streak int, waited time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	if r.waitStreak <= 0 || r.waitSince.IsZero() {
+		r.waitSince = now
+	}
+	r.waitStreak++
+	return r.waitStreak, now.Sub(r.waitSince)
+}
+
+// clearWaiting ends a run of waiting verdicts: something happened - a
+// command finished, a screen was rendered, output arrived - so the
+// next wait, should there be one, starts counting from itself.
+func (r *ptyRunner) clearWaiting() {
+	r.mu.Lock()
+	r.waitStreak = 0
+	r.waitSince = time.Time{}
+	r.mu.Unlock()
+}
+
+// queueDepth is how many command lines are waiting for the session's
+// current command to finish.
+func (r *ptyRunner) queueDepth() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.pending)
 }
 
 // takeSettled reports whether the session is still exactly where the
@@ -1406,7 +1482,18 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 				}
 				// The foreground job is blocked reading the terminal:
 				// the command has asked its question and gone quiet.
-				return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: true, Waiting: true}, nil
+				streak, waited := r.noteWaiting()
+				return PTYResult{
+					Output:      r.clean(string(s.Drain()), echo),
+					Running:     true,
+					Waiting:     true,
+					WaitStreak:  streak,
+					WaitSeconds: int(waited / time.Second),
+					// Typed input still standing in the tty queue is the
+					// wedge's own signature: a genuine reader would have
+					// taken it.
+					InputPending: s.PendingInput(),
+				}, nil
 			} else if !s.WaitForOutput(ctx, time.Until(deadline)) {
 				break // the silence outlasted the budget
 			} else {
@@ -1489,8 +1576,10 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 	}
 	if s.AltScreen() {
 		s.Drain()
+		r.clearWaiting()
 		return r.screenResult(s), nil
 	}
+	r.clearWaiting()
 	return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: s.Alive()}, nil
 }
 
@@ -1743,6 +1832,9 @@ func (r *ptyRunner) interrupt(s ptyTerminal) PTYResult {
 // terminal, where the raw byte stream is a redraw log, not output.
 func (r *ptyRunner) screenResult(s ptyTerminal) PTYResult {
 	screen := s.Screen()
+	// A rendered screen is evidence of life: the wait-streak, if one
+	// was running, belongs to a wait that has since ended.
+	r.clearWaiting()
 	res := PTYResult{
 		Output:    screen,
 		AltScreen: true,
@@ -1780,6 +1872,7 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 		}
 		return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: s.Alive()}, nil
 	}
+	r.clearWaiting()
 
 	// Take the prompt that follows the sentinel along with it, so the
 	// session is left at a known point and the next command can start
@@ -2359,6 +2452,7 @@ func (r *ptyRunner) collect(ctx context.Context, s ptyTerminal) PTYResult {
 // draining then would take the tail of its output away from the call
 // that is about to report it.
 func (r *ptyRunner) collectBusy(_ context.Context, s ptyTerminal, busy bool) PTYResult {
+	r.clearWaiting()
 	// The call waiting on that command owns the output stream, so show
 	// the screen instead - a read, not a consume.
 	if busy {
