@@ -97,3 +97,26 @@ func TestDragCopyOfCodeBlockHasNoMargin(t *testing.T) {
 	_ = renderToBuffer(t, c, 80, 20)
 	require.Equal(t, "Run:\n\nls -la\n  cd /tmp && make\n\nDone.", c.HighlightContent())
 }
+
+// TestDragCopyKeepsNoBreakSpaces pins that a drag copy restores inline
+// code's backticks from its padding and nothing else: a no-break space
+// in the message text copies as itself, not as a backtick.
+func TestDragCopyKeepsNoBreakSpaces(t *testing.T) {
+	u := newTestUI()
+	msg := &message.Message{
+		ID:   "m1",
+		Role: message.Assistant,
+		Parts: []message.ContentPart{
+			message.TextContent{Text: "Prix : 10 €, run `make` now."},
+		},
+	}
+	u.chat.SetMessages("", chat.NewAssistantMessageItem(u.com.Styles, msg))
+	u.updateLayoutAndSize()
+	c := u.chat
+
+	c.mouseDown = true
+	c.mouseDownItem, c.mouseDownY, c.mouseDownX = 0, 0, 0
+	c.mouseDragItem, c.mouseDragY, c.mouseDragX = 0, 0, 79
+	_ = renderToBuffer(t, c, 80, 20)
+	require.Equal(t, "Prix : 10 €, run `make` now.", c.HighlightContent())
+}

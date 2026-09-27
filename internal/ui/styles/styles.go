@@ -24,10 +24,18 @@ const (
 
 	ArrowRightIcon string = "→"
 
-	// CodespanPadding is the padding rendered around inline code spans in
-	// markdown. It displays identically to the blank padding it replaced,
-	// but selection copies recognize it and turn it back into the original
-	// backticks (see list.HighlightContent).
+	// CodespanPaddingMarkup is how the padding around inline code spans in
+	// markdown is written: a concealed [CodespanPadding]. Concealed, it
+	// still shows the code's background, so it looks exactly like the
+	// blank padding it replaced, but a selection copy can tell it from a
+	// no-break space in the message text and turns only it back into the
+	// original backtick (see list.HighlightContent). The conceal is
+	// switched off with its own reset (SGR 28), which leaves the code's
+	// colors alone.
+	CodespanPaddingMarkup string = "\x1b[8m" + CodespanPadding + "\x1b[28m"
+
+	// CodespanPadding is the cell content of the codespan padding, written
+	// as [CodespanPaddingMarkup].
 	//
 	// It is a no-break space: being non-breaking, it keeps word wrap from
 	// tearing a codespan between its padding and its text. This fork keeps

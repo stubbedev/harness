@@ -112,23 +112,28 @@ func TestHighlightContentRestoresCodespanBackticks(t *testing.T) {
 	require.Contains(t, result, `"this is `+"`code`"+`" ok`, "copy must restore the codespan backticks, got:\n%s", result)
 }
 
-// TestCodespanPaddingCopiesAsBacktick documents this fork's tradeoff:
-// the padding is a plain no-break space (upstream tags it with a
-// variation selector, which some terminals render as visible tofu
-// around every codespan), so a no-break space anywhere in copied
-// content becomes a backtick. Regular spaces and text are
-// unaffected.
+// TestCodespanPaddingCopiesAsBacktick pins that only the codespan
+// padding copies as a backtick: it is a concealed no-break space
+// ([styles.CodespanPaddingMarkup]), so a no-break space in the message
+// text, which is not concealed, copies as itself. That holds on a
+// render the selection has already painted, which is the render a chat
+// copy reads.
 func TestCodespanPaddingCopiesAsBacktick(t *testing.T) {
 	t.Parallel()
 
-	// The tradeoff in action: a real no-break space copies as a
-	// backtick because it is indistinguishable from padding.
-	result := HighlightContent("foo\u00a0bar", uv.Rect(0, 0, 40, 1), 0, 0, -1, -1)
-	require.Equal(t, "foo`bar\n", result)
+	area := uv.Rect(0, 0, 40, 1)
+	padded := "foo" + styles.CodespanPaddingMarkup + "bar" + styles.CodespanPaddingMarkup
+	require.Equal(t, "foo`bar`\n", HighlightContent(padded, area, 0, 0, -1, -1))
+
+	painted := Highlight(padded, area, 0, 0, -1, -1, nil)
+	require.Equal(t, "foo`bar`\n", HighlightContent(painted, area, 0, 0, -1, -1),
+		"painting keeps the padding concealed")
+
+	// A no-break space in the text itself is not padding.
+	require.Equal(t, "foo\u00a0bar\n", HighlightContent("foo\u00a0bar", area, 0, 0, -1, -1))
 
 	// Regular spaces and plain text are untouched.
-	result = HighlightContent("foo bar", uv.Rect(0, 0, 40, 1), 0, 0, -1, -1)
-	require.Equal(t, "foo bar\n", result)
+	require.Equal(t, "foo bar\n", HighlightContent("foo bar", area, 0, 0, -1, -1))
 }
 
 // TestHighlightContentRestoresWrappedCodespanBackticks is the narrow-width

@@ -21,9 +21,35 @@ var DefaultHighlighter Highlighter = func(x, y int, c *uv.Cell) *uv.Cell {
 }
 
 // concealed reports whether a cell is concealed: rendered, but not shown
-// as text. A selection neither paints nor copies such cells.
+// as text.
 func concealed(c *uv.Cell) bool {
 	return c.Style.Attrs&uv.AttrConceal != 0
+}
+
+// copiedText is what a selection copies for a cell, and whether it copies
+// anything. It is the one rule for what a selection holds: extractRow
+// copies by it and HighlightBuffer paints by it, so what shows as selected
+// is exactly what copies.
+//
+// Concealed cells are not shown as text, so they are not part of what was
+// selected. Renderers conceal layout that is not content, such as a code
+// block's margin, so copied code carries no indent its source did not
+// have. The one concealed cell that does copy is the codespan padding
+// ([styles.CodespanPaddingMarkup]): markdown inline code renders it in
+// place of its backticks, and a copy must reproduce the source text, so
+// it copies as the backtick. A no-break space that is not concealed is
+// message text and copies as itself.
+func copiedText(c *uv.Cell) (string, bool) {
+	switch {
+	case c == nil || c.Content == "":
+		return "", false
+	case !concealed(c):
+		return c.Content, true
+	case c.Content == styles.CodespanPadding:
+		return "`", true
+	default:
+		return "", false
+	}
 }
 
 // Highlighter represents a function that defines how to highlight text.
@@ -85,41 +111,21 @@ func extractRows(buf uv.ScreenBuffer, startLine, startCol, endLine, endCol, heig
 }
 
 // extractRow returns the text of a single buffer line between colStart and
-// colEnd, trimmed to the last cell holding any content (including explicit
-// spaces: renderers like glamour pad rows with real space cells, so content
-// usually reaches the full width).
-//
-// Concealed cells are left out: concealed text is not shown, so it is not
-// part of what was selected. Renderers conceal layout that is not
-// content, such as a code block's margin, so copied code carries no
-// indent its source did not have.
-//
-// Codespan padding cells are converted back into backticks: markdown inline
-// code renders blank padding in place of its backticks
-// ([styles.CodespanPadding]), and a copy of a selection must reproduce the
-// original source text, not the rendered blank padding. The sentinel is a
-// plain no-break space (see [styles.CodespanPadding] for why), so a
-// no-break space in the message text itself also copies as a backtick.
+// colEnd, as [copiedText] copies each cell, trimmed to the last cell that
+// copies anything (explicit spaces included: renderers like glamour pad
+// rows with real space cells, so content usually reaches the full width).
 func extractRow(line uv.Line, colStart, colEnd int) string {
-	copied := func(cell *uv.Cell) bool {
-		return cell != nil && cell.Content != "" && !concealed(cell)
-	}
 	lastCellX := -1
 	for x := colStart; x < colEnd; x++ {
-		if copied(line.At(x)) {
+		if _, ok := copiedText(line.At(x)); ok {
 			lastCellX = x
 		}
 	}
 
 	var row strings.Builder
 	for x := colStart; x <= lastCellX; x++ {
-		cell := line.At(x)
-		if copied(cell) {
-			if cell.Content == styles.CodespanPadding {
-				row.WriteString("`")
-			} else {
-				row.WriteString(cell.Content)
-			}
+		if text, ok := copiedText(line.At(x)); ok {
+			row.WriteString(text)
 		}
 	}
 	return row.String()
@@ -275,17 +281,23 @@ func HighlightBuffer(content string, area image.Rectangle, startLine, startCol, 
 			highlightEnd = colStart // No content on this line
 		}
 
-		// Apply highlight style only to cells with content. Concealed
-		// cells are not part of a selection (see extractRow), so they are
-		// not painted as selected either: what shows as selected is
-		// exactly what copies.
+		// Apply highlight style only to cells with content, and only to
+		// cells a copy holds ([copiedText]), so what shows as selected is
+		// exactly what copies. A painted cell stays concealed: the copy
+		// reads the painted render, and the conceal is what tells it the
+		// codespan padding from message text.
 		for x := colStart; x < highlightEnd; x++ {
 			if !image.Pt(x, y).In(area) {
 				continue
 			}
 			cell := line.At(x)
-			if cell != nil && !concealed(cell) {
-				highlighter(x, y, cell)
+			if _, ok := copiedText(cell); !ok && (cell == nil || concealed(cell)) {
+				continue
+			}
+			wasConcealed := concealed(cell)
+			highlighter(x, y, cell)
+			if wasConcealed {
+				cell.Style.Attrs |= uv.AttrConceal
 			}
 		}
 	}
