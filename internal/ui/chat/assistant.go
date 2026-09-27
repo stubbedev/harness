@@ -334,23 +334,26 @@ func (a *AssistantMessageItem) ID() string {
 
 // RawRender implements [MessageItem].
 func (a *AssistantMessageItem) RawRender(width int) string {
-	cappedWidth := cappedMessageWidth(width)
-
-	var spinner string
+	content := a.rawContent(width)
 	if a.isSpinning() {
-		spinner = a.renderSpinning()
-	}
-
-	content, height := a.renderMessageContent(cappedWidth)
-	highlightedContent := a.renderHighlighted(content, cappedWidth, height)
-	if spinner != "" {
-		if highlightedContent != "" {
-			highlightedContent += "\n\n"
+		if spinner := a.renderSpinning(); spinner != "" {
+			if content != "" {
+				spinner = "\n\n" + spinner
+			}
+			content += spinner
 		}
-		return highlightedContent + spinner
 	}
+	return content
+}
 
-	return highlightedContent
+// rawContent renders the message body without the spinner suffix. The
+// suffix is frame-dependent (the spinner animates), so keeping it out
+// of here is what lets Render cache the prefixed body across spinner
+// ticks.
+func (a *AssistantMessageItem) rawContent(width int) string {
+	cappedWidth := cappedMessageWidth(width)
+	content, height := a.renderMessageContent(cappedWidth)
+	return a.renderHighlighted(content, cappedWidth, height)
 }
 
 // Render implements MessageItem.
@@ -366,33 +369,70 @@ func (a *AssistantMessageItem) Render(width int) string {
 	// becomes a pointer return. The sectionsFingerprint folds in the
 	// per-section srcHash/extra so that any sub-cache change
 	// invalidates this prefix cache without requiring an explicit
-	// drop. Bypass the cache while spinning (RawRender's spinner
-	// suffix changes every animation frame) or while a highlight
-	// range is active (selection drag).
-	useCache := !a.isSpinning() && !a.isHighlighted()
+	// drop. The cache holds the body WITHOUT the spinner suffix: the
+	// spinner animates every tick, so folding it in would bypass the
+	// cache exactly when the message is largest. A hit therefore needs
+	// only the O(spinner) suffix re-attached per tick instead of a
+	// re-split and re-prefix of the whole body. The suffix is kept
+	// byte-identical to the unsplit path: body lines and spinner lines
+	// are prefixed with the same focus style, joined in the same order
+	// with the same "\n\n" separator.
+	useCache := !a.isHighlighted()
 	cappedWidth := cappedMessageWidth(width)
 	key := a.prefixCacheKey(cappedWidth)
 	if useCache {
 		if cached, ok := a.getCachedPrefixedRender(width, key); ok {
-			return cached
+			return cached + a.spinnerSuffix(true)
 		}
 	}
-	focused := a.sty.Messages.AssistantFocused.Render()
-	blurred := a.sty.Messages.AssistantBlurred.Render()
-	rendered := a.RawRender(width)
+	prefixed := a.prefixedRender(width)
+	if useCache {
+		a.setCachedPrefixedRender(prefixed, width, key)
+	}
+	return prefixed + a.spinnerSuffix(prefixed != "")
+}
+
+// prefixedRender applies the per-line focus prefix to the body without
+// the spinner suffix. Empty bodies produce an empty string.
+func (a *AssistantMessageItem) prefixedRender(width int) string {
+	rendered := a.rawContent(width)
+	if rendered == "" {
+		return ""
+	}
+	style := a.sty.Messages.AssistantBlurred.Render()
+	if a.focused {
+		style = a.sty.Messages.AssistantFocused.Render()
+	}
 	lines := strings.Split(rendered, "\n")
 	for i, line := range lines {
-		if a.focused {
-			lines[i] = focused + line
-		} else {
-			lines[i] = blurred + line
-		}
+		lines[i] = style + line
 	}
-	out := strings.Join(lines, "\n")
-	if useCache {
-		a.setCachedPrefixedRender(out, width, key)
+	return strings.Join(lines, "\n")
+}
+
+// spinnerSuffix returns the focus-prefixed spinner lines to append
+// after the body, preceded by the "\n\n" separator when the body is
+// non-empty. It returns "" when not spinning.
+func (a *AssistantMessageItem) spinnerSuffix(hasBody bool) string {
+	if !a.isSpinning() {
+		return ""
 	}
-	return out
+	spinner := a.renderSpinning()
+	if spinner == "" {
+		return ""
+	}
+	if hasBody {
+		spinner = "\n\n" + spinner
+	}
+	style := a.sty.Messages.AssistantBlurred.Render()
+	if a.focused {
+		style = a.sty.Messages.AssistantFocused.Render()
+	}
+	lines := strings.Split(spinner, "\n")
+	for i, line := range lines {
+		lines[i] = style + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 // prefixCacheKey builds the F3 prefixed-render cache key. We pack the

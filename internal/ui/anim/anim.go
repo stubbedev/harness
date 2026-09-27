@@ -477,16 +477,18 @@ func (a *Anim) Render() string {
 			}
 		}
 	}
+	// Render the suffix (e.g., elapsed time) once: it is checked for
+	// emptiness by the ellipsis logic below and appended at the end.
+	var suffixStr string
+	if a.suffix != nil {
+		suffixStr = a.suffix()
+	}
+
 	// Render animated ellipsis at the end of the label if all characters
 	// have been initialized. Skip when a suffix is active to avoid visual
 	// competition between the animated dots and the timer.
 	if a.initialized.Load() && a.labelWidth > 0 {
-		showEllipsis := true
-		if a.suffix != nil {
-			if s := a.suffix(); s != "" {
-				showEllipsis = false
-			}
-		}
+		showEllipsis := a.suffix == nil || suffixStr == ""
 		if showEllipsis {
 			ellipsisStep := int(a.ellipsisStep.Load())
 			if ellipsisFrame, ok := a.ellipsisFrames.Get(ellipsisStep / ellipsisAnimSpeed); ok {
@@ -495,13 +497,9 @@ func (a *Anim) Render() string {
 		}
 	}
 
-	// Render optional suffix (e.g., elapsed time).
-	if a.suffix != nil {
-		suffixStr := a.suffix()
-		if suffixStr != "" {
-			b.WriteString(" ")
-			b.WriteString(lipgloss.NewStyle().Foreground(a.suffixColor).Render(suffixStr))
-		}
+	if suffixStr != "" {
+		b.WriteString(" ")
+		b.WriteString(lipgloss.NewStyle().Foreground(a.suffixColor).Render(suffixStr))
 	}
 
 	return b.String()

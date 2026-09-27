@@ -97,3 +97,22 @@ func BenchmarkDrawStreaming(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkDrawSpinnerTick isolates an animation tick over an unchanged
+// live message: a large reasoning body with no new token. This is the
+// 20Hz clock cost while the model thinks or a tool runs. The prefixed
+// body must come from the cache so only the spinner suffix re-renders;
+// a re-split and re-prefix of the whole body here means the cache is
+// being bypassed on spinner frames.
+func BenchmarkDrawSpinnerTick(b *testing.B) {
+	items := buildSession(10)
+	live := &message.Message{ID: "live", Role: message.Assistant}
+	for j := range 200 {
+		live.AppendReasoningContent(fmt.Sprintf("Reasoning paragraph %d that is already fully rendered.\n", j))
+	}
+	item := chat.NewAssistantMessageItem(benchStyles(), live).(*chat.AssistantMessageItem)
+	items = append(items, item)
+	benchDraw(b, items, func(_ int) {
+		item.SetMessage(live)
+	})
+}
