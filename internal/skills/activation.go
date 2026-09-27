@@ -132,14 +132,20 @@ func activationPath(workingDir, file string) (string, bool) {
 }
 
 func activationMarkerExists(workingDir, marker string) bool {
+	root, err := filepath.EvalSymlinks(workingDir)
+	if err != nil {
+		return false
+	}
+	return activationMarkerExistsIn(workingDir, root, marker)
+}
+
+// activationMarkerExistsIn takes the already-resolved working directory
+// so callers checking many markers resolve it once.
+func activationMarkerExistsIn(workingDir, root, marker string) bool {
 	if workingDir == "" || !activationRelativePath(marker) {
 		return false
 	}
 	resolved, err := filepath.EvalSymlinks(filepath.Join(workingDir, filepath.FromSlash(marker)))
-	if err != nil {
-		return false
-	}
-	root, err := filepath.EvalSymlinks(workingDir)
 	if err != nil {
 		return false
 	}
@@ -164,9 +170,13 @@ func ProjectCapabilities(workingDir string) []string {
 		{"dotnet", []string{"global.json"}},
 	}
 	var result []string
+	root, err := filepath.EvalSymlinks(workingDir)
+	if err != nil {
+		return nil
+	}
 	for _, capability := range markers {
 		for _, marker := range capability.files {
-			if activationMarkerExists(workingDir, marker) {
+			if activationMarkerExistsIn(workingDir, root, marker) {
 				result = append(result, capability.name)
 				break
 			}
