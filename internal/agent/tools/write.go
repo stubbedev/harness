@@ -34,7 +34,7 @@ type WriteResponseMetadata struct {
 	Removals  int    `json:"removals"`
 	// FileMutations is filled from the content the write put on disk, as
 	// the last field so the JSON matches what withFileMutations appended.
-	FileMutations []fileMutation `json:"file_mutations,omitempty"`
+	FileMutations []FileMutation `json:"file_mutations,omitempty"`
 }
 
 const WriteToolName = toolname.Write
@@ -123,7 +123,7 @@ func NewWriteTool(
 					Diff:          diff,
 					Additions:     additions,
 					Removals:      removals,
-					FileMutations: []fileMutation{newFileMutation(filePath, written)},
+					FileMutations: []FileMutation{newFileMutation(filePath, written)},
 				},
 			), nil
 		},

@@ -114,7 +114,7 @@ func ambiguityHint(content, old string) string {
 // stamp is the stat that went with oldContent's read; while it still
 // matches, the file on disk is the content already in hand and the
 // read this used to do a second time is skipped.
-func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf bool, stamp fileStamp) (fileMutation, error) {
+func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf bool, stamp fileStamp) (FileMutation, error) {
 	expected := oldContent
 	if crlf {
 		expected, _ = fsext.ToWindowsLineEndings(oldContent)
@@ -125,10 +125,10 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 	} else if read, readErr := os.ReadFile(filePath); readErr == nil {
 		current = read
 	} else {
-		return fileMutation{}, readErr
+		return FileMutation{}, readErr
 	}
 	if string(current) != expected {
-		return fileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, filetracker.ErrStale)
+		return FileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, filetracker.ErrStale)
 	}
 	// expected now holds exactly the bytes of current, so it stands in for
 	// them as a string without another copy of the file.
@@ -143,18 +143,18 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 		if len(ranges) > 0 {
 			at = ranges[0].Start
 		}
-		return fileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, at, err)
+		return FileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, at, err)
 	}
 
 	if err := guardedWriteStamped(filePath, current, newBytes, false, stamp); err != nil {
 		if current, readErr := os.ReadFile(filePath); readErr == nil {
-			return fileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, err)
+			return FileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, 0, err)
 		}
-		return fileMutation{}, fmt.Errorf("failed to write file: %w", err)
+		return FileMutation{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
 	if err := recordFileVersion(edit.ctx, edit.files, sessionID, filePath, oldContent, newContent); err != nil {
-		return fileMutation{}, err
+		return FileMutation{}, err
 	}
 
 	filetracker.AdvanceChanges(edit.ctx, edit.filetracker, sessionID, filePath, current, newBytes, changes)

@@ -524,7 +524,7 @@ func TestCompactionExecutionStatePersistsIndependentOfNarrative(t *testing.T) {
 	require.NoError(t, err)
 	sa, _ := compactionAgent(t, env, 1_000_000, "all facts omitted")
 	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "do work"})
-	for _, msg := range executionMessages("write", "write", `{"file_path":"/project/a.go"}`, `{"changed_files":[{"path":"/project/a.go","version":"sha256:first"}]}`, false) {
+	for _, msg := range executionMessages("write", "write", `{"file_path":"/project/a.go"}`, `{"file_mutations":[{"path":"/project/a.go","version":"sha256:first"}]}`, false) {
 		createMessage(t, env, sess.ID, msg.Role, msg.Parts...)
 	}
 	for _, msg := range executionMessages("test", "shell", `{"command":"go test ./..."}`, `{"exit_code":3}`, false) {

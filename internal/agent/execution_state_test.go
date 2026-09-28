@@ -88,7 +88,7 @@ func TestExecutionStateBoundsAndVersions(t *testing.T) {
 	t.Parallel()
 	state := newExecutionState("")
 	for i := range 100 {
-		state.Ingest(executionMessages(fmt.Sprint(i), "write", `{"file_path":"/a"}`, fmt.Sprintf(`{"changed_files":[{"path":"/file/%d","version":"v%d"}]}`, i, i), false))
+		state.Ingest(executionMessages(fmt.Sprint(i), "write", `{"file_path":"/a"}`, fmt.Sprintf(`{"file_mutations":[{"path":"/file/%d","version":"v%d"}]}`, i, i), false))
 		state.Ingest(executionMessages(fmt.Sprintf("cmd%d", i), "shell", fmt.Sprintf(`{"command":"echo %d"}`, i), `{"exit_code":0}`, false))
 	}
 	require.Len(t, state.Files, executionFilesLimit)
@@ -98,7 +98,7 @@ func TestExecutionStateBoundsAndVersions(t *testing.T) {
 	snapshot := state.Render()
 	state = newExecutionState(state.Summary("nothing happened"))
 	require.Equal(t, snapshot, state.Render())
-	state.Ingest(executionMessages("new-version", "edit", `{}`, `{"changed_files":[{"path":"/file/99","version":"v100"}]}`, false))
+	state.Ingest(executionMessages("new-version", "edit", `{}`, `{"file_mutations":[{"path":"/file/99","version":"v100"}]}`, false))
 	require.Len(t, state.Files, executionFilesLimit)
 	require.Contains(t, string(state.Files[len(state.Files)-1].Metadata), "v100")
 }
@@ -130,7 +130,7 @@ func TestExecutionStateTotalBudget(t *testing.T) {
 	t.Parallel()
 	state := newExecutionState("")
 	for i := range 100 {
-		metadata, _ := json.Marshal(map[string]any{"changed_files": []any{map[string]any{"path": fmt.Sprintf("/file/%d", i), "version": strings.Repeat("v", 1500)}}})
+		metadata, _ := json.Marshal(map[string]any{"file_mutations": []any{map[string]any{"path": fmt.Sprintf("/file/%d", i), "version": strings.Repeat("v", 1500)}}})
 		state.Ingest(executionMessages(fmt.Sprint(i), "write", `{}`, string(metadata), false))
 	}
 	data, err := json.Marshal(state)

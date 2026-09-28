@@ -9,6 +9,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/toolname"
+	"github.com/stubbedev/harness/internal/verification"
+
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/stringext"
 )
@@ -314,6 +318,22 @@ func (s *executionState) Ingest(msgs []message.Message) {
 	}
 }
 
+// The statuses an execution entry records. They reach the model in the
+// execution-state note, so they are its vocabulary for how a call ended.
+const (
+	executionUnknown     = "unknown"
+	executionFailed      = "failed"
+	executionSucceeded   = "succeeded"
+	executionReset       = "reset"
+	executionInterrupted = "interrupted"
+	executionQueued      = "queued"
+	executionWaiting     = "waiting"
+	executionRunning     = "running"
+	executionShellExited = "shell_exited"
+	executionChanged     = "changed"
+	executionReported    = "reported"
+)
+
 func (s *executionState) ingestResult(call message.ToolCall, result message.ToolResult) {
 	key := executionKey(call.Name, call.Input)
 	if call.Input == "" {
@@ -321,124 +341,91 @@ func (s *executionState) ingestResult(call message.ToolCall, result message.Tool
 	}
 	entry := executionEntry{Key: key, Tool: call.Name, Input: executionClip(call.Input, executionTextLimit)}
 	failed, success := result.IsError, !result.IsError
-	var metadata map[string]json.RawMessage
-	_ = json.Unmarshal([]byte(result.Metadata), &metadata)
-	if call.Name == "shell" {
+	var common tools.ExecutionMetadata
+	_ = json.Unmarshal([]byte(result.Metadata), &common)
+	if call.Name == toolname.Shell {
 		failed, success, entry = s.ingestShell(call, result, entry)
 	}
-	var failedEdits []json.RawMessage
-	if json.Unmarshal(metadata["edits_failed"], &failedEdits) == nil && len(failedEdits) > 0 {
+	if len(common.EditsFailed) > 0 {
 		failed, success = true, false
 	}
-	if call.Name == "verify" || call.Name == "verification" {
-		var verification struct {
-			Status string `json:"status"`
-		}
-		if json.Unmarshal(metadata["verification"], &verification) == nil {
-			failed = failed || verification.Status == "failed" || verification.Status == "blocked"
-			success = !failed && verification.Status == "passed"
-		}
+	var verified struct {
+		Verification *verification.Result `json:"verification"`
+	}
+	if call.Name == toolname.Verify && json.Unmarshal([]byte(result.Metadata), &verified) == nil && verified.Verification != nil {
+		status := verified.Verification.Status
+		failed = failed || status == verification.Failed || status == verification.Blocked
+		success = !failed && status == verification.Passed
 	}
 	if failed {
 		entry.Detail = executionClip(result.Content, executionTextLimit)
-		entry.Status = "failed"
+		entry.Status = executionFailed
 		s.put(&s.Failures, entry)
 	} else if success {
 		s.clearFailure(entry.Key)
 	}
-	if !result.IsError && (call.Name == "write" || call.Name == "edit") && metadata["changed_files"] == nil && metadata["file_mutations"] == nil && metadata["mutations"] == nil {
+	if !result.IsError && (call.Name == toolname.Write || call.Name == toolname.Edit) && len(common.FileMutations) == 0 {
 		var params struct {
 			FilePath string `json:"file_path"`
 		}
-		var applied int
-		_ = json.Unmarshal(metadata["edits_applied"], &applied)
-		if json.Unmarshal([]byte(call.Input), &params) == nil && params.FilePath != "" && (call.Name == "write" || applied > 0) {
-			s.put(&s.Files, executionEntry{Key: params.FilePath, Tool: call.Name, Status: "changed", Metadata: json.RawMessage(`{"version_unavailable":true}`)})
+		if json.Unmarshal([]byte(call.Input), &params) == nil && params.FilePath != "" && (call.Name == toolname.Write || common.EditsApplied > 0) {
+			s.put(&s.Files, executionEntry{Key: params.FilePath, Tool: call.Name, Status: executionChanged, Metadata: json.RawMessage(`{"version_unavailable":true}`)})
 		}
 	}
-	if len(metadata) == 0 {
+	if result.Metadata == "" {
 		return
 	}
-	s.ingestFiles(metadata, entry)
-	if call.Name == "verification" || call.Name == "verify" {
+	s.ingestFiles(common.FileMutations, entry)
+	if call.Name == toolname.Verify {
+		var metadata map[string]json.RawMessage
+		_ = json.Unmarshal([]byte(result.Metadata), &metadata)
 		entry.Metadata = compactVerificationMetadata(metadata)
-		entry.Status = "reported"
-		var verification struct {
-			Status string `json:"status"`
-		}
-		if json.Unmarshal(metadata["verification"], &verification) == nil && verification.Status != "" {
-			entry.Status = verification.Status
+		entry.Status = executionReported
+		if verified.Verification != nil && verified.Verification.Status != "" {
+			entry.Status = string(verified.Verification.Status)
 		}
 		s.put(&s.Verification, entry)
 	}
-	if call.Name == "agent" {
-		var jobs []backgroundJobMetadata
-		if json.Unmarshal(metadata["jobs"], &jobs) == nil && len(jobs) > 0 {
-			for _, job := range jobs {
+	if call.Name == toolname.Agent {
+		var dispatched struct {
+			Jobs []backgroundJobMetadata `json:"jobs"`
+		}
+		if json.Unmarshal([]byte(result.Metadata), &dispatched) == nil && len(dispatched.Jobs) > 0 {
+			for _, job := range dispatched.Jobs {
 				data, _ := json.Marshal(job)
 				s.put(&s.Jobs, executionEntry{Key: job.Handle, Tool: call.Name, Status: job.Status, Metadata: data})
 			}
 			return
 		}
 		entry.Metadata = boundedExecutionMetadata(json.RawMessage(result.Metadata))
-		entry.Status = "reported"
-		for _, field := range []string{"handle", "job_id", "id"} {
-			var id string
-			if json.Unmarshal(metadata[field], &id) == nil && id != "" {
-				entry.Key = id
-				break
-			}
+		entry.Status = executionReported
+		var handle struct {
+			Handle string `json:"handle"`
+		}
+		if json.Unmarshal([]byte(result.Metadata), &handle) == nil && handle.Handle != "" {
+			entry.Key = handle.Handle
 		}
 		s.put(&s.Jobs, entry)
 	}
 }
 
-func (s *executionState) ingestFiles(metadata map[string]json.RawMessage, entry executionEntry) {
-	for _, field := range []string{"changed_files", "file_mutations", "mutations"} {
-		var files []map[string]json.RawMessage
-		if json.Unmarshal(metadata[field], &files) != nil {
+func (s *executionState) ingestFiles(mutations []tools.FileMutation, entry executionEntry) {
+	for _, mutation := range mutations {
+		if mutation.Path == "" {
 			continue
 		}
-		for _, file := range files {
-			var path string
-			for _, name := range []string{"path", "file_path"} {
-				_ = json.Unmarshal(file[name], &path)
-				if path != "" {
-					break
-				}
-			}
-			if path == "" {
-				continue
-			}
-			// The key is the path; saying it again in the metadata was
-			// the longest field of every file entry.
-			delete(file, "path")
-			delete(file, "file_path")
-			data, _ := json.Marshal(file)
-			fileEntry := executionEntry{Key: path, Tool: entry.Tool, Status: "changed", Metadata: boundedExecutionMetadata(data)}
-			s.put(&s.Files, fileEntry)
-		}
+		// The key is the path; saying it again in the metadata was the
+		// longest field of every file entry.
+		data, _ := json.Marshal(struct {
+			Version string `json:"version"`
+		}{mutation.Version})
+		s.put(&s.Files, executionEntry{Key: mutation.Path, Tool: entry.Tool, Status: executionChanged, Metadata: boundedExecutionMetadata(data)})
 	}
 }
 
 func (s *executionState) ingestShell(call message.ToolCall, result message.ToolResult, entry executionEntry) (bool, bool, executionEntry) {
-	var params struct {
-		Command string `json:"command"`
-		Session string `json:"session"`
-		Reset   bool   `json:"reset"`
-	}
-	var meta struct {
-		Session       string `json:"session"`
-		ExitCode      *int   `json:"exit_code"`
-		Running       bool   `json:"running"`
-		Waiting       bool   `json:"waiting"`
-		Queued        bool   `json:"queued"`
-		WhileBusy     bool   `json:"while_busy"`
-		AltScreen     bool   `json:"alt_screen"`
-		Interrupted   bool   `json:"interrupted"`
-		ShellExited   bool   `json:"shell_exited"`
-		ShellExitCode *int   `json:"shell_exit_code"`
-	}
+	var params tools.ShellParams
+	var meta tools.ShellResponseMetadata
 	_ = json.Unmarshal([]byte(call.Input), &params)
 	_ = json.Unmarshal([]byte(result.Metadata), &meta)
 	name := meta.Session
@@ -461,26 +448,26 @@ func (s *executionState) ingestShell(call message.ToolCall, result message.ToolR
 		entry.Key = previous.Detail
 	}
 	entry.ExitCode = meta.ExitCode
-	entry.Status = "unknown"
+	entry.Status = executionUnknown
 	switch {
 	case result.IsError:
-		entry.Status = "failed"
+		entry.Status = executionFailed
 	case params.Reset:
-		entry.Status = "reset"
+		entry.Status = executionReset
 	case meta.Interrupted:
-		entry.Status = "interrupted"
+		entry.Status = executionInterrupted
 	case meta.Queued:
-		entry.Status = "queued"
+		entry.Status = executionQueued
 	case meta.Waiting:
-		entry.Status = "waiting"
+		entry.Status = executionWaiting
 	case meta.Running || meta.WhileBusy || meta.AltScreen:
-		entry.Status = "running"
+		entry.Status = executionRunning
 	case meta.ExitCode != nil && *meta.ExitCode != 0:
-		entry.Status = "failed"
+		entry.Status = executionFailed
 	case meta.ExitCode != nil:
-		entry.Status = "succeeded"
+		entry.Status = executionSucceeded
 	case meta.ShellExited:
-		entry.Status = "shell_exited"
+		entry.Status = executionShellExited
 		entry.ExitCode = meta.ShellExitCode
 	}
 	s.put(&s.Commands, entry)
@@ -490,7 +477,7 @@ func (s *executionState) ingestShell(call message.ToolCall, result message.ToolR
 		sessionEntry.Detail = entry.Key
 		s.put(&s.Sessions, sessionEntry)
 	}
-	return result.IsError || entry.Status == "failed" || (entry.Status == "shell_exited" && entry.ExitCode != nil && *entry.ExitCode != 0) || entry.Status == "interrupted", entry.Status == "succeeded", entry
+	return result.IsError || entry.Status == executionFailed || (entry.Status == executionShellExited && entry.ExitCode != nil && *entry.ExitCode != 0) || entry.Status == executionInterrupted, entry.Status == executionSucceeded, entry
 }
 
 func compactVerificationMetadata(metadata map[string]json.RawMessage) json.RawMessage {

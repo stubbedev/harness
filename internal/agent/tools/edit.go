@@ -47,7 +47,7 @@ type EditResponseMetadata struct {
 	// last field so the JSON is what withFileMutations produced by
 	// appending the key to the marshalled metadata, without reading the
 	// file back or re-parsing metadata that holds the whole file twice.
-	FileMutations []fileMutation `json:"file_mutations,omitempty"`
+	FileMutations []FileMutation `json:"file_mutations,omitempty"`
 }
 
 const EditToolName = toolname.Edit
@@ -230,7 +230,7 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 			Removals:      removals,
 			EditsApplied:  editsApplied,
 			EditsFailed:   failedEdits,
-			FileMutations: []fileMutation{newFileMutation(params.FilePath, written)},
+			FileMutations: []FileMutation{newFileMutation(params.FilePath, written)},
 		},
 	), nil
 }
@@ -304,7 +304,7 @@ func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolR
 			Removals:      removals,
 			EditsApplied:  editsApplied,
 			EditsFailed:   failedEdits,
-			FileMutations: []fileMutation{mutation},
+			FileMutations: []FileMutation{mutation},
 		},
 	), nil
 }
