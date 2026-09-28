@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/stubbedev/harness/internal/message"
 )
 
 // promptHistoryLoadedMsg is sent when prompt history is loaded.
@@ -22,28 +20,10 @@ type promptHistoryLoadedMsg struct {
 func (m *UI) loadPromptHistory() tea.Cmd {
 	sessionID := m.currentSessionID()
 	return func() tea.Msg {
-		ctx := context.Background()
-		var messages []message.Message
-		var err error
-
-		if sessionID != "" {
-			messages, err = m.com.Workspace.ListUserMessages(ctx, sessionID)
-		} else {
-			messages, err = m.com.Workspace.ListAllUserMessages(ctx)
-		}
+		texts, err := m.com.Workspace.PromptHistory(context.Background(), sessionID)
 		if err != nil {
 			slog.Error("Failed to load prompt history", "error", err)
 			return promptHistoryLoadedMsg{forSession: sessionID}
-		}
-
-		texts := make([]string, 0, len(messages))
-		for _, msg := range messages {
-			if text := msg.Content().Text; text != "" {
-				texts = append(texts, text)
-			}
-			for _, sc := range msg.ShellCommands() {
-				texts = append(texts, "!"+sc.Command)
-			}
 		}
 		return promptHistoryLoadedMsg{forSession: sessionID, messages: texts}
 	}

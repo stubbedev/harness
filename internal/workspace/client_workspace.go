@@ -199,12 +199,8 @@ func (w *ClientWorkspace) ListUserMessages(ctx context.Context, sessionID string
 	return proto.MessagesToDomain(msgs), nil
 }
 
-func (w *ClientWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Message, error) {
-	msgs, err := w.client.ListAllUserMessages(ctx, w.workspaceID())
-	if err != nil {
-		return nil, err
-	}
-	return proto.MessagesToDomain(msgs), nil
+func (w *ClientWorkspace) PromptHistory(ctx context.Context, sessionID string) ([]string, error) {
+	return w.client.PromptHistory(ctx, w.workspaceID(), sessionID)
 }
 
 // -- Agent --

@@ -398,9 +398,13 @@ func (c *Client) ListUserMessages(ctx context.Context, id string, sessionID stri
 	return call[[]proto.Message](ctx, c, "get user messages", get(wsPath(id, "sessions", sessionID, "messages", "user")))
 }
 
-// ListAllUserMessages retrieves all user-role messages across sessions as proto types.
-func (c *Client) ListAllUserMessages(ctx context.Context, id string) ([]proto.Message, error) {
-	return call[[]proto.Message](ctx, c, "get all user messages", get(wsPath(id, "messages", "user")))
+// PromptHistory retrieves the prompt-history entries of a session's user
+// messages, or of every session when sessionID is empty.
+func (c *Client) PromptHistory(ctx context.Context, id string, sessionID string) ([]string, error) {
+	if sessionID == "" {
+		return call[[]string](ctx, c, "get prompt history", get(wsPath(id, "prompt-history")))
+	}
+	return call[[]string](ctx, c, "get prompt history", get(wsPath(id, "sessions", sessionID, "prompt-history")))
 }
 
 // CancelAgentSession cancels an ongoing agent operation for a session.

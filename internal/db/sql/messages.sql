@@ -52,14 +52,6 @@ FROM messages
 WHERE session_id = ? AND role = 'user'
 ORDER BY created_at DESC, rowid DESC;
 
--- name: ListAllUserMessages :many
--- Prompt history reads only the parts blob; the rest of the row is
--- never touched by its callers.
-SELECT parts
-FROM messages
-WHERE role = 'user'
-ORDER BY created_at DESC, rowid DESC;
-
 -- name: GetLastAssistantMessageBySession :one
 -- Only the provider and model of the last assistant message are read;
 -- skip fetching the parts blob and the rest of the row.
@@ -86,3 +78,17 @@ WHERE messages.session_id = sqlc.arg(session_id)
     WHERE a.id = sqlc.arg(anchor_id) AND a.session_id = sqlc.arg(session_id)
   )
 RETURNING *;
+
+-- name: ListPromptHistory :many
+-- The prompt-history entries of user messages, newest message first: each
+-- text part as written and each shell command prefixed with "!", read
+-- straight from the stored parts so no binary attachment or context note
+-- is decoded. An empty session_id reads every session.
+SELECT
+    CAST(json_extract(p.value, '$.type') AS TEXT) AS part_type,
+    CAST(COALESCE(json_extract(p.value, '$.data.text'), json_extract(p.value, '$.data.command'), '') AS TEXT) AS entry
+FROM messages m, json_each(m.parts) p
+WHERE m.role = 'user'
+  AND (sqlc.arg(session_id) = '' OR m.session_id = sqlc.arg(session_id))
+  AND json_extract(p.value, '$.type') IN ('text', 'shell_command')
+ORDER BY m.created_at DESC, m.rowid DESC, p.key ASC;

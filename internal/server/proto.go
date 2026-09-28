@@ -485,20 +485,22 @@ func (c *controllerV1) handleGetWorkspaceSessionUserMessages(w http.ResponseWrit
 	})
 }
 
-// handleGetWorkspaceAllUserMessages returns all user messages across sessions.
+// handleGetWorkspacePromptHistory returns the prompt-history entries of
+// user messages: one session's, or every session's without a session in
+// the path.
 //
-//	@Summary		Get all user messages for workspace
+//	@Summary		Get prompt history
 //	@Tags			workspaces
 //	@Produce		json
 //	@Param			id	path		string			true	"Workspace ID"
-//	@Success		200	{array}		proto.Message
+//	@Success		200	{array}		string
 //	@Failure		404	{object}	proto.Error
 //	@Failure		500	{object}	proto.Error
-//	@Router			/workspaces/{id}/messages/user [get]
-func (c *controllerV1) handleGetWorkspaceAllUserMessages(w http.ResponseWriter, r *http.Request) {
+//	@Router			/workspaces/{id}/prompt-history [get]
+//	@Router			/workspaces/{id}/sessions/{sid}/prompt-history [get]
+func (c *controllerV1) handleGetWorkspacePromptHistory(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		msgs, err := ws.Ops().ListAllUserMessages(ctx)
-		return proto.MessagesFromDomain(msgs), err
+		return ws.Ops().PromptHistory(ctx, r.PathValue("sid"))
 	})
 }
 

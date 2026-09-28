@@ -49,9 +49,6 @@ type Querier interface {
 	GetUsageByDayOfWeek(ctx context.Context) ([]GetUsageByDayOfWeekRow, error)
 	GetUsageByHour(ctx context.Context) ([]GetUsageByHourRow, error)
 	GetUsageByModel(ctx context.Context) ([]GetUsageByModelRow, error)
-	// Prompt history reads only the parts blob; the rest of the row is
-	// never touched by its callers.
-	ListAllUserMessages(ctx context.Context) ([]string, error)
 	ListCheckpointsBySession(ctx context.Context, sessionID string) ([]Checkpoint, error)
 	ListChildSessions(ctx context.Context, parentSessionID sql.NullString) ([]Session, error)
 	ListFilesBySessionWithChildren(ctx context.Context, arg ListFilesBySessionWithChildrenParams) ([]File, error)
@@ -64,6 +61,11 @@ type Querier interface {
 	// often share a second; rowid is insertion order and breaks the tie.
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListMessagesBySessionFrom(ctx context.Context, arg ListMessagesBySessionFromParams) ([]Message, error)
+	// The prompt-history entries of user messages, newest message first: each
+	// text part as written and each shell command prefixed with "!", read
+	// straight from the stored parts so no binary attachment or context note
+	// is decoded. An empty session_id reads every session.
+	ListPromptHistory(ctx context.Context, sessionID interface{}) ([]ListPromptHistoryRow, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context) ([]Session, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)

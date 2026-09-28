@@ -59,7 +59,11 @@ type Service interface {
 	// List rather than to nothing.
 	ListFrom(ctx context.Context, sessionID, fromID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
-	ListAllUserMessages(ctx context.Context) ([]Message, error)
+	// PromptHistory returns the prompt-history entries of the session's
+	// user messages, newest first: the text of each prompt and each
+	// shell command prefixed with "!". An empty sessionID reads every
+	// session. It decodes nothing but those strings.
+	PromptHistory(ctx context.Context, sessionID string) ([]string, error)
 	// GetLastAssistantMessage returns the provider and model that
 	// produced the latest non-summary assistant message; every other
 	// field of the returned Message is left empty because no caller
@@ -609,23 +613,24 @@ func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]Mes
 	return s.convertAll(dbMessages)
 }
 
-// ListAllUserMessages returns every user message across sessions, in
-// newest-first order, carrying only the parts prompt history reads:
-// the row's other columns are never projected.
-func (s *service) ListAllUserMessages(ctx context.Context) ([]Message, error) {
-	partsList, err := s.q.ListAllUserMessages(ctx)
+func (s *service) PromptHistory(ctx context.Context, sessionID string) ([]string, error) {
+	rows, err := s.q.ListPromptHistory(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]Message, len(partsList))
-	for i, partsJSON := range partsList {
-		parts, err := unmarshalParts([]byte(partsJSON))
-		if err != nil {
-			return nil, err
+	entries := make([]string, 0, len(rows))
+	for _, row := range rows {
+		switch partType(row.PartType) {
+		case textType:
+			if row.Entry != "" {
+				entries = append(entries, row.Entry)
+			}
+		case shellCommandType:
+			entries = append(entries, "!"+row.Entry)
+		default:
 		}
-		messages[i] = Message{Parts: parts}
 	}
-	return messages, nil
+	return entries, nil
 }
 
 // GetLastAssistantMessage returns the provider and model of the last

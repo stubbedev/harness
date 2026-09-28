@@ -2902,34 +2902,6 @@ paths:
       summary: Get MCP client states
       tags:
       - mcp
-  /workspaces/{id}/messages/user:
-    get:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/github_com_stubbedev_harness_internal_proto.Message'
-            type: array
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Get all user messages for workspace
-      tags:
-      - workspaces
   /workspaces/{id}/project/init-prompt:
     get:
       parameters:
@@ -2956,6 +2928,34 @@ paths:
       summary: Get project initialization prompt
       tags:
       - project
+  /workspaces/{id}/prompt-history:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get prompt history
+      tags:
+      - workspaces
   /workspaces/{id}/questions/answer:
     post:
       consumes:
@@ -3349,6 +3349,34 @@ paths:
       summary: Get user messages for session
       tags:
       - sessions
+  /workspaces/{id}/sessions/{sid}/prompt-history:
+    get:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get prompt history
+      tags:
+      - workspaces
   /workspaces/{id}/sessions/{sid}/rewind:
     post:
       consumes:

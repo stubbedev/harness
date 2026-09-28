@@ -118,8 +118,8 @@ func (w *AppWorkspace) ListUserMessages(ctx context.Context, sessionID string) (
 	return w.app.Messages.ListUserMessages(ctx, sessionID)
 }
 
-func (w *AppWorkspace) ListAllUserMessages(ctx context.Context) ([]message.Message, error) {
-	return w.app.Messages.ListAllUserMessages(ctx)
+func (w *AppWorkspace) PromptHistory(ctx context.Context, sessionID string) ([]string, error) {
+	return w.app.Messages.PromptHistory(ctx, sessionID)
 }
 
 // -- Agent --

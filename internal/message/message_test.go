@@ -867,3 +867,38 @@ func TestMessageCountCountsVisibleMessagesOnly(t *testing.T) {
 	require.NoError(t, svc.Delete(t.Context(), aborted.ID))
 	require.Equal(t, int64(2), count(), "deleting it does not count it twice")
 }
+
+// TestPromptHistoryReadsOnlyPromptText pins the history query: prompt
+// text and "!"-prefixed shell commands, newest first, scoped to a session
+// or across all of them, and nothing from other roles or part types.
+func TestPromptHistoryReadsOnlyPromptText(t *testing.T) {
+	t.Parallel()
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	one, err := sessions.Create(t.Context(), "one")
+	require.NoError(t, err)
+	two, err := sessions.Create(t.Context(), "two")
+	require.NoError(t, err)
+	svc := NewService(q)
+
+	create := func(sessionID string, role MessageRole, parts ...ContentPart) {
+		_, createErr := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: role, Parts: parts})
+		require.NoError(t, createErr)
+	}
+	create(one.ID, User, TextContent{Text: "first"}, BinaryContent{Path: "a.png", MIMEType: "image/png", Data: []byte("x")})
+	create(one.ID, Assistant, TextContent{Text: "reply"})
+	create(one.ID, User, ShellCommand{Command: "ls"})
+	create(one.ID, User, ContextNote{Kind: ContextNoteRuntime, Text: "env"})
+	create(two.ID, User, TextContent{Text: "elsewhere"})
+
+	got, err := svc.PromptHistory(t.Context(), one.ID)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"!ls", "first"}, got)
+
+	all, err := svc.PromptHistory(t.Context(), "")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"!ls", "first", "elsewhere"}, all)
+}

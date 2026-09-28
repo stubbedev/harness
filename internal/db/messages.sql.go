@@ -188,38 +188,6 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 	return i, err
 }
 
-const listAllUserMessages = `-- name: ListAllUserMessages :many
-SELECT parts
-FROM messages
-WHERE role = 'user'
-ORDER BY created_at DESC, rowid DESC
-`
-
-// Prompt history reads only the parts blob; the rest of the row is
-// never touched by its callers.
-func (q *Queries) ListAllUserMessages(ctx context.Context) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, listAllUserMessages)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var parts string
-		if err := rows.Scan(&parts); err != nil {
-			return nil, err
-		}
-		items = append(items, parts)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listMessagesBySession = `-- name: ListMessagesBySession :many
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, visible
 FROM messages
@@ -307,6 +275,49 @@ func (q *Queries) ListMessagesBySessionFrom(ctx context.Context, arg ListMessage
 			&i.PrismDollarSavings,
 			&i.Visible,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPromptHistory = `-- name: ListPromptHistory :many
+SELECT
+    CAST(json_extract(p.value, '$.type') AS TEXT) AS part_type,
+    CAST(COALESCE(json_extract(p.value, '$.data.text'), json_extract(p.value, '$.data.command'), '') AS TEXT) AS entry
+FROM messages m, json_each(m.parts) p
+WHERE m.role = 'user'
+  AND (?1 = '' OR m.session_id = ?1)
+  AND json_extract(p.value, '$.type') IN ('text', 'shell_command')
+ORDER BY m.created_at DESC, m.rowid DESC, p.key ASC
+`
+
+type ListPromptHistoryRow struct {
+	PartType string `json:"part_type"`
+	Entry    string `json:"entry"`
+}
+
+// The prompt-history entries of user messages, newest message first: each
+// text part as written and each shell command prefixed with "!", read
+// straight from the stored parts so no binary attachment or context note
+// is decoded. An empty session_id reads every session.
+func (q *Queries) ListPromptHistory(ctx context.Context, sessionID interface{}) ([]ListPromptHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPromptHistory, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPromptHistoryRow{}
+	for rows.Next() {
+		var i ListPromptHistoryRow
+		if err := rows.Scan(&i.PartType, &i.Entry); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
