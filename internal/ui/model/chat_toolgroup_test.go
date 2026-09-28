@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -372,4 +373,32 @@ func TestSubCursorStaysInView(t *testing.T) {
 	shown, hidden = viewShows(u, "cmd-00", "cmd-14")
 	require.Contains(t, shown, "cmd-14", "the from-below landing must show the bottommost call")
 	require.Contains(t, hidden, "cmd-00")
+}
+
+// TestAppendKeepsTheIndexEqualToARebuild streams a turn through
+// AppendMessages - tool calls joining a group, text closing it, a spinner
+// swept to the end - and requires the incrementally kept ID index to be
+// exactly what a full rebuild produces after every append.
+func TestAppendKeepsTheIndexEqualToARebuild(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+
+	spinner := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{ID: "m-spin", Role: message.Assistant})
+	text := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{
+		ID: "m-text", Role: message.Assistant,
+		Parts: []message.ContentPart{message.TextContent{Text: "done"}},
+	})
+	steps := [][]chat.MessageItem{
+		{spinner},
+		{newToolItemForGroup(u, "t1")},
+		{newToolItemForGroup(u, "t2"), newToolItemForGroup(u, "t3")},
+		{text},
+		{newToolItemForGroup(u, "t4")},
+	}
+	for i, step := range steps {
+		u.chat.AppendMessages(step...)
+		incremental := maps.Clone(u.chat.idInxMap)
+		u.chat.rebuildIndices()
+		require.Equal(t, u.chat.idInxMap, incremental, "after step %d", i)
+	}
 }

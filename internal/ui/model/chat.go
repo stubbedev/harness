@@ -463,15 +463,32 @@ func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 	if len(msgs) == 0 {
 		return
 	}
+	// Appending leaves every existing item where it was unless the sweep
+	// moves a spinner, so the index only needs the new entries: a full
+	// rebuild walks the whole transcript, on every streamed tool call.
+	first := m.list.Len()
+	type absorbed struct {
+		id  string
+		idx int
+	}
+	var intoGroups []absorbed
 	for _, msg := range msgs {
 		if tool, ok := msg.(chat.ToolMessageItem); ok {
-			m.absorbTool(tool)
+			if idx, joined := m.absorbTool(tool); joined {
+				intoGroups = append(intoGroups, absorbed{tool.ID(), idx})
+			}
 			continue
 		}
 		m.list.AppendItems(msg)
 	}
-	m.sweepSpinnersToEnd()
-	m.rebuildIndices()
+	if m.sweepSpinnersToEnd() {
+		m.rebuildIndices()
+		return
+	}
+	for _, a := range intoGroups {
+		m.idInxMap[a.id] = a.idx
+	}
+	m.indexFrom(first)
 }
 
 // absorbTool folds a tool call into the trailing open group, skipping
@@ -485,7 +502,11 @@ func (m *Chat) AppendMessages(msgs ...chat.MessageItem) {
 // the middle of the transcript, so it is skipped here and swept back
 // to the end of the list: while the turn is running it belongs below
 // everything the turn has produced so far.
-func (m *Chat) absorbTool(tool chat.ToolMessageItem) {
+//
+// It reports the index of the existing group it joined, or false when it
+// started a new group at the end of the list. The caller sweeps spinners
+// once the whole batch is in.
+func (m *Chat) absorbTool(tool chat.ToolMessageItem) (int, bool) {
 	for idx := m.list.Len() - 1; idx >= 0; idx-- {
 		item := m.list.ItemAt(idx)
 		if _, ok := item.(*chat.AssistantInfoItem); ok {
@@ -496,13 +517,12 @@ func (m *Chat) absorbTool(tool chat.ToolMessageItem) {
 		}
 		if group, ok := item.(*chat.ToolGroupMessageItem); ok {
 			group.AddTool(tool)
-			m.sweepSpinnersToEnd()
-			return
+			return idx, true
 		}
 		break
 	}
 	m.list.AppendItems(chat.NewToolGroupMessageItem(m.com.Styles, tool))
-	m.sweepSpinnersToEnd()
+	return 0, false
 }
 
 // sweepSpinnersToEnd moves every working-spinner item to the end of
@@ -511,8 +531,9 @@ func (m *Chat) absorbTool(tool chat.ToolMessageItem) {
 // the thinking indicator must anchor below all of them until the turn
 // settles. Indices are gathered newest-first, so removing one never
 // shifts the indices still to come. The list selection never sits on a
-// spinner (isSelectable refuses it), so the removals cannot drop it.
-func (m *Chat) sweepSpinnersToEnd() {
+// spinner (isSelectable refuses it), so the removals cannot drop it. It
+// reports whether it moved anything.
+func (m *Chat) sweepSpinnersToEnd() bool {
 	var spinners []int
 	for idx := m.list.Len() - 1; idx >= 0; idx-- {
 		if chat.IsWorkingSpinner(m.list.ItemAt(idx)) {
@@ -521,7 +542,7 @@ func (m *Chat) sweepSpinnersToEnd() {
 	}
 	// Already the tail of the list: nothing to move.
 	if len(spinners) == 0 || spinners[len(spinners)-1] == m.list.Len()-len(spinners) {
-		return
+		return false
 	}
 	items := make([]list.Item, 0, len(spinners))
 	for _, idx := range spinners {
@@ -530,6 +551,7 @@ func (m *Chat) sweepSpinnersToEnd() {
 	}
 	slices.Reverse(items)
 	m.list.AppendItems(items...)
+	return true
 }
 
 // foldToolGroups folds runs of tool calls into group items. Info footers
@@ -579,7 +601,13 @@ func (m *Chat) foldToolGroups(msgs []chat.MessageItem) []list.Item {
 // child IDs against their group's index.
 func (m *Chat) rebuildIndices() {
 	m.idInxMap = make(map[string]int, len(m.idInxMap))
-	for i := range m.list.Len() {
+	m.indexFrom(0)
+}
+
+// indexFrom registers the items from index first on, and their tool group
+// children, in the ID-to-index map.
+func (m *Chat) indexFrom(first int) {
+	for i := first; i < m.list.Len(); i++ {
 		item, ok := m.list.ItemAt(i).(chat.MessageItem)
 		if !ok {
 			continue
