@@ -63,6 +63,10 @@
             },
             "type": "array"
           },
+          "propertyNames": {
+            "pattern": "^([Pp][Rr][Ee]_?[Tt][Oo][Oo][Ll]_?[Uu][Ss][Ee]|[Pp][Oo][Ss][Tt]_?[Tt][Oo][Oo][Ll]_?[Uu][Ss][Ee]|[Uu][Ss][Ee][Rr]_?[Pp][Rr][Oo][Mm][Pp][Tt]_?[Ss][Uu][Bb][Mm][Ii][Tt]|[Ss][Ee][Ss][Ss][Ii][Oo][Nn]_?[Ss][Tt][Aa][Rr][Tt]|[Ss][Tt][Oo][Pp]|[Ss][Uu][Bb][Aa][Gg][Ee][Nn][Tt]_?[Ss][Tt][Oo][Pp]|[Nn][Oo][Tt][Ii][Ff][Ii][Cc][Aa][Tt][Ii][Oo][Nn]|[Pp][Rr][Ee]_?[Cc][Oo][Mm][Pp][Aa][Cc][Tt]|[Pp][Oo][Ss][Tt]_?[Cc][Oo][Mm][Pp][Aa][Cc][Tt])$",
+            "description": "Hook event: PreToolUse, PostToolUse, UserPromptSubmit, SessionStart, Stop, SubagentStop, Notification, PreCompact, PostCompact"
+          },
           "type": "object",
           "description": "User-defined shell commands that fire on hook events (e.g. PreToolUse)"
         },

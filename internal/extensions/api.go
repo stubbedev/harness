@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/hooks"
 	"github.com/stubbedev/harness/internal/version"
 	lua "github.com/yuin/gopher-lua"
 )
@@ -268,10 +267,14 @@ func (in *instance) luaOn(L *lua.LState) int {
 		}
 	}
 
-	if !slices.Contains(hooks.EventNames(), event) {
+	// The same spellings a config hook accepts: any case, with or
+	// without underscores.
+	canonical, known := config.CanonicalHookEvent(event)
+	if !known {
 		L.RaiseError("harness.on: unknown event %q", event)
 		return 0
 	}
+	event = canonical
 	if fn == nil {
 		L.RaiseError("harness.on %q: handler must be a function", event)
 		return 0

@@ -26,11 +26,6 @@ const (
 	EventPostCompact      = config.HookPostCompact
 )
 
-// EventNames lists every event this build understands, in a stable order.
-func EventNames() []string {
-	return config.HookEvents()
-}
-
 // HaltExitCode is the exit code that halts the whole turn. 2 blocks the
 // current tool call; 49 sits in the no-man's-land between the
 // generic-error range (1-30), the sysexits range (64-78), and the

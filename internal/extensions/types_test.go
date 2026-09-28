@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/extensions"
+	"github.com/stubbedev/harness/internal/hooks"
 	lua "github.com/yuin/gopher-lua"
 )
 
@@ -80,4 +83,53 @@ func TestWriteTypeDefinitions(t *testing.T) {
 	// The types directory holds no init.lua, so discovery ignores it.
 	host := newHost(t, []string{dir})
 	require.Empty(t, host.Loaded())
+}
+
+// TestTypeDefinitionsNameEveryHookEvent keeps the stub's event alias and
+// the fields of harness.HookEvent in step with the hook engine: the event
+// list is config.HookEvents, and a handler receives the payload encoded
+// from hooks.EventContext.
+func TestTypeDefinitionsNameEveryHookEvent(t *testing.T) {
+	t.Parallel()
+
+	stub := extensions.TypeDefinitions
+	var aliased []string
+	inAlias := false
+	for line := range strings.SplitSeq(stub, "\n") {
+		switch {
+		case strings.HasPrefix(line, "---@alias harness.HookEventName"):
+			inAlias = true
+		case inAlias && strings.HasPrefix(line, `---| "`):
+			aliased = append(aliased, strings.Trim(strings.TrimPrefix(line, "---| "), `"`))
+		case inAlias:
+			inAlias = false
+		}
+	}
+	require.Equal(t, config.HookEvents(), aliased)
+
+	var fields []string
+	inClass := false
+	for line := range strings.SplitSeq(stub, "\n") {
+		switch {
+		case line == "---@class harness.HookEvent":
+			inClass = true
+		case inClass && strings.HasPrefix(line, "---@field "):
+			name, _, _ := strings.Cut(strings.TrimPrefix(line, "---@field "), " ")
+			fields = append(fields, strings.TrimSuffix(name, "?"))
+		case inClass:
+			inClass = false
+		}
+	}
+	var want []string
+	for field := range reflect.TypeFor[hooks.EventContext]().Fields() {
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if name == "-" {
+			// ToolInput is re-encoded as a table under tool_input.
+			name = "tool_input"
+		}
+		if name != "" {
+			want = append(want, name)
+		}
+	}
+	require.ElementsMatch(t, want, fields)
 }

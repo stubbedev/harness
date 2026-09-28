@@ -1026,7 +1026,7 @@ func TestValidateHooksNormalizesAllEventNames(t *testing.T) {
 		},
 	}
 	require.NoError(t, cfg.ValidateHooks())
-	for _, event := range EventNames() {
+	for _, event := range config.HookEvents() {
 		require.Contains(t, cfg.Hooks, event)
 	}
 	require.NotContains(t, cfg.Hooks, "pre_tool_use")
