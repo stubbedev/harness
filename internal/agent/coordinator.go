@@ -997,6 +997,10 @@ func (c *coordinator) buildModel(ctx context.Context, providerCfg config.Provide
 	if err != nil {
 		return Model{}, err
 	}
+	// Bound each request with the configured timeout so unreachable or hung
+	// providers fail instead of blocking a session forever. The wrapper is
+	// applied per request, so retries get a fresh budget each attempt.
+	lm = newRequestTimeoutModel(lm, c.cfg.Config().Options.GetRequestTimeout())
 	return Model{Model: lm, CatalogCfg: catalogModel, ModelCfg: selModel, FlatRate: providerCfg.FlatRate}, nil
 }
 

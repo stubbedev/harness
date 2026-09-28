@@ -1593,3 +1593,26 @@ func TestBearerOnlyClientStripsAPIKeyHeader(t *testing.T) {
 	require.Empty(t, inner.got.Get("X-Api-Key"))
 	require.Equal(t, "Bearer token", inner.got.Get("Authorization"))
 }
+
+// TestBuildModelAppliesRequestTimeout pins the request_timeout wiring: every
+// model the coordinator builds is bounded by the configured budget, so a
+// stalled provider cannot hang a turn.
+func TestBuildModelAppliesRequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	providerCfg := config.ProviderConfig{
+		ID:      "timeout-provider",
+		Type:    catalog.TypeOpenAI,
+		APIKey:  "test-key",
+		BaseURL: "http://127.0.0.1:1",
+		Models:  []catalog.Model{{ID: "model-t", DefaultMaxTokens: 4096}},
+	}
+	coord := newTestCoordinator(t, env, "timeout-provider", providerCfg)
+
+	m, err := coord.resolveModelByID(t.Context(), "model-t", "timeout-provider", false)
+	require.NoError(t, err)
+	wrapped, ok := m.Model.(requestTimeoutModel)
+	require.True(t, ok, "model must be wrapped with the request timeout, got %T", m.Model)
+	require.Equal(t, config.DefaultRequestTimeout, wrapped.timeout)
+}
