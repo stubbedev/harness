@@ -19,7 +19,7 @@ var mcpResourceDescription string
 // MCPResourceParams covers listing and reading, which differ only by
 // whether a URI is known yet.
 type MCPResourceParams struct {
-	Action  string `json:"action" description:"list (the server's resource URIs) or read (one of them)"`
+	Action  string `json:"action" enum:"list,read" description:"list (the server's resource URIs) or read (one of them)"`
 	MCPName string `json:"mcp_name" description:"Name of a configured MCP server"`
 	URI     string `json:"uri,omitempty" description:"read only: the resource URI, exactly as list returned it"`
 }
