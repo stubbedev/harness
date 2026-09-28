@@ -444,6 +444,12 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	}
 	done := make(chan response, 1)
 
+	// Subscribe before the run starts: a subscription opened after it
+	// misses whatever the run publishes first.
+	messageEvents := app.Messages.Subscribe(ctx)
+	messageReadBytes := make(map[string]int)
+	var printed bool
+
 	go func(ctx context.Context, sessionID, prompt string) {
 		// A panic in the run must still unblock the caller below, which
 		// waits on done with no timeout of its own.
@@ -462,9 +468,35 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		}
 	}(ctx, sess.ID, prompt)
 
-	messageEvents := app.Messages.Subscribe(ctx)
-	messageReadBytes := make(map[string]int)
-	var printed bool
+	// printDelta writes the part of an assistant message not yet printed.
+	printDelta := func(msg message.Message) error {
+		if msg.SessionID != sess.ID || msg.Role != message.Assistant || len(msg.Parts) == 0 {
+			return nil
+		}
+		stopSpinner()
+
+		content := msg.Content().String()
+		readBytes := messageReadBytes[msg.ID]
+
+		if len(content) < readBytes {
+			slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
+			return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
+		}
+
+		part := content[readBytes:]
+		// Trim leading whitespace. Sometimes the LLM includes leading
+		// formatting and intentation, which we don't want here.
+		if readBytes == 0 {
+			part = strings.TrimLeft(part, " \t")
+		}
+		// Ignore initial whitespace-only messages.
+		if printed || strings.TrimSpace(part) != "" {
+			printed = true
+			fmt.Fprint(output, part)
+		}
+		messageReadBytes[msg.ID] = len(content)
+		return nil
+	}
 
 	defer func() {
 		if progress && stderrTTY {
@@ -486,6 +518,23 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 		select {
 		case result := <-done:
 			stopSpinner()
+			// The run's last updates can still sit in the subscription
+			// buffer: select picks among ready cases at random, so done
+			// can win over them. Print them before returning.
+			for drained := false; !drained; {
+				select {
+				case event, ok := <-messageEvents:
+					if !ok {
+						drained = true
+						break
+					}
+					if err := printDelta(event.Payload); err != nil {
+						return err
+					}
+				default:
+					drained = true
+				}
+			}
 			if result.err != nil {
 				if errors.Is(result.err, context.Canceled) || errors.Is(result.err, agent.ErrRequestCancelled) {
 					slog.Debug("Non-interactive: agent processing cancelled", "session_id", sess.ID)
@@ -496,30 +545,8 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 			return nil
 
 		case event := <-messageEvents:
-			msg := event.Payload
-			if msg.SessionID == sess.ID && msg.Role == message.Assistant && len(msg.Parts) > 0 {
-				stopSpinner()
-
-				content := msg.Content().String()
-				readBytes := messageReadBytes[msg.ID]
-
-				if len(content) < readBytes {
-					slog.Error("Non-interactive: message content is shorter than read bytes", "message_length", len(content), "read_bytes", readBytes)
-					return fmt.Errorf("message content is shorter than read bytes: %d < %d", len(content), readBytes)
-				}
-
-				part := content[readBytes:]
-				// Trim leading whitespace. Sometimes the LLM includes leading
-				// formatting and intentation, which we don't want here.
-				if readBytes == 0 {
-					part = strings.TrimLeft(part, " \t")
-				}
-				// Ignore initial whitespace-only messages.
-				if printed || strings.TrimSpace(part) != "" {
-					printed = true
-					fmt.Fprint(output, part)
-				}
-				messageReadBytes[msg.ID] = len(content)
+			if err := printDelta(event.Payload); err != nil {
+				return err
 			}
 
 		case <-ctx.Done():
