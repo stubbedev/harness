@@ -218,6 +218,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 		Model:            sql.NullString{String: params.Model, Valid: true},
 		Provider:         sql.NullString{String: params.Provider, Valid: params.Provider != ""},
 		IsSummaryMessage: isSummary,
+		Visible:          boolInt((&Message{Parts: params.Parts, IsSummaryMessage: params.IsSummaryMessage}).CountsInTranscript()),
 	})
 	if err != nil {
 		return Message{}, err
@@ -441,10 +442,18 @@ func (s *service) write(ctx context.Context, msg Message) error {
 		PrismHypercreditSavings: nullableFloat(msg.PrismHypercreditSavings),
 		PrismDollarSavings:      nullableFloat(msg.PrismDollarSavings),
 		FinishedAt:              finishedAt,
+		Visible:                 boolInt(msg.CountsInTranscript()),
 	}); err != nil {
 		return err
 	}
 	return nil
+}
+
+func boolInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func nullableFloat(v *float64) sql.NullFloat64 {

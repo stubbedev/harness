@@ -855,4 +855,15 @@ func TestMessageCountCountsVisibleMessagesOnly(t *testing.T) {
 
 	require.NoError(t, svc.Delete(t.Context(), note.ID))
 	require.Equal(t, int64(2), count(), "deleting a note changes nothing")
+
+	// Context-overflow recovery: an assistant row created empty (counted)
+	// ends as bookkeeping only and is deleted. The count must come back.
+	aborted, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant, Parts: []ContentPart{}})
+	require.NoError(t, err)
+	require.Equal(t, int64(3), count())
+	aborted.AddFinish(FinishReasonError, "overflow", "")
+	require.NoError(t, svc.Update(t.Context(), aborted))
+	require.Equal(t, int64(2), count(), "a row that became bookkeeping only stops counting")
+	require.NoError(t, svc.Delete(t.Context(), aborted.ID))
+	require.Equal(t, int64(2), count(), "deleting it does not count it twice")
 }

@@ -294,6 +294,29 @@ func (m *Message) SubagentNotesOnly() bool {
 	return notes > 0
 }
 
+// CountsInTranscript reports whether m is conversation the reader sees,
+// and so counts toward its session's message_count. Summaries and rows
+// whose every part is model-only bookkeeping (context notes, sub-agent
+// report-backs, the finish marker) do not. A row with no parts yet, an
+// assistant message before it streams, does. The store writes this with
+// every create and update; the count triggers only read it.
+func (m *Message) CountsInTranscript() bool {
+	if m.IsSummaryMessage {
+		return false
+	}
+	if len(m.Parts) == 0 {
+		return true
+	}
+	for _, part := range m.Parts {
+		switch part.(type) {
+		case ContextNote, SubagentNote, Finish:
+		default:
+			return true
+		}
+	}
+	return false
+}
+
 type Message struct {
 	ID               string
 	Role             MessageRole

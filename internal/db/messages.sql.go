@@ -19,12 +19,13 @@ INSERT INTO messages (
     model,
     provider,
     is_summary_message,
+    visible,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
-RETURNING id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+RETURNING id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, visible
 `
 
 type CreateMessageParams struct {
@@ -35,6 +36,7 @@ type CreateMessageParams struct {
 	Model            sql.NullString `json:"model"`
 	Provider         sql.NullString `json:"provider"`
 	IsSummaryMessage int64          `json:"is_summary_message"`
+	Visible          int64          `json:"visible"`
 }
 
 func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error) {
@@ -46,6 +48,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		arg.Model,
 		arg.Provider,
 		arg.IsSummaryMessage,
+		arg.Visible,
 	)
 	var i Message
 	err := row.Scan(
@@ -63,6 +66,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.PrismModelName,
 		&i.PrismHypercreditSavings,
 		&i.PrismDollarSavings,
+		&i.Visible,
 	)
 	return i, err
 }
@@ -100,7 +104,7 @@ func (q *Queries) GetLastAssistantMessageBySession(ctx context.Context, sessionI
 }
 
 const getMessage = `-- name: GetMessage :one
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, visible
 FROM messages
 WHERE id = ? LIMIT 1
 `
@@ -123,6 +127,7 @@ func (q *Queries) GetMessage(ctx context.Context, id string) (Message, error) {
 		&i.PrismModelName,
 		&i.PrismHypercreditSavings,
 		&i.PrismDollarSavings,
+		&i.Visible,
 	)
 	return i, err
 }
@@ -160,7 +165,7 @@ func (q *Queries) ListAllUserMessages(ctx context.Context) ([]string, error) {
 }
 
 const listMessagesBySession = `-- name: ListMessagesBySession :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, visible
 FROM messages
 WHERE session_id = ?
 ORDER BY created_at ASC
@@ -190,6 +195,7 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) (
 			&i.PrismModelName,
 			&i.PrismHypercreditSavings,
 			&i.PrismDollarSavings,
+			&i.Visible,
 		); err != nil {
 			return nil, err
 		}
@@ -205,7 +211,7 @@ func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) (
 }
 
 const listMessagesBySessionFrom = `-- name: ListMessagesBySessionFrom :many
-SELECT m.id, m.session_id, m.role, m.parts, m.model, m.created_at, m.updated_at, m.finished_at, m.provider, m.is_summary_message, m.prism_model_id, m.prism_model_name, m.prism_hypercredit_savings, m.prism_dollar_savings
+SELECT m.id, m.session_id, m.role, m.parts, m.model, m.created_at, m.updated_at, m.finished_at, m.provider, m.is_summary_message, m.prism_model_id, m.prism_model_name, m.prism_hypercredit_savings, m.prism_dollar_savings, m.visible
 FROM messages m
 WHERE m.session_id = ?
   AND m.created_at >= (SELECT b.created_at FROM messages b WHERE b.id = ?)
@@ -241,6 +247,7 @@ func (q *Queries) ListMessagesBySessionFrom(ctx context.Context, arg ListMessage
 			&i.PrismModelName,
 			&i.PrismHypercreditSavings,
 			&i.PrismDollarSavings,
+			&i.Visible,
 		); err != nil {
 			return nil, err
 		}
@@ -256,7 +263,7 @@ func (q *Queries) ListMessagesBySessionFrom(ctx context.Context, arg ListMessage
 }
 
 const listUserMessagesBySession = `-- name: ListUserMessagesBySession :many
-SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, visible
 FROM messages
 WHERE session_id = ? AND role = 'user'
 ORDER BY created_at DESC
@@ -286,6 +293,7 @@ func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID strin
 			&i.PrismModelName,
 			&i.PrismHypercreditSavings,
 			&i.PrismDollarSavings,
+			&i.Visible,
 		); err != nil {
 			return nil, err
 		}
@@ -309,6 +317,7 @@ SET
     prism_hypercredit_savings = ?,
     prism_dollar_savings = ?,
     finished_at = ?,
+    visible = ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?
 `
@@ -320,6 +329,7 @@ type UpdateMessageParams struct {
 	PrismHypercreditSavings sql.NullFloat64 `json:"prism_hypercredit_savings"`
 	PrismDollarSavings      sql.NullFloat64 `json:"prism_dollar_savings"`
 	FinishedAt              sql.NullInt64   `json:"finished_at"`
+	Visible                 int64           `json:"visible"`
 	ID                      string          `json:"id"`
 }
 
@@ -331,6 +341,7 @@ func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) er
 		arg.PrismHypercreditSavings,
 		arg.PrismDollarSavings,
 		arg.FinishedAt,
+		arg.Visible,
 		arg.ID,
 	)
 	return err

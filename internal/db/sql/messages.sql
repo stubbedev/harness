@@ -18,10 +18,11 @@ INSERT INTO messages (
     model,
     provider,
     is_summary_message,
+    visible,
     created_at,
     updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
+    ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
 RETURNING *;
 
@@ -34,6 +35,7 @@ SET
     prism_hypercredit_savings = ?,
     prism_dollar_savings = ?,
     finished_at = ?,
+    visible = ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?;
 
