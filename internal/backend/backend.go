@@ -26,7 +26,6 @@ import (
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/subagents"
-	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/version"
 	"github.com/stubbedev/harness/internal/workspace"
 )
@@ -552,16 +551,16 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	b.registerClient(ws, clientID)
 	b.mu.Unlock()
 
+	// The client compares versions itself before it attaches (it has the
+	// server's in the response and restarts a stale idle server), so this
+	// is only the server-side record. An event here would be published
+	// before any client stream exists to carry it.
 	if args.Version != "" && args.Version != version.Version {
 		slog.Warn(
 			"Client/server version mismatch",
 			"client", args.Version,
 			"server", version.Version,
 		)
-		appWorkspace.SendEvent(util.NewWarnMsg(fmt.Sprintf(
-			"Server version %q differs from client version %q. Consider restarting the server.",
-			version.Version, args.Version,
-		)))
 	}
 
 	return ws, workspaceToProto(ws), nil
