@@ -563,3 +563,36 @@ providers:
     disable: true
 ```
 
+
+## Environment variables
+
+These configure Harness from the environment. Boolean variables take `1`,
+`true` or `false`.
+
+| Variable | Effect |
+| --- | --- |
+| `HARNESS_GLOBAL_CONFIG` | Directory the global `config.yaml` lives in. |
+| `HARNESS_GLOBAL_DATA` | Global data directory: state, model catalog, and sessions of projects without a data directory of their own. |
+| `HARNESS_CACHE_DIR` | Global cache directory: logs and server sockets. |
+| `HARNESS_CRASH_DIR` | Where crash reports are written. |
+| `HARNESS_SCRATCH_DIR` | Root of the per-session scratch directories. |
+| `HARNESS_SKILLS_DIR` | Replaces the global skill directories. |
+| `HARNESS_SUBAGENTS_DIR` | Replaces the global subagent directories. |
+| `HARNESS_EXTENSIONS_DIR` | Replaces the global extension directories. |
+| `HARNESS_SKIP_DATADIR_LOCK` | Skips the lock that keeps two instances off one data directory. |
+| `HARNESS_DISABLE_PROVIDER_AUTO_UPDATE` | Same as `options.disable_provider_auto_update`. |
+| `HARNESS_DISABLE_DEFAULT_PROVIDERS` | Same as `options.disable_default_providers`. |
+| `HARNESS_DISABLE_ANTHROPIC_CACHE` | Stops marking Anthropic prompt-cache breakpoints. |
+| `HARNESS_DISABLE_PROMPT_CACHE_KEY` | Stops sending the per-session `prompt_cache_key` to OpenAI-style APIs. |
+| `HARNESS_CORE_UTILS` | Forces the built-in Go coreutils on or off (on by default on Windows only). |
+| `HARNESS_PTY_ROWS`, `HARNESS_PTY_COLS` | Size new terminal sessions open with. |
+| `HARNESS_PTY_TERM` | `TERM` terminal sessions run with. |
+| `HARNESS_CLIENT_SERVER` | Runs the TUI against a Harness server process. |
+| `HARNESS_SERVER_IDLE_TIMEOUT` | Seconds a server with no clients lingers before exiting; `0` exits at once. |
+| `HARNESS_SERVER_DETACH_GRACE` | Seconds a workspace outlives its last client detaching. |
+| `HARNESS_SERVER_READY_TIMEOUT` | How long to wait for a started server to answer, as a Go duration (`10s`). |
+| `HARNESS_PROFILE` | Serves pprof on `localhost:6060`. |
+| `HARNESS_UI_DEBUG` | Paints a changing block on every TUI redraw. |
+
+Hooks receive their own `HARNESS_*` variables describing the event; see
+[Hooks](../hooks/README.md).

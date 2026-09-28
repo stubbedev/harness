@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/stubbedev/harness/internal/envvars"
+
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/version"
 )
@@ -46,7 +48,7 @@ var written atomic.Uint64
 // HARNESS_CRASH_DIR environment variable overrides the default location
 // under the global data root.
 func Dir() string {
-	if dir := os.Getenv("HARNESS_CRASH_DIR"); dir != "" {
+	if dir := os.Getenv(envvars.CrashDir); dir != "" {
 		return dir
 	}
 	return filepath.Join(home.DataDir(), "crashes")

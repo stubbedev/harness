@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stubbedev/harness/internal/envvars"
+
 	tea "charm.land/bubbletea/v2"
 	fang "charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
@@ -265,7 +267,7 @@ func supportsProgressBar() bool {
 // useClientServer returns true when the client/server architecture is
 // enabled via the HARNESS_CLIENT_SERVER environment variable.
 func useClientServer() bool {
-	v, _ := strconv.ParseBool(os.Getenv("HARNESS_CLIENT_SERVER"))
+	v, _ := strconv.ParseBool(os.Getenv(envvars.ClientServer))
 	return v
 }
 
@@ -647,7 +649,7 @@ func safeHostName(hostURL *url.URL) string {
 // Overridable via HARNESS_SERVER_READY_TIMEOUT (parsed as a Go duration).
 func serverReadyTimeout() time.Duration {
 	const def = 10 * time.Second
-	v := os.Getenv("HARNESS_SERVER_READY_TIMEOUT")
+	v := os.Getenv(envvars.ServerReadyTimeout)
 	if v == "" {
 		return def
 	}

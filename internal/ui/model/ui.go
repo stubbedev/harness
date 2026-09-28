@@ -20,6 +20,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/stubbedev/harness/internal/envvars"
+
 	"charm.land/bubbles/v2/cursor"
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -3056,7 +3058,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	m.status.Draw(scr, layout.status)
 
 	// Debugging rendering (visually see when the tui rerenders)
-	if os.Getenv("HARNESS_UI_DEBUG") == "true" {
+	if os.Getenv(envvars.UIDebug) == "true" {
 		debugView := lipgloss.NewStyle().Background(lipgloss.ANSIColor(rand.Intn(256))).Width(4).Height(2)
 		debug := uv.NewStyledString(debugView.String())
 		debug.Draw(scr, image.Rectangle{

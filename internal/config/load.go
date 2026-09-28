@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stubbedev/harness/internal/envvars"
+
 	powernapConfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/qjebbs/go-jsons"
 	"github.com/stubbedev/harness/internal/catalog"
@@ -703,11 +705,11 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	c.Options.ExtensionsPaths = appendMissing(c.Options.ExtensionsPaths, GlobalExtensionsDirs()...)
 	c.Options.ExtensionsPaths = appendMissing(c.Options.ExtensionsPaths, ProjectExtensionsDir(workingDir)...)
 
-	if str, ok := os.LookupEnv("HARNESS_DISABLE_PROVIDER_AUTO_UPDATE"); ok {
+	if str, ok := os.LookupEnv(envvars.DisableProviderAutoUpdate); ok {
 		c.Options.DisableProviderAutoUpdate, _ = strconv.ParseBool(str)
 	}
 
-	if str, ok := os.LookupEnv("HARNESS_DISABLE_DEFAULT_PROVIDERS"); ok {
+	if str, ok := os.LookupEnv(envvars.DisableDefaultProviders); ok {
 		c.Options.DisableDefaultProviders, _ = strconv.ParseBool(str)
 	}
 
@@ -1153,7 +1155,7 @@ func hasAWSCredentials(env env.Env) bool {
 // $XDG_CONFIG_HOME/harness/config.yaml. Harness reads this file and never
 // writes to it, so comments and layout in it are safe.
 func GlobalConfig() string {
-	if harnessGlobal := os.Getenv("HARNESS_GLOBAL_CONFIG"); harnessGlobal != "" {
+	if harnessGlobal := os.Getenv(envvars.GlobalConfig); harnessGlobal != "" {
 		return filepath.Join(harnessGlobal, userConfigFile)
 	}
 	return filepath.Join(home.Config(), appName, userConfigFile)
@@ -1162,7 +1164,7 @@ func GlobalConfig() string {
 // GlobalCacheDir returns the path to the global cache directory for the
 // application.
 func GlobalCacheDir() string {
-	if harnessCache := os.Getenv("HARNESS_CACHE_DIR"); harnessCache != "" {
+	if harnessCache := os.Getenv(envvars.CacheDir); harnessCache != "" {
 		return harnessCache
 	}
 	if xdgCacheHome := os.Getenv("XDG_CACHE_HOME"); xdgCacheHome != "" {
@@ -1262,7 +1264,7 @@ func projectBoundary(dir string) string {
 // without permission prompts.
 func GlobalSkillsDirs() []string {
 	// Per the Agent Skills spec, also scan ~/.agents/skills.
-	return globalDirs("HARNESS_SKILLS_DIR", "skills", ".agents", ".claude")
+	return globalDirs(envvars.SkillsDir, "skills", ".agents", ".claude")
 }
 
 // globalDirs returns the global directories for one kind of definition
@@ -1334,7 +1336,7 @@ func ProjectSkillsDir(workingDir string) []string {
 // definitions. The HARNESS_SUBAGENTS_DIR environment variable, when set to a
 // non-empty value, overrides the default list entirely.
 func GlobalSubagentsDirs() []string {
-	return globalDirs("HARNESS_SUBAGENTS_DIR", "subagents", ".agents")
+	return globalDirs(envvars.SubagentsDir, "subagents", ".agents")
 }
 
 // projectSubagentSubdirs lists the conventional subdirectories where
@@ -1392,7 +1394,7 @@ func (c *Config) ValidateHooks() error {
 // extensions. The HARNESS_EXTENSIONS_DIR environment variable, when set
 // to a non-empty value, overrides the default list entirely.
 func GlobalExtensionsDirs() []string {
-	return globalDirs("HARNESS_EXTENSIONS_DIR", "extensions")
+	return globalDirs(envvars.ExtensionsDir, "extensions")
 }
 
 // projectExtensionSubdirs lists the conventional subdirectories where

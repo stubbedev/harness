@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/envvars"
+
 	"github.com/stubbedev/harness/internal/filepathext"
 )
 
@@ -18,7 +20,7 @@ import (
 // HARNESS_SCRATCH_DIR overrides the root, which tests use to keep their
 // files out of the real temp directory.
 func scratchRoot() string {
-	if override := strings.TrimSpace(os.Getenv("HARNESS_SCRATCH_DIR")); override != "" {
+	if override := strings.TrimSpace(os.Getenv(envvars.ScratchDir)); override != "" {
 		return override
 	}
 	return filepath.Join(os.TempDir(), "harness", "scratchpad")

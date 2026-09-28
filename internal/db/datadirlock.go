@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/stubbedev/harness/internal/envvars"
+
 	"github.com/stubbedev/harness/internal/lock"
 	"github.com/stubbedev/harness/internal/version"
 )
@@ -72,7 +74,7 @@ func acquireDataDirLock(dataDir string) (func(), error) {
 
 // skipDataDirLock reports whether the data-dir lock should be bypassed.
 func skipDataDirLock() bool {
-	v, _ := strconv.ParseBool(os.Getenv("HARNESS_SKIP_DATADIR_LOCK"))
+	v, _ := strconv.ParseBool(os.Getenv(envvars.SkipDataDirLock))
 	return v
 }
 

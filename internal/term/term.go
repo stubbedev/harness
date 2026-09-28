@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stubbedev/harness/internal/envvars"
+
 	"github.com/aymanbagabas/go-pty"
 	"github.com/hinshun/vt10x"
 	"github.com/stubbedev/harness/internal/crash"
@@ -288,7 +290,7 @@ func withoutSizeEnv(entries []string) []string {
 // renders wrong. Override with HARNESS_PTY_TERM when a program needs
 // something else.
 func termValue() string {
-	if t := strings.TrimSpace(os.Getenv("HARNESS_PTY_TERM")); t != "" {
+	if t := strings.TrimSpace(os.Getenv(envvars.PTYTerm)); t != "" {
 		return t
 	}
 	return "xterm-256color"
@@ -297,8 +299,8 @@ func termValue() string {
 // DefaultSize is the size new sessions open with: the defaults, unless
 // HARNESS_PTY_ROWS/HARNESS_PTY_COLS override them.
 func DefaultSize() (rows, cols int) {
-	return clampDim(envInt("HARNESS_PTY_ROWS", DefaultRows), minRows, maxRows),
-		clampDim(envInt("HARNESS_PTY_COLS", DefaultCols), minCols, maxCols)
+	return clampDim(envInt(envvars.PTYRows, DefaultRows), minRows, maxRows),
+		clampDim(envInt(envvars.PTYCols, DefaultCols), minCols, maxCols)
 }
 
 func envInt(name string, fallback int) int {

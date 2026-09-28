@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/stubbedev/harness/internal/envvars"
 )
 
 var homedir, homedirErr = os.UserHomeDir()
@@ -49,7 +51,7 @@ func AppData() string {
 // leaf packages (crash reporting among them) can resolve it without
 // importing config.
 func DataDir() string {
-	if harnessData := os.Getenv("HARNESS_GLOBAL_DATA"); harnessData != "" {
+	if harnessData := os.Getenv(envvars.GlobalData); harnessData != "" {
 		return harnessData
 	}
 	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {

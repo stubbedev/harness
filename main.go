@@ -16,13 +16,15 @@ import (
 	_ "net/http/pprof"
 	"os"
 
+	"github.com/stubbedev/harness/internal/envvars"
+
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/stubbedev/harness/internal/cmd"
 	_ "github.com/stubbedev/harness/internal/dns"
 )
 
 func main() {
-	if os.Getenv("HARNESS_PROFILE") != "" {
+	if os.Getenv(envvars.Profile) != "" {
 		go func() {
 			slog.Info("Serving pprof at localhost:6060")
 			if httpErr := http.ListenAndServe("localhost:6060", nil); httpErr != nil {

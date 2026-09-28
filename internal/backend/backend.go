@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stubbedev/harness/internal/envvars"
+
 	"github.com/google/uuid"
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/app"
@@ -296,14 +298,14 @@ func New(ctx context.Context, cfg *config.ConfigStore, shutdownFn ShutdownFunc) 
 		shutdownFn:  shutdownFn,
 		createGrace: DefaultCreateGrace,
 		lingerDelay: idleShutdownDelayFromEnv(),
-		detachGrace: durationFromEnv("HARNESS_SERVER_DETACH_GRACE", DefaultDetachGrace),
+		detachGrace: durationFromEnv(envvars.ServerDetachGrace, DefaultDetachGrace),
 	}
 }
 
 // idleShutdownDelayFromEnv returns the idle-shutdown delay, honoring a
 // HARNESS_SERVER_IDLE_TIMEOUT override (in seconds; 0 disables lingering).
 func idleShutdownDelayFromEnv() time.Duration {
-	return durationFromEnv("HARNESS_SERVER_IDLE_TIMEOUT", DefaultIdleShutdownDelay)
+	return durationFromEnv(envvars.ServerIdleTimeout, DefaultIdleShutdownDelay)
 }
 
 // durationFromEnv reads a whole number of seconds from the named

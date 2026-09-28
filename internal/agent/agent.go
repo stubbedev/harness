@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/stubbedev/harness/internal/envvars"
+
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
@@ -2251,7 +2253,7 @@ func stampToolCacheControl(tools []fantasy.AgentTool, opts fantasy.ProviderOptio
 }
 
 var disableAnthropicCache = sync.OnceValue(func() bool {
-	t, _ := strconv.ParseBool(os.Getenv("HARNESS_DISABLE_ANTHROPIC_CACHE"))
+	t, _ := strconv.ParseBool(os.Getenv(envvars.DisableAnthropicCache))
 	return t
 })
 
@@ -2293,7 +2295,7 @@ func sessionHeaders(sessionID string) map[string]string {
 // Responses) and the user has not configured a key of their own.
 // Disable with HARNESS_DISABLE_PROMPT_CACHE_KEY.
 func withPromptCacheKey(sessionID string, opts fantasy.ProviderOptions) fantasy.ProviderOptions {
-	if t, _ := strconv.ParseBool(os.Getenv("HARNESS_DISABLE_PROMPT_CACHE_KEY")); t {
+	if t, _ := strconv.ParseBool(os.Getenv(envvars.DisablePromptCacheKey)); t {
 		return opts
 	}
 	switch o := opts[openai.Name].(type) {
