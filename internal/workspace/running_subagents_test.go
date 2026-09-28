@@ -140,7 +140,7 @@ func TestAppWorkspace_RunningSubagents_WithEntries(t *testing.T) {
 	require.Equal(t, "parent-1", a.ParentSessionID)
 	require.Equal(t, "agent-alpha", a.Name)
 	require.Equal(t, "blue", a.Color)
-	require.Equal(t, "running", a.Status)
+	require.Equal(t, subagents.StatusRunning, a.Status)
 	require.False(t, a.StartedAt.IsZero())
 
 	b := byChild["child-B"]
