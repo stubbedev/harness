@@ -18,6 +18,9 @@ type Querier interface {
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	DeleteMemory(ctx context.Context, id string) (int64, error)
 	DeleteMessage(ctx context.Context, id string) error
+	// Deletes the anchor message and every message after it in the session,
+	// in the order ListMessagesBySession reads them, as one statement.
+	DeleteMessagesFrom(ctx context.Context, arg DeleteMessagesFromParams) ([]Message, error)
 	DeleteSession(ctx context.Context, id string) error
 	GetAverageResponseTime(ctx context.Context) (int64, error)
 	GetCheckpointByMessage(ctx context.Context, messageID string) (Checkpoint, error)

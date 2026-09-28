@@ -81,6 +81,62 @@ func (q *Queries) DeleteMessage(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteMessagesFrom = `-- name: DeleteMessagesFrom :many
+DELETE FROM messages
+WHERE messages.session_id = ?1
+  AND (messages.created_at, messages.rowid) >= (
+    SELECT a.created_at, a.rowid FROM messages a
+    WHERE a.id = ?2 AND a.session_id = ?1
+  )
+RETURNING id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, visible
+`
+
+type DeleteMessagesFromParams struct {
+	SessionID string `json:"session_id"`
+	AnchorID  string `json:"anchor_id"`
+}
+
+// Deletes the anchor message and every message after it in the session,
+// in the order ListMessagesBySession reads them, as one statement.
+func (q *Queries) DeleteMessagesFrom(ctx context.Context, arg DeleteMessagesFromParams) ([]Message, error) {
+	rows, err := q.db.QueryContext(ctx, deleteMessagesFrom, arg.SessionID, arg.AnchorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Parts,
+			&i.Model,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.Provider,
+			&i.IsSummaryMessage,
+			&i.PrismModelID,
+			&i.PrismModelName,
+			&i.PrismHypercreditSavings,
+			&i.PrismDollarSavings,
+			&i.Visible,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLastAssistantMessageBySession = `-- name: GetLastAssistantMessageBySession :one
 SELECT provider, model
 FROM messages

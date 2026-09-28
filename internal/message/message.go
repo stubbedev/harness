@@ -1,6 +1,7 @@
 package message
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -65,6 +66,10 @@ type Service interface {
 	// reads them.
 	GetLastAssistantMessage(ctx context.Context, sessionID string) (Message, error)
 	Delete(ctx context.Context, id string) error
+	// DeleteFrom deletes the message with fromID and every message after
+	// it in the session, as one statement, and returns them newest first.
+	// A fromID the session does not hold deletes nothing.
+	DeleteFrom(ctx context.Context, sessionID, fromID string) ([]Message, error)
 
 	// Flush synchronously drains any pending debounced state for the
 	// given message ID, performs the SQL write, and publishes the
@@ -194,6 +199,42 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	// concurrent modifications to the Parts slice.
 	s.Publish(pubsub.DeletedEvent, message.Clone())
 	return nil
+}
+
+func (s *service) DeleteFrom(ctx context.Context, sessionID, fromID string) ([]Message, error) {
+	rows, err := s.q.DeleteMessagesFrom(ctx, db.DeleteMessagesFromParams{SessionID: sessionID, AnchorID: fromID})
+	if err != nil {
+		return nil, err
+	}
+	deleted := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		msg, err := s.fromDBItem(row)
+		if err != nil {
+			return nil, err
+		}
+		deleted = append(deleted, msg)
+	}
+	// RETURNING order is unspecified; subscribers observe the transcript
+	// unwinding from its end. SQLite deletes in rowid order, so reversing
+	// it before the stable sort keeps same-second rows newest first.
+	slices.Reverse(deleted)
+	slices.SortStableFunc(deleted, func(a, b Message) int {
+		return cmp.Compare(b.CreatedAt, a.CreatedAt)
+	})
+	s.mu.Lock()
+	for _, msg := range deleted {
+		if p, ok := s.pending[msg.ID]; ok {
+			if p.timer != nil {
+				p.timer.Stop()
+			}
+			delete(s.pending, msg.ID)
+		}
+	}
+	s.mu.Unlock()
+	for _, msg := range deleted {
+		s.Publish(pubsub.DeletedEvent, msg.Clone())
+	}
+	return deleted, nil
 }
 
 func (s *service) Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error) {

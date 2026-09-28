@@ -75,3 +75,14 @@ FROM messages m
 WHERE m.session_id = ?
   AND m.created_at >= (SELECT b.created_at FROM messages b WHERE b.id = ?)
 ORDER BY m.created_at ASC, m.rowid ASC;
+
+-- name: DeleteMessagesFrom :many
+-- Deletes the anchor message and every message after it in the session,
+-- in the order ListMessagesBySession reads them, as one statement.
+DELETE FROM messages
+WHERE messages.session_id = sqlc.arg(session_id)
+  AND (messages.created_at, messages.rowid) >= (
+    SELECT a.created_at, a.rowid FROM messages a
+    WHERE a.id = sqlc.arg(anchor_id) AND a.session_id = sqlc.arg(session_id)
+  )
+RETURNING *;

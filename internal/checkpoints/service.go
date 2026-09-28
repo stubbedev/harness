@@ -195,30 +195,21 @@ func (s *Service) Rewind(ctx context.Context, sessionID, messageID string, mode 
 	return s.truncateConversation(ctx, sessionID, messageID)
 }
 
-// truncateConversation deletes messageID and every message after it,
-// newest first so subscribers observe an unwinding transcript, and
-// clears a summary pointer that would otherwise dangle.
+// truncateConversation deletes messageID and every message after it in
+// one statement, so a failure cannot leave a half-truncated transcript,
+// and clears a summary pointer that would otherwise dangle.
 func (s *Service) truncateConversation(ctx context.Context, sessionID, messageID string) error {
-	msgs, err := s.messages.List(ctx, sessionID)
+	doomed, err := s.messages.DeleteFrom(ctx, sessionID, messageID)
 	if err != nil {
-		return err
+		return fmt.Errorf("deleting messages from %s: %w", messageID, err)
 	}
-	idx := slices.IndexFunc(msgs, func(m message.Message) bool {
-		return m.ID == messageID
-	})
-	if idx < 0 {
+	if len(doomed) == 0 {
 		return fmt.Errorf("message %s not found in session %s", messageID, sessionID)
-	}
-	doomed := msgs[idx:]
-	for _, m := range slices.Backward(doomed) {
-		if err := s.messages.Delete(ctx, m.ID); err != nil {
-			return fmt.Errorf("deleting message %s: %w", m.ID, err)
-		}
 	}
 
 	sess, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return nil
+		return fmt.Errorf("reading session after rewind: %w", err)
 	}
 	if clearDoomedPointers(&sess, doomed) {
 		if _, err := s.sessions.SetCompaction(ctx, sessionID, session.CompactionOf(sess), nil); err != nil {
