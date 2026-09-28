@@ -812,7 +812,12 @@ func (m *UI) loadMCPrompts() tea.Msg {
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.update(msg)
 	// The command picker follows the editor's text, whatever changed it.
-	m.refreshCommandPicker()
+	// Reading the text allocates the whole draft, so the stream deltas
+	// and animation ticks that make up most messages skip it unless the
+	// draft's length moved or the message is input.
+	if m.draftMayHaveChanged(msg) {
+		m.refreshCommandPicker()
+	}
 	return model, cmd
 }
 
@@ -2710,7 +2715,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if cmd := m.focusAboveEditor(chatEntryCycled); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-			case key.Matches(msg, m.keyMap.Chat.UpOneItem) && msg.String() == "shift+up" && m.isAtEditorTopRow():
+			case key.Matches(msg, m.keyMap.Editor.SelectLineUp) && m.isAtEditorTopRow():
 				// Shift+up extends a selection upward while there are
 				// display rows above. On the top row it first grows the
 				// selection to the start of the input, so a selection can

@@ -42,6 +42,8 @@ type commandPicker struct {
 	// dismissed is the editor text the picker was closed on with esc;
 	// it stays closed until the text changes.
 	dismissed string
+	// draftLen is the editor's length when the picker last looked.
+	draftLen int
 }
 
 // visible reports whether the picker has rows to show, and so whether
@@ -168,6 +170,21 @@ func (m *UI) pickerQuery() (string, bool) {
 
 // refreshCommandPicker opens, updates or closes the picker for what the
 // editor now holds. It runs after every edit.
+// draftMayHaveChanged reports whether msg could have changed the editor's
+// text: input always may, and anything else only if the draft's length
+// moved, which is cheap to read where the text itself is not.
+func (m *UI) draftMayHaveChanged(msg tea.Msg) bool {
+	length := m.textarea.Length()
+	changed := length != m.commandPicker.draftLen
+	m.commandPicker.draftLen = length
+	switch msg.(type) {
+	case tea.KeyPressMsg, tea.PasteMsg:
+		return true
+	default:
+		return changed || m.commandPicker.open
+	}
+}
+
 func (m *UI) refreshCommandPicker() {
 	p := &m.commandPicker
 	value := m.textarea.Value()
