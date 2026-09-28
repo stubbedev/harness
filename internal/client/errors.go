@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/stubbedev/harness/internal/session"
+
 	"github.com/stubbedev/harness/internal/proto"
 )
 
@@ -64,6 +66,8 @@ func checkStatus(rsp *http.Response, ok ...int) error {
 		return fmt.Errorf("%w: %w", ErrNotFound, err)
 	case rsp.StatusCode == http.StatusServiceUnavailable:
 		return fmt.Errorf("%w: %w", ErrServerShuttingDown, err)
+	case body.Code == proto.ErrorCodeSessionBusy:
+		return fmt.Errorf("%w: %w", session.ErrBusy, err)
 	}
 	return err
 }

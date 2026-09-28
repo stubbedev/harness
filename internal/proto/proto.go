@@ -47,6 +47,9 @@ const (
 	// ErrorCodeConflict means the request is valid but the current state
 	// forbids it, such as rewinding a busy session.
 	ErrorCodeConflict ErrorCode = "conflict"
+	// ErrorCodeSessionBusy is the conflict of an agent run in flight for
+	// the session; clients map it back to session.ErrBusy.
+	ErrorCodeSessionBusy ErrorCode = "session_busy"
 	// ErrorCodeUnavailable means the server is going away; retry against
 	// its replacement.
 	ErrorCodeUnavailable ErrorCode = "unavailable"

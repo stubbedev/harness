@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -124,6 +125,12 @@ type TokenCounts struct {
 	Completion int64
 	Estimated  bool
 }
+
+// ErrBusy means a request is refused because an agent run is in flight
+// for the session. It is the one busy sentinel: the agent, the workspace
+// and the wire all return it, so errors.Is matches it in-process and
+// across the client/server boundary alike.
+var ErrBusy = errors.New("the agent is running in this session")
 
 type Service interface {
 	pubsub.Subscriber[Session]

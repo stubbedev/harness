@@ -1013,6 +1013,7 @@ var (
 	classNotFound      = errorClass{http.StatusNotFound, proto.ErrorCodeNotFound}
 	classInvalid       = errorClass{http.StatusBadRequest, proto.ErrorCodeInvalidArgument}
 	classConflict      = errorClass{http.StatusConflict, proto.ErrorCodeConflict}
+	classSessionBusy   = errorClass{http.StatusConflict, proto.ErrorCodeSessionBusy}
 	classUnavailable   = errorClass{http.StatusServiceUnavailable, proto.ErrorCodeUnavailable}
 	classInternal      = errorClass{http.StatusInternalServerError, proto.ErrorCodeInternal}
 )
@@ -1046,7 +1047,7 @@ var errorClasses = []struct {
 	{backend.ErrWorkspaceClosing, classConflict},
 	{backend.ErrServerNotIdle, classConflict},
 	{backend.ErrClientRetired, classConflict},
-	{backend.ErrSessionBusy, classConflict},
+	{backend.ErrSessionBusy, classSessionBusy},
 	{backend.ErrChannelOptInMismatch, classConflict},
 	// 503, not 409: the request is not wrong, this process is just
 	// leaving. Clients retry against its replacement.

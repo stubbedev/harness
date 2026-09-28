@@ -723,6 +723,7 @@ definitions:
     - not_found
     - invalid_argument
     - conflict
+    - session_busy
     - unavailable
     - internal
     type: string
@@ -731,6 +732,7 @@ definitions:
     - ErrorCodeNotFound
     - ErrorCodeInvalidArgument
     - ErrorCodeConflict
+    - ErrorCodeSessionBusy
     - ErrorCodeUnavailable
     - ErrorCodeInternal
   proto.ExtensionCommandArgument:

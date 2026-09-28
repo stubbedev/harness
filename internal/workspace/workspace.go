@@ -50,7 +50,7 @@ var (
 	// ErrSessionBusy means the request is refused because an agent run is
 	// in flight for the session, such as a rewind that would race the
 	// tools still writing to the tree.
-	ErrSessionBusy = errors.New("the agent is running in this session")
+	ErrSessionBusy = session.ErrBusy
 	// ErrInvalidArgument means a request value was malformed.
 	ErrInvalidArgument = errors.New("invalid argument")
 )

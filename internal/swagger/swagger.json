@@ -4336,6 +4336,7 @@
                 "not_found",
                 "invalid_argument",
                 "conflict",
+                "session_busy",
                 "unavailable",
                 "internal"
             ],
@@ -4344,6 +4345,7 @@
                 "ErrorCodeNotFound",
                 "ErrorCodeInvalidArgument",
                 "ErrorCodeConflict",
+                "ErrorCodeSessionBusy",
                 "ErrorCodeUnavailable",
                 "ErrorCodeInternal"
             ]

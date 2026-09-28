@@ -4343,6 +4343,7 @@ const docTemplate = `{
                 "not_found",
                 "invalid_argument",
                 "conflict",
+                "session_busy",
                 "unavailable",
                 "internal"
             ],
@@ -4351,6 +4352,7 @@ const docTemplate = `{
                 "ErrorCodeNotFound",
                 "ErrorCodeInvalidArgument",
                 "ErrorCodeConflict",
+                "ErrorCodeSessionBusy",
                 "ErrorCodeUnavailable",
                 "ErrorCodeInternal"
             ]
