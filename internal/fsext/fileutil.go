@@ -55,10 +55,12 @@ func NewFastGlobWalker(searchPath string) *FastGlobWalker {
 	}
 }
 
-// ShouldSkip checks if a file path should be skipped based on hierarchical gitignore,
-// harnessignore, and hidden file rules.
-func (w *FastGlobWalker) ShouldSkip(path string) bool {
-	return w.directoryLister.shouldIgnore(path, nil, false)
+// ShouldSkip checks if a path should be skipped based on hierarchical
+// gitignore, harnessignore, and hidden file rules. isDir must be true for
+// a directory: directory-only rules ("build/") and the always-ignored
+// directory names (.git, node_modules) only match directories.
+func (w *FastGlobWalker) ShouldSkip(path string, isDir bool) bool {
+	return w.directoryLister.shouldIgnore(path, nil, isDir)
 }
 
 func PrettyPath(path string) string {

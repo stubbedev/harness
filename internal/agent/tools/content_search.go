@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -194,21 +196,18 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 	// Create walker with gitignore and harnessignore support
 	walker := fsext.NewFastGlobWalker(rootPath)
 
-	err = filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.WalkDir(rootPath, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return nil //nolint:nilerr // unreadable entries are skipped, not fatal
 		}
 
-		if info.IsDir() {
-			// Check if directory should be skipped
-			if walker.ShouldSkip(path) {
+		if entry.IsDir() {
+			if walker.ShouldSkip(path, true) {
 				return filepath.SkipDir
 			}
-			return nil // Continue into directory
+			return nil
 		}
-
-		// Use walker's shouldSkip method for files
-		if walker.ShouldSkip(path) {
+		if walker.ShouldSkip(path, false) {
 			return nil
 		}
 
@@ -223,8 +222,12 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 		}
 
 		lineMatches, err := fileMatches(path, regex)
-		if err != nil {
+		if err != nil || len(lineMatches) == 0 {
 			return nil //nolint:nilerr // unreadable files are skipped, not fatal
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil //nolint:nilerr // a file gone since the walk listed it is skipped
 		}
 
 		for _, lm := range lineMatches {
@@ -266,19 +269,24 @@ func fileMatches(filePath string, pattern *regexp.Regexp) ([]lineMatch, error) {
 	if pattern == nil {
 		return nil, nil
 	}
-	// Only search text files.
-	if !isTextFile(filePath) {
-		return nil, nil
-	}
-
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	var matches []lineMatch
+	// Only search text files. The sniff peeks at the buffered head, so
+	// the file is opened and read once.
 	reader := bufio.NewReader(file)
+	head, err := reader.Peek(512)
+	if err != nil && err != io.EOF && !errors.Is(err, bufio.ErrBufferFull) {
+		return nil, nil
+	}
+	if !isText(head) {
+		return nil, nil
+	}
+
+	var matches []lineMatch
 	lineNum := 0
 	for {
 		line, err := reader.ReadString('\n')
@@ -303,25 +311,10 @@ func fileMatches(filePath string, pattern *regexp.Regexp) ([]lineMatch, error) {
 	return matches, nil
 }
 
-// isTextFile checks if a file is a text file by examining its MIME type.
-func isTextFile(filePath string) bool {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-
-	// Read first 512 bytes for MIME type detection.
-	buffer := make([]byte, 512)
-	n, err := file.Read(buffer)
-	if err != nil && err != io.EOF {
-		return false
-	}
-
-	// Detect content type.
-	contentType := http.DetectContentType(buffer[:n])
-
-	// Check if it's a text MIME type.
+// isText reports whether a file whose first bytes are head is text, by
+// its sniffed MIME type.
+func isText(head []byte) bool {
+	contentType := http.DetectContentType(head)
 	return strings.HasPrefix(contentType, "text/") ||
 		contentType == "application/json" ||
 		contentType == "application/xml" ||
