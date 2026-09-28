@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -23,7 +24,7 @@ func (s *Server) recoverHandler(next http.Handler) http.Handler {
 			}
 			// http.ErrAbortHandler is the documented way to abort a
 			// handler without logging; preserve that contract.
-			if rec == http.ErrAbortHandler {
+			if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 				panic(rec)
 			}
 			crash.Capture("server.handler", rec)

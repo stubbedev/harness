@@ -633,7 +633,7 @@ func streamText(source *bufio.Reader, offset, limit, maxContentSize int) (textVi
 			pos += len(chunk)
 			hash.write(chunk)
 			scratch = append(scratch, chunk...)
-			if err == bufio.ErrBufferFull {
+			if errors.Is(err, bufio.ErrBufferFull) {
 				continue
 			}
 			return scratch, err
@@ -645,7 +645,7 @@ func streamText(source *bufio.Reader, offset, limit, maxContentSize int) (textVi
 	// anchor sits at the end of the file.
 	for range max(0, offset) {
 		if _, err := readLine(); err != nil {
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				return textView{}, err
 			}
 			return textView{version: hash.sum(), ranges: []filetracker.Range{{Start: pos, End: pos}}}, nil
@@ -660,7 +660,7 @@ func streamText(source *bufio.Reader, offset, limit, maxContentSize int) (textVi
 	for lines < limit {
 		lineStart := pos
 		line, err := readLine()
-		if err != nil && err != io.EOF {
+		if err != nil && !errors.Is(err, io.EOF) {
 			return textView{}, err
 		}
 		text := bytes.TrimSuffix(bytes.TrimSuffix(line, []byte("\n")), []byte("\r"))
@@ -694,7 +694,7 @@ func streamText(source *bufio.Reader, offset, limit, maxContentSize int) (textVi
 			}
 			ranges = append(ranges, r)
 		}
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 	}
@@ -710,7 +710,7 @@ func streamText(source *bufio.Reader, offset, limit, maxContentSize int) (textVi
 	// to cover bytes the section never touched.
 	for {
 		if _, err := readLine(); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return textView{}, err

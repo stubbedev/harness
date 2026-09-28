@@ -1067,7 +1067,7 @@ func validateClientID(id string) (string, error) {
 		return "", ErrInvalidClientID
 	}
 	if _, err := uuid.Parse(id); err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidClientID, err)
+		return "", fmt.Errorf("%w: %w", ErrInvalidClientID, err)
 	}
 	return id, nil
 }

@@ -114,17 +114,17 @@ func (c *coordinator) researchTool(client *http.Client) fantasy.AgentTool {
 
 			promptTemplate, err := prompt.NewPrompt("research", string(researchPromptTmpl), promptOpts...)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %s", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error creating prompt: %w", err)
 			}
 
 			_, small, err := c.buildAgentModels(ctx, true)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %s", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error building models: %w", err)
 			}
 
 			systemPrompt, err := promptTemplate.Build(ctx, small.Model.Provider(), small.Model.Model(), c.cfg)
 			if err != nil {
-				return fantasy.ToolResponse{}, fmt.Errorf("error building system prompt: %s", err)
+				return fantasy.ToolResponse{}, fmt.Errorf("error building system prompt: %w", err)
 			}
 
 			smallProviderCfg, ok := c.cfg.Config().Providers.Get(small.ModelCfg.Provider)

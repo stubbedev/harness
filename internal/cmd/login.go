@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -123,7 +124,7 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 		fmt.Println("Waiting for authorization...")
 
 		t, err := copilot.PollForToken(loginCtx, dc)
-		if err == copilot.ErrNotAvailable {
+		if errors.Is(err, copilot.ErrNotAvailable) {
 			fmt.Println()
 			fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")
 			fmt.Println()

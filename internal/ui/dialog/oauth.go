@@ -121,6 +121,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 			if cmd != nil {
 				return ActionCmd{cmd}
 			}
+		default:
 		}
 
 	case tea.KeyPressMsg:

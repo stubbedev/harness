@@ -80,6 +80,7 @@ func reconcile(current config.MCPs, running map[string]ClientInfo, sessionDisabl
 				if mcpConfigEqual(info.Config, m) {
 					continue
 				}
+			default:
 			}
 		}
 		actions[name] = reinitStart

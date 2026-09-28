@@ -179,6 +179,7 @@ func (s *SessionItem) Render(width int) string {
 			s.updateTitleInput.Placeholder = ansi.Truncate(s.Title, inputWidth, "…")
 			return styles.ItemFocused.Render(s.updateTitleInput.View())
 		}
+	default:
 	}
 
 	return renderItem(styles, s.Title, info, s.focused, width, s.cache, &s.m)

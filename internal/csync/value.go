@@ -25,6 +25,7 @@ func NewValue[T any](t T) *Value[T] {
 		panic("csync.Value does not support slice types; use csync.Slice")
 	case reflect.Map:
 		panic("csync.Value does not support map types; use csync.Map")
+	default:
 	}
 	return &Value[T]{v: t}
 }

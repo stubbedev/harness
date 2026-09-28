@@ -150,6 +150,7 @@ func (m *LSPServers) detailItems(name string) []list.FilterableItem {
 			switch state.State {
 			case lsp.StateReady, lsp.StateStarting, lsp.StateError:
 				b.Action("restart", "Restart", "restart this server now", ActionLSPRestart{Name: name})
+			default:
 			}
 		}
 		return b.

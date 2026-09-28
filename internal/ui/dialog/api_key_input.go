@@ -103,6 +103,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 		case APIKeyInputStateVerifying:
 			cmd := tea.Batch(m.spinner.Tick, m.verifyAPIKey)
 			return ActionCmd{cmd}
+		default:
 		}
 	case spinner.TickMsg:
 		switch m.state {
@@ -112,6 +113,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 			if cmd != nil {
 				return ActionCmd{cmd}
 			}
+		default:
 		}
 	case tea.KeyPressMsg:
 		switch {
@@ -130,6 +132,7 @@ func (m *APIKeyInput) HandleMsg(msg tea.Msg) Action {
 				return ActionChangeAPIKeyState{State: APIKeyInputStateVerifying}
 			case APIKeyInputStateVerified:
 				return m.saveKeyAndContinue()
+			default:
 			}
 		default:
 			var cmd tea.Cmd

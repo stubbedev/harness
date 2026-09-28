@@ -847,6 +847,7 @@ func (a *AssistantMessageItem) ToggleExpanded() bool {
 		}
 	case thinkingTailWindow:
 		next = thinkingFullExpanded
+	default:
 	}
 	a.SetExpansionLevel(uint8(next))
 	return a.thinkingViewMode != thinkingCollapsed

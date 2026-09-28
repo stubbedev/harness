@@ -1134,6 +1134,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			return fmt.Errorf("invalid API key format for provider %s", c.ID)
 		}
 		return nil
+	default:
 	}
 
 	switch c.Type {
@@ -1179,6 +1180,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 			return nil
 		}
 		return errors.New("not a valid vercel api key")
+	default:
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

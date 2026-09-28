@@ -628,6 +628,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			items = append(items, item)
 		}
 		return items
+	default:
 	}
 	return []MessageItem{}
 }

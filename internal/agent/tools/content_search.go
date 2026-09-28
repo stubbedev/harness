@@ -114,7 +114,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 
 	output, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
 			return []grepMatch{}, nil
 		}
 		return nil, err
@@ -285,7 +285,7 @@ func fileMatches(filePath string, pattern *regexp.Regexp) ([]lineMatch, error) {
 	// the file is opened and read once.
 	reader := bufio.NewReader(file)
 	head, err := reader.Peek(512)
-	if err != nil && err != io.EOF && !errors.Is(err, bufio.ErrBufferFull) {
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
 		return nil, nil
 	}
 	if !isText(head) {

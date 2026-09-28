@@ -3,7 +3,9 @@ linters:
   enable:
     - modernize
     - bodyclose
-    # - exhaustive
+    - errorlint
+    - exhaustive
+    - gochecksumtype
     # - goconst
     # - godot
     # - godox
@@ -24,11 +26,19 @@ linters:
     - tparallel
     # - unconvert
     - unparam
+    - wastedassign
     - whitespace
     # - wrapcheck
   disable:
     - errcheck
     - ineffassign
+  settings:
+    exhaustive:
+      # A default case is an explicit decision about the rest; what the
+      # linter catches is a switch that silently forgot a new value.
+      default-signifies-exhaustive: true
+    gochecksumtype:
+      default-signifies-exhaustive: true
   exclusions:
     generated: lax
     presets:
@@ -39,6 +49,7 @@ linters:
       - path: _test\.go
         linters:
           - unparam
+          - exhaustive
       # A tool reports failures to the model as an error response with a
       # nil Go error; that is the tool contract, not a swallowed error.
       - linters:

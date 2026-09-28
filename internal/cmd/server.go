@@ -30,21 +30,21 @@ var serverCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		dataDir, err := cmd.Flags().GetString("data-dir")
 		if err != nil {
-			return fmt.Errorf("failed to get data directory: %v", err)
+			return fmt.Errorf("failed to get data directory: %w", err)
 		}
 		debug, err := cmd.Flags().GetBool("debug")
 		if err != nil {
-			return fmt.Errorf("failed to get debug flag: %v", err)
+			return fmt.Errorf("failed to get debug flag: %w", err)
 		}
 
 		cfg, err := config.Load(config.GlobalWorkspaceDir(), dataDir, debug)
 		if err != nil {
-			return fmt.Errorf("failed to load configuration: %v", err)
+			return fmt.Errorf("failed to load configuration: %w", err)
 		}
 
 		hostURL, err := server.ParseHostURL(serverHost)
 		if err != nil {
-			return fmt.Errorf("invalid server host: %v", err)
+			return fmt.Errorf("invalid server host: %w", err)
 		}
 
 		logFile := filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL), "harness.log")
@@ -76,7 +76,7 @@ var serverCmd = &cobra.Command{
 			if err != nil && !errors.Is(err, server.ErrServerClosed) {
 				_ = srv.Close()
 				slog.Error("Server error", "error", err)
-				return fmt.Errorf("server error: %v", err)
+				return fmt.Errorf("server error: %w", err)
 			}
 		}
 
@@ -91,7 +91,7 @@ var serverCmd = &cobra.Command{
 
 		if err := srv.Shutdown(ctx); err != nil {
 			slog.Error("Failed to shutdown server", "error", err)
-			return fmt.Errorf("failed to shutdown server: %v", err)
+			return fmt.Errorf("failed to shutdown server: %w", err)
 		}
 
 		return nil

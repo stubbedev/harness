@@ -421,6 +421,7 @@ func (m *Message) IsErrorLike() bool {
 	switch m.FinishReason() {
 	case FinishReasonError, FinishReasonContentFilter:
 		return true
+	default:
 	}
 	return false
 }
@@ -819,6 +820,7 @@ func (m *Message) ToAIMessage() []fantasy.Message {
 			Role:    fantasy.MessageRoleTool,
 			Content: parts,
 		})
+	default:
 	}
 	return messages
 }

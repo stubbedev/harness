@@ -1024,6 +1024,7 @@ func updateState(name string, state State, err error, client *ClientSession, cou
 		}
 		// Never publish a dead session on the state.
 		info.Client = nil
+	default:
 	}
 	states.Set(name, info)
 

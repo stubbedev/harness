@@ -101,7 +101,7 @@ func TestPtyRunner_AliasesNeverExpandBash(t *testing.T) {
 
 	// Re-sourcing the rc files brings the alias definition back; it
 	// must still not expand.
-	res, err = r.Type(t.Context(), "source ~/.bashrc", 15)
+	_, err = r.Type(t.Context(), "source ~/.bashrc", 15)
 	require.NoError(t, err)
 	res, err = r.Type(t.Context(), "zzhijack", 15)
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestPtyRunner_AliasesNeverExpandZsh(t *testing.T) {
 	require.Equal(t, 127, *res.ExitCode, "the alias must not run; got output %q", res.Output)
 	require.NotContains(t, res.Output, "HIJACKED")
 
-	res, err = r.Type(t.Context(), "source ~/.zshrc", 15)
+	_, err = r.Type(t.Context(), "source ~/.zshrc", 15)
 	require.NoError(t, err)
 	res, err = r.Type(t.Context(), "zzhijack", 15)
 	require.NoError(t, err)

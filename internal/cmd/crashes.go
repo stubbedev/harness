@@ -39,7 +39,7 @@ func listCrashReports() error {
 			fmt.Printf("No crash reports yet. Reports are saved to %s\n", crash.Dir())
 			return nil
 		}
-		return fmt.Errorf("failed to list crash reports: %v", err)
+		return fmt.Errorf("failed to list crash reports: %w", err)
 	}
 	if len(reports) == 0 {
 		fmt.Printf("No crash reports yet. Reports are saved to %s\n", crash.Dir())
@@ -64,7 +64,7 @@ func printCrashReport(name string) error {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("failed to read crash report: %v", err)
+		return fmt.Errorf("failed to read crash report: %w", err)
 	}
 	_, err = os.Stdout.Write(data)
 	return err

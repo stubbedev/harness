@@ -385,6 +385,7 @@ func formatDiagnostic(pth string, diagnostic protocol.Diagnostic, source string)
 		severity = "Warn"
 	case protocol.SeverityHint:
 		severity = "Hint"
+	default:
 	}
 
 	location := fmt.Sprintf("%s:%d:%d", pth, diagnostic.Range.Start.Line+1, diagnostic.Range.Start.Character+1)

@@ -71,7 +71,7 @@ func newRequestTimeoutModel(m fantasy.LanguageModel, timeout time.Duration) fant
 // our own timer report as [context.DeadlineExceeded] so callers never
 // mistake a timeout for a user cancellation.
 func wrapTimedOut(ctx context.Context, timeoutErr *requestTimeoutError, err error) error {
-	if err == nil || context.Cause(ctx) != timeoutErr {
+	if err == nil || !errors.Is(context.Cause(ctx), timeoutErr) {
 		return err
 	}
 	if errors.Is(err, context.Canceled) {

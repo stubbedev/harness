@@ -50,7 +50,7 @@ func ParseHostURL(host string) (*url.URL, error) {
 	if proto == "tcp" {
 		parsed, err := url.Parse("tcp://" + addr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid tcp address: %v", err)
+			return nil, fmt.Errorf("invalid tcp address: %w", err)
 		}
 		addr = parsed.Host
 		basePath = parsed.Path

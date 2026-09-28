@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -85,7 +86,7 @@ func (r *Runner) fingerprint(ctx context.Context, rules []Rule, paths []string) 
 			if n > 0 {
 				_, _ = content.Write(buffer[:n])
 			}
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				err = nil
 				break
 			}

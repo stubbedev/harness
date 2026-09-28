@@ -37,7 +37,7 @@ func MatchedRanges(in []int) [][2]int {
 // cell width, so styled ranges line up with what the terminal shows.
 func BytePosToVisibleCharPos(str string, rng [2]int) (int, int) {
 	bytePos, byteStart, byteStop := 0, rng[0], rng[1]
-	pos, start, stop := 0, 0, 0
+	pos := 0
 	gr := uniseg.NewGraphemes(str)
 	for byteStart > bytePos {
 		if !gr.Next() {
@@ -46,7 +46,7 @@ func BytePosToVisibleCharPos(str string, rng [2]int) (int, int) {
 		bytePos += len(gr.Str())
 		pos += max(1, gr.Width())
 	}
-	start = pos
+	start := pos
 	for byteStop > bytePos {
 		if !gr.Next() {
 			break
@@ -54,8 +54,7 @@ func BytePosToVisibleCharPos(str string, rng [2]int) (int, int) {
 		bytePos += len(gr.Str())
 		pos += max(1, gr.Width())
 	}
-	stop = pos
-	return start, stop
+	return start, pos
 }
 
 // FilterableItem is an item that can be filtered via a query.

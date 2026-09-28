@@ -106,6 +106,7 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 			if len(cmds) > 0 {
 				return ActionCmd{tea.Batch(cmds...)}
 			}
+		default:
 		}
 
 	case tea.KeyPressMsg:
@@ -118,6 +119,7 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 				m.openAuthURL()
 			case MCPAuthStateSuccess:
 				return m.advance()
+			default:
 			}
 		case key.Matches(msg, m.keyMap.Copy):
 			// Copy whatever URL is available without opening a browser.

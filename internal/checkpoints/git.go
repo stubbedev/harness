@@ -2,6 +2,7 @@ package checkpoints
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -178,7 +179,7 @@ func (s *Service) git(ctx context.Context, sessionID string, args ...string) (st
 	cmd.Env = gitEnv()
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			return "", fmt.Errorf("git %s: %w: %s",
 				strings.Join(args, " "), err, strings.TrimSpace(string(ee.Stderr)))
 		}

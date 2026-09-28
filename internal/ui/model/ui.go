@@ -1198,6 +1198,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, handleMCPToolsEvent(m.com.Workspace, msg.Payload.Name)
 		case mcp.EventResourcesListChanged:
 			return m, handleMCPResourcesEvent(m.com.Workspace, msg.Payload.Name)
+		default:
 		}
 	case pubsub.Event[question.Request]:
 		m.openBatchFormDialog(msg.Payload)
@@ -1306,6 +1307,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, cmd)
 				}
 			}
+		default:
 		}
 
 	case tea.MouseMotionMsg:
@@ -1360,6 +1362,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			x -= m.layout.main.Min.X
 			y -= m.layout.main.Min.Y
 			m.chat.HandleMouseDrag(x, y)
+		default:
 		}
 
 	case tea.MouseReleaseMsg:
@@ -1390,6 +1393,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return nil
 				}))
 			}
+		default:
 		}
 	case common.CoalescedWheelMsg:
 		// Route wheel events to active inline editor only when the
@@ -1423,6 +1427,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.markScrollOnly()
 			m.applyChatScroll(lines)
+		default:
 		}
 	case frameGCMsg:
 		m.handleFrameGC()
@@ -1597,6 +1602,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.textarea.Placeholder = m.readyPlaceholder
 		}
+	default:
 	}
 	if m.textarea.Placeholder != prevPlaceholder {
 		m.invalidateFrames()
@@ -1799,6 +1805,7 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 				m.chat.ScrollToBottom()
 			}
 		}
+	default:
 	}
 	return tea.Sequence(cmds...)
 }
@@ -3078,6 +3085,7 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		// The textarea draws its own caret inside the frame (virtual
 		// cursor), so no protocol cursor is placed for it here: Draw
 		// returns nil and the terminal caret stays out of the way.
+	default:
 	}
 	return nil
 }
@@ -3245,6 +3253,7 @@ func (m *UI) ShortHelp() []key.Binding {
 				k.Chat.Expand,
 				k.Chat.ClearHighlight,
 			)
+		default:
 		}
 	default:
 		// TODO: other states
@@ -3373,6 +3382,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 					k.Chat.BackgroundTasks,
 				},
 			)
+		default:
 		}
 	default:
 		if m.session == nil {

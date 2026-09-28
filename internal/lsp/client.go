@@ -359,6 +359,7 @@ func (s ServerState) isLive() bool {
 	switch s {
 	case StateReady, StateStarting, StateDisabled:
 		return true
+	default:
 	}
 	return false
 }

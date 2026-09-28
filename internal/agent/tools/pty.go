@@ -2061,6 +2061,7 @@ func (r *ptyRunner) confirmCredentialPrompt(s ptyTerminal, window time.Duration)
 			if shellBack() {
 				return false
 			}
+		default:
 		}
 		if !time.Now().Before(deadline) {
 			break

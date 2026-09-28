@@ -392,7 +392,7 @@ func setupClientServerWorkspace(cmd *cobra.Command) (workspace.Workspace, func()
 func connectToServer(cmd *cobra.Command) (*client.Client, *proto.Workspace, func(), error) {
 	hostURL, err := server.ParseHostURL(clientHost)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("invalid host URL: %v", err)
+		return nil, nil, nil, fmt.Errorf("invalid host URL: %w", err)
 	}
 
 	if err := ensureServer(cmd, hostURL); err != nil {
@@ -475,7 +475,7 @@ func createWorkspaceOnLiveServer(
 			return ws, nil
 		}
 		if !errors.Is(err, client.ErrServerShuttingDown) || attempt == maxStaleServerRetries-1 {
-			return nil, fmt.Errorf("failed to create workspace: %v", err)
+			return nil, fmt.Errorf("failed to create workspace: %w", err)
 		}
 		slog.Warn("Server is shutting down; retrying against a replacement",
 			"attempt", attempt+1, "error", err)
@@ -495,7 +495,7 @@ func replaceExitingServer(cmd *cobra.Command, hostURL *url.URL) error {
 		}
 	}
 	if err := spawnAndWaitReady(cmd, hostURL); err != nil {
-		return fmt.Errorf("failed to initialize harness server: %v", err)
+		return fmt.Errorf("failed to initialize harness server: %w", err)
 	}
 	return nil
 }
@@ -515,7 +515,7 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 
 	switch hostURL.Scheme {
 	case "unix", "npipe":
-		needsStart := false
+		var needsStart bool
 		_, statErr := os.Stat(hostURL.Host)
 		switch {
 		case statErr == nil:
@@ -535,7 +535,7 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 					slog.Warn("Stale socket detected, removing",
 						"path", hostURL.Host, "error", dialErr)
 					if err := os.Remove(hostURL.Host); err != nil && !errors.Is(err, fs.ErrNotExist) {
-						return fmt.Errorf("failed to remove stale server socket %q: %v", hostURL.Host, err)
+						return fmt.Errorf("failed to remove stale server socket %q: %w", hostURL.Host, err)
 					}
 					needsStart = true
 					break
@@ -552,20 +552,20 @@ func ensureServer(cmd *cobra.Command, hostURL *url.URL) error {
 			slog.Warn("Unexpected error stat'ing server socket, attempting cleanup",
 				"path", hostURL.Host, "error", statErr)
 			if err := os.Remove(hostURL.Host); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return fmt.Errorf("failed to remove stale server socket %q: %v", hostURL.Host, err)
+				return fmt.Errorf("failed to remove stale server socket %q: %w", hostURL.Host, err)
 			}
 			needsStart = true
 		}
 
 		if needsStart {
 			if err := spawnAndWaitReady(cmd, hostURL); err != nil {
-				return fmt.Errorf("failed to initialize harness server: %v", err)
+				return fmt.Errorf("failed to initialize harness server: %w", err)
 			}
 			return nil
 		}
 
 		if err := waitForServerReady(cmd.Context(), hostURL); err != nil {
-			return fmt.Errorf("failed to initialize harness server: %v", err)
+			return fmt.Errorf("failed to initialize harness server: %w", err)
 		}
 	}
 
@@ -631,7 +631,7 @@ func quickHealthProbe(ctx context.Context, hostURL *url.URL) error {
 func perHostServerDir(hostURL *url.URL) (string, error) {
 	chDir := filepath.Join(config.GlobalCacheDir(), "server-"+safeHostName(hostURL))
 	if err := os.MkdirAll(chDir, 0o700); err != nil {
-		return "", fmt.Errorf("failed to create server working directory: %v", err)
+		return "", fmt.Errorf("failed to create server working directory: %w", err)
 	}
 	return chDir, nil
 }
@@ -860,7 +860,7 @@ var safeNameRegexp = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 func startDetachedServer(hostURL *url.URL) error {
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("failed to get executable path: %v", err)
+		return fmt.Errorf("failed to get executable path: %w", err)
 	}
 
 	chDir, err := perHostServerDir(hostURL)
@@ -890,24 +890,24 @@ func startDetachedServer(hostURL *url.URL) error {
 
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
-		return fmt.Errorf("failed to create stdout log file: %v", err)
+		return fmt.Errorf("failed to create stdout log file: %w", err)
 	}
 	defer stdout.Close()
 	c.Stdout = stdout
 
 	stderr, err := os.Create(stderrPath)
 	if err != nil {
-		return fmt.Errorf("failed to create stderr log file: %v", err)
+		return fmt.Errorf("failed to create stderr log file: %w", err)
 	}
 	defer stderr.Close()
 	c.Stderr = stderr
 
 	if err := c.Start(); err != nil {
-		return fmt.Errorf("failed to start harness server: %v", err)
+		return fmt.Errorf("failed to start harness server: %w", err)
 	}
 
 	if err := c.Process.Release(); err != nil {
-		return fmt.Errorf("failed to detach harness server process: %v", err)
+		return fmt.Errorf("failed to detach harness server process: %w", err)
 	}
 
 	return nil
@@ -945,13 +945,13 @@ func ResolveCwd(cmd *cobra.Command) (string, error) {
 	if cwd != "" {
 		err := os.Chdir(cwd)
 		if err != nil {
-			return "", fmt.Errorf("failed to change directory: %v", err)
+			return "", fmt.Errorf("failed to change directory: %w", err)
 		}
 		return cwd, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("failed to get current working directory: %v", err)
+		return "", fmt.Errorf("failed to get current working directory: %w", err)
 	}
 	return cwd, nil
 }

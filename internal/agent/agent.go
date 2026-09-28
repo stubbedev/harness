@@ -1707,6 +1707,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					"session_id", call.SessionID,
 					"finish_reason", string(stepResult.FinishReason),
 				)
+			default:
 			}
 			// If a tool result halted the turn (e.g. a hook halt or a
 			// permission denial), the step ends on FinishReasonToolCalls but
@@ -2737,22 +2738,6 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 		return nil
 	}
 	return &opts.Usage.Cost
-}
-
-// updateSessionUsage applies usage to an in-memory session the way
-// RecordUsage applies it to the stored one.
-func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {
-	delta := sessionUsage(model, usage, overrideCost, estimated)
-	if delta.Estimated != nil {
-		session.EstimatedUsage = *delta.Estimated
-	}
-	session.Cost += delta.CostDelta
-	if delta.CompletionTokens != 0 {
-		session.CompletionTokens = delta.CompletionTokens
-	}
-	if delta.PromptTokens != 0 {
-		session.PromptTokens = delta.PromptTokens
-	}
 }
 
 // sessionUsage prices one request's usage for model and names the token

@@ -482,6 +482,7 @@ func (e MCPEvent) ToDomain() mcp.Event {
 		t = mcp.EventPromptsListChanged
 	case MCPEventResourcesListChanged:
 		t = mcp.EventResourcesListChanged
+	default:
 	}
 	return mcp.Event{
 		Type:   t,

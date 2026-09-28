@@ -26,22 +26,22 @@ var logsCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, err := cmd.Flags().GetString("cwd")
 		if err != nil {
-			return fmt.Errorf("failed to get current working directory: %v", err)
+			return fmt.Errorf("failed to get current working directory: %w", err)
 		}
 
 		dataDir, err := cmd.Flags().GetString("data-dir")
 		if err != nil {
-			return fmt.Errorf("failed to get data directory: %v", err)
+			return fmt.Errorf("failed to get data directory: %w", err)
 		}
 
 		follow, err := cmd.Flags().GetBool("follow")
 		if err != nil {
-			return fmt.Errorf("failed to get follow flag: %v", err)
+			return fmt.Errorf("failed to get follow flag: %w", err)
 		}
 
 		tailLines, err := cmd.Flags().GetInt("tail")
 		if err != nil {
-			return fmt.Errorf("failed to get tail flag: %v", err)
+			return fmt.Errorf("failed to get tail flag: %w", err)
 		}
 
 		log.SetLevel(log.DebugLevel)
@@ -52,7 +52,7 @@ var logsCmd = &cobra.Command{
 
 		cfg, err := config.Load(cwd, dataDir, false)
 		if err != nil {
-			return fmt.Errorf("failed to load configuration: %v", err)
+			return fmt.Errorf("failed to load configuration: %w", err)
 		}
 		logsFile := filepath.Join(cfg.Config().Options.DataDirectory, "logs", "harness.log")
 		_, err = os.Stat(logsFile)
@@ -81,7 +81,7 @@ func followLogs(ctx context.Context, logsFile string, tailLines int) error {
 		Logger: tail.DiscardingLogger,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to tail log file: %v", err)
+		return fmt.Errorf("failed to tail log file: %w", err)
 	}
 
 	var lines []string
@@ -112,7 +112,7 @@ func followLogs(ctx context.Context, logsFile string, tailLines int) error {
 		Location: &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to tail log file: %v", err)
+		return fmt.Errorf("failed to tail log file: %w", err)
 	}
 	defer t.Stop()
 
@@ -137,7 +137,7 @@ func showLogs(logsFile string, tailLines int) error {
 		MaxLineSize: 0,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to tail log file: %v", err)
+		return fmt.Errorf("failed to tail log file: %w", err)
 	}
 	defer t.Stop()
 

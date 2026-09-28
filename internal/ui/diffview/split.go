@@ -62,6 +62,7 @@ func hunkToSplit(h *udiff.Hunk) (sh splitHunk) {
 					break inner
 				case udiff.Equal:
 					break inner
+				default:
 				}
 			}
 		}

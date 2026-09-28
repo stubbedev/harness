@@ -263,6 +263,7 @@ func (g *channelGate) accept(raw json.RawMessage) json.RawMessage {
 			return raw
 		case stateGateClosed:
 			return nil
+		default:
 		}
 		g.pending = append(g.pending, raw)
 		return nil

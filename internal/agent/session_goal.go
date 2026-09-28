@@ -145,6 +145,7 @@ func (a *sessionAgent) advanceGoal(ctx context.Context, call SessionAgentCall, a
 		goal.Status = session.GoalMet
 	case goalVerdictImpossible:
 		goal.Status = session.GoalImpossible
+	default:
 	}
 	a.saveGoal(ctx, call.SessionID, goal)
 	if verdict.Verdict != goalVerdictNotMet {

@@ -37,8 +37,8 @@ func TestDocumentedConfigExamplesDecode(t *testing.T) {
 
 	topLevel := map[string]bool{}
 	configType := reflect.TypeFor[Config]()
-	for i := range configType.NumField() {
-		if name, _, _ := strings.Cut(configType.Field(i).Tag.Get("json"), ","); name != "" && name != "-" {
+	for field := range configType.Fields() {
+		if name, _, _ := strings.Cut(field.Tag.Get("json"), ","); name != "" && name != "-" {
 			topLevel[name] = true
 		}
 	}

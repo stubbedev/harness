@@ -285,7 +285,7 @@ func (w *ClientWorkspace) AgentReadyErr() error {
 		// The workspace/server could not be reached. This is distinct
 		// from an initialized-but-not-ready agent: the server may have
 		// torn the workspace down or restarted underneath us.
-		return fmt.Errorf("%w: %v", ErrServerUnreachable, err)
+		return fmt.Errorf("%w: %w", ErrServerUnreachable, err)
 	}
 	if !info.IsReady {
 		return ErrAgentNotInitialized
