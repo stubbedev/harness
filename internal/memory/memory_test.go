@@ -4,7 +4,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/db"
@@ -255,11 +254,4 @@ func TestSlug(t *testing.T) {
 	require.True(t, strings.HasPrefix(ja, "notes-m-"), ja)
 	require.NotEmpty(t, Slug("日本語メモ"))
 	require.LessOrEqual(t, len(Slug(strings.Repeat("日本 notes ", 20))), MaxIDLen)
-}
-
-func TestTruncateKeepsRunes(t *testing.T) {
-	t.Parallel()
-	got := truncate("aé", 2)
-	require.Equal(t, "a", got)
-	require.True(t, utf8.ValidString(got))
 }

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/stubbedev/harness/internal/stringext"
+
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -146,17 +148,5 @@ func wrapCmdSubstErr(err error, stderrBytes []byte) error {
 // stderr of a failing command so the result is safe to include in an
 // error message shown to the user.
 func sanitizeStderr(b []byte) string {
-	b = bytes.TrimRight(b, "\n")
-	if len(b) > maxInnerStderrBytes {
-		b = b[:maxInnerStderrBytes]
-	}
-	out := make([]byte, len(b))
-	for i, c := range b {
-		if c == '\t' || c == '\n' || (c >= 0x20 && c < 0x7f) {
-			out[i] = c
-		} else {
-			out[i] = '?'
-		}
-	}
-	return string(out)
+	return stringext.ScrubNonPrintable(string(bytes.TrimRight(b, "\n")), maxInnerStderrBytes)
 }

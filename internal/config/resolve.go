@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stubbedev/harness/internal/stringext"
+
 	"github.com/stubbedev/harness/internal/env"
 	"github.com/stubbedev/harness/internal/shell"
 )
@@ -181,25 +183,10 @@ func (e *resolveError) Error() string {
 
 func (e *resolveError) Unwrap() error { return e.inner }
 
-// scrubErrorMessage bounds the message to maxResolveErrBytes bytes and
-// replaces non-printable bytes (anything outside ASCII printable, tab, or
-// newline) with '?'. Mirrors shell.sanitizeStderr but operates on a
-// string rather than raw command stderr and runs at the config layer,
-// so arbitrary Expander error text is also sanitized.
+// scrubErrorMessage bounds and sanitizes arbitrary Expander error text at
+// the config layer, the same way the shell sanitizes command stderr.
 func scrubErrorMessage(s string) string {
-	if len(s) > maxResolveErrBytes {
-		s = s[:maxResolveErrBytes]
-	}
-	out := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '\t' || c == '\n' || (c >= 0x20 && c < 0x7f) {
-			out[i] = c
-			continue
-		}
-		out[i] = '?'
-	}
-	return string(out)
+	return stringext.ScrubNonPrintable(s, maxResolveErrBytes)
 }
 
 // digitVarAliasPrefix names the placeholders aliasDigitVars substitutes

@@ -103,3 +103,35 @@ func Truncate(s string, maxRunes int, marker string) string {
 	}
 	return s[:i] + marker
 }
+
+// RuneBoundaryBefore returns the largest index at most n that starts a rune
+// in s (or ends it), clamped to [0, len(s)]. s[:RuneBoundaryBefore(s, n)]
+// is the longest prefix of at most n bytes that splits no rune.
+func RuneBoundaryBefore(s string, n int) int {
+	n = min(max(n, 0), len(s))
+	for n > 0 && n < len(s) && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return n
+}
+
+// TruncateBytes cuts s to at most maxBytes bytes without splitting a rune.
+func TruncateBytes(s string, maxBytes int) string {
+	return s[:RuneBoundaryBefore(s, maxBytes)]
+}
+
+// ScrubNonPrintable cuts s to at most maxBytes bytes and replaces every
+// byte outside printable ASCII, tab and newline with '?', so text from a
+// failing command or an arbitrary error is safe to show the user.
+func ScrubNonPrintable(s string, maxBytes int) string {
+	if len(s) > maxBytes {
+		s = s[:maxBytes]
+	}
+	out := []byte(s)
+	for i, c := range out {
+		if c != '\t' && c != '\n' && (c < 0x20 || c >= 0x7f) {
+			out[i] = '?'
+		}
+	}
+	return string(out)
+}

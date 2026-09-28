@@ -13,7 +13,7 @@ import (
 )
 
 // copyItem builds a finished tool item and hands back its copy text.
-// Paths in these tests sit under /srv so fsext.PrettyPath, which
+// Paths in these tests sit under /srv so home.Short, which
 // shortens the home directory and nothing else, leaves them alone.
 func copyItem(t *testing.T, name string, input any, result *message.ToolResult) string {
 	t.Helper()

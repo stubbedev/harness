@@ -26,14 +26,16 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"github.com/stubbedev/harness/internal/home"
+
+	"github.com/stubbedev/harness/internal/stringext"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/diff"
-	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/xchroma"
 )
@@ -101,10 +103,7 @@ func copyTruncate(s string) string {
 	if len(s) <= copyContentLimit {
 		return s
 	}
-	cut := copyContentLimit
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
+	cut := stringext.RuneBoundaryBefore(s, copyContentLimit)
 	if nl := strings.LastIndexByte(s[:cut], '\n'); nl > 0 {
 		cut = nl
 	}
@@ -284,7 +283,7 @@ func copyViewParams(input string) string {
 	}
 	var lines []string
 	for _, req := range requests {
-		lines = append(lines, copyField("File", fsext.PrettyPath(req.FilePath)))
+		lines = append(lines, copyField("File", home.Short(req.FilePath)))
 		if req.Offset > 0 {
 			lines = append(lines, copyField("Offset", req.Offset))
 		}
@@ -302,7 +301,7 @@ func copyEditParams(input string) string {
 		// carries the same change as a diff, which reads better
 		// and does not duplicate the file's text twice over.
 		return strings.Join([]string{
-			copyField("File", fsext.PrettyPath(params.FilePath)),
+			copyField("File", home.Short(params.FilePath)),
 			copyField("Edits", len(params.Edits)),
 		}, "\n")
 	}
@@ -312,7 +311,7 @@ func copyEditParams(input string) string {
 func copyWriteParams(input string) string {
 	var params tools.WriteParams
 	if json.Unmarshal([]byte(input), &params) == nil {
-		return copyField("File", fsext.PrettyPath(params.FilePath))
+		return copyField("File", home.Short(params.FilePath))
 	}
 	return ""
 }
@@ -451,7 +450,7 @@ func (t *baseToolMessageItem) formatEditResultForCopy() string {
 	json.Unmarshal([]byte(t.toolCall.Input), &params)
 	fileName := params.FilePath
 	if fileName != "" {
-		fileName = fsext.PrettyPath(fileName)
+		fileName = home.Short(fileName)
 	}
 
 	diffContent, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, fileName)

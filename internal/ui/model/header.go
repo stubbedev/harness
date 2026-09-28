@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/home"
+
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -109,7 +111,7 @@ func (h *header) currentState(
 	state := headerState{
 		breadcrumb:  breadcrumb,
 		diagnostics: diagnostics,
-		cwd:         fsext.DirTrim(fsext.PrettyPath(h.com.Workspace.WorkingDir()), dirTrimLimit),
+		cwd:         fsext.DirTrim(home.Short(h.com.Workspace.WorkingDir()), dirTrimLimit),
 		git:         gitSegment(h.com),
 	}
 	if session != nil {

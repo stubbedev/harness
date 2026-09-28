@@ -5,8 +5,9 @@ import (
 	"maps"
 	"strconv"
 
+	"github.com/stubbedev/harness/internal/home"
+
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -113,7 +114,7 @@ func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		if params.FilePath == "" {
 			return []string{"project"}, true
 		}
-		return []string{fsext.PrettyPath(params.FilePath)}, true
+		return []string{home.Short(params.FilePath)}, true
 	}, func() string {
 		body := toolPlainBody(sty, opts, width)
 		if note := d.liveNote(params.FilePath); note != "" {
@@ -144,9 +145,9 @@ func (d *DiagnosticsToolRenderContext) liveNote(path string) string {
 		return ""
 	}
 	if note := liveCountNote(counts); note != "" {
-		return note + " still open in " + fsext.PrettyPath(path)
+		return note + " still open in " + home.Short(path)
 	}
-	return "resolved — no diagnostics remain for " + fsext.PrettyPath(path)
+	return "resolved — no diagnostics remain for " + home.Short(path)
 }
 
 // totalsFor sums the per-file counts, either for one path or across the whole

@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/stubbedev/harness/internal/home"
 )
 
 // commonIgnoredDirs are the directory names every crawling walker
@@ -61,10 +60,6 @@ func NewFastGlobWalker(searchPath string) *FastGlobWalker {
 // directory names (.git, node_modules) only match directories.
 func (w *FastGlobWalker) ShouldSkip(path string, isDir bool) bool {
 	return w.directoryLister.shouldIgnore(path, nil, isDir)
-}
-
-func PrettyPath(path string) string {
-	return home.Short(path)
 }
 
 func DirTrim(pwd string, lim int) string {

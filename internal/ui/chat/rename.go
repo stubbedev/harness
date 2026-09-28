@@ -3,8 +3,9 @@ package chat
 import (
 	"encoding/json"
 
+	"github.com/stubbedev/harness/internal/home"
+
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -18,7 +19,7 @@ func (r *RenameToolRenderContext) RenderTool(sty *styles.Styles, width int, opts
 		_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 		toolParams := []string{params.Symbol + " → " + params.NewName}
 		if params.Path != "" {
-			toolParams = append(toolParams, "path", fsext.PrettyPath(params.Path))
+			toolParams = append(toolParams, "path", home.Short(params.Path))
 		}
 		return toolParams, true
 	}, nil)

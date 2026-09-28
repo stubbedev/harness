@@ -118,3 +118,21 @@ func TestTruncate(t *testing.T) {
 		require.Equal(t, c.want, Truncate(c.in, c.max, c.marker), c.in)
 	}
 }
+
+func TestTruncateBytesKeepsRunesWhole(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "ab", TruncateBytes("abé", 3), "é is two bytes; cutting at 3 would split it")
+	require.Equal(t, "abé", TruncateBytes("abé", 4))
+	require.Equal(t, "", TruncateBytes("é", 1))
+	require.Equal(t, "abc", TruncateBytes("abc", 10))
+	require.Equal(t, 0, RuneBoundaryBefore("abc", -1))
+}
+
+func TestScrubNonPrintable(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "a?b\tc\n", ScrubNonPrintable("a\x1bb\tc\n", 100))
+	require.Equal(t, "ab", ScrubNonPrintable("abcdef", 2))
+	require.Equal(t, "??", ScrubNonPrintable("é", 100), "multi-byte runes are not printable ASCII")
+}

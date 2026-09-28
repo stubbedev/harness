@@ -224,7 +224,7 @@ type Styles struct {
 
 	// Sidebar
 	Sidebar struct {
-		WorkingDir lipgloss.Style // Working directory path (PrettyPath)
+		WorkingDir lipgloss.Style // Working directory path (home.Short)
 	}
 
 	// ModelInfo (model name, provider, reasoning, token/cost summary)

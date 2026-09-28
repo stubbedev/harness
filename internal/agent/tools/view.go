@@ -770,37 +770,15 @@ func sniffImageMimeType(data []byte, fallback string) string {
 // Note that symlinks are resolved to prevent path traversal attacks via
 // symbolic links.
 func isInSkillsPath(filePath string, skillsPaths []string) bool {
-	if len(skillsPaths) == 0 {
-		return false
-	}
-
 	absFilePath, err := filepath.Abs(filePath)
 	if err != nil {
 		return false
 	}
-
-	evalFilePath, err := filepath.EvalSymlinks(absFilePath)
-	if err != nil {
-		return false
-	}
-
 	for _, skillsPath := range skillsPaths {
-		absSkillsPath, err := filepath.Abs(skillsPath)
-		if err != nil {
-			continue
-		}
-
-		evalSkillsPath, err := filepath.EvalSymlinks(absSkillsPath)
-		if err != nil {
-			continue
-		}
-
-		relPath, err := filepath.Rel(evalSkillsPath, evalFilePath)
-		if err == nil && !strings.HasPrefix(relPath, "..") {
+		if absSkillsPath, err := filepath.Abs(skillsPath); err == nil && filepathext.SameOrInside(absFilePath, absSkillsPath) {
 			return true
 		}
 	}
-
 	return false
 }
 

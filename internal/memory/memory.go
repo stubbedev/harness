@@ -15,7 +15,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
+
+	"github.com/stubbedev/harness/internal/stringext"
 
 	"github.com/stubbedev/harness/internal/db"
 )
@@ -190,7 +191,7 @@ const MaxContentLen = 16 * 1024
 const MaxIDLen = 64
 
 func (s *service) Save(ctx context.Context, input SaveInput) (SaveResult, error) {
-	input.Title = truncate(strings.TrimSpace(input.Title), MaxTitleLen)
+	input.Title = stringext.TruncateBytes(strings.TrimSpace(input.Title), MaxTitleLen)
 	if input.Title == "" {
 		return SaveResult{}, errors.New("memory title is required")
 	}
@@ -198,7 +199,7 @@ func (s *service) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 	if input.Content == "" {
 		return SaveResult{}, errors.New("memory content is required")
 	}
-	input.Content = truncate(input.Content, MaxContentLen)
+	input.Content = stringext.TruncateBytes(input.Content, MaxContentLen)
 
 	category := input.Category
 	if category == "" {
@@ -405,26 +406,15 @@ func Slug(title string) string {
 	}
 	slug := strings.Trim(b.String(), "-")
 	if !dropped {
-		return strings.TrimRight(truncate(slug, MaxIDLen), "-")
+		return strings.TrimRight(stringext.TruncateBytes(slug, MaxIDLen), "-")
 	}
 	sum := sha256.Sum256([]byte(title))
 	suffix := "m-" + hex.EncodeToString(sum[:6])
 	if slug == "" {
 		return suffix
 	}
-	slug = strings.TrimRight(truncate(slug, MaxIDLen-len(suffix)-1), "-")
+	slug = strings.TrimRight(stringext.TruncateBytes(slug, MaxIDLen-len(suffix)-1), "-")
 	return slug + "-" + suffix
-}
-
-// truncate cuts s to at most max bytes without splitting a rune.
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	for max > 0 && !utf8.RuneStart(s[max]) {
-		max--
-	}
-	return s[:max]
 }
 
 func boolToInt(b bool) int64 {
