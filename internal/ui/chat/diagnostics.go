@@ -75,19 +75,19 @@ func (r *lspToolRenderer) RenderTool(sty *styles.Styles, width int, opts *ToolRe
 
 func (r *lspToolRenderer) pick(tc message.ToolCall) ToolRenderer {
 	switch lspAction(tc) {
-	case "references":
+	case tools.LSPActionReferences:
 		return &ReferencesToolRenderContext{}
-	case "definition":
+	case tools.LSPActionDefinition:
 		return &DefinitionToolRenderContext{}
-	case "rename":
+	case tools.LSPActionRename:
 		return &RenameToolRenderContext{}
-	case "replace_symbol":
+	case tools.LSPActionReplaceSymbol:
 		return &ReplaceSymbolToolRenderContext{}
-	case "call_hierarchy":
+	case tools.LSPActionCallHierarchy:
 		return &CallHierarchyToolRenderContext{}
-	case "symbols":
+	case tools.LSPActionSymbols:
 		return &SymbolsToolRenderContext{}
-	case "restart":
+	case tools.LSPActionRestart:
 		return &LSPRestartToolRenderContext{}
 	default:
 		return &r.diagnostics

@@ -166,9 +166,15 @@ func init() {
 	runCmd.Flags().StringP("model", "m", "", "Model to use. Accepts 'model' or 'provider/model' to disambiguate models with the same name across providers")
 	runCmd.Flags().String("small-model", "", "Small model to use. If not provided, uses the default small model for the provider")
 	runCmd.Flags().String("reasoning-effort", "", "Reasoning effort for the model (e.g. low, medium, high). Levels depend on the model; unsupported values are rejected with the accepted values listed")
-	runCmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
-	runCmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
-	runCmd.MarkFlagsMutuallyExclusive("session", "continue")
+	addSessionFlags(runCmd)
+}
+
+// addSessionFlags declares the flags that pick the session a command
+// resumes, the same way for every command that takes them.
+func addSessionFlags(cmd *cobra.Command) {
+	cmd.Flags().StringP("session", "s", "", "Continue a previous session by ID")
+	cmd.Flags().BoolP("continue", "C", false, "Continue the most recent session")
+	cmd.MarkFlagsMutuallyExclusive("session", "continue")
 }
 
 // runNonInteractive executes the agent via the server and streams output

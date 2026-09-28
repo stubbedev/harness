@@ -37,6 +37,23 @@ type LSPParams struct {
 	Name        string `json:"name,omitempty" description:"restart only: one client to restart; all of them when omitted"`
 }
 
+// LSPAction names one of the actions the lsp tool dispatches. The UI labels
+// and renders an lsp call by it, so both sides spell it one way.
+type LSPAction string
+
+// The lsp tool's actions. The enum tag on LSPParams.Action must list these;
+// TestLSPActionEnumMatchesDispatch holds it to that.
+const (
+	LSPActionDiagnostics   LSPAction = "diagnostics"
+	LSPActionSymbols       LSPAction = "symbols"
+	LSPActionDefinition    LSPAction = "definition"
+	LSPActionReferences    LSPAction = "references"
+	LSPActionCallHierarchy LSPAction = "call_hierarchy"
+	LSPActionRename        LSPAction = "rename"
+	LSPActionReplaceSymbol LSPAction = "replace_symbol"
+	LSPActionRestart       LSPAction = "restart"
+)
+
 // lspActionFunc runs one language-server action with the fields of the
 // combined parameters that action reads.
 type lspActionFunc func(context.Context, LSPParams) (fantasy.ToolResponse, error)
@@ -49,44 +66,52 @@ func adapt[P any](run func(context.Context, P) (fantasy.ToolResponse, error), pi
 	}
 }
 
-// NewLSPTool folds the language-server actions into one tool: the model
-// sees one schema, the code keeps one behaviour per action.
-func NewLSPTool(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service) fantasy.AgentTool {
-	actions := map[string]lspActionFunc{
-		"diagnostics": adapt(diagnosticsAction(lspManager), func(p LSPParams) DiagnosticsParams {
+// lspActions maps each lsp action to its behaviour.
+func lspActions(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service) map[LSPAction]lspActionFunc {
+	return map[LSPAction]lspActionFunc{
+		LSPActionDiagnostics: adapt(diagnosticsAction(lspManager), func(p LSPParams) DiagnosticsParams {
 			return DiagnosticsParams{FilePath: p.FilePath}
 		}),
-		"symbols": adapt(symbolsAction(lspManager), func(p LSPParams) SymbolsParams {
+		LSPActionSymbols: adapt(symbolsAction(lspManager), func(p LSPParams) SymbolsParams {
 			return SymbolsParams{FilePath: p.FilePath}
 		}),
-		"definition": adapt(definitionAction(lspManager), func(p LSPParams) DefinitionParams {
+		LSPActionDefinition: adapt(definitionAction(lspManager), func(p LSPParams) DefinitionParams {
 			return DefinitionParams{Symbol: p.Symbol, Path: p.Path}
 		}),
-		"references": adapt(referencesAction(lspManager), func(p LSPParams) ReferencesParams {
+		LSPActionReferences: adapt(referencesAction(lspManager), func(p LSPParams) ReferencesParams {
 			return ReferencesParams{Symbol: p.Symbol, Path: p.Path}
 		}),
-		"call_hierarchy": adapt(callHierarchyAction(lspManager), func(p LSPParams) CallHierarchyParams {
+		LSPActionCallHierarchy: adapt(callHierarchyAction(lspManager), func(p LSPParams) CallHierarchyParams {
 			return CallHierarchyParams{Symbol: p.Symbol, Direction: p.Direction, Path: p.Path}
 		}),
-		"rename": adapt(renameAction(lspManager, files, filetracker), func(p LSPParams) RenameParams {
+		LSPActionRename: adapt(renameAction(lspManager, files, filetracker), func(p LSPParams) RenameParams {
 			return RenameParams{Symbol: p.Symbol, NewName: p.NewName, Path: p.Path}
 		}),
 		// The action parameter would shadow replace_symbol's own "action",
 		// so the model sends that one as "mode".
-		"replace_symbol": adapt(replaceSymbolAction(lspManager, files, filetracker), func(p LSPParams) ReplaceSymbolParams {
+		LSPActionReplaceSymbol: adapt(replaceSymbolAction(lspManager, files, filetracker), func(p LSPParams) ReplaceSymbolParams {
 			return ReplaceSymbolParams{Symbol: p.Symbol, FilePath: p.FilePath, Replacement: p.Replacement, Action: p.Mode}
 		}),
-		"restart": adapt(lspRestartAction(lspManager), func(p LSPParams) LSPRestartParams {
+		LSPActionRestart: adapt(lspRestartAction(lspManager), func(p LSPParams) LSPRestartParams {
 			return LSPRestartParams{Name: p.Name}
 		}),
 	}
-	known := slices.Sorted(maps.Keys(actions))
+}
+
+// NewLSPTool folds the language-server actions into one tool: the model
+// sees one schema, the code keeps one behaviour per action.
+func NewLSPTool(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service) fantasy.AgentTool {
+	actions := lspActions(lspManager, files, filetracker)
+	var known []string
+	for _, action := range slices.Sorted(maps.Keys(actions)) {
+		known = append(known, string(action))
+	}
 
 	return fantasy.NewAgentTool(
 		LSPToolName,
 		lspDescription,
 		func(ctx context.Context, params LSPParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			action, ok := actions[params.Action]
+			action, ok := actions[LSPAction(params.Action)]
 			if !ok {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf(
 					"unknown action %q. Available: %s", params.Action, strings.Join(known, ", "))), nil

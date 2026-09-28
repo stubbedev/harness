@@ -354,7 +354,7 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 // has streamed in, so this is decided per render.
 func toolFullWidth(tc message.ToolCall) bool {
 	if tc.Name == tools.LSPToolName {
-		return lspAction(tc) == "replace_symbol"
+		return lspAction(tc) == tools.LSPActionReplaceSymbol
 	}
 	spec, ok := toolSpecs[tc.Name]
 	return ok && spec.fullWidth != nil && spec.fullWidth(tc)
@@ -1384,19 +1384,19 @@ func lspDisplayName(tc message.ToolCall) string {
 		return ""
 	}
 	switch lspAction(tc) {
-	case "references":
+	case tools.LSPActionReferences:
 		return "Find References"
-	case "definition":
+	case tools.LSPActionDefinition:
 		return "Find Definition"
-	case "rename":
+	case tools.LSPActionRename:
 		return "Rename Symbol"
-	case "replace_symbol":
+	case tools.LSPActionReplaceSymbol:
 		return "Replace Symbol"
-	case "call_hierarchy":
+	case tools.LSPActionCallHierarchy:
 		return "Call Hierarchy"
-	case "symbols":
+	case tools.LSPActionSymbols:
 		return "List Symbols"
-	case "restart":
+	case tools.LSPActionRestart:
 		return "Restart LSP"
 	default:
 		return "Diagnostics"
@@ -1405,9 +1405,9 @@ func lspDisplayName(tc message.ToolCall) string {
 
 // lspAction reads the action an lsp call dispatches. Unparsable input
 // falls through to the diagnostics default in both consumers.
-func lspAction(tc message.ToolCall) string {
+func lspAction(tc message.ToolCall) tools.LSPAction {
 	var params struct {
-		Action string `json:"action"`
+		Action tools.LSPAction `json:"action"`
 	}
 	_ = json.Unmarshal([]byte(tc.Input), &params)
 	return params.Action
