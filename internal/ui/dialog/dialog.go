@@ -290,6 +290,17 @@ func (d *Overlay) FullHelp() [][]key.Binding {
 	return nil
 }
 
+// FocusIfOpen brings the dialog with dialogID to the front when it is open
+// and reports whether it was: the opener's "focus it, or build it" check
+// in one call.
+func (d *Overlay) FocusIfOpen(dialogID ID) bool {
+	if !d.ContainsDialog(dialogID) {
+		return false
+	}
+	d.BringToFront(dialogID)
+	return true
+}
+
 // BringToFront brings the dialog with the specified ID to the front.
 func (d *Overlay) BringToFront(dialogID ID) {
 	for i, dialog := range d.dialogs {

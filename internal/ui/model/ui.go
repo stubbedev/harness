@@ -2472,8 +2472,7 @@ func (m *UI) openAuthenticationDialog(provider catalog.Provider, model config.Se
 		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
 	}
 
-	if m.dialog.ContainsDialog(dlg.ID()) {
-		m.dialog.BringToFront(dlg.ID())
+	if m.dialog.FocusIfOpen(dlg.ID()) {
 		return nil
 	}
 
@@ -4523,8 +4522,7 @@ func (m *UI) openDialog(id dialog.ID) tea.Cmd {
 // turns. Rewinding mid-run would race the tools still writing, so a
 // busy agent refuses entry.
 func (m *UI) openRewindDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.RewindID) {
-		m.dialog.BringToFront(dialog.RewindID)
+	if m.dialog.FocusIfOpen(dialog.RewindID) {
 		return nil
 	}
 	if m.session == nil {
@@ -4543,9 +4541,7 @@ func (m *UI) openRewindDialog() tea.Cmd {
 
 // openModelsDialog opens the models dialog.
 func (m *UI) openModelsDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.ModelsID) {
-		// Bring to front
-		m.dialog.BringToFront(dialog.ModelsID)
+	if m.dialog.FocusIfOpen(dialog.ModelsID) {
 		return nil
 	}
 
@@ -4564,8 +4560,7 @@ func (m *UI) openModelsDialog() tea.Cmd {
 // dialog gives way to it: the two are the same list seen from either side
 // of having credentials.
 func (m *UI) openConnectDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.ConnectID) {
-		m.dialog.BringToFront(dialog.ConnectID)
+	if m.dialog.FocusIfOpen(dialog.ConnectID) {
 		return nil
 	}
 
@@ -4581,9 +4576,7 @@ func (m *UI) openConnectDialog() tea.Cmd {
 
 // openCommandsDialog opens the commands dialog.
 func (m *UI) openCommandsDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.CommandsID) {
-		// Bring to front
-		m.dialog.BringToFront(dialog.CommandsID)
+	if m.dialog.FocusIfOpen(dialog.CommandsID) {
 		return nil
 	}
 
@@ -4599,8 +4592,7 @@ func (m *UI) openCommandsDialog() tea.Cmd {
 
 // openReasoningDialog opens the reasoning effort dialog.
 func (m *UI) openReasoningDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.ReasoningID) {
-		m.dialog.BringToFront(dialog.ReasoningID)
+	if m.dialog.FocusIfOpen(dialog.ReasoningID) {
 		return nil
 	}
 
@@ -4615,8 +4607,7 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 
 // openThemesDialog opens the color theme picker.
 func (m *UI) openThemesDialog() tea.Cmd { //nolint:unparam // uniform openDialog dispatch signature
-	if m.dialog.ContainsDialog(dialog.ThemesID) {
-		m.dialog.BringToFront(dialog.ThemesID)
+	if m.dialog.FocusIfOpen(dialog.ThemesID) {
 		return nil
 	}
 
@@ -4626,8 +4617,7 @@ func (m *UI) openThemesDialog() tea.Cmd { //nolint:unparam // uniform openDialog
 
 // openNotificationsDialog opens the notification style picker dialog.
 func (m *UI) openNotificationsDialog() tea.Cmd { //nolint:unparam // uniform openDialog dispatch signature
-	if m.dialog.ContainsDialog(dialog.NotificationsID) {
-		m.dialog.BringToFront(dialog.NotificationsID)
+	if m.dialog.FocusIfOpen(dialog.NotificationsID) {
 		return nil
 	}
 
@@ -4640,9 +4630,7 @@ func (m *UI) openNotificationsDialog() tea.Cmd { //nolint:unparam // uniform ope
 // it brings it to the front. Otherwise, it will list all the sessions and open
 // the dialog.
 func (m *UI) openSessionsDialog() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.SessionsID) {
-		// Bring to front
-		m.dialog.BringToFront(dialog.SessionsID)
+	if m.dialog.FocusIfOpen(dialog.SessionsID) {
 		return nil
 	}
 
@@ -4665,8 +4653,7 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 // subagents). Replaces the cursor-anchored completions popup; picking
 // inserts through the same insert*Completion paths as before.
 func (m *UI) openMentionPicker() tea.Cmd {
-	if m.dialog.ContainsDialog(dialog.MentionPickerID) {
-		m.dialog.BringToFront(dialog.MentionPickerID)
+	if m.dialog.FocusIfOpen(dialog.MentionPickerID) {
 		return nil
 	}
 

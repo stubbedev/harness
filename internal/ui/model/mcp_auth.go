@@ -49,8 +49,7 @@ func (m *UI) openMCPAuthDialog() tea.Cmd {
 	if len(pending) == 0 {
 		return nil
 	}
-	if m.dialog.ContainsDialog(dialog.MCPAuthID) {
-		m.dialog.BringToFront(dialog.MCPAuthID)
+	if m.dialog.FocusIfOpen(dialog.MCPAuthID) {
 		return nil
 	}
 	dlg, cmd := dialog.NewMCPAuth(m.com, pending, m.com.Workspace.MCPAuthURL)
