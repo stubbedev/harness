@@ -255,7 +255,14 @@ func mustMarshalConfig(cfg *Config) []byte {
 // restores the previous environment. A variable that was unset before is
 // unset again, not left behind as an empty string, so ${VAR-default} and
 // LookupEnv checks still see it as absent.
+// harnessEnvMu serializes pushHarnessEnv's rewrite of the process
+// environment. Two loads overlapping (a reload and a second workspace in
+// server mode) would otherwise each back up the other's rewritten values
+// and restore them as the originals.
+var harnessEnvMu sync.Mutex
+
 func pushHarnessEnv() func() {
+	harnessEnvMu.Lock()
 	type backup struct {
 		value string
 		set   bool
@@ -273,6 +280,7 @@ func pushHarnessEnv() func() {
 	}
 
 	return func() {
+		defer harnessEnvMu.Unlock()
 		for name, b := range backups {
 			if b.set {
 				os.Setenv(name, b.value)
@@ -596,12 +604,40 @@ func (c *Config) migrateLegacyProviderIDs(knownProviders []catalog.Provider) {
 // applyEnv sets top-level env vars from the config. Keys are sorted for
 // deterministic ordering so that vars referencing other vars via the
 // value resolver produce consistent results.
+// appliedEnv remembers each variable applyEnv set and what the process
+// held before it, so a key dropped from env: on a reload goes back to that
+// instead of keeping the value the config no longer asks for.
+var appliedEnv = struct {
+	sync.Mutex
+	previous map[string]*string
+}{previous: map[string]*string{}}
+
 func (c *Config) applyEnv(resolver VariableResolver) {
+	appliedEnv.Lock()
+	defer appliedEnv.Unlock()
+	for k, prev := range appliedEnv.previous {
+		if _, still := c.Env[k]; still {
+			continue
+		}
+		if prev == nil {
+			os.Unsetenv(k)
+		} else {
+			os.Setenv(k, *prev)
+		}
+		delete(appliedEnv.previous, k)
+	}
 	for _, k := range slices.Sorted(maps.Keys(c.Env)) {
 		resolved, err := resolver.ResolveValue(c.Env[k])
 		if err != nil {
 			slog.Warn("Skipping env var due to resolution failure.", "key", k, "value", c.Env[k], "error", err)
 			continue
+		}
+		if _, tracked := appliedEnv.previous[k]; !tracked {
+			if prev, ok := os.LookupEnv(k); ok {
+				appliedEnv.previous[k] = &prev
+			} else {
+				appliedEnv.previous[k] = nil
+			}
 		}
 		os.Setenv(k, resolved)
 	}
