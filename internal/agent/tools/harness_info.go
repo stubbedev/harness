@@ -351,7 +351,7 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 
 	opts = append(opts, kv{"data_directory", c.Options.DataDirectory})
 	opts = append(opts, kv{"debug", fmt.Sprintf("%v", c.Options.Debug)})
-	autoLSP := c.Options.AutoLSP == nil || *c.Options.AutoLSP
+	autoLSP := c.Options.AutoLSPEnabled()
 	opts = append(opts, kv{"auto_lsp", fmt.Sprintf("%v", autoLSP)})
 	autoSummarize := !c.Options.DisableAutoSummarize
 	opts = append(opts, kv{"auto_summarize", fmt.Sprintf("%v", autoSummarize)})
@@ -363,9 +363,9 @@ func writeOptions(b *strings.Builder, cfg *config.ConfigStore) {
 		opts = append(opts, kv{"diff_mode", cmp.Or(c.Options.TUI.DiffMode, "auto")})
 		opts = append(opts, kv{"scrollbar", c.Options.TUI.Scrollbar})
 		opts = append(opts, kv{"exit_banner", string(c.Options.TUI.ExitBanner)})
-		// Report the completion limits only once the user has pinned them;
-		// see CompletionLimits for what zero means.
-		if depth, items := c.Options.TUI.CompletionLimits(); depth != 0 || items != 0 {
+		// Report the completion limits only once the user has pinned them.
+		if completions := c.Options.TUI.Completions; completions.MaxDepth != nil || completions.MaxItems != nil {
+			depth, items := completions.Limits()
 			opts = append(opts, kv{"completions_max_depth", fmt.Sprintf("%d", depth)})
 			opts = append(opts, kv{"completions_max_items", fmt.Sprintf("%d", items)})
 		}

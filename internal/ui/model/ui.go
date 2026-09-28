@@ -588,9 +588,9 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	chat.HideThinking = !opts.TUI.ShouldShowThinking()
 
 	// disable indeterminate progress bar
-	ui.progressBarEnabled = opts.Progress == nil || *opts.Progress
+	ui.progressBarEnabled = opts.ProgressEnabled()
 	// enable mouse support (default on)
-	ui.mouseEnabled = opts.TUI.Mouse == nil || *opts.TUI.Mouse
+	ui.mouseEnabled = opts.TUI.MouseEnabled()
 
 	return ui
 }
@@ -2114,7 +2114,7 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 		// Flip the field on the main update path so it never races with
 		// View() reading m.mouseEnabled from a background command's
 		// goroutine; only the (possibly slow) config write is deferred.
-		mouseEnabled := cfg.Options == nil || cfg.Options.TUI.Mouse == nil || *cfg.Options.TUI.Mouse
+		mouseEnabled := cfg.Options == nil || cfg.Options.TUI.MouseEnabled()
 		newValue := !mouseEnabled
 		m.mouseEnabled = newValue
 		cmds = append(cmds, func() tea.Msg {

@@ -364,7 +364,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	)
 
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
-	progress = app.config.Config().Options.Progress == nil || *app.config.Config().Options.Progress
+	progress = app.config.Config().Options.ProgressEnabled()
 
 	if !hideSpinner && stderrTTY {
 		// The configured theme (options.tui.theme) wins over the

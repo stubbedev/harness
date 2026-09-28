@@ -44,7 +44,7 @@ harness logout copilot
 		}
 		defer cleanup()
 
-		progressEnabled := ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
+		progressEnabled := ws.Config.Options.ProgressEnabled()
 		if progressEnabled && supportsProgressBar() {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 			defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()

@@ -226,7 +226,7 @@ func (c *Catalog) defaultCommands() []*CommandItem {
 
 	// Add mouse support toggle.
 	mouseLabel := "Disable Mouse"
-	if cfg != nil && cfg.Options != nil && cfg.Options.TUI.Mouse != nil && !*cfg.Options.TUI.Mouse {
+	if cfg != nil && cfg.Options != nil && !cfg.Options.TUI.MouseEnabled() {
 		mouseLabel = "Enable Mouse"
 	}
 	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mouse", mouseLabel, "", ActionToggleMouseSupport{}))

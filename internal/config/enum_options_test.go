@@ -47,3 +47,30 @@ func TestUnknownEnumValueFallsBackToDefault(t *testing.T) {
 	require.Equal(t, ScrollbarDefault, cfg.Options.TUI.Scrollbar)
 	require.Equal(t, NotificationsBell, cfg.Options.Notifications, "a known value is kept")
 }
+
+// TestOptionDefaultsMatchSchema holds the default the schema advertises
+// for each optional option to the one its accessor applies.
+func TestOptionDefaultsMatchSchema(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("../../schema.json")
+	require.NoError(t, err)
+	var schema struct {
+		Defs map[string]struct {
+			Properties map[string]struct {
+				Default any `json:"default"`
+			} `json:"properties"`
+		} `json:"$defs"`
+	}
+	require.NoError(t, json.Unmarshal(data, &schema))
+	def := func(typ, prop string) any { return schema.Defs[typ].Properties[prop].Default }
+
+	var zero *Options
+	require.Equal(t, zero.ProgressEnabled(), def("Options", "progress"))
+	require.Equal(t, zero.AutoLSPEnabled(), def("Options", "auto_lsp"))
+	require.Equal(t, zero.InherentGoalsEnabled(), def("Options", "inherent_goals"))
+	require.Equal(t, (*TUIOptions)(nil).MouseEnabled(), def("TUIOptions", "mouse"))
+	depth, items := Completions{}.Limits()
+	require.EqualValues(t, depth, def("Completions", "max_depth"))
+	require.EqualValues(t, items, def("Completions", "max_items"))
+}

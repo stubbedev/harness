@@ -1035,7 +1035,7 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		DisableAutoSummarize:  c.cfg.Config().Options.DisableAutoSummarize,
 		AutoSummarizeRatio:    c.cfg.Config().Options.AutoSummarizeRatio,
 		AutoSummarizeBuffer:   c.cfg.Config().Options.AutoSummarizeBuffer,
-		InherentGoals:         c.cfg.Config().Options.InherentGoals == nil || *c.cfg.Config().Options.InherentGoals,
+		InherentGoals:         c.cfg.Config().Options.InherentGoalsEnabled(),
 		MaxRetries:            c.cfg.Config().Options.MaxRetries,
 		Sessions:              c.sessions,
 		Messages:              c.messages,
@@ -1186,7 +1186,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	}
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
-	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSP == nil || *c.cfg.Config().Options.AutoLSP {
+	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSPEnabled() {
 		allTools = append(allTools, tools.NewLSPTool(manager, c.history, c.filetracker))
 	}
 

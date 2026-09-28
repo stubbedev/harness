@@ -219,7 +219,7 @@ func runNonInteractive(
 	)
 
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
-	progress = ws.Config.Options.Progress == nil || *ws.Config.Options.Progress
+	progress = ws.Config.Options.ProgressEnabled()
 
 	if !hideSpinner && stderrTTY {
 		t := common.ThemeStylesForConfig(ws.Config, ws.Config.Models[config.SelectedModelTypeLarge].Provider)

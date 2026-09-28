@@ -397,14 +397,21 @@ func (t *TUIOptions) ThemeName() string {
 
 // Completions defines options for the completions UI.
 type Completions struct {
-	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum depth for the ls tool,default=0,example=10"`
-	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of items to return for the ls tool,default=1000,example=100"`
+	MaxDepth *int `json:"max_depth,omitempty" jsonschema:"description=Maximum directory depth the @-mention file picker lists (0 means unlimited),default=0,example=10"`
+	MaxItems *int `json:"max_items,omitempty" jsonschema:"description=Maximum number of files the @-mention file picker lists (0 means unlimited),default=1000,example=100"`
 }
 
-// Limits returns the configured completion limits. Zero means the user has not
-// pinned that limit, and callers fall back to their own built-in cap.
+// Completion defaults. TestOptionDefaultsMatchSchema holds the schema's
+// default for each field to these.
+const (
+	DefaultCompletionMaxDepth = 0
+	DefaultCompletionMaxItems = 1000
+)
+
+// Limits returns the completion limits in effect: the configured ones, or
+// the defaults. Zero means unlimited.
 func (c Completions) Limits() (depth, items int) {
-	return ptrValOr(c.MaxDepth, 0), ptrValOr(c.MaxItems, 0)
+	return ptrValOr(c.MaxDepth, DefaultCompletionMaxDepth), ptrValOr(c.MaxItems, DefaultCompletionMaxItems)
 }
 
 // CompletionLimits returns the configured completion limits, nil-safe:
@@ -1281,6 +1288,49 @@ func resolveMap(m map[string]string, r VariableResolver, keyFormat string, dropE
 		out[k] = v
 	}
 	return out, nil
+}
+
+// Defaults of the optional boolean options, read through the nil-safe
+// accessors below rather than spelled out at each reader.
+const (
+	DefaultProgress      = true
+	DefaultAutoLSP       = true
+	DefaultInherentGoals = true
+	DefaultMouse         = true
+)
+
+// ProgressEnabled reports whether progress output is on.
+func (o *Options) ProgressEnabled() bool {
+	if o == nil {
+		return DefaultProgress
+	}
+	return ptrValOr(o.Progress, DefaultProgress)
+}
+
+// AutoLSPEnabled reports whether language servers are set up from root
+// markers.
+func (o *Options) AutoLSPEnabled() bool {
+	if o == nil {
+		return DefaultAutoLSP
+	}
+	return ptrValOr(o.AutoLSP, DefaultAutoLSP)
+}
+
+// InherentGoalsEnabled reports whether a turn that ended by declaring
+// next steps continues on its own.
+func (o *Options) InherentGoalsEnabled() bool {
+	if o == nil {
+		return DefaultInherentGoals
+	}
+	return ptrValOr(o.InherentGoals, DefaultInherentGoals)
+}
+
+// MouseEnabled reports whether the TUI captures the mouse.
+func (t *TUIOptions) MouseEnabled() bool {
+	if t == nil {
+		return DefaultMouse
+	}
+	return ptrValOr(t.Mouse, DefaultMouse)
 }
 
 func ptrValOr[T any](t *T, el T) T {

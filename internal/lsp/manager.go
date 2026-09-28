@@ -239,11 +239,8 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 	if _, disabled := s.sessionDisabled.Get(name); disabled {
 		return
 	}
-	var (
-		isUserConfigured = s.isUserConfigured(name)
-		autoLSP          = s.cfg.Config().Options.AutoLSP
-	)
-	if !isUserConfigured && autoLSP != nil && !*autoLSP {
+	isUserConfigured := s.isUserConfigured(name)
+	if !isUserConfigured && !s.cfg.Config().Options.AutoLSPEnabled() {
 		slog.Debug("Auto-start LSP disabled", "name", name)
 		return
 	}
