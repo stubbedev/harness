@@ -53,6 +53,8 @@ type Querier interface {
 	// whatever order SQLite chose, and the index the model reads would
 	// reshuffle between runs.
 	ListMemories(ctx context.Context) ([]Memory, error)
+	// created_at has whole-second resolution and a prompt and its reply
+	// often share a second; rowid is insertion order and breaks the tie.
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListMessagesBySessionFrom(ctx context.Context, arg ListMessagesBySessionFromParams) ([]Message, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)

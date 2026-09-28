@@ -7,7 +7,9 @@ WHERE id = ? LIMIT 1;
 SELECT *
 FROM messages
 WHERE session_id = ?
-ORDER BY created_at ASC;
+-- created_at has whole-second resolution and a prompt and its reply
+-- often share a second; rowid is insertion order and breaks the tie.
+ORDER BY created_at ASC, rowid ASC;
 
 -- name: CreateMessage :one
 INSERT INTO messages (
@@ -48,7 +50,7 @@ WHERE id = ?;
 SELECT *
 FROM messages
 WHERE session_id = ? AND role = 'user'
-ORDER BY created_at DESC;
+ORDER BY created_at DESC, rowid DESC;
 
 -- name: ListAllUserMessages :many
 -- Prompt history reads only the parts blob; the rest of the row is
@@ -56,7 +58,7 @@ ORDER BY created_at DESC;
 SELECT parts
 FROM messages
 WHERE role = 'user'
-ORDER BY created_at DESC;
+ORDER BY created_at DESC, rowid DESC;
 
 -- name: GetLastAssistantMessageBySession :one
 -- Only the provider and model of the last assistant message are read;
@@ -64,7 +66,7 @@ ORDER BY created_at DESC;
 SELECT provider, model
 FROM messages
 WHERE session_id = ? AND role = 'assistant' AND is_summary_message = 0
-ORDER BY created_at DESC
+ORDER BY created_at DESC, rowid DESC
 LIMIT 1;
 
 -- name: ListMessagesBySessionFrom :many
@@ -72,4 +74,4 @@ SELECT m.*
 FROM messages m
 WHERE m.session_id = ?
   AND m.created_at >= (SELECT b.created_at FROM messages b WHERE b.id = ?)
-ORDER BY m.created_at ASC;
+ORDER BY m.created_at ASC, m.rowid ASC;

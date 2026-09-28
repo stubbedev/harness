@@ -85,7 +85,7 @@ const getLastAssistantMessageBySession = `-- name: GetLastAssistantMessageBySess
 SELECT provider, model
 FROM messages
 WHERE session_id = ? AND role = 'assistant' AND is_summary_message = 0
-ORDER BY created_at DESC
+ORDER BY created_at DESC, rowid DESC
 LIMIT 1
 `
 
@@ -136,7 +136,7 @@ const listAllUserMessages = `-- name: ListAllUserMessages :many
 SELECT parts
 FROM messages
 WHERE role = 'user'
-ORDER BY created_at DESC
+ORDER BY created_at DESC, rowid DESC
 `
 
 // Prompt history reads only the parts blob; the rest of the row is
@@ -168,9 +168,11 @@ const listMessagesBySession = `-- name: ListMessagesBySession :many
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, visible
 FROM messages
 WHERE session_id = ?
-ORDER BY created_at ASC
+ORDER BY created_at ASC, rowid ASC
 `
 
+// created_at has whole-second resolution and a prompt and its reply
+// often share a second; rowid is insertion order and breaks the tie.
 func (q *Queries) ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
 	rows, err := q.db.QueryContext(ctx, listMessagesBySession, sessionID)
 	if err != nil {
@@ -215,7 +217,7 @@ SELECT m.id, m.session_id, m.role, m.parts, m.model, m.created_at, m.updated_at,
 FROM messages m
 WHERE m.session_id = ?
   AND m.created_at >= (SELECT b.created_at FROM messages b WHERE b.id = ?)
-ORDER BY m.created_at ASC
+ORDER BY m.created_at ASC, m.rowid ASC
 `
 
 type ListMessagesBySessionFromParams struct {
@@ -266,7 +268,7 @@ const listUserMessagesBySession = `-- name: ListUserMessagesBySession :many
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, visible
 FROM messages
 WHERE session_id = ? AND role = 'user'
-ORDER BY created_at DESC
+ORDER BY created_at DESC, rowid DESC
 `
 
 func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
