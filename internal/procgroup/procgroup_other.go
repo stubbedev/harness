@@ -9,3 +9,12 @@ package procgroup
 func descendants(_ int) []int { return nil }
 
 func killHolders(string) {}
+
+// stray is never collected here: descendants finds none.
+type stray struct{}
+
+func pin(int) stray { return stray{} }
+
+func (stray) kill() {}
+
+func (stray) release() {}

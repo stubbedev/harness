@@ -14,9 +14,27 @@ import (
 const pollInterval = 20 * time.Millisecond
 
 // killStrays SIGKILLs the collected setsid escapees alongside the group.
-func killStrays(strays []int) {
-	for _, pid := range strays {
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+// Each is signalled through the identity pinned when it was collected, so
+// a stray that exited during the grace wait and whose pid the kernel handed
+// to an unrelated process is left alone.
+func killStrays(strays []stray) {
+	for _, s := range strays {
+		s.kill()
+	}
+}
+
+// pinAll pins the identity of each pid; release the result when done.
+func pinAll(pids []int) []stray {
+	strays := make([]stray, 0, len(pids))
+	for _, pid := range pids {
+		strays = append(strays, pin(pid))
+	}
+	return strays
+}
+
+func releaseAll(strays []stray) {
+	for _, s := range strays {
+		s.release()
 	}
 }
 
@@ -42,7 +60,8 @@ func killGroup(proc *os.Process, grace time.Duration) {
 	// that called setsid() is outside the group and survives its kill,
 	// but stays parented until the root dies, so PPid links still reach
 	// it here (see descendants).
-	strays := descendants(pgid)
+	strays := pinAll(descendants(pgid))
+	defer releaseAll(strays)
 	kill := func() {
 		_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		killStrays(strays)

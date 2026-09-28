@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // descendants returns the pids of every process whose ancestor chain
@@ -132,4 +134,59 @@ func holdsDevice(pid int, device string) bool {
 		}
 	}
 	return false
+}
+
+// stray is a process outside the group, pinned by a pidfd so a signal can
+// only ever reach the process it was opened on. Kernels without pidfds
+// (before 5.3) fall back to comparing the process's start time.
+type stray struct {
+	pid   int
+	fd    int
+	start uint64
+}
+
+func pin(pid int) stray {
+	if fd, err := unix.PidfdOpen(pid, 0); err == nil {
+		return stray{pid: pid, fd: fd}
+	}
+	start, _ := startTime(pid)
+	return stray{pid: pid, fd: -1, start: start}
+}
+
+func (s stray) kill() {
+	if s.fd >= 0 {
+		_ = unix.PidfdSendSignal(s.fd, unix.SIGKILL, nil, 0)
+		return
+	}
+	if start, ok := startTime(s.pid); ok && start == s.start {
+		_ = syscall.Kill(s.pid, syscall.SIGKILL)
+	}
+}
+
+func (s stray) release() {
+	if s.fd >= 0 {
+		_ = unix.Close(s.fd)
+	}
+}
+
+// startTime reads when a process started, in clock ticks since boot, from
+// field 22 of /proc/<pid>/stat. Two processes that share a pid never share
+// a start time.
+func startTime(pid int) (uint64, bool) {
+	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return 0, false
+	}
+	end := bytes.LastIndexByte(data, ')')
+	if end < 0 {
+		return 0, false
+	}
+	// Fields after the comm start at field 3 (state); starttime is 22.
+	fields := strings.Fields(string(data[end+1:]))
+	const startTimeField = 22 - 3
+	if len(fields) <= startTimeField {
+		return 0, false
+	}
+	start, err := strconv.ParseUint(fields[startTimeField], 10, 64)
+	return start, err == nil
 }

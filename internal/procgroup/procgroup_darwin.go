@@ -70,3 +70,32 @@ func killHolders(device string) {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// stray is a process outside the group, pinned by its start time: a pid
+// the kernel reused for another process has a different one.
+type stray struct {
+	pid   int
+	start unix.Timeval
+	known bool
+}
+
+func pin(pid int) stray {
+	start, ok := startTime(pid)
+	return stray{pid: pid, start: start, known: ok}
+}
+
+func (s stray) kill() {
+	if start, ok := startTime(s.pid); ok && s.known && start == s.start {
+		_ = syscall.Kill(s.pid, syscall.SIGKILL)
+	}
+}
+
+func (stray) release() {}
+
+func startTime(pid int) (unix.Timeval, bool) {
+	proc, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil || int(proc.Proc.P_pid) != pid {
+		return unix.Timeval{}, false
+	}
+	return proc.Proc.P_starttime, true
+}
