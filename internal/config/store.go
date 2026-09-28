@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stubbedev/harness/internal/fsext"
+
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/env"
 	"github.com/stubbedev/harness/internal/lock"
@@ -275,7 +277,7 @@ func (s *ConfigStore) atomicWrite(scope Scope, fn func(current []byte) ([]byte, 
 		return fmt.Errorf("encode config file %s: %w", path, err)
 	}
 
-	return atomicWriteFile(path, out, 0o600)
+	return fsext.WriteFileAtomic(path, out, 0o600)
 }
 
 // readConfigJSON reads a config file from disk and returns it as JSON,
