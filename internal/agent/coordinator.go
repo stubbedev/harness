@@ -71,51 +71,6 @@ var (
 	errSmallModelNotFound              = errors.New("small model not found in provider config")
 )
 
-// Copilot models that use the Responses API instead of Chat Completions.
-var copilotResponsesModels = map[string]bool{
-	"gpt-5.2":       true,
-	"gpt-5.2-codex": true,
-	"gpt-5.3-codex": true,
-	"gpt-5.4":       true,
-	"gpt-5.4-mini":  true,
-	"gpt-5.5":       true,
-	"gpt-5-mini":    true,
-	"gpt-5.6-luna":  true,
-	"gpt-5.6-terra": true,
-	"gpt-5.6-sol":   true,
-	"gpt-6-astra":   true,
-	"grok-4.5":      true,
-	"grok-4.6":      true,
-}
-
-// OpenCode models that use the Anthropic Messages API instead of Chat
-// Completions. Which endpoint serves each model differs per provider, see
-// https://opencode.ai/docs/zen and https://opencode.ai/docs/go.
-func isOpenCodeMessagesModel(providerID, modelID string) bool {
-	switch providerID {
-	case string(catalog.InferenceProviderOpenCodeGo):
-		return strings.HasPrefix(modelID, "minimax-") ||
-			strings.HasPrefix(modelID, "qwen3.6-") ||
-			strings.HasPrefix(modelID, "qwen3.7-") ||
-			strings.HasPrefix(modelID, "qwen3.8-")
-	case string(catalog.InferenceProviderOpenCodeZen):
-		return strings.HasPrefix(modelID, "claude-") ||
-			strings.HasPrefix(modelID, "qwen3.5-") ||
-			strings.HasPrefix(modelID, "qwen3.6-") ||
-			strings.HasPrefix(modelID, "qwen3.7-") ||
-			strings.HasPrefix(modelID, "qwen3.8-")
-	}
-	return false
-}
-
-// OpenCode models that use the OpenAI Responses API instead of Chat
-// Completions. See https://opencode.ai/docs/zen and https://opencode.ai/docs/go.
-func isOpenCodeResponsesModel(modelID string) bool {
-	return strings.HasPrefix(modelID, "gpt-") ||
-		strings.HasPrefix(modelID, "grok-") ||
-		strings.HasPrefix(modelID, "muse-spark-")
-}
-
 type Coordinator interface {
 	// INFO: (kujtim) this is not used yet we will use this when we have multiple agents
 	// SetMainAgent(string)
@@ -1444,9 +1399,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
-			openaicompat.WithResponsesAPIFunc(func(modelID string) bool {
-				return copilotResponsesModels[modelID]
-			}),
+			openaicompat.WithResponsesAPIFunc(catalog.ResponsesAPIRouter(catalog.InferenceProviderCopilot)),
 		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 
@@ -1454,7 +1407,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
-			openaicompat.WithResponsesAPIFunc(isOpenCodeResponsesModel),
+			openaicompat.WithResponsesAPIFunc(catalog.ResponsesAPIRouter(catalog.InferenceProvider(providerID))),
 		)
 	}
 	if httpClient == nil {
@@ -1618,12 +1571,9 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
 	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
 
-	switch providerCfg.ID {
-	case string(catalog.InferenceProviderOpenCodeGo), string(catalog.InferenceProviderOpenCodeZen):
-		if isOpenCodeMessagesModel(providerCfg.ID, model.Model) {
-			baseURL = strings.TrimSuffix(baseURL, "/v1")
-			return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.DisableHTTP2)
-		}
+	if catalog.UsesMessagesAPI(catalog.InferenceProvider(providerCfg.ID), model.Model) {
+		baseURL = strings.TrimSuffix(baseURL, "/v1")
+		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.DisableHTTP2)
 	}
 
 	switch providerCfg.Type {

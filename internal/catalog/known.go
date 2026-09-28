@@ -158,3 +158,64 @@ func knownHeaders(id InferenceProvider) map[string]string {
 	}
 	return maps.Clone(known.Headers)
 }
+
+// Some gateways serve one OpenAI-compatible endpoint but route certain
+// models to a different wire protocol. Which models is a fact about the
+// gateway, not about the model, and models.dev does not publish it.
+
+// copilotResponsesModels are the Copilot models served by the OpenAI
+// Responses API instead of Chat Completions.
+var copilotResponsesModels = map[string]bool{
+	"gpt-5.2":       true,
+	"gpt-5.2-codex": true,
+	"gpt-5.3-codex": true,
+	"gpt-5.4":       true,
+	"gpt-5.4-mini":  true,
+	"gpt-5.5":       true,
+	"gpt-5-mini":    true,
+	"gpt-5.6-luna":  true,
+	"gpt-5.6-terra": true,
+	"gpt-5.6-sol":   true,
+	"gpt-6-astra":   true,
+	"grok-4.5":      true,
+	"grok-4.6":      true,
+}
+
+// ResponsesAPIRouter returns the predicate naming the models provider
+// serves over the OpenAI Responses API instead of Chat Completions, or nil
+// when it routes no model there. See https://opencode.ai/docs/zen and
+// https://opencode.ai/docs/go for OpenCode's split.
+func ResponsesAPIRouter(provider InferenceProvider) func(modelID string) bool {
+	switch provider {
+	case InferenceProviderCopilot:
+		return func(modelID string) bool { return copilotResponsesModels[modelID] }
+	case InferenceProviderOpenCodeGo, InferenceProviderOpenCodeZen:
+		return func(modelID string) bool {
+			return strings.HasPrefix(modelID, "gpt-") ||
+				strings.HasPrefix(modelID, "grok-") ||
+				strings.HasPrefix(modelID, "muse-spark-")
+		}
+	default:
+		return nil
+	}
+}
+
+// UsesMessagesAPI reports whether provider serves modelID over the
+// Anthropic Messages API instead of Chat Completions.
+func UsesMessagesAPI(provider InferenceProvider, modelID string) bool {
+	switch provider {
+	case InferenceProviderOpenCodeGo:
+		return strings.HasPrefix(modelID, "minimax-") ||
+			strings.HasPrefix(modelID, "qwen3.6-") ||
+			strings.HasPrefix(modelID, "qwen3.7-") ||
+			strings.HasPrefix(modelID, "qwen3.8-")
+	case InferenceProviderOpenCodeZen:
+		return strings.HasPrefix(modelID, "claude-") ||
+			strings.HasPrefix(modelID, "qwen3.5-") ||
+			strings.HasPrefix(modelID, "qwen3.6-") ||
+			strings.HasPrefix(modelID, "qwen3.7-") ||
+			strings.HasPrefix(modelID, "qwen3.8-")
+	default:
+		return false
+	}
+}
