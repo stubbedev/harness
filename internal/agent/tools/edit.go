@@ -26,7 +26,7 @@ type EditOperation struct {
 }
 
 type EditParams struct {
-	FilePath string          `json:"file_path" description:"The absolute path to the file to modify"`
+	FilePath string          `json:"file_path" description:"Path to the file to modify, absolute or relative to the working directory"`
 	Edits    []EditOperation `json:"edits" description:"Array of edit operations to perform sequentially on the file"`
 }
 

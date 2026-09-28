@@ -39,9 +39,10 @@ var viewDescriptionTpl = template.Must(
 )
 
 type viewDescriptionData struct {
-	DefaultReadLimit int
-	MaxViewSizeKB    int
-	MaxFilesPerCall  int
+	DefaultReadLimit    int
+	MaxViewSizeKB       int
+	MaxFilesPerCall     int
+	MaxDirectoryEntries int
 }
 
 func viewDescription() string {
@@ -49,6 +50,8 @@ func viewDescription() string {
 		DefaultReadLimit: DefaultReadLimit,
 		MaxViewSizeKB:    MaxViewSize / 1024,
 		MaxFilesPerCall:  MaxViewFilesPerCall,
+
+		MaxDirectoryEntries: MaxDirectoryEntries,
 	})
 }
 

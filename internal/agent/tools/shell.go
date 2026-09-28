@@ -31,7 +31,7 @@ type ShellParams struct {
 	Command             string `json:"command,omitempty" description:"The literal keystrokes for the terminal: a command line at the prompt (Enter implied), or bytes for the program that is running. Keys with no character of their own go in as their terminal bytes via JSON escapes: \\n or \\r for Enter, \\t tab, \\u0003 ctrl-c, \\u001b escape, \\u001b[A up, \\u001b[3~ delete. Leave empty to wait for the running command's next event."`
 	Session             string `json:"session,omitempty" description:"Terminal to use; omit to have one assigned. Name one to pin a long-lived program to it."`
 	Reset               bool   `json:"reset,omitempty" description:"Kill a wedged session and start a fresh one, losing everything the old shell held"`
-	WorkingDir          string `json:"working_dir,omitempty" description:"Directory for a new session to open in; defaults to the directory Harness was spawned from. Has no effect on an existing session - use cd inside it."`
+	WorkingDir          string `json:"working_dir,omitempty" description:"Directory for a new session to open in; defaults to the workspace working directory. Has no effect on an existing session - use cd inside it."`
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to hold a command that has gone completely idle before returning it as still running (default 60, ceiling 15 minutes)"`
 }
 

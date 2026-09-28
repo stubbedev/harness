@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
@@ -38,4 +39,19 @@ func TestMemoryCategoryEnumMatchesStore(t *testing.T) {
 	t.Parallel()
 
 	require.ElementsMatch(t, memory.ValidCategories(), enumTag[MemoryParams](t, "Category"))
+}
+
+// TestParamDescriptionsQuoteTheirConstants holds the numbers the model
+// reads in parameter descriptions to the constants the tools enforce.
+func TestParamDescriptionsQuoteTheirConstants(t *testing.T) {
+	t.Parallel()
+
+	description := func(field reflect.StructField) string { return field.Tag.Get("description") }
+	limit, _ := reflect.TypeFor[ViewParams]().FieldByName("Limit")
+	require.Contains(t, description(limit), fmt.Sprintf("defaults to %d", DefaultReadLimit))
+	fileLimit, _ := reflect.TypeFor[ViewFileRequest]().FieldByName("Limit")
+	require.Contains(t, description(fileLimit), fmt.Sprintf("defaults to %d", DefaultReadLimit))
+	wait, _ := reflect.TypeFor[ShellParams]().FieldByName("AutoBackgroundAfter")
+	require.Contains(t, description(wait), fmt.Sprintf("default %d", DefaultAutoBackgroundAfter))
+	require.Contains(t, description(wait), fmt.Sprintf("ceiling %d minutes", int(ptyMaxWait.Minutes())))
 }
