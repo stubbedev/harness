@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stubbedev/harness/internal/filepathext"
+
 	"github.com/stubbedev/harness/internal/toolname"
 
 	"github.com/charmbracelet/x/ansi"
@@ -200,7 +202,12 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 		shellDescription(shellPath),
 		func(ctx context.Context, params ShellParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			// Determine working directory
-			execWorkingDir := cmp.Or(params.WorkingDir, workingDir)
+			// A relative working_dir is relative to the workspace, not to
+			// whatever directory the process happens to run in.
+			execWorkingDir := workingDir
+			if params.WorkingDir != "" {
+				execWorkingDir = filepathext.SmartJoin(workingDir, params.WorkingDir)
+			}
 
 			// Everything synchronous goes through the persistent terminal
 			// session, used the way a person uses one: whatever is in
