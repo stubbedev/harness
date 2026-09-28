@@ -370,6 +370,17 @@ func (s *ConfigStore) SetConfigField(scope Scope, key string, value any) error {
 // The write is protected by an in-process mutex and a cross-process flock
 // to prevent races between concurrent writers in different processes.
 func (s *ConfigStore) SetConfigFields(scope Scope, kv map[string]any) error {
+	// A write confined to preferences nothing but the UI reads is
+	// applied to the in-memory config directly. A reload would re-resolve
+	// every provider's credentials and re-run model discovery, which a
+	// theme or mouse toggle has no business waiting on.
+	if inMemoryApplicable(kv) && applyConfigPaths(s.Config().cloneForWrite(), kv) == nil {
+		return s.update(scope, func(c *Config) map[string]any {
+			// Validated on a throwaway clone above; the paths resolve.
+			_ = applyConfigPaths(c, kv)
+			return kv
+		})
+	}
 	if err := s.writeConfigFields(scope, kv); err != nil {
 		return err
 	}

@@ -785,3 +785,47 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 		}
 	}
 }
+
+// TestSetConfigField_UIPreferenceAppliesInMemory covers the write path
+// that skips the reload: the value lands on disk and in the live config,
+// and the staleness tracker does not mistake the write for an external
+// edit.
+func TestSetConfigField_UIPreferenceAppliesInMemory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "harness.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"options": {"tui": {"theme": "charmtone"}}}`), 0o600))
+	store, err := Load(dir, dir, false)
+	require.NoError(t, err)
+	store.globalDataPath = configPath
+	store.CaptureStalenessSnapshot([]string{configPath})
+	before := store.Config()
+
+	require.NoError(t, store.SetConfigFields(ScopeGlobal, map[string]any{
+		"options.tui.theme":   "gruvbox-dark",
+		"options.tui.mouse":   false,
+		"recent_models.large": []SelectedModel{{Provider: "p", Model: "m"}},
+	}))
+
+	cfg := store.Config()
+	require.Equal(t, "gruvbox-dark", cfg.Options.TUI.Theme)
+	require.False(t, cfg.Options.TUI.MouseEnabled())
+	require.Equal(t, []SelectedModel{{Provider: "p", Model: "m"}}, cfg.RecentModels[SelectedModelTypeLarge])
+	require.Equal(t, "charmtone", before.Options.TUI.Theme, "the published config is never mutated in place")
+
+	data, err := os.ReadFile(configPath)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "gruvbox-dark")
+	require.False(t, store.ConfigStaleness().Dirty)
+}
+
+func TestInMemoryApplicable(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, inMemoryApplicable(map[string]any{"options.tui.theme": "x", "recent_models.small": nil}))
+	require.False(t, inMemoryApplicable(map[string]any{"options.tui.theme": "x", "providers.p.api_key": "k"}))
+	require.False(t, inMemoryApplicable(map[string]any{"options.debug": true}))
+	require.False(t, inMemoryApplicable(nil))
+	require.False(t, inMemoryApplicable(map[string]any{"options.tui.keybinds.chat.cancel": "x"}))
+}
