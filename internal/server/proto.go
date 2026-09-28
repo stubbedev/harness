@@ -278,13 +278,7 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 			if wrapped == nil {
 				continue
 			}
-			data, err := json.Marshal(wrapped)
-			if err != nil {
-				c.server.logError(r, "Failed to marshal event", "error", err)
-				continue
-			}
-
-			fmt.Fprintf(w, "data: %s\n\n", data)
+			writeSSEPayload(w, wrapped)
 			flusher.Flush()
 		}
 	}

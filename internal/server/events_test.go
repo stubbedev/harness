@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -270,4 +271,17 @@ func TestMessageToProtoPrismModel(t *testing.T) {
 	require.Equal(t, 1.5, *got.PrismHypercreditSavings)
 	require.NotNil(t, got.PrismDollarSavings)
 	require.Equal(t, 0.002, *got.PrismDollarSavings)
+}
+
+// TestWriteSSEPayloadMatchesMarshal pins the hand-framed SSE envelope to
+// what encoding the Payload would produce, so clients decode it the same.
+func TestWriteSSEPayloadMatchesMarshal(t *testing.T) {
+	t.Parallel()
+
+	p := &pubsub.Payload{Type: pubsub.PayloadTypeMessage, Payload: json.RawMessage(`{"id":"m1","parts":[]}`)}
+	var buf bytes.Buffer
+	writeSSEPayload(&buf, p)
+	want, err := json.Marshal(p)
+	require.NoError(t, err)
+	require.Equal(t, "data: "+string(want)+"\n\n", buf.String())
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 
 	"github.com/stubbedev/harness/internal/agent/notify"
@@ -104,6 +105,19 @@ func wrapEvent(ev any) *pubsub.Payload {
 }
 
 // envelope marshals the inner event and wraps it in a pubsub.Payload.
+// writeSSEPayload writes p as one SSE data frame. The inner payload is
+// already encoded JSON; framing the envelope by hand spares re-encoding
+// it, which for a streaming message is the whole transcript entry again
+// on every update.
+func writeSSEPayload(w io.Writer, p *pubsub.Payload) {
+	typ, _ := json.Marshal(p.Type)
+	_, _ = io.WriteString(w, `data: {"type":`)
+	_, _ = w.Write(typ)
+	_, _ = io.WriteString(w, `,"payload":`)
+	_, _ = w.Write(p.Payload)
+	_, _ = io.WriteString(w, "}\n\n")
+}
+
 func envelope(payloadType pubsub.PayloadType, inner any) *pubsub.Payload {
 	raw, err := json.Marshal(inner)
 	if err != nil {
