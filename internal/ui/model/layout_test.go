@@ -60,7 +60,7 @@ func newTestUI() *UI {
 	ta.SetStyles(com.Styles.Editor.Textarea)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
-	ta.SetVirtualCursor(false)
+	ta.SetVirtualCursor(true)
 	ta.DynamicHeight = true
 	ta.MinHeight = TextareaMinHeight
 	ta.MaxHeight = TextareaMaxHeight

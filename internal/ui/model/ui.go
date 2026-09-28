@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode"
 
+	"charm.land/bubbles/v2/cursor"
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -491,7 +492,13 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	ta.SetStyles(com.Styles.Editor.Textarea)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = -1
-	ta.SetVirtualCursor(false)
+	// The caret is drawn as part of the frame (bubbles' virtual cursor)
+	// rather than driven through the terminal's hide/show cursor
+	// protocol: streaming repaints hide and re-show a protocol cursor on
+	// every frame, which resets its blink phase and reads as the caret
+	// vanishing from a focused editor. A drawn caret is immune to that
+	// churn; its blink ticks reach the textarea through Update.
+	ta.SetVirtualCursor(true)
 	ta.DynamicHeight = true
 	ta.MinHeight = com.Config().Options.TUI.MinTextareaHeight()
 	ta.MaxHeight = TextareaMaxHeight
@@ -1487,6 +1494,12 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.MoveToEnd()
 		m.syncBangModeFromTextarea()
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
+	case cursor.BlinkMsg:
+		// The editor caret's blink tick. The centralized model is the only
+		// thing that can hand it back to the textarea, whose Update arms
+		// the next tick; dropping it would freeze the drawn caret in one
+		// phase. While it is blurred the textarea ignores the tick.
+		cmds = append(cmds, m.updateTextarea(msg))
 	case shellStreamMsg:
 		if item := m.chat.MessageItem(msg.PendingID); item != nil {
 			if shellItem, ok := item.(*chat.ShellItem); ok {
@@ -3062,12 +3075,9 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			return common.OffsetCursor(m.inlineCursor, origin.X, origin.Y, 0, 0)
 		}
 
-		if m.textarea.Focused() {
-			// Editor may not start at the screen edge; the origin carries
-			// the top frame line so the cursor sits on the field itself.
-			origin := m.editorContentOrigin()
-			return common.OffsetCursor(m.textarea.Cursor(), origin.X, origin.Y, 0, 0)
-		}
+		// The textarea draws its own caret inside the frame (virtual
+		// cursor), so no protocol cursor is placed for it here: Draw
+		// returns nil and the terminal caret stays out of the way.
 	}
 	return nil
 }

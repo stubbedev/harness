@@ -27,8 +27,9 @@ func newCompactUI(t *testing.T) (*UI, *countingWorkspace) {
 	ws := &countingWorkspace{}
 	m := newBusyUI(ws)
 	m.com = common.DefaultCommon(&compactWorkspace{countingWorkspace: ws})
-	// A real cursor, as the editor has: the virtual one blinks, and every
-	// blink is a timer the command runner would sit through.
+	// A real cursor: the virtual one blinks, and every blink is a timer
+	// the command runner would sit through. The production editor is
+	// virtual; these tests only exercise command routing, not the caret.
 	m.textarea.SetVirtualCursor(false)
 	m.textarea.Focus()
 	warmCaches(m, false)
