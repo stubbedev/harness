@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -121,6 +122,21 @@ func (s *Manager) Ledger() *Ledger {
 // Clients returns the map of LSP clients.
 func (s *Manager) Clients() *csync.Map[string, *Client] {
 	return s.clients
+}
+
+// DiagnosticsGeneration identifies the diagnostics every client holds
+// right now: it changes when any client's diagnostics change, when a client
+// starts or stops, or when one is replaced by a restart.
+func (s *Manager) DiagnosticsGeneration() string {
+	if s == nil {
+		return ""
+	}
+	var parts []string
+	for name, client := range s.clients.Seq2() {
+		parts = append(parts, fmt.Sprintf("%s@%p:%d", name, client, client.DiagnosticsVersion()))
+	}
+	slices.Sort(parts)
+	return strings.Join(parts, ";")
 }
 
 // SetCallback sets a callback that is invoked when a new LSP

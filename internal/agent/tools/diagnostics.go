@@ -235,9 +235,13 @@ func reportDiagnostics(ctx context.Context, manager *lsp.Manager, grace time.Dur
 		return ""
 	}
 
-	entries := diagnosticLines(manager)
-	lines, paths := entryLines(entries)
-	added, resolved := manager.Ledger().Diff(GetSessionFromContext(ctx), lines)
+	var entries map[string]diagnosticEntry
+	var lines, paths map[string]string
+	added, resolved := manager.Ledger().DiffAt(GetSessionFromContext(ctx), manager.DiagnosticsGeneration(), func() map[string]string {
+		entries = diagnosticLines(manager)
+		lines, paths = entryLines(entries)
+		return lines
+	})
 	if len(added) == 0 && len(resolved) == 0 {
 		return ""
 	}

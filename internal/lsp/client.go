@@ -547,6 +547,14 @@ func (c *Client) GetDiagnostics() map[protocol.DocumentURI][]protocol.Diagnostic
 	return c.diagnostics.Copy()
 }
 
+// DiagnosticsVersion changes whenever the client's diagnostics do.
+func (c *Client) DiagnosticsVersion() uint64 {
+	if c == nil {
+		return 0
+	}
+	return c.diagnostics.Version()
+}
+
 // GetDiagnosticCounts returns cached diagnostic counts by severity.
 // Uses the VersionedMap version to avoid recomputing on every call.
 func (c *Client) GetDiagnosticCounts() DiagnosticCounts {
