@@ -64,7 +64,7 @@ func TestRun_QueuedPromptFoldsIntoNextRequestMidToolLoop(t *testing.T) {
 	}
 
 	// The user interjects while the tool is blocked mid-loop.
-	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, Prompt: "STEER: use plan b", acceptSeq: 1})
+	sa.enqueueCallLocked(SessionAgentCall{SessionID: sess.ID, Prompt: "STEER: use plan b", acceptSeq: 1})
 	close(gated.release)
 
 	select {

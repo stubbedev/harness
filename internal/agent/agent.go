@@ -494,14 +494,17 @@ func (a *sessionAgent) sessionMu(sessionID string) *sync.Mutex {
 	return mu
 }
 
-// enqueueCall appends call to the session's message queue. The
+// enqueueCallLocked appends call to the session's message queue. The
+// caller must hold the session's dispatch mutex, like every other queue
+// mutation: the drain reads and writes the queue back under it, so an
+// unlocked write in between is lost or resurrected. The
 // OnComplete hook is stripped: the caller that supplied it (typically
 // coordinator.Run) has its own retry/coalesce scope that ends when it
 // returns, so by the time the queue drains nobody is left to consume the
 // buffered terminal event. The recursive Run falls back to the default
 // broker publish, which is what existing subscribers expect for queued
 // turns.
-func (a *sessionAgent) enqueueCall(call SessionAgentCall) {
+func (a *sessionAgent) enqueueCallLocked(call SessionAgentCall) {
 	existing, ok := a.messageQueue.Get(call.SessionID)
 	if !ok {
 		existing = []SessionAgentCall{}
@@ -710,16 +713,16 @@ func (a *sessionAgent) publishCanceledQueueDrops(drops []SessionAgentCall) {
 	}
 }
 
-// clearQueueAndNotify removes all queued prompts for the session and
-// publishes a terminal cancelled RunComplete for any that carried a RunID,
-// so callers waiting on those RunIDs (e.g. `harness run`) are not left
+// takeQueueLocked removes and returns all queued prompts for the
+// session. The caller must hold the session's dispatch mutex, and once it
+// has released it, hand the result to publishCanceledQueueDrops so
+// callers waiting on those RunIDs (e.g. `harness run`) are not left
 // hanging when their queued prompt is discarded without running.
-func (a *sessionAgent) clearQueueAndNotify(sessionID string) {
-	queued, ok := a.messageQueue.Take(sessionID)
-	if !ok {
-		return
-	}
-	a.publishCanceledQueueDrops(queued)
+// Publishing happens outside the lock: a must-deliver publish can block
+// on a slow subscriber, and the dispatch handoff must not wait on it.
+func (a *sessionAgent) takeQueueLocked(sessionID string) []SessionAgentCall {
+	queued, _ := a.messageQueue.Take(sessionID)
+	return queued
 }
 
 // clearPendingCancel removes any pending-cancel mark for sessionID. It
@@ -958,13 +961,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// accept reservation. A Cancel arriving after this point sees the
 		// active entry and clears the queue.
 		//
-		// enqueueCall strips OnComplete: the caller that supplied the hook
+		// enqueueCallLocked strips OnComplete: the caller that supplied the hook
 		// (typically coordinator.Run) has its own retry/coalesce scope that
 		// ends when it returns, so by the time the queue drains nobody is
 		// left to consume the buffered terminal event. The queued turn falls
 		// back to the default broker publish, which is what existing
 		// subscribers expect.
-		a.enqueueCall(call)
+		a.enqueueCallLocked(call)
 		if call.Accepted != nil {
 			call.Accepted.Close()
 		}
@@ -2799,7 +2802,11 @@ func (a *sessionAgent) Cancel(sessionID string) {
 	// is a true no-op and must not poison the next prompt.
 	mu := a.sessionMu(sessionID)
 	mu.Lock()
-	defer mu.Unlock()
+	var drops []SessionAgentCall
+	defer func() {
+		mu.Unlock()
+		a.publishCanceledQueueDrops(drops)
+	}()
 
 	// Cancel regular requests. Don't use Take() here - we need the entry to
 	// remain in activeRequests so IsBusy() returns true until the goroutine
@@ -2834,17 +2841,25 @@ func (a *sessionAgent) Cancel(sessionID string) {
 		a.cancelMark.Set(sessionID, max(existing, mark))
 	}
 
-	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Debug("Clearing queued prompts", "session_id", sessionID)
-		a.clearQueueAndNotify(sessionID)
+	if drops = a.takeQueueLocked(sessionID); len(drops) > 0 {
+		slog.Debug("Cleared queued prompts", "session_id", sessionID, "count", len(drops))
 	}
 }
 
+// ClearQueue drops every queued prompt for the session. It takes the
+// dispatch mutex so it is ordered against the drain, which reads the
+// queue and writes it back under that mutex: a clear landing between
+// the two used to be undone, and the cleared prompt ran after its
+// cancellation had been announced.
 func (a *sessionAgent) ClearQueue(sessionID string) {
-	if a.QueuedPrompts(sessionID) > 0 {
-		slog.Debug("Clearing queued prompts", "session_id", sessionID)
-		a.clearQueueAndNotify(sessionID)
+	mu := a.sessionMu(sessionID)
+	mu.Lock()
+	drops := a.takeQueueLocked(sessionID)
+	mu.Unlock()
+	if len(drops) > 0 {
+		slog.Debug("Cleared queued prompts", "session_id", sessionID, "count", len(drops))
 	}
+	a.publishCanceledQueueDrops(drops)
 }
 
 func (a *sessionAgent) CancelAll() {

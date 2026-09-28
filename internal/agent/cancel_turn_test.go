@@ -73,7 +73,7 @@ func TestCancelTurn_KeepsQueueAndAcceptedRuns(t *testing.T) {
 
 	var activeCanceled atomic.Bool
 	sa.activeRequests.Set(sess.ID, &activeCancel{cancel: func() { activeCanceled.Store(true) }})
-	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, Prompt: "queued-followup", acceptSeq: 1})
+	sa.enqueueCallLocked(SessionAgentCall{SessionID: sess.ID, Prompt: "queued-followup", acceptSeq: 1})
 	accept := sa.BeginAccepted(sess.ID)
 	defer accept.Close()
 
@@ -121,7 +121,7 @@ func TestRun_CanceledTurnRunsQueuedFollowUp(t *testing.T) {
 		}
 		return sa.IsSessionBusy(sess.ID)
 	}, 5*time.Second, 10*time.Millisecond, "the main turn must become active")
-	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, Prompt: "next", acceptSeq: 1})
+	sa.enqueueCallLocked(SessionAgentCall{SessionID: sess.ID, Prompt: "next", acceptSeq: 1})
 	sa.CancelTurn(sess.ID)
 
 	select {

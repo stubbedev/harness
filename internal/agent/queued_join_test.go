@@ -41,8 +41,8 @@ func TestRun_QueuedPromptsJoinIntoSingleUserMessage(t *testing.T) {
 		t.Fatal("main run never entered Stream")
 	}
 	require.True(t, sa.IsSessionBusy(sess.ID))
-	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, Prompt: "first", acceptSeq: 1})
-	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, Prompt: "second", acceptSeq: 2})
+	sa.enqueueCallLocked(SessionAgentCall{SessionID: sess.ID, Prompt: "first", acceptSeq: 1})
+	sa.enqueueCallLocked(SessionAgentCall{SessionID: sess.ID, Prompt: "second", acceptSeq: 2})
 	require.Equal(t, 2, sa.QueuedPrompts(sess.ID))
 
 	close(large.gate)

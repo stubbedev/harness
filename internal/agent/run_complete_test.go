@@ -247,7 +247,7 @@ func requireSingleCancelledRunComplete(t *testing.T, ch <-chan pubsub.Event[noti
 // TestCancel_QueuedRunIDPromptPublishesCancelledRunComplete proves the
 // terminal-event behavior end-to-end: a RunID-bearing prompt sitting in
 // the queue that is canceled while queued (via the public Cancel path,
-// which routes through clearQueueAndNotify -> publishCanceledQueueDrops)
+// which routes through takeQueueLocked -> publishCanceledQueueDrops)
 // must emit exactly one cancelled RunComplete on the broker for its
 // RunID. A queued prompt without a RunID is dropped silently. This is the
 // coverage the earlier drain test lacked: it asserted the returned

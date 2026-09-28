@@ -141,7 +141,7 @@ func TestRun_PrepareStepDrainSkipsQueuedOnPendingCancel(t *testing.T) {
 	require.NoError(t, err)
 
 	// A follow-up prompt sits queued for the session.
-	sa.enqueueCall(SessionAgentCall{SessionID: sess.ID, Prompt: "queued-followup"})
+	sa.enqueueCallLocked(SessionAgentCall{SessionID: sess.ID, Prompt: "queued-followup"})
 	// A cancel was recorded for the session while it sat in the queue.
 	sa.cancelMark.Set(sess.ID, 1)
 
