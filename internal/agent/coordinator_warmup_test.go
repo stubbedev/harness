@@ -10,11 +10,13 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 )
 
-// warmupTestCoordinator builds an interactive coordinator on a hermetic
-// offline config: one openai-typed provider whose model resolves without
+// warmupTestCoordinator builds a coordinator on a hermetic offline
+// config: one openai-typed provider whose model resolves without
 // network, selected as both large and small, so the builds behind
-// Warmup run for real but never dial out.
-func warmupTestCoordinator(t *testing.T) Coordinator {
+// Warmup run for real but never dial out. The background builds read
+// the interactive flag (buildTools branches on it), so it has to be
+// fixed at construction instead of mutated afterwards.
+func warmupTestCoordinator(t *testing.T, interactive bool) Coordinator {
 	t.Helper()
 
 	env := testEnv(t)
@@ -38,7 +40,7 @@ func warmupTestCoordinator(t *testing.T) Coordinator {
 		Messages:    env.messages,
 		History:     env.history,
 		FileTracker: *env.filetracker,
-		Interactive: true,
+		Interactive: interactive,
 	})
 	require.NoError(t, err)
 	return coord
@@ -52,7 +54,7 @@ func warmupTestCoordinator(t *testing.T) Coordinator {
 func TestCoordinatorWarmupInstallsReadiness(t *testing.T) {
 	t.Parallel()
 
-	coord := warmupTestCoordinator(t)
+	coord := warmupTestCoordinator(t, true)
 	c := coord.(*coordinator)
 	require.False(t, c.rebuildGenValid, "precondition: a fresh coordinator has nothing warm")
 
@@ -72,17 +74,16 @@ func TestCoordinatorWarmupInstallsReadiness(t *testing.T) {
 func TestCoordinatorWarmupNonInteractiveWaitsForInit(t *testing.T) {
 	t.Parallel()
 
-	coord := warmupTestCoordinator(t)
+	coord := warmupTestCoordinator(t, false)
 	c := coord.(*coordinator)
-	c.interactive = false
 
-	waits := 0
+	wants := 0
 	c.waitForInit = func(context.Context) error {
-		waits++
+		wants++
 		return nil
 	}
 
 	require.NoError(t, coord.Warmup(t.Context()))
-	require.Equal(t, 1, waits, "the non-interactive warmup waits for MCP init once")
+	require.Equal(t, 1, wants, "the non-interactive warmup waits for MCP init once")
 	require.True(t, c.rebuildGenValid)
 }
