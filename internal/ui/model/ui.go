@@ -826,6 +826,10 @@ func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.draftMayHaveChanged(msg) {
 		m.refreshCommandPicker()
 	}
+	// Settle the layout here, so the frame Draw renders is the state
+	// Update left and Draw has nothing to change. Its own check stays only
+	// for callers that draw without updating first.
+	m.syncLayout()
 	return model, cmd
 }
 
@@ -3004,6 +3008,7 @@ func (m *UI) drawHeader(scr uv.Screen, area uv.Rectangle) {
 func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	layout := m.generateLayout(area.Dx(), area.Dy())
 
+	// Update has normally settled this already (see syncLayout).
 	if m.layout != layout {
 		m.layout = layout
 		m.updateSize()
@@ -3434,6 +3439,18 @@ func (m *UI) currentModelSupportsImages() bool {
 	}
 	model := cfg.GetModelByType(agentCfg.Model)
 	return model != nil && model.SupportsImages
+}
+
+// syncLayout recomputes the layout for the current window and resizes the
+// components when it moved.
+func (m *UI) syncLayout() {
+	if m.width == 0 || m.height == 0 {
+		return
+	}
+	if layout := m.generateLayout(m.width, m.height); layout != m.layout {
+		m.layout = layout
+		m.updateSize()
+	}
 }
 
 // updateLayoutAndSize updates the layout and sizes of UI components.
