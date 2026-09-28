@@ -471,11 +471,11 @@ func (c *Client) LSPRestartSingle(ctx context.Context, id, name string) error {
 // LSPSetSessionDisabled turns a named LSP server off (or back on) for
 // the rest of the server process without touching its configuration.
 func (c *Client) LSPSetSessionDisabled(ctx context.Context, id, name string, disabled bool) error {
-	action := "enable"
+	path := wsPath(id, "lsps", "enable")
 	if disabled {
-		action = "disable"
+		path = wsPath(id, "lsps", "disable")
 	}
-	return c.do(ctx, "set LSP session state", post(wsPath(id, "lsps", action), proto.LSPNameRequest{Name: name}))
+	return c.do(ctx, "set LSP session state", post(path, proto.LSPNameRequest{Name: name}))
 }
 
 // ListCheckpoints retrieves a session's rewind checkpoints.
