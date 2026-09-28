@@ -28,11 +28,37 @@ type Service interface {
 type service struct {
 	q        *db.Queries
 	evidence evidenceStore
+	// baseDir is what stored paths are relative to; empty means the
+	// process working directory.
+	baseDir string
+}
+
+// ServiceOption configures a file tracker service.
+type ServiceOption func(*service)
+
+// WithBaseDir stores read paths relative to dir, the workspace, instead of
+// the process working directory. A server hosts workspaces the process was
+// not started in, and a path relative to its own directory would not
+// survive it being started from another.
+func WithBaseDir(dir string) ServiceOption {
+	return func(s *service) { s.baseDir = dir }
 }
 
 // NewService creates a new file tracker service.
-func NewService(q *db.Queries) Service {
-	return &service{q: q}
+func NewService(q *db.Queries, opts ...ServiceOption) Service {
+	s := &service{q: q}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// base returns the directory stored paths are relative to.
+func (s *service) base() (string, error) {
+	if s.baseDir != "" {
+		return s.baseDir, nil
+	}
+	return os.Getwd()
 }
 
 // RecordRead records when a file was read.
@@ -42,7 +68,7 @@ func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
 	}
 	if err := s.q.RecordFileRead(ctx, db.RecordFileReadParams{
 		SessionID: sessionID,
-		Path:      relpath(path),
+		Path:      s.relpath(path),
 	}); err != nil {
 		slog.Error("Error recording file read", "error", err, "file", path)
 	}
@@ -53,7 +79,7 @@ func (s *service) RecordRead(ctx context.Context, sessionID, path string) {
 func (s *service) LastReadTime(ctx context.Context, sessionID, path string) time.Time {
 	readFile, err := s.q.GetFileRead(ctx, db.GetFileReadParams{
 		SessionID: sessionID,
-		Path:      relpath(path),
+		Path:      s.relpath(path),
 	})
 	if err != nil {
 		return time.Time{}
@@ -62,9 +88,9 @@ func (s *service) LastReadTime(ctx context.Context, sessionID, path string) time
 	return time.Unix(readFile.ReadAt, 0)
 }
 
-func relpath(path string) string {
+func (s *service) relpath(path string) string {
 	path = filepath.Clean(path)
-	basepath, err := os.Getwd()
+	basepath, err := s.base()
 	if err != nil {
 		slog.Warn("Error getting basepath", "error", err)
 		return path
@@ -84,7 +110,7 @@ func (s *service) ListReadFiles(ctx context.Context, sessionID string) ([]string
 		return nil, fmt.Errorf("listing read files: %w", err)
 	}
 
-	basepath, err := os.Getwd()
+	basepath, err := s.base()
 	if err != nil {
 		return nil, fmt.Errorf("getting working directory: %w", err)
 	}

@@ -141,7 +141,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		Messages:    messages,
 		History:     files,
 		Questions:   question.NewService(),
-		FileTracker: filetracker.NewService(q),
+		FileTracker: filetracker.NewService(q, filetracker.WithBaseDir(store.WorkingDir())),
 		Memory:      memories,
 		Checkpoints: checkpoints.NewService(
 			q,
