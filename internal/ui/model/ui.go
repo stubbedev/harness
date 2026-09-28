@@ -2095,6 +2095,7 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 		cmds = append(cmds, m.rewindSession(msg.SessionID, msg.MessageID, msg.Prompt, msg.Mode))
 	case dialog.ActionToggleHelp:
 		m.status.ToggleHelp()
+		m.updateLayoutAndSize()
 	case dialog.ActionExternalEditor:
 		if m.isAgentBusy() {
 			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
@@ -2493,8 +2494,11 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			return true
 		case key.Matches(msg, m.keyMap.Help):
-			m.status.ToggleHelp()
-			m.updateLayoutAndSize()
+			// One handler per action: the key and the palette entry
+			// cannot drift apart.
+			if cmd := m.handleAction(dialog.ActionToggleHelp{}); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 			return true
 		case key.Matches(msg, m.keyMap.Commands):
 			if cmd := m.openCommandsDialog(); cmd != nil {
@@ -2713,11 +2717,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				if !m.hasSession() {
 					break
 				}
-				if m.isAgentBusy() {
-					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
-					break
-				}
-				if cmd := m.newSession(); cmd != nil {
+				if cmd := m.handleAction(dialog.ActionNewSession{}); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Tab):
@@ -2753,15 +2753,9 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				// rune short of it there.
 				m.selectToEditorEdge(true)
 			case key.Matches(msg, m.keyMap.Editor.OpenEditor):
-				if m.isAgentBusy() {
-					cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
-					break
+				if cmd := m.handleAction(dialog.ActionExternalEditor{}); cmd != nil {
+					cmds = append(cmds, cmd)
 				}
-				editorValue := m.textarea.Value()
-				if m.bangMode {
-					editorValue = "!" + editorValue
-				}
-				cmds = append(cmds, m.openEditor(editorValue))
 			case key.Matches(msg, m.keyMap.Editor.Newline):
 				prevHeight := m.textarea.Height()
 				m.textarea.InsertRune('\n')
@@ -2901,10 +2895,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 				if m.isAgentBusy() {
-					cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
+					cmds = append(cmds, m.handleAction(dialog.ActionNewSession{}))
 					break
 				}
-				cmds = append(cmds, m.focusEditor(), m.newSession())
+				cmds = append(cmds, m.focusEditor(), m.handleAction(dialog.ActionNewSession{}))
 			case key.Matches(msg, m.keyMap.Chat.Expand):
 				m.chat.ToggleExpandedSelectedItem()
 			case key.Matches(msg, m.keyMap.Chat.DigIn):
