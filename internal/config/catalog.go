@@ -113,8 +113,8 @@ func (s *catalogSync) load(ctx context.Context, autoupdate bool) {
 	// auto-update disabled the cache is served at any age.
 	if conn != nil {
 		if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
-			if providers, ok := usableCachedProviders(row.Data); ok {
-				stale := time.Since(time.Unix(row.FetchedAt, 0)) >= catalogRefreshInterval
+			if providers, ok, current := usableCachedProviders(row.Data); ok {
+				stale := !current || time.Since(time.Unix(row.FetchedAt, 0)) >= catalogRefreshInterval
 				if !stale || !autoupdate {
 					slog.Info("Using cached catalog", "fetched_at", time.Unix(row.FetchedAt, 0))
 					s.serve(providers, nil)
@@ -150,7 +150,7 @@ func (s *catalogSync) load(ctx context.Context, autoupdate bool) {
 	// usable exists at all.
 	if conn != nil {
 		if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
-			if providers, ok := usableCachedProviders(row.Data); ok {
+			if providers, ok, _ := usableCachedProviders(row.Data); ok {
 				slog.Warn("Continuing with stale catalog", "fetched_at", time.Unix(row.FetchedAt, 0), "error", fetchErr)
 				s.serve(providers, nil)
 				return
@@ -221,8 +221,16 @@ func (s *catalogSync) fetch(ctx context.Context) ([]catalog.Provider, error) {
 // storeCatalog persists the catalog to the database. A failure only
 // costs the next run a refresh, so it is logged and returned as an
 // advisory error alongside a valid result.
+// storedCatalog is a cached catalog row: the translated providers and the
+// translation that produced them. Rows written before the version was
+// recorded hold a bare provider list.
+type storedCatalog struct {
+	Translation string             `json:"translation"`
+	Providers   []catalog.Provider `json:"providers"`
+}
+
 func storeCatalog(ctx context.Context, conn *sql.DB, providers []catalog.Provider) error {
-	data, err := json.Marshal(providers)
+	data, err := json.Marshal(storedCatalog{Translation: catalog.TranslationVersion(), Providers: providers})
 	if err != nil {
 		return fmt.Errorf("failed to marshal catalog: %w", err)
 	}
@@ -233,13 +241,17 @@ func storeCatalog(ctx context.Context, conn *sql.DB, providers []catalog.Provide
 	return nil
 }
 
-// decodeCatalog decodes a stored catalog row.
-func decodeCatalog(data string) ([]catalog.Provider, error) {
-	var providers []catalog.Provider
-	if err := json.Unmarshal([]byte(data), &providers); err != nil {
-		return nil, fmt.Errorf("failed to decode cached catalog: %w", err)
+// decodeCatalog decodes a stored catalog row and reports whether this
+// build's translation produced it.
+func decodeCatalog(data string) (providers []catalog.Provider, current bool, err error) {
+	var stored storedCatalog
+	if json.Unmarshal([]byte(data), &stored) == nil && stored.Providers != nil {
+		return stored.Providers, stored.Translation == catalog.TranslationVersion(), nil
 	}
-	return providers, nil
+	if err := json.Unmarshal([]byte(data), &providers); err != nil {
+		return nil, false, fmt.Errorf("failed to decode cached catalog: %w", err)
+	}
+	return providers, false, nil
 }
 
 // usableCachedProviders decodes a stored catalog row and reports
@@ -248,7 +260,10 @@ func decodeCatalog(data string) ([]catalog.Provider, error) {
 // on, so it is defined once here: a row that decodes and is not empty.
 // An empty list from a corrupt or half-written row must fall through to
 // the live fetch, not masquerade as a working cache.
-func usableCachedProviders(data string) ([]catalog.Provider, bool) {
-	providers, err := decodeCatalog(data)
-	return providers, err == nil && len(providers) > 0
+//
+// current reports whether this build's translation produced the row; one
+// that another build translated is usable but stale.
+func usableCachedProviders(data string) (providers []catalog.Provider, usable, current bool) {
+	providers, current, err := decodeCatalog(data)
+	return providers, err == nil && len(providers) > 0, current
 }

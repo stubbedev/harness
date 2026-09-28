@@ -86,3 +86,22 @@ func TestCopilotResponsesModels(t *testing.T) {
 	require.False(t, ResponsesAPIRouter(InferenceProviderCopilot)("gpt-4.1"))
 	require.Nil(t, ResponsesAPIRouter(InferenceProviderOpenAI))
 }
+
+// TestSeedAgreesWithKnownProviders catches a seed.json.gz generated before
+// the known-provider table last changed: every fact the table dictates
+// (protocol, headers) must already be in the bundled snapshot. Regenerate
+// with go generate ./internal/catalog when it fails.
+func TestSeedAgreesWithKnownProviders(t *testing.T) {
+	t.Parallel()
+
+	for _, p := range Seed() {
+		known, ok := knownProviders[p.ID]
+		if !ok {
+			continue
+		}
+		if known.Type != "" {
+			require.Equal(t, known.Type, p.Type, "seed type of %s", p.ID)
+		}
+		require.Equal(t, knownHeaders(p.ID), p.DefaultHeaders, "seed headers of %s", p.ID)
+	}
+}

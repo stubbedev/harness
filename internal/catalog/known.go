@@ -1,8 +1,14 @@
 package catalog
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"maps"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 // Harness identifies itself to the gateways that attribute traffic by
@@ -219,3 +225,21 @@ func UsesMessagesAPI(provider InferenceProvider, modelID string) bool {
 		return false
 	}
 }
+
+// translationRevision is bumped whenever the models.dev translation itself
+// changes in a way the known-provider table does not capture.
+const translationRevision = 1
+
+// TranslationVersion identifies the translation this build applies to
+// models.dev: the translator's revision and the known-provider table. A
+// catalog cached by a build with another version was translated by other
+// rules (another endpoint, header or protocol), so it is only a stale
+// answer until this build has fetched and translated its own.
+var TranslationVersion = sync.OnceValue(func() string {
+	table, err := json.Marshal(knownProviders)
+	if err != nil {
+		panic(fmt.Sprintf("catalog: known-provider table does not encode: %v", err))
+	}
+	sum := sha256.Sum256(append([]byte(strconv.Itoa(translationRevision)+"\n"), table...))
+	return hex.EncodeToString(sum[:8])
+})

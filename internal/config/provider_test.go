@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -43,7 +44,14 @@ func seedCatalogDB(t *testing.T, dataDir string, providers []catalog.Provider, f
 	t.Helper()
 	conn, err := db.Connect(context.Background(), dataDir)
 	require.NoError(t, err)
-	data, err := json.Marshal(providers)
+	seedCatalogRow(t, conn, storedCatalog{Translation: catalog.TranslationVersion(), Providers: providers}, fetchedAt)
+}
+
+// seedCatalogRow writes row as the stored catalog, backdated to fetchedAt
+// when it is set.
+func seedCatalogRow(t *testing.T, conn *sql.DB, row any, fetchedAt time.Time) {
+	t.Helper()
+	data, err := json.Marshal(row)
 	require.NoError(t, err)
 	_, err = db.New(conn).SaveModelCatalog(context.Background(), string(data))
 	require.NoError(t, err)
@@ -310,4 +318,30 @@ func TestUpdateProviders_WritesTheStoreProvidersReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, providers, 1)
 	require.Equal(t, "Local", providers[0].Name)
+}
+
+// A row another build translated is served, being sound, but refreshed
+// like a stale one: this build's known-provider table may disagree with
+// the one that produced it.
+func TestCatalogSync_OtherTranslationIsRefreshed(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(db.ResetPool)
+
+	conn, err := db.Connect(context.Background(), dataDir)
+	require.NoError(t, err)
+	seedCatalogRow(t, conn, storedCatalog{Translation: "another-build", Providers: []catalog.Provider{
+		{Name: "Theirs", ID: "c1", Models: []catalog.Model{{ID: "m1"}}},
+	}}, time.Now())
+
+	client := &mockCatalogClient{providers: []catalog.Provider{{Name: "Ours", ID: "c1", Models: []catalog.Model{{ID: "m1"}}}}}
+	syncer := &catalogSync{}
+	syncer.Init(client, dataDir, true)
+
+	providers, err := syncer.Get(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, "Theirs", providers[0].Name, "served at once")
+	require.Eventually(t, func() bool {
+		got, _ := syncer.Get(t.Context())
+		return len(got) == 1 && got[0].Name == "Ours"
+	}, 5*time.Second, 10*time.Millisecond, "refreshed in the background")
 }
