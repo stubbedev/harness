@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -665,6 +668,22 @@ var partDecoders = map[partType]func(json.RawMessage) (ContentPart, error){
 	shellCommandType: decodePart[ShellCommand],
 	subagentNoteType: decodePart[SubagentNote],
 	contextNoteType:  decodePart[ContextNote],
+}
+
+// PartTypes returns a zero value of every content part type the store
+// knows, ordered by stored type name. Layers that mirror parts, such as
+// the wire protocol, walk it to prove they cover every one.
+func PartTypes() []ContentPart {
+	types := slices.Sorted(maps.Keys(partDecoders))
+	parts := make([]ContentPart, 0, len(types))
+	for _, typ := range types {
+		part, err := partDecoders[typ](json.RawMessage("{}"))
+		if err != nil {
+			panic(fmt.Sprintf("message: part type %q cannot decode its zero value: %v", typ, err))
+		}
+		parts = append(parts, part)
+	}
+	return parts
 }
 
 func decodePart[T ContentPart](data json.RawMessage) (ContentPart, error) {

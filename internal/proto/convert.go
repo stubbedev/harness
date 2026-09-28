@@ -248,7 +248,7 @@ func partFromDomain(p message.ContentPart) ContentPart {
 			FinishedAt: v.FinishedAt,
 		}
 	case message.ToolCall:
-		return ToolCall{ID: v.ID, Name: v.Name, Input: v.Input, Finished: v.Finished}
+		return ToolCall{ID: v.ID, Name: v.Name, Input: v.Input, ProviderExecuted: v.ProviderExecuted, Finished: v.Finished}
 	case message.ToolResult:
 		return ToolResult(v)
 	case message.Finish:
@@ -261,6 +261,8 @@ func partFromDomain(p message.ContentPart) ContentPart {
 		return ShellCommand(v)
 	case message.SubagentNote:
 		return SubagentNote(v)
+	case message.ContextNote:
+		return ContextNote(v)
 	}
 	return nil
 }
@@ -277,7 +279,7 @@ func partToDomain(p ContentPart) message.ContentPart {
 			FinishedAt: v.FinishedAt,
 		}
 	case ToolCall:
-		return message.ToolCall{ID: v.ID, Name: v.Name, Input: v.Input, Finished: v.Finished}
+		return message.ToolCall{ID: v.ID, Name: v.Name, Input: v.Input, ProviderExecuted: v.ProviderExecuted, Finished: v.Finished}
 	case ToolResult:
 		return message.ToolResult(v)
 	case Finish:
@@ -290,6 +292,8 @@ func partToDomain(p ContentPart) message.ContentPart {
 		return message.ShellCommand(v)
 	case SubagentNote:
 		return message.SubagentNote(v)
+	case ContextNote:
+		return message.ContextNote(v)
 	}
 	return nil
 }

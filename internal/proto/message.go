@@ -3,8 +3,7 @@ package proto
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
-	"slices"
+	"log/slog"
 	"time"
 
 	"github.com/stubbedev/harness/internal/catalog"
@@ -82,8 +81,10 @@ func (fr *FinishReason) UnmarshalText(data []byte) error {
 }
 
 // ContentPart is a part of a message's content.
+//
+//sumtype:decl
 type ContentPart interface {
-	isPart()
+	partType() partType
 }
 
 // ReasoningContent represents the reasoning/thinking part of a message.
@@ -99,7 +100,7 @@ func (tc ReasoningContent) String() string {
 	return tc.Thinking
 }
 
-func (ReasoningContent) isPart() {}
+func (ReasoningContent) partType() partType { return reasoningType }
 
 // TextContent represents a text part of a message.
 type TextContent struct {
@@ -111,7 +112,7 @@ func (tc TextContent) String() string {
 	return tc.Text
 }
 
-func (TextContent) isPart() {}
+func (TextContent) partType() partType { return textType }
 
 // ImageURLContent represents an image URL part of a message.
 type ImageURLContent struct {
@@ -124,7 +125,7 @@ func (iuc ImageURLContent) String() string {
 	return iuc.URL
 }
 
-func (ImageURLContent) isPart() {}
+func (ImageURLContent) partType() partType { return imageURLType }
 
 // BinaryContent represents binary data in a message.
 type BinaryContent struct {
@@ -142,18 +143,21 @@ func (bc BinaryContent) String(p catalog.InferenceProvider) string {
 	return base64Encoded
 }
 
-func (BinaryContent) isPart() {}
+func (BinaryContent) partType() partType { return binaryType }
 
 // ToolCall represents a tool call in a message.
 type ToolCall struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Input    string `json:"input"`
-	Type     string `json:"type,omitempty"`
-	Finished bool   `json:"finished,omitempty"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Input string `json:"input"`
+	Type  string `json:"type,omitempty"`
+	// ProviderExecuted marks a call the provider ran itself (a hosted
+	// web search, say), which the agent must not execute.
+	ProviderExecuted bool `json:"provider_executed,omitempty"`
+	Finished         bool `json:"finished,omitempty"`
 }
 
-func (ToolCall) isPart() {}
+func (ToolCall) partType() partType { return toolCallType }
 
 // ToolResult represents the result of a tool call.
 type ToolResult struct {
@@ -167,7 +171,7 @@ type ToolResult struct {
 	Canceled   bool   `json:"canceled,omitempty"`
 }
 
-func (ToolResult) isPart() {}
+func (ToolResult) partType() partType { return toolResultType }
 
 // Finish represents the end of a message generation.
 type Finish struct {
@@ -177,7 +181,7 @@ type Finish struct {
 	Details string       `json:"details,omitempty"`
 }
 
-func (Finish) isPart() {}
+func (Finish) partType() partType { return finishType }
 
 // ShellCommand stores a bang-mode shell command and its output.
 type ShellCommand struct {
@@ -186,7 +190,7 @@ type ShellCommand struct {
 	ExitCode int    `json:"exit_code"`
 }
 
-func (ShellCommand) isPart() {}
+func (ShellCommand) partType() partType { return shellCommandType }
 
 // SubagentNote is a message a running background sub-agent pushed to its
 // orchestrator. It renders as user text for the model but never in the
@@ -198,7 +202,17 @@ type SubagentNote struct {
 	Text           string `json:"text"`
 }
 
-func (SubagentNote) isPart() {}
+func (SubagentNote) partType() partType { return subagentNoteType }
+
+// ContextNote is text the harness adds to a message for the model alone
+// (runtime facts, directory instructions, diagnostics). It never renders
+// in the transcript.
+type ContextNote struct {
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+}
+
+func (ContextNote) partType() partType { return contextNoteType }
 
 // MarshalJSON implements the [json.Marshaler] interface.
 func (m Message) MarshalJSON() ([]byte, error) {
@@ -339,75 +353,6 @@ func (m *Message) IsThinking() bool {
 	return m.ReasoningContent().Thinking != "" && m.Content().Text == "" && !m.IsFinished()
 }
 
-// AppendContent appends text to the text content part.
-func (m *Message) AppendContent(delta string) {
-	found := false
-	for i, part := range m.Parts {
-		if c, ok := part.(TextContent); ok {
-			m.Parts[i] = TextContent{Text: c.Text + delta}
-			found = true
-		}
-	}
-	if !found {
-		m.Parts = append(m.Parts, TextContent{Text: delta})
-	}
-}
-
-// AppendReasoningContent appends text to the reasoning content part.
-func (m *Message) AppendReasoningContent(delta string) {
-	found := false
-	for i, part := range m.Parts {
-		if c, ok := part.(ReasoningContent); ok {
-			m.Parts[i] = ReasoningContent{
-				Thinking:   c.Thinking + delta,
-				Signature:  c.Signature,
-				StartedAt:  c.StartedAt,
-				FinishedAt: c.FinishedAt,
-			}
-			found = true
-		}
-	}
-	if !found {
-		m.Parts = append(m.Parts, ReasoningContent{
-			Thinking:  delta,
-			StartedAt: time.Now().Unix(),
-		})
-	}
-}
-
-// AppendReasoningSignature appends a signature to the reasoning content part.
-func (m *Message) AppendReasoningSignature(signature string) {
-	for i, part := range m.Parts {
-		if c, ok := part.(ReasoningContent); ok {
-			m.Parts[i] = ReasoningContent{
-				Thinking:   c.Thinking,
-				Signature:  c.Signature + signature,
-				StartedAt:  c.StartedAt,
-				FinishedAt: c.FinishedAt,
-			}
-			return
-		}
-	}
-	m.Parts = append(m.Parts, ReasoningContent{Signature: signature})
-}
-
-// FinishThinking marks the reasoning content as finished.
-func (m *Message) FinishThinking() {
-	for i, part := range m.Parts {
-		if c, ok := part.(ReasoningContent); ok {
-			if c.FinishedAt == 0 {
-				m.Parts[i] = ReasoningContent{
-					Thinking:   c.Thinking,
-					Signature:  c.Signature,
-					StartedAt:  c.StartedAt,
-					FinishedAt: time.Now().Unix(),
-				}
-			}
-			return
-		}
-	}
-}
-
 // ThinkingDuration returns the duration of the thinking phase.
 func (m *Message) ThinkingDuration() time.Duration {
 	reasoning := m.ReasoningContent()
@@ -423,103 +368,6 @@ func (m *Message) ThinkingDuration() time.Duration {
 	return time.Duration(endTime-reasoning.StartedAt) * time.Second
 }
 
-// FinishToolCall marks a tool call as finished.
-func (m *Message) FinishToolCall(toolCallID string) {
-	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == toolCallID {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input,
-					Type:     c.Type,
-					Finished: true,
-				}
-				return
-			}
-		}
-	}
-}
-
-// AppendToolCallInput appends input to a tool call.
-func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
-	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == toolCallID {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input + inputDelta,
-					Type:     c.Type,
-					Finished: c.Finished,
-				}
-				return
-			}
-		}
-	}
-}
-
-// AddToolCall adds or updates a tool call.
-func (m *Message) AddToolCall(tc ToolCall) {
-	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == tc.ID {
-				m.Parts[i] = tc
-				return
-			}
-		}
-	}
-	m.Parts = append(m.Parts, tc)
-}
-
-// SetToolCalls replaces all tool call parts.
-func (m *Message) SetToolCalls(tc []ToolCall) {
-	parts := make([]ContentPart, 0)
-	for _, part := range m.Parts {
-		if _, ok := part.(ToolCall); ok {
-			continue
-		}
-		parts = append(parts, part)
-	}
-	m.Parts = parts
-	for _, toolCall := range tc {
-		m.Parts = append(m.Parts, toolCall)
-	}
-}
-
-// AddToolResult adds a tool result.
-func (m *Message) AddToolResult(tr ToolResult) {
-	m.Parts = append(m.Parts, tr)
-}
-
-// SetToolResults adds multiple tool results.
-func (m *Message) SetToolResults(tr []ToolResult) {
-	for _, toolResult := range tr {
-		m.Parts = append(m.Parts, toolResult)
-	}
-}
-
-// AddFinish adds a finish part to the message.
-func (m *Message) AddFinish(reason FinishReason, message, details string) {
-	for i, part := range m.Parts {
-		if _, ok := part.(Finish); ok {
-			m.Parts = slices.Delete(m.Parts, i, i+1)
-			break
-		}
-	}
-	m.Parts = append(m.Parts, Finish{Reason: reason, Time: time.Now().Unix(), Message: message, Details: details})
-}
-
-// AddImageURL adds an image URL part to the message.
-func (m *Message) AddImageURL(url, detail string) {
-	m.Parts = append(m.Parts, ImageURLContent{URL: url, Detail: detail})
-}
-
-// AddBinary adds a binary content part to the message.
-func (m *Message) AddBinary(mimeType string, data []byte) {
-	m.Parts = append(m.Parts, BinaryContent{MIMEType: mimeType, Data: data})
-}
-
 type partType string
 
 const (
@@ -532,6 +380,7 @@ const (
 	finishType       partType = "finish"
 	shellCommandType partType = "shell_command"
 	subagentNoteType partType = "subagent_note"
+	contextNoteType  partType = "context_note"
 )
 
 type partWrapper struct {
@@ -542,121 +391,61 @@ type partWrapper struct {
 // MarshalParts marshals content parts to JSON.
 func MarshalParts(parts []ContentPart) ([]byte, error) {
 	wrappedParts := make([]partWrapper, len(parts))
-
 	for i, part := range parts {
-		var typ partType
-
-		switch part.(type) {
-		case ReasoningContent:
-			typ = reasoningType
-		case TextContent:
-			typ = textType
-		case ImageURLContent:
-			typ = imageURLType
-		case BinaryContent:
-			typ = binaryType
-		case ToolCall:
-			typ = toolCallType
-		case ToolResult:
-			typ = toolResultType
-		case Finish:
-			typ = finishType
-		case ShellCommand:
-			typ = shellCommandType
-		case SubagentNote:
-			typ = subagentNoteType
-		default:
-			return nil, fmt.Errorf("unknown part type: %T", part)
-		}
-
-		wrappedParts[i] = partWrapper{
-			Type: typ,
-			Data: part,
-		}
+		wrappedParts[i] = partWrapper{Type: part.partType(), Data: part}
 	}
 	return json.Marshal(wrappedParts)
 }
 
-// UnmarshalParts unmarshals content parts from JSON.
-func UnmarshalParts(data []byte) ([]ContentPart, error) {
-	temp := []json.RawMessage{}
+// partDecoders maps each wire part type to its decoder. A type missing
+// here cannot be sent: TestEveryDomainPartCrossesTheWire walks every
+// domain part through the conversion and back.
+var partDecoders = map[partType]func(json.RawMessage) (ContentPart, error){
+	reasoningType:    decodePart[ReasoningContent],
+	textType:         decodePart[TextContent],
+	imageURLType:     decodePart[ImageURLContent],
+	binaryType:       decodePart[BinaryContent],
+	toolCallType:     decodePart[ToolCall],
+	toolResultType:   decodePart[ToolResult],
+	finishType:       decodePart[Finish],
+	shellCommandType: decodePart[ShellCommand],
+	subagentNoteType: decodePart[SubagentNote],
+	contextNoteType:  decodePart[ContextNote],
+}
 
-	if err := json.Unmarshal(data, &temp); err != nil {
+func decodePart[T ContentPart](data json.RawMessage) (ContentPart, error) {
+	var part T
+	if err := json.Unmarshal(data, &part); err != nil {
+		return nil, err
+	}
+	return part, nil
+}
+
+// UnmarshalParts unmarshals content parts from JSON. A part type this
+// build does not know (sent by a newer server) is skipped rather than
+// failing the whole message, matching how the message store reads rows.
+func UnmarshalParts(data []byte) ([]ContentPart, error) {
+	var wrappers []struct {
+		Type partType        `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &wrappers); err != nil {
 		return nil, err
 	}
 
-	parts := make([]ContentPart, 0)
-
-	for _, rawPart := range temp {
-		var wrapper struct {
-			Type partType        `json:"type"`
-			Data json.RawMessage `json:"data"`
+	parts := make([]ContentPart, 0, len(wrappers))
+	for _, wrapper := range wrappers {
+		decode, ok := partDecoders[wrapper.Type]
+		if !ok {
+			slog.Warn("Skipping unknown message part type", "type", wrapper.Type)
+			continue
 		}
-
-		if err := json.Unmarshal(rawPart, &wrapper); err != nil {
+		part, err := decode(wrapper.Data)
+		if err != nil {
 			return nil, err
 		}
-
-		switch wrapper.Type {
-		case reasoningType:
-			part := ReasoningContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case textType:
-			part := TextContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case imageURLType:
-			part := ImageURLContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case binaryType:
-			part := BinaryContent{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case toolCallType:
-			part := ToolCall{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case toolResultType:
-			part := ToolResult{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case finishType:
-			part := Finish{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case shellCommandType:
-			part := ShellCommand{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		case subagentNoteType:
-			part := SubagentNote{}
-			if err := json.Unmarshal(wrapper.Data, &part); err != nil {
-				return nil, err
-			}
-			parts = append(parts, part)
-		default:
-			return nil, fmt.Errorf("unknown part type: %s", wrapper.Type)
-		}
+		parts = append(parts, part)
 	}
-
 	return parts, nil
 }
 

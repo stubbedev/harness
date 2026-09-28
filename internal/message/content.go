@@ -56,6 +56,8 @@ const (
 
 // ContentPart is one piece of a message. partType names its stored
 // encoding, so a part type cannot exist without one.
+//
+//sumtype:decl
 type ContentPart interface {
 	partType() partType
 }

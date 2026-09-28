@@ -2,6 +2,7 @@ package proto
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -97,23 +98,46 @@ func TestMessageRoundTrip(t *testing.T) {
 	t.Parallel()
 	f := &filler{}
 	d := filled[message.Message](f)
-	reasoning := filled[message.ReasoningContent](f)
-	// Provider-private replay metadata stays on the server.
-	reasoning.ThoughtSignature, reasoning.ToolID, reasoning.ResponsesData = "", "", nil
-	call := filled[message.ToolCall](f)
-	call.ProviderExecuted = false
-	d.Parts = []message.ContentPart{
-		filled[message.TextContent](f),
-		reasoning,
-		call,
-		filled[message.ToolResult](f),
-		filled[message.Finish](f),
-		filled[message.ImageURLContent](f),
-		filled[message.BinaryContent](f),
-		filled[message.ShellCommand](f),
-		filled[message.SubagentNote](f),
+	d.Parts = nil
+	for _, zero := range message.PartTypes() {
+		d.Parts = append(d.Parts, filledPart(f, zero))
 	}
 	require.Equal(t, d, MessageFromDomain(d).ToDomain())
+}
+
+// TestEveryDomainPartCrossesTheWire walks every part type the message
+// store knows through the wire conversion and the wire JSON codec, so a
+// new part cannot be silently dropped between server and client.
+func TestEveryDomainPartCrossesTheWire(t *testing.T) {
+	t.Parallel()
+	for _, zero := range message.PartTypes() {
+		part := filledPart(&filler{}, zero)
+		t.Run(fmt.Sprintf("%T", part), func(t *testing.T) {
+			t.Parallel()
+			wire := partFromDomain(part)
+			require.NotNil(t, wire, "no wire form for %T", part)
+
+			encoded, err := MarshalParts([]ContentPart{wire})
+			require.NoError(t, err)
+			decoded, err := UnmarshalParts(encoded)
+			require.NoError(t, err)
+			require.Len(t, decoded, 1, "wire codec dropped %T", wire)
+			require.Equal(t, part, partToDomain(decoded[0]))
+		})
+	}
+}
+
+// filledPart returns a part of zero's type with every wire-visible field
+// set. Provider-private replay metadata on reasoning stays on the server.
+func filledPart(f *filler, zero message.ContentPart) message.ContentPart {
+	v := reflect.New(reflect.TypeOf(zero)).Elem()
+	f.fill(v)
+	part := v.Interface().(message.ContentPart)
+	if reasoning, ok := part.(message.ReasoningContent); ok {
+		reasoning.ThoughtSignature, reasoning.ToolID, reasoning.ResponsesData = "", "", nil
+		return reasoning
+	}
+	return part
 }
 
 func TestQuestionRoundTrip(t *testing.T) {
