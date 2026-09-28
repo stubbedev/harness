@@ -71,12 +71,6 @@ func (w *countingWorkspace) AgentSummarize(_ context.Context, sessionID, instruc
 	return nil
 }
 
-// ParseAgentToolSessionID reports "not a child session"; the background
-// tasks strip probes it for running-subagent events.
-func (w *countingWorkspace) ParseAgentToolSessionID(string) (string, string, bool) {
-	return "", "", false
-}
-
 func (w *countingWorkspace) AgentReadyErr() error {
 	w.readyCalls++
 	if w.ready {

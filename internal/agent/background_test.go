@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stubbedev/harness/internal/session"
+
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -438,7 +440,7 @@ func TestRunSubAgentBackground_SessionCreateFailureReleasesSlot(t *testing.T) {
 
 	// Pre-create the child session ID runSubAgent will try to use so
 	// CreateTaskSession fails on the duplicate primary key.
-	agentToolSessionID := coord.sessions.CreateAgentToolSessionID("msg-dup", "call-dup")
+	agentToolSessionID := session.AgentToolSessionID("msg-dup", "call-dup")
 	_, err = env.sessions.CreateTaskSession(t.Context(), agentToolSessionID, parentSession.ID, "Dup")
 	require.NoError(t, err)
 

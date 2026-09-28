@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -86,23 +84,6 @@ func (m *mockSessionService) Rename(context.Context, string, string) error {
 
 func (m *mockSessionService) Delete(context.Context, string) error {
 	return nil
-}
-
-func (m *mockSessionService) CreateAgentToolSessionID(messageID, toolCallID string) string {
-	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
-}
-
-func (m *mockSessionService) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
-	parts := strings.Split(sessionID, "$$")
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
-
-func (m *mockSessionService) IsAgentToolSession(sessionID string) bool {
-	_, _, ok := m.ParseAgentToolSessionID(sessionID)
-	return ok
 }
 
 func newTestApp(sessions session.Service) *App {

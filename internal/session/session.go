@@ -154,11 +154,6 @@ type Service interface {
 	AddCost(ctx context.Context, sessionID string, delta float64) error
 	Rename(ctx context.Context, id string, title string) error
 	Delete(ctx context.Context, id string) error
-
-	// Agent tool session management
-	CreateAgentToolSessionID(messageID, toolCallID string) string
-	ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool)
-	IsAgentToolSession(sessionID string) bool
 }
 
 type service struct {
@@ -516,22 +511,29 @@ func NewService(q *db.Queries, conn *sql.DB) Service {
 	}
 }
 
-// CreateAgentToolSessionID creates a session ID for agent tool sessions using the format "messageID$$toolCallID"
-func (s *service) CreateAgentToolSessionID(messageID, toolCallID string) string {
-	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
+// agentToolSessionSep joins the two halves of an agent tool session ID.
+const agentToolSessionSep = "$$"
+
+// AgentToolSessionID is the ID of the child session a sub-agent dispatch
+// runs in: the dispatching message and tool call, joined. It is a pure
+// function of its inputs, so every process derives the same ID.
+func AgentToolSessionID(messageID, toolCallID string) string {
+	return messageID + agentToolSessionSep + toolCallID
 }
 
-// ParseAgentToolSessionID parses an agent tool session ID into its components
-func (s *service) ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool) {
-	parts := strings.Split(sessionID, "$$")
-	if len(parts) != 2 {
+// ParseAgentToolSessionID splits an ID made by AgentToolSessionID into the
+// dispatching message and tool call. ok is false for any other ID.
+func ParseAgentToolSessionID(sessionID string) (messageID string, toolCallID string, ok bool) {
+	messageID, toolCallID, ok = strings.Cut(sessionID, agentToolSessionSep)
+	if !ok || strings.Contains(toolCallID, agentToolSessionSep) {
 		return "", "", false
 	}
-	return parts[0], parts[1], true
+	return messageID, toolCallID, true
 }
 
-// IsAgentToolSession checks if a session ID follows the agent tool session format
-func (s *service) IsAgentToolSession(sessionID string) bool {
-	_, _, ok := s.ParseAgentToolSessionID(sessionID)
+// IsAgentToolSession reports whether sessionID was made by
+// AgentToolSessionID.
+func IsAgentToolSession(sessionID string) bool {
+	_, _, ok := ParseAgentToolSessionID(sessionID)
 	return ok
 }

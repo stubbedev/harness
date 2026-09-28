@@ -346,14 +346,14 @@ func TestEnterSwitchesToAgentAndMainBack(t *testing.T) {
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
 	task := u.agentTaskByToolCall("a1")
-	require.Equal(t, "agent-tool-m1-a1", task.childSessionID)
+	require.Equal(t, "m1$$a1", task.childSessionID)
 
 	// Enter on the agent row: the transcript shows its session, focus
 	// moves to the transcript, and the Main Agent row is the strip's
 	// only row — the strip is one level deep, so the main session's
 	// other dispatches stay hidden while an agent is viewed.
 	activateAgentView(t, u)
-	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
+	require.Equal(t, "m1$$a1", u.agentView.shown)
 	require.Equal(t, uiFocusMain, u.focus, "activating a row moves focus to the transcript")
 	require.Equal(t, 1, u.taskRowCount(), "only the pinned Main row shows while an agent is viewed")
 	u.tasksAreaHeight()
@@ -390,7 +390,7 @@ func TestEscapeFromAgentViewReturnsToMain(t *testing.T) {
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
 	activateAgentView(t, u)
-	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
+	require.Equal(t, "m1$$a1", u.agentView.shown)
 
 	u.focusTasks()
 	consumed, cmd := u.handleTaskKey(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -418,8 +418,8 @@ func TestSwitchBackReloadsMainTranscript(t *testing.T) {
 				message.TextContent{Text: "the initial ask"},
 			}},
 		},
-		"agent-tool-m1-a1": {
-			{ID: "c1", SessionID: "agent-tool-m1-a1", Role: message.User, Parts: []message.ContentPart{
+		"m1$$a1": {
+			{ID: "c1", SessionID: "m1$$a1", Role: message.User, Parts: []message.ContentPart{
 				message.TextContent{Text: "the dispatch prompt"},
 			}},
 		},
@@ -428,7 +428,7 @@ func TestSwitchBackReloadsMainTranscript(t *testing.T) {
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
 	activateAgentView(t, u)
-	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
+	require.Equal(t, "m1$$a1", u.agentView.shown)
 	require.NotNil(t, u.chat.MessageItem("c1"), "the agent's transcript shows its dispatch prompt")
 	assert.Nil(t, u.chat.MessageItem("u1"), "main history does not leak into the agent's view")
 
@@ -459,7 +459,7 @@ func TestSwitchBackReloadsMainTranscript(t *testing.T) {
 	assert.Nil(t, u.handleAgentTranscriptMsg(tr2), "the retrace does not retrace again")
 	assert.NotNil(t, u.chat.MessageItem("raced"), "the retrace picks up events that raced the snapshot")
 	assert.Empty(t, u.agentView.shown, "the switch back completes on the main session")
-	assert.Equal(t, []string{"agent-tool-m1-a1", "agent-tool-m1-a1", "s1", "s1"}, ws.listed,
+	assert.Equal(t, []string{"m1$$a1", "m1$$a1", "s1", "s1"}, ws.listed,
 		"every fetch targets the viewed session by ID")
 }
 
@@ -529,7 +529,7 @@ func TestViewedAgentIgnoresMainTraffic(t *testing.T) {
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
 	activateAgentView(t, u)
-	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
+	require.Equal(t, "m1$$a1", u.agentView.shown)
 
 	before := u.chat.Len()
 	_, _ = u.Update(pubsub.Event[message.Message]{
@@ -543,7 +543,7 @@ func TestViewedAgentIgnoresMainTraffic(t *testing.T) {
 	// The viewed agent's own traffic does render.
 	_, _ = u.Update(pubsub.Event[message.Message]{
 		Type: pubsub.CreatedEvent,
-		Payload: message.Message{ID: "child-1", SessionID: "agent-tool-m1-a1", Role: message.Assistant, Parts: []message.ContentPart{
+		Payload: message.Message{ID: "child-1", SessionID: "m1$$a1", Role: message.Assistant, Parts: []message.ContentPart{
 			message.TextContent{Text: "agent reply"},
 		}},
 	})
@@ -564,12 +564,12 @@ func TestSteerWhileViewingSendsToAgent(t *testing.T) {
 	msg := &message.Message{ID: "m1", Role: message.Assistant}
 	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
 	activateAgentView(t, u)
-	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
+	require.Equal(t, "m1$$a1", u.agentView.shown)
 
 	cmd := u.steerAgent("focus on the parser")
 	require.NotNil(t, cmd)
 	assert.Nil(t, cmd(), "a successful steer reports nothing")
-	assert.Equal(t, "agent-tool-m1-a1", ws.steeredSession)
+	assert.Equal(t, "m1$$a1", ws.steeredSession)
 	assert.Equal(t, "focus on the parser", ws.steeredText)
 }
 
@@ -591,7 +591,7 @@ func TestViewSwitchIsAtomicUntilPopulated(t *testing.T) {
 	// Mid-switch: main is still shown and still paints; the agent's
 	// traffic waits for the swap.
 	require.Empty(t, u.agentView.shown)
-	require.Equal(t, "agent-tool-m1-a1", u.agentView.requested)
+	require.Equal(t, "m1$$a1", u.agentView.requested)
 	_, _ = u.Update(pubsub.Event[message.Message]{
 		Type: pubsub.CreatedEvent,
 		Payload: message.Message{ID: "main-2", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
@@ -605,11 +605,11 @@ func TestViewSwitchIsAtomicUntilPopulated(t *testing.T) {
 	// retrace folds in anything that raced the first snapshot.
 	tr := cmd().(agentTranscriptMsg)
 	retrace := u.handleAgentTranscriptMsg(tr)
-	require.Equal(t, "agent-tool-m1-a1", u.agentView.shown)
+	require.Equal(t, "m1$$a1", u.agentView.shown)
 	require.NotNil(t, retrace, "a child swap retraces once")
 	_, _ = u.Update(pubsub.Event[message.Message]{
 		Type: pubsub.CreatedEvent,
-		Payload: message.Message{ID: "child-race", SessionID: "agent-tool-m1-a1", Role: message.User, Parts: []message.ContentPart{
+		Payload: message.Message{ID: "child-race", SessionID: "m1$$a1", Role: message.User, Parts: []message.ContentPart{
 			message.TextContent{Text: "steer"},
 		}},
 	})

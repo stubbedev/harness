@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -168,18 +167,6 @@ func (w *ClientWorkspace) RenameSession(ctx context.Context, sessionID, title st
 
 func (w *ClientWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
 	return w.client.DeleteSession(ctx, w.workspaceID(), sessionID)
-}
-
-func (w *ClientWorkspace) CreateAgentToolSessionID(messageID, toolCallID string) string {
-	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
-}
-
-func (w *ClientWorkspace) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
-	parts := strings.Split(sessionID, "$$")
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
 }
 
 // SetCurrentSession reports the session this client is currently

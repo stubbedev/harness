@@ -4,11 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -91,23 +89,6 @@ func (s *stubSessionService) AddCost(context.Context, string, float64) error {
 func (s *stubSessionService) Rename(context.Context, string, string) error { return nil }
 
 func (s *stubSessionService) Delete(context.Context, string) error { return nil }
-
-func (s *stubSessionService) CreateAgentToolSessionID(messageID, toolCallID string) string {
-	return fmt.Sprintf("%s$$%s", messageID, toolCallID)
-}
-
-func (s *stubSessionService) ParseAgentToolSessionID(sessionID string) (string, string, bool) {
-	parts := strings.Split(sessionID, "$$")
-	if len(parts) != 2 {
-		return "", "", false
-	}
-	return parts[0], parts[1], true
-}
-
-func (s *stubSessionService) IsAgentToolSession(sessionID string) bool {
-	_, _, ok := s.ParseAgentToolSessionID(sessionID)
-	return ok
-}
 
 // newStoreForWorkDir returns a ConfigStore whose WorkingDir() reports workDir.
 func newStoreForWorkDir(workDir string) *config.ConfigStore {

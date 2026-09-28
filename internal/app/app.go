@@ -301,7 +301,7 @@ func (app *App) ReportCurrentSession(sessionID string) {
 func (app *App) resolveSession(ctx context.Context, continueSessionID string, useLast bool) (session.Session, error) {
 	switch {
 	case continueSessionID != "":
-		if app.Sessions.IsAgentToolSession(continueSessionID) {
+		if session.IsAgentToolSession(continueSessionID) {
 			return session.Session{}, fmt.Errorf("cannot continue an agent tool session: %s", continueSessionID)
 		}
 		sess, err := app.Sessions.Get(ctx, continueSessionID)

@@ -2327,7 +2327,7 @@ func callTopK(providerCfg config.ProviderConfig, topK *int64) *int64 {
 // (see runSubAgentBackground).
 func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (resp fantasy.ToolResponse, _ error) {
 	// Create sub-session
-	agentToolSessionID := c.sessions.CreateAgentToolSessionID(params.AgentMessageID, params.ToolCallID)
+	agentToolSessionID := session.AgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
 	if err != nil {
 		if params.ReleaseSlot != nil {

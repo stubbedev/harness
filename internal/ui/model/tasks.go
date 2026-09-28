@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stubbedev/harness/internal/session"
+
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -163,7 +165,7 @@ func (m *UI) childSessionIDFor(msgID, toolCallID string) string {
 	if m.com == nil || m.com.Workspace == nil {
 		return ""
 	}
-	return m.com.Workspace.CreateAgentToolSessionID(msgID, toolCallID)
+	return session.AgentToolSessionID(msgID, toolCallID)
 }
 
 // tasksSpinning reports whether any tracked task is still in flight.
@@ -442,7 +444,7 @@ func (m *UI) applyRunningSubagentInfo(info childSessionInfo) {
 	if m.com == nil || m.com.Workspace == nil {
 		return
 	}
-	_, toolCallID, ok := m.com.Workspace.ParseAgentToolSessionID(info.ChildSessionID)
+	_, toolCallID, ok := session.ParseAgentToolSessionID(info.ChildSessionID)
 	if !ok {
 		return
 	}

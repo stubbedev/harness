@@ -1912,7 +1912,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 // reconcile clocks alive.
 func (m *UI) handleChildSessionMessage(event message.Message) tea.Cmd {
 	// Check if this is an agent tool session and parse it.
-	if _, _, ok := m.com.Workspace.ParseAgentToolSessionID(event.SessionID); !ok {
+	if _, _, ok := session.ParseAgentToolSessionID(event.SessionID); !ok {
 		return nil
 	}
 	// Subagent activity means work is running; keep the strip spinner

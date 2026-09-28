@@ -83,7 +83,7 @@ func TestViewSwitchKeepsViewState(t *testing.T) {
 	ws := &testWorkspace{cfg: &config.Config{}}
 	u.com.Workspace = ws
 	u.session = &session.Session{ID: "s1"}
-	const child = "agent-tool-m1-a1"
+	const child = "m1$$a1"
 	ws.messages = map[string][]message.Message{
 		"s1":  viewStateSession("s1", "main-"),
 		child: viewStateSession(child, "agent-"),
