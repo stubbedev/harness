@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"github.com/charmbracelet/x/ansi"
 
 	"charm.land/fantasy"
@@ -54,7 +56,7 @@ type ShellResponseMetadata struct {
 const (
 	// ShellToolName is the terminal-session tool's name: it runs the
 	// user's own shell, whatever that is, not bash specifically.
-	ShellToolName = "shell"
+	ShellToolName = toolname.Shell
 
 	DefaultAutoBackgroundAfter = 60 // Seconds an idle command is held before it is reported as still running
 	MaxOutputLength            = 30000

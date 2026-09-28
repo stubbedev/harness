@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/diff"
 	"github.com/stubbedev/harness/internal/filepathext"
@@ -35,7 +37,7 @@ type WriteResponseMetadata struct {
 	FileMutations []fileMutation `json:"file_mutations,omitempty"`
 }
 
-const WriteToolName = "write"
+const WriteToolName = toolname.Write
 
 func NewWriteTool(
 	lspManager *lsp.Manager,

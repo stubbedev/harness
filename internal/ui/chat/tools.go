@@ -17,6 +17,7 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/stringext"
+	"github.com/stubbedev/harness/internal/toolname"
 	"github.com/stubbedev/harness/internal/ui/anim"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
@@ -255,27 +256,13 @@ func firstEnv(env []*ItemEnv) *ItemEnv {
 // waiting form (no prompt) and never renders at all as a dispatch, so
 // the name alone cannot decide.
 func toolRendererFor(toolCall message.ToolCall) ToolRenderer {
-	switch toolCall.Name {
-	case tools.ShellToolName:
-		return &ShellToolRenderContext{}
-	case tools.ViewToolName:
-		return &ViewToolRenderContext{}
-	case tools.WriteToolName:
-		return &WriteToolRenderContext{}
-	case tools.EditToolName:
-		return &EditToolRenderContext{}
-	case tools.FetchToolName:
-		return &FetchToolRenderContext{}
-	case tools.WebSearchToolName:
-		return &WebSearchToolRenderContext{}
-	case tools.QuestionToolName:
-		return &QuestionToolRenderContext{}
-	case agent.AgentToolName:
-		if agent.IsAgentWaitCall(toolCall.Name, toolCall.Input) {
-			return &WaitToolRenderContext{}
-		}
+	if toolCall.Name == agent.AgentToolName && agent.IsAgentWaitCall(toolCall.Name, toolCall.Input) {
+		return &WaitToolRenderContext{}
 	}
-	if strings.HasPrefix(toolCall.Name, "mcp_") {
+	if spec, ok := toolSpecs[toolCall.Name]; ok && spec.renderer != nil {
+		return spec.renderer()
+	}
+	if _, _, ok := mcpCall(toolCall); ok {
 		return &MCPToolRenderContext{}
 	}
 	return &GenericToolRenderContext{}
@@ -290,14 +277,16 @@ func IsSubagentTool(name string) bool {
 
 // IsInternalContextTool reports whether a tool call is harness-internal
 // plumbing rather than work the user asked for: skill_search and
-// tool_search defer skill and MCP tool loading out of the system
+// tool_search (and each deferred MCP server's own search stub) defer
+// skill and MCP tool loading out of the system
 // prompt, and send_message is subagent-to-orchestrator mail. These
 // calls stay in the message history the model sees, but never render
 // in the transcript, the expanded task views, or the export.
 func IsInternalContextTool(name string) bool {
 	return name == agent.SkillSearchToolName ||
 		name == agent.ToolSearchToolName ||
-		name == agent.SendMessageToolName
+		name == agent.SendMessageToolName ||
+		toolname.IsMCPSearch(name, "")
 }
 
 // RendersInTranscript reports whether a tool call appears in the
@@ -364,13 +353,11 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 // readability. The action of an lsp call is only known once its input
 // has streamed in, so this is decided per render.
 func toolFullWidth(tc message.ToolCall) bool {
-	switch tc.Name {
-	case tools.EditToolName:
-		return true
-	case tools.LSPToolName:
+	if tc.Name == tools.LSPToolName {
 		return lspAction(tc) == "replace_symbol"
 	}
-	return false
+	spec, ok := toolSpecs[tc.Name]
+	return ok && spec.fullWidth != nil && spec.fullWidth(tc)
 }
 
 // BodyRender renders the call's full view in the given body width, with
@@ -1379,25 +1366,10 @@ func callLabel(tc message.ToolCall) string {
 	if name := lspDisplayName(tc); name != "" {
 		return name
 	}
-	switch tc.Name {
-	case tools.ShellToolName:
-		return "Shell"
-	case tools.ViewToolName:
-		return "View"
-	case tools.WriteToolName:
-		return "Write"
-	case tools.EditToolName:
-		return "Edit"
-	case tools.FetchToolName:
-		return "Fetch"
-	case tools.WebSearchToolName:
-		return "Search"
-	case tools.QuestionToolName:
-		return "Question"
-	case tools.DiagnosticsToolName:
-		return "Diagnostics"
+	if spec, ok := toolSpecs[tc.Name]; ok && spec.label != "" {
+		return spec.label
 	}
-	if server, tool, ok := splitMCPName(tc.Name); ok {
+	if server, tool, ok := mcpCall(tc); ok {
 		return server + " -> " + tool
 	}
 	return humanizedToolName(tc.Name)
@@ -1439,18 +1411,4 @@ func lspAction(tc message.ToolCall) string {
 	}
 	_ = json.Unmarshal([]byte(tc.Input), &params)
 	return params.Action
-}
-
-// splitMCPName splits the "mcp_server_tool" wire name into its human
-// parts. The mcp renderer styles these same parts with color; this is
-// the plain form one-liners and copy headings show.
-func splitMCPName(name string) (server, tool string, ok bool) {
-	if !strings.HasPrefix(name, "mcp_") {
-		return "", "", false
-	}
-	parts := strings.SplitN(name, "_", 3)
-	if len(parts) != 3 {
-		return "", "", false
-	}
-	return humanizedToolName(parts[1]), humanizedToolName(parts[2]), true
 }

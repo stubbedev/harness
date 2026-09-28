@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/stringext"
@@ -32,7 +34,7 @@ var deferredBuiltinTools = []string{
 }
 
 // ToolSearchToolName is the tool the model calls to load a deferred tool.
-const ToolSearchToolName = "tool_search"
+const ToolSearchToolName = toolname.ToolSearch
 
 // toolSearchTool stands in for the deferred built-in tools: it names them
 // and loads the ones asked for into the running agent's tool set.

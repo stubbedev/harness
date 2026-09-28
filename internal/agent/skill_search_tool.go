@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/skills"
@@ -22,7 +24,7 @@ type skillSearchTool struct {
 }
 
 // SkillSearchToolName is the tool name the model calls.
-const SkillSearchToolName = "skill_search"
+const SkillSearchToolName = toolname.SkillSearch
 
 // skillSearchResultLimit caps how many matches one search returns, and
 // skillSearchNameBudget how many characters of the name list the tool's own

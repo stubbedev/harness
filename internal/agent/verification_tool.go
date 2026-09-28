@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/verification"
 )
 
-const VerificationToolName = "verify"
+const VerificationToolName = toolname.Verify
 
 type verificationTool struct {
 	runner       *verification.Runner

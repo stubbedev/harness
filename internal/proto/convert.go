@@ -248,7 +248,7 @@ func partFromDomain(p message.ContentPart) ContentPart {
 			FinishedAt: v.FinishedAt,
 		}
 	case message.ToolCall:
-		return ToolCall{ID: v.ID, Name: v.Name, Input: v.Input, ProviderExecuted: v.ProviderExecuted, Finished: v.Finished}
+		return ToolCall{ID: v.ID, Name: v.Name, Input: v.Input, ProviderExecuted: v.ProviderExecuted, Finished: v.Finished, MCPServer: v.MCPServer}
 	case message.ToolResult:
 		return ToolResult(v)
 	case message.Finish:
@@ -279,7 +279,7 @@ func partToDomain(p ContentPart) message.ContentPart {
 			FinishedAt: v.FinishedAt,
 		}
 	case ToolCall:
-		return message.ToolCall{ID: v.ID, Name: v.Name, Input: v.Input, ProviderExecuted: v.ProviderExecuted, Finished: v.Finished}
+		return message.ToolCall{ID: v.ID, Name: v.Name, Input: v.Input, ProviderExecuted: v.ProviderExecuted, Finished: v.Finished, MCPServer: v.MCPServer}
 	case ToolResult:
 		return message.ToolResult(v)
 	case Finish:

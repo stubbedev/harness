@@ -5,11 +5,13 @@ import (
 	_ "embed"
 	"fmt"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/config"
 )
 
-const MCPResourceToolName = "mcp_resource"
+const MCPResourceToolName = toolname.MCPResource
 
 //go:embed mcp_resource.md
 var mcpResourceDescription string

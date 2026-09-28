@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/memory"
 )
@@ -15,7 +17,7 @@ import (
 //go:embed memory.md
 var memoryDescription string
 
-const MemoryToolName = "memory"
+const MemoryToolName = toolname.Memory
 
 const (
 	// minTitleMatch is the title similarity above which a single

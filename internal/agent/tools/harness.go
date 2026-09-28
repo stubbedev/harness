@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"fmt"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/extensions"
@@ -12,7 +14,7 @@ import (
 	"github.com/stubbedev/harness/internal/skills"
 )
 
-const HarnessToolName = "harness"
+const HarnessToolName = toolname.Harness
 
 //go:embed harness.md
 var harnessDescription string

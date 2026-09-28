@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/diff"
 	"github.com/stubbedev/harness/internal/filepathext"
@@ -48,7 +50,7 @@ type EditResponseMetadata struct {
 	FileMutations []fileMutation `json:"file_mutations,omitempty"`
 }
 
-const EditToolName = "edit"
+const EditToolName = toolname.Edit
 
 //go:embed edit.md
 var editDescription string

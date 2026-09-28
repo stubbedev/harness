@@ -155,6 +155,8 @@ type ToolCall struct {
 	// web search, say), which the agent must not execute.
 	ProviderExecuted bool `json:"provider_executed,omitempty"`
 	Finished         bool `json:"finished,omitempty"`
+	// MCPServer names the MCP server the called tool belongs to.
+	MCPServer string `json:"mcp_server,omitempty"`
 }
 
 func (ToolCall) partType() partType { return toolCallType }

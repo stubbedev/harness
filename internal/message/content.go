@@ -120,6 +120,11 @@ type ToolCall struct {
 	Input            string `json:"input"`
 	ProviderExecuted bool   `json:"provider_executed"`
 	Finished         bool   `json:"finished"`
+	// MCPServer names the MCP server the called tool belongs to, empty
+	// for built-in and extension tools. The wire name cannot say it
+	// unambiguously: a server name may hold the underscore that joins
+	// it to the tool's.
+	MCPServer string `json:"mcp_server,omitempty"`
 }
 
 func (ToolCall) partType() partType { return toolCallType }

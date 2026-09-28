@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/question"
 )
 
-const QuestionToolName = "question"
+const QuestionToolName = toolname.Question
 
 //go:embed question.md
 var questionDescription string

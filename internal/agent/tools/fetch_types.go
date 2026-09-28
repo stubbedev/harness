@@ -1,10 +1,12 @@
 package tools
 
+import "github.com/stubbedev/harness/internal/toolname"
+
 // ResearchToolName is the name of the research tool.
-const ResearchToolName = "research"
+const ResearchToolName = toolname.Research
 
 // WebSearchToolName is the name of the web_search tool.
-const WebSearchToolName = "web_search"
+const WebSearchToolName = toolname.WebSearch
 
 // LargeContentThreshold is the size threshold for saving content to a file.
 const LargeContentThreshold = 50 * 1024 // 50KB

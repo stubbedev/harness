@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/csync"
@@ -12,7 +14,7 @@ import (
 
 // SendMessageToolName is the tool sub-agents use to message their
 // orchestrator mid-run.
-const SendMessageToolName = "send_message"
+const SendMessageToolName = toolname.SendMessage
 
 // sendMessageTool lets a dispatched sub-agent push a message to the
 // orchestrating agent while it is still running. Delivery depends on how

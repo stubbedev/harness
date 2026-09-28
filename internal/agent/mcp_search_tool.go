@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
@@ -39,7 +41,7 @@ const mcpSearchNameBudget = 2000
 func (s *mcpSearchTool) Info() fantasy.ToolInfo {
 	names := s.coord.mcpServerToolNames(s.server)
 	return fantasy.ToolInfo{
-		Name: fmt.Sprintf("mcp_%s_tool_search", s.server),
+		Name: toolname.MCPSearch(s.server),
 		Description: fmt.Sprintf(
 			`Tools from the "%s" MCP server. Its %d tools are named below; their input schemas load on demand.
 
@@ -255,4 +257,20 @@ func (c *coordinator) refreshCoderTools(ctx context.Context) error {
 	}
 	c.currentAgent.SetTools(built)
 	return nil
+}
+
+// mcpServerOf returns the MCP server the named tool in this agent's
+// palette belongs to, empty for any other tool. The call records it so
+// no reader has to recover the server by splitting the wire name.
+func (a *sessionAgent) mcpServerOf(name string) string {
+	for tool := range a.tools.Seq() {
+		if tool.Info().Name != name {
+			continue
+		}
+		if m, ok := tool.(interface{ MCP() string }); ok {
+			return m.MCP()
+		}
+		return ""
+	}
+	return ""
 }

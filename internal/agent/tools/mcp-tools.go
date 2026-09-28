@@ -7,6 +7,8 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
@@ -53,7 +55,7 @@ func (m *Tool) ProviderOptions() fantasy.ProviderOptions {
 }
 
 func (m *Tool) Name() string {
-	return fmt.Sprintf("mcp_%s_%s", m.mcpName, m.tool.Name)
+	return toolname.MCP(m.mcpName, m.tool.Name)
 }
 
 func (m *Tool) MCP() string {

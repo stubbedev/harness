@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"golang.org/x/sync/errgroup"
 
@@ -51,7 +53,7 @@ type AgentDispatchParams struct {
 }
 
 const (
-	AgentToolName = "agent"
+	AgentToolName = toolname.Agent
 )
 
 // IsAgentWaitCall reports whether a tool call is the dispatcher tool's

@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/oauth"
@@ -1035,23 +1037,7 @@ const maxRecentModelsPerType = 5
 // `tools:` / `disallowedTools:` frontmatter — can reject unknown names instead
 // of silently intersecting them away to nothing.
 func AllToolNames() []string {
-	return []string{
-		"agent",
-		"shell",
-		"harness",
-		"edit",
-		"lsp",
-		"fetch",
-		"research",
-		"memory",
-		"question",
-		"web_search",
-		"send_message",
-		"view",
-		"verify",
-		"write",
-		"mcp_resource",
-	}
+	return toolname.Allowlistable()
 }
 
 func resolveAllowedTools(allTools []string, disabledTools []string) []string {
@@ -1069,7 +1055,7 @@ func resolveSubagentTools(tools []string) []string {
 	// session), which it can background but not share with a sibling
 	// dispatch. Specialized agents are unaffected — they build their own
 	// allowlist in frontmatter.
-	subagentTools := []string{"edit", "fetch", "lsp", "send_message", "shell", "view", "web_search", "write"}
+	subagentTools := toolname.SubagentDefaults()
 	// filter to only include tools that are in allowedtools (include mode)
 	return filterSlice(tools, subagentTools, true)
 }

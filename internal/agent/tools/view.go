@@ -21,6 +21,8 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/filetracker"
@@ -89,7 +91,7 @@ type ViewFilesResponseMetadata struct {
 }
 
 const (
-	ViewToolName     = "view"
+	ViewToolName     = toolname.View
 	MaxViewSize      = 200 * 1024 // 200KB
 	DefaultReadLimit = 200
 	MaxLineLength    = 2000

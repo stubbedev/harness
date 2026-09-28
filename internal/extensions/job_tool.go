@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 )
 
@@ -15,7 +17,7 @@ var jobToolDescription string
 
 // JobToolName is the tool the model uses to collect what background jobs
 // produced.
-const JobToolName = "extension_jobs"
+const JobToolName = toolname.ExtensionJobs
 
 // maxJobWaitSeconds caps how long a collect may block, so waiting on a
 // job cannot pin a turn.

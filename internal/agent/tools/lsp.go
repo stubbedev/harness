@@ -8,13 +8,15 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
 )
 
-const LSPToolName = "lsp"
+const LSPToolName = toolname.LSP
 
 //go:embed lsp.md
 var lspDescription string

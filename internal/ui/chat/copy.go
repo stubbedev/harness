@@ -249,86 +249,119 @@ func (t *baseToolMessageItem) copyText(depth int) string {
 }
 
 // formatParametersForCopy formats tool parameters for the clipboard.
+// A tool's [toolSpec] supplies its shape; everything else - MCP servers
+// and any tool without a hand-written one, or input that does not parse -
+// gets the raw input as sorted, indented JSON.
 func (t *baseToolMessageItem) formatParametersForCopy() string {
 	input := t.toolCall.Input
-	switch t.toolCall.Name {
-	case tools.ShellToolName:
-		var params tools.ShellParams
-		if json.Unmarshal([]byte(input), &params) == nil {
-			// The command is fenced rather than flattened onto one
-			// line: a copied heredoc or multi-line pipeline should
-			// paste back into a shell and run.
-			return copyJoin("**Command:**", copyFence("bash", params.Command))
-		}
-	case tools.ViewToolName:
-		var params tools.ViewParams
-		if json.Unmarshal([]byte(input), &params) == nil {
-			lines := []string{copyField("File", fsext.PrettyPath(params.FilePath))}
-			if params.Offset > 0 {
-				lines = append(lines, copyField("Offset", params.Offset))
-			}
-			if params.Limit > 0 {
-				lines = append(lines, copyField("Limit", params.Limit))
-			}
-			return strings.Join(lines, "\n")
-		}
-	case tools.EditToolName:
-		var params tools.EditParams
-		if json.Unmarshal([]byte(input), &params) == nil {
-			// The old and new strings are not echoed here: the result
-			// carries the same change as a diff, which reads better
-			// and does not duplicate the file's text twice over.
-			return strings.Join([]string{
-				copyField("File", fsext.PrettyPath(params.FilePath)),
-				copyField("Edits", len(params.Edits)),
-			}, "\n")
-		}
-	case tools.WriteToolName:
-		var params tools.WriteParams
-		if json.Unmarshal([]byte(input), &params) == nil {
-			return copyField("File", fsext.PrettyPath(params.FilePath))
-		}
-	case tools.FetchToolName:
-		var params tools.FetchParams
-		if json.Unmarshal([]byte(input), &params) == nil {
-			lines := []string{copyField("URL", params.URL)}
-			if params.Format != "" {
-				lines = append(lines, copyField("Format", params.Format))
-			}
-			if params.Timeout > 0 {
-				lines = append(lines, copyField("Timeout", fmt.Sprintf("%ds", params.Timeout)))
-			}
-			return strings.Join(lines, "\n")
-		}
-	case tools.ResearchToolName:
-		var params tools.ResearchParams
-		if json.Unmarshal([]byte(input), &params) == nil {
-			var lines []string
-			if params.URL != "" {
-				lines = append(lines, copyField("URL", params.URL))
-			}
-			if params.Prompt != "" {
-				lines = append(lines, "**Prompt:**", params.Prompt)
-			}
-			return strings.Join(lines, "\n")
-		}
-	case tools.DiagnosticsToolName:
-		return copyField("Project", "diagnostics")
-	case agent.AgentToolName:
-		var params agent.AgentParams
-		if json.Unmarshal([]byte(input), &params) == nil {
-			var lines []string
-			if params.SubagentType != "" && params.SubagentType != config.AgentTask {
-				lines = append(lines, copyField("Subagent", params.SubagentType))
-			}
-			lines = append(lines, "**Task:**", params.Prompt)
-			return strings.Join(lines, "\n")
+	if spec, ok := toolSpecs[t.toolCall.Name]; ok && spec.copyParams != nil {
+		if out := spec.copyParams(input); out != "" {
+			return out
 		}
 	}
-
-	// Everything else - MCP servers and any tool without a hand-written
-	// shape - gets the raw input as sorted, indented JSON.
 	return copyJSON(input)
+}
+
+func copyShellParams(input string) string {
+	var params tools.ShellParams
+	if json.Unmarshal([]byte(input), &params) == nil {
+		// The command is fenced rather than flattened onto one
+		// line: a copied heredoc or multi-line pipeline should
+		// paste back into a shell and run.
+		return copyJoin("**Command:**", copyFence("bash", params.Command))
+	}
+	return ""
+}
+
+func copyViewParams(input string) string {
+	var params tools.ViewParams
+	if json.Unmarshal([]byte(input), &params) != nil {
+		return ""
+	}
+	requests := params.Files
+	if len(requests) == 0 {
+		requests = []tools.ViewFileRequest{{FilePath: params.FilePath, Offset: params.Offset, Limit: params.Limit}}
+	}
+	var lines []string
+	for _, req := range requests {
+		lines = append(lines, copyField("File", fsext.PrettyPath(req.FilePath)))
+		if req.Offset > 0 {
+			lines = append(lines, copyField("Offset", req.Offset))
+		}
+		if req.Limit > 0 {
+			lines = append(lines, copyField("Limit", req.Limit))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func copyEditParams(input string) string {
+	var params tools.EditParams
+	if json.Unmarshal([]byte(input), &params) == nil {
+		// The old and new strings are not echoed here: the result
+		// carries the same change as a diff, which reads better
+		// and does not duplicate the file's text twice over.
+		return strings.Join([]string{
+			copyField("File", fsext.PrettyPath(params.FilePath)),
+			copyField("Edits", len(params.Edits)),
+		}, "\n")
+	}
+	return ""
+}
+
+func copyWriteParams(input string) string {
+	var params tools.WriteParams
+	if json.Unmarshal([]byte(input), &params) == nil {
+		return copyField("File", fsext.PrettyPath(params.FilePath))
+	}
+	return ""
+}
+
+func copyFetchParams(input string) string {
+	var params tools.FetchParams
+	if json.Unmarshal([]byte(input), &params) == nil {
+		lines := []string{copyField("URL", params.URL)}
+		if params.Format != "" {
+			lines = append(lines, copyField("Format", params.Format))
+		}
+		if params.Timeout > 0 {
+			lines = append(lines, copyField("Timeout", fmt.Sprintf("%ds", params.Timeout)))
+		}
+		return strings.Join(lines, "\n")
+	}
+	return ""
+}
+
+func copyResearchParams(input string) string {
+	var params tools.ResearchParams
+	if json.Unmarshal([]byte(input), &params) == nil {
+		var lines []string
+		if params.URL != "" {
+			lines = append(lines, copyField("URL", params.URL))
+		}
+		if params.Prompt != "" {
+			lines = append(lines, "**Prompt:**", params.Prompt)
+		}
+		return strings.Join(lines, "\n")
+	}
+	return ""
+}
+
+func copyDiagnosticsParams(string) string {
+	return copyField("Project", "diagnostics")
+}
+
+func copyAgentParams(input string) string {
+	var params agent.AgentParams
+	if json.Unmarshal([]byte(input), &params) == nil {
+		var lines []string
+		if params.SubagentType != "" && params.SubagentType != config.AgentTask {
+			lines = append(lines, copyField("Subagent", params.SubagentType))
+		}
+		lines = append(lines, "**Task:**", params.Prompt)
+		return strings.Join(lines, "\n")
+	}
+	return ""
 }
 
 // formatResultForCopy formats a tool result for the clipboard.
@@ -344,26 +377,10 @@ func (t *baseToolMessageItem) formatResultForCopy() string {
 		return fmt.Sprintf("[Media: %s]", t.result.MIMEType)
 	}
 
-	switch t.toolCall.Name {
-	case tools.ShellToolName:
-		return t.formatShellResultForCopy()
-	case tools.ViewToolName:
-		return t.formatViewResultForCopy()
-	case tools.EditToolName:
-		return t.formatEditResultForCopy()
-	case tools.WriteToolName:
-		return t.formatWriteResultForCopy()
-	case tools.FetchToolName:
-		return t.formatFetchResultForCopy()
-	case tools.ResearchToolName:
-		return copyFence("markdown", t.result.Content)
-	case agent.AgentToolName:
-		return copyFence("markdown", t.result.Content)
-	case tools.DiagnosticsToolName:
-		return copyFence("", t.result.Content)
+	if spec, ok := toolSpecs[t.toolCall.Name]; ok && spec.copyResult != nil {
+		return spec.copyResult(t)
 	}
-
-	if strings.HasPrefix(t.toolCall.Name, "mcp_") {
+	if _, _, ok := mcpCall(t.toolCall); ok {
 		return copyJSON(t.result.Content)
 	}
 	// An unrecognized tool's result is opaque text; fencing it is what

@@ -13,6 +13,7 @@ import (
 
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/extensions"
+	"github.com/stubbedev/harness/internal/toolname"
 )
 
 // nameOnlyTool is a stand-in for a tool whose name is all that matters
@@ -82,4 +83,21 @@ harness.register_tool({ name = "fine_tool", description = "usable", handler = fu
 	assert.Equal(t, 1, counts["view"], "the built-in view keeps the name it owns")
 	assert.Zero(t, counts["bad name!"], "an illegal name never reaches the provider")
 	assert.Equal(t, 1, counts["fine_tool"], "a usable extension tool is untouched")
+}
+
+// TestBuiltToolsAreKnownBuiltins ties the palette to the one list of
+// built-in names: config validates allowlists against it and the UI
+// routes rendering by it, so a tool registered under a name missing
+// there would be silently unallowlistable and render generically.
+func TestBuiltToolsAreKnownBuiltins(t *testing.T) {
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, "p", config.ProviderConfig{ID: "p"})
+
+	built, err := coord.buildTools(t.Context(), coord.cfg.Config().Agents[config.AgentCoder], false, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, built)
+	for _, tool := range built {
+		name := tool.Info().Name
+		require.True(t, toolname.IsBuiltin(name), "built tool %q is not in internal/toolname", name)
+	}
 }

@@ -14,11 +14,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stubbedev/harness/internal/toolname"
+
 	"charm.land/fantasy"
 )
 
 const (
-	FetchToolName = "fetch"
+	FetchToolName = toolname.Fetch
 	// MaxFetchSize is how much converted content is returned inline
 	// before the page is spilled to a file instead.
 	MaxFetchSize = LargeContentThreshold

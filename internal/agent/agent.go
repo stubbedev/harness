@@ -1590,6 +1590,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				Name:             toolName,
 				ProviderExecuted: false,
 				Finished:         false,
+				MCPServer:        a.mcpServerOf(toolName),
 			}
 			currentAssistant.AddToolCall(toolCall)
 			// Use parent ctx instead of genCtx to ensure the update succeeds
@@ -1653,6 +1654,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				Input:            input,
 				ProviderExecuted: false,
 				Finished:         true,
+				MCPServer:        a.mcpServerOf(tc.ToolName),
 			}
 			currentAssistant.AddToolCall(toolCall)
 			// The execution state locks itself; holding sessionLock over
