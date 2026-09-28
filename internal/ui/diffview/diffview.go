@@ -11,7 +11,6 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/stubbedev/harness/internal/ansiext"
 	"github.com/stubbedev/harness/internal/ui/xchroma"
 	"github.com/zeebo/xxh3"
 )
@@ -821,6 +820,25 @@ func (dv *DiffView) getChromaFormatter(bgColor color.Color) chroma.Formatter {
 
 func processChromaValue(value string) string {
 	value = strings.TrimRight(value, "\n")
-	value = ansiext.Escape(value)
+	value = escapeControl(value)
 	return value
+}
+
+// escapeControl replaces control characters with their Unicode Control
+// Picture representations so they display in the diff instead of acting
+// on the terminal.
+func escapeControl(content string) string {
+	var sb strings.Builder
+	sb.Grow(len(content))
+	for _, r := range content {
+		switch {
+		case r >= 0 && r <= 0x1f: // Control characters 0x00-0x1F
+			sb.WriteRune('\u2400' + r)
+		case r == ansi.DEL:
+			sb.WriteRune('\u2421')
+		default:
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
 }
