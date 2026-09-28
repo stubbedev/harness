@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"sort"
 	"strings"
 
 	"charm.land/glamour/v2"
@@ -230,7 +231,17 @@ func (s *streamingMarkdown) findBoundaryAfter(content string) int {
 	// Scan blank-line candidates from latest to earliest, but only
 	// those strictly after the stable prefix. Candidates at or
 	// before the stable prefix are already covered by the cache.
+	//
+	// Inside an open code fence every candidate fails the fence-parity
+	// check, and running the full predicate on each re-scanned the
+	// tail once per blank line: quadratic in a long code block. The
+	// fence lines of the tail are found once instead, so a candidate
+	// with odd parity is skipped with a binary search.
+	fences := fenceLineStarts(content, len(s.stablePrefix))
 	for p := blankLineBefore(content, len(content)); p > len(s.stablePrefix); p = blankLineBefore(content, p-1) {
+		if (s.baseFenceCount+sort.SearchInts(fences, p))%2 != 0 {
+			continue
+		}
 		if s.isSafeBoundaryIncremental(content, p) {
 			return p
 		}
@@ -751,6 +762,28 @@ func countFenceLines(s string) int {
 		}
 	}
 	return n
+}
+
+// fenceLineStarts returns, in order, the offsets of the lines of
+// content[from:] that open or close a fenced code block. from must be a
+// line start. The number of offsets below a line start p is the
+// countFenceLines of content[from:p].
+func fenceLineStarts(content string, from int) []int {
+	var starts []int
+	for start := from; start < len(content); {
+		end := strings.IndexByte(content[start:], '\n')
+		next := len(content)
+		line := content[start:]
+		if end >= 0 {
+			line = content[start : start+end]
+			next = start + end + 1
+		}
+		if isFenceLine(line) {
+			starts = append(starts, start)
+		}
+		start = next
+	}
+	return starts
 }
 
 // isFenceLine reports whether line opens or closes a fenced code
