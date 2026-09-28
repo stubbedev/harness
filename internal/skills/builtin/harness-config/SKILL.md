@@ -1,6 +1,6 @@
 ---
 name: harness-config
-description: Use when the user needs help configuring Harness — writing config.yaml or a project harness.yaml, setting up providers, models, LSPs, MCP servers, hooks, skills, permissions, or changing Harness behavior.
+description: Use when the user needs help configuring Harness — writing config.yaml or a project harness.yaml, setting up providers, models, LSPs, MCP servers, hooks, skills, tools, or changing Harness behavior.
 ---
 
 # Harness Configuration
@@ -48,8 +48,6 @@ mcp: # Model Context Protocol servers
 lsp: # language servers
 hooks: # commands that fire on agent events
 options: # everything else about Harness's behavior
-permissions: # which tools skip the permission prompt
-tools: # per-tool limits (ls, grep, glob)
 env: # environment variables set at startup
 ```
 
@@ -156,28 +154,15 @@ lsp:
 Fields: `command`, `args`, `env`, `filetypes`, `root_markers`, `init_options`,
 `options`, `timeout`, `disabled`.
 
-## Permissions and tools
+## Tools
 
 ```yaml
-permissions:
-  yolo: false # false restores prompts; unset means prompts are skipped
-  allowed_tools: [view, ls, grep, edit]
-
 options:
-  disabled_tools: [shell] # hidden from the agent entirely, not just prompted
-
-tools:
-  ls:
-    max_depth: 5
-    max_items: 500
-  grep:
-    timeout: 30s
-  glob:
-    timeout: 30s
+  disabled_tools: [shell] # hidden from the agent entirely
 ```
 
-`allowed_tools` skips the prompt for those tools. `options.disabled_tools`
-removes a tool from the agent's toolbox.
+There is no permission prompt to configure. A policy on what a tool may do is
+a `PreToolUse` hook (see below): it can allow, deny or rewrite each call.
 
 ## Hooks
 
@@ -221,17 +206,11 @@ options:
   subagents_paths: [./agents]
   disabled_subagents: [reviewer]
 
-  # Commit/PR attribution
-  attribution:
-    trailer_style: assisted-by # none | co-authored-by | assisted-by
-    generated_with: true
-
   # TUI
   tui:
     theme: gruvbox-dark # charmtone | catppuccin-mocha | gruvbox-dark
     compact_mode: false
     diff_mode: unified # unified | split
-    transparent: false
     mouse: true # false lets the terminal/tmux own selection and copy
     scrollbar: default # default | always | never
     exit_banner: default # default | compact | none
@@ -281,8 +260,9 @@ env:
 
 ## Hooks runtime
 
-Hooks are user-defined shell commands that fire on agent events. Currently only
-`PreToolUse` is supported, which runs before a tool executes.
+Hooks are user-defined shell commands that fire on agent events: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`, `SubagentStop`, `Notification`, `PreCompact` and `PostCompact`.
+The contract below is written for `PreToolUse`, which runs before a tool
+executes; `docs/hooks/README.md` covers what every other event receives.
 
 ### How hooks work
 

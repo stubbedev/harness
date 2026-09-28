@@ -60,7 +60,7 @@ hooks:
   PreToolUse:
     # What tool do we want to hook into? In this case bash, because it runs
     # the stuff we wanna block.
-    - matcher: "^bash$"
+    - matcher: "^shell$"
       # The path to our actual hook script.
       command: ./no-haskell.sh
 ```
@@ -189,7 +189,7 @@ This hook fires before every tool call. Use it to block dangerous commands,
 enforce policies, rewrite tool input, inject context the model should see, log
 stuff, and so on.
 
-**Matched against**: the tool name (e.g. `bash`, `edit`, `write`,
+**Matched against**: the tool name (e.g. `shell`, `edit`, `write`,
 `mcp_github_create_pull_request`).
 
 **Scope**: `PreToolUse` fires on every tool call, including calls made
@@ -307,11 +307,11 @@ The available environment variables are:
 | `AGENT`                        | Always `harness`.                                    |
 | `AI_AGENT`                     | Always `harness`.                                    |
 | `HARNESS_EVENT`                | The hook event name (e.g. `PreToolUse`).             |
-| `HARNESS_TOOL_NAME`            | The tool being called, for tool events (e.g. `bash`). |
+| `HARNESS_TOOL_NAME`            | The tool being called, for tool events (e.g. `shell`). |
 | `HARNESS_SESSION_ID`           | Current session ID.                                  |
 | `HARNESS_CWD`                  | Working directory.                                   |
 | `HARNESS_PROJECT_DIR`          | Project root directory.                              |
-| `HARNESS_TOOL_INPUT_COMMAND`   | For `bash` calls: the shell command being run.       |
+| `HARNESS_TOOL_INPUT_COMMAND`   | For `shell` calls: the shell command being run.       |
 | `HARNESS_TOOL_INPUT_FILE_PATH` | For file tools: the target file path.                |
 | `HARNESS_PROMPT`               | For `UserPromptSubmit`/`SessionStart`: the prompt.   |
 | `HARNESS_SUBAGENT_TYPE`        | For `SubagentStop`: the sub-agent type.              |
@@ -319,7 +319,7 @@ The available environment variables are:
 | `HARNESS_NOTIFICATION_TYPE`    | For `Notification`: the notification type.           |
 | `HARNESS_MESSAGE`              | For `Notification`/`SubagentStop`: the message/status. |
 
-The `HARNESS`, `AGENT`, and `AI_AGENT` markers are also set by the `bash`
+The `HARNESS`, `AGENT`, and `AI_AGENT` markers are also set by the `shell`
 tool, so a script can detect "am I running under Harness?" the same way in
 either context.
 
@@ -332,7 +332,7 @@ Standard input provides the full context as JSON:
   "event": "PreToolUse", // Hook event name
   "session_id": "313909e", // Current session ID
   "cwd": "/home/user/project", // Working directory
-  "tool_name": "bash", // The tool being called
+  "tool_name": "shell", // The tool being called
   "tool_input": { "command": "rm -rf /" }, // The tool's input
 }
 ```
@@ -491,7 +491,7 @@ Prevent the agent from running `rm -rf` in bash:
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^bash$",
+        "matcher": "^shell$",
         "command": "./hooks/no-rm-rf.sh"
       }
     ]
@@ -577,7 +577,7 @@ Hooks aren't limited to shell scripts: any executable works. Here's the same
 
 #### Lua
 
-`{"matcher": "^bash$", "command": "lua ./hooks/no-rm-rf.lua"}`
+`{"matcher": "^shell$", "command": "lua ./hooks/no-rm-rf.lua"}`
 
 > [!TIP]
 > This one needs a `lua` binary on PATH. Harness also embeds a Lua VM:
@@ -596,7 +596,7 @@ end
 
 #### JavaScript
 
-`{"matcher": "^bash$", "command": "node ./hooks/no-rm-rf.js"}`
+`{"matcher": "^shell$", "command": "node ./hooks/no-rm-rf.js"}`
 
 ```js
 let input = "";
@@ -650,7 +650,7 @@ Each entry in a `hooks.<EventName>` list:
   # name for tool events, the sub-agent type for SubagentStop. Omit to
   # match all. Events without a subject ignore it (an empty matcher is
   # the only thing that matches them).
-  matcher: "^bash$"
+  matcher: "^shell$"
 
   # string. Required. Shell command to run.
   command: ./hooks/my-hook.sh
@@ -685,7 +685,7 @@ Extends the common payload:
   // ...common fields...
 
   // string. The tool being called.
-  "tool_name": "bash",
+  "tool_name": "shell",
 
   // object. Raw JSON input the model sent to the tool. Shape is per-tool.
   "tool_input": {
@@ -703,7 +703,7 @@ Extends the common payload:
   // ...common fields...
 
   // string. The tool that ran.
-  "tool_name": "bash",
+  "tool_name": "shell",
 
   // object. The input the tool ran with (after any PreToolUse rewrite).
   "tool_input": { "command": "npm test" },

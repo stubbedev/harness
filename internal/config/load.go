@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -1005,6 +1006,7 @@ func loadFromConfigPaths(_ context.Context, configPaths []string) (*Config, []st
 			continue
 		}
 
+		warnUnknownFields(path, jsonBytes)
 		dir := filepath.Dir(path)
 		reportConflicts(dirKeys, dirFiles, dir, path, jsonBytes)
 		configs = append(configs, jsonBytes)
@@ -1048,6 +1050,20 @@ func reportConflicts(dirKeys map[string]map[string]bool, dirFiles map[string][]s
 			"conflicting_keys", strings.Join(conflicts, ", "))
 	}
 	dirFiles[dir] = append(dirFiles[dir], filepath.Base(path))
+}
+
+// warnUnknownFields logs the first key in a config file the loader does
+// not know. The merged decode ignores unknown keys, so without this a
+// typo (optons:, dialog_placment:) or a key a newer or older build dropped
+// is silently ignored unless the editor happens to load the schema. It
+// warns rather than fails: a config shared across versions stays usable.
+func warnUnknownFields(path string, jsonBytes []byte) {
+	dec := json.NewDecoder(bytes.NewReader(jsonBytes))
+	dec.DisallowUnknownFields()
+	var probe Config
+	if err := dec.Decode(&probe); err != nil && strings.Contains(err.Error(), "unknown field") {
+		slog.Warn("Config file holds a key Harness does not recognize; it is ignored", "path", path, "error", err)
+	}
 }
 
 func loadFromBytes(configs [][]byte) (*Config, error) {

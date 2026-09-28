@@ -245,21 +245,12 @@ and `disabled`. Harness fills in defaults for servers it recognizes, so a bare
 
 ```yaml
 options:
-  disabled_tools: [bash]
-
-tools:
-  ls:
-    max_depth: 5
-    max_items: 500
-  grep:
-    timeout: 45s
-  glob:
-    timeout: 2m
+  disabled_tools: [shell]
 ```
 
-- `options.disabled_tools` hides tools from the agent entirely: the agent
-  never sees them.
-- Tool timeouts take a duration string (`45s`, `2m`, `1h30m`).
+`options.disabled_tools` hides tools from the agent entirely: the agent never
+sees them. There is no permission prompt to configure; a policy on what a tool
+may do is a `PreToolUse` [hook](#hooks).
 
 ## Hooks
 
@@ -267,7 +258,7 @@ tools:
 hooks:
   PreToolUse:
     - name: no-haskell
-      matcher: ^bash$
+      matcher: ^shell$
       command: .harness/hooks/no-haskell.sh
       timeout: 10
 ```
@@ -321,10 +312,6 @@ options:
   disabled_subagents: [reviewer]
   max_concurrent_subagents: 24 # sub-agents running at once; extras wait for a slot
 
-  attribution:
-    trailer_style: assisted-by # none | co-authored-by | assisted-by
-    generated_with: true # add the "Generated with" trailer
-
   memory:
     enabled: true # durable agent notes across sessions
 ```
@@ -344,7 +331,6 @@ options:
     theme: charmtone # charmtone | catppuccin-mocha | gruvbox-dark
     compact_mode: false # hide the sidebar
     diff_mode: unified # unified | split
-    transparent: false # use the terminal background
     mouse: true # false lets the terminal or tmux own selection and copy
     scrollbar: default # default | always | never
     exit_banner: default # default | compact | none
@@ -360,9 +346,9 @@ options:
       max_items: 500
 ```
 
-The theme picker (`ctrl+shift+t`) and the command palette's "Disable Background Color"
-and "Disable Mouse" toggles write to the **global state file**. If a project
-config also sets `theme`, `transparent`, or `mouse`, the project wins on the
+The theme picker (`ctrl+shift+t`) and the command palette's "Disable Mouse"
+toggle write to the **global state file**. If a project config also sets
+`theme` or `mouse`, the project wins on the
 next launch (see [Where config lives](#where-config-lives)), so a toggle can
 look like it silently reverted.
 

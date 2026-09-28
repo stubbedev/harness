@@ -6,25 +6,26 @@ description: Use when the user wants to add, write, debug, or configure a Harnes
 # Harness Hooks
 
 Hooks are user-defined commands in the config that fire at specific points
-during execution, giving deterministic control over tool behavior. They run
-**before** permission checks and **only on the top-level agent's** tool calls —
-sub-agent calls (task tool, research, etc.) are not intercepted, though
-the sub-agent tool call itself is.
+during execution, giving deterministic control over tool behavior.
+`PreToolUse` fires on every tool call, including calls made from inside
+sub-agents (task dispatches, research, custom subagents); a hook fired from a
+sub-agent sees the child session's ID in its payload.
 
 For the full reference, see `docs/hooks/README.md`. This skill covers what you
 need to author correct hooks.
 
 ## Supported Events
 
-Only `PreToolUse` is currently supported. Event names are case-insensitive and
-accept snake_case (`PreToolUse`, `pretooluse`, `pre_tool_use` all work).
+`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`, `SubagentStop`, `Notification`, `PreCompact` and `PostCompact`. Event names are case-insensitive and accept snake_case
+(`PreToolUse`, `pretooluse`, `pre_tool_use` all work). `docs/hooks/README.md`
+documents the payload of each.
 
 ## Configuration
 
 ```yaml
 hooks:
   PreToolUse:
-    - matcher: "^bash$" # regex against tool name (optional; omit to match all)
+    - matcher: "^shell$" # regex against tool name (optional; omit to match all)
       command: ./hooks/my-hook.sh # required: shell command to run
       timeout: 10 # optional: seconds, default 30
 ```
@@ -46,11 +47,11 @@ the input/output contract is identical regardless of language.
 | Variable                     | Description                              |
 | ---------------------------- | ---------------------------------------- |
 | `HARNESS_EVENT`                | Event name (e.g. `PreToolUse`)           |
-| `HARNESS_TOOL_NAME`            | Tool being called (e.g. `bash`)          |
+| `HARNESS_TOOL_NAME`            | Tool being called (e.g. `shell`)          |
 | `HARNESS_SESSION_ID`           | Current session ID                       |
 | `HARNESS_CWD`                  | Working directory                        |
 | `HARNESS_PROJECT_DIR`          | Project root directory                   |
-| `HARNESS_TOOL_INPUT_COMMAND`   | For `bash` calls: the shell command      |
+| `HARNESS_TOOL_INPUT_COMMAND`   | For `shell` calls: the shell command      |
 | `HARNESS_TOOL_INPUT_FILE_PATH` | For file tools: the target file path     |
 
 **JSON on stdin:**
@@ -60,7 +61,7 @@ the input/output contract is identical regardless of language.
   "event": "PreToolUse",
   "session_id": "313909e",
   "cwd": "/home/user/project",
-  "tool_name": "bash",
+  "tool_name": "shell",
   "tool_input": {"command": "rm -rf /"}
 }
 ```
@@ -129,7 +130,7 @@ if echo "$HARNESS_TOOL_INPUT_COMMAND" | grep -qE 'rm\s+-(rf|fr)\s+/'; then
 fi
 ```
 
-Config: `- matcher: "^bash$"` / `  command: ./hooks/no-rm-rf.sh`
+Config: `- matcher: "^shell$"` / `  command: ./hooks/no-rm-rf.sh`
 
 ### Auto-approve read-only tools (inline, no script)
 
@@ -193,8 +194,8 @@ preserved.
 - Timeouts kill the hook silently and the tool call proceeds. Bump `timeout` if needed.
 - Non-zero exit codes other than 2/49 are logged but don't block — check Harness logs.
 - Use `echo "debug info" >&2` for logging without corrupting stdout JSON.
-- `matcher` is a regex against the tool name. Use `^bash$` (not `bash`) if you
-  don't also want to match `mcp_something_bash`.
+- `matcher` is a regex against the tool name. Use `^shell$` (not `shell`) if you
+  don't also want to match `mcp_something_shell`.
 
 ## Claude Code Compatibility
 

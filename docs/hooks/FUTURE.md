@@ -111,7 +111,7 @@ Additive, per-hook. Zero-value matches current default (skip sub-agents):
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^bash$",
+        "matcher": "^shell$",
         "command": "./hooks/audit.sh",
         "include_sub_agents": true, // default false
       },
