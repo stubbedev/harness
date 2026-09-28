@@ -36,6 +36,7 @@ func (c *errorCoordinator) RunAccepted(ctx context.Context, accept *agent.Accept
 	return nil, c.err
 }
 
+func (c *errorCoordinator) Warmup(context.Context) error                        { return nil }
 func (c *errorCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun   { return nil }
 func (c *errorCoordinator) Cancel(string)                                       {}
 func (c *errorCoordinator) CancelTurn(string)                                   {}

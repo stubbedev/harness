@@ -178,6 +178,8 @@ func (c *scriptedCoordinator) RunAccepted(ctx context.Context, accept *agent.Acc
 	return c.Run(ctx, sessionID, prompt, attachments...)
 }
 
+func (c *scriptedCoordinator) Warmup(context.Context) error { return nil }
+
 func (c *scriptedCoordinator) BeginAccepted(string) *agent.AcceptedRun { return nil }
 
 func (c *scriptedCoordinator) CancelTurn(sessionID string) {

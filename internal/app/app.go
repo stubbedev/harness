@@ -809,6 +809,18 @@ func (app *App) initCoderAgent(ctx context.Context, interactive bool) error {
 		slog.Error("Failed to create coder agent", "err", err)
 		return err
 	}
+	// Warm the readiness path off the submit path. Without this the
+	// first prompt absorbs the background agent build (system prompt,
+	// tool palette) plus the first model/tool rebuild, and until the
+	// user message is persisted the editor looks dead: typed text sits
+	// there and Enter appears to do nothing. Warming overlaps that work
+	// with the user typing instead.
+	warmupCtx := app.globalCtx
+	crash.Go("agent.warmup", func() {
+		if err := app.AgentCoordinator.Warmup(warmupCtx); err != nil {
+			slog.Warn("Failed to warm up coder agent", "error", err)
+		}
+	})
 	return nil
 }
 

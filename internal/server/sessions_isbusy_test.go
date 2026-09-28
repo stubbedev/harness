@@ -36,6 +36,8 @@ func (s *stubCoordinator) RunAccepted(ctx context.Context, accept *agent.Accepte
 	return nil, nil
 }
 
+func (s *stubCoordinator) Warmup(context.Context) error { return nil }
+
 func (s *stubCoordinator) BeginAccepted(sessionID string) *agent.AcceptedRun {
 	return nil
 }

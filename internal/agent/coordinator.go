@@ -151,6 +151,17 @@ type Coordinator interface {
 	// not running — a finished run never takes another step, so the
 	// message could not be delivered.
 	SteerSubagent(ctx context.Context, childSessionID, text string) error
+	// Warmup runs the readiness work the first run would otherwise wait
+	// on: the background agent build (system prompt, initial tool
+	// palette), for a non-interactive coordinator the bounded wait for
+	// MCP initialization too, then the first model/tool rebuild.
+	// Calling it right after construction moves that work off the first
+	// submit, which would otherwise absorb all of it while the user
+	// watches a seemingly dead prompt line. It is idempotent and safe to
+	// race with Run: the builds behind it are memoized per generation, so
+	// a run that overlaps the warmup waits it out and a run that follows
+	// it finds everything hot.
+	Warmup(ctx context.Context) error
 }
 
 type coordinator struct {
@@ -429,6 +440,42 @@ func (c *coordinator) mcpInitWait(ctx context.Context) error {
 	return mcp.WaitForInitBudget(ctx, mcp.InitWaitBudget)
 }
 
+// Warmup implements Coordinator. It is exactly run's prologue,
+// single-sourced here so a coordinator can complete it ahead of the
+// first submit (see app.initCoderAgent) and a run that races the warmup
+// still goes through the identical sequence.
+func (c *coordinator) Warmup(ctx context.Context) error {
+	if err := c.readyWg.Wait(); err != nil {
+		return err
+	}
+
+	// MCP servers connect asynchronously (see mcp.Initialize).
+	//
+	// Interactive runs never wait for that to finish: the tool list is
+	// built from whatever is registered right now, servers still
+	// connecting are simply absent from the palette, and they are picked
+	// up by later runs once they register and publish
+	// EventToolsListChanged. Blocking here froze the TUI for the duration
+	// of the slowest server's connect timeout whenever a prompt was sent
+	// before initialization finished — most visibly on the first message.
+	//
+	// Non-interactive runs get a single shot at the tool palette, so they
+	// do wait for initialization to settle — but bounded by InitWaitBudget
+	// rather than each server's connect timeout, so a server wedged
+	// mid-handshake cannot stall a headless run for minutes. Past the
+	// budget the turn proceeds without the stragglers; their tools simply
+	// stay absent from this run.
+	if !c.interactive {
+		if err := c.mcpInitWait(ctx); err != nil {
+			return fmt.Errorf("failed to wait for MCP initialization: %w", err)
+		}
+	}
+	if err := c.UpdateModels(ctx); err != nil {
+		return fmt.Errorf("failed to update models: %w", err)
+	}
+	return nil
+}
+
 // Run implements Coordinator.
 func (c *coordinator) Run(ctx context.Context, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	return c.run(ctx, nil, sessionID, prompt, attachments...)
@@ -445,35 +492,8 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 // dispatchMu; when nil (the in-process/local path) no accept tracking
 // applies.
 func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
-	if err := c.readyWg.Wait(); err != nil {
+	if err := c.Warmup(ctx); err != nil {
 		return nil, err
-	}
-
-	// MCP servers connect asynchronously (see mcp.Initialize).
-	//
-	// Interactive runs never wait for that to finish: the tool list below
-	// is built from whatever is registered right now, servers still
-	// connecting are simply absent from this run's palette, and they are
-	// picked up by later runs once they register and publish
-	// EventToolsListChanged. Blocking here froze the TUI for the duration
-	// of the slowest server's connect timeout whenever a prompt was sent
-	// before initialization finished — most visibly on the first message.
-	//
-	// Non-interactive runs get a single shot at the tool palette, so they
-	// do wait for initialization to settle — but bounded by InitWaitBudget
-	// rather than each server's connect timeout, so a server wedged
-	// mid-handshake cannot stall a headless run for minutes. Past the
-	// budget the turn proceeds without the stragglers; their tools simply
-	// stay absent from this run.
-	if !c.interactive {
-		if err := c.mcpInitWait(ctx); err != nil {
-			return nil, fmt.Errorf("failed to wait for MCP initialization: %w", err)
-		}
-	}
-
-	// refresh models before each run
-	if err := c.UpdateModels(ctx); err != nil {
-		return nil, fmt.Errorf("failed to update models: %w", err)
 	}
 
 	model := c.currentAgent.Model()

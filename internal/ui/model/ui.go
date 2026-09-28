@@ -2593,29 +2593,59 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 
+				draft := strings.TrimSpace(value)
+
+				// Quit words work whatever the agent is doing.
+				if draft == "exit" || draft == "quit" {
+					m.textarea.Reset()
+					return tea.Quit
+				}
+
+				// A shell command runs without the agent.
+				if m.bangMode && draft != "" {
+					m.textarea.Reset()
+					if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					m.bangMode = false
+					m.setEditorPrompt()
+					m.randomizePlaceholders()
+					m.historyReset()
+					return tea.Batch(append(cmds, m.runShellCommand(draft))...)
+				}
+
+				// An empty enter just clears the editor.
+				if draft == "" {
+					m.textarea.Reset()
+					if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					return nil
+				}
+
+				// The draft survives a rejected send: the readiness gate
+				// runs before the editor is cleared, so a prompt typed while
+				// the agent is still starting (or the server is unreachable)
+				// is reported but not thrown away. A command invocation
+				// ("/goal ...") runs without the agent and stays ungated;
+				// its decision is computed once here and reused below.
+				inv, isInvocation := m.editorInvocation(draft)
+				if !isInvocation {
+					if err := m.com.Workspace.AgentReadyErr(); err != nil {
+						return util.ReportError(err)
+					}
+				}
+
 				// Otherwise, send the message
 				m.textarea.Reset()
 				if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
 					cmds = append(cmds, cmd)
 				}
 
-				value = strings.TrimSpace(value)
-				if value == "exit" || value == "quit" {
-					return tea.Quit
-				}
-
-				if m.bangMode && value != "" {
-					m.bangMode = false
-					m.setEditorPrompt()
-					m.randomizePlaceholders()
-					m.historyReset()
-					return tea.Batch(m.runShellCommand(value))
-				}
-
 				// Inline attachments ride references in the text; swap them
 				// for the payloads. Paste tokens are stripped, mention text
 				// stays.
-				value, attachments := m.resolveInlineAttachments(value)
+				value, attachments := m.resolveInlineAttachments(draft)
 				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
 					return nil
 				}
@@ -2626,10 +2656,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				// A command invocation ("/compact keep the API notes") runs
 				// the command. A line carrying attachments is a message:
 				// commands take text, not files.
-				if len(attachments) == 0 {
-					if inv, ok := m.editorInvocation(value); ok {
-						return m.invoke(inv)
-					}
+				if len(attachments) == 0 && isInvocation {
+					return m.invoke(inv)
 				}
 
 				if m.agentView.shown != "" {
