@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"path/filepath"
+	"sync"
 )
 
 // BuiltinPrefix is the path prefix for builtin skill files. It is used by
@@ -28,7 +29,28 @@ func DiscoverBuiltin() []*Skill {
 // DiscoverBuiltinWithStates is like DiscoverBuiltin but additionally returns
 // a per-file state slice describing parse/validation outcomes. Useful for
 // diagnostics.
+//
+// The embedded tree is fixed at build time, so it is walked and parsed
+// once; every call hands out copies, since callers may adjust the skills
+// they receive.
 func DiscoverBuiltinWithStates() ([]*Skill, []*SkillState) {
+	skills, states := builtinSkills()
+	outSkills := make([]*Skill, len(skills))
+	for i, skill := range skills {
+		clone := *skill
+		outSkills[i] = &clone
+	}
+	outStates := make([]*SkillState, len(states))
+	for i, state := range states {
+		clone := *state
+		outStates[i] = &clone
+	}
+	return outSkills, outStates
+}
+
+var builtinSkills = sync.OnceValues(discoverBuiltin)
+
+func discoverBuiltin() ([]*Skill, []*SkillState) {
 	var discovered []*Skill
 	var states []*SkillState
 
