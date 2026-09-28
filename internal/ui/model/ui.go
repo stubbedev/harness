@@ -810,6 +810,12 @@ func (m *UI) loadMCPrompts() tea.Msg {
 	return mcpPromptsLoadedMsg{Prompts: prompts}
 }
 
+// themeSavedMsg reports how writing a chosen theme to the config went.
+type themeSavedMsg struct {
+	name string
+	err  error
+}
+
 // Update handles updates to the UI model.
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.update(msg)
@@ -1013,6 +1019,16 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearChatMouseMsg:
 		m.chat.ClearMouse()
 
+	case themeSavedMsg:
+		if msg.err != nil {
+			// Nothing was saved, so put the previous theme back rather
+			// than leaving the UI in a state the config doesn't describe.
+			m.revertThemePreview()
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		m.commitThemePreview()
+		cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Theme set to: "+msg.name)))
 	case promptHistoryLoadedMsg:
 		if msg.forSession != m.currentSessionID() {
 			break
@@ -1999,16 +2015,22 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 
 	// Command dialog messages.
 	case dialog.ActionSelectNotificationStyle:
-		cfg := m.com.Config()
-		if cfg != nil && cfg.Options != nil {
-			cfg.Options.Notifications = msg.Style
-			if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notifications", msg.Style); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			} else {
-				cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Notifications set to: "+msg.Style)))
-			}
-			// Reinitialize notification backend with new style.
-			m.notifyBackend = selectNotificationBackend(m.caps, cfg)
+		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
+			// Switch the backend now from a copy: the published config is
+			// never mutated in place, and the write that updates it may be
+			// a server round trip, which the key press does not wait on.
+			opts := *cfg.Options
+			opts.Notifications = msg.Style
+			chosen := *cfg
+			chosen.Options = &opts
+			m.notifyBackend = selectNotificationBackend(m.caps, &chosen)
+			style := msg.Style
+			cmds = append(cmds, func() tea.Msg {
+				if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.notifications", style); err != nil {
+					return util.ReportError(err)()
+				}
+				return util.NewInfoMsg("Notifications set to: " + style)
+			})
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
 	case dialog.ActionNewSession:
@@ -2153,25 +2175,15 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 			cmds = append(cmds, msg.Cmd)
 		}
 	case dialog.ActionSelectTheme:
-		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.theme", msg.Name); err != nil {
-			// The preview is still on screen but nothing was saved, so
-			// put the previous theme back rather than leaving the UI in a
-			// state the config doesn't describe.
-			m.revertThemePreview()
-			cmds = append(cmds, util.ReportError(err))
-			m.dialog.CloseDialog(dialog.ThemesID)
-			break
-		}
-		if cfg := m.com.Config(); cfg != nil && cfg.Options != nil {
-			if cfg.Options.TUI == nil {
-				cfg.Options.TUI = &config.TUIOptions{}
-			}
-			cfg.Options.TUI.Theme = msg.Name
-		}
+		// The chosen theme stays on screen while the write happens off
+		// the key path; the preview snapshot is kept until it lands, so a
+		// failed write can put the previous theme back.
 		m.previewTheme(msg.Name)
-		m.commitThemePreview()
-		cmds = append(cmds, util.CmdHandler(util.NewInfoMsg("Theme set to: "+msg.Name)))
 		m.dialog.CloseDialog(dialog.ThemesID)
+		name := msg.Name
+		cmds = append(cmds, func() tea.Msg {
+			return themeSavedMsg{name: name, err: m.com.Workspace.SetConfigField(config.ScopeGlobal, "options.tui.theme", name)}
+		})
 
 	case dialog.ActionMentionSelected:
 		m.dialog.CloseDialog(dialog.MentionPickerID)
@@ -2695,7 +2707,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					return tea.Batch(m.steerAgent(value), m.loadPromptHistory())
 				}
 
-				return tea.Batch(m.sendMessage(value, attachments...), m.loadPromptHistory())
+				// The readiness gate above already ran for this prompt.
+				return tea.Batch(m.sendReadyMessage(value, attachments...), m.loadPromptHistory())
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
@@ -4170,13 +4183,21 @@ func (m *UI) runSkill(skillID, name, args string) tea.Cmd {
 	}
 }
 
-// sendMessage sends a message with the given content and attachments.
+// sendMessage sends a message with the given content and attachments,
+// once the agent reports ready.
 func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
-	content = rewriteSubagentPrompt(content, m.activeSubagentNames)
-
 	if err := m.com.Workspace.AgentReadyErr(); err != nil {
 		return util.ReportError(err)
 	}
+	return m.sendReadyMessage(content, attachments...)
+}
+
+// sendReadyMessage is sendMessage for a caller that already checked the
+// agent is ready. In client/server mode the check is a round trip to the
+// server, made on the key press, so the editor's submit path makes it
+// once, not twice.
+func (m *UI) sendReadyMessage(content string, attachments ...message.Attachment) tea.Cmd {
+	content = rewriteSubagentPrompt(content, m.activeSubagentNames)
 
 	// Start the turn timer.
 	common.StartTurn()
