@@ -4464,58 +4464,31 @@ func (m *UI) disarmRewind() {
 }
 
 // openDialog opens a dialog by its ID.
+// dialogOpeners maps each dialog an ActionOpenDialog can name to its
+// opener. TestEveryOpenableDialogHasAnOpener holds the command catalog to
+// it, so a palette entry cannot name a dialog nothing opens.
+var dialogOpeners = map[dialog.ID]func(*UI) tea.Cmd{
+	dialog.SessionsID:      (*UI).openSessionsDialog,
+	dialog.ModelsID:        (*UI).openModelsDialog,
+	dialog.CommandsID:      (*UI).openCommandsDialog,
+	dialog.ReasoningID:     (*UI).openReasoningDialog,
+	dialog.ConnectID:       (*UI).openConnectDialog,
+	dialog.ThemesID:        (*UI).openThemesDialog,
+	dialog.RewindID:        (*UI).openRewindDialog,
+	dialog.NotificationsID: (*UI).openNotificationsDialog,
+	dialog.MentionPickerID: (*UI).openMentionPicker,
+	dialog.MCPServersID:    (*UI).openMCPServersDialog,
+	dialog.LSPServersID:    (*UI).openLSPServersDialog,
+}
+
+// openDialog opens the dialog with id, or brings it to the front.
 func (m *UI) openDialog(id dialog.ID) tea.Cmd {
-	var cmds []tea.Cmd
-	switch id {
-	case dialog.SessionsID:
-		if cmd := m.openSessionsDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.ModelsID:
-		if cmd := m.openModelsDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.CommandsID:
-		if cmd := m.openCommandsDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.ReasoningID:
-		if cmd := m.openReasoningDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.ConnectID:
-		if cmd := m.openConnectDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.ThemesID:
-		if cmd := m.openThemesDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.RewindID:
-		if cmd := m.openRewindDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.NotificationsID:
-		if cmd := m.openNotificationsDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.MentionPickerID:
-		if cmd := m.openMentionPicker(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.MCPServersID:
-		if cmd := m.openMCPServersDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case dialog.LSPServersID:
-		if cmd := m.openLSPServersDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	default:
-		// Unknown dialog
-		break
+	open, ok := dialogOpeners[id]
+	if !ok {
+		slog.Warn("No opener for dialog", "id", id)
+		return nil
 	}
-	return tea.Batch(cmds...)
+	return open(m)
 }
 
 // openRewindDialog opens the rewind picker over the session's user
