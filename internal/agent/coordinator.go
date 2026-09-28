@@ -1187,7 +1187,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 
 	// Add LSP tools if user has configured LSPs or auto_lsp is enabled (nil or true).
 	if len(c.cfg.Config().LSP) > 0 || c.cfg.Config().Options.AutoLSPEnabled() {
-		allTools = append(allTools, tools.NewLSPTool(manager, c.history, c.filetracker))
+		allTools = append(allTools, tools.NewLSPTool(manager, c.history, c.filetracker, c.presence))
 	}
 
 	if len(c.cfg.Config().MCP) > 0 {

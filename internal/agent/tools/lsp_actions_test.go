@@ -27,7 +27,7 @@ func TestLSPActionEnumMatchesDispatch(t *testing.T) {
 	t.Parallel()
 
 	var dispatched []string
-	for _, action := range slices.Sorted(maps.Keys(lspActions(nil, nil, nil))) {
+	for _, action := range slices.Sorted(maps.Keys(lspActions(nil, nil, nil, nil))) {
 		dispatched = append(dispatched, string(action))
 	}
 	enum := enumTag[LSPParams](t, "Action")

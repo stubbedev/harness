@@ -106,17 +106,8 @@ func NewWriteTool(
 
 			filetracker.Observe(ctx, tracker, sessionID, filePath, written, []filetracker.Range{{Start: 0, End: len(params.Content)}})
 
-			lspManager.NotifyChangeAsync(ctx, filePath)
-
-			result := fmt.Sprintf("File successfully written: %s", filePath)
-			result = fmt.Sprintf("<result>\n%s\n</result>", result)
-			// Publish the mutation to concurrent harness instances, and warn
-			// when one of them wrote this file recently: a soft note, not a
-			// refusal — the evidence layer remains the hard line.
-			if warn := presence.Report(filePath); warn != "" {
-				result += "\n" + warn
-			}
-			result += reportDiagnosticsNow(ctx, lspManager, filePath)
+			result := fmt.Sprintf("<result>\nFile successfully written: %s\n</result>\n", filePath) +
+				finishFileChange(ctx, lspManager, presence, filePath)
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(result),
 				WriteResponseMetadata{

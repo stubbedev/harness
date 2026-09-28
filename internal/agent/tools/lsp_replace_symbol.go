@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/presence"
+
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stubbedev/harness/internal/filetracker"
@@ -74,6 +76,7 @@ func replaceSymbolAction(
 	lspManager *lsp.Manager,
 	files history.Service,
 	tracker filetracker.Service,
+	reg *presence.Registry,
 ) func(context.Context, ReplaceSymbolParams) (fantasy.ToolResponse, error) {
 	return func(ctx context.Context, params ReplaceSymbolParams) (fantasy.ToolResponse, error) {
 		if params.Symbol == "" {
@@ -156,11 +159,9 @@ func replaceSymbolAction(
 
 		filetracker.Advance(ctx, tracker, sessionID, params.FilePath, content, []byte(newContent))
 
-		lspManager.NotifyChangeAsync(ctx, params.FilePath)
-
 		summary := op.summary(params.Symbol, params.FilePath, startLine+1, endLine+1)
 
-		resp := fantasy.NewTextResponse(summary + "\n" + reportDiagnosticsNow(ctx, lspManager, params.FilePath))
+		resp := fantasy.NewTextResponse(summary + "\n" + finishFileChange(ctx, lspManager, reg, params.FilePath))
 		resp = fantasy.WithResponseMetadata(resp, ReplaceSymbolResponseMetadata{
 			FilePath:   params.FilePath,
 			OldContent: string(content),

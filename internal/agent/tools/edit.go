@@ -102,21 +102,8 @@ func NewEditTool(
 				return response, nil
 			}
 
-			// Tell the language servers what changed and move on without
-			// waiting. Their answer is relayed by the sweep before the next
-			// model step, so a slow server never adds its analysis time to
-			// an edit.
-			lspManager.NotifyChangeAsync(ctx, params.FilePath)
-
-			// Publish the mutation to concurrent harness instances, and warn
-			// when one of them wrote this file recently: a soft note, not a
-			// refusal — the evidence layer remains the hard line.
-			text := fmt.Sprintf("<result>\n%s\n</result>\n", response.Content)
-			if warn := presence.Report(params.FilePath); warn != "" {
-				text += warn + "\n"
-			}
-			text += reportDiagnosticsNow(ctx, lspManager, params.FilePath)
-			response.Content = text
+			response.Content = fmt.Sprintf("<result>\n%s\n</result>\n", response.Content) +
+				finishFileChange(ctx, lspManager, presence, params.FilePath)
 			return response, nil
 		},
 	)

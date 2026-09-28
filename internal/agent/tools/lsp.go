@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/presence"
+
 	"github.com/stubbedev/harness/internal/toolname"
 
 	"charm.land/fantasy"
@@ -67,7 +69,7 @@ func adapt[P any](run func(context.Context, P) (fantasy.ToolResponse, error), pi
 }
 
 // lspActions maps each lsp action to its behaviour.
-func lspActions(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service) map[LSPAction]lspActionFunc {
+func lspActions(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service, reg *presence.Registry) map[LSPAction]lspActionFunc {
 	return map[LSPAction]lspActionFunc{
 		LSPActionDiagnostics: adapt(diagnosticsAction(lspManager), func(p LSPParams) DiagnosticsParams {
 			return DiagnosticsParams{FilePath: p.FilePath}
@@ -84,12 +86,12 @@ func lspActions(lspManager *lsp.Manager, files history.Service, filetracker file
 		LSPActionCallHierarchy: adapt(callHierarchyAction(lspManager), func(p LSPParams) CallHierarchyParams {
 			return CallHierarchyParams{Symbol: p.Symbol, Direction: p.Direction, Path: p.Path}
 		}),
-		LSPActionRename: adapt(renameAction(lspManager, files, filetracker), func(p LSPParams) RenameParams {
+		LSPActionRename: adapt(renameAction(lspManager, files, filetracker, reg), func(p LSPParams) RenameParams {
 			return RenameParams{Symbol: p.Symbol, NewName: p.NewName, Path: p.Path}
 		}),
 		// The action parameter would shadow replace_symbol's own "action",
 		// so the model sends that one as "mode".
-		LSPActionReplaceSymbol: adapt(replaceSymbolAction(lspManager, files, filetracker), func(p LSPParams) ReplaceSymbolParams {
+		LSPActionReplaceSymbol: adapt(replaceSymbolAction(lspManager, files, filetracker, reg), func(p LSPParams) ReplaceSymbolParams {
 			return ReplaceSymbolParams{Symbol: p.Symbol, FilePath: p.FilePath, Replacement: p.Replacement, Action: p.Mode}
 		}),
 		LSPActionRestart: adapt(lspRestartAction(lspManager), func(p LSPParams) LSPRestartParams {
@@ -100,8 +102,8 @@ func lspActions(lspManager *lsp.Manager, files history.Service, filetracker file
 
 // NewLSPTool folds the language-server actions into one tool: the model
 // sees one schema, the code keeps one behaviour per action.
-func NewLSPTool(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service) fantasy.AgentTool {
-	actions := lspActions(lspManager, files, filetracker)
+func NewLSPTool(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service, reg *presence.Registry) fantasy.AgentTool {
+	actions := lspActions(lspManager, files, filetracker, reg)
 	var known []string
 	for _, action := range slices.Sorted(maps.Keys(actions)) {
 		known = append(known, string(action))

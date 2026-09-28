@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/presence"
+
 	"charm.land/fantasy"
 
 	"github.com/stubbedev/harness/internal/filetracker"
@@ -25,6 +27,7 @@ func renameAction(
 	lspManager *lsp.Manager,
 	files history.Service,
 	tracker filetracker.Service,
+	reg *presence.Registry,
 ) func(context.Context, RenameParams) (fantasy.ToolResponse, error) {
 	return func(ctx context.Context, params RenameParams) (fantasy.ToolResponse, error) {
 		if params.NewName == "" {
@@ -84,21 +87,18 @@ func renameAction(
 			}
 		}
 
-		// A rename knows exactly which files it touched, so tell the
-		// servers about those rather than re-sending every open file in
-		// the workspace and asking for a full re-analysis.
-		lspManager.NotifyChangesAsync(ctx, affectedFiles...)
-
 		var b strings.Builder
 		fmt.Fprintf(&b, "Renamed '%s' to '%s' in %d file(s):\n\n", params.Symbol, params.NewName, len(affectedFiles))
 		for _, f := range affectedFiles {
 			fmt.Fprintf(&b, "  %s\n", f)
 		}
 
-		// Every file the rename touched counts as the file in hand: a
-		// rename that breaks a caller breaks it in one of these, and
-		// burying that under "project diagnostics" reads as unrelated.
-		text := b.String() + "\n" + reportDiagnosticsNow(ctx, lspManager, affectedFiles...)
+		// A rename knows exactly which files it touched, so the servers
+		// hear about those rather than every open file, and every one of
+		// them counts as the file in hand: a rename that breaks a caller
+		// breaks it in one of these, and burying that under "project
+		// diagnostics" reads as unrelated.
+		text := b.String() + "\n" + finishFileChange(ctx, lspManager, reg, affectedFiles...)
 
 		return withFileMutations(fantasy.NewTextResponse(text), affectedFiles...), nil
 	}

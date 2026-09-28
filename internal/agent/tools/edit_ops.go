@@ -9,6 +9,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/lsp"
+	"github.com/stubbedev/harness/internal/presence"
+
 	"charm.land/fantasy"
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/stubbedev/harness/internal/filetracker"
@@ -159,6 +162,26 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 
 	filetracker.AdvanceChanges(edit.ctx, edit.filetracker, sessionID, filePath, current, newBytes, changes)
 	return newFileMutation(filePath, newBytes), nil
+}
+
+// finishFileChange is what every tool that changed files does once the
+// write has landed, so none can skip a step: tell the language servers
+// without waiting (their answer is relayed by the sweep before the next
+// model step), publish the change to concurrent harness instances, and
+// report what the servers already hold. It returns the notes to append to
+// the tool's result: a warning for each file another instance wrote
+// recently (a soft note, not a refusal; the evidence layer is the hard
+// line), then the diagnostics.
+func finishFileChange(ctx context.Context, lspManager *lsp.Manager, reg *presence.Registry, paths ...string) string {
+	lspManager.NotifyChangesAsync(ctx, paths...)
+	var notes strings.Builder
+	for _, path := range paths {
+		if warn := reg.Report(path); warn != "" {
+			notes.WriteString(warn + "\n")
+		}
+	}
+	notes.WriteString(reportDiagnosticsNow(ctx, lspManager, paths...))
+	return notes.String()
 }
 
 // recordFileVersion stores filePath in the session's file history: the
