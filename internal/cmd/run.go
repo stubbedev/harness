@@ -19,7 +19,6 @@ import (
 	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/format"
 	"github.com/stubbedev/harness/internal/herdr"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
@@ -156,7 +155,19 @@ harness run --continue "Follow up on your last response"
 			sessionID = sess.ID
 		}
 
-		return appWs.App().RunNonInteractive(ctx, os.Stdout, prompt, largeModel, smallModel, reasoningEffort, quiet || verbose, sessionID, useLast)
+		opts := app.NonInteractiveOptions{
+			Output:            os.Stdout,
+			Prompt:            prompt,
+			LargeModel:        largeModel,
+			SmallModel:        smallModel,
+			ReasoningEffort:   reasoningEffort,
+			ContinueSessionID: sessionID,
+			UseLast:           useLast,
+		}
+		if !quiet && !verbose {
+			opts.NewSpinner = runSpinner(ws.Config())
+		}
+		return appWs.App().RunNonInteractive(ctx, opts)
 	},
 }
 
@@ -219,7 +230,7 @@ func runNonInteractive(
 	}
 
 	var (
-		spinner   *format.Spinner
+		spin      app.Spinner
 		stderrTTY bool
 		progress  bool
 	)
@@ -228,22 +239,13 @@ func runNonInteractive(
 	progress = ws.Config.Options.ProgressEnabled()
 
 	if !hideSpinner && stderrTTY {
-		t := common.ThemeStylesForConfig(ws.Config, ws.Config.Models[config.SelectedModelTypeLarge].Provider)
-
-		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
-			Size:        10,
-			Label:       "Generating",
-			GradColorA:  t.WorkingGradFromColor,
-			GradColorB:  t.WorkingGradToColor,
-			CycleColors: true,
-		})
-		spinner.Start()
+		spin = runSpinner(ws.Config)(ctx, cancel)
 	}
 
 	stopSpinner := func() {
-		if !hideSpinner && spinner != nil {
-			spinner.Stop()
-			spinner = nil
+		if spin != nil {
+			spin.Stop()
+			spin = nil
 		}
 	}
 
@@ -744,4 +746,22 @@ func resolveSessionByID(ctx context.Context, c *client.Client, wsID, id string) 
 		return nil, err
 	}
 	return &s, nil
+}
+
+// runSpinner returns the progress spinner of a non-interactive run, in
+// the configured theme, falling back to the one the large model's provider
+// maps to. Both the in-process and the client/server run use it.
+func runSpinner(cfg *config.Config) func(context.Context, context.CancelFunc) app.Spinner {
+	return func(ctx context.Context, cancel context.CancelFunc) app.Spinner {
+		t := common.ThemeStylesForConfig(cfg, cfg.Models[config.SelectedModelTypeLarge].Provider)
+		s := newSpinner(ctx, cancel, anim.Settings{
+			Size:        10,
+			Label:       "Generating",
+			GradColorA:  t.WorkingGradFromColor,
+			GradColorB:  t.WorkingGradToColor,
+			CycleColors: true,
+		})
+		s.Start()
+		return s
+	}
 }

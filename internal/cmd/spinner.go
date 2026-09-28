@@ -1,4 +1,4 @@
-package format
+package cmd
 
 import (
 	"context"
@@ -12,28 +12,28 @@ import (
 	"github.com/stubbedev/harness/internal/ui/anim"
 )
 
-// Spinner wraps the bubbles spinner for non-interactive mode
-type Spinner struct {
+// spinner is the progress indicator of a non-interactive run.
+type spinner struct {
 	done chan struct{}
 	prog *tea.Program
 }
 
-type model struct {
+type spinnerModel struct {
 	cancel context.CancelFunc
 	anim   *anim.Anim
 }
 
-type tickMsg struct{}
+type spinnerTickMsg struct{}
 
-func tick() tea.Cmd {
-	return tea.Tick(anim.FrameInterval(), func(time.Time) tea.Msg { return tickMsg{} })
+func spinnerTick() tea.Cmd {
+	return tea.Tick(anim.FrameInterval(), func(time.Time) tea.Msg { return spinnerTickMsg{} })
 }
 
-func (m model) Init() tea.Cmd  { return tick() }
-func (m model) View() tea.View { return tea.NewView(m.anim.Render()) }
+func (m spinnerModel) Init() tea.Cmd  { return spinnerTick() }
+func (m spinnerModel) View() tea.View { return tea.NewView(m.anim.Render()) }
 
 // Update implements tea.Model.
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -41,30 +41,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel()
 			return m, tea.Quit
 		}
-	case tickMsg:
+	case spinnerTickMsg:
 		m.anim.Advance()
-		return m, tick()
+		return m, spinnerTick()
 	}
 	return m, nil
 }
 
-// NewSpinner creates a new spinner with the given message
-func NewSpinner(ctx context.Context, cancel context.CancelFunc, animSettings anim.Settings) *Spinner {
-	m := model{
+// newSpinner creates a spinner that calls cancel on ctrl+c or esc.
+func newSpinner(ctx context.Context, cancel context.CancelFunc, animSettings anim.Settings) *spinner {
+	m := spinnerModel{
 		anim:   anim.New(animSettings),
 		cancel: cancel,
 	}
 
 	p := tea.NewProgram(m, tea.WithOutput(os.Stderr), tea.WithContext(ctx))
 
-	return &Spinner{
+	return &spinner{
 		prog: p,
 		done: make(chan struct{}, 1),
 	}
 }
 
 // Start begins the spinner animation
-func (s *Spinner) Start() {
+func (s *spinner) Start() {
 	go func() {
 		defer close(s.done)
 		_, err := s.prog.Run()
@@ -77,7 +77,7 @@ func (s *Spinner) Start() {
 }
 
 // Stop ends the spinner animation
-func (s *Spinner) Stop() {
+func (s *spinner) Stop() {
 	s.prog.Quit()
 	<-s.done
 }

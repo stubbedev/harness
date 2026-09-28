@@ -30,7 +30,6 @@ import (
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/filetracker"
-	"github.com/stubbedev/harness/internal/format"
 	"github.com/stubbedev/harness/internal/herdr"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
@@ -43,8 +42,6 @@ import (
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/tmux"
-	"github.com/stubbedev/harness/internal/ui/anim"
-	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/update"
 	"github.com/stubbedev/harness/internal/version"
 )
@@ -325,10 +322,41 @@ func (app *App) resolveSession(ctx context.Context, continueSessionID string, us
 	}
 }
 
+// NonInteractiveOptions configures RunNonInteractive.
+type NonInteractiveOptions struct {
+	// Output receives the assistant's text as it streams.
+	Output io.Writer
+	Prompt string
+	// LargeModel and SmallModel override the configured models for this
+	// run; empty keeps them.
+	LargeModel string
+	SmallModel string
+	// ReasoningEffort overrides the large model's effort for this run.
+	ReasoningEffort string
+	// ContinueSessionID resumes that session; UseLast resumes the most
+	// recent one. Neither starts a new session.
+	ContinueSessionID string
+	UseLast           bool
+	// NewSpinner, when set, starts a progress indicator on a terminal
+	// stderr; cancel ends the run, for an indicator that takes ctrl+c.
+	// The app stops it once output begins. Rendering it is the caller's
+	// business, so this package draws no UI of its own.
+	NewSpinner func(ctx context.Context, cancel context.CancelFunc) Spinner
+}
+
+// Spinner is a progress indicator RunNonInteractive stops once output
+// begins.
+type Spinner interface {
+	Stop()
+}
+
 // RunNonInteractive runs the application in non-interactive mode with the
-// given prompt, printing to stdout.
-func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt, largeModel, smallModel, reasoningEffort string, hideSpinner bool, continueSessionID string, useLast bool) error {
+// given prompt, printing to opts.Output.
+func (app *App) RunNonInteractive(ctx context.Context, opts NonInteractiveOptions) error {
 	slog.Info("Running in non-interactive mode")
+	output, prompt := opts.Output, opts.Prompt
+	largeModel, smallModel, reasoningEffort := opts.LargeModel, opts.SmallModel, opts.ReasoningEffort
+	continueSessionID, useLast := opts.ContinueSessionID, opts.UseLast
 
 	// Re-initialize the coder agent without interactive-only tools.
 	if err := app.InitCoderAgentNonInteractive(ctx); err != nil {
@@ -358,7 +386,7 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	fmt.Fprintln(os.Stderr, app.config.Config().ResolvedLargeLine())
 
 	var (
-		spinner   *format.Spinner
+		spinner   Spinner
 		stderrTTY bool
 		progress  bool
 	)
@@ -366,28 +394,13 @@ func (app *App) RunNonInteractive(ctx context.Context, output io.Writer, prompt,
 	stderrTTY = term.IsTerminal(os.Stderr.Fd())
 	progress = app.config.Config().Options.ProgressEnabled()
 
-	if !hideSpinner && stderrTTY {
-		// The configured theme (options.tui.theme) wins over the
-		// provider-based mapping. Resolved inline because importing
-		// ui/common here would cycle (common -> workspace -> app).
-		t := styles.ThemeForProvider(app.config.Config().Models[config.SelectedModelTypeLarge].Provider)
-		if cfg := app.config.Config(); cfg != nil && cfg.Options != nil && cfg.Options.TUI != nil && cfg.Options.TUI.Theme != "" {
-			t = styles.ThemeFromConfig(cfg.Options.TUI.Theme)
-		}
-
-		spinner = format.NewSpinner(ctx, cancel, anim.Settings{
-			Size:        10,
-			Label:       "Generating",
-			GradColorA:  t.WorkingGradFromColor,
-			GradColorB:  t.WorkingGradToColor,
-			CycleColors: true,
-		})
-		spinner.Start()
+	if opts.NewSpinner != nil && stderrTTY {
+		spinner = opts.NewSpinner(ctx, cancel)
 	}
 
 	// Helper function to stop spinner once.
 	stopSpinner := func() {
-		if !hideSpinner && spinner != nil {
+		if spinner != nil {
 			spinner.Stop()
 			spinner = nil
 		}
