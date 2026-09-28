@@ -890,19 +890,13 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case loadSessionMsg:
-		// A session switch leaves any retry notice behind: it
-		// belonged to the previous session's backoff.
-		m.clearRetryNotice()
+		m.resetSessionScope()
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
-		// Session switch: the memoized busy state and queued prompts
-		// belong to the previous session. Drop them and re-fetch
-		// off-thread so the queue indicator and esc behavior track the new
-		// session instead of a stale one.
-		m.invalidateBusyCaches()
-		m.invalidatePromptQueue()
-		m.promptQueueItems = nil
+		// The memoized busy state and queued prompts were dropped with
+		// the previous session; re-fetch them off-thread so the queue
+		// indicator and esc behavior track the new one.
 		m.promptQueueCheckedAt = time.Time{}
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -910,17 +904,9 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		m.parentTitle = ""
-		m.subagentColor = ""
-		m.knownChildSessionIDs = nil
-		// runningSubagents is otherwise only refreshed by a live RuntimeEvent
-		// for the current session's parent — drop the previous session's
-		// list and re-fetch for the new one so the sidebar doesn't keep
-		// showing a stale "Active subagents" panel until one happens to
-		// arrive (or never, if nothing is dispatched under the new session).
-		m.runningSubagents = nil
-		m.resetAgentTasks()
-		m.pendingModelAction = nil
+		// runningSubagents is otherwise only refreshed by a live
+		// RuntimeEvent for the current session's parent, so fetch the new
+		// session's list rather than wait for one that may never come.
 		cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		// Restored diagnostics items render their live overlay from the
@@ -4819,30 +4805,41 @@ func (m *UI) handleAWSSSOAuthResult(errMsg string) tea.Cmd {
 // newSession clears the current session state and prepares for a new session.
 // The actual session creation happens when the user sends their first message.
 // Returns a command to reload prompt history.
+// resetSessionScope drops everything the UI holds about the session it
+// is leaving: a switch to another session and a fresh one both start from
+// here, so a field added to one path cannot be forgotten on the other.
+// Leaving any of it set would keep rendering the previous session's parent
+// breadcrumb, "Active subagents" panel, queue or retry notice.
+func (m *UI) resetSessionScope() {
+	m.clearRetryNotice()
+	m.knownChildSessionIDs = nil
+	m.runningSubagents = nil
+	m.resetAgentTasks()
+	m.parentTitle = ""
+	m.subagentColor = ""
+	m.pendingModelAction = nil
+	m.promptQueueItems = nil
+	m.invalidateBusyCaches()
+	m.invalidatePromptQueue()
+}
+
 func (m *UI) newSession() tea.Cmd {
 	if !m.hasSession() {
 		return nil
 	}
 
+	m.resetSessionScope()
 	m.session = nil
 	m.sessionFiles = nil
+	// Reads recorded for the next prompt belong to the session being
+	// left. A load keeps them: it also reloads the same session (on
+	// reconnect, or right after the first prompt created it).
 	m.sessionFileReads = nil
-	m.knownChildSessionIDs = nil
-	// Same reset the loadSessionMsg handler performs on a session switch. A new
-	// session has no parent and no children, so leaving these set would keep
-	// rendering the previous session's parent breadcrumb and "Active subagents"
-	// panel on an empty screen until an unrelated event happened to clear them.
-	m.runningSubagents = nil
-	m.resetAgentTasks()
-	m.parentTitle = ""
-	m.subagentColor = ""
 	m.setState(uiLanding, uiFocusEditor)
 	cmd := m.focusEditor()
 	m.chat.ClearMessages()
-	m.promptQueueItems = nil
+	// A new session has no queue to fetch.
 	m.promptQueueCheckedAt = time.Now()
-	m.invalidateBusyCaches()
-	m.invalidatePromptQueue()
 	m.historyReset()
 	agenttools.ResetCache()
 	return tea.Batch(
