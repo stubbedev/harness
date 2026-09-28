@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/stubbedev/harness/internal/db"
@@ -52,47 +51,46 @@ func NewService(q *db.Queries) Service {
 	}
 }
 
+// Create stores the initial version of a file for the session. When the
+// session already holds that version it stores the path's next version
+// instead, the way a concurrent writer that got there first requires.
 func (s *service) Create(ctx context.Context, sessionID, path, content string) (File, error) {
-	return s.createWithVersion(ctx, sessionID, path, content, InitialVersion)
-}
-
-// CreateVersion creates a new version of a file with auto-incremented version
-// number. If no previous versions exist for the path, it creates the initial
-// version. The provided content is stored as the new version.
-func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (File, error) {
-	latest, err := s.q.GetLatestFileVersion(ctx, path)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return s.Create(ctx, sessionID, path, content)
-	case err != nil:
+	dbFile, err := s.q.CreateFile(ctx, db.CreateFileParams{
+		ID:        uuid.New().String(),
+		SessionID: sessionID,
+		Path:      path,
+		Content:   content,
+		Version:   InitialVersion,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.CreateVersion(ctx, sessionID, path, content)
+	}
+	if err != nil {
 		return File{}, err
 	}
-	return s.createWithVersion(ctx, sessionID, path, content, latest+1)
+	return s.created(dbFile), nil
 }
 
-// createWithVersion inserts the file at version, stepping the version up
-// when a concurrent writer already took it.
-func (s *service) createWithVersion(ctx context.Context, sessionID, path, content string, version int64) (File, error) {
-	const maxAttempts = 3
-	for attempt := 1; ; attempt++ {
-		dbFile, err := s.q.CreateFile(ctx, db.CreateFileParams{
-			ID:        uuid.New().String(),
-			SessionID: sessionID,
-			Path:      path,
-			Content:   content,
-			Version:   version,
-		})
-		if err != nil {
-			if attempt < maxAttempts && strings.Contains(err.Error(), "UNIQUE constraint failed") {
-				version++
-				continue
-			}
-			return File{}, err
-		}
-		file := s.fromDBItem(dbFile)
-		s.Publish(pubsub.CreatedEvent, file)
-		return file, nil
+// CreateVersion stores content as the path's next version, the initial
+// one when the path has none. The version is computed by the insert
+// itself, so concurrent writers cannot collide on it.
+func (s *service) CreateVersion(ctx context.Context, sessionID, path, content string) (File, error) {
+	dbFile, err := s.q.CreateFileNextVersion(ctx, db.CreateFileNextVersionParams{
+		ID:        uuid.New().String(),
+		SessionID: sessionID,
+		Path:      path,
+		Content:   content,
+	})
+	if err != nil {
+		return File{}, err
 	}
+	return s.created(dbFile), nil
+}
+
+func (s *service) created(dbFile db.File) File {
+	file := s.fromDBItem(dbFile)
+	s.Publish(pubsub.CreatedEvent, file)
+	return file
 }
 
 func (s *service) Get(ctx context.Context, id string) (File, error) {

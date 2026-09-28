@@ -12,7 +12,12 @@ import (
 type Querier interface {
 	AddSessionCost(ctx context.Context, arg AddSessionCostParams) (int64, error)
 	CreateCheckpoint(ctx context.Context, arg CreateCheckpointParams) (Checkpoint, error)
+	// A version the session already holds for the path inserts nothing and
+	// returns no row, which callers read as a conflict.
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
+	// Inserts the path's next version, computed in the same statement so a
+	// concurrent writer cannot take it in between.
+	CreateFileNextVersion(ctx context.Context, arg CreateFileNextVersionParams) (File, error)
 	CreateMemory(ctx context.Context, arg CreateMemoryParams) (Memory, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
@@ -32,7 +37,6 @@ type Querier interface {
 	// skip fetching the parts blob and the rest of the row.
 	GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (GetLastAssistantMessageBySessionRow, error)
 	GetLastSession(ctx context.Context) (Session, error)
-	GetLatestFileVersion(ctx context.Context, path string) (int64, error)
 	GetMemory(ctx context.Context, id string) (Memory, error)
 	GetMemoryByTitle(ctx context.Context, lower string) (Memory, error)
 	GetMessage(ctx context.Context, id string) (Message, error)

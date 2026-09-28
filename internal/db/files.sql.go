@@ -22,6 +22,7 @@ INSERT INTO files (
 ) VALUES (
     ?, ?, ?, ?, ?, strftime('%s', 'now'), strftime('%s', 'now')
 )
+ON CONFLICT (path, session_id, version) DO NOTHING
 RETURNING id, session_id, path, content, version, created_at, updated_at
 `
 
@@ -33,6 +34,8 @@ type CreateFileParams struct {
 	Version   int64  `json:"version"`
 }
 
+// A version the session already holds for the path inserts nothing and
+// returns no row, which callers read as a conflict.
 func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, error) {
 	row := q.db.QueryRowContext(ctx, createFile,
 		arg.ID,
@@ -40,6 +43,58 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, e
 		arg.Path,
 		arg.Content,
 		arg.Version,
+	)
+	var i File
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.Path,
+		&i.Content,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createFileNextVersion = `-- name: CreateFileNextVersion :one
+INSERT INTO files (
+    id,
+    session_id,
+    path,
+    content,
+    version,
+    created_at,
+    updated_at
+)
+SELECT
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    COALESCE(MAX(f.version) + 1, 0),
+    strftime('%s', 'now'),
+    strftime('%s', 'now')
+FROM files f
+WHERE f.path = ?3
+RETURNING id, session_id, path, content, version, created_at, updated_at
+`
+
+type CreateFileNextVersionParams struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+}
+
+// Inserts the path's next version, computed in the same statement so a
+// concurrent writer cannot take it in between.
+func (q *Queries) CreateFileNextVersion(ctx context.Context, arg CreateFileNextVersionParams) (File, error) {
+	row := q.db.QueryRowContext(ctx, createFileNextVersion,
+		arg.ID,
+		arg.SessionID,
+		arg.Path,
+		arg.Content,
 	)
 	var i File
 	err := row.Scan(
@@ -101,21 +156,6 @@ func (q *Queries) GetFileByPathAndSession(ctx context.Context, arg GetFileByPath
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const getLatestFileVersion = `-- name: GetLatestFileVersion :one
-SELECT version
-FROM files
-WHERE path = ?
-ORDER BY version DESC
-LIMIT 1
-`
-
-func (q *Queries) GetLatestFileVersion(ctx context.Context, path string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getLatestFileVersion, path)
-	var version int64
-	err := row.Scan(&version)
-	return version, err
 }
 
 const listFilesBySessionWithChildren = `-- name: ListFilesBySessionWithChildren :many
