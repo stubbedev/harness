@@ -1294,7 +1294,7 @@ func createRemoteTransport(ctx context.Context, cfg *config.ConfigStore, name st
 
 // oauthTokenKey is the config field an MCP server's OAuth token lives in.
 func oauthTokenKey(name string) string {
-	return fmt.Sprintf("mcp.%s.oauth_token", name)
+	return config.MCPFieldPath(name, "oauth_token")
 }
 
 // newOAuthHandler builds the OAuth handler for a remote server and

@@ -85,8 +85,8 @@ func logoutCopilot(c *client.Client, wsID string) error {
 	ctx := interactiveContext()
 
 	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+string(catalog.InferenceProviderCopilot)+".api_key"),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, "providers."+string(catalog.InferenceProviderCopilot)+".oauth"),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, config.ProviderFieldPath(string(catalog.InferenceProviderCopilot), "api_key")),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, config.ProviderFieldPath(string(catalog.InferenceProviderCopilot), "oauth")),
 	); err != nil {
 		return err
 	}

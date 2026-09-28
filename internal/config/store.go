@@ -574,7 +574,7 @@ func (s *ConfigStore) SetProviderKey(scope Scope, providerID, apiKey string) err
 	if err != nil {
 		return err
 	}
-	if err := s.SetConfigField(scope, fmt.Sprintf("providers.%s.api_key", providerID), apiKey); err != nil {
+	if err := s.SetConfigField(scope, ProviderFieldPath(providerID, "api_key"), apiKey); err != nil {
 		return fmt.Errorf("failed to save api key to config file: %w", err)
 	}
 	providerConfig.APIKey = apiKey
@@ -597,8 +597,8 @@ func (s *ConfigStore) SetProviderOAuthToken(scope Scope, providerID string, toke
 	// just completed.
 	if err := s.withRefreshLock(providerID, func() error {
 		return s.SetConfigFields(scope, map[string]any{
-			fmt.Sprintf("providers.%s.api_key", providerID): token.AccessToken,
-			fmt.Sprintf("providers.%s.oauth", providerID):   token,
+			ProviderFieldPath(providerID, "api_key"): token.AccessToken,
+			ProviderFieldPath(providerID, "oauth"):   token,
 		})
 	}); err != nil {
 		return err
@@ -733,8 +733,8 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	s.applyToken(providerConfig, refreshedToken, providerID)
 
 	if err := s.SetConfigFields(scope, map[string]any{
-		fmt.Sprintf("providers.%s.api_key", providerID): refreshedToken.AccessToken,
-		fmt.Sprintf("providers.%s.oauth", providerID):   refreshedToken,
+		ProviderFieldPath(providerID, "api_key"): refreshedToken.AccessToken,
+		ProviderFieldPath(providerID, "oauth"):   refreshedToken,
 	}); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
@@ -920,7 +920,7 @@ func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.
 		return nil, nil
 	}
 
-	oauthKey := fmt.Sprintf("providers.%s.oauth", providerID)
+	oauthKey := ProviderFieldPath(providerID, "oauth")
 	oauthResult := gjson.Get(string(data), oauthKey)
 	if !oauthResult.Exists() {
 		return nil, nil
