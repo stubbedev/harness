@@ -664,23 +664,23 @@ func selectNotificationBackend(caps common.Capabilities, cfg *config.Config) not
 	// Check for explicit user preference first.
 	if cfg != nil && cfg.Options != nil && cfg.Options.Notifications != "" {
 		switch cfg.Options.Notifications {
-		case "native":
+		case config.NotificationsNative:
 			if !notification.NativeSupported {
 				slog.Debug("Native notifications unavailable on this platform; using OSC backend", "osc99_supported", caps.OSC99Notifications)
 				return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
 			}
 			slog.Debug("Using native backend (user preference)")
 			return notification.NewNativeBackend(notification.Icon)
-		case "osc":
+		case config.NotificationsOSC:
 			slog.Debug("Using OSC backend (user preference)", "osc99_supported", caps.OSC99Notifications)
 			return notification.NewOSCBackend(notification.Icon, caps.OSC99Notifications)
-		case "bell":
+		case config.NotificationsBell:
 			slog.Debug("Using bell backend (user preference)")
 			return notification.NewBellBackend()
-		case "disabled":
+		case config.NotificationsDisabled:
 			slog.Debug("Notifications disabled (user preference)")
 			return notification.NoopBackend{}
-		case "auto":
+		case config.NotificationsAuto:
 			// Fall through to auto-detection below.
 		default:
 			slog.Warn("Unknown notification style, using auto", "style", cfg.Options.Notifications)

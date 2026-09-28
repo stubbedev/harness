@@ -593,6 +593,7 @@ func (c *Config) NormalizeOptions() {
 	if c.Options.TUI == nil {
 		c.Options.TUI = &TUIOptions{}
 	}
+	c.clearUnknownEnumValues()
 	if c.Options.TUI.Scrollbar == "" {
 		c.Options.TUI.Scrollbar = ScrollbarDefault
 	}

@@ -475,6 +475,15 @@ const (
 	ScrollbarNever   = "never"   // Never show scrollbar
 )
 
+// Notification styles.
+const (
+	NotificationsAuto     = "auto"
+	NotificationsNative   = "native"
+	NotificationsOSC      = "osc"
+	NotificationsBell     = "bell"
+	NotificationsDisabled = "disabled"
+)
+
 // ExitBanner selects what Harness prints after the TUI exits.
 type ExitBanner string
 
