@@ -514,7 +514,8 @@ func (a *sessionAgent) maintainContext(
 	sess.PromptTokens = projected
 	sess.CompletionTokens = 0
 	sess.EstimatedUsage = true
-	if _, err := a.sessions.Save(ctx, sess); err != nil {
+	tokens := &session.TokenCounts{Prompt: projected, Completion: 0, Estimated: true}
+	if _, err := a.sessions.SetCompaction(ctx, sessionID, session.CompactionOf(sess), tokens); err != nil {
 		return true, fmt.Errorf("failed to save compacted session: %w", err)
 	}
 	slog.Info("Session compacted", "session_id", sessionID, "trigger", trigger,
@@ -603,7 +604,13 @@ func (a *sessionAgent) summarizeMessages(
 			cost = &total
 		}
 	}
-	a.updateSessionUsage(model, sess, resp.TotalUsage, cost, false)
+	// Only the cost is charged, and atomically: the token counters are
+	// replaced by the compacted request's projection once it is known.
+	if delta := sessionUsage(model, resp.TotalUsage, cost, false); delta.CostDelta > 0 {
+		if err := a.sessions.AddCost(ctx, sess.ID, delta.CostDelta); err != nil {
+			slog.Warn("Failed to charge the compaction summary", "session_id", sess.ID, "error", err)
+		}
+	}
 	return state.Summary(text), nil
 }
 

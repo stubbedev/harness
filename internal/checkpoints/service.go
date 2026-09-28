@@ -221,7 +221,7 @@ func (s *Service) truncateConversation(ctx context.Context, sessionID, messageID
 		return nil
 	}
 	if clearDoomedPointers(&sess, doomed) {
-		if _, err := s.sessions.Save(ctx, sess); err != nil {
+		if _, err := s.sessions.SetCompaction(ctx, sessionID, session.CompactionOf(sess), nil); err != nil {
 			slog.Warn("Failed to clear summary pointers after rewind", "error", err)
 		}
 	}

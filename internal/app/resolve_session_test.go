@@ -60,6 +60,14 @@ func (m *mockSessionService) Save(_ context.Context, s session.Session) (session
 	return s, nil
 }
 
+func (m *mockSessionService) RecordUsage(context.Context, string, session.Usage) (session.Session, error) {
+	return session.Session{}, nil
+}
+
+func (m *mockSessionService) SetCompaction(context.Context, string, session.Compaction, *session.TokenCounts) (session.Session, error) {
+	return session.Session{}, nil
+}
+
 func (m *mockSessionService) SetGoal(context.Context, string, *session.Goal) error {
 	return nil
 }

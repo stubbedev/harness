@@ -162,3 +162,45 @@ func TestDelete_RemovesDescendantsAndGetLastSkipsChildren(t *testing.T) {
 		require.Error(t, err, id)
 	}
 }
+
+// TestNarrowUpdatesKeepConcurrentWrites pins the reason usage and
+// compaction have their own updates: a rename or a sub-agent cost roll-up
+// landing between an agent's read and its write must survive it, which a
+// whole-row Save could not guarantee.
+func TestNarrowUpdatesKeepConcurrentWrites(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+	sessions := NewService(db.New(conn), conn)
+
+	created, err := sessions.Create(t.Context(), "before")
+	require.NoError(t, err)
+
+	require.NoError(t, sessions.Rename(t.Context(), created.ID, "renamed"))
+	require.NoError(t, sessions.AddCost(t.Context(), created.ID, 2))
+
+	estimated := false
+	got, err := sessions.RecordUsage(t.Context(), created.ID, Usage{CostDelta: 1, PromptTokens: 10, Estimated: &estimated})
+	require.NoError(t, err)
+	require.Equal(t, "renamed", got.Title)
+	require.InDelta(t, 3.0, got.Cost, 1e-9)
+	require.Equal(t, int64(10), got.PromptTokens)
+
+	got, err = sessions.RecordUsage(t.Context(), created.ID, Usage{CompletionTokens: 5})
+	require.NoError(t, err)
+	require.Equal(t, int64(10), got.PromptTokens, "an unmeasured counter is left alone")
+	require.Equal(t, int64(5), got.CompletionTokens)
+
+	got, err = sessions.SetCompaction(t.Context(), created.ID, Compaction{Summary: "s", BoundaryID: "b"}, &TokenCounts{Prompt: 7, Estimated: true})
+	require.NoError(t, err)
+	require.Equal(t, "s", got.CompactionSummary)
+	require.Equal(t, int64(7), got.PromptTokens)
+	require.Equal(t, int64(0), got.CompletionTokens)
+	require.True(t, got.EstimatedUsage)
+	require.InDelta(t, 3.0, got.Cost, 1e-9, "compaction leaves the cost alone")
+	require.Equal(t, "renamed", got.Title)
+}

@@ -68,6 +68,14 @@ func (s *stubSessionService) Save(_ context.Context, sess session.Session) (sess
 	return sess, nil
 }
 
+func (s *stubSessionService) RecordUsage(context.Context, string, session.Usage) (session.Session, error) {
+	return session.Session{}, nil
+}
+
+func (s *stubSessionService) SetCompaction(context.Context, string, session.Compaction, *session.TokenCounts) (session.Session, error) {
+	return session.Session{}, nil
+}
+
 func (s *stubSessionService) SetGoal(context.Context, string, *session.Goal) error {
 	return nil
 }

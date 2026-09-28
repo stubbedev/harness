@@ -1725,13 +1725,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			sessionLock.Lock()
 			defer sessionLock.Unlock()
 
-			updatedSession, getSessionErr := a.sessions.Get(ctx, call.SessionID)
-			if getSessionErr != nil {
-				return getSessionErr
-			}
 			usage, estimated := fallbackStepUsageWith(requestTokens.Messages, stepMessages, stepResult)
-			a.updateSessionUsage(largeModel, &updatedSession, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated)
-			_, sessionErr := a.sessions.Save(ctx, updatedSession)
+			updatedSession, sessionErr := a.sessions.RecordUsage(ctx, call.SessionID,
+				sessionUsage(largeModel, usage, a.openrouterCost(stepResult.ProviderMetadata), estimated))
 			if sessionErr != nil {
 				return sessionErr
 			}
@@ -2743,9 +2739,28 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 	return &opts.Usage.Cost
 }
 
+// updateSessionUsage applies usage to an in-memory session the way
+// RecordUsage applies it to the stored one.
 func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session, usage fantasy.Usage, overrideCost *float64, estimated bool) {
+	delta := sessionUsage(model, usage, overrideCost, estimated)
+	if delta.Estimated != nil {
+		session.EstimatedUsage = *delta.Estimated
+	}
+	session.Cost += delta.CostDelta
+	if delta.CompletionTokens != 0 {
+		session.CompletionTokens = delta.CompletionTokens
+	}
+	if delta.PromptTokens != 0 {
+		session.PromptTokens = delta.PromptTokens
+	}
+}
+
+// sessionUsage prices one request's usage for model and names the token
+// counters it measured, as the update RecordUsage applies.
+func sessionUsage(model Model, usage fantasy.Usage, overrideCost *float64, estimated bool) session.Usage {
+	var delta session.Usage
 	if !usageIsZero(usage) {
-		session.EstimatedUsage = estimated
+		delta.Estimated = &estimated
 	}
 
 	modelConfig := model.CatalogCfg
@@ -2768,17 +2783,10 @@ func (a *sessionAgent) updateSessionUsage(model Model, session *session.Session,
 		}
 	}
 
-	session.Cost += cost
-	updateSessionTokenCounters(session, usage)
-}
-
-func updateSessionTokenCounters(session *session.Session, usage fantasy.Usage) {
-	if usage.OutputTokens != 0 {
-		session.CompletionTokens = usage.OutputTokens
-	}
-	if promptTokens := usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens; promptTokens != 0 {
-		session.PromptTokens = promptTokens
-	}
+	delta.CostDelta = cost
+	delta.CompletionTokens = usage.OutputTokens
+	delta.PromptTokens = usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
+	return delta
 }
 
 func (a *sessionAgent) CancelTurn(sessionID string) {

@@ -58,8 +58,37 @@ SET
     todos = ?,
     compaction_summary = ?,
     compaction_boundary_id = ?,
-    compaction_aged_id = ?
+    compaction_aged_id = ?,
+    updated_at = strftime('%s', 'now')
 WHERE id = ?
+RETURNING *;
+
+-- name: RecordSessionUsage :one
+-- Adds a step's cost and replaces whichever token counter the step
+-- measured (NULL leaves a counter alone), in one statement so a concurrent
+-- rename or sub-agent cost roll-up is never overwritten.
+UPDATE sessions
+SET
+    cost = cost + sqlc.arg(cost_delta),
+    prompt_tokens = COALESCE(sqlc.narg(prompt_tokens), prompt_tokens),
+    completion_tokens = COALESCE(sqlc.narg(completion_tokens), completion_tokens),
+    updated_at = strftime('%s', 'now')
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: UpdateSessionCompaction :one
+-- Writes the compaction pointers, and the token counters when given,
+-- leaving title, cost and todos to their own writers.
+UPDATE sessions
+SET
+    compaction_summary = sqlc.narg(compaction_summary),
+    compaction_boundary_id = sqlc.narg(compaction_boundary_id),
+    compaction_aged_id = sqlc.narg(compaction_aged_id),
+    summary_message_id = sqlc.narg(summary_message_id),
+    prompt_tokens = COALESCE(sqlc.narg(prompt_tokens), prompt_tokens),
+    completion_tokens = COALESCE(sqlc.narg(completion_tokens), completion_tokens),
+    updated_at = strftime('%s', 'now')
+WHERE id = sqlc.arg(id)
 RETURNING *;
 
 -- name: UpdateSessionTitleAndUsage :exec

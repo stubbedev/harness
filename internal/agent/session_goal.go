@@ -222,10 +222,8 @@ func (a *sessionAgent) judgeGoal(ctx context.Context, sessionID string, goal *se
 	}
 	// Only the cost is charged: the token counters describe the coding
 	// request the session stands at, which the judge did not send.
-	var charged session.Session
-	a.updateSessionUsage(model, &charged, resp.TotalUsage, cost, false)
-	if charged.Cost > 0 {
-		if err := a.sessions.AddCost(ctx, sessionID, charged.Cost); err != nil {
+	if charged := sessionUsage(model, resp.TotalUsage, cost, false); charged.CostDelta > 0 {
+		if err := a.sessions.AddCost(ctx, sessionID, charged.CostDelta); err != nil {
 			slog.Warn("Failed to charge the goal judge", "session_id", sessionID, "error", err)
 		}
 	}

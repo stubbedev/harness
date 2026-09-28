@@ -60,12 +60,19 @@ type Querier interface {
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ReapMemories(ctx context.Context, limit int64) (int64, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
+	// Adds a step's cost and replaces whichever token counter the step
+	// measured (NULL leaves a counter alone), in one statement so a concurrent
+	// rename or sub-agent cost roll-up is never overwritten.
+	RecordSessionUsage(ctx context.Context, arg RecordSessionUsageParams) (Session, error)
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
 	SaveModelCatalog(ctx context.Context, data string) (ModelCatalog, error)
 	TouchMemory(ctx context.Context, id string) error
 	UpdateMemory(ctx context.Context, arg UpdateMemoryParams) (Memory, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
+	// Writes the compaction pointers, and the token counters when given,
+	// leaving title, cost and todos to their own writers.
+	UpdateSessionCompaction(ctx context.Context, arg UpdateSessionCompactionParams) (Session, error)
 	UpdateSessionGoal(ctx context.Context, arg UpdateSessionGoalParams) error
 	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
 }

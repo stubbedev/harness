@@ -260,6 +260,55 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 	return items, nil
 }
 
+const recordSessionUsage = `-- name: RecordSessionUsage :one
+UPDATE sessions
+SET
+    cost = cost + ?1,
+    prompt_tokens = COALESCE(?2, prompt_tokens),
+    completion_tokens = COALESCE(?3, completion_tokens),
+    updated_at = strftime('%s', 'now')
+WHERE id = ?4
+RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, compaction_summary, compaction_boundary_id, compaction_aged_id, goal
+`
+
+type RecordSessionUsageParams struct {
+	CostDelta        float64       `json:"cost_delta"`
+	PromptTokens     sql.NullInt64 `json:"prompt_tokens"`
+	CompletionTokens sql.NullInt64 `json:"completion_tokens"`
+	ID               string        `json:"id"`
+}
+
+// Adds a step's cost and replaces whichever token counter the step
+// measured (NULL leaves a counter alone), in one statement so a concurrent
+// rename or sub-agent cost roll-up is never overwritten.
+func (q *Queries) RecordSessionUsage(ctx context.Context, arg RecordSessionUsageParams) (Session, error) {
+	row := q.db.QueryRowContext(ctx, recordSessionUsage,
+		arg.CostDelta,
+		arg.PromptTokens,
+		arg.CompletionTokens,
+		arg.ID,
+	)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.ParentSessionID,
+		&i.Title,
+		&i.MessageCount,
+		&i.PromptTokens,
+		&i.CompletionTokens,
+		&i.Cost,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.SummaryMessageID,
+		&i.Todos,
+		&i.CompactionSummary,
+		&i.CompactionBoundaryID,
+		&i.CompactionAgedID,
+		&i.Goal,
+	)
+	return i, err
+}
+
 const renameSession = `-- name: RenameSession :exec
 UPDATE sessions
 SET
@@ -288,7 +337,8 @@ SET
     todos = ?,
     compaction_summary = ?,
     compaction_boundary_id = ?,
-    compaction_aged_id = ?
+    compaction_aged_id = ?,
+    updated_at = strftime('%s', 'now')
 WHERE id = ?
 RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, compaction_summary, compaction_boundary_id, compaction_aged_id, goal
 `
@@ -317,6 +367,63 @@ func (q *Queries) UpdateSession(ctx context.Context, arg UpdateSessionParams) (S
 		arg.CompactionSummary,
 		arg.CompactionBoundaryID,
 		arg.CompactionAgedID,
+		arg.ID,
+	)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.ParentSessionID,
+		&i.Title,
+		&i.MessageCount,
+		&i.PromptTokens,
+		&i.CompletionTokens,
+		&i.Cost,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.SummaryMessageID,
+		&i.Todos,
+		&i.CompactionSummary,
+		&i.CompactionBoundaryID,
+		&i.CompactionAgedID,
+		&i.Goal,
+	)
+	return i, err
+}
+
+const updateSessionCompaction = `-- name: UpdateSessionCompaction :one
+UPDATE sessions
+SET
+    compaction_summary = ?1,
+    compaction_boundary_id = ?2,
+    compaction_aged_id = ?3,
+    summary_message_id = ?4,
+    prompt_tokens = COALESCE(?5, prompt_tokens),
+    completion_tokens = COALESCE(?6, completion_tokens),
+    updated_at = strftime('%s', 'now')
+WHERE id = ?7
+RETURNING id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, compaction_summary, compaction_boundary_id, compaction_aged_id, goal
+`
+
+type UpdateSessionCompactionParams struct {
+	CompactionSummary    sql.NullString `json:"compaction_summary"`
+	CompactionBoundaryID sql.NullString `json:"compaction_boundary_id"`
+	CompactionAgedID     sql.NullString `json:"compaction_aged_id"`
+	SummaryMessageID     sql.NullString `json:"summary_message_id"`
+	PromptTokens         sql.NullInt64  `json:"prompt_tokens"`
+	CompletionTokens     sql.NullInt64  `json:"completion_tokens"`
+	ID                   string         `json:"id"`
+}
+
+// Writes the compaction pointers, and the token counters when given,
+// leaving title, cost and todos to their own writers.
+func (q *Queries) UpdateSessionCompaction(ctx context.Context, arg UpdateSessionCompactionParams) (Session, error) {
+	row := q.db.QueryRowContext(ctx, updateSessionCompaction,
+		arg.CompactionSummary,
+		arg.CompactionBoundaryID,
+		arg.CompactionAgedID,
+		arg.SummaryMessageID,
+		arg.PromptTokens,
+		arg.CompletionTokens,
 		arg.ID,
 	)
 	var i Session

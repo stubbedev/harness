@@ -87,6 +87,44 @@ type Session struct {
 	UpdatedAt int64
 }
 
+// Usage is one request's contribution to a session's counters.
+type Usage struct {
+	// CostDelta is added to the session's cost.
+	CostDelta float64
+	// PromptTokens and CompletionTokens replace the stored counters; zero
+	// leaves a counter as it is.
+	PromptTokens     int64
+	CompletionTokens int64
+	// Estimated, when non-nil, records whether the counters above were
+	// measured by the provider or estimated locally.
+	Estimated *bool
+}
+
+// Compaction is the set of pointers a session's compaction state keeps.
+type Compaction struct {
+	Summary          string
+	BoundaryID       string
+	AgedID           string
+	SummaryMessageID string
+}
+
+// CompactionOf returns s's compaction pointers.
+func CompactionOf(s Session) Compaction {
+	return Compaction{
+		Summary:          s.CompactionSummary,
+		BoundaryID:       s.CompactionBoundaryID,
+		AgedID:           s.CompactionAgedID,
+		SummaryMessageID: s.SummaryMessageID,
+	}
+}
+
+// TokenCounts sets a session's token counters outright.
+type TokenCounts struct {
+	Prompt     int64
+	Completion int64
+	Estimated  bool
+}
+
 type Service interface {
 	pubsub.Subscriber[Session]
 	Create(ctx context.Context, title string) (Session, error)
@@ -98,7 +136,16 @@ type Service interface {
 	// sessions created via CreateTaskSession) of parentSessionID. It does
 	// not recurse into grandchildren.
 	ListChildSessions(ctx context.Context, parentSessionID string) ([]Session, error)
+	// Save overwrites every mutable column from session. It races any
+	// concurrent writer of those columns, so production code uses the
+	// narrow updates below; Save is for seeding state wholesale.
 	Save(ctx context.Context, session Session) (Session, error)
+	// RecordUsage applies one request's usage in a single statement: the
+	// cost is added, the measured token counters replace the stored ones.
+	RecordUsage(ctx context.Context, sessionID string, usage Usage) (Session, error)
+	// SetCompaction writes the compaction pointers and, when tokens is
+	// non-nil, the token counters the compacted session now stands at.
+	SetCompaction(ctx context.Context, sessionID string, compaction Compaction, tokens *TokenCounts) (Session, error)
 	// SetGoal stores a session's goal, or clears it when goal is nil.
 	// Save leaves the goal untouched.
 	SetGoal(ctx context.Context, sessionID string, goal *Goal) error
@@ -248,6 +295,50 @@ func (s *service) Save(ctx context.Context, session Session) (Session, error) {
 	s.setEstimatedUsageState(session.ID, estimatedUsage)
 	session = s.fromDBItem(dbSession)
 	session.EstimatedUsage = estimatedUsage
+	s.Publish(pubsub.UpdatedEvent, session)
+	return session, nil
+}
+
+func (s *service) RecordUsage(ctx context.Context, sessionID string, usage Usage) (Session, error) {
+	dbSession, err := s.q.RecordSessionUsage(ctx, db.RecordSessionUsageParams{
+		ID:               sessionID,
+		CostDelta:        usage.CostDelta,
+		PromptTokens:     sql.NullInt64{Int64: usage.PromptTokens, Valid: usage.PromptTokens != 0},
+		CompletionTokens: sql.NullInt64{Int64: usage.CompletionTokens, Valid: usage.CompletionTokens != 0},
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	if usage.Estimated != nil {
+		s.setEstimatedUsageState(sessionID, *usage.Estimated)
+	}
+	session := s.fromDBItem(dbSession)
+	s.applyEstimatedUsageState(&session)
+	s.Publish(pubsub.UpdatedEvent, session)
+	return session, nil
+}
+
+func (s *service) SetCompaction(ctx context.Context, sessionID string, compaction Compaction, tokens *TokenCounts) (Session, error) {
+	params := db.UpdateSessionCompactionParams{
+		ID:                   sessionID,
+		CompactionSummary:    nullStr(compaction.Summary),
+		CompactionBoundaryID: nullStr(compaction.BoundaryID),
+		CompactionAgedID:     nullStr(compaction.AgedID),
+		SummaryMessageID:     nullStr(compaction.SummaryMessageID),
+	}
+	if tokens != nil {
+		params.PromptTokens = sql.NullInt64{Int64: tokens.Prompt, Valid: true}
+		params.CompletionTokens = sql.NullInt64{Int64: tokens.Completion, Valid: true}
+	}
+	dbSession, err := s.q.UpdateSessionCompaction(ctx, params)
+	if err != nil {
+		return Session{}, err
+	}
+	if tokens != nil {
+		s.setEstimatedUsageState(sessionID, tokens.Estimated)
+	}
+	session := s.fromDBItem(dbSession)
+	s.applyEstimatedUsageState(&session)
 	s.Publish(pubsub.UpdatedEvent, session)
 	return session, nil
 }
