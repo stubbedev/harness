@@ -763,7 +763,7 @@ func (m *UI) focusEditor() tea.Cmd {
 // loadCustomCommands loads the custom commands asynchronously.
 func (m *UI) loadCustomCommands() tea.Cmd {
 	return func() tea.Msg {
-		customCommands := commands.LoadCustomCommands(m.com.Config())
+		customCommands := commands.LoadCustomCommands(m.com.Config(), m.com.Workspace.WorkingDir())
 		// Append user-invocable skills as commands.
 		skillEntries, err := m.com.Workspace.ListSkills(context.Background())
 		if err != nil {

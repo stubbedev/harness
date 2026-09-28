@@ -579,6 +579,7 @@ These configure Harness from the environment. Boolean variables take `1`,
 | `HARNESS_SKILLS_DIR` | Replaces the global skill directories. |
 | `HARNESS_SUBAGENTS_DIR` | Replaces the global subagent directories. |
 | `HARNESS_EXTENSIONS_DIR` | Replaces the global extension directories. |
+| `HARNESS_COMMANDS_DIR` | Replaces the global custom-command directories. |
 | `HARNESS_SKIP_DATADIR_LOCK` | Skips the lock that keeps two instances off one data directory. |
 | `HARNESS_DISABLE_PROVIDER_AUTO_UPDATE` | Same as `options.disable_provider_auto_update`. |
 | `HARNESS_DISABLE_DEFAULT_PROVIDERS` | Same as `options.disable_default_providers`. |

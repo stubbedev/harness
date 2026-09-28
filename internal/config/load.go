@@ -1332,6 +1332,27 @@ func ProjectSkillsDir(workingDir string) []string {
 	return projectDirs(workingDir, projectSkillSubdirs)
 }
 
+// GlobalCommandsDirs returns the global directories custom commands are
+// read from, by the rules skills and subagents follow. The
+// HARNESS_COMMANDS_DIR environment variable, when set, replaces the list.
+func GlobalCommandsDirs() []string {
+	return globalDirs(envvars.CommandsDir, "commands", ".harness", ".claude")
+}
+
+// projectCommandSubdirs lists the project directories custom commands are
+// read from, so they can be committed with the repository.
+var projectCommandSubdirs = []string{
+	".agents/commands",
+	".harness/commands",
+	".claude/commands",
+}
+
+// ProjectCommandsDirs returns the project directories custom commands are
+// read from, repository root first.
+func ProjectCommandsDirs(workingDir string) []string {
+	return projectDirs(workingDir, projectCommandSubdirs)
+}
+
 // GlobalSubagentsDirs returns the default global directories for subagent
 // definitions. The HARNESS_SUBAGENTS_DIR environment variable, when set to a
 // non-empty value, overrides the default list entirely.

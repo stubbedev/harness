@@ -577,9 +577,12 @@ Built-in commands answer to their palette name (`/new-session`,
 theirs. A command missing a required argument opens a form for it with what
 was typed filled in.
 
-Custom commands are Markdown files in `~/.config/harness/commands/` or
-`~/.harness/commands/` (`user:` commands), or in `commands/` under the
-workspace's data directory (`project:` commands); the path below the
+Custom commands are Markdown files. `user:` commands live in
+`~/.config/harness/commands/`, `~/.config/agents/commands/`,
+`~/.harness/commands/` or `~/.claude/commands/` (`HARNESS_COMMANDS_DIR`
+replaces the list); `project:` commands live in the repository, in
+`.agents/commands/`, `.harness/commands/` or `.claude/commands/`, or in
+`commands/` under the workspace's data directory. The path below the
 directory is the name, so `git/fixup.md` is `/git:fixup`. The file is the prompt. `$ARGUMENTS` is replaced by everything
 typed after the name, and `$NAME` placeholders become named arguments filled
 in order (quote a value that has spaces); without either, the typed text

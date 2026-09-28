@@ -14,7 +14,6 @@ import (
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/extensions"
-	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/stringext"
 	"gopkg.in/yaml.v3"
@@ -71,11 +70,12 @@ type commandSource struct {
 	prefix string
 }
 
-// LoadCustomCommands loads custom commands from multiple sources including
-// XDG config directory, home directory, and project directory. A source
-// that cannot be read is logged and skipped.
-func LoadCustomCommands(cfg *config.Config) []CustomCommand {
-	return loadAll(buildCommandSources(cfg))
+// LoadCustomCommands loads custom commands from the global directories
+// (user: commands) and the project's (project: commands), found the way
+// skills and subagents are. A source that cannot be read is logged and
+// skipped.
+func LoadCustomCommands(cfg *config.Config, workingDir string) []CustomCommand {
+	return loadAll(buildCommandSources(cfg, workingDir))
 }
 
 // newArgument builds an Argument, titling it by its ID when no title is
@@ -141,21 +141,22 @@ func LoadMCPPrompts() []MCPPrompt {
 	return commands
 }
 
-func buildCommandSources(cfg *config.Config) []commandSource {
-	return []commandSource{
-		{
-			path:   filepath.Join(home.Config(), "harness", "commands"),
-			prefix: userCommandPrefix,
-		},
-		{
-			path:   filepath.Join(home.Dir(), ".harness", "commands"),
-			prefix: userCommandPrefix,
-		},
-		{
-			path:   filepath.Join(cfg.Options.DataDirectory, "commands"),
-			prefix: projectCommandPrefix,
-		},
+func buildCommandSources(cfg *config.Config, workingDir string) []commandSource {
+	var sources []commandSource
+	for _, dir := range config.GlobalCommandsDirs() {
+		sources = append(sources, commandSource{path: dir, prefix: userCommandPrefix})
 	}
+	if workingDir != "" {
+		for _, dir := range config.ProjectCommandsDirs(workingDir) {
+			sources = append(sources, commandSource{path: dir, prefix: projectCommandPrefix})
+		}
+	}
+	// The data directory held project commands before they moved into
+	// the repository; it stays a source so existing ones keep working.
+	if cfg != nil && cfg.Options != nil && cfg.Options.DataDirectory != "" {
+		sources = append(sources, commandSource{path: filepath.Join(cfg.Options.DataDirectory, "commands"), prefix: projectCommandPrefix})
+	}
+	return sources
 }
 
 func loadAll(sources []commandSource) []CustomCommand {

@@ -27,6 +27,8 @@ const (
 	SubagentsDir = "HARNESS_SUBAGENTS_DIR"
 	// ExtensionsDir replaces the global extension directories.
 	ExtensionsDir = "HARNESS_EXTENSIONS_DIR"
+	// CommandsDir replaces the global custom-command directories.
+	CommandsDir = "HARNESS_COMMANDS_DIR"
 	// SkipDataDirLock bypasses the lock that keeps two instances off one
 	// data directory.
 	SkipDataDirLock = "HARNESS_SKIP_DATADIR_LOCK"
@@ -86,7 +88,7 @@ const (
 func All() []string {
 	return []string{
 		GlobalConfig, GlobalData, CacheDir, CrashDir, ScratchDir, SkillsDir,
-		SubagentsDir, ExtensionsDir, SkipDataDirLock,
+		SubagentsDir, ExtensionsDir, CommandsDir, SkipDataDirLock,
 		DisableProviderAutoUpdate, DisableDefaultProviders,
 		DisableAnthropicCache, DisablePromptCacheKey,
 		CoreUtils, PTYRows, PTYCols, PTYTerm,
