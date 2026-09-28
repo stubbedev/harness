@@ -63,11 +63,15 @@ var (
 )
 
 type grepMatch struct {
-	path     string
-	modTime  time.Time
-	lineNum  int
+	path    string
+	modTime time.Time
+	lineNum int
+	// charNum is the 1-based byte column of the match in rawLine.
 	charNum  int
 	lineText string
+	// rawLine is the matched line as it is in the file, only the line
+	// break stripped. charNum indexes it; lineText may be trimmed.
+	rawLine string
 }
 
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
@@ -151,6 +155,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 				lineNum:  match.Data.LineNumber,
 				charNum:  m.Start + 1, // ensure 1-based
 				lineText: strings.TrimSpace(match.Data.Lines.Text),
+				rawLine:  strings.TrimRight(match.Data.Lines.Text, "\r\n"),
 			})
 			// only get the first match of each line
 			break
@@ -237,6 +242,7 @@ func searchFilesWithRegex(pattern, rootPath, include string) ([]grepMatch, error
 				lineNum:  lm.lineNum,
 				charNum:  lm.charNum,
 				lineText: lm.lineText,
+				rawLine:  lm.lineText,
 			})
 			if len(matches) >= 200 {
 				return filepath.SkipAll

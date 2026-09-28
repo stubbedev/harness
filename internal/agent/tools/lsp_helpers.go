@@ -104,7 +104,9 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 			client: client,
 			path:   absPath,
 			line:   match.lineNum,
-			char:   match.charNum + getSymbolOffset(symbol),
+			// The client takes a 1-based column in the server's
+			// negotiated encoding; the search reports bytes.
+			char: lsp.CharacterOffset(match.rawLine, match.charNum-1+getSymbolOffset(symbol), client.GetOffsetEncoding()) + 1,
 		})
 	}
 
