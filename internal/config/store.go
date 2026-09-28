@@ -1197,45 +1197,18 @@ func (s *ConfigStore) reloadFromDiskLocked(ctx context.Context) error {
 	// model type this instance never chose.
 	maps.Copy(cfg.Models, s.overrides.Models)
 
-	// Reconfigure providers
-	env := env.New()
-	resolver := NewShellVariableResolver(env)
-
-	// Apply top-level env vars before configuring providers so variables
-	// like AWS_PROFILE are visible to the AWS SDK credential chain.
-	cfg.applyEnv(resolver)
-
-	providers, err := Providers(cfg)
-	if err != nil {
-		if len(providers) == 0 {
-			return fmt.Errorf("failed to load providers during reload: %w", err)
-		}
-		slog.Warn("Reload continuing with the previously known providers", "error", err)
-	}
-
-	if err := cfg.configureProviders(ctx, s, env, resolver, providers); err != nil {
-		return fmt.Errorf("failed to configure providers during reload: %w", err)
-	}
-
 	// Finish the new config before publishing it: readers hold the
 	// published pointer without a lock, so it must never change after
-	// setConfig. Agents are set up whether or not a provider is configured,
-	// as on startup.
-	cfg.SetupAgents()
-	if cfg.IsConfigured() {
-		resolved, err := resolveSelectedModels(cfg, providers)
-		if err != nil {
-			return fmt.Errorf("failed to configure selected models during reload: %w", err)
-		}
-		applyResolvedModels(cfg, resolved)
-	} else {
-		slog.Warn("No providers configured after reload")
+	// setConfig.
+	rt, err := buildRuntime(ctx, cfg, s)
+	if err != nil {
+		return fmt.Errorf("failed to reload config: %w", err)
 	}
 
 	s.setConfig(cfg)
 	s.loadedPaths = disk.loadedPaths
-	s.resolver = resolver
-	s.knownProviders = providers
+	s.resolver = rt.resolver
+	s.knownProviders = rt.providers
 	s.workspacePath = disk.workspacePath
 	s.CaptureStalenessSnapshot(disk.trackedPaths())
 

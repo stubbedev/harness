@@ -49,52 +49,21 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 		loadedPaths:    disk.loadedPaths,
 	}
 
-	// Load known providers, this loads the config from models.dev. A
-	// failed refresh still yields the cached or embedded catalog, so
-	// only an empty list is fatal: starting up without providers is
-	// worse than starting up with slightly stale ones.
-	providers, err := Providers(cfg)
-	if err != nil {
-		if len(providers) == 0 {
-			return nil, err
-		}
-		slog.Warn("Continuing with the previously known providers", "error", err)
-	}
-	store.knownProviders = providers
-
-	env := env.New()
-	// Configure providers
-	valueResolver := NewShellVariableResolver(env)
-	store.resolver = valueResolver
-
 	// Hold writeMu during initial load to prevent configureProviders
 	// from triggering auto-reload via RemoveConfigField.
 	store.writeMu.Lock()
 	defer store.writeMu.Unlock()
 
-	// Apply top-level env vars before configuring providers so variables
-	// like AWS_PROFILE are visible to the AWS SDK credential chain.
-	cfg.applyEnv(valueResolver)
-
-	if err := cfg.configureProviders(context.Background(), store, env, valueResolver, store.knownProviders); err != nil {
-		return nil, fmt.Errorf("failed to configure providers: %w", err)
+	rt, err := buildRuntime(context.Background(), cfg, store)
+	if err != nil {
+		return nil, err
 	}
-
-	// Agents depend only on the tool set, not on any provider, and callers
-	// (the sub-agent dispatcher among them) look them up even when nothing is
-	// configured yet, so set them up before the unconfigured early return.
-	store.SetupAgents()
-
-	if !cfg.IsConfigured() {
-		slog.Warn("No providers configured")
+	store.knownProviders = rt.providers
+	store.resolver = rt.resolver
+	if !rt.configured {
 		return store, nil
 	}
-
-	resolved, err := resolveSelectedModels(cfg, store.knownProviders)
-	if err != nil {
-		return nil, fmt.Errorf("failed to configure selected models: %w", err)
-	}
-	applyResolvedModels(cfg, resolved)
+	resolved := rt.resolved
 
 	// Persist any fallback corrections while we still hold writeMu.
 	if resolved.LargeFallback {
@@ -115,6 +84,63 @@ func Load(workingDir, dataDir string, debug bool) (*ConfigStore, error) {
 	store.CaptureStalenessSnapshot(disk.trackedPaths())
 
 	return store, nil
+}
+
+// loadedRuntime is the provider half of a load, built from a disk config the
+// same way on startup and on every reload.
+type loadedRuntime struct {
+	providers []catalog.Provider
+	resolver  VariableResolver
+	// configured reports whether any provider is; resolved is set only
+	// then.
+	configured bool
+	resolved   resolvedModels
+}
+
+// buildRuntime finishes cfg for publishing: its env applied, the catalog
+// loaded, its providers configured, its agents set up and, when a provider
+// is configured, its selected models resolved. Load and ReloadFromDisk both
+// call it so the steps and their order cannot drift apart. A failed catalog
+// refresh still yields the cached or embedded catalog, so only an empty one
+// is fatal: starting without providers is worse than with slightly stale
+// ones.
+func buildRuntime(ctx context.Context, cfg *Config, store *ConfigStore) (loadedRuntime, error) {
+	environ := env.New()
+	rt := loadedRuntime{resolver: NewShellVariableResolver(environ)}
+
+	// Apply top-level env vars before configuring providers so variables
+	// like AWS_PROFILE are visible to the AWS SDK credential chain.
+	cfg.applyEnv(rt.resolver)
+
+	providers, err := Providers(cfg)
+	if err != nil {
+		if len(providers) == 0 {
+			return loadedRuntime{}, err
+		}
+		slog.Warn("Continuing with the previously known providers", "error", err)
+	}
+	rt.providers = providers
+
+	if err := cfg.configureProviders(ctx, store, environ, rt.resolver, providers); err != nil {
+		return loadedRuntime{}, fmt.Errorf("failed to configure providers: %w", err)
+	}
+
+	// Agents depend only on the tool set, not on any provider, and
+	// callers (the sub-agent dispatcher among them) look them up even
+	// when nothing is configured yet, so set them up either way.
+	cfg.SetupAgents()
+
+	if !cfg.IsConfigured() {
+		slog.Warn("No providers configured")
+		return rt, nil
+	}
+	rt.configured = true
+	rt.resolved, err = resolveSelectedModels(cfg, providers)
+	if err != nil {
+		return loadedRuntime{}, fmt.Errorf("failed to configure selected models: %w", err)
+	}
+	applyResolvedModels(cfg, rt.resolved)
+	return rt, nil
 }
 
 // diskConfig is the disk half of a load: every config file read, merged
