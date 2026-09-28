@@ -60,6 +60,10 @@ type catalogSync struct {
 	client     catalogClient
 	dataDir    string
 	autoupdate bool
+	// stale records that the served catalog is the cached one past its
+	// refresh interval, so a later caller that allows auto-update can
+	// still start the refresh a first caller that forbade it did not.
+	stale bool
 }
 
 // Init configures the syncer; it must be called before Get.
@@ -69,16 +73,27 @@ func (s *catalogSync) Init(client catalogClient, dataDir string, autoupdate bool
 	s.autoupdate = autoupdate
 }
 
+// Get returns the catalog under the refresh policy given to Init.
 func (s *catalogSync) Get(ctx context.Context) ([]catalog.Provider, error) {
+	return s.GetWith(ctx, s.autoupdate)
+}
+
+// GetWith returns the catalog. The load happens once per syncer, but the
+// refresh policy is the caller's: a stale catalog served to a caller that
+// disabled auto-update is still refreshed for the next one that allows it.
+func (s *catalogSync) GetWith(ctx context.Context, autoupdate bool) ([]catalog.Provider, error) {
 	// The result and the error are memoized together so that every
 	// caller sees the same outcome, not just the one that won the once.
-	s.once.Do(func() { s.load(ctx) })
+	s.once.Do(func() { s.load(ctx, autoupdate) })
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if autoupdate && s.stale {
+		s.refreshInBackground()
+	}
 	return s.result, s.err
 }
 
-func (s *catalogSync) load(ctx context.Context) {
+func (s *catalogSync) load(ctx context.Context, autoupdate bool) {
 	conn, connErr := db.Connect(context.WithoutCancel(ctx), s.dataDir)
 	if connErr != nil {
 		slog.Warn("Could not open catalog cache database", "error", connErr)
@@ -100,16 +115,17 @@ func (s *catalogSync) load(ctx context.Context) {
 		if row, getErr := db.New(conn).GetModelCatalog(ctx); getErr == nil {
 			if providers, ok := usableCachedProviders(row.Data); ok {
 				stale := time.Since(time.Unix(row.FetchedAt, 0)) >= catalogRefreshInterval
-				if !stale || !s.autoupdate {
+				if !stale || !autoupdate {
 					slog.Info("Using cached catalog", "fetched_at", time.Unix(row.FetchedAt, 0))
 					s.serve(providers, nil)
+					s.stale = stale
 					return
 				}
 				// Stale but sound: hand it out now and let the refresh
 				// land behind the caller's back.
 				slog.Info("Using stale catalog; refreshing in the background", "fetched_at", time.Unix(row.FetchedAt, 0))
 				s.serve(providers, nil)
-				s.refreshInBackground()
+				s.stale = true
 				return
 			}
 		}
@@ -188,6 +204,9 @@ func (s *catalogSync) refreshInBackground() {
 			}
 			slog.Info("Catalog refreshed in the background", "providers", len(result))
 			s.serve(result, nil)
+			s.mu.Lock()
+			s.stale = false
+			s.mu.Unlock()
 		})
 	})
 }

@@ -32,7 +32,6 @@ func (m *mockCatalogClient) FetchCatalog(context.Context) ([]catalog.Provider, e
 
 func resetProviderState() {
 	providerOnce = sync.Once{}
-	providerNoDefault = false
 	catalogSyncer = &catalogSync{}
 	// Close pooled catalog-cache connections so temp data dirs can be
 	// removed on Windows, where open files cannot be unlinked.

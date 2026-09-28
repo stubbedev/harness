@@ -15,12 +15,10 @@ import (
 	"github.com/stubbedev/harness/internal/db"
 )
 
-var (
-	providerOnce sync.Once
-	// providerNoDefault records a first config that disables the
-	// default providers: no catalog is loaded at all, at any age.
-	providerNoDefault bool
-)
+// providerOnce points the process-wide syncer at the live sources and
+// the machine-wide store. Nothing config-specific happens under it: each
+// call to Providers applies its own config's options.
+var providerOnce sync.Once
 
 var catalogSyncer = &catalogSync{}
 
@@ -38,31 +36,29 @@ func KnownProviderByID(knownProviders []catalog.Provider, id string) *catalog.Pr
 // Providers returns the list of providers, taking into account the
 // shared catalog cache and whether or not auto update is enabled.
 //
-// The catalog is loaded once per process, from the options of the first
-// config passed in; later calls read the syncer's current answer. That
-// is the point of reading through rather than snapshotting: a catalog
-// that was stale at startup is refreshed in the background, and the
-// fresh list is what every later call - the next turn's tool-palette
-// rebuild included - sees.
+// The catalog is loaded once per process; later calls read the syncer's
+// current answer. That is the point of reading through rather than
+// snapshotting: a catalog that was stale at startup is refreshed in the
+// background, and the fresh list is what every later call - the next
+// turn's tool-palette rebuild included - sees. The options are applied
+// per call, so one workspace disabling the default providers or
+// auto-update does not decide it for every other workspace the process
+// serves.
 //
 // A returned error is advisory: it reports that the catalog could not
 // be refreshed or cached. Callers decide whether an empty catalog is
 // fatal.
 func Providers(cfg *Config) ([]catalog.Provider, error) {
-	providerOnce.Do(func() {
-		if cfg.Options.DisableDefaultProviders {
-			providerNoDefault = true
-			return
-		}
-		catalogSyncer.Init(liveCatalogClient{}, GlobalCatalogDir(), !cfg.Options.DisableProviderAutoUpdate)
-	})
-	if providerNoDefault {
+	if cfg.Options.DisableDefaultProviders {
 		return nil, nil
 	}
+	providerOnce.Do(func() {
+		catalogSyncer.Init(liveCatalogClient{}, GlobalCatalogDir(), true)
+	})
 	// A failure to refresh or cache the catalog is worth reporting to
 	// the caller, which decides whether an empty catalog is fatal or
 	// the manually configured providers suffice.
-	items, err := catalogSyncer.Get(context.Background())
+	items, err := catalogSyncer.GetWith(context.Background(), !cfg.Options.DisableProviderAutoUpdate)
 	if err != nil {
 		err = fmt.Errorf( //nolint:staticcheck
 			"Harness was unable to fetch an updated model catalog. You can also update providers manually. For more info see harness update-providers --help.\n\nCause: %w",
