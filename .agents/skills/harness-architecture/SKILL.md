@@ -33,6 +33,8 @@ internal/
     templates/                     System prompt templates (coder.md.tpl, task.md.tpl, etc.)
     tools/                         All built-in tools (bash, edit, view, grep, glob, etc.)
       mcp/                         MCP client integration
+  toolname/                        Wire names of the built-in tools and the MCP tool naming scheme; the one spelling config, tools and UI share
+  envvars/                         Every HARNESS_* variable Harness reads, documented in docs/config/README.md
   hooks/                           Hook engine: runs user shell commands on hook events
     hooks.go                       Decision types, aggregation logic, event constants
     registry.go                    Config-backed event registry; live-reloads, nil-safe
@@ -100,7 +102,17 @@ providers. Refresh it with `go generate ./internal/catalog`.
   and how to drop the fork once upstream fixes it.
 - **Config is a Service**: accessed via `config.Service`, not global state.
 - **Tools are self-documenting**: each tool has a `.go` implementation and a
-  `.md` description file in `internal/agent/tools/`.
+  `.md` description file in `internal/agent/tools/`. Its name lives in
+  `internal/toolname`, and the UI renders it through the spec table in
+  `internal/ui/chat/tool_specs.go`; tests fail when a built-in has no spec.
+- **Drift guards**: facts that live in two places are held together by a
+  test or a linter rather than by care: message parts are sum types checked
+  by `gochecksumtype` and walked across the wire by
+  `TestEveryDomainPartCrossesTheWire`; documented config examples decode
+  through the loader (`TestDocumentedConfigExamplesDecode`); client routes
+  must be registered by the server (`TestEveryClientRouteIsServed`); CI
+  regenerates sqlc, swagger and the schema and fails on a diff, and fails
+  on dead code.
 - **System prompts are Go templates**: `internal/agent/templates/*.md.tpl`
   with runtime data injected.
 - **Context files**: Harness reads AGENTS.md, HARNESS.md, CLAUDE.md, GEMINI.md
