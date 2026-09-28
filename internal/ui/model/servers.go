@@ -11,7 +11,7 @@ import (
 
 // openMCPServersDialog opens the MCP server manager over the memoized
 // MCP states; state events keep it fresh while it stays open.
-func (m *UI) openMCPServersDialog() tea.Cmd { //nolint:unparam // uniform openDialog dispatch signature
+func (m *UI) openMCPServersDialog() tea.Cmd {
 	if m.dialog.FocusIfOpen(dialog.MCPServersID) {
 		return nil
 	}
@@ -21,7 +21,7 @@ func (m *UI) openMCPServersDialog() tea.Cmd { //nolint:unparam // uniform openDi
 
 // openLSPServersDialog opens the LSP server manager over the memoized
 // LSP states and diagnostic counts.
-func (m *UI) openLSPServersDialog() tea.Cmd { //nolint:unparam // uniform openDialog dispatch signature
+func (m *UI) openLSPServersDialog() tea.Cmd {
 	if m.dialog.FocusIfOpen(dialog.LSPServersID) {
 		return nil
 	}

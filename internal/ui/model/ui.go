@@ -4582,7 +4582,7 @@ func (m *UI) openReasoningDialog() tea.Cmd {
 }
 
 // openThemesDialog opens the color theme picker.
-func (m *UI) openThemesDialog() tea.Cmd { //nolint:unparam // uniform openDialog dispatch signature
+func (m *UI) openThemesDialog() tea.Cmd {
 	if m.dialog.FocusIfOpen(dialog.ThemesID) {
 		return nil
 	}
@@ -4592,7 +4592,7 @@ func (m *UI) openThemesDialog() tea.Cmd { //nolint:unparam // uniform openDialog
 }
 
 // openNotificationsDialog opens the notification style picker dialog.
-func (m *UI) openNotificationsDialog() tea.Cmd { //nolint:unparam // uniform openDialog dispatch signature
+func (m *UI) openNotificationsDialog() tea.Cmd {
 	if m.dialog.FocusIfOpen(dialog.NotificationsID) {
 		return nil
 	}
