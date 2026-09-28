@@ -9,12 +9,14 @@ import (
 // embedded AgentTool, and implement Run. The promoted Info,
 // ProviderOptions and SetProviderOptions satisfy the interface; MCP
 // forwards the wrapped tool's server name so callers grouping a built
-// tool list by MCP server still see it through the wrapper.
+// tool list by MCP server still see it through the wrapper. Every
+// wrapper in this package embeds it; TestDecoratorsForwardMCP holds
+// them to it.
 type toolDecorator struct {
 	fantasy.AgentTool
 }
 
-func (d *toolDecorator) MCP() string {
+func (d toolDecorator) MCP() string {
 	if m, ok := d.AgentTool.(interface{ MCP() string }); ok {
 		return m.MCP()
 	}

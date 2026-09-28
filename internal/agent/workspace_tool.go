@@ -10,7 +10,7 @@ import (
 )
 
 type workspaceLSPTool struct {
-	fantasy.AgentTool
+	toolDecorator
 	root string
 }
 
@@ -47,7 +47,7 @@ func (t workspaceLSPTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 func workspaceTools(input []fantasy.AgentTool, root string) []fantasy.AgentTool {
 	for i, tool := range input {
 		if tool.Info().Name == tools.LSPToolName {
-			input[i] = workspaceLSPTool{AgentTool: tool, root: root}
+			input[i] = workspaceLSPTool{toolDecorator: toolDecorator{AgentTool: tool}, root: root}
 		}
 	}
 	return input

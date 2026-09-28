@@ -66,7 +66,7 @@ func isContextLengthError(err error) bool {
 const maxToolResultChars = tools.MaxToolResultBytes
 
 type resultCappingTool struct {
-	fantasy.AgentTool
+	toolDecorator
 }
 
 func (t resultCappingTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -86,7 +86,7 @@ func withResultCap(tools []fantasy.AgentTool) []fantasy.AgentTool {
 	}
 	capped := make([]fantasy.AgentTool, len(tools))
 	for i, tool := range tools {
-		capped[i] = resultCappingTool{AgentTool: tool}
+		capped[i] = resultCappingTool{toolDecorator{AgentTool: tool}}
 	}
 	return capped
 }
