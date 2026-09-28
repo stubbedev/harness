@@ -4419,12 +4419,21 @@ func (m *UI) cancelAgent() tea.Cmd {
 			m.bangCancel = nil
 		}
 
-		m.com.Workspace.AgentCancelTurn(m.session.ID)
-		// Drop the memoized busy state the cancel just changed; the
-		// off-thread refresh (and the agent's own events) land next. The
+		// The cancel is a server round trip in client/server mode, so it
+		// runs off the key path; the busy refresh waits for it, or it
+		// would read the turn as still running.
+		// Drop the memoized busy state the cancel is about to change; the
+		// refresh (and the agent's own events) land next. The
 		// queued-prompt cache stays: a turn-only cancel keeps the queue.
 		m.invalidateBusyCaches()
-		return m.dispatchBusyRefresh()
+		sessionID, refresh := m.session.ID, m.dispatchBusyRefresh()
+		return func() tea.Msg {
+			m.com.Workspace.AgentCancelTurn(sessionID)
+			if refresh == nil {
+				return nil
+			}
+			return refresh()
+		}
 	}
 
 	// First escape press - arm the cancel window.

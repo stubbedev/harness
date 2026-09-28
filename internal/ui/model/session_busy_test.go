@@ -536,8 +536,8 @@ func TestSendMessageSetsOptimisticBusy(t *testing.T) {
 	m.cancelAgent()
 	require.Equal(t, escCancel, m.esc.state, "first esc press must arm cancellation")
 
-	// Second press must actually cancel.
-	m.cancelAgent()
+	// Second press must actually cancel, off the key path.
+	runCmds(m, m.cancelAgent())
 	require.Equal(t, 1, ws.cancelTurnCalls, "second esc press must interrupt the running turn")
 }
 
@@ -559,7 +559,7 @@ func TestCancelAgentCancelsTurnNotQueue(t *testing.T) {
 	require.Zero(t, ws.clearQueueCalls, "esc must not clear the queue")
 	require.Zero(t, ws.cancelTurnCalls, "the armed press cancels nothing yet")
 
-	m.cancelAgent()
+	runCmds(m, m.cancelAgent())
 	require.Equal(t, 1, ws.cancelTurnCalls, "second esc press interrupts the turn")
 	require.Zero(t, ws.cancelCalls, "the TUI esc path never issues a full cancel")
 	require.Zero(t, ws.clearQueueCalls, "the queue must survive a turn cancel")
