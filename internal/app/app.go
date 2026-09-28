@@ -720,11 +720,11 @@ func (app *App) setupEvents() {
 	app.eventsCtx = ctx
 	app.subscribe(ctx, "sessions", app.Sessions.Subscribe)
 	app.subscribe(ctx, "messages", app.Messages.Subscribe)
-	app.subscribeMustDeliver(ctx, "question-batches", app.Questions.Subscribe)
-	app.subscribeMustDeliver(ctx, "question-notifications", app.Questions.SubscribeNotifications)
+	app.subscribe(ctx, "question-batches", app.Questions.Subscribe)
+	app.subscribe(ctx, "question-notifications", app.Questions.SubscribeNotifications)
 	app.subscribe(ctx, "history", app.History.Subscribe)
 	app.subscribe(ctx, "agent-notifications", app.agentNotifications.Subscribe)
-	app.subscribeMustDeliver(ctx, "run-completions", app.runCompletions.Subscribe)
+	app.subscribe(ctx, "run-completions", app.runCompletions.Subscribe)
 	app.subscribe(ctx, "mcp", mcp.SubscribeEvents)
 	app.subscribe(ctx, "lsp", SubscribeLSPEvents)
 	if app.Skills != nil {
@@ -741,7 +741,7 @@ func (app *App) setupEvents() {
 
 // subscribe fans a service's event stream into the shared app.events
 // broker on app.serviceEventsWG, re-publishing each upstream event as a
-// tea.Msg. The goroutine exits when ctx is cancelled or the upstream
+// tea.Msg with the delivery guarantee it was published with. The goroutine exits when ctx is cancelled or the upstream
 // channel closes. It is a generic method (Go 1.27) so it can live in the
 // App namespace while still inferring the upstream event type T.
 func (app *App) subscribe[T any](
@@ -758,37 +758,14 @@ func (app *App) subscribe[T any](
 					slog.Debug("Subscription channel closed", "name", name)
 					return
 				}
-				app.events.Publish(pubsub.UpdatedEvent, tea.Msg(event))
-			case <-ctx.Done():
-				slog.Debug("Subscription cancelled", "name", name)
-				return
-			}
-		}
-	})
-}
-
-// subscribeMustDeliver is the bounded-blocking fan-in variant of
-// [App.subscribe]: it re-publishes upstream events onto the shared
-// app.events broker using PublishMustDeliver instead of Publish. Use
-// this for terminal events that subscribers cannot tolerate losing —
-// notably RunComplete, which is the authoritative end-of-run signal
-// for `harness run`. A lossy fan-in here can drop the only terminal
-// event and hang non-interactive clients waiting on it.
-func (app *App) subscribeMustDeliver[T any](
-	ctx context.Context,
-	name string,
-	subscriber func(context.Context) <-chan pubsub.Event[T],
-) {
-	app.serviceEventsWG.Go(func() {
-		subCh := subscriber(ctx)
-		for {
-			select {
-			case event, ok := <-subCh:
-				if !ok {
-					slog.Debug("Subscription channel closed", "name", name)
-					return
+				// Forward with the guarantee the event was published with:
+				// a terminal message update or a RunComplete must reach
+				// the UI and the SSE stream, not just this goroutine.
+				if event.MustDeliver {
+					app.events.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
+				} else {
+					app.events.Publish(pubsub.UpdatedEvent, tea.Msg(event))
 				}
-				app.events.PublishMustDeliver(ctx, pubsub.UpdatedEvent, tea.Msg(event))
 			case <-ctx.Done():
 				slog.Debug("Subscription cancelled", "name", name)
 				return

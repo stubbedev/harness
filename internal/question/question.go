@@ -272,7 +272,9 @@ func (s *questionService) Ask(ctx context.Context, req Request) ([]Answer, error
 		s.mu.Unlock()
 	}()
 
-	s.broker.Publish(pubsub.CreatedEvent, req)
+	// A question the UI never receives blocks the agent until its
+	// context ends, so it goes out with the bounded-blocking guarantee.
+	s.broker.PublishMustDeliver(ctx, pubsub.CreatedEvent, req)
 
 	select {
 	case <-ctx.Done():
@@ -300,7 +302,7 @@ func (s *questionService) Answer(answers []Answer) bool {
 	// Publish a notification so non-answering clients can dismiss
 	// their open question forms.
 	if batchID != "" {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{
+		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, Notification{
 			BatchID: batchID,
 		})
 	}
@@ -323,7 +325,7 @@ func (s *questionService) Cancel() bool {
 	// Publish a notification so non-answering clients can dismiss
 	// their open question forms.
 	if batchID != "" {
-		s.notificationBroker.Publish(pubsub.CreatedEvent, Notification{
+		s.notificationBroker.PublishMustDeliver(context.Background(), pubsub.CreatedEvent, Notification{
 			BatchID: batchID,
 		})
 	}

@@ -35,9 +35,9 @@ func NewForTest(ctx context.Context) *App {
 
 	eventsCtx, cancel := context.WithCancel(ctx)
 	app.eventsCtx = eventsCtx
-	app.subscribeMustDeliver(eventsCtx, "question-batches",
+	app.subscribe(eventsCtx, "question-batches",
 		app.Questions.Subscribe)
-	app.subscribeMustDeliver(eventsCtx, "question-notifications",
+	app.subscribe(eventsCtx, "question-notifications",
 		app.Questions.SubscribeNotifications)
 	app.subscribe(eventsCtx, "agent-notifications",
 		app.agentNotifications.Subscribe)

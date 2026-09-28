@@ -49,6 +49,12 @@ type (
 	Event[T any] struct {
 		Type    EventType `json:"type"`
 		Payload T         `json:"payload"`
+		// MustDeliver records that the event was published with
+		// [Broker.PublishMustDeliver]. A fan-in that re-publishes events
+		// onto another broker forwards it with the same guarantee, so a
+		// terminal event keeps it across every hop instead of only the
+		// first.
+		MustDeliver bool `json:"-"`
 	}
 
 	// Publisher can publish events of type T.

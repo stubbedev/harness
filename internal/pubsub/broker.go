@@ -210,7 +210,9 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 // Use this for terminal events that must reach subscribers (finish,
 // tool result, error, cancel). Callers must still tolerate rare drops
 // after timeout — recovery is the subscriber's responsibility (e.g. a
-// re-fetch on the next session-visible event).
+// re-fetch on the next session-visible event). A canceled ctx stops the
+// blocking wait, not the delivery: the remaining subscribers still get
+// the non-blocking attempt.
 func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload T) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -221,7 +223,7 @@ func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload
 	default:
 	}
 
-	event := Event[T]{Type: t, Payload: payload}
+	event := Event[T]{Type: t, Payload: payload, MustDeliver: true}
 	timeout := b.mustDeliverTimeout
 
 	for sub := range b.subs {
@@ -230,6 +232,11 @@ func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload
 		case sub <- event:
 			continue
 		default:
+		}
+		if ctx.Err() != nil {
+			b.mustDeliverDropCount.Add(1)
+			slog.Error("PublishMustDeliver canceled before delivering event", "type", t)
+			continue
 		}
 
 		// Slow path: bounded blocking send.
@@ -243,7 +250,8 @@ func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload
 				"type", t, "timeout", timeout)
 		case <-ctx.Done():
 			timer.Stop()
-			return
+			b.mustDeliverDropCount.Add(1)
+			slog.Error("PublishMustDeliver canceled before delivering event", "type", t)
 		}
 	}
 }
