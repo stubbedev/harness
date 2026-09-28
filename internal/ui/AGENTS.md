@@ -258,9 +258,10 @@ through all components that need access to app state or styles.
 - Use `tea.Batch()` when returning multiple commands.
 - Pass `*common.Common` to components that need styles or app access.
 - When writing tea.Cmd's prefer creating methods in the model instead of writing inline functions.
-- The `list.List` only renders visible items (lazy). No render cache exists
-  at the list level — items should cache internally if rendering is
-  expensive.
+- The `list.List` only renders visible items (lazy) and memoizes each
+  item's render, keyed by width and the item's version (`renderItemEntry`);
+  a `Finished()` item is frozen and never re-rendered. An item that changes
+  must bump its version, or the list keeps drawing the old render.
 - Rendering is the chat's hot path; a few invariants keep resize/scroll fast
   on large conversations:
   - Syntax highlighting and diff formatting build the chroma style from the

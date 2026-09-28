@@ -2,10 +2,6 @@
 
 package clipboard
 
-func initClipboard() error {
-	return ErrUnsupported
-}
-
 func writeText(string) error {
 	return ErrUnsupported
 }

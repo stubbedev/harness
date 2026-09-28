@@ -71,7 +71,7 @@ lint-log:
     ./scripts/check_log_capitalization.sh
 
 lint-install:
-    GOTOOLCHAIN=go1.26.6 go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 
 # Apply golang.org/x/tools modernize fixes (golangci-lint enforces them too).
 modernize:

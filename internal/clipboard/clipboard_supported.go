@@ -18,10 +18,6 @@ func ready() bool {
 	return clipboard.Init() == nil
 }
 
-func initClipboard() error {
-	return clipboard.Init()
-}
-
 func writeText(text string) error {
 	if !ready() {
 		return ErrUnsupported

@@ -25,12 +25,12 @@ is kept out of every prompt rather than carried in all of them.
 
 - **Build**: `go build .` or `go run .`
 - **Test**: `just test` or `go test ./...` (run single test:
-  `go test ./internal/llm/prompt -run TestGetContextFromPaths`)
+  `go test ./internal/agent/prompt -run TestGetGitStatusCachesWithinTTL`)
 - **Update Golden Files**: `go test ./... -update` (regenerates `.golden`
   files when test output changes)
   - Update specific package:
-    `go test ./internal/tui/components/core -update` (in this case,
-    we're updating "core")
+    `go test ./internal/ui/diffview -update` (in this case, we're
+    updating "diffview")
 - **No API key is needed for any test**. `TestCoderAgent` drives a scripted
   model (`internal/agent/scripted_model_test.go`) rather than a recorded
   provider, so editing a prompt template or a tool description cannot
@@ -76,29 +76,27 @@ is kept out of every prompt rather than carried in all of them.
 - **Comments**: End comments in periods unless comments are at the end of the
   line.
 
-## Testing with Mock Providers
+## Testing Without Providers
 
-When writing tests that involve provider configurations, use the mock
-providers to avoid API calls:
+No test reaches a real provider or the models.dev catalog:
 
-```go
-func TestYourFunction(t *testing.T) {
-    // Enable mock providers for testing
-    originalUseMock := config.UseMockProviders
-    config.UseMockProviders = true
-    defer func() {
-        config.UseMockProviders = originalUseMock
-        config.ResetProviders()
-    }()
+- Build config for a test in memory with `config.NewTestStore(cfg)` (or
+  `config.NewTestStoreWithWorkingDir(cfg, dir)` when the working directory
+  matters) and set the providers the test needs directly:
 
-    // Reset providers to ensure fresh mock data
-    config.ResetProviders()
+  ```go
+  store := config.NewTestStoreWithWorkingDir(&config.Config{}, t.TempDir())
+  store.Config().Providers.Set("p", config.ProviderConfig{
+      ID:     "p",
+      Models: []catalog.Model{{ID: "model-x", DefaultMaxTokens: 4096}},
+  })
+  ```
 
-    // Your test code here - providers will now return mock data
-    providers := config.Providers()
-    // ... test logic
-}
-```
+- The catalog syncer takes a `catalogClient`; config's own tests hand it a
+  stub (`mockCatalogClient` in `internal/config/provider_test.go`) and point
+  `XDG_DATA_HOME` at `t.TempDir()` so the machine-wide cache is untouched.
+- Agent-loop tests drive the scripted model in
+  `internal/agent/scripted_model_test.go`.
 
 ## Formatting
 

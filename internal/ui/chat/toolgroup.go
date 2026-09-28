@@ -379,27 +379,6 @@ func ShowsFullView(t ToolMessageItem) bool {
 	return t.ExpansionLevel() != 0
 }
 
-// ToggleFullView flips a tool call between its full view and its
-// one-liner - the one expansion move every surface shares. A call at
-// rest opens, un-compacting the strip's nested calls; a full one
-// collapses back and re-compactes if it was compact at rest. Reports
-// whether the call shows its full view after the flip.
-func ToggleFullView(t ToolMessageItem) bool {
-	compact, isCompact := t.(Compactable)
-	if ShowsFullView(t) {
-		t.SetExpansionLevel(0)
-		if isCompact {
-			compact.SetCompact(true)
-		}
-		return false
-	}
-	if isCompact {
-		compact.SetCompact(false)
-	}
-	t.SetExpansionLevel(1)
-	return true
-}
-
 // NestedToolLines renders one nested tool call's lines under indent:
 // its full view when it shows one, its one-liner otherwise, both at
 // the body width the nesting level gives. Shared by the transcript's

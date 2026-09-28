@@ -63,6 +63,23 @@ jobs:
 
       # The swagger docs are generated from handler annotations; drift means
       # the published API description no longer matches the server.
+      # sqlc output is committed; a query or migration edited without
+      # regenerating leaves the Go code executing the old SQL.
+      - name: sqlc is current
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
+          git diff --exit-code internal/db
+
+      # Code that neither the binary nor any test reaches. Test-only
+      # seams are fine; a function nothing calls is drift waiting to
+      # mislead the next reader.
+      - name: No dead code
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          out=$(go run golang.org/x/tools/cmd/deadcode@v0.50.0 -test ./...)
+          if [ -n "$out" ]; then echo "$out"; exit 1; fi
+
       - name: Swagger is current
         if: matrix.os == 'ubuntu-latest'
         run: |

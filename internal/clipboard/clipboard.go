@@ -27,15 +27,9 @@ var (
 	ErrWriteFailed = errors.New("clipboard write did not land")
 )
 
-// Init initializes the clipboard subsystem. On unsupported platforms it
-// returns ErrUnsupported but is otherwise safe to call.
-func Init() error {
-	return initClipboard()
-}
-
 // WriteText writes plain text to the system clipboard and reads it back to
 // confirm the write landed. It returns ErrUnsupported on platforms without a
-// clipboard or when Init did not succeed, and ErrWriteFailed when the
+// clipboard or when it cannot be initialized, and ErrWriteFailed when the
 // clipboard does not hold the text afterwards.
 func WriteText(text string) error {
 	return writeText(text)
