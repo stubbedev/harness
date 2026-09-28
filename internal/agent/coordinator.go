@@ -624,7 +624,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		reasoningEffort != "" &&
 		slices.Contains(model.CatalogCfg.ReasoningLevels, reasoningEffort)
 
-	switch providerCfg.Type {
+	switch providerOptionsFamily(providerCfg.Type, model.CatalogCfg.ID) {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && shouldSetEffort {
@@ -1550,6 +1550,20 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	return google.New(opts...)
 }
 
+// providerOptionsFamily names the provider whose option format a call to
+// modelID on a provider of type t takes. It is the type itself except for
+// Vertex AI, which fantasy serves through its google provider, handing
+// Claude models on to its anthropic provider.
+func providerOptionsFamily(t catalog.Type, modelID string) catalog.Type {
+	if t != catalog.TypeVertexAI {
+		return t
+	}
+	if strings.Contains(modelID, "anthropic") || strings.Contains(modelID, "claude") {
+		return anthropic.Name
+	}
+	return google.Name
+}
+
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
 	if model.Think {
 		return true
@@ -1627,7 +1641,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return c.buildBedrockProvider(apiKey, headers)
 	case google.Name:
 		return c.buildGoogleProvider(baseURL, apiKey, headers)
-	case "google-vertex":
+	case catalog.TypeVertexAI:
 		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams)
 	case openaicompat.Name:
 		if catalog.IsZAI(providerCfg.ID) {
