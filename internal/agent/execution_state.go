@@ -393,7 +393,7 @@ func (s *executionState) ingestResult(call message.ToolCall, result message.Tool
 		if json.Unmarshal([]byte(result.Metadata), &dispatched) == nil && len(dispatched.Jobs) > 0 {
 			for _, job := range dispatched.Jobs {
 				data, _ := json.Marshal(job)
-				s.put(&s.Jobs, executionEntry{Key: job.Handle, Tool: call.Name, Status: job.Status, Metadata: data})
+				s.put(&s.Jobs, executionEntry{Key: job.Handle, Tool: call.Name, Status: string(job.Status), Metadata: data})
 			}
 			return
 		}

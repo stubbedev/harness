@@ -2402,7 +2402,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 // runCtx is what cancels the child; parentCtx is used for work that must
 // outlive the run (the cost update), so a background caller passes a
 // detached context.
-func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, session session.Session, params subAgentParams) (response fantasy.ToolResponse, status string) {
+func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, session session.Session, params subAgentParams) (response fantasy.ToolResponse, status subagents.RunStatus) {
 	if params.FinishWorkspace != nil {
 		defer func() { params.FinishWorkspace(&response) }()
 	}
@@ -2724,7 +2724,7 @@ func (c *coordinator) knownBackgroundHandles(parentSessionID string) []string {
 // finished. status is the runtime status (completed, cancelled, failed).
 // The event's decisions are informational, but context returned by hooks
 // is appended to the tool response so the orchestrating model sees it.
-func (c *coordinator) fireSubagentStopHooks(ctx context.Context, sessionID, agentName, status string, resp *fantasy.ToolResponse) {
+func (c *coordinator) fireSubagentStopHooks(ctx context.Context, sessionID, agentName string, status subagents.RunStatus, resp *fantasy.ToolResponse) {
 	if resp == nil || !c.hooks.Has(hooks.EventSubagentStop) {
 		return
 	}
@@ -2732,7 +2732,7 @@ func (c *coordinator) fireSubagentStopHooks(ctx context.Context, sessionID, agen
 		Event:        hooks.EventSubagentStop,
 		SessionID:    sessionID,
 		SubagentType: agentName,
-		Message:      status,
+		Message:      string(status),
 	})
 	if err != nil {
 		slog.Warn("SubagentStop hook error", "error", err)

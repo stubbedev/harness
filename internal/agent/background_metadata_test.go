@@ -21,5 +21,5 @@ func TestBackgroundMetadataSurvivesCompactionAndUpdates(t *testing.T) {
 	response = withBackgroundMetadata(fantasy.NewTextResponse("collected"), []*backgroundRun{run})
 	state.Ingest(executionMessages("wait", "agent", `{"handles":["bg-one"]}`, response.Metadata, false))
 	require.Len(t, state.Jobs, 1)
-	require.Equal(t, subagents.StatusCompleted, state.Jobs[0].Status)
+	require.Equal(t, string(subagents.StatusCompleted), state.Jobs[0].Status)
 }

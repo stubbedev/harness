@@ -1,13 +1,16 @@
 package agent
 
-import "charm.land/fantasy"
+import (
+	"charm.land/fantasy"
+	"github.com/stubbedev/harness/internal/subagents"
+)
 
 type backgroundJobMetadata struct {
-	Handle    string          `json:"handle"`
-	SessionID string          `json:"session_id"`
-	Agent     string          `json:"agent"`
-	Status    string          `json:"status"`
-	Worktree  *WorktreeResult `json:"worktree,omitempty"`
+	Handle    string              `json:"handle"`
+	SessionID string              `json:"session_id"`
+	Agent     string              `json:"agent"`
+	Status    subagents.RunStatus `json:"status"`
+	Worktree  *WorktreeResult     `json:"worktree,omitempty"`
 }
 
 func withBackgroundMetadata(response fantasy.ToolResponse, runs []*backgroundRun) fantasy.ToolResponse {
@@ -15,7 +18,7 @@ func withBackgroundMetadata(response fantasy.ToolResponse, runs []*backgroundRun
 	for _, run := range runs {
 		finished, status, _, _ := run.snapshot()
 		if !finished {
-			status = "running"
+			status = subagents.StatusRunning
 		}
 		run.mu.Lock()
 		worktree := run.worktree

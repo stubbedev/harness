@@ -39,11 +39,11 @@ func TestRuntime_SetStatus(t *testing.T) {
 	t.Cleanup(rt.Shutdown)
 
 	rt.Register("parent-1", "child-1", "my-agent", "green", "")
-	rt.SetStatus("child-1", "queued")
+	rt.SetStatus("child-1", StatusRetrying)
 
 	entries := rt.List("parent-1")
 	require.Len(t, entries, 1)
-	require.Equal(t, "queued", entries[0].Status)
+	require.Equal(t, StatusRetrying, entries[0].Status)
 }
 
 func TestRuntime_List_IsolatedByParent(t *testing.T) {
@@ -150,9 +150,9 @@ func TestRuntime_Finish_PublishesFinishedEvent(t *testing.T) {
 func TestRuntime_Finish_StatusFlowsThrough(t *testing.T) {
 	t.Parallel()
 
-	cases := []string{StatusCompleted, StatusCancelled, StatusFailed}
+	cases := []RunStatus{StatusCompleted, StatusCancelled, StatusFailed}
 	for _, status := range cases {
-		t.Run(status, func(t *testing.T) {
+		t.Run(string(status), func(t *testing.T) {
 			t.Parallel()
 
 			rt := NewRuntime()
@@ -200,7 +200,7 @@ func TestRuntime_NilSafe(t *testing.T) {
 		rt.Finish("child-1", StatusCompleted)
 	})
 	require.NotPanics(t, func() {
-		rt.SetStatus("child-1", "queued")
+		rt.SetStatus("child-1", StatusRetrying)
 	})
 	require.NotPanics(t, func() {
 		entries := rt.List("parent-1")
@@ -258,7 +258,7 @@ func TestRuntime_ConcurrentAccess(t *testing.T) {
 			childID := "child-" + string(rune('A'+i))
 			rt.Register("parent-shared", childID, "agent", "white", "")
 			rt.List("parent-shared")
-			rt.SetStatus(childID, "queued")
+			rt.SetStatus(childID, StatusRetrying)
 			rt.List("parent-shared")
 			rt.Finish(childID, StatusCompleted)
 		}(i)

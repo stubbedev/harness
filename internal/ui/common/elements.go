@@ -39,11 +39,11 @@ func FormatSubagentTokenCount(prompt, completion int64) string {
 // SubagentStatusSuffix renders a non-running subagent status in the
 // shared parenthesized form. Live statuses render empty: the task strip
 // shows a spinner for them and the list views simply omit them.
-func SubagentStatusSuffix(t *styles.Styles, status string) string {
+func SubagentStatusSuffix(t *styles.Styles, status subagents.RunStatus) string {
 	if status == "" || status == subagents.StatusRunning {
 		return ""
 	}
-	return t.Resource.AdditionalText.Render("(" + status + ")")
+	return t.Resource.AdditionalText.Render("(" + string(status) + ")")
 }
 
 // ModelContextInfo contains token usage and cost information for a model.

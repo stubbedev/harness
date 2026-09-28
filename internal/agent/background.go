@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/stubbedev/harness/internal/subagents"
+
 	"charm.land/fantasy"
 
 	"github.com/stubbedev/harness/internal/message"
@@ -147,9 +149,10 @@ type backgroundRun struct {
 	parentSession string
 	agentName     string
 
-	mu        sync.Mutex
-	finished  bool
-	status    string
+	mu sync.Mutex
+	// status is the run's lifecycle; the run has finished exactly when
+	// it is terminal, so there is no separate flag to disagree with it.
+	status    subagents.RunStatus
 	result    string
 	resultErr bool
 	worktree  *WorktreeResult
@@ -157,13 +160,17 @@ type backgroundRun struct {
 
 // finish records the terminal state exactly once. Later calls are no-ops so
 // a duplicate finish cannot overwrite the collected result.
-func (r *backgroundRun) finish(status string, resp fantasy.ToolResponse) {
+func (r *backgroundRun) finish(status subagents.RunStatus, resp fantasy.ToolResponse) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.finished {
+	if r.status.IsTerminal() {
 		return
 	}
-	r.finished = true
+	if !status.IsTerminal() {
+		// A run cannot finish into a live status; one that tries has
+		// failed in a way nothing else reported.
+		status = subagents.StatusFailed
+	}
 	r.status = status
 	r.result = resp.Content
 	r.resultErr = resp.IsError
@@ -176,10 +183,10 @@ func (r *backgroundRun) finish(status string, resp fantasy.ToolResponse) {
 }
 
 // snapshot returns the run's current state.
-func (r *backgroundRun) snapshot() (finished bool, status, result string, resultErr bool) {
+func (r *backgroundRun) snapshot() (finished bool, status subagents.RunStatus, result string, resultErr bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.finished, r.status, r.result, r.resultErr
+	return r.status.IsTerminal(), r.status, r.result, r.resultErr
 }
 
 // isFinished reports whether the run has terminated.

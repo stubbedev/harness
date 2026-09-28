@@ -9,6 +9,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/stubbedev/harness/internal/subagents"
+
 	tea "charm.land/bubbletea/v2"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/catalog"
@@ -310,7 +312,7 @@ type RunningSubagentInfo struct {
 	Name             string
 	Color            string
 	Model            string
-	Status           string
+	Status           subagents.RunStatus
 	StartedAt        time.Time
 	PromptTokens     int64
 	CompletionTokens int64

@@ -27,7 +27,7 @@ type agentTask struct {
 	toolCallID     string
 	childSessionID string
 	description    string
-	status         string
+	status         subagents.RunStatus
 	startedAt      time.Time
 	background     bool
 	dispatched     bool
@@ -453,8 +453,7 @@ func (m *UI) applyRunningSubagentInfo(info childSessionInfo) {
 	if task.childSessionID == "" {
 		task.childSessionID = info.ChildSessionID
 	}
-	switch info.Status {
-	case subagents.StatusCompleted, subagents.StatusCancelled, subagents.StatusFailed:
+	if info.Status.IsTerminal() {
 		m.reapAgentTask(toolCallID)
 		return
 	}
@@ -534,7 +533,7 @@ func (m *UI) reconcileBackgroundTasks(list []workspace.RunningSubagentInfo) {
 // feed it.
 type childSessionInfo struct {
 	ChildSessionID string
-	Status         string
+	Status         subagents.RunStatus
 }
 
 // mainRowCount is the number of pinned rows ahead of the task rows:

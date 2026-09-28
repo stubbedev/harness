@@ -17,18 +17,31 @@ type RunningEntry struct {
 	Name            string
 	Color           string
 	Model           string
-	Status          string
+	Status          RunStatus
 	StartedAt       time.Time
 }
 
+// RunStatus is where a sub-agent run stands.
+type RunStatus string
+
 // Live and terminal statuses for sub-agent runs.
 const (
-	StatusRunning   = "running"
-	StatusRetrying  = "retrying"
-	StatusCompleted = "completed"
-	StatusCancelled = "cancelled"
-	StatusFailed    = "failed"
+	StatusRunning   RunStatus = "running"
+	StatusRetrying  RunStatus = "retrying"
+	StatusCompleted RunStatus = "completed"
+	StatusCancelled RunStatus = "cancelled"
+	StatusFailed    RunStatus = "failed"
 )
+
+// IsTerminal reports whether a run in status s has ended.
+func (s RunStatus) IsTerminal() bool {
+	switch s {
+	case StatusCompleted, StatusCancelled, StatusFailed:
+		return true
+	default:
+		return false
+	}
+}
 
 // RuntimeEvent is published whenever the set of running sub-agents changes.
 // Finished is non-nil when the event reflects a sub-agent that just finished,
@@ -86,7 +99,7 @@ func (r *Runtime) Register(parentSessionID, childSessionID, name, color, model s
 // entry is deleted no later event re-announces it, so a lossy publish here
 // leaves a spinner running in the TUI forever (reconciliation is only a
 // backstop, not a guarantee).
-func (r *Runtime) Finish(childSessionID, finalStatus string) {
+func (r *Runtime) Finish(childSessionID string, finalStatus RunStatus) {
 	if r == nil {
 		return
 	}
@@ -111,7 +124,7 @@ func (r *Runtime) Finish(childSessionID, finalStatus string) {
 
 // SetStatus updates the Status field of a running sub-agent and publishes a
 // RuntimeEvent. It is a no-op when r is nil or the entry is not found.
-func (r *Runtime) SetStatus(childSessionID, status string) {
+func (r *Runtime) SetStatus(childSessionID string, status RunStatus) {
 	if r == nil {
 		return
 	}
