@@ -41,7 +41,7 @@ func TestDescendantsFindsChild(t *testing.T) {
 func TestPinnedStrayOnlyKillsItsOwnProcess(t *testing.T) {
 	t.Parallel()
 
-	live := exec.Command("sleep", "30")
+	live := exec.CommandContext(t.Context(), "sleep", "30")
 	require.NoError(t, live.Start())
 	s := pin(live.Process.Pid)
 	defer s.release()
