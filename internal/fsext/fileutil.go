@@ -1,6 +1,7 @@
 package fsext
 
 import (
+	"bytes"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -122,4 +123,12 @@ func truncate[T any](input []T, limit int) ([]T, bool) {
 		return input[:limit], true
 	}
 	return input, false
+}
+
+// LooksBinary reports whether a file whose first bytes are head is binary
+// rather than text, by the rule ripgrep applies: a NUL byte. The fallback
+// search and ripgrep must agree on which files they search, and the shell
+// builds its executable check on the same rule.
+func LooksBinary(head []byte) bool {
+	return bytes.IndexByte(head, 0) >= 0
 }

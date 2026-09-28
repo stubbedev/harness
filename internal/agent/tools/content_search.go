@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -288,7 +287,7 @@ func fileMatches(filePath string, pattern *regexp.Regexp) ([]lineMatch, error) {
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
 		return nil, nil
 	}
-	if !isText(head) {
+	if fsext.LooksBinary(head) {
 		return nil, nil
 	}
 
@@ -315,17 +314,6 @@ func fileMatches(filePath string, pattern *regexp.Regexp) ([]lineMatch, error) {
 	}
 
 	return matches, nil
-}
-
-// isText reports whether a file whose first bytes are head is text, by
-// its sniffed MIME type.
-func isText(head []byte) bool {
-	contentType := http.DetectContentType(head)
-	return strings.HasPrefix(contentType, "text/") ||
-		contentType == "application/json" ||
-		contentType == "application/xml" ||
-		contentType == "application/javascript" ||
-		contentType == "application/x-sh"
 }
 
 func globToRegex(glob string) string {

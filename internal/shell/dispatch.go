@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/fsext"
+
 	"github.com/stubbedev/harness/internal/filepathext"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
@@ -147,7 +149,7 @@ func hasShebang(probe []byte) bool {
 // numbers so we can fast-path well-formed binaries that happen to have no
 // NUL in the first 128 bytes (rare but possible for small binaries).
 func isBinary(probe []byte) bool {
-	if bytes.IndexByte(probe, 0) >= 0 {
+	if fsext.LooksBinary(probe) {
 		return true
 	}
 	magics := [][]byte{
