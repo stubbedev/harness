@@ -13,6 +13,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/stubbedev/harness/internal/filepathext"
+
 	"github.com/aymanbagabas/go-udiff"
 	"github.com/stubbedev/harness/internal/filetracker"
 )
@@ -20,12 +22,7 @@ import (
 var fileLocks [128]sync.Mutex
 
 func lockFile(path string) func() {
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		path = real
-	}
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
+	path = filepathext.Key(path)
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(path))
 	mu := &fileLocks[h.Sum32()%uint32(len(fileLocks))]

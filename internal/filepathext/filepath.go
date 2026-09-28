@@ -94,6 +94,17 @@ func SameOrInside(path, dir string) bool {
 	return ok
 }
 
+// Key is the one spelling of a file that locks, read evidence and history
+// agree on: absolute, cleaned, with symlinks resolved in its longest
+// existing prefix. A file viewed through a symlink and edited by its real
+// path is the same file under Key.
+func Key(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return Canonicalize(filepath.Clean(path))
+}
+
 // Canonicalize resolves symlinks in the longest existing prefix of path.
 // The final elements usually do not exist yet (they are a worktree being
 // created), which would make a plain EvalSymlinks fail and leave

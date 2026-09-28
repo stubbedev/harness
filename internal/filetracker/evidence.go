@@ -4,9 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"path/filepath"
 	"slices"
 	"sync"
+
+	"github.com/stubbedev/harness/internal/filepathext"
 
 	"github.com/aymanbagabas/go-udiff"
 )
@@ -37,10 +38,7 @@ type evidenceStore struct {
 }
 
 func evidenceKey(session, path string) string {
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
-	}
-	return session + "\x00" + filepath.Clean(path)
+	return session + "\x00" + filepathext.Key(path)
 }
 
 func mergeRanges(ranges []Range) []Range {
