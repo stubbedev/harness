@@ -243,3 +243,50 @@ func textareaTick(t *testing.T, cmd tea.Cmd) tea.Msg {
 	require.NotNil(t, msg)
 	return msg
 }
+
+// TestEditorCaretHoldsSteadyWhileTerminalBlurred pins the terminal-focus
+// caret (issue #77): while the terminal window is unfocused the editor
+// caret holds steady instead of blinking, so it reads at a glance that
+// keystrokes are landing in another window, and regaining focus
+// restores the blinking caret along with its tick chain.
+func TestEditorCaretHoldsSteadyWhileTerminalBlurred(t *testing.T) {
+	ui := newFrameTestUI(t)
+	ui.com.Workspace = &testWorkspace{cfg: &config.Config{Options: &config.Options{}}}
+	ui.state = uiChat
+	ui.session = &session.Session{ID: "s1"}
+	ui.focus = uiFocusEditor
+	ui.caps.ReportFocusEvents = true
+
+	_, ok := caretCell(t, ui)
+	require.True(t, ok, "a focused editor draws its caret")
+
+	_, _ = ui.Update(tea.BlurMsg{})
+	require.False(t, ui.textarea.Styles().Cursor.Blink,
+		"losing terminal focus must leave the caret steady")
+	_, ok = caretCell(t, ui)
+	require.True(t, ok, "the steady caret stays visible while blurred")
+
+	// The restored blink must tick: feed the command FocusMsg returned
+	// the way the runtime would and confirm the phase toggles again.
+	_, cmd := ui.Update(tea.FocusMsg{})
+	require.True(t, ui.textarea.Styles().Cursor.Blink,
+		"regaining terminal focus must restore the blinking caret")
+	ui.Update(textareaTick(t, cmd))
+	_, ok = caretCell(t, ui)
+	require.False(t, ok, "the restored blink must toggle the caret again")
+}
+
+// TestEditorCaretUnchangedWithoutFocusReporting pins the degradation:
+// focus messages only exist on terminals that report focus, and one
+// slipping through without the capability must leave the caret alone.
+func TestEditorCaretUnchangedWithoutFocusReporting(t *testing.T) {
+	ui := newFrameTestUI(t)
+	ui.com.Workspace = &testWorkspace{cfg: &config.Config{Options: &config.Options{}}}
+	ui.state = uiChat
+	ui.session = &session.Session{ID: "s1"}
+	ui.focus = uiFocusEditor
+
+	_, _ = ui.Update(tea.BlurMsg{})
+	require.True(t, ui.textarea.Styles().Cursor.Blink,
+		"without focus reporting the caret keeps its theme behavior")
+}

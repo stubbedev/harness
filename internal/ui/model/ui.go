@@ -760,6 +760,30 @@ func (m *UI) focusEditor() tea.Cmd {
 	return m.textarea.Focus()
 }
 
+// setEditorCaretTerminalBlurred restyles the editor caret while the
+// terminal window itself has lost focus: the caret holds steady instead
+// of blinking, so with Harness and another window side by side the
+// unblinking caret marks the editor as not receiving keystrokes. It
+// applies only while the textarea owns the caret; a terminal without
+// focus reporting never sends Blur and keeps today's caret. Returning
+// to focus restarts the blink cycle, whose tick chain dies in the
+// steady mode the blur leaves behind.
+func (m *UI) setEditorCaretTerminalBlurred(blurred bool) []tea.Cmd {
+	if !m.caps.ReportFocusEvents || m.state != uiChat ||
+		m.focus != uiFocusEditor || m.activeInline != nil {
+		return nil
+	}
+	styled := m.com.Styles.Editor.Textarea
+	styled.Cursor.Blink = styled.Cursor.Blink && !blurred
+	m.textarea.SetStyles(styled)
+	if blurred {
+		return nil
+	}
+	// updateVirtualCursorStyle drops SetMode's command, so the blink
+	// chain needs the kick textarea.Focus provides.
+	return []tea.Cmd{m.textarea.Focus()}
+}
+
 // loadCustomCommands loads the custom commands asynchronously.
 func (m *UI) loadCustomCommands() tea.Cmd {
 	return func() tea.Msg {
@@ -851,8 +875,10 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateNotificationBackend()
 	case tea.FocusMsg:
 		m.notifyWindowFocused = true
+		cmds = append(cmds, m.setEditorCaretTerminalBlurred(false)...)
 	case tea.BlurMsg:
 		m.notifyWindowFocused = false
+		cmds = append(cmds, m.setEditorCaretTerminalBlurred(true)...)
 	case gitStatusChangedMsg:
 		// A background git refresh produced a different summary;
 		// re-arm the subscription and let the repaint read the cache.
