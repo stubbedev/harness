@@ -41,9 +41,10 @@ Harness merges everything it finds, with later entries winning:
 | 1     | `/etc/harness/config.yaml` (Unix only)   | your administrator  |
 | 2     | `$XDG_CONFIG_HOME/harness/config.yaml`   | you                 |
 | 3     | `$XDG_DATA_HOME/harness/state.yaml`      | Harness             |
-| 4     | `<project>/harness.yaml`                 | you                 |
-| 5     | `<project>/.harness.yaml`                | you                 |
-| 6     | `<data-directory>/state.yaml`            | Harness             |
+| 4     | `<project>/.mcp.json`                    | you                 |
+| 5     | `<project>/harness.yaml`                 | you                 |
+| 6     | `<project>/.harness.yaml`                | you                 |
+| 7     | `<data-directory>/state.yaml`            | Harness             |
 
 On Windows the user config is `%XDG_CONFIG_HOME%\harness\config.yaml` (falling
 back to `%USERPROFILE%\.config\harness\config.yaml`) and the state file lives
@@ -217,6 +218,28 @@ mcp:
 | `enabled_tools`, `disabled_tools`                           | Allow/deny individual tools                 |
 | `sessionless`                                               | Treat the server as stateless               |
 | `oauth`, `oauth_client_id`, `oauth_client_secret`, `oauth_callback_port` | OAuth flow for remote servers   |
+
+Project `.mcp.json` files — the format Claude Code uses — are also read, so
+a shared MCP config serves both tools. Its `mcpServers` map holds the same
+fields, with `stdio` implied when `type` is omitted:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp"
+    }
+  }
+}
+```
+
+On a name conflict the native `mcp` map wins over `.mcp.json`, which wins
+over the global config.
 
 ## Language servers
 

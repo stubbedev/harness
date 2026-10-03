@@ -135,6 +135,10 @@ Fields: `type` (`stdio`, `http`, `sse`), `command`, `args`, `env`, `url`,
 `sessionless`, `oauth`, `oauth_client_id`, `oauth_client_secret`,
 `oauth_callback_port`.
 
+A project `.mcp.json` (the Claude Code format, a top-level `mcpServers` map)
+also feeds this map, with `type: stdio` implied when omitted; on a name
+conflict a native `mcp` entry wins.
+
 ## Language servers
 
 ```yaml

@@ -183,6 +183,58 @@ func TestLookupConfigs_BoundedByProject(t *testing.T) {
 	})
 }
 
+// TestLookupConfigs_MCPJSON verifies where the shared Claude Code project
+// .mcp.json sits in the discovery order: inside the project boundary, and
+// between the global configs and the native project configs so a name
+// conflict resolves in favor of harness.yaml.
+func TestLookupConfigs_MCPJSON(t *testing.T) {
+	t.Setenv("HARNESS_GLOBAL_CONFIG", t.TempDir())
+	t.Setenv("HARNESS_GLOBAL_DATA", t.TempDir())
+
+	t.Run("is discovered inside the project", func(t *testing.T) {
+		project := t.TempDir()
+		mcpJSON := filepath.Join(project, ".mcp.json")
+		require.NoError(t, os.WriteFile(mcpJSON, []byte("{}"), 0o644))
+
+		got := lookupConfigs(project)
+		require.Contains(t, got, mcpJSON)
+	})
+
+	t.Run("is not picked up above a non-git project", func(t *testing.T) {
+		parent := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(parent, ".mcp.json"), []byte("{}"), 0o644))
+		project := filepath.Join(parent, "project")
+		require.NoError(t, os.Mkdir(project, 0o755))
+
+		got := lookupConfigs(project)
+		require.NotContains(t, got, filepath.Join(parent, ".mcp.json"))
+	})
+
+	t.Run("loads before native project configs", func(t *testing.T) {
+		project := t.TempDir()
+		mcpJSON := filepath.Join(project, ".mcp.json")
+		local := filepath.Join(project, "harness.yaml")
+		require.NoError(t, os.WriteFile(mcpJSON, []byte("{}"), 0o644))
+		require.NoError(t, os.WriteFile(local, []byte("{}"), 0o644))
+
+		got := lookupConfigs(project)
+		// Later paths are merged last and therefore win, so the native
+		// harness.yaml must come after .mcp.json.
+		require.Less(t, slices.Index(got, mcpJSON), slices.Index(got, local))
+	})
+
+	t.Run("loads after the global configs", func(t *testing.T) {
+		project := t.TempDir()
+		mcpJSON := filepath.Join(project, ".mcp.json")
+		require.NoError(t, os.WriteFile(mcpJSON, []byte("{}"), 0o644))
+
+		got := lookupConfigs(project)
+		// Later paths are merged last and therefore win, so the project
+		// .mcp.json must come after the global configs it shadows.
+		require.Greater(t, slices.Index(got, mcpJSON), slices.Index(got, GlobalConfigData()))
+	})
+}
+
 func TestLoadFromConfigPaths_InvalidYAML(t *testing.T) {
 	t.Parallel()
 
@@ -248,18 +300,22 @@ func TestLoadFromConfigPaths_InvalidYAML(t *testing.T) {
 	})
 }
 
+// captureWarnings swaps in a slog default that collects warning-level
+// records into a JSON buffer for the duration of the test.
+func captureWarnings(t *testing.T) *strings.Builder {
+	t.Helper()
+	var buf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
 // TestLoadFromConfigPaths_ConflictWarningNamesKeys verifies that when two
 // config files coexist in the same directory, the merge warning names the
 // overlapping top-level keys so a shadowed setting is easy to spot.
 func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
-	capture := func(t *testing.T) *strings.Builder {
-		t.Helper()
-		var buf strings.Builder
-		prev := slog.Default()
-		slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-		t.Cleanup(func() { slog.SetDefault(prev) })
-		return &buf
-	}
+	capture := captureWarnings
 
 	t.Run("names overlapping keys", func(t *testing.T) {
 		buf := capture(t)
@@ -304,6 +360,91 @@ func TestLoadFromConfigPaths_ConflictWarningNamesKeys(t *testing.T) {
 		require.NoError(t, err)
 		require.NotContains(t, buf.String(), "later file taking precedence",
 			"layered directories are the normal case, not a conflict")
+	})
+}
+
+// TestLoadFromConfigPaths_MCPJSON verifies that a project .mcp.json in the
+// shared Claude Code format merges into the config's mcp map with the
+// source format's stdio default, and that native configs keep precedence.
+// The subtests stay sequential: some of them swap slog's default handler.
+func TestLoadFromConfigPaths_MCPJSON(t *testing.T) {
+	t.Run("decodes mcpServers and defaults the type to stdio", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".mcp.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{
+			"mcpServers": {
+				"filesystem": {"command": "npx", "args": ["-y", "server-filesystem"]},
+				"linear": {"type": "http", "url": "https://mcp.linear.app/mcp"}
+			}
+		}`), 0o644))
+
+		cfg, loaded, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.NoError(t, err)
+		require.Equal(t, []string{path}, loaded)
+		require.Len(t, cfg.MCP, 2)
+
+		filesystem := cfg.MCP["filesystem"]
+		require.Equal(t, MCPStdio, filesystem.Type)
+		require.Equal(t, "npx", filesystem.Command)
+		require.Equal(t, []string{"-y", "server-filesystem"}, filesystem.Args)
+
+		linear := cfg.MCP["linear"]
+		require.Equal(t, MCPHttp, linear.Type)
+		require.Equal(t, "https://mcp.linear.app/mcp", linear.URL)
+	})
+
+	t.Run("native harness.yaml wins over it on a name conflict", func(t *testing.T) {
+		dir := t.TempDir()
+		mcpJSON := filepath.Join(dir, ".mcp.json")
+		local := filepath.Join(dir, "harness.yaml")
+		require.NoError(t, os.WriteFile(mcpJSON, []byte(`{"mcpServers": {"fs": {"command": "from-mcp-json"}}}`), 0o644))
+		require.NoError(t, os.WriteFile(local, []byte("mcp:\n  fs:\n    type: stdio\n    command: from-yaml\n"), 0o644))
+
+		cfg, _, err := loadFromConfigPaths(context.Background(), []string{mcpJSON, local})
+		require.NoError(t, err)
+		require.Equal(t, "from-yaml", cfg.MCP["fs"].Command)
+	})
+
+	t.Run("warns and is skipped when mcpServers is missing", func(t *testing.T) {
+		buf := captureWarnings(t)
+		path := filepath.Join(t.TempDir(), ".mcp.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{"other": true}`), 0o644))
+
+		cfg, loaded, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.NoError(t, err)
+		require.Empty(t, loaded)
+		require.Empty(t, cfg.MCP)
+		require.Contains(t, buf.String(), "holds no mcpServers object")
+	})
+
+	t.Run("skips an empty mcpServers object silently", func(t *testing.T) {
+		buf := captureWarnings(t)
+		path := filepath.Join(t.TempDir(), ".mcp.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{"mcpServers": {}}`), 0o644))
+
+		_, loaded, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.NoError(t, err)
+		require.Empty(t, loaded)
+		require.Empty(t, buf.String())
+	})
+
+	t.Run("rejects a malformed mcpServers value", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), ".mcp.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{"mcpServers": []}`), 0o644))
+
+		_, _, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid MCP config file")
+		require.Contains(t, err.Error(), path)
+	})
+
+	t.Run("unknown server fields warn like native configs", func(t *testing.T) {
+		buf := captureWarnings(t)
+		path := filepath.Join(t.TempDir(), ".mcp.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{"mcpServers": {"x": {"comand": "npx"}}}`), 0o644))
+
+		_, _, err := loadFromConfigPaths(context.Background(), []string{path})
+		require.NoError(t, err)
+		require.Contains(t, buf.String(), "unknown field")
 	})
 }
 

@@ -31,6 +31,7 @@ import (
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // Load loads the configuration from the default paths and returns a
@@ -1008,6 +1009,10 @@ func resolveSelectedModels(cfg *Config, knownProviders []catalog.Provider) (reso
 // so an unrelated harness.yaml placed above the project is never picked
 // up. Global user-level config locations are always included
 // regardless of the boundary.
+// mcpJSONFile is the project-level MCP config in the shared Claude Code
+// format, read in addition to the native harness configs.
+const mcpJSONFile = ".mcp.json"
+
 func lookupConfigs(cwd string) []string {
 	// Prepend the system config, the hand-written user config, and the
 	// machine-owned state file. Missing files are skipped when loaded.
@@ -1015,6 +1020,16 @@ func lookupConfigs(cwd string) []string {
 		systemConfigPath,
 		GlobalConfig(),
 		GlobalConfigData(),
+	}
+
+	// .mcp.json slots between the global configs and the project's own:
+	// any native harness config beats it on a server-name conflict, while
+	// it beats the global configs.
+	foundMCP, err := fsext.LookupBounded(cwd, projectBoundary(cwd), mcpJSONFile)
+	if err == nil {
+		// reverse order so last config has more priority
+		slices.Reverse(foundMCP)
+		configPaths = append(configPaths, foundMCP...)
 	}
 
 	// Ordered high-to-low priority within a directory. LookupBounded returns
@@ -1063,9 +1078,17 @@ func loadFromConfigPaths(_ context.Context, configPaths []string) (*Config, []st
 			return nil, nil, fmt.Errorf("failed to open config file %s: %w", path, err)
 		}
 
-		jsonBytes, err := decodeConfig(data)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid YAML in config file %s: %w", path, err)
+		var jsonBytes []byte
+		if filepath.Base(path) == mcpJSONFile {
+			jsonBytes, err = decodeMCPJSON(path, data)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid MCP config file %s: %w", path, err)
+			}
+		} else {
+			jsonBytes, err = decodeConfig(data)
+			if err != nil {
+				return nil, nil, fmt.Errorf("invalid YAML in config file %s: %w", path, err)
+			}
 		}
 		if len(jsonBytes) == 0 {
 			continue
@@ -1129,6 +1152,51 @@ func warnUnknownFields(path string, jsonBytes []byte) {
 	if err := dec.Decode(&probe); err != nil && strings.Contains(err.Error(), "unknown field") {
 		slog.Warn("Config file holds a key Harness does not recognize; it is ignored", "path", path, "error", err)
 	}
+}
+
+// decodeMCPJSON converts a project .mcp.json, the shared Claude Code MCP
+// format, into harness config JSON: its mcpServers object becomes the mcp
+// map. Entries pass through untouched except that a missing or empty type
+// defaults to stdio, which the source format implies; unknown fields are
+// kept so warnUnknownFields flags them like native configs. A file
+// without a usable mcpServers object yields nil, which callers treat as
+// "nothing to merge".
+func decodeMCPJSON(path string, data []byte) ([]byte, error) {
+	servers := gjson.GetBytes(data, "mcpServers")
+	switch {
+	case !servers.Exists():
+		if len(bytes.TrimSpace(data)) > 0 {
+			slog.Warn("MCP config file holds no mcpServers object; it is ignored", "path", path)
+		}
+		return nil, nil
+	case !servers.IsObject():
+		return nil, fmt.Errorf("mcpServers must be an object")
+	}
+
+	converted := make(map[string]json.RawMessage)
+	var setErr error
+	servers.ForEach(func(name, entry gjson.Result) bool {
+		if !entry.IsObject() {
+			setErr = fmt.Errorf("mcp server %q must be an object", name.String())
+			return false
+		}
+		raw := entry.Raw
+		if t := entry.Get("type"); !t.Exists() || t.String() == "" {
+			raw, setErr = sjson.Set(raw, "type", string(MCPStdio))
+			if setErr != nil {
+				return false
+			}
+		}
+		converted[name.String()] = json.RawMessage(raw)
+		return true
+	})
+	if setErr != nil {
+		return nil, setErr
+	}
+	if len(converted) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(map[string]map[string]json.RawMessage{"mcp": converted})
 }
 
 func loadFromBytes(configs [][]byte) (*Config, error) {
