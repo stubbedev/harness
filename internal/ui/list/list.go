@@ -713,6 +713,12 @@ func (l *List) SetItems(items ...Item) {
 	l.items = items
 	l.selectedIdx = min(l.selectedIdx, len(l.items)-1)
 	l.offsetIdx = min(l.offsetIdx, len(l.items)-1)
+	// -1 is the empty-list sentinel (see Offset); it must not leak
+	// into a list that just gained items, or Render starts at
+	// renderItemEntry(-1) and draws nothing.
+	if len(l.items) > 0 && l.offsetIdx < 0 {
+		l.offsetIdx = 0
+	}
 	l.offsetLine = 0
 	l.retainCacheFor(items)
 	l.sumsFrom = 0
