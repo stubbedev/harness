@@ -321,7 +321,7 @@ type UI struct {
 	workingPlaceholder string
 
 	// completionsStartIndex is the offset of the '@' that opened the
-	// mention picker; the picked mention replaces the query from there.
+	// mention picker; the picked mention replaces that '@' from there.
 	// The picker itself is the shared dialog (dialog.MentionPicker).
 	completionsStartIndex int
 
@@ -2204,7 +2204,6 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 
 	case dialog.ActionMentionSelected:
 		m.dialog.CloseDialog(dialog.MentionPickerID)
-		m.closeCompletions()
 		switch value := msg.Value.(type) {
 		case completions.FileCompletionValue:
 			cmds = append(cmds, m.insertFileCompletion(value.Path))
@@ -2213,17 +2212,13 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 		case completions.SubagentCompletionValue:
 			cmds = append(cmds, m.insertSubagentCompletion(value.Name))
 		}
+		// The anchor resets only after the insertion has read it.
+		m.closeCompletions()
 
 	case dialog.ActionMentionCancelled:
 		m.dialog.CloseDialog(dialog.MentionPickerID)
-		// The "@" that opened the picker goes with it; only that rune,
-		// and only when it still sits where it was typed.
-		if value := m.textarea.Value(); m.completionsStartIndex < len(value) && value[m.completionsStartIndex] == '@' {
-			prevHeight := m.textarea.Height()
-			m.textarea.SetValue(value[:m.completionsStartIndex] + value[m.completionsStartIndex+1:])
-			m.textarea.MoveToEnd()
-			cmds = append(cmds, m.handleTextareaHeightChange(prevHeight))
-		}
+		// The typed "@" stays in the editor as ordinary text; only the
+		// picker closes.
 		m.closeCompletions()
 
 	case dialog.ActionRunCustomCommand:
@@ -2847,13 +2842,17 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					break
 				}
 
-				// Check for @ trigger before passing to textarea.
+				// Check for @ trigger before passing to textarea. The anchor
+				// is the cursor position, not the end of the text, so a
+				// mention picked mid-edit lands where the @ was typed.
 				curValue := m.textarea.Value()
-				curIdx := len(curValue)
+				curRunes := []rune(curValue)
+				curIdx := absoluteOffset(curValue, m.textarea.Line(), m.textarea.Column())
 
 				if key.Matches(msg, m.keyMap.Editor.MentionFile) && !m.dialog.ContainsDialog(dialog.MentionPickerID) {
-					// Only show if beginning of prompt or after whitespace.
-					if curIdx == 0 || (curIdx > 0 && isWhitespace(curValue[curIdx-1])) {
+					// Only show if beginning of prompt or after whitespace,
+					// judged at the cursor.
+					if curIdx == 0 || unicode.IsSpace(curRunes[curIdx-1]) {
 						m.completionsStartIndex = curIdx
 						cmds = append(cmds, m.openMentionPicker())
 					}
@@ -3867,25 +3866,41 @@ func (m *UI) closeCompletions() {
 	m.completionsStartIndex = 0
 }
 
-// insertCompletionText replaces the @query in the textarea with the given text.
-// Returns false if the replacement cannot be performed.
+// insertCompletionText replaces the '@' that opened the mention picker
+// with the given text followed by one space, and leaves the cursor right
+// after the insertion so typing resumes where the mention went in. The
+// picker's query never reaches the editor, so the '@' rune is all there
+// is to replace. Returns false if the replacement cannot be performed.
 func (m *UI) insertCompletionText(text string) bool {
-	value := m.textarea.Value()
-	if m.completionsStartIndex > len(value) {
+	runes := []rune(m.textarea.Value())
+	start := m.completionsStartIndex
+	if start > len(runes) {
 		return false
 	}
-
-	word := m.textareaWord()
-	endIdx := min(m.completionsStartIndex+len(word), len(value))
-	newValue := value[:m.completionsStartIndex] + text + value[endIdx:]
-	m.textarea.SetValue(newValue)
-	m.textarea.MoveToEnd()
-	m.textarea.InsertRune(' ')
+	end := start
+	if start < len(runes) && runes[start] == '@' {
+		end = start + 1
+	}
+	inserted := text + " "
+	m.textarea.SetValue(string(runes[:start]) + inserted + string(runes[end:]))
+	m.moveCursorToOffset(start + len([]rune(inserted)))
 	return true
 }
 
+// moveCursorToOffset parks the textarea cursor at the given absolute
+// rune offset of its value.
+func (m *UI) moveCursorToOffset(offset int) {
+	row, col := rowColOfOffset([]rune(m.textarea.Value()), offset)
+	m.textarea.MoveToBegin()
+	for range row {
+		m.textarea.CursorDown()
+	}
+	m.textarea.SetCursorColumn(col)
+}
+
 // insertFileCompletion inserts the selected file path into the textarea,
-// replacing the @query. The file's content rides the path as an inline
+// replacing the @ that opened the picker. The file's content rides the path
+// as an inline
 // attachment: it ships with the next send while the path text stays in
 // the prompt, and deleting the path drops the content.
 func (m *UI) insertFileCompletion(path string) tea.Cmd {
@@ -3941,7 +3956,8 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 	return tea.Batch(heightCmd, fileCmd)
 }
 
-// insertSubagentCompletion inserts @name into the textarea, replacing the @query.
+// insertSubagentCompletion inserts @name into the textarea, replacing the @
+// that opened the picker.
 func (m *UI) insertSubagentCompletion(name string) tea.Cmd {
 	prevHeight := m.textarea.Height()
 	if !m.insertCompletionText("@" + name) {
@@ -3951,7 +3967,8 @@ func (m *UI) insertSubagentCompletion(name string) tea.Cmd {
 }
 
 // insertMCPResourceCompletion inserts the selected resource into the textarea,
-// replacing the @query. The resource's content rides the inserted text as
+// replacing the @ that opened the picker. The resource's content rides the
+// inserted text as
 // an inline attachment.
 func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValue) tea.Cmd {
 	displayText := cmp.Or(item.Title, item.URI)
@@ -4010,16 +4027,6 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 		}
 	}
 	return tea.Batch(heightCmd, resourceCmd)
-}
-
-// textareaWord returns the current word at the cursor position.
-func (m *UI) textareaWord() string {
-	return m.textarea.Word()
-}
-
-// isWhitespace returns true if the byte is a whitespace character.
-func isWhitespace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
 // isAgentBusy returns true if the agent coordinator exists and is currently

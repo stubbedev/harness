@@ -29,7 +29,7 @@ type ActionMentionSelected struct {
 }
 
 // ActionMentionCancelled is emitted when the picker closes without a
-// selection; the model removes the "@" that opened it from the editor.
+// selection; the "@" that opened it stays in the editor as plain text.
 type ActionMentionCancelled struct{}
 
 // MentionPicker is the @-mention picker: the same filter-input dialog
