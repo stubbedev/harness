@@ -1143,7 +1143,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// agent reach for a terminal it does not have, and its description
 	// could not name the shell to write for.
 	if tools.ShellAvailable() {
-		shellTool := tools.NewShellTool(store.WorkingDir(), agent.ID, c.questions)
+		shellTool := tools.NewShellTool(store.WorkingDir(), agent.ID, c.questions, c.filetracker)
 		if shellTool != nil {
 			// Spread parallel shell calls across terminals: the first keeps
 			// the stable default, the rest get their own, so several shell

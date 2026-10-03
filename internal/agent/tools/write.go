@@ -85,11 +85,17 @@ func NewWriteTool(
 				return fantasy.ToolResponse{}, err
 			}
 
-			diff, additions, removals := diff.GenerateDiff(
+			diffText, additions, removals := diff.GenerateDiff(
 				oldContent,
 				params.Content,
 				strings.TrimPrefix(filePath, workingDir),
 			)
+			// The metadata rides along in every persisted message; a whole
+			// file rewrites the diff into a whole file, so past the same cap
+			// the edit metadata uses, the renderer falls back to the input.
+			if len(diffText) > maxMetadataDiffBytes {
+				diffText = ""
+			}
 
 			written := []byte(params.Content)
 			err = guardedWrite(filePath, oldBytes, written, create)
@@ -111,7 +117,7 @@ func NewWriteTool(
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
-					Diff:          diff,
+					Diff:          diffText,
 					Additions:     additions,
 					Removals:      removals,
 					FileMutations: []FileMutation{newFileMutation(filePath, written)},

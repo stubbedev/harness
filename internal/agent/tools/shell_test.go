@@ -13,6 +13,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/filetracker"
 )
 
 func TestShellTool_DefaultAutoBackgroundThreshold(t *testing.T) {
@@ -174,7 +175,46 @@ func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 func newShellToolForTest(t *testing.T, workingDir string) fantasy.AgentTool {
 	t.Helper()
 	t.Cleanup(func() { closeOwnerSessions(t.Name()) })
-	return NewShellTool(workingDir, t.Name(), nil)
+	return NewShellTool(workingDir, t.Name(), nil, nil)
+}
+
+// A file a shell command rewrote is one the session wrote itself: the
+// certification accepts the new state without a fresh view, so the
+// edit that follows the command does not bounce off a stale refusal.
+func TestShellCertifiesMutatedFileForEdit(t *testing.T) {
+	requireTerminalSession(t)
+	dir := t.TempDir()
+	path := writeViewFixture(t, dir, "file", "alpha\nbeta\n")
+	tracker := filetracker.NewService(nil)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "s")
+	require.False(t, runViewTool(t, NewViewTool(nil, tracker, nil, dir), ctx, ViewParams{FilePath: path}).IsError)
+
+	t.Cleanup(func() { closeOwnerSessions(t.Name()) })
+	shell := NewShellTool(dir, t.Name(), nil, tracker)
+	require.False(t, runShellTool(t, shell, ctx, ShellParams{Command: "printf 'gamma\\n' >> " + path}).IsError)
+
+	edit := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
+	resp := runFileTool(t, edit, ctx, EditParams{FilePath: path, Edits: []EditOperation{{OldString: "alpha", NewString: "ALPHA"}}})
+	require.False(t, resp.IsError, resp.Content)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "ALPHA\nbeta\ngamma\n", string(data))
+}
+
+func TestShellCommandFilesFindsPathsAndSkipsNoise(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "f.txt")
+	require.NoError(t, os.WriteFile(file, []byte("x"), 0o644))
+	other := filepath.Join(dir, "g.txt")
+	require.NoError(t, os.WriteFile(other, []byte("x"), 0o644))
+	nested := filepath.Join(dir, "sub")
+	require.NoError(t, os.Mkdir(nested, 0o755))
+
+	got := shellCommandFiles("sed -i 's/a/b/' f.txt && cat header > "+other+" | sort; echo done", dir)
+	require.ElementsMatch(t, []string{file, other}, got)
+	require.Empty(t, shellCommandFiles("echo nothing here", dir))
+	require.NotContains(t, shellCommandFiles("ls "+nested, dir), nested)
 }
 
 // requireTerminalSession skips tests that execute commands through the

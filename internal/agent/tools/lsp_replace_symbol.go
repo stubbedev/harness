@@ -12,6 +12,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/stubbedev/harness/internal/diff"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
@@ -26,9 +27,12 @@ type ReplaceSymbolParams struct {
 
 // ReplaceSymbolResponseMetadata carries diff data for the renderer.
 type ReplaceSymbolResponseMetadata struct {
-	FilePath   string `json:"file_path"`
-	OldContent string `json:"old_content"`
-	NewContent string `json:"new_content"`
+	FilePath string `json:"file_path"`
+	Diff     string `json:"diff,omitempty"`
+	// OldContent and NewContent remain for results persisted before the
+	// stored diff took over; new results fill them only for small files.
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
 	Action     string `json:"action"`
 }
 
@@ -161,13 +165,17 @@ func replaceSymbolAction(
 
 		summary := op.summary(params.Symbol, params.FilePath, startLine+1, endLine+1)
 
+		meta := ReplaceSymbolResponseMetadata{FilePath: params.FilePath, Action: action}
+		diffText, _, _ := diff.GenerateDiff(string(content), newContent, params.FilePath)
+		if len(diffText) <= maxMetadataDiffBytes {
+			meta.Diff = diffText
+		}
+		if len(content) <= maxMetadataContentsBytes && len(newContent) <= maxMetadataContentsBytes {
+			meta.OldContent = string(content)
+			meta.NewContent = newContent
+		}
 		resp := fantasy.NewTextResponse(summary + "\n" + finishFileChange(ctx, lspManager, reg, params.FilePath))
-		resp = fantasy.WithResponseMetadata(resp, ReplaceSymbolResponseMetadata{
-			FilePath:   params.FilePath,
-			OldContent: string(content),
-			NewContent: newContent,
-			Action:     action,
-		})
+		resp = fantasy.WithResponseMetadata(resp, meta)
 		return withFileMutations(resp, params.FilePath), nil
 	}
 }

@@ -436,13 +436,12 @@ func (t *baseToolMessageItem) formatViewResultForCopy() string {
 	return copyFence(copyFenceLang(meta.FilePath), meta.Content)
 }
 
-// formatEditResultForCopy renders the change as a unified diff.
+// formatEditResultForCopy renders the change as a unified diff. New
+// results carry it precomputed; older ones are re-computed from the
+// whole-file contents their metadata still holds.
 func (t *baseToolMessageItem) formatEditResultForCopy() string {
 	var meta tools.EditResponseMetadata
 	if t.result.Metadata == "" || json.Unmarshal([]byte(t.result.Metadata), &meta) != nil {
-		return copyFence("", t.result.Content)
-	}
-	if meta.OldContent == "" && meta.NewContent == "" {
 		return copyFence("", t.result.Content)
 	}
 
@@ -451,6 +450,16 @@ func (t *baseToolMessageItem) formatEditResultForCopy() string {
 	fileName := params.FilePath
 	if fileName != "" {
 		fileName = home.Short(fileName)
+	}
+
+	if meta.Diff != "" {
+		return copyJoin(
+			fmt.Sprintf("Changes: +%d -%d", meta.Additions, meta.Removals),
+			copyFence("diff", meta.Diff),
+		)
+	}
+	if meta.OldContent == "" && meta.NewContent == "" {
+		return copyFence("", t.result.Content)
 	}
 
 	diffContent, additions, removals := diff.GenerateDiff(meta.OldContent, meta.NewContent, fileName)

@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"charm.land/fantasy"
+	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/stringext"
@@ -185,7 +186,7 @@ func firstLine(s string) string {
 // to lie about which shell it is writing for, and the session would open
 // against a guess or not at all. ShellAvailable answers the same
 // question without building anything.
-func NewShellTool(workingDir, owner string, questions question.Service) fantasy.AgentTool {
+func NewShellTool(workingDir, owner string, questions question.Service, tracker filetracker.Service) fantasy.AgentTool {
 	shellPath, ok := term.Shell()
 	if !ok {
 		return nil
@@ -231,6 +232,17 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			startTime := time.Now()
 			waitSeconds := clampWaitSeconds(params.AutoBackgroundAfter)
 
+			// Files the command names are stat-checked around the call: one
+			// it rewrites is one the session just wrote itself, so the edit
+			// tool can trust a following match against them without a
+			// re-read in between.
+			var trackedPaths []string
+			var trackedStamps map[string]fileStamp
+			if params.Command != "" {
+				trackedPaths = shellCommandFiles(params.Command, execWorkingDir)
+				trackedStamps = stampPaths(trackedPaths)
+			}
+
 			var result PTYResult
 			session := ptyRunnerFor(owner, GetSessionFromContext(ctx), name, execWorkingDir, questions)
 			switch {
@@ -244,6 +256,7 @@ func NewShellTool(workingDir, owner string, questions question.Service) fantasy.
 			if err != nil {
 				return fantasy.ToolResponse{}, fmt.Errorf("terminal session: %w", err)
 			}
+			certifyShellMutations(ctx, tracker, GetSessionFromContext(ctx), trackedStamps, trackedPaths)
 
 			stdout := TruncateOutput(result.Output)
 

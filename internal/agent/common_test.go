@@ -126,7 +126,7 @@ func coderAgent(client *http.Client, env fakeEnv, large, small fantasy.LanguageM
 	}
 
 	allTools := []fantasy.AgentTool{
-		tools.NewShellTool(env.workingDir, "coder", nil),
+		tools.NewShellTool(env.workingDir, "coder", nil, *env.filetracker),
 		tools.NewEditTool(nil, env.history, *env.filetracker, nil, env.workingDir),
 		tools.NewEditTool(nil, env.history, *env.filetracker, nil, env.workingDir),
 		tools.NewFetchTool(client),

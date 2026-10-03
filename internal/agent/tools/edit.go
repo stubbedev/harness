@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/stubbedev/harness/internal/toolname"
 
@@ -39,6 +40,7 @@ type FailedEdit struct {
 type EditResponseMetadata struct {
 	Additions    int          `json:"additions"`
 	Removals     int          `json:"removals"`
+	Diff         string       `json:"diff,omitempty"`
 	OldContent   string       `json:"old_content,omitempty"`
 	NewContent   string       `json:"new_content,omitempty"`
 	EditsApplied int          `json:"edits_applied"`
@@ -48,6 +50,36 @@ type EditResponseMetadata struct {
 	// appending the key to the marshalled metadata, without reading the
 	// file back or re-parsing metadata that holds the whole file twice.
 	FileMutations []FileMutation `json:"file_mutations,omitempty"`
+}
+
+const (
+	// maxMetadataContentsBytes caps each whole-file content the edit
+	// metadata persists. The transcript and the copy path render from the
+	// stored diff once a file outgrows the cap, so an edit to a large
+	// file no longer carries the file twice in the session's history.
+	maxMetadataContentsBytes = 64 * 1024
+	// maxMetadataDiffBytes caps the stored unified diff itself; beyond it
+	// the change was the file being rewritten, and the renderer falls
+	// back to what the call's input and the session history hold.
+	maxMetadataDiffBytes = 256 * 1024
+)
+
+// newEditResponseMetadata computes the response metadata for one applied
+// edit: the change counts and a unified diff always, whole-file contents
+// only while both fit the cap. The diff is what the transcript and the
+// copy path render; the contents remain for small files and for
+// rendering results persisted before the cap existed.
+func newEditResponseMetadata(filePath, workingDir, oldContent, newContent string) EditResponseMetadata {
+	diffText, additions, removals := diff.GenerateDiff(oldContent, newContent, strings.TrimPrefix(filePath, workingDir))
+	meta := EditResponseMetadata{Additions: additions, Removals: removals}
+	if len(diffText) <= maxMetadataDiffBytes {
+		meta.Diff = diffText
+	}
+	if len(oldContent) <= maxMetadataContentsBytes && len(newContent) <= maxMetadataContentsBytes {
+		meta.OldContent = oldContent
+		meta.NewContent = newContent
+	}
+	return meta
 }
 
 const EditToolName = toolname.Edit
@@ -183,7 +215,7 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 	}
 
 	// Record the counts for the response metadata.
-	additions, removals := diff.CountChanges("", currentContent)
+	meta := newEditResponseMetadata(params.FilePath, edit.workingDir, "", currentContent)
 
 	editsApplied := len(params.Edits) - len(failedEdits)
 
@@ -200,6 +232,10 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 
 	filetracker.Observe(edit.ctx, edit.filetracker, sessionID, params.FilePath, written, []filetracker.Range{{Start: 0, End: len(currentContent)}})
 
+	meta.EditsApplied = editsApplied
+	meta.EditsFailed = failedEdits
+	meta.FileMutations = []FileMutation{newFileMutation(params.FilePath, written)}
+
 	var message string
 	if len(failedEdits) > 0 {
 		message = fmt.Sprintf("File created with %d of %d edits: %s (%d edit(s) failed)", editsApplied, len(params.Edits), params.FilePath, len(failedEdits))
@@ -210,34 +246,29 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(message),
-		EditResponseMetadata{
-			OldContent:    "",
-			NewContent:    currentContent,
-			Additions:     additions,
-			Removals:      removals,
-			EditsApplied:  editsApplied,
-			EditsFailed:   failedEdits,
-			FileMutations: []FileMutation{newFileMutation(params.FilePath, written)},
-		},
+		meta,
 	), nil
 }
 
 func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolResponse, error) {
-	sessionID, oldContent, isCrlf, stamp, toolErr, err := loadExistingFile(edit, params.FilePath, params.Edits[0].OldString)
+	loaded, toolErr, err := loadExistingFile(edit, params.FilePath, params.Edits)
 	if err != nil {
 		return fantasy.ToolResponse{}, err
 	}
 	if toolErr != nil {
 		return *toolErr, nil
 	}
+	sessionID, oldContent, isCrlf, stamp := loaded.sessionID, loaded.oldContent, loaded.isCrlf, loaded.stamp
 
 	if err := validateEditSizes(oldContent, params.Edits); err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
 	norm := &normCache{}
-	if err := checkEditRanges(edit, norm, sessionID, params.FilePath, oldContent, isCrlf, params.Edits); err != nil {
-		return fantasy.NewTextErrorResponse(err.Error()), nil
+	if !loaded.exactEvidence {
+		if err := checkEditRanges(edit, norm, sessionID, params.FilePath, oldContent, isCrlf, params.Edits); err != nil {
+			return fantasy.NewTextErrorResponse(err.Error()), nil
+		}
 	}
 	currentContent, failedEdits, whitespaceCorrected, err := applyEditsToContent(norm, oldContent, params.Edits, 0)
 	if err != nil {
@@ -259,8 +290,8 @@ func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolR
 		return fantasy.NewTextErrorResponse("no changes made - all edits resulted in identical content"), nil
 	}
 
-	// Generate the counts for the response metadata.
-	additions, removals := diff.CountChanges(oldContent, currentContent)
+	// Generate the counts and response metadata for the change.
+	meta := newEditResponseMetadata(params.FilePath, edit.workingDir, oldContent, currentContent)
 
 	editsApplied := len(params.Edits) - len(failedEdits)
 
@@ -269,7 +300,7 @@ func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolR
 		writeContent, _ = fsext.ToWindowsLineEndings(writeContent)
 	}
 
-	mutation, err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent, isCrlf, stamp)
+	mutation, err := commitFileChange(edit, sessionID, params.FilePath, oldContent, writeContent, isCrlf, stamp, loaded.exactEvidence)
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
@@ -282,17 +313,12 @@ func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolR
 	}
 	message = withWhitespaceNote(message, whitespaceCorrected)
 
+	meta.EditsApplied = editsApplied
+	meta.EditsFailed = failedEdits
+	meta.FileMutations = []FileMutation{mutation}
 	return fantasy.WithResponseMetadata(
 		fantasy.NewTextResponse(message),
-		EditResponseMetadata{
-			OldContent:    oldContent,
-			NewContent:    currentContent,
-			Additions:     additions,
-			Removals:      removals,
-			EditsApplied:  editsApplied,
-			EditsFailed:   failedEdits,
-			FileMutations: []FileMutation{mutation},
-		},
+		meta,
 	), nil
 }
 

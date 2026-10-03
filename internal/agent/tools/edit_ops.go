@@ -116,8 +116,10 @@ func ambiguityHint(content, old string) string {
 // written content, hashed from memory rather than by reading the file back.
 // stamp is the stat that went with oldContent's read; while it still
 // matches, the file on disk is the content already in hand and the
-// read this used to do a second time is skipped.
-func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf bool, stamp fileStamp) (FileMutation, error) {
+// read this used to do a second time is skipped. certified marks edits
+// whose old_string matched byte-for-byte, which carry their own evidence
+// and skip the range check, keeping the byte guard on the write itself.
+func commitFileChange(edit editContext, sessionID, filePath, oldContent, newContent string, crlf bool, stamp fileStamp, certified bool) (FileMutation, error) {
 	expected := oldContent
 	if crlf {
 		expected, _ = fsext.ToWindowsLineEndings(oldContent)
@@ -141,12 +143,14 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 	// past the write; each used to diff the whole file on its own.
 	changes := udiff.Bytes(current, newBytes)
 	ranges := changedRanges(changes, len(current))
-	if err := checkFileEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, ranges); err != nil {
-		at := 0
-		if len(ranges) > 0 {
-			at = ranges[0].Start
+	if !certified {
+		if err := checkFileEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, ranges); err != nil {
+			at := 0
+			if len(ranges) > 0 {
+				at = ranges[0].Start
+			}
+			return FileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, at, err)
 		}
-		return FileMutation{}, conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, current, at, err)
 	}
 
 	if err := guardedWriteStamped(filePath, current, newBytes, false, stamp); err != nil {
@@ -212,44 +216,62 @@ func recordFileVersion(ctx context.Context, files history.Service, sessionID, fi
 	return nil
 }
 
+// loadedFile is what loadExistingFile read: the file's session-scoped
+// identity, its content in Unix line endings, and whether the pending
+// operations carry their own evidence (every old_string matching the
+// content byte-for-byte), which lets the edit skip the certification.
+type loadedFile struct {
+	sessionID     string
+	oldContent    string
+	isCrlf        bool
+	stamp         fileStamp
+	exactEvidence bool
+}
+
 // loadExistingFile reads a file the edit tool is about to change, in Unix
-// line endings, and checks the session's evidence for it. A problem the
-// model should hear about comes back as toolErr; err is for failures the
-// tool cannot report as a result. hint is text the edit expects to find,
-// which positions a conflict report near it. stamp is the stat the read
-// was taken under, for the write path's staleness guard.
-func loadExistingFile(edit editContext, filePath, hint string) (sessionID, oldContent string, isCrlf bool, stamp fileStamp, toolErr *fantasy.ToolResponse, err error) {
-	reject := func(msg string) (string, string, bool, fileStamp, *fantasy.ToolResponse, error) {
+// line endings, and checks the session's evidence for it unless the
+// operations carry their own. A problem the model should hear about comes
+// back as toolErr; err is for failures the tool cannot report as a result.
+// operations position a conflict report near the text the edit expects to
+// find and decide the exact-match shortcut.
+func loadExistingFile(edit editContext, filePath string, operations []EditOperation) (loadedFile, *fantasy.ToolResponse, error) {
+	reject := func(msg string) (loadedFile, *fantasy.ToolResponse, error) {
 		resp := fantasy.NewTextErrorResponse(msg)
-		return "", "", false, fileStamp{}, &resp, nil
+		return loadedFile{}, &resp, nil
 	}
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return reject(fmt.Sprintf("file not found: %s", filePath))
 		}
-		return "", "", false, fileStamp{}, nil, fmt.Errorf("failed to access file: %w", err)
+		return loadedFile{}, nil, fmt.Errorf("failed to access file: %w", err)
 	}
 
 	if fileInfo.IsDir() {
 		return reject(fmt.Sprintf("path is a directory, not a file: %s", filePath))
 	}
 
-	sessionID, err = SessionIDOrError(edit.ctx, "editing a file")
+	sessionID, err := SessionIDOrError(edit.ctx, "editing a file")
 	if err != nil {
-		return "", "", false, fileStamp{}, nil, err
+		return loadedFile{}, nil, err
 	}
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", "", false, fileStamp{}, nil, fmt.Errorf("failed to read file: %w", err)
+		return loadedFile{}, nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	if checkErr := checkFileEvidence(edit.ctx, edit.filetracker, sessionID, filePath, content, nil); checkErr != nil {
-		at := max(0, strings.Index(string(content), hint))
-		return reject(conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, content, at, checkErr).Error())
+	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))
+	exact := exactMatchEvidence(oldContent, operations)
+	if !exact {
+		if checkErr := checkFileEvidence(edit.ctx, edit.filetracker, sessionID, filePath, content, nil); checkErr != nil {
+			at := 0
+			if len(operations) > 0 {
+				at = max(0, strings.Index(oldContent, operations[0].OldString))
+			}
+			return reject(conflictEvidence(edit.ctx, edit.filetracker, sessionID, filePath, content, at, withExactMatchHint(checkErr)).Error())
+		}
 	}
 
-	oldContent, isCrlf = fsext.ToUnixLineEndings(string(content))
-	return sessionID, oldContent, isCrlf, stampOf(fileInfo), nil, nil
+	return loadedFile{sessionID: sessionID, oldContent: oldContent, isCrlf: isCrlf, stamp: stampOf(fileInfo), exactEvidence: exact}, nil, nil
 }

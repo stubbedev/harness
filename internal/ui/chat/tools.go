@@ -1257,20 +1257,27 @@ func formatTimeout(timeout int) string {
 }
 
 // toolOutputEditDiffContent renders a diff with optional failed edits note.
+// New results carry the unified diff in the metadata; results persisted
+// before it existed are re-computed from the whole-file contents.
 func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditResponseMetadata, totalEdits, width int, expanded bool) string {
 	bodyWidth := width
 
-	formatter := common.DiffFormatter(sty).
-		Before(file, meta.OldContent).
-		After(file, meta.NewContent).
-		Width(bodyWidth)
+	var formatted string
+	if meta.Diff != "" {
+		formatted = toolOutputDiffContentFromUnified(sty, meta.Diff, width, expanded)
+	} else {
+		formatter := common.DiffFormatter(sty).
+			Before(file, meta.OldContent).
+			After(file, meta.NewContent).
+			Width(bodyWidth)
 
-	// Use split view for wide terminals.
-	if width > maxTextWidth {
-		formatter = formatter.Split()
+		// Use split view for wide terminals.
+		if width > maxTextWidth {
+			formatter = formatter.Split()
+		}
+
+		formatted = formatter.String()
 	}
-
-	formatted := formatter.String()
 	lines := strings.Split(formatted, "\n")
 
 	// Truncate if needed.

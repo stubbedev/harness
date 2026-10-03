@@ -35,10 +35,16 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 		return header
 	}
 
-	// Try to render as a diff using metadata.
+	// Try to render as a diff using metadata. New results carry the
+	// unified diff precomputed; older ones hold whole-file contents.
 	var meta tools.ReplaceSymbolResponseMetadata
-	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && (meta.OldContent != "" || meta.NewContent != "") {
-		diff := toolOutputDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.ExpandedContent)
+	if err := json.Unmarshal([]byte(opts.Result.Metadata), &meta); err == nil && (meta.Diff != "" || meta.OldContent != "" || meta.NewContent != "") {
+		var diff string
+		if meta.Diff != "" {
+			diff = toolOutputDiffContentFromUnified(sty, meta.Diff, width, opts.ExpandedContent)
+		} else {
+			diff = toolOutputDiffContent(sty, file, meta.OldContent, meta.NewContent, width, opts.ExpandedContent)
+		}
 
 		// On error, show error above the diff.
 		if opts.Result.IsError {

@@ -263,10 +263,120 @@ func checkEditRanges(edit editContext, norm *normCache, session, path, content s
 		return nil
 	}
 	for _, affected := range ranges {
-		if err := checkFileEvidence(edit.ctx, edit.filetracker, session, path, rawBytes, []filetracker.Range{affected}); err != nil {
-			return conflictEvidence(edit.ctx, edit.filetracker, session, path, rawBytes, affected.Start, err)
+		err := checkFileEvidence(edit.ctx, edit.filetracker, session, path, rawBytes, []filetracker.Range{affected})
+		if err == nil {
+			continue
 		}
+		return conflictEvidence(edit.ctx, edit.filetracker, session, path, rawBytes, affected.Start, withExactMatchHint(err))
 	}
 
 	return nil
+}
+
+// withExactMatchHint appends the exact-match alternative to an unread
+// refusal, since an edit that matches byte-for-byte needs no view.
+func withExactMatchHint(err error) error {
+	if errors.Is(err, filetracker.ErrUnread) {
+		return fmt.Errorf("%w. An edit whose old_string matches the file byte-for-byte applies without a view", err)
+	}
+	return err
+}
+
+// exactMatchEvidence reports whether every operation's old_string matches
+// the content byte-for-byte, exactly once. A match like that is its own
+// evidence: the replacement runs against bytes read in this call, so it
+// cannot corrupt content the model never saw, and it does not need the
+// view the certification otherwise asks for. replace_all is excluded on
+// purpose - it multiplies matches beyond the model's stated context, so
+// it still certifies - and the whitespace-tolerant fallback does not
+// count either, since approximately matching unseen text is what the
+// view requirement exists to prevent.
+func exactMatchEvidence(content string, operations []EditOperation) bool {
+	if len(operations) == 0 {
+		return false
+	}
+	for _, operation := range operations {
+		if operation.ReplaceAll || strings.Count(content, operation.OldString) != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+// shellTrackedPathLimit caps how many existing paths one shell command
+// gets stat-checked for mutations.
+const shellTrackedPathLimit = 64
+
+// shellCommandFiles returns the existing regular files a command line
+// names, resolved from workingDir when relative. It is a heuristic by
+// construction: redirections written without a space, globs and paths
+// built at runtime are invisible to it. Its bias is to miss, which keeps
+// today's behaviour; a false positive is near-impossible because the
+// mutation check below still requires the file's stamp to move.
+func shellCommandFiles(command, workingDir string) []string {
+	var paths []string
+	for _, token := range strings.FieldsFunc(command, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == ';' || r == '&' || r == '|' || r == '(' || r == ')'
+	}) {
+		token = strings.Trim(token, "\"'`")
+		token = strings.TrimLeft(token, "0123456789<>")
+		token = strings.TrimRight(token, ",:")
+		if token == "" || token == "<<" {
+			continue
+		}
+		path := token
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			paths = append(paths, path)
+			if len(paths) >= shellTrackedPathLimit {
+				break
+			}
+		}
+	}
+	return paths
+}
+
+// stampPaths stats every path once, as the before side of a mutation
+// check. Paths that do not stat are simply absent.
+func stampPaths(paths []string) map[string]fileStamp {
+	if len(paths) == 0 {
+		return nil
+	}
+	stamps := make(map[string]fileStamp, len(paths))
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil {
+			stamps[path] = stampOf(info)
+		}
+	}
+	return stamps
+}
+
+// certifyShellMutations observes, for the session, the new state of every
+// path a shell command changed: the command line just rewrote them, so
+// the next edit matches against bytes the session put there itself and
+// needs no fresh view first.
+func certifyShellMutations(ctx context.Context, tracker filetracker.Service, session string, before map[string]fileStamp, paths []string) {
+	if tracker == nil || len(paths) == 0 {
+		return
+	}
+	evidence, ok := tracker.(filetracker.Evidence)
+	if !ok {
+		return
+	}
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if stamp, seen := before[path]; seen && stamp.matches(info) {
+			continue
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		evidence.Observe(ctx, session, path, content, []filetracker.Range{{Start: 0, End: len(content)}})
+	}
 }

@@ -26,7 +26,7 @@ func runFileTool(t testing.TB, tool fantasy.AgentTool, ctx context.Context, para
 	return resp
 }
 
-func TestFileEvidenceSameSecondConflictAndRetry(t *testing.T) {
+func TestFileEvidenceExactMatchAppliesOverExternalChange(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := writeViewFixture(t, dir, "file", "alpha\nbeta\n")
@@ -38,16 +38,68 @@ func TestFileEvidenceSameSecondConflictAndRetry(t *testing.T) {
 	stamp := time.Now().Truncate(time.Second)
 	require.NoError(t, os.WriteFile(path, []byte("alpha\nBETA\n"), 0o644))
 	require.NoError(t, os.Chtimes(path, stamp, stamp))
-	params := EditParams{FilePath: path, Edits: []EditOperation{{OldString: "alpha", NewString: "ALPHA"}}}
-	resp := runFileTool(t, edit, ctx, params)
-	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "modified since")
-	require.Contains(t, resp.Content, "BETA")
+	// The edit's old_string matches the current file byte-for-byte and
+	// uniquely, which is evidence on its own: it applies, and the section
+	// the model had not seen survives untouched.
+	require.False(t, runFileTool(t, edit, ctx, EditParams{FilePath: path, Edits: []EditOperation{{OldString: "alpha", NewString: "ALPHA"}}}).IsError)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
-	require.Equal(t, "alpha\nBETA\n", string(data))
-	require.NoError(t, tracker.(filetracker.Evidence).Check(ctx, "s", path, data, []filetracker.Range{{Start: 0, End: len(data)}}))
-	require.False(t, runFileTool(t, edit, ctx, params).IsError)
+	require.Equal(t, "ALPHA\nBETA\n", string(data))
+}
+
+func TestFileEvidenceStaleWhitespaceMatchStillRefused(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := writeViewFixture(t, dir, "file", "alpha  beta\n")
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
+	tracker := filetracker.NewService(nil)
+	require.False(t, runViewTool(t, NewViewTool(nil, tracker, nil, dir), ctx, ViewParams{FilePath: path}).IsError)
+	stamp := time.Now().Truncate(time.Second)
+	require.NoError(t, os.WriteFile(path, []byte("alpha\tbeta\n"), 0o644))
+	require.NoError(t, os.Chtimes(path, stamp, stamp))
+	edit := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
+	// The old_string only matches after whitespace normalization, so it
+	// carries no evidence of its own: the out-of-band rewrite is refused.
+	resp := runFileTool(t, edit, ctx, EditParams{FilePath: path, Edits: []EditOperation{{OldString: "alpha  beta", NewString: "ALPHA"}}})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "modified since")
+	require.Contains(t, resp.Content, "alpha\tbeta")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "alpha\tbeta\n", string(data))
+}
+
+func TestFileEvidenceUnreadFuzzyOperationStillNeedsView(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := writeViewFixture(t, dir, "file", "never viewed\n")
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
+	tracker := filetracker.NewService(nil)
+	edit := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
+	resp := runFileTool(t, edit, ctx, EditParams{FilePath: path, Edits: []EditOperation{
+		{OldString: "never viewed", NewString: "seen"},
+		{OldString: "missing entirely", NewString: "x"},
+	}})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "must read")
+	require.Contains(t, resp.Content, "byte-for-byte")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "never viewed\n", string(data))
+}
+
+func TestExactMatchEvidence(t *testing.T) {
+	t.Parallel()
+	content := "alpha\nbeta\nalpha\n"
+	require.False(t, exactMatchEvidence(content, nil))
+	require.True(t, exactMatchEvidence(content, []EditOperation{{OldString: "beta", NewString: "B"}}))
+	require.False(t, exactMatchEvidence(content, []EditOperation{{OldString: "alpha", NewString: "A"}}))
+	require.False(t, exactMatchEvidence(content, []EditOperation{{OldString: "missing", NewString: "A"}}))
+	require.False(t, exactMatchEvidence(content, []EditOperation{{OldString: "alpha", NewString: "A", ReplaceAll: true}}))
+	require.True(t, exactMatchEvidence(content, []EditOperation{
+		{OldString: "beta", NewString: "B"},
+		{OldString: "beta\nalpha", NewString: "B\nA"},
+	}))
 }
 
 func TestFileEvidencePartialEditDoesNotAuthorizeFullWrite(t *testing.T) {
@@ -206,7 +258,7 @@ func TestFileEvidenceLineEndingChangeBeforeCommitIsStale(t *testing.T) {
 	require.False(t, runViewTool(t, NewViewTool(nil, tracker, nil, dir), ctx, ViewParams{FilePath: path}).IsError)
 	require.NoError(t, os.WriteFile(path, []byte("alpha\r\nbeta\r\n"), 0o644))
 	edit := editContext{ctx: ctx, files: &mockHistoryService{}, filetracker: tracker, workingDir: dir}
-	_, err := commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false, fileStamp{})
+	_, err := commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false, fileStamp{}, false)
 	require.ErrorIs(t, err, filetracker.ErrStale)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -226,7 +278,7 @@ func TestCommitFileChangeWithFreshStampApplies(t *testing.T) {
 	require.NoError(t, err)
 	filetracker.Observe(ctx, tracker, "s", path, []byte("alpha\nbeta\n"), []filetracker.Range{{Start: 0, End: 11}})
 
-	mutation, err := commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false, stampOf(info))
+	mutation, err := commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false, stampOf(info), false)
 	require.NoError(t, err)
 	require.Equal(t, path, mutation.Path)
 	require.NotEmpty(t, mutation.Version)
@@ -249,7 +301,7 @@ func TestCommitFileChangeDetectsExternalWriteDespiteStamp(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, []byte("someone else was here"), 0o644))
 
-	_, err = commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false, stampOf(info))
+	_, err = commitFileChange(edit, "s", path, "alpha\nbeta\n", "ALPHA\nbeta\n", false, stampOf(info), false)
 	require.ErrorIs(t, err, filetracker.ErrStale)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
