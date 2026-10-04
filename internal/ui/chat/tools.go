@@ -1201,11 +1201,6 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 		After(file, newContent).
 		Width(bodyWidth)
 
-	// Use split view on wide terminals.
-	if width > diffSplitMinWidth {
-		formatter = formatter.Split()
-	}
-
 	formatted := formatter.String()
 	lines := strings.Split(formatted, "\n")
 
@@ -1248,11 +1243,6 @@ func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditR
 			Before(file, meta.OldContent).
 			After(file, meta.NewContent).
 			Width(bodyWidth)
-
-		// Use split view on wide terminals.
-		if width > diffSplitMinWidth {
-			formatter = formatter.Split()
-		}
 
 		formatted = formatter.String()
 	}

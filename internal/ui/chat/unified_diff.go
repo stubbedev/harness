@@ -8,10 +8,6 @@ import (
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
-// diffSplitMinWidth is the body width above which a diff renders side
-// by side instead of unified.
-const diffSplitMinWidth = 120
-
 type parsedDiffFile struct {
 	path   string
 	before string
@@ -144,9 +140,6 @@ func toolOutputDiffContentFromUnified(sty *styles.Styles, content string, width 
 			Width(bodyWidth)
 		if len(files) > 1 {
 			formatter = formatter.FileName(f.path)
-		}
-		if width > diffSplitMinWidth {
-			formatter = formatter.Split()
 		}
 		formatted := formatter.String()
 		if i < len(files)-1 {
