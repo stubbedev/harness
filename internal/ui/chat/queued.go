@@ -72,9 +72,9 @@ func (q *QueuedMessageItem) Finished() bool { return true }
 // prompt queued as a named invocation renders as its compact row, the
 // shape it takes once the real message lands.
 func (q *QueuedMessageItem) RawRender(width int) string {
-	cappedWidth := cappedMessageWidth(width)
+	contentWidth := messageContentWidth(width)
 
-	content, _, ok := q.getCachedRender(cappedWidth)
+	content, _, ok := q.getCachedRender(contentWidth)
 	if ok {
 		return content
 	}
@@ -85,7 +85,7 @@ func (q *QueuedMessageItem) RawRender(width int) string {
 			rendered = append(rendered, promptInvocationRow(q.sty, name))
 			continue
 		}
-		rendered = append(rendered, renderUserMarkdown(q.sty, strings.TrimSpace(text), cappedWidth))
+		rendered = append(rendered, renderUserMarkdown(q.sty, strings.TrimSpace(text), contentWidth))
 	}
 	content = strings.Join(rendered, message.QueuedPromptSeparator)
 
@@ -95,14 +95,14 @@ func (q *QueuedMessageItem) RawRender(width int) string {
 		// The markdown wrapped before the tag was prepended, so the
 		// first line can now run past the width the renderer targeted;
 		// trim it back with an ANSI-aware truncate.
-		lines[0] = ansi.Truncate(tag+" "+lines[0], cappedWidth, "")
+		lines[0] = ansi.Truncate(tag+" "+lines[0], contentWidth, "")
 	} else {
 		lines = []string{tag}
 	}
 	content = strings.Join(lines, "\n")
 
 	height := lipgloss.Height(content)
-	q.setCachedRender(content, cappedWidth, height)
+	q.setCachedRender(content, contentWidth, height)
 	return content
 }
 

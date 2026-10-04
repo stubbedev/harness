@@ -208,7 +208,7 @@ func (s *ShellItem) SetExpansionLevel(level uint8) {
 }
 
 func (s *ShellItem) RawRender(width int) string {
-	cappedWidth := cappedMessageWidth(width)
+	contentWidth := messageContentWidth(width)
 
 	cmd := strings.ReplaceAll(s.command, "\n", " ")
 	cmd = strings.ReplaceAll(cmd, "\t", "    ")
@@ -282,7 +282,7 @@ func (s *ShellItem) RawRender(width int) string {
 			maxW = w
 		}
 	}
-	s.maxLineWidth = max(0, maxW-cappedWidth)
+	s.maxLineWidth = max(0, maxW-contentWidth)
 
 	var body strings.Builder
 
@@ -297,7 +297,7 @@ func (s *ShellItem) RawRender(width int) string {
 
 	for _, ln := range lines {
 		scrolled := ansi.GraphemeWidth.Cut(ln, s.xOffset, len(ln))
-		truncated := ansi.Truncate(scrolled, cappedWidth, "…")
+		truncated := ansi.Truncate(scrolled, contentWidth, "…")
 		if s.xOffset > 0 && strings.TrimSpace(truncated) != "" {
 			truncated = "…" + truncated
 		}

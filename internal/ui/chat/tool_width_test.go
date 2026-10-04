@@ -18,10 +18,11 @@ func maxLineWidth(s string) int {
 	return w
 }
 
-// The readability cap is applied once, in BodyRender: a pending call, its
-// settled render, and the same call nested in a group all share one width
-// budget, so the header does not change width when the call settles.
-func TestToolWidthCapAppliedOnce(t *testing.T) {
+// Tool bodies render at the full body width with no readability cap:
+// a pending call, its settled render, and the same call nested in a
+// group all share one width budget, so the header does not change
+// width when the call settles.
+func TestToolWidthUsesFullBodyWidth(t *testing.T) {
 	t.Parallel()
 	sty := styles.CharmtonePantera()
 	input := `{"query":"` + strings.Repeat("x", 400) + `"}`
@@ -31,9 +32,8 @@ func TestToolWidthCapAppliedOnce(t *testing.T) {
 		&message.ToolResult{ToolCallID: "b", Content: strings.Repeat("y ", 300)}, false)
 
 	for _, width := range []int{80, 200} {
-		want := min(ToolBodyWidth(width, 0), maxTextWidth)
-		require.LessOrEqual(t, maxLineWidth(ansi.Strip(pending.RawRender(width))), want, "pending at %d", width)
-		require.Equal(t, want, maxLineWidth(ansi.Strip(settled.RawRender(width))), "settled at %d", width)
-		require.LessOrEqual(t, maxLineWidth(settled.BodyRender(ToolBodyWidth(width, 1))), want, "nested at %d", width)
+		require.Equal(t, ToolBodyWidth(width, 0), maxLineWidth(ansi.Strip(settled.RawRender(width))), "settled at %d", width)
+		require.LessOrEqual(t, maxLineWidth(ansi.Strip(pending.RawRender(width))), ToolBodyWidth(width, 0), "pending at %d", width)
+		require.Equal(t, ToolBodyWidth(width, 1), maxLineWidth(settled.BodyRender(ToolBodyWidth(width, 1))), "nested at %d", width)
 	}
 }

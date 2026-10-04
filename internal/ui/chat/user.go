@@ -66,12 +66,12 @@ func (m *UserMessageItem) Finished() bool {
 
 // RawRender implements [MessageItem].
 func (m *UserMessageItem) RawRender(width int) string {
-	cappedWidth := cappedMessageWidth(width)
+	contentWidth := messageContentWidth(width)
 
-	content, height, ok := m.getCachedRender(cappedWidth)
+	content, height, ok := m.getCachedRender(contentWidth)
 	// cache hit
 	if ok {
-		return m.renderHighlighted(content, cappedWidth, height)
+		return m.renderHighlighted(content, contentWidth, height)
 	}
 
 	msgContent := strings.TrimSpace(m.message.Content().Text)
@@ -80,14 +80,14 @@ func (m *UserMessageItem) RawRender(width int) string {
 	switch {
 	case strings.HasPrefix(msgContent, "<loaded_skill>"):
 		// A skill invocation carries its own compact rendering.
-		content = m.renderSkillInvocation(msgContent, cappedWidth)
+		content = m.renderSkillInvocation(msgContent, contentWidth)
 	case inv != nil:
-		content = m.renderPromptInvocation(inv, cappedWidth)
+		content = m.renderPromptInvocation(inv, contentWidth)
 	default:
-		content = renderUserMarkdown(m.sty, msgContent, cappedWidth)
+		content = renderUserMarkdown(m.sty, msgContent, contentWidth)
 
 		if len(m.message.BinaryContent()) > 0 {
-			attachmentsStr := m.renderAttachments(cappedWidth)
+			attachmentsStr := m.renderAttachments(contentWidth)
 			if content == "" {
 				content = attachmentsStr
 			} else {
@@ -97,8 +97,8 @@ func (m *UserMessageItem) RawRender(width int) string {
 	}
 
 	height = lipgloss.Height(content)
-	m.setCachedRender(content, cappedWidth, height)
-	return m.renderHighlighted(content, cappedWidth, height)
+	m.setCachedRender(content, contentWidth, height)
+	return m.renderHighlighted(content, contentWidth, height)
 }
 
 // promptInvocation returns the wrapped prompt invocation the message

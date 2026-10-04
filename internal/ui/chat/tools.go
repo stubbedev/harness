@@ -348,25 +348,12 @@ func (t *baseToolMessageItem) RawRender(width int) string {
 	return t.BodyRender(ToolBodyWidth(width, 0))
 }
 
-// toolFullWidth reports whether a call renders at the full body width.
-// Only diffs do; everything else is capped at [maxTextWidth] for
-// readability. The action of an lsp call is only known once its input
-// has streamed in, so this is decided per render.
-func toolFullWidth(tc message.ToolCall) bool {
-	if tc.Name == tools.LSPToolName {
-		return lspAction(tc) == tools.LSPActionReplaceSymbol
-	}
-	spec, ok := toolSpecs[tc.Name]
-	return ok && spec.fullWidth != nil && spec.fullWidth(tc)
-}
-
 // BodyRender renders the call's full view in the given body width, with
 // no left chrome of its own: the bar and any group indent around it
 // belong to the caller, which derives the width from [ToolBodyWidth] for
-// the call's nesting level. This is the one place the readability cap is
-// applied, so renderers treat the width they get as final.
+// the call's nesting level. Renderers treat the width they get as
+// final.
 func (t *baseToolMessageItem) BodyRender(bodyWidth int) string {
-	bodyWidth = t.bodyRenderWidth(bodyWidth)
 	body, height := t.cachedBody(bodyWidth)
 	suffix := t.bodySuffix()
 	if suffix == "" {
@@ -376,15 +363,6 @@ func (t *baseToolMessageItem) BodyRender(bodyWidth int) string {
 		suffix = "\n" + suffix
 	}
 	return t.renderHighlighted(body+suffix, bodyWidth, height+lipgloss.Height(suffix))
-}
-
-// bodyRenderWidth applies the readability cap: only diffs render at
-// the full body width, everything else is capped at [maxTextWidth].
-func (t *baseToolMessageItem) bodyRenderWidth(bodyWidth int) int {
-	if !toolFullWidth(t.toolCall) {
-		return min(bodyWidth, maxTextWidth)
-	}
-	return bodyWidth
 }
 
 // cachedBody returns the call's body — its full view without the
@@ -523,7 +501,7 @@ func (t *baseToolMessageItem) focusPrefix() string {
 // prefixedBodyRender applies the per-line focus prefix to the cached
 // body without the waiting suffix.
 func (t *baseToolMessageItem) prefixedBodyRender(width int) string {
-	body, _ := t.cachedBody(t.bodyRenderWidth(ToolBodyWidth(width, 0)))
+	body, _ := t.cachedBody(ToolBodyWidth(width, 0))
 	if body == "" {
 		return ""
 	}
@@ -1223,8 +1201,8 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 		After(file, newContent).
 		Width(bodyWidth)
 
-	// Use split view for wide terminals.
-	if width > maxTextWidth {
+	// Use split view on wide terminals.
+	if width > diffSplitMinWidth {
 		formatter = formatter.Split()
 	}
 
@@ -1271,8 +1249,8 @@ func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditR
 			After(file, meta.NewContent).
 			Width(bodyWidth)
 
-		// Use split view for wide terminals.
-		if width > maxTextWidth {
+		// Use split view on wide terminals.
+		if width > diffSplitMinWidth {
 			formatter = formatter.Split()
 		}
 
@@ -1307,11 +1285,6 @@ func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditR
 // toolOutputMarkdownContent renders markdown content with optional truncation.
 func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, expanded bool) string {
 	content = stringext.NormalizeSpace(content)
-
-	// Cap width for readability.
-	if width > maxTextWidth {
-		width = maxTextWidth
-	}
 
 	renderer := common.QuietMarkdownRenderer(sty, width)
 	mu := common.LockMarkdownRenderer(renderer)

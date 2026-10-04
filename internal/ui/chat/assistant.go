@@ -351,9 +351,9 @@ func (a *AssistantMessageItem) RawRender(width int) string {
 // of here is what lets Render cache the prefixed body across spinner
 // ticks.
 func (a *AssistantMessageItem) rawContent(width int) string {
-	cappedWidth := cappedMessageWidth(width)
-	content, height := a.renderMessageContent(cappedWidth)
-	return a.renderHighlighted(content, cappedWidth, height)
+	contentWidth := messageContentWidth(width)
+	content, height := a.renderMessageContent(contentWidth)
+	return a.renderHighlighted(content, contentWidth, height)
 }
 
 // Render implements MessageItem.
@@ -378,8 +378,8 @@ func (a *AssistantMessageItem) Render(width int) string {
 	// are prefixed with the same focus style, joined in the same order
 	// with the same "\n\n" separator.
 	useCache := !a.isHighlighted()
-	cappedWidth := cappedMessageWidth(width)
-	key := a.prefixCacheKey(cappedWidth)
+	contentWidth := messageContentWidth(width)
+	key := a.prefixCacheKey(contentWidth)
 	if useCache {
 		if cached, ok := a.getCachedPrefixedRender(width, key); ok {
 			return cached + a.spinnerSuffix(true)
@@ -439,12 +439,12 @@ func (a *AssistantMessageItem) spinnerSuffix(hasBody bool) string {
 // focus bit into bit 0 and a fingerprint of the section caches into
 // the upper bits, so any change to a sub-section's source text or
 // extras forces the prefix cache to miss without needing an explicit
-// drop. cappedWidth is included so a cached prefix never survives a
+// drop. contentWidth is included so a cached prefix never survives a
 // section-cache miss caused by a width change. The finish reason is
 // folded in too because it controls the composition of
 // renderMessageContent (e.g. appending the constant "Canceled"
 // string) — that decision lives outside any section's own hash.
-func (a *AssistantMessageItem) prefixCacheKey(cappedWidth int) uint64 {
+func (a *AssistantMessageItem) prefixCacheKey(contentWidth int) uint64 {
 	thinkSrc, thinkExtra := a.thinkingKey()
 	contentSrc, contentExtra := a.contentKey()
 	errSrc, errExtra := a.errorKey()
@@ -456,7 +456,7 @@ func (a *AssistantMessageItem) prefixCacheKey(cappedWidth int) uint64 {
 		}
 		_, _ = h.Write(buf[:])
 	}
-	writeU64(uint64(cappedWidth))
+	writeU64(uint64(contentWidth))
 	writeU64(thinkSrc)
 	writeU64(thinkExtra)
 	writeU64(contentSrc)

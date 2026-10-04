@@ -18,7 +18,7 @@ import (
 )
 
 // MessageLeftPaddingTotal is the total width that is taken up by the border +
-// padding. We also cap the width so text is readable to the maxTextWidth(120).
+// padding.
 const MessageLeftPaddingTotal = 2
 
 // toolNestIndent is the extra left column a tool call gains per level
@@ -57,9 +57,6 @@ func ViewportCol(contentCol int) int {
 func ContentCol(viewportCol int) int {
 	return max(viewportCol-MessageLeftPaddingTotal, 0)
 }
-
-// maxTextWidth is the maximum width text messages can be
-const maxTextWidth = 120
 
 // Identifiable is an interface for items that can provide a unique identifier.
 type Identifiable interface {
@@ -545,14 +542,15 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 // than leaving the item silently uncopyable.
 func (a *AssistantInfoItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (bool, tea.Cmd) {
 	if keys.MatchesCopy(msg) {
-		return true, common.CopyToClipboard(copyPlainRender(a, maxTextWidth), copyToastMessage)
+		return true, common.CopyToClipboard(copyPlainRender(a, 0), copyToastMessage)
 	}
 	return false, nil
 }
 
-// cappedMessageWidth returns the maximum width for message content for readability.
-func cappedMessageWidth(availableWidth int) int {
-	return min(availableWidth-MessageLeftPaddingTotal, maxTextWidth)
+// messageContentWidth returns the width message content renders at
+// inside a row of the given width.
+func messageContentWidth(availableWidth int) int {
+	return max(availableWidth-MessageLeftPaddingTotal, 0)
 }
 
 // ExtractMessageItems extracts [MessageItem]s from a [message.Message]. It

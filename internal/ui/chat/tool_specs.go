@@ -8,20 +8,16 @@ import (
 )
 
 // toolSpec is everything the transcript knows about one built-in tool:
-// how its call renders, what it is called, how wide it draws and how it
-// copies. Every surface reads the same entry, so a tool cannot render
-// under one name and copy under another. TestEveryBuiltinToolHasASpec
-// holds each built-in to having an entry or being listed in
-// genericTools.
+// how its call renders, what it is called and how it copies. Every
+// surface reads the same entry, so a tool cannot render under one name
+// and copy under another. TestEveryBuiltinToolHasASpec holds each
+// built-in to having an entry or being listed in genericTools.
 type toolSpec struct {
 	// label is the call's header name. Empty falls back to the
 	// humanized wire name.
 	label string
 	// renderer builds the call's body renderer. Nil renders generically.
 	renderer func() ToolRenderer
-	// fullWidth reports whether the call draws at the full body width
-	// instead of the readability cap. Nil means capped.
-	fullWidth func(message.ToolCall) bool
 	// copyParams formats the call's input for the clipboard. Nil, or an
 	// empty result, copies the raw input as JSON.
 	copyParams func(input string) string
@@ -55,7 +51,6 @@ var toolSpecs = map[string]toolSpec{
 	tools.EditToolName: {
 		label:      "Edit",
 		renderer:   func() ToolRenderer { return &EditToolRenderContext{} },
-		fullWidth:  func(message.ToolCall) bool { return true },
 		copyParams: copyEditParams,
 		copyResult: (*baseToolMessageItem).formatEditResultForCopy,
 	},
