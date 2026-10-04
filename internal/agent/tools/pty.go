@@ -68,12 +68,6 @@ const (
 	// drop the tail.
 	ptyKeyGap = 25 * time.Millisecond
 
-	// ptyPasteEchoWait bounds how long a pasted command waits for its
-	// echo of the block's last line before the drain runs anyway: a
-	// line editor that never echoes it is not settling, and the call
-	// must still return.
-	ptyPasteEchoWait = 30 * time.Second
-
 	// ptySendChunk is the largest single write into the terminal: a
 	// block bigger than this goes out in paced pieces. With echo on,
 	// the kernel echoes every byte written, and its echo buffer drops
@@ -88,18 +82,6 @@ const (
 	// the send for good, and the caller's own wait budget still
 	// applies to what was written.
 	ptyEchoDrainWait = 2 * time.Second
-
-	// ptyTypeMaxBytes is how much command text still goes into the
-	// terminal as keystrokes. A block past this is written to the
-	// session's scratch directory and sourced from there instead:
-	// typed keystrokes come back as an echo the result depends on
-	// never losing a byte, and terminals have been observed losing
-	// a few bytes of a 40 KB echo under a slow reader no matter how
-	// the writes are paced. One short line - a path - is all that
-	// crosses the terminal then; the shell reads the block from the
-	// filesystem whole, with cd, environment and functions set inside
-	// it staying in the session exactly as if it had been typed.
-	ptyTypeMaxBytes = 8 << 10
 
 	// ptyQuietMs is the silence window after which the runner stops
 	// waiting blindly and looks at what the foreground job is doing:
@@ -432,6 +414,9 @@ type ptyRunner struct {
 	lastScreen string
 	// sentinel is this session's completion marker.
 	sentinel sentinel
+	// dialect is the session protocol for the shell this session runs:
+	// it says how to run a command block held in a file (sendSourced).
+	dialect shellDialect
 	// running records that the last call left a program in the session
 	// - a command still going, a REPL, a full-screen program - so the
 	// next text typed goes to that program rather than being run as a
@@ -894,6 +879,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	r.startedAt = time.Now()
 	r.lastScreen = ""
 	r.settled = false
+	r.dialect = dialect
 	r.sentinel = newSentinel(dialect)
 	if native && s.WaitForAny(ctx, []*regexp.Regexp{ptyPromptRe}, ptyStartupWait) == 0 {
 		// The shell ran the setup from its own rc file (see launchFor):
@@ -1227,10 +1213,10 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 
 	var err error
 	if echo != nil {
-		// The delivery decides what its echo is: an oversized block is
-		// sourced from a file, and the one line typed is the path, not
-		// the command the model wrote.
-		echo, err = r.pasteCommand(ctx, s, text)
+		// The delivery decides what its echo is: a block no single line
+		// can carry is sourced from a file, and the one line typed is
+		// the path, not the command the model wrote.
+		echo, err = r.pasteCommand(s, text)
 	} else {
 		err = r.typeInput(s, text)
 	}
@@ -2166,10 +2152,10 @@ type ptySizer interface {
 	Size() (rows, cols int)
 }
 
-// needsPasteMarkers reports whether command must go through the
-// bracketed-paste-and-drain path rather than a plain typed send: either
-// it spans several lines, or a single line is long enough that the
-// terminal will soft-wrap its echo across rows.
+// needsPasteMarkers reports whether command must not go in as one
+// plain typed line, and so is run from a file instead (sendSourced):
+// either it spans several lines, or a single line is long enough that
+// the terminal will soft-wrap its echo across rows.
 func needsPasteMarkers(s ptySizer, body string) bool {
 	if strings.Contains(body, "\n") {
 		return true
@@ -2178,72 +2164,24 @@ func needsPasteMarkers(s ptySizer, body string) bool {
 	return cols > 0 && len(body) >= max(1, cols-ptyWrapMargin)
 }
 
-// pasteCommand delivers a command as a terminal delivers a paste, and
-// submits it only after the line editor's echo of the block has settled
-// and been drained. A multiline command written straight in is read as
-// many typed lines: the line editor echoes each one, redraws it with
-// syntax highlighting, and toggles bracketed paste around every prompt -
-// debris that survives cleaning as blank lines, bells and doubled
-// fragments. A single line long enough to soft-wrap has the same
-// problem in miniature: the terminal reflows its echo across rows with
-// no newline at the wrap point for clean's echo stripping to key off,
-// so the wrapped continuation is mistaken for the command's own output
-// (see needsPasteMarkers). Wrapped in the paste markers it is one block
-// with one echo, and that echo is dropped whole before the return that
-// runs the command, so the command's own output starts from a clean
-// slate. Short single-line commands and programs without bracketed
-// paste keep the plain send path: its one-line echo the cleaner already
-// strips. A block too big to type reliably goes to the scratch
-// directory and is sourced from there (see sendSourced). What comes
-// back is the echo the cleaner should strip for this delivery.
-func (r *ptyRunner) pasteCommand(ctx context.Context, s ptyTerminal, command string) ([]string, error) {
+// pasteCommand delivers a command the shell's prompt cannot take as
+// one plain line. A short single line is typed: its one-line echo the
+// cleaner already strips. Anything else - a multiline block, or one
+// line long enough to soft-wrap - is written to the session's scratch
+// directory and sourced from there (see sendSourced). Typed delivery of
+// a block has failed every way it can be paced: a line editor echoes,
+// redraws and bracketed-pastes each line into debris, a soft-wrapped
+// echo has no newline for the cleaner to key off, and even a plain
+// echo has lost bytes of a large block under a slow reader. The file
+// reaches the shell byte for byte at any size. What comes back is the
+// echo the cleaner should strip for this delivery.
+func (r *ptyRunner) pasteCommand(s ptyTerminal, command string) ([]string, error) {
 	body := strings.TrimSuffix(command, "\n")
 	echo := strings.Split(body, "\n")
-	if !needsPasteMarkers(s, body) || !s.BracketedPaste() {
-		if len(body) > ptyTypeMaxBytes {
-			return r.sendSourced(s, body)
-		}
+	if !needsPasteMarkers(s, body) {
 		return echo, r.send(s, []byte(keystrokes(body)+term.Enter))
 	}
-	r.sendMu.Lock()
-	defer r.sendMu.Unlock()
-	if err := s.Paste(keystrokes(body)); err != nil {
-		return nil, fmt.Errorf("terminal session: %w", err)
-	}
-	// Everything on the wire between the paste and this drain is the
-	// line editor echoing the block back; drop it whole instead of
-	// trying to clean it line by line. The echo-line stripping in clean
-	// goes with it: with the echo already gone it would only eat
-	// command output that repeats a line of the command - a heredoc
-	// body catted right back, for one. The block sits unexecuted in the
-	// editor until the return below, so nothing past the echo can be
-	// lost. Its end cannot be read off silence alone - an editor
-	// redrawing a long paste pauses mid-echo - so wait for the block's
-	// own last line, then let its redraw settle.
-	if tail := lastLine(body); tail != "" {
-		tailRe := regexp.MustCompile(regexp.QuoteMeta(keystrokes(tail)))
-		s.WaitForAny(ctx, []*regexp.Regexp{tailRe}, ptyPasteEchoWait)
-	}
-	s.WaitForQuiet(ctx, ptySettleMs*time.Millisecond, 3*time.Second)
-	s.Drain()
-	// A block taller than the screen has one more echo after this
-	// drain: on the return, the editor re-displays the lines its
-	// display still tracks - the last screenful - as it accepts them.
-	// Those lines are exactly the echo's tail, so leave the echo list
-	// trimmed to it for the cleaner; a block that fits the screen
-	// leaves nothing to strip, and its echo is dropped whole.
-	lines := strings.Split(body, "\n")
-	rows, _ := s.Size()
-	if len(lines) > rows {
-		echo = lines[len(lines)-rows:]
-	} else {
-		echo = nil
-	}
-	r.setState(func() { r.lastEcho = echo })
-	if err := s.Send([]byte("\r")); err != nil {
-		return nil, fmt.Errorf("terminal session: %w", err)
-	}
-	return echo, nil
+	return r.sendSourced(s, body)
 }
 
 // runnerScratchKey names the scratch subdirectory for one runner: a
@@ -2254,20 +2192,23 @@ func runnerScratchKey(key string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// sendSourced runs a command too big to type: the block goes to the
-// session's scratch directory byte for byte, and the one line typed is
-// the path to source it with. Typed keystrokes come back as an echo the
-// result depends on not losing bytes of, and terminals have lost a few
-// bytes of a 40 KB echo no matter how the writes were paced - the file
-// keeps the block out of the terminal entirely. Sourcing runs the block
-// in the session's shell, so cd, environment and functions set inside
-// it persist exactly as if it had been typed.
+// sendSourced runs a command no plain line can carry: the block goes
+// to the session's scratch directory byte for byte, and the one line
+// typed is the dialect's way of running it from there. Typed keystrokes
+// come back as an echo the result depends on not losing bytes of, and
+// terminals have lost bytes of a large block's echo no matter how the
+// writes were paced - the file keeps the block out of the terminal
+// entirely, and the heredoc's body passes through untouched by history
+// expansion, soft-wrap reflowing or line-editor redraws. Sourcing runs
+// the block in the session's shell, so cd, environment and functions
+// set inside it persist exactly as if it had been typed.
 func (r *ptyRunner) sendSourced(s ptyTerminal, body string) ([]string, error) {
 	dir, err := ScratchDir(runnerScratchKey(r.key), "commands")
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, "cmd.sh")
+	d := r.sourcing()
+	path := filepath.Join(dir, d.scriptName)
 	if strings.ContainsAny(path, "'\"") {
 		// A path the shell cannot say safely: type the block and lean
 		// on the paced send, as before this delivery existed.
@@ -2277,10 +2218,21 @@ func (r *ptyRunner) sendSourced(s ptyTerminal, body string) ([]string, error) {
 	if err := os.WriteFile(path, []byte(body+"\n"), 0o600); err != nil {
 		return nil, fmt.Errorf("failed to write command file: %w", err)
 	}
-	line := ". '" + path + "'"
+	line := fmt.Sprintf(d.sourceCmd, path)
 	echo := []string{line}
 	r.setState(func() { r.lastEcho = echo })
 	return echo, r.send(s, []byte(keystrokes(line)+term.Enter))
+}
+
+// sourcing is the dialect that says how to run a command block held in
+// a file. A runner that has opened no session has no dialect of its
+// own; the shells the tests open by hand are POSIX, and POSIX is
+// dialectFor's default for a shell it does not recognise either.
+func (r *ptyRunner) sourcing() shellDialect {
+	if r.dialect.sourceCmd != "" {
+		return r.dialect
+	}
+	return posixDialect
 }
 
 // Poll reads the terminal without typing anything. An idle session

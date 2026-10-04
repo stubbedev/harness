@@ -919,9 +919,10 @@ func TestPtyRunner_ZshUserShell(t *testing.T) {
 // A multiline command written straight into a line editor is mangled:
 // zle echoes each line as it arrives, then redisplays it, toggling
 // bracketed paste around every prompt - raw echo debris (blank lines,
-// bells, doubled fragments) that survives cleaning. Commands must be
-// delivered as a paste instead, so the shell takes the whole block at
-// once. The issue's case: a heredoc whose body is many lines of code.
+// bells, doubled fragments) that survives cleaning. Commands a plain
+// line cannot carry are run from a file instead, so the line editor
+// never sees them. The issue's case: a heredoc whose body is many
+// lines of code.
 func TestPtyRunner_ZshUserShellHeredoc(t *testing.T) {
 	if _, err := exec.LookPath("zsh"); err != nil {
 		t.Skip("zsh not installed")
@@ -962,6 +963,30 @@ func TestPtyRunner_HeredocWithAngleBracketText(t *testing.T) {
 		"angle-bracket text is content, not keystrokes")
 }
 
+// runHeredocRoundTrip writes a heredoc of the given line count through
+// the runner and checks the contract end to end: the command succeeds,
+// and the byte count the shell reports for the file is the byte count
+// of the body - the whole heredoc reached the filesystem byte for byte,
+// and nothing of the block leaked into the output around the count.
+func runHeredocRoundTrip(t *testing.T, r *ptyRunner, lines int) {
+	t.Helper()
+
+	var body strings.Builder
+	for i := range lines {
+		fmt.Fprintf(&body, "line %03d: %s\n", i, strings.Repeat("payload ", 12))
+	}
+	cmd := "cat > heredoc.txt <<'EOF'\n" + body.String() + "EOF\nwc -c < heredoc.txt"
+	res, err := r.Type(t.Context(), cmd, 30)
+	require.NoError(t, err)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode, "output: %q", res.Output)
+	size := strings.TrimSpace(res.Output)
+	written, err := strconv.Atoi(size)
+	require.NoError(t, err, "wc output: %q", size)
+	require.Equal(t, body.Len(), written,
+		"the whole heredoc must reach the file byte for byte")
+}
+
 // A heredoc far past what a terminal takes as keystrokes must still run
 // whole: a block this size goes to the session's scratch directory and
 // the shell sources it, so delivery does not depend on any terminal's
@@ -970,20 +995,32 @@ func TestPtyRunner_HeredocWithAngleBracketText(t *testing.T) {
 func TestPtyRunner_BigHeredoc(t *testing.T) {
 	r := newTestRunner(t)
 
-	var body strings.Builder
-	for i := range 400 {
-		fmt.Fprintf(&body, "line %03d: %s\n", i, strings.Repeat("payload ", 12))
-	}
-	cmd := "cat > big.txt <<'EOF'\n" + body.String() + "EOF\nwc -c < big.txt"
-	res, err := r.Type(t.Context(), cmd, 30)
-	require.NoError(t, err)
-	require.NotNil(t, res.ExitCode)
-	require.Equal(t, 0, *res.ExitCode)
-	size := strings.TrimSpace(res.Output)
-	written, err := strconv.Atoi(size)
-	require.NoError(t, err, "wc output: %q", size)
-	require.Equal(t, body.Len(), written,
-		"the whole heredoc must reach the file byte for byte")
+	runHeredocRoundTrip(t, r, 400)
+}
+
+// A heredoc in the mid range - far past what fits a screen, far under
+// what used to reach the scratch directory - is the size zone terminals
+// mangled: every byte of it went in as keystrokes and came back as an
+// echo the result had to strip, and echoes have lost bytes under a slow
+// reader no matter how the send was paced. The file has no such
+// appetite: it round-trips byte for byte, and the output is nothing
+// but the byte count.
+func TestPtyRunner_MidsizeHeredoc(t *testing.T) {
+	r := newTestRunner(t)
+
+	runHeredocRoundTrip(t, r, 60)
+}
+
+// The bracketed-paste line editor is where midsize blocks mangled for
+// certain: the whole block went to the editor as one paste, and its
+// echo of the block - the entire body, redelivered into the output
+// around the byte count - is what the result used to depend on
+// draining whole. Blocks are run from a file now, so a shell that asks
+// for bracketed paste never sees the block at all.
+func TestPtyRunner_MidsizeHeredocOnBracketedPasteShell(t *testing.T) {
+	r := newBracketedPasteRunner(t)
+
+	runHeredocRoundTrip(t, r, 60)
 }
 
 func TestRenderLines(t *testing.T) {

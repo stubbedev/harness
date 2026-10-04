@@ -68,11 +68,10 @@ builtin unset HARNESS_USER_ZDOTDIR
 // dash does. The editor is there for a person at the keyboard -
 // highlighting redrawn on every keystroke, autosuggestions, completion -
 // and for the model it is only cost: a redraw per line (the bulk of what
-// a command's round trip spent in zsh), echo debris the cleaner has to
-// pick apart, and a multiline command having to go in as a bracketed
-// paste and wait for the editor's echo of it to settle. Programs the
-// session runs keep their own editors; only the shell's prompt loses
-// completion and history recall, which nothing drives it by.
+// a command's round trip spent in zsh), and echo debris the cleaner has
+// to pick apart. Programs the session runs keep their own editors; only
+// the shell's prompt loses completion and history recall, which nothing
+// drives it by.
 const (
 	zshNoEditor  = `unsetopt zle`
 	bashNoEditor = `set +o emacs +o vi`

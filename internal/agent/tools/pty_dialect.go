@@ -23,6 +23,17 @@ type shellDialect struct {
 	fenceRe       string
 	historyOffCmd string
 	setupCmd      string
+	// sourceCmd is the one line that runs a command block held in a
+	// file: a format string over the quoted path. Blocks no single line
+	// can carry - multiline commands, long ones that would soft-wrap -
+	// are written to the session's scratch directory and run from
+	// there, which delivers them byte for byte at any size. Empty means
+	// the dialect has no answer and the block goes in as keystrokes.
+	sourceCmd string
+	// scriptName is the file name a command block is written as. The
+	// extension is part of how the shell chooses to run it, so it
+	// belongs to the dialect rather than the delivery.
+	scriptName string
 }
 
 // The exit marker and fence patterns are the same text in every dialect;
@@ -63,6 +74,8 @@ var posixDialect = shellDialect{
 		`HISTFILE=/dev/null; SAVEHIST=0; shopt -u histappend 2>/dev/null; ` +
 		`unsetopt share_history inc_append_history inc_append_history_time append_history 2>/dev/null; ` +
 		`PROMPT_COMMAND=""; RPS1=""; RPROMPT=""; PS2=""; PS1="$(printf '\033]133;A\007')"`,
+	sourceCmd:  `. '%s'`,
+	scriptName: "cmd.sh",
 }
 
 // powershellDialect drives Windows PowerShell and PowerShell Core.
@@ -87,6 +100,8 @@ var powershellDialect = shellDialect{
 	fenceRe:       dialectFenceRe,
 	historyOffCmd: `if (Get-Command Set-PSReadLineOption -ErrorAction SilentlyContinue) { Set-PSReadLineOption -HistorySaveStyle SaveNothing }`,
 	setupCmd:      `function global:prompt { "$([char]27)]133;A$([char]7)" }`,
+	sourceCmd:     `. '%s'`,
+	scriptName:    "cmd.ps1",
 }
 
 // cmdDialect drives cmd.exe. It is the thinnest of the three: cmd keeps
@@ -101,6 +116,8 @@ var cmdDialect = shellDialect{
 	fenceRe:       dialectFenceRe,
 	historyOffCmd: "",
 	setupCmd:      `prompt $E]133;A$E\`,
+	sourceCmd:     `call "%s"`,
+	scriptName:    "cmd.bat",
 }
 
 // dialectFor returns the protocol for the shell at path, defaulting to
