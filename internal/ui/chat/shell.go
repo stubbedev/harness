@@ -136,8 +136,7 @@ func (s *ShellItem) Advance() bool {
 }
 
 func (s *ShellItem) Render(width int) string {
-	innerWidth := max(0, width-MessageLeftPaddingTotal)
-	content := s.RawRender(innerWidth)
+	content := s.RawRender(width)
 
 	var prefix string
 	if s.focused {
@@ -220,16 +219,20 @@ func (s *ShellItem) RawRender(width int) string {
 		prompt = s.sty.Messages.ShellPromptBlurred.Render("$")
 	}
 
-	highlighted := s.sty.Messages.ShellCommand.Render(cmd)
-	header := prompt + " " + highlighted
+	var exitSuffix string
+	if !s.pending && s.exitCode != 0 {
+		exitSuffix = " " + s.sty.Messages.ShellExitCode.Render(fmt.Sprintf("(exit %d)", s.exitCode))
+	}
 
-	if s.pending {
-		if s.output.Len() == 0 {
-			// Nothing streamed yet: show the spinner under the header.
-			return header + "\n" + s.anim.Render()
-		}
-	} else if s.exitCode != 0 {
-		header += " " + s.sty.Messages.ShellExitCode.Render(fmt.Sprintf("(exit %d)", s.exitCode))
+	// Truncate the command so the header, prompt and exit suffix
+	// included, stays within the content width.
+	budget := contentWidth - ansi.StringWidth(prompt) - 1 - lipgloss.Width(exitSuffix)
+	cmd = ansi.Truncate(cmd, max(budget, 0), "…")
+	header := prompt + " " + s.sty.Messages.ShellCommand.Render(cmd) + exitSuffix
+
+	if s.pending && s.output.Len() == 0 {
+		// Nothing streamed yet: show the spinner under the header.
+		return header + "\n" + s.anim.Render()
 	}
 
 	if s.output.Len() == 0 {

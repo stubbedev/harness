@@ -15,6 +15,24 @@ import (
 // compiler from optimizing away benchmark results.
 var benchmarkShellOutput string
 
+// TestShellRenderFillsContentWidth pins the width contract: Render
+// hands the row width to RawRender, which derives the content width
+// once through messageContentWidth. A long command line must fill
+// the content width exactly, not lose another padding of columns,
+// and the bar prefix must bring the row back up to the full width.
+func TestShellRenderFillsContentWidth(t *testing.T) {
+	t.Parallel()
+
+	sty := styles.CharmtonePantera()
+	item := NewShellItem(&sty, "echo "+strings.Repeat("x", 300), "", 0)
+
+	width := 200
+	require.Equal(t, messageContentWidth(width), maxLineWidth(item.RawRender(width)),
+		"the command line must fill the content width exactly")
+	require.Equal(t, width, maxLineWidth(item.Render(width)),
+		"the bar prefix must complete the row to its full width")
+}
+
 // TestPendingShellItemRendersStreamedOutput verifies that a pending shell
 // item surfaces output appended during execution, rather than hiding it
 // behind the spinner until completion.

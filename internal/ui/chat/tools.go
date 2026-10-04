@@ -940,8 +940,7 @@ func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, wid
 	maxDigits := getDigits(maxLineNumber)
 	numFmt := fmt.Sprintf("%%%dd", maxDigits)
 
-	bodyWidth := width
-	codeWidth := bodyWidth - maxDigits
+	codeWidth := width - maxDigits
 
 	var out []string
 	for i, ln := range highlightedLines {
@@ -1194,12 +1193,10 @@ func formatSize(bytes int) string {
 
 // toolOutputDiffContent renders a diff between old and new content.
 func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent string, width int, expanded bool) string {
-	bodyWidth := width
-
 	formatter := common.DiffFormatter(sty).
 		Before(file, oldContent).
 		After(file, newContent).
-		Width(bodyWidth)
+		Width(width)
 
 	formatted := formatter.String()
 	lines := strings.Split(formatted, "\n")
@@ -1212,7 +1209,7 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 
 	if len(lines) > maxLines && !expanded {
 		truncMsg := sty.Tool.DiffTruncation.
-			Width(bodyWidth).
+			Width(width).
 			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
 		formatted = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
 	}
@@ -1233,8 +1230,6 @@ func formatTimeout(timeout int) string {
 // New results carry the unified diff in the metadata; results persisted
 // before it existed are re-computed from the whole-file contents.
 func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditResponseMetadata, totalEdits, width int, expanded bool) string {
-	bodyWidth := width
-
 	var formatted string
 	if meta.Diff != "" {
 		formatted = toolOutputDiffContentFromUnified(sty, meta.Diff, width, expanded)
@@ -1242,7 +1237,7 @@ func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditR
 		formatter := common.DiffFormatter(sty).
 			Before(file, meta.OldContent).
 			After(file, meta.NewContent).
-			Width(bodyWidth)
+			Width(width)
 
 		formatted = formatter.String()
 	}
@@ -1256,7 +1251,7 @@ func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditR
 
 	if len(lines) > maxLines && !expanded {
 		truncMsg := sty.Tool.DiffTruncation.
-			Width(bodyWidth).
+			Width(width).
 			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
 		formatted = truncMsg + "\n" + strings.Join(lines[:maxLines], "\n")
 	}

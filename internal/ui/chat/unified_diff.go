@@ -128,16 +128,14 @@ func parseUnifiedDiff(content string) []parsedDiffFile {
 func toolOutputDiffContentFromUnified(sty *styles.Styles, content string, width int, expanded bool) string {
 	files := parseUnifiedDiff(content)
 	if len(files) == 0 {
-		bodyWidth := width
-		return sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.diff", content, 0, bodyWidth, expanded))
+		return sty.Tool.Body.Render(toolOutputCodeContent(sty, "result.diff", content, 0, width, expanded))
 	}
-	bodyWidth := width
 	var blocks []string
 	for i, f := range files {
 		formatter := common.DiffFormatter(sty).
 			Before(f.path, f.before).
 			After(f.path, f.after).
-			Width(bodyWidth)
+			Width(width)
 		if len(files) > 1 {
 			formatter = formatter.FileName(f.path)
 		}
@@ -155,7 +153,7 @@ func toolOutputDiffContentFromUnified(sty *styles.Styles, content string, width 
 	}
 	if len(lines) > maxLines && !expanded {
 		truncMsg := sty.Tool.DiffTruncation.
-			Width(bodyWidth).
+			Width(width).
 			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
 		combined = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
 	}

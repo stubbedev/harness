@@ -534,10 +534,12 @@ func toolCopyText(t ToolMessageItem, depth int) string {
 // Plain items
 // -----------------------------------------------------------------------------
 
-// copyPlainRender is the copy text for items whose whole content is the
-// line they render: the assistant footer, the subagent wait entry. The
-// rendered form is the content, so it is copied with styling stripped
-// rather than left uncopyable.
-func copyPlainRender(item interface{ RawRender(int) string }, width int) string {
-	return strings.TrimRight(ansi.Strip(item.RawRender(width)), " \n")
+// copyPlainRender is the copy text for items whose whole content is
+// the line they render: the assistant footer. The rendered form is
+// the content, so it is copied with styling stripped rather than
+// left uncopyable. It renders at width zero, which yields the bare
+// line: Section pads to the row width, and that padding is layout,
+// not content.
+func copyPlainRender(item interface{ RawRender(int) string }) string {
+	return strings.TrimRight(ansi.Strip(item.RawRender(0)), " \n")
 }

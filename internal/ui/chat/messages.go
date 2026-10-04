@@ -37,7 +37,7 @@ var toolNestIndentString = strings.Repeat(" ", toolNestIndent)
 // tool body width - a call's own render and every group child's -
 // derives here, so the chrome math cannot drift between call sites.
 func ToolBodyWidth(width, level int) int {
-	return max(width-MessageLeftPaddingTotal-level*toolNestIndent, 1)
+	return max(messageContentWidth(width)-level*toolNestIndent, 1)
 }
 
 // ViewportCol converts an item-content column into a viewport column.
@@ -473,7 +473,7 @@ func (a *AssistantInfoItem) ID() string {
 
 // RawRender implements MessageItem.
 func (a *AssistantInfoItem) RawRender(width int) string {
-	innerWidth := max(0, width-MessageLeftPaddingTotal)
+	innerWidth := messageContentWidth(width)
 	content, _, ok := a.getCachedRender(innerWidth)
 	if !ok {
 		content = a.renderContent(innerWidth)
@@ -542,13 +542,16 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 // than leaving the item silently uncopyable.
 func (a *AssistantInfoItem) HandleKeyEvent(msg tea.KeyMsg, keys ItemKeymap) (bool, tea.Cmd) {
 	if keys.MatchesCopy(msg) {
-		return true, common.CopyToClipboard(copyPlainRender(a, 0), copyToastMessage)
+		return true, common.CopyToClipboard(copyPlainRender(a), copyToastMessage)
 	}
 	return false, nil
 }
 
 // messageContentWidth returns the width message content renders at
-// inside a row of the given width.
+// inside a row of the given width. It is the one row-to-content
+// derivation: every item derives its content width through it,
+// exactly once per render (in RawRender), so no renderer can drift
+// from the row chrome or subtract the padding twice.
 func messageContentWidth(availableWidth int) int {
 	return max(availableWidth-MessageLeftPaddingTotal, 0)
 }
