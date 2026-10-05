@@ -189,7 +189,7 @@ func launchFor(shellPath string, dialect shellDialect) (shellLaunch, bool) {
 	if dialect.setupCmd != posixDialect.setupCmd {
 		return shellLaunch{}, false
 	}
-	setup := dialect.setupCmd
+	setup := strings.Join(dialect.setupLines(), "\n")
 	switch name := strings.TrimSuffix(strings.ToLower(filepath.Base(shellPath)), ".exe"); name {
 	case "zsh":
 		dir, err := integrationDir(zshIntegration(setup))

@@ -34,7 +34,7 @@ func TestPtyRunner_WaitingStreakEscalates(t *testing.T) {
 	require.Equal(t, 1, res.WaitStreak)
 	require.Zero(t, res.InputPending)
 
-	for streak := 2; streak <= ptyWaitingEscalateCalls; streak++ {
+	for streak := 2; streak <= ptyStuckEscalateCalls; streak++ {
 		res, err = r.Type(t.Context(), "echo probe", 10)
 		require.NoError(t, err)
 		require.True(t, res.Waiting, "the wedge keeps the verdict")
@@ -56,8 +56,11 @@ func TestPtyRunner_ResetClearsWaitingStreak(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, res.WaitStreak)
 
-	require.NoError(t, r.Reset(t.Context()))
-	require.Zero(t, r.waitStreak)
+	_, err = r.Reset(t.Context())
+	require.NoError(t, err)
+	r.mu.Lock()
+	require.Zero(t, r.waiting.streak)
+	r.mu.Unlock()
 
 	res, err = r.Type(t.Context(), "cat > /dev/null", 10)
 	require.NoError(t, err)

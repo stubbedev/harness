@@ -1,6 +1,10 @@
 package tools
 
-import "github.com/stubbedev/harness/internal/term"
+import (
+	"slices"
+
+	"github.com/stubbedev/harness/internal/term"
+)
 
 // shellDialect is the session protocol for one family of shells: how to
 // ask it for an exit code and a working directory, how to fence a
@@ -23,6 +27,15 @@ type shellDialect struct {
 	fenceRe       string
 	historyOffCmd string
 	setupCmd      string
+	// promptHook is the line that installs the shell's prompt-state
+	// hook (see ptyRunner.readPromptState): a function, run by the
+	// shell's own before-each-prompt mechanism, writing one
+	// ordinal-and-exit-code line to a side-channel file at every
+	// prompt. Empty when the dialect carries the hook inside setupCmd
+	// (PowerShell folds it into its prompt function) or has no hook to
+	// install (cmd.exe); such a session runs without the side channel
+	// and the reconciliations that read it.
+	promptHook string
 	// sourceCmd is the one line that runs a command block held in a
 	// file: a format string over the quoted path. Blocks no single line
 	// can carry - multiline commands, long ones that would soft-wrap -
@@ -42,6 +55,30 @@ const (
 	dialectSentinelRe    = `__exit_%s:(-?\d+)@(.*)__`
 	dialectSentinelLoose = `__exit_%s:-?\d+@`
 	dialectFenceRe       = `__begin_%s:ok__`
+)
+
+// The prompt-state hook is one mechanism shared by every dialect that
+// has one, spelled once here and carried into both the setup and the
+// shells' own hook points. The shell writes, at every prompt, one
+// tab-separated line - the prompt's ordinal, the exit code of the
+// command that just ended, and the directory it ended in - to the file
+// named in HARNESS_PROMPT_STATE. The ordinal is what a wait orders two
+// prompts by; the code and directory are what a completion nobody
+// watched would otherwise have lost.
+//
+// The text is plain POSIX, parsed by every shell in the family even
+// where parts of it are inert, because the setup reaches some of them
+// through files they source whole: a line one shell cannot run must
+// not stop it reading the ones after it. POSIX shells have no shared
+// before-prompt hook, so the registration uses each shell's own:
+// defining a function named precmd is zsh's oldest prompt hook, and
+// PROMPT_COMMAND is bash's; the definition the other shell ignores is
+// inert.
+const (
+	posixPromptFunc = `__harness_prompt() { __harness_rc=$?; [ -n "$HARNESS_PROMPT_STATE" ] || return 0; ` +
+		`__harness_seq=$((__harness_seq+1)); ` +
+		`printf '%s\t%s\t%s\n' "$__harness_seq" "$__harness_rc" "$PWD" > "$HARNESS_PROMPT_STATE" 2>/dev/null; }`
+	posixPromptHook = posixPromptFunc + `; precmd() { __harness_prompt; }; PROMPT_COMMAND=__harness_prompt`
 )
 
 // posixDialect drives bash, zsh and the rest of the Bourne family.
@@ -74,6 +111,7 @@ var posixDialect = shellDialect{
 		`HISTFILE=/dev/null; SAVEHIST=0; shopt -u histappend 2>/dev/null; ` +
 		`unsetopt share_history inc_append_history inc_append_history_time append_history 2>/dev/null; ` +
 		`PROMPT_COMMAND=""; RPS1=""; RPROMPT=""; PS2=""; PS1="$(printf '\033]133;A\007')"`,
+	promptHook: posixPromptHook,
 	sourceCmd:  `. '%s'`,
 	scriptName: "cmd.sh",
 }
@@ -99,9 +137,18 @@ var powershellDialect = shellDialect{
 	fenceCmd:      `$global:LASTEXITCODE = $null; [Console]::Write("__begin_%s:ok__")`,
 	fenceRe:       dialectFenceRe,
 	historyOffCmd: `if (Get-Command Set-PSReadLineOption -ErrorAction SilentlyContinue) { Set-PSReadLineOption -HistorySaveStyle SaveNothing }`,
-	setupCmd:      `function global:prompt { "$([char]27)]133;A$([char]7)" }`,
-	sourceCmd:     `. '%s'`,
-	scriptName:    "cmd.ps1",
+	// The prompt function is PowerShell's before-each-prompt hook, so
+	// the prompt-state write lives inside it: $? captured first (an
+	// assignment that reads $LASTEXITCODE resets it), the marker
+	// emitted only after the state file is written, so a marker seen on
+	// the wire always has its ordinal already on disk.
+	setupCmd: `function global:prompt { $__ok = $?; if ($env:HARNESS_PROMPT_STATE) { try { ` +
+		`$__hc = $LASTEXITCODE; if ($null -eq $__hc) { $__hc = $(if ($__ok) { 0 } else { 1 }) }; ` +
+		`$__n = 1; if ($null -ne $global:__harness_seq) { $__n = $global:__harness_seq + 1 }; $global:__harness_seq = $__n; ` +
+		`[IO.File]::WriteAllText($env:HARNESS_PROMPT_STATE, (@($__n, $__hc, "$($PWD.Path)") -join [char]9)) } catch { } }; ` +
+		`"$([char]27)]133;A$([char]7)" }`,
+	sourceCmd:  `. '%s'`,
+	scriptName: "cmd.ps1",
 }
 
 // cmdDialect drives cmd.exe. It is the thinnest of the three: cmd keeps
@@ -118,6 +165,14 @@ var cmdDialect = shellDialect{
 	setupCmd:      `prompt $E]133;A$E\`,
 	sourceCmd:     `call "%s"`,
 	scriptName:    "cmd.bat",
+}
+
+// setupLines is the dialect's startup script as the lines to deliver:
+// the setup command, then the prompt-state hook where the dialect has
+// one, so every delivery - rc file or typed - carries both without the
+// call sites spelling that pairing out.
+func (d shellDialect) setupLines() []string {
+	return slices.DeleteFunc([]string{d.setupCmd, d.promptHook}, func(s string) bool { return s == "" })
 }
 
 // dialectFor returns the protocol for the shell at path, defaulting to

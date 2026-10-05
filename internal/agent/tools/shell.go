@@ -247,7 +247,7 @@ func NewShellTool(workingDir, owner string, questions question.Service, tracker 
 			session := ptyRunnerFor(owner, GetSessionFromContext(ctx), name, execWorkingDir, questions)
 			switch {
 			case params.Reset:
-				err = session.Reset(ctx)
+				result, err = session.Reset(ctx)
 			case params.Command != "":
 				result, err = session.Type(ctx, params.Command, waitSeconds)
 			default:
@@ -282,11 +282,11 @@ func NewShellTool(workingDir, owner string, questions question.Service, tracker 
 			case result.Running && result.Output != "":
 				header = "[still running; an empty call waits for it]"
 			case result.Running && result.ShellExit == nil:
-				header = "[still running, idle]"
+				header = runningHeader(result)
 			case result.ExitCode != nil && *result.ExitCode != 0:
 				header = fmt.Sprintf("[exit %d]", *result.ExitCode)
 			case params.Reset:
-				header = "[session reset]"
+				header = resetHeader(result)
 			case result.Output == "" && params.Command == "" && result.ShellExit == nil:
 				header = "[no new output]"
 			}
@@ -371,6 +371,39 @@ func waitingHeader(res PTYResult) string {
 		return fmt.Sprintf("[waiting for input; no change across %d calls and %ds: the program may be wedged; send \\u0003 (ctrl-c) to interrupt it, or reset: true for a fresh shell]", res.WaitStreak, res.WaitSeconds)
 	}
 	return "[waiting for input]"
+}
+
+// runningHeader is the header for a call whose wait budget ran out on
+// a command still holding the terminal. Output to show is progress and
+// names itself; silence is the state. A silence that has stopped
+// changing - the same nothing, call after call - is the running
+// verdict's share of the poll-loop trap waitingHeader escalates out
+// of, and gets the same treatment: name the wedge and the way out,
+// because the caller reading the same line again has nothing else to
+// go on.
+func runningHeader(res PTYResult) string {
+	if res.runEscalated() {
+		return fmt.Sprintf("[still running with no output across %d calls and %ds: it may be wedged; send \\u0003 (ctrl-c) to interrupt it, or reset: true for a fresh shell]", res.RunStreak, res.RunSeconds)
+	}
+	return "[still running, idle]"
+}
+
+// resetHeader is the header for a call that reset its session. It
+// names what else went with the shell when there was something: the
+// queue had promised those lines would run, and the model that queued
+// them is owed the count.
+func resetHeader(res PTYResult) string {
+	if res.QueuedDropped > 0 {
+		return fmt.Sprintf("[session reset; %d queued command%s dropped with it]", res.QueuedDropped, plural(res.QueuedDropped))
+	}
+	return "[session reset]"
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // shellExitNote is what the model is told when its call landed on a

@@ -1278,7 +1278,8 @@ func TestPtyRunner_ResetStartsAFreshShell(t *testing.T) {
 	_, err := r.Type(t.Context(), "export PTY_RESET_VAR=before", 10)
 	require.NoError(t, err)
 
-	require.NoError(t, r.Reset(t.Context()))
+	_, err = r.Reset(t.Context())
+	require.NoError(t, err)
 
 	res, err := r.Type(t.Context(), "printf %s \"$PTY_RESET_VAR\"", 10)
 	require.NoError(t, err)
@@ -1300,7 +1301,9 @@ func TestPtyRunner_ResetClearsARunningCommand(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, res.Running)
 
-	require.NoError(t, r.Reset(t.Context()))
+	reset, err := r.Reset(t.Context())
+	require.NoError(t, err)
+	require.Zero(t, reset.QueuedDropped, "nothing was queued")
 	require.True(t, r.shellIdle(r.session), "a reset session is free")
 
 	done, err := r.Type(t.Context(), "echo back", 10)
@@ -1492,15 +1495,16 @@ func TestWaitingStreakStateMachine(t *testing.T) {
 	streak, _ = r.noteWaiting()
 	require.Equal(t, 2, streak)
 
-	r.clearWaiting()
+	r.clearStuck()
 	streak, waited = r.noteWaiting()
 	require.Equal(t, 1, streak, "a wait after evidence of life counts from itself")
 	require.Less(t, waited, time.Second)
 
 	r.mu.Lock()
-	r.clearWaitingLocked()
+	r.clearStuckLocked()
 	r.mu.Unlock()
 	r.mu.Lock()
-	require.Zero(t, r.waitStreak)
+	require.Zero(t, r.waiting.streak)
+	require.Zero(t, r.runningIdle.streak, "a reset ends the running streak with the session it belongs to")
 	r.mu.Unlock()
 }

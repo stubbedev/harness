@@ -152,18 +152,20 @@ const (
 	// whose dialog nobody is there to answer must still return.
 	ptyCredentialDialogWait = 10 * time.Minute
 
-	// ptyWaitingEscalateCalls is how many calls in a row reporting the
-	// foreground blocked on input it takes before the result says so
-	// plainly. Past this, another bare "waiting" is the bait in the
-	// poll-loop trap: each poll is cheap, looks plausible, and confirms
-	// the caller's wrong mental model, so the message has to name the
-	// wedge and the way out instead.
-	ptyWaitingEscalateCalls = 3
-	// ptyWaitingEscalateAfter is the age of an unanswered wait that
-	// escalates the message however few calls reported it - a single
-	// long-budget call parked on a wedged foreground deserves the same
-	// honesty as a run of short polls.
-	ptyWaitingEscalateAfter = 2 * time.Minute
+	// ptyStuckEscalateCalls is how many calls in a row reporting the
+	// same dead-air verdict - the foreground blocked on input, or a
+	// command still holding the terminal with nothing to show - it
+	// takes before the result says so plainly. Past this, another bare
+	// restatement is the bait in the poll-loop trap: each poll is
+	// cheap, looks plausible, and confirms the caller's wrong mental
+	// model, so the message has to name the wedge and the way out
+	// instead.
+	ptyStuckEscalateCalls = 3
+	// ptyStuckEscalateAfter is the age of a verdict that escalates its
+	// message however few calls reported it - a single long-budget call
+	// parked on a wedged foreground deserves the same honesty as a run
+	// of short polls.
+	ptyStuckEscalateAfter = 2 * time.Minute
 )
 
 // errTerminalInputFull reports that the program in the foreground is
@@ -290,6 +292,15 @@ type PTYResult struct {
 	// nothing told it the polls were the failure.
 	WaitStreak  int
 	WaitSeconds int
+	// RunStreak counts the calls in a row that have reported the
+	// command still running with no output and no progress to show,
+	// this one included; RunSeconds is how long ago the first of them
+	// found it. Output, completion, a question - anything else - clears
+	// the streak; a count still standing is a command that holds the
+	// terminal and does nothing, which the header has to say plainly
+	// before the caller polls it for a fourth identical nothing.
+	RunStreak  int
+	RunSeconds int
 	// InputPending is how many bytes of input typed at the session are
 	// still unconsumed. A foreground genuinely blocked in a read takes
 	// what it is sent; bytes left standing mean nothing is reading,
@@ -300,6 +311,10 @@ type PTYResult struct {
 	// included. It is the queue-depth surface a client needs to tell
 	// one queued command from fifty.
 	QueuedCount int
+	// QueuedDropped is how many queued command lines a reset threw
+	// away with the shell they were queued behind. The queue promised
+	// those lines would run; the result that ends them has to say so.
+	QueuedDropped int
 	// Queued reports that the text was not typed: the session's
 	// foreground command does not read input, so the line joined a
 	// queue and the shell runs it, in the order typed, the next time it
@@ -311,14 +326,49 @@ type PTYResult struct {
 	ShellExit *shellExit
 }
 
+// stuckRun counts a run of identical verdicts: how many in a row,
+// this one included, and when the run began. Whichever verdict it
+// tracks - a foreground blocked on input, a command running with
+// nothing to show - anything else that happens is evidence the state
+// changed, and the caller clears the run.
+type stuckRun struct {
+	streak int
+	since  time.Time
+}
+
+func (s *stuckRun) note() (int, time.Duration) {
+	now := time.Now()
+	if s.streak <= 0 || s.since.IsZero() {
+		s.since = now
+	}
+	s.streak++
+	return s.streak, now.Sub(s.since)
+}
+
+func (s *stuckRun) clear() {
+	s.streak, s.since = 0, time.Time{}
+}
+
+// stuckEscalated is the shared rule for when a repeated verdict stops
+// being described as the state and starts naming the wedge: the same
+// verdict ptyStuckEscalateCalls times in a row, or one older than
+// ptyStuckEscalateAfter. It lives beside the constants it reads, so
+// the headers and their tests cannot drift from it.
+func stuckEscalated(streak, seconds int) bool {
+	return streak >= ptyStuckEscalateCalls || seconds >= int(ptyStuckEscalateAfter/time.Second)
+}
+
 // waitEscalated reports whether a waiting verdict has stalled long
-// enough to stop being described as a plain wait: the same verdict
-// ptyWaitingEscalateCalls times in a row, or a single wait held longer
-// than ptyWaitingEscalateAfter. The rule lives beside the counters it
-// reads, so the header and its tests cannot drift from it.
+// enough to stop being described as a plain wait.
 func (res PTYResult) waitEscalated() bool {
-	return res.WaitStreak >= ptyWaitingEscalateCalls ||
-		res.WaitSeconds >= int(ptyWaitingEscalateAfter/time.Second)
+	return stuckEscalated(res.WaitStreak, res.WaitSeconds)
+}
+
+// runEscalated reports whether a running-but-silent verdict has
+// stalled long enough to stop being described as merely running: the
+// command holds the terminal and has shown nothing, call after call.
+func (res PTYResult) runEscalated() bool {
+	return stuckEscalated(res.RunStreak, res.RunSeconds)
 }
 
 // shellExit is a dead shell's verdict: the output it left undrained
@@ -451,13 +501,25 @@ type ptyRunner struct {
 	// setup is typed at it (see setupSessionLocked) - the path shells
 	// without one take, kept reachable for tests on shells that have.
 	typedSetup bool
-	// waitStreak and waitSince track the run of consecutive results
-	// that found the session's foreground blocked on input: how many
-	// in a row, and when the run began. They are what lets a later
+	// waiting counts the run of consecutive results that found the
+	// session's foreground blocked on input. It is what lets a later
 	// result say "this wait has stopped changing" instead of repeating
 	// the state line the caller has already misread three times.
-	waitStreak int
-	waitSince  time.Time
+	waiting stuckRun
+	// runningIdle is the same machine for the other dead-air verdict:
+	// results that reported a command still holding the terminal with
+	// no output and no progress to show.
+	runningIdle stuckRun
+	// promptFile is the side-channel file the shell's prompt hook
+	// writes one line to at every prompt, and sentSeq the ordinal of
+	// the prompt the command being waited on was sent at: a later
+	// ordinal on the file is that command's completion, by the shell's
+	// own account, whatever became of the prompt marker on the wire.
+	// An empty promptFile is a shell with no hook; a negative sentSeq
+	// is a baseline that could not be read, which disables the
+	// reconciliation for the command rather than guessing it.
+	promptFile string
+	sentSeq    int
 }
 
 var (
@@ -859,7 +921,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 		// that is what the model should be told about next -- and only if
 		// something moves away from it.
 		r.announcedCwd = r.cwd
-		r.clearWaitingLocked()
+		r.clearStuckLocked()
 		if time.Since(r.startedAt) < ptyRestartDelay {
 			time.Sleep(ptyRestartDelay)
 		}
@@ -871,6 +933,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	if !r.typedSetup {
 		launch, native = launchFor(shellPath, dialect)
 	}
+	launch.env = append(slices.Clone(launch.env), r.openPromptState()...)
 	s, err := term.StartShell(r.cwd, launch.args, append(slices.Clone(ptySessionEnv), launch.env...)...)
 	if err != nil {
 		return nil, err
@@ -917,11 +980,12 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 // bracketed-paste heuristic stands in rather than leaving every command
 // waiting for a marker that will never come.
 func (r *ptyRunner) setupSessionLocked(ctx context.Context, s ptyTerminal, dialect shellDialect) *regexp.Regexp {
-	lines := make([]string, 0, 3)
+	lines := make([]string, 0, 4)
 	if dialect.historyOffCmd != "" {
 		lines = append(lines, dialect.historyOffCmd)
 	}
-	lines = append(lines, dialect.setupCmd, r.sentinel.begin)
+	lines = append(lines, dialect.setupLines()...)
+	lines = append(lines, r.sentinel.begin)
 	setup := func() bool {
 		for _, line := range lines {
 			if err := s.Send([]byte(line + term.Enter)); err != nil {
@@ -1068,7 +1132,7 @@ func (r *ptyRunner) fence(ctx context.Context, s ptyTerminal) {
 // stuck on that lock is the thing being rescued. Everything the old
 // shell held (cd, exported variables, activated environments, the sudo
 // credential) is gone with it.
-func (r *ptyRunner) Reset(ctx context.Context) error {
+func (r *ptyRunner) Reset(ctx context.Context) (PTYResult, error) {
 	r.mu.Lock()
 	old := r.session
 	r.session = nil
@@ -1078,9 +1142,12 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 	r.lastScreen = ""
 	r.lastCwd = ""
 	r.announcedCwd = r.cwd
-	r.clearWaitingLocked()
+	r.clearStuckLocked()
 	// Lines queued behind the old shell's command were meant for that
-	// shell's state; a fresh one would run them against nothing.
+	// shell's state; a fresh one would run them against nothing. They
+	// are dropped, and counted, because the queue promised they would
+	// run and the result that breaks that promise has to say so.
+	dropped := len(r.pending)
 	r.pending = nil
 	r.mu.Unlock()
 
@@ -1088,7 +1155,7 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 		old.Close()
 	}
 	if _, err := r.terminal(ctx); err != nil {
-		return err
+		return PTYResult{QueuedDropped: dropped}, err
 	}
 	// The run that was in flight against the old shell unwinds once its
 	// session closes and writes its own verdict into the runner on the
@@ -1098,7 +1165,7 @@ func (r *ptyRunner) Reset(ctx context.Context) error {
 		r.inFlight = false
 		r.running = false
 	})
-	return nil
+	return PTYResult{QueuedDropped: dropped}, nil
 }
 
 // Type is the one way into the terminal: it writes what a person would
@@ -1195,6 +1262,9 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 	if !r.takeSettled(s) {
 		r.fence(ctx, s)
 	}
+	// The prompt this command starts from is the baseline its
+	// completion is read back against (see markPromptSeq).
+	r.markPromptSeq()
 
 	// Enter is implied: at a prompt, a line nobody presses Enter on
 	// does nothing. Input that already ends in a keystroke is typed as
@@ -1230,32 +1300,60 @@ func (r *ptyRunner) runCommand(ctx context.Context, s ptyTerminal, text string, 
 // foreground blocked on input, and returns the run of consecutive such
 // results with the age of the run. Callers that report any other
 // outcome call clearWaiting.
-func (r *ptyRunner) noteWaiting() (streak int, waited time.Duration) {
+func (r *ptyRunner) noteWaiting() (int, time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	now := time.Now()
-	if r.waitStreak <= 0 || r.waitSince.IsZero() {
-		r.waitSince = now
-	}
-	r.waitStreak++
-	return r.waitStreak, now.Sub(r.waitSince)
+	return r.waiting.note()
 }
 
-// clearWaiting ends a run of waiting verdicts: something happened - a
-// command finished, a screen was rendered, output arrived - so the
-// next wait, should there be one, starts counting from itself.
+// noteRunningIdle records one more result that reported a command
+// still holding the terminal with nothing new to show, and returns the
+// run of consecutive such results with the age of the run. Output,
+// completion or a question - anything the caller could report instead -
+// calls clearRunningIdle.
+func (r *ptyRunner) noteRunningIdle() (int, time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.runningIdle.note()
+}
+
+// clearWaiting ends a run of waiting verdicts alone: the result that
+// calls it reported the foreground doing something other than blocking
+// on input, while a command still holding the terminal keeps its own
+// count going.
 func (r *ptyRunner) clearWaiting() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.clearWaitingLocked()
+	r.waiting.clear()
 }
 
-// clearWaitingLocked is clearWaiting for callers already holding the
-// state lock - the shell-replacement paths, which reset every other
-// piece of per-session state in the same critical section.
-func (r *ptyRunner) clearWaitingLocked() {
-	r.waitStreak = 0
-	r.waitSince = time.Time{}
+// clearStuck ends both stuck-verdict runs at once - something
+// happened: a command finished, a screen was rendered, output arrived -
+// so the next wait or silence, should there be one, starts counting
+// from itself.
+func (r *ptyRunner) clearStuck() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.clearStuckLocked()
+}
+
+// clearRunningIdle ends a run of running-but-silent verdicts for a
+// result that showed the caller something: output, an exit code, a
+// question - the command's state changed, so the next silent verdict
+// counts from itself.
+func (r *ptyRunner) clearRunningIdle() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.runningIdle.clear()
+}
+
+// clearStuckLocked ends both stuck-verdict runs at once - the
+// shell-replacement paths, which reset every other piece of
+// per-session state in the same critical section, and every result
+// that carried the model an event. Callers hold the state lock.
+func (r *ptyRunner) clearStuckLocked() {
+	r.waiting.clear()
+	r.runningIdle.clear()
 }
 
 // queueDepth is how many command lines are waiting for the session's
@@ -1297,6 +1395,10 @@ func (r *ptyRunner) driveProgram(ctx context.Context, s ptyTerminal, text string
 	if err := r.typeInput(s, text); err != nil {
 		return PTYResult{}, err
 	}
+	// The program may quit on this keystroke and hand the shell its
+	// prompt back; mark where the count stands so that prompt reads as
+	// the finish line it is.
+	r.markPromptSeq()
 	// The program may have finished on the keystroke before this wait
 	// begins; its prompt can already be sitting in the undrained output.
 	s.RescanFromStart()
@@ -1340,6 +1442,10 @@ func (r *ptyRunner) typeOrRecall(ctx context.Context, s ptyTerminal, text string
 		time.Sleep(ptyConsumePoll)
 	}
 	if s.PendingInput() <= 0 {
+		// The line went to a reader after all: its exit is the
+		// completion this wait is for, so the count is marked from the
+		// prompt before the read began.
+		r.markPromptSeq()
 		res, err := r.awaitCompletion(ctx, s, []string{line}, waitSeconds)
 		return res, err == nil
 	}
@@ -1443,6 +1549,14 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 				// raw stream is a redraw log and says nothing.
 				s.Drain()
 				return r.screenResult(s), nil
+			} else if r.promptPastSent() {
+				// The shell reports a prompt newer than the one this
+				// command began at: it finished while nothing was
+				// watching the wire. The sentinel still reads its
+				// own exit code - nothing else has run since - so
+				// collect the completion rather than describing a
+				// program that no longer exists.
+				return r.collectResult(ctx, s)
 			} else if act := s.SampleJob(); waitingForInput(s, act) {
 				if r.credentialRead(s) {
 					if asked && s.PendingLen() <= answeredLen {
@@ -1492,6 +1606,7 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 				// The foreground job is blocked reading the terminal:
 				// the command has asked its question and gone quiet.
 				streak, waited := r.noteWaiting()
+				r.clearRunningIdle()
 				return PTYResult{
 					Output:      r.clean(string(s.Drain()), echo),
 					Running:     true,
@@ -1585,11 +1700,31 @@ func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []s
 	}
 	if s.AltScreen() {
 		s.Drain()
-		r.clearWaiting()
+		r.clearStuck()
 		return r.screenResult(s), nil
 	}
+	if r.promptPastSent() {
+		// The budget ran out on a command the shell says has already
+		// finished: the marker on the wire was missed somewhere, and the
+		// result this call owes is the completion, not a verdict about a
+		// program that is not there.
+		return r.collectResult(ctx, s)
+	}
 	r.clearWaiting()
-	return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: s.Alive()}, nil
+	// Nothing arrived with the budget gone. Output would have been
+	// progress - something to show for the wait - and is reported as
+	// such; silence makes this one more identical no-event verdict in a
+	// row, which the streak counts and the header escalates.
+	if out := r.clean(string(s.Drain()), echo); out != "" {
+		r.clearRunningIdle()
+		return PTYResult{Output: out, Running: s.Alive()}, nil
+	}
+	streak, waited := r.noteRunningIdle()
+	return PTYResult{
+		Running:    s.Alive(),
+		RunStreak:  streak,
+		RunSeconds: int(waited / time.Second),
+	}, nil
 }
 
 // jobWorking reports measurable progress in the foreground job: CPU
@@ -1841,9 +1976,9 @@ func (r *ptyRunner) interrupt(s ptyTerminal) PTYResult {
 // terminal, where the raw byte stream is a redraw log, not output.
 func (r *ptyRunner) screenResult(s ptyTerminal) PTYResult {
 	screen := s.Screen()
-	// A rendered screen is evidence of life: the wait-streak, if one
-	// was running, belongs to a wait that has since ended.
-	r.clearWaiting()
+	// A rendered screen is evidence of life: the stuck-verdict runs, if
+	// any were open, belong to waits that have since ended.
+	r.clearStuck()
 	res := PTYResult{
 		Output:    screen,
 		AltScreen: true,
@@ -1881,7 +2016,7 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 		}
 		return PTYResult{Output: r.clean(string(s.Drain()), echo), Running: s.Alive()}, nil
 	}
-	r.clearWaiting()
+	r.clearStuck()
 
 	// Take the prompt that follows the sentinel along with it, so the
 	// session is left at a known point and the next command can start
@@ -1922,6 +2057,110 @@ func (r *ptyRunner) knownCwd() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.lastCwd
+}
+
+// ptyPromptStateEnv names, in the session's environment, the file the
+// shell's prompt hook writes its account to. It is an environment
+// variable rather than a path baked into the hook's text because the
+// file is per shell generation and the hook's text is shared.
+const ptyPromptStateEnv = "HARNESS_PROMPT_STATE"
+
+// promptState is the shell's own account of where it stands: the
+// ordinal of the prompt it is showing, the exit code of the command
+// that ended there, and the directory that command left it in. The
+// ordinal orders two prompts; the rest is what a completion nobody
+// watched would otherwise have lost.
+type promptState struct {
+	seq  int
+	code int
+	cwd  string
+}
+
+// openPromptState prepares the side channel for a shell this runner is
+// about to open: a fresh file per generation, so a replaced shell
+// starts its ordinal count clean and no two Harness processes ever
+// share one, named in the environment the hook reads. The nil return
+// means this session runs without a side channel - a shell whose
+// dialect has no hook - and every reconciliation that would read it
+// answers no instead. Callers hold the state lock.
+func (r *ptyRunner) openPromptState() []string {
+	r.promptFile = ""
+	r.sentSeq = 0
+	dir, err := ScratchDir(runnerScratchKey(r.key), "prompt-state")
+	if err != nil {
+		return nil
+	}
+	f, err := os.CreateTemp(dir, "state-*")
+	if err != nil {
+		return nil
+	}
+	path := f.Name()
+	_ = f.Close()
+	r.promptFile = path
+	return []string{ptyPromptStateEnv + "=" + path}
+}
+
+// readPromptState reads the shell's account. The hook rewrites the
+// file at every prompt, so a read can land between the truncate and
+// the write: an empty or torn line is no observation, not a zero, and
+// the caller goes on without the side channel for that decision.
+func (r *ptyRunner) readPromptState() (promptState, bool) {
+	if r.promptFile == "" {
+		return promptState{}, false
+	}
+	b, err := os.ReadFile(r.promptFile)
+	if err != nil {
+		return promptState{}, false
+	}
+	fields := strings.Split(strings.TrimSpace(string(b)), "\t")
+	if len(fields) != 3 {
+		return promptState{}, false
+	}
+	var st promptState
+	var seqErr, codeErr error
+	st.seq, seqErr = strconv.Atoi(fields[0])
+	st.code, codeErr = strconv.Atoi(fields[1])
+	st.cwd = fields[2]
+	if seqErr != nil || codeErr != nil || st.seq < 1 {
+		return promptState{}, false
+	}
+	return st, true
+}
+
+// markPromptSeq records the prompt the session is sitting at as the
+// baseline for the command about to run: the hook's next ordinal is
+// that command's completion, whenever and however it comes to be
+// observed. A file that keeps reading torn disables the baseline for
+// this command - a stale ordinal would call a running command
+// finished - and the wait falls back to the marker on the wire.
+func (r *ptyRunner) markPromptSeq() {
+	for range 3 {
+		if st, ok := r.readPromptState(); ok {
+			r.setState(func() { r.sentSeq = st.seq })
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	r.setState(func() { r.sentSeq = -1 })
+}
+
+// promptPastSent reports whether the shell has shown a prompt newer
+// than the one the command being waited on was sent at: the command
+// has finished, by the shell's own account, whatever became of the
+// marker on the wire - drained with a credential answer, replaced by a
+// prompt framework that reinstalled its PS1, completed between calls.
+// It is the ground truth the verdict machine reconciles against,
+// because only the shell knows a prompt from a program that happens to
+// be reading.
+func (r *ptyRunner) promptPastSent() bool {
+	st, ok := r.readPromptState()
+	if !ok {
+		return false
+	}
+	r.mu.Lock()
+	sent := r.sentSeq
+	r.mu.Unlock()
+	return sent >= 0 && st.seq > sent
 }
 
 // answerCredentialPrompt drains the prompt output, asks the user for
@@ -2428,7 +2667,7 @@ func (r *ptyRunner) collect(ctx context.Context, s ptyTerminal) PTYResult {
 // draining then would take the tail of its output away from the call
 // that is about to report it.
 func (r *ptyRunner) collectBusy(_ context.Context, s ptyTerminal, busy bool) PTYResult {
-	r.clearWaiting()
+	r.clearStuck()
 	// The call waiting on that command owns the output stream, so show
 	// the screen instead - a read, not a consume.
 	if busy {
@@ -2442,22 +2681,25 @@ func (r *ptyRunner) collectBusy(_ context.Context, s ptyTerminal, busy bool) PTY
 		s.Drain()
 		return r.screenResult(s)
 	}
+	advanced := r.promptPastSent()
 	var echo []string
+	var still bool
 	raw := string(s.Drain())
 	r.setState(func() {
 		r.lastScreen = ""
 		echo = r.lastEcho
 		// Draining a session whose command was not in flight observes
-		// whatever became of it. A prompt in the drained bytes means the
-		// shell - not some program - has the terminal back, so the
-		// program left running has finished and been seen: there is
-		// nothing left for a poll to wait for. Without a prompt it may
-		// still be running, and the flag stands.
-		if r.running && r.promptRe.MatchString(raw) {
+		// whatever became of it. A prompt - announced on the wire or
+		// reported by the shell's own account - means the shell, not
+		// some program, has the terminal back, so the program left
+		// running has finished and been seen: there is nothing left for
+		// a poll to wait for. Without one it may still be running.
+		if r.running && (advanced || r.promptRe.MatchString(raw)) {
 			r.running = false
 		}
+		still = r.running
 	})
-	return PTYResult{Output: r.clean(raw, echo), Running: s.Alive()}
+	return PTYResult{Output: r.clean(raw, echo), Running: still && s.Alive()}
 }
 
 // clean normalizes terminal output for the model: CRLF and lone CR to

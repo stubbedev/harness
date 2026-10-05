@@ -354,10 +354,10 @@ func TestWaitingHeader(t *testing.T) {
 	require.Equal(t, "[waiting for input]", waitingHeader(PTYResult{Waiting: true}),
 		"a first wait is reported as the state alone")
 	require.Equal(t, "[waiting for input]",
-		waitingHeader(PTYResult{Waiting: true, WaitStreak: ptyWaitingEscalateCalls - 1}),
+		waitingHeader(PTYResult{Waiting: true, WaitStreak: ptyStuckEscalateCalls - 1}),
 		"a question a caller is thinking about is not a wedge")
 
-	stuck := waitingHeader(PTYResult{Waiting: true, WaitStreak: ptyWaitingEscalateCalls})
+	stuck := waitingHeader(PTYResult{Waiting: true, WaitStreak: ptyStuckEscalateCalls})
 	require.Contains(t, stuck, "wedged")
 	require.Contains(t, stuck, "ctrl-c")
 	require.Contains(t, stuck, "reset: true")
@@ -373,14 +373,54 @@ func TestWaitingHeader(t *testing.T) {
 // The escalation rule is defined once, on the result it reads: age
 // alone escalates past the threshold, and neither counter short of it
 // does. If the threshold moves, this is the boundary that moves with
-// it - the header tests above only pin the wording.
-func TestWaitEscalated(t *testing.T) {
+// it - the header tests above only pin the wording. Both stuck
+// verdicts share the rule, so both share the boundary.
+func TestStuckEscalated(t *testing.T) {
 	t.Parallel()
 
-	require.False(t, PTYResult{WaitStreak: ptyWaitingEscalateCalls - 1}.waitEscalated())
-	require.True(t, PTYResult{WaitStreak: ptyWaitingEscalateCalls}.waitEscalated())
-	require.False(t, PTYResult{WaitSeconds: int(ptyWaitingEscalateAfter/time.Second) - 1}.waitEscalated())
-	require.True(t, PTYResult{WaitSeconds: int(ptyWaitingEscalateAfter / time.Second)}.waitEscalated())
+	require.False(t, PTYResult{WaitStreak: ptyStuckEscalateCalls - 1}.waitEscalated())
+	require.True(t, PTYResult{WaitStreak: ptyStuckEscalateCalls}.waitEscalated())
+	require.False(t, PTYResult{WaitSeconds: int(ptyStuckEscalateAfter/time.Second) - 1}.waitEscalated())
+	require.True(t, PTYResult{WaitSeconds: int(ptyStuckEscalateAfter / time.Second)}.waitEscalated())
+
+	require.False(t, PTYResult{RunStreak: ptyStuckEscalateCalls - 1}.runEscalated())
+	require.True(t, PTYResult{RunStreak: ptyStuckEscalateCalls}.runEscalated())
+	require.False(t, PTYResult{RunSeconds: int(ptyStuckEscalateAfter/time.Second) - 1}.runEscalated())
+	require.True(t, PTYResult{RunSeconds: int(ptyStuckEscalateAfter / time.Second)}.runEscalated())
+}
+
+// The running header escalates exactly as the waiting one does: an
+// ordinary idle command is the state, and a command that has shown
+// nothing call after call names the wedge and the way out.
+func TestRunningHeader(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "[still running, idle]", runningHeader(PTYResult{Running: true}),
+		"a first silent budget is reported as the state alone")
+	require.Equal(t, "[still running, idle]",
+		runningHeader(PTYResult{Running: true, RunStreak: ptyStuckEscalateCalls - 1}),
+		"a build that has not spoken this call is not a wedge")
+
+	stuck := runningHeader(PTYResult{Running: true, RunStreak: ptyStuckEscalateCalls})
+	require.Contains(t, stuck, "wedged")
+	require.Contains(t, stuck, "ctrl-c")
+	require.Contains(t, stuck, "reset: true")
+
+	long := runningHeader(PTYResult{Running: true, RunStreak: 1, RunSeconds: 121})
+	require.Contains(t, long, "wedged", "a long silence escalates on age alone")
+}
+
+// The reset header counts the queue it threw away: the queue had
+// promised those lines would run, and the call that breaks a promise
+// says so.
+func TestResetHeader(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "[session reset]", resetHeader(PTYResult{}))
+	require.Equal(t, "[session reset; 1 queued command dropped with it]",
+		resetHeader(PTYResult{QueuedDropped: 1}))
+	require.Equal(t, "[session reset; 2 queued commands dropped with it]",
+		resetHeader(PTYResult{QueuedDropped: 2}))
 }
 
 // The queued header reports the depth of the queue once there is more
