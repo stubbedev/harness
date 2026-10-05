@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/stubbedev/harness/internal/envvars"
 )
 
 // newHookRunner opens a runner over a shell whose prompt-state hook
@@ -211,7 +213,7 @@ func TestDialectPromptHook(t *testing.T) {
 
 	require.Empty(t, powershellDialect.promptHook, "PowerShell folds the hook into its prompt function")
 	require.Equal(t, []string{powershellDialect.setupCmd}, powershellDialect.setupLines())
-	require.Contains(t, powershellDialect.setupCmd, ptyPromptStateEnv)
+	require.Contains(t, powershellDialect.setupCmd, envvars.PromptStateFile)
 
 	require.Empty(t, cmdDialect.promptHook, "cmd.exe has no prompt hook to install")
 	require.Equal(t, []string{cmdDialect.setupCmd}, cmdDialect.setupLines())

@@ -59,6 +59,10 @@ const (
 	PTYCols = "HARNESS_PTY_COLS"
 	// PTYTerm overrides the TERM terminal sessions run with.
 	PTYTerm = "HARNESS_PTY_TERM"
+	// PromptStateFile names, for a terminal session's shell, the file
+	// its prompt hook writes its per-prompt account to. Harness sets it
+	// into the session; the hook the session setup installs reads it.
+	PromptStateFile = "HARNESS_PROMPT_STATE"
 )
 
 // The client/server split.
@@ -91,7 +95,7 @@ func All() []string {
 		SubagentsDir, ExtensionsDir, CommandsDir, SkipDataDirLock,
 		DisableProviderAutoUpdate, DisableDefaultProviders,
 		DisableAnthropicCache, DisablePromptCacheKey,
-		CoreUtils, PTYRows, PTYCols, PTYTerm,
+		CoreUtils, PTYRows, PTYCols, PTYTerm, PromptStateFile,
 		ClientServer, ServerIdleTimeout, ServerDetachGrace, ServerReadyTimeout,
 		Profile, UIDebug,
 	}

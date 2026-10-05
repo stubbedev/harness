@@ -611,6 +611,7 @@ These configure Harness from the environment. Boolean variables take `1`,
 | `HARNESS_CORE_UTILS` | Forces the built-in Go coreutils on or off (on by default on Windows only). |
 | `HARNESS_PTY_ROWS`, `HARNESS_PTY_COLS` | Size new terminal sessions open with. |
 | `HARNESS_PTY_TERM` | `TERM` terminal sessions run with. |
+| `HARNESS_PROMPT_STATE` | Set into terminal sessions: the file the shell's prompt hook writes its per-prompt account to. Not for users; do not set. |
 | `HARNESS_CLIENT_SERVER` | Runs the TUI against a Harness server process. |
 | `HARNESS_SERVER_IDLE_TIMEOUT` | Seconds a server with no clients lingers before exiting; `0` exits at once. |
 | `HARNESS_SERVER_DETACH_GRACE` | Seconds a workspace outlives its last client detaching. |

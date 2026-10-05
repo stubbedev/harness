@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/stubbedev/harness/internal/crash"
+	"github.com/stubbedev/harness/internal/envvars"
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/shell"
@@ -2059,12 +2060,10 @@ func (r *ptyRunner) knownCwd() string {
 	return r.lastCwd
 }
 
-// ptyPromptStateEnv names, in the session's environment, the file the
-// shell's prompt hook writes its account to. It is an environment
-// variable rather than a path baked into the hook's text because the
-// file is per shell generation and the hook's text is shared.
-const ptyPromptStateEnv = "HARNESS_PROMPT_STATE"
-
+// The side-channel file the shell's prompt hook writes to is named in
+// the session's environment; the name lives in internal/envvars with
+// the rest, and the hook the dialects install reads it by that name.
+// See ptyRunner.openPromptState.
 // promptState is the shell's own account of where it stands: the
 // ordinal of the prompt it is showing, the exit code of the command
 // that ended there, and the directory that command left it in. The
@@ -2097,7 +2096,7 @@ func (r *ptyRunner) openPromptState() []string {
 	path := f.Name()
 	_ = f.Close()
 	r.promptFile = path
-	return []string{ptyPromptStateEnv + "=" + path}
+	return []string{envvars.PromptStateFile + "=" + path}
 }
 
 // readPromptState reads the shell's account. The hook rewrites the
