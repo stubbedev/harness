@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -21,6 +22,12 @@ func TestEveryOpenableDialogHasAnOpener(t *testing.T) {
 
 	named := map[string]bool{}
 	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
+		// Parallel tests build scratch directories under this tree and
+		// remove them in their cleanup (see TestResolveGitDirs), so an
+		// entry can vanish between the directory read and the open.
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
 		}
