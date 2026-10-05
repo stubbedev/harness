@@ -438,6 +438,18 @@ func newAskRunner(t *testing.T, answers ...string) (*ptyRunner, *fakeAsk) {
 	return r, ask
 }
 
+// detachPromptState disconnects the runner's prompt-state side channel
+// before a wait is driven against a fake terminal: the fake stands in
+// for the session only for the wait, and the real shell's account is
+// one prompt ahead of the fake's world, which the reconciliation would
+// read as a completion that never happened on it.
+func detachPromptState(r *ptyRunner) {
+	r.mu.Lock()
+	r.promptFile = ""
+	r.sentSeq = 0
+	r.mu.Unlock()
+}
+
 // A localized sudo prompt - the shape the old English-only regex missed
 // - opens the masked dialog: the text is prompt-shaped and the reader
 // has switched the terminal to a hidden line. The answer goes to the
@@ -502,6 +514,7 @@ func TestPtyRunner_BlindQuietJobIsNotWaitingRightAway(t *testing.T) {
 	require.NoError(t, err)
 
 	blind := &blindSleeperTerm{since: time.Now()}
+	detachPromptState(r)
 	start := time.Now()
 	res, err := r.awaitCompletion(t.Context(), blind, nil, 2)
 	require.NoError(t, err)
@@ -624,6 +637,7 @@ func TestPtyRunner_UnconsumedAnswerDoesNotReopenDialog(t *testing.T) {
 	require.NoError(t, err)
 
 	stuck := &stuckReaderTerm{}
+	detachPromptState(r)
 	res, err := r.awaitCompletion(t.Context(), stuck, nil, 2)
 	require.NoError(t, err)
 	require.True(t, res.Running)
