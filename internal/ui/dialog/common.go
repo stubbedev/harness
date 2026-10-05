@@ -189,20 +189,6 @@ func inputCursorIn(cur *tea.Cursor, titleStyle, inputStyle, dialogStyle lipgloss
 			rowsAbove)
 }
 
-// adjustOnboardingInputCursor removes the dialog view frame offset from an
-// input cursor. Onboarding dialogs render without Dialog.View frame, while
-// InputCursor includes that frame offset for regular dialogs.
-func adjustOnboardingInputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
-	if cur == nil {
-		return nil
-	}
-	dialogStyle := t.Dialog.View
-	return common.OffsetCursor(cur,
-		-(dialogStyle.GetBorderLeftSize() + dialogStyle.GetPaddingLeft() + dialogStyle.GetMarginLeft()),
-		-(dialogStyle.GetBorderTopSize() + dialogStyle.GetPaddingTop() + dialogStyle.GetMarginTop()),
-		0, 0)
-}
-
 // ActiveFrame returns the frame style dialogs wrap their content in for
 // the active placement: the rounded floating box, or the full-width
 // top-border-only panel of the bottom-anchored (which-key) mode.
@@ -313,10 +299,6 @@ type RenderContext struct {
 	// input style and places it first among the content (floating) or as
 	// the panel's last line (bottom-anchored). Set it with AddInput.
 	Input string
-	// IsOnboarding indicates whether to render the dialog as part of the
-	// onboarding flow. This means that the content will be rendered at the
-	// bottom left of the screen.
-	IsOnboarding bool
 }
 
 // NewRenderContext creates a new RenderContext with the provided styles and width.
@@ -401,13 +383,8 @@ func (rc *RenderContext) Render() string {
 	// Input placement follows the anchoring: floating dialogs put the
 	// input directly under the title; the bottom-anchored panel puts it on
 	// the last line, below the options and help, framed by the rules.
-	// Onboarding keeps the classic order and margins wherever it is
-	// drawn.
 	inputStyle := ActiveInput(rc.Styles)
-	inputLast := anchoredAtBottom() && !rc.IsOnboarding
-	if rc.IsOnboarding {
-		inputStyle = rc.Styles.Dialog.InputPrompt
-	}
+	inputLast := anchoredAtBottom()
 	// The separator rule sits between the input row and the content,
 	// whichever side of the panel the placement puts them on. When it
 	// renders it also replaces the input's breathing-room margin, so the
@@ -463,7 +440,7 @@ func (rc *RenderContext) Render() string {
 		if len(run) == 0 {
 			return
 		}
-		if rc.IsOnboarding || placementTop() {
+		if placementTop() {
 			lines = append(lines, run...)
 		} else {
 			padded := dialogStyle.Border(lipgloss.Border{}, false, false, false, false)
@@ -482,8 +459,6 @@ func (rc *RenderContext) Render() string {
 	flush()
 
 	switch {
-	case rc.IsOnboarding:
-		return strings.Join(lines, "\n")
 	case placementTop():
 		return dialogStyle.Render(strings.Join(lines, "\n"))
 	default:

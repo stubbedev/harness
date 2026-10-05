@@ -452,10 +452,6 @@ type Styles struct {
 			InfoFocused lipgloss.Style
 		}
 
-		Models struct {
-			ConfiguredText lipgloss.Style // "Configured" badge shown on the ModelGroup header
-		}
-
 		APIKey struct {
 			Spinner lipgloss.Style // Loading spinner while validating the key
 		}

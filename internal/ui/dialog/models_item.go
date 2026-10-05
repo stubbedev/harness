@@ -1,7 +1,6 @@
 package dialog
 
 import (
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 	"github.com/stubbedev/harness/internal/catalog"
@@ -14,20 +13,18 @@ import (
 // ModelGroup represents a group of model items.
 type ModelGroup struct {
 	*list.Versioned
-	Title      string
-	Items      []*ModelItem
-	configured bool
-	t          *styles.Styles
+	Title string
+	Items []*ModelItem
+	t     *styles.Styles
 }
 
 // NewModelGroup creates a new ModelGroup.
-func NewModelGroup(t *styles.Styles, title string, configured bool, items ...*ModelItem) ModelGroup {
+func NewModelGroup(t *styles.Styles, title string, items ...*ModelItem) ModelGroup {
 	return ModelGroup{
-		Versioned:  list.NewVersioned(),
-		Title:      title,
-		Items:      items,
-		configured: configured,
-		t:          t,
+		Versioned: list.NewVersioned(),
+		Title:     title,
+		Items:     items,
+		t:         t,
 	}
 }
 
@@ -43,26 +40,8 @@ func (m *ModelGroup) AppendItems(items ...*ModelItem) {
 
 // Render implements [list.Item].
 func (m *ModelGroup) Render(width int) string {
-	var configured string
-	if m.configured {
-		configuredIcon := m.t.ToolCallSuccess.Render()
-		configuredText := m.t.Dialog.Models.ConfiguredText.Render("Configured")
-		configured = configuredIcon + " " + configuredText
-	}
-
-	title := " " + m.Title + " "
-	// Keep the "Configured" badge only when the full title fits beside it
-	// (plus a separator). Otherwise drop it and let the title use the whole
-	// width, rather than truncating the title to reserve room for a badge
-	// that common.Section would then drop anyway, leaving dead space.
-	if configured != "" && lipgloss.Width(title)+lipgloss.Width(configured)+3 > width {
-		configured = ""
-	}
-	if configured == "" {
-		title = ansi.Truncate(title, max(0, width-1), "…")
-	}
-
-	return common.Section(m.t, title, width, configured)
+	title := ansi.Truncate(" "+m.Title+" ", max(0, width-1), "…")
+	return common.Section(m.t, title, width)
 }
 
 // ModelItem represents a list item for a model type.

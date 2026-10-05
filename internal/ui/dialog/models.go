@@ -61,20 +61,16 @@ func (mt ModelType) Placeholder() string {
 }
 
 const (
-	onboardingModelInputPlaceholder = "Find your fave"
-	largeModelInputPlaceholder      = "Choose a model for large, complex tasks"
-	smallModelInputPlaceholder      = "Choose a model for small, simple tasks"
+	largeModelInputPlaceholder = "Choose a model for large, complex tasks"
+	smallModelInputPlaceholder = "Choose a model for small, simple tasks"
 )
 
 // ModelsID is the identifier for the model selection dialog.
 const ModelsID ID = "models"
 
-const defaultModelsDialogMaxWidth = 73
-
 // Models represents a model selection dialog.
 type Models struct {
-	com          *common.Common
-	isOnboarding bool
+	com *common.Common
 
 	modelType ModelType
 	providers []catalog.Provider
@@ -96,11 +92,10 @@ type Models struct {
 var _ Dialog = (*Models)(nil)
 
 // NewModels creates a new Models dialog.
-func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
+func NewModels(com *common.Common) (*Models, error) {
 	t := com.Styles
 	m := &Models{}
 	m.com = com
-	m.isOnboarding = isOnboarding
 
 	m.list = NewModelsList(t)
 	m.list.Focus()
@@ -109,7 +104,6 @@ func NewModels(com *common.Common, isOnboarding bool) (*Models, error) {
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
 	m.input.Prompt = "❯ "
-	m.input.Placeholder = onboardingModelInputPlaceholder
 	m.input.SetStyles(com.Styles.TextInput)
 	m.input.Focus()
 
@@ -179,14 +173,8 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				ReAuthenticate: isEdit,
 			}
 		case key.Matches(msg, m.keyMap.Connect):
-			if m.isOnboarding {
-				break
-			}
 			return ActionOpenDialog{DialogID: ConnectID}
 		case key.Matches(msg, m.keyMap.Tab):
-			if m.isOnboarding {
-				break
-			}
 			if m.modelType == ModelTypeLarge {
 				m.modelType = ModelTypeSmall
 			} else {
@@ -238,16 +226,9 @@ func (m *Models) modelTypeRadioView() string {
 // Draw implements [Dialog].
 func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := m.com.Styles
-	width := max(0, min(defaultModelsDialogMaxWidth, area.Dx()-t.Dialog.View.GetHorizontalBorderSize()))
-	height := max(0, min(defaultDialogHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
-	innerWidth := width - t.Dialog.View.GetHorizontalFrameSize()
-	if !m.isOnboarding {
-		// Onboarding keeps its classic centered framing; the placement-
-		// aware sizing applies to the in-app palette.
-		width = DialogWidth(t, area)
-		height = DialogHeightCeiling(t, area, defaultDialogHeight)
-		innerWidth = DialogInnerWidth(t, width)
-	}
+	width := DialogWidth(t, area)
+	height := DialogHeightCeiling(t, area, defaultDialogHeight)
+	innerWidth := DialogInnerWidth(t, width)
 	m.input.SetWidth(dialogInputTextWidth(t, m.input, innerWidth))
 
 	listHeight, listTotalHeight, _ := sizeDialogList(t, m.list, innerWidth, height)
@@ -256,14 +237,9 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	rc.Title = "Switch Model"
 	rc.TitleInfo = m.modelTypeRadioView()
 
-	if m.isOnboarding {
-		titleText := t.Dialog.PrimaryText.Render("To start, let's choose a provider and model.")
-		rc.AddPart(titleText)
-	}
-
 	rc.AddInput(m.input.View())
 
-	if m.list.Len() == 0 && !m.isOnboarding {
+	if m.list.Len() == 0 {
 		// Nothing is connected, so the list has nothing to offer. Say
 		// where the models come from instead of showing an empty box.
 		rc.AddPart(t.Dialog.SecondaryText.Render(fmt.Sprintf(
@@ -276,17 +252,6 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		rc.AddPart(listView)
 	}
 
-	if m.isOnboarding {
-		cur := m.Cursor()
-		rc.Title = ""
-		rc.TitleInfo = ""
-		rc.IsOnboarding = true
-		view := rc.Render()
-		cur = adjustOnboardingInputCursor(t, cur)
-		DrawOnboardingCursor(scr, area, view, cur)
-		return cur
-	}
-
 	view := rc.Render()
 	cur := DialogCursor(t, view, m.input.Cursor())
 	DrawCenterCursor(scr, area, view, cur)
@@ -295,12 +260,6 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 // ShortHelp returns the short help view.
 func (m *Models) ShortHelp() []key.Binding {
-	if m.isOnboarding {
-		return []key.Binding{
-			m.keyMap.UpDown,
-			m.keyMap.Select,
-		}
-	}
 	h := []key.Binding{
 		m.keyMap.UpDown,
 		m.keyMap.Tab,
@@ -332,14 +291,6 @@ func (m *Models) isSelectedConfigured() bool {
 	return isConfigured
 }
 
-// isConfigOnlyProvider reports whether a catalog provider can only be
-// configured outside the TUI: the API-key dialog's connection test has no
-// verification path for these provider types, so offering them would
-// dead-end. Mirrors the type switch in config.TestConnection.
-func isConfigOnlyProvider(provider catalog.Provider) bool {
-	return provider.Type == catalog.TypeAzure || provider.Type == catalog.TypeVertexAI
-}
-
 // setProviderItems sets the provider items in the list.
 func (m *Models) setProviderItems() error {
 	t := m.com.Styles
@@ -353,12 +304,10 @@ func (m *Models) setProviderItems() error {
 	// Track providers already added to avoid duplicates
 	addedProviders := make(map[string]bool)
 
-	// A provider with no credentials cannot serve a request, so outside
-	// onboarding the list only shows connected ones. Connecting a new
-	// provider is the Connect dialog's job now, so nothing here has to
-	// fall back to the catalog: an unconnected entry would only
-	// dead-end at a failed request.
-	showUnconfigured := m.isOnboarding
+	// A provider with no credentials cannot serve a request, so the list
+	// only shows connected ones. Connecting a new provider is the Connect
+	// dialog's job: an unconnected entry here would only dead-end at a
+	// failed request.
 
 	// Get a list of known providers to compare against
 	knownProviders, err := config.Providers(cfg)
@@ -390,7 +339,7 @@ func (m *Models) setProviderItems() error {
 
 			addedProviders[id] = true
 
-			group := NewModelGroup(t, name, showUnconfigured)
+			group := NewModelGroup(t, name)
 			for _, model := range p.Models {
 				item := NewModelItem(t, provider, model, m.modelType, false)
 				group.AppendItems(item)
@@ -413,50 +362,34 @@ func (m *Models) setProviderItems() error {
 		}
 
 		providerConfig, providerConfigured := cfg.Providers.Get(providerID)
-		if providerConfigured && providerConfig.Disable {
-			continue
-		}
-		if !showUnconfigured && !providerConfigured {
-			continue
-		}
-		// Even when the catalog is shown, skip providers whose
-		// credentials the TUI cannot collect: the API-key dialog has no
-		// verification for them, so selecting one dead-ends at a failed
-		// connection test. They stay reachable via config.yaml, and a
-		// provider already configured there still shows.
-		if !providerConfigured && isConfigOnlyProvider(provider) {
+		if !providerConfigured || providerConfig.Disable {
 			continue
 		}
 
 		displayProvider := provider
-		if providerConfigured {
-			displayProvider.Name = cmp.Or(providerConfig.Name, displayProvider.Name)
-			modelIndex := make(map[string]int, len(displayProvider.Models))
-			for i, model := range displayProvider.Models {
-				modelIndex[model.ID] = i
+		displayProvider.Name = cmp.Or(providerConfig.Name, displayProvider.Name)
+		modelIndex := make(map[string]int, len(displayProvider.Models))
+		for i, model := range displayProvider.Models {
+			modelIndex[model.ID] = i
+		}
+		for _, model := range providerConfig.Models {
+			if model.ID == "" {
+				continue
 			}
-			for _, model := range providerConfig.Models {
-				if model.ID == "" {
-					continue
+			if idx, ok := modelIndex[model.ID]; ok {
+				if model.Name != "" {
+					displayProvider.Models[idx].Name = model.Name
 				}
-				if idx, ok := modelIndex[model.ID]; ok {
-					if model.Name != "" {
-						displayProvider.Models[idx].Name = model.Name
-					}
-					continue
-				}
-				model.Name = cmp.Or(model.Name, model.ID)
-				displayProvider.Models = append(displayProvider.Models, model)
-				modelIndex[model.ID] = len(displayProvider.Models) - 1
+				continue
 			}
+			model.Name = cmp.Or(model.Name, model.ID)
+			displayProvider.Models = append(displayProvider.Models, model)
+			modelIndex[model.ID] = len(displayProvider.Models) - 1
 		}
 
 		name := cmp.Or(displayProvider.Name, providerID)
 
-		// The badge only earns its place while the catalog is on screen
-		// and the list is a mix. Outside that every group is configured,
-		// so the badge says nothing and crowds the provider name.
-		group := NewModelGroup(t, name, providerConfigured && showUnconfigured)
+		group := NewModelGroup(t, name)
 		for _, model := range displayProvider.Models {
 			item := NewModelItem(t, provider, model, m.modelType, false)
 			group.AppendItems(item)
@@ -469,21 +402,8 @@ func (m *Models) setProviderItems() error {
 		groups = append(groups, group)
 	}
 
-	// Show configured providers first, keeping the original order within
-	// each tier.
-	slices.SortStableFunc(groups, func(a, b ModelGroup) int {
-		switch {
-		case a.configured == b.configured:
-			return 0
-		case b.configured:
-			return 1
-		default:
-			return -1
-		}
-	})
-
 	if len(recentItems) > 0 {
-		recentGroup := NewModelGroup(t, "Recently used", false)
+		recentGroup := NewModelGroup(t, "Recently used")
 
 		var validRecentItems []config.SelectedModel
 		for _, recent := range recentItems {
@@ -528,9 +448,7 @@ func (m *Models) setProviderItems() error {
 	}
 
 	// Update placeholder based on model type
-	if !m.isOnboarding {
-		m.input.Placeholder = m.modelType.Placeholder()
-	}
+	m.input.Placeholder = m.modelType.Placeholder()
 
 	return nil
 }

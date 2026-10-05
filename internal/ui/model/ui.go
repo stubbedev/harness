@@ -98,8 +98,7 @@ type uiState uint8
 
 // Possible uiState values.
 const (
-	uiOnboarding uiState = iota
-	uiLanding
+	uiLanding uiState = iota
 	uiChat
 )
 
@@ -573,14 +572,8 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 
 	// Initialize compact mode from config
 
-	desiredState := uiLanding
-	desiredFocus := uiFocusEditor
-	if !com.Config().IsConfigured() {
-		desiredState = uiOnboarding
-	}
-
 	// set initial state
-	ui.setState(desiredState, desiredFocus)
+	ui.setState(uiLanding, uiFocusEditor)
 
 	opts := com.Config().Options
 
@@ -600,11 +593,6 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 // Init initializes the UI model.
 func (m *UI) Init() tea.Cmd {
 	var cmds []tea.Cmd
-	if m.state == uiOnboarding {
-		if cmd := m.openModelsDialog(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	}
 	// load the user commands async
 	cmds = append(cmds, m.loadCustomCommands())
 	// load prompt history async
@@ -632,7 +620,7 @@ func (m *UI) Init() tea.Cmd {
 func (m *UI) loadInitialSession() tea.Cmd {
 	switch {
 	case m.state != uiLanding:
-		// Only load if we're in landing state (i.e., fully configured)
+		// Only load in the landing state, before any session is open.
 		return nil
 	case m.initialSessionID != "":
 		return m.loadSession(m.initialSessionID)
@@ -1974,27 +1962,15 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 		return nil
 	}
 
-	isOnboarding := m.state == uiOnboarding
-
 	switch msg := action.(type) {
 	// Generic dialog messages
 	case dialog.ActionClose:
-		if isOnboarding && m.dialog.ContainsDialog(dialog.ModelsID) {
-			break
-		}
-
 		// Closing the theme picker without confirming drops the preview.
 		if front := m.dialog.DialogLast(); front != nil && front.ID() == dialog.ThemesID {
 			m.revertThemePreview()
 		}
 
 		m.dialog.CloseFrontDialog()
-
-		if isOnboarding {
-			if cmd := m.openModelsDialog(); cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-		}
 
 		if m.focus == uiFocusEditor {
 			cmds = append(cmds, m.focusEditor())
@@ -2385,7 +2361,6 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		providerID   = msg.Model.Provider
 		isCopilot    = providerID == string(catalog.InferenceProviderCopilot)
 		isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
-		isOnboarding = m.state == uiOnboarding
 	)
 
 	// Attempt to import GitHub Copilot tokens from VSCode if available.
@@ -2450,15 +2425,15 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 	m.dialog.CloseDialog(dialog.ModelsID)
 	m.dialog.CloseDialog(dialog.ConnectID)
 
-	if isOnboarding {
-		m.setState(uiLanding, uiFocusEditor)
-		m.com.Config().SetupAgents()
+	// Connecting the first provider mid-session is the one path where the
+	// agent is not up yet (app startup skips it on an unconfigured
+	// install): bring it up now, then re-fetch the memoized ready/model
+	// state so the landing view shows the selected model without waiting
+	// for the TTL backstop.
+	if !m.com.Workspace.AgentIsReady() {
 		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
 			cmds = append(cmds, util.ReportError(err))
 		}
-		// The agent just came up: re-fetch the memoized ready/model state
-		// so the landing view shows the selected model without waiting for
-		// the TTL backstop.
 		m.invalidateBusyCaches()
 		if cmd := m.dispatchBusyRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -2472,15 +2447,13 @@ func (m *UI) openAuthenticationDialog(provider catalog.Provider, model config.Se
 	var (
 		dlg dialog.Dialog
 		cmd tea.Cmd
-
-		isOnboarding = m.state == uiOnboarding
 	)
 
 	switch provider.ID {
 	case catalog.InferenceProviderCopilot:
-		dlg, cmd = dialog.NewOAuthCopilot(m.com, isOnboarding, provider, model, modelType)
+		dlg, cmd = dialog.NewOAuthCopilot(m.com, provider, model, modelType)
 	default:
-		dlg, cmd = dialog.NewAPIKeyInput(m.com, isOnboarding, provider, model, modelType)
+		dlg, cmd = dialog.NewAPIKeyInput(m.com, provider, model, modelType)
 	}
 
 	if m.dialog.FocusIfOpen(dlg.ID()) {
@@ -2621,8 +2594,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	switch m.state {
-	case uiOnboarding:
-		return tea.Batch(cmds...)
 	case uiChat, uiLanding:
 		switch m.focus {
 		case uiFocusEditor:
@@ -3043,12 +3014,6 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	screen.Clear(scr)
 
 	switch m.state {
-	case uiOnboarding:
-		m.drawHeader(scr, layout.header)
-
-		// NOTE: Onboarding flow will be rendered as dialogs below, but
-		// positioned at the bottom left of the screen.
-
 	case uiLanding:
 		m.drawHeader(scr, layout.header)
 		main := uv.NewStyledString(m.landingView())
@@ -3068,13 +3033,11 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	// The command picker sits on top of whatever is above the editor
 	// and its status line.
-	if m.state != uiOnboarding {
-		above := layout.editor
-		if layout.header.Dy() > 0 {
-			above = layout.header
-		}
-		m.drawCommandPicker(scr, above)
+	above := layout.editor
+	if layout.header.Dy() > 0 {
+		above = layout.header
 	}
+	m.drawCommandPicker(scr, above)
 
 	// Add status and help layer
 	m.status.Draw(scr, layout.status)
@@ -3643,8 +3606,6 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 		}
 	}
 	editorHeight += editorFrameRows
-	// The header height
-	const landingHeaderHeight = 0
 
 	var helpKeyMap help.KeyMap = m
 	if m.status != nil && m.status.ShowingAll() {
@@ -3670,8 +3631,8 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 	// a hardcoded amount that silently goes stale when a state's padding
 	// changes here.
 	sideMargin := 1
-	if slices.Contains([]uiState{uiOnboarding, uiLanding}, m.state) {
-		// extra padding on left and right for these states
+	if m.state == uiLanding {
+		// extra padding on left and right for the landing state
 		appRect.Min.X += 1
 		appRect.Max.X -= 1
 		sideMargin = 2
@@ -3684,23 +3645,6 @@ func (m *UI) generateLayout(w, h int) uiLayout {
 
 	// Handle different app states
 	switch m.state {
-	case uiOnboarding:
-		// Layout
-		//
-		// header
-		// ------
-		// main
-		// ------
-		// help
-
-		var headerRect, mainRect image.Rectangle
-		layout.Vertical(
-			layout.Len(landingHeaderHeight),
-			layout.Fill(1),
-		).Split(appRect).Assign(&headerRect, &mainRect)
-		uiLayout.header = headerRect
-		uiLayout.main = mainRect
-
 	case uiLanding:
 		// Layout
 		//
@@ -4554,8 +4498,7 @@ func (m *UI) openModelsDialog() tea.Cmd {
 		return nil
 	}
 
-	isOnboarding := m.state == uiOnboarding
-	modelsDialog, err := dialog.NewModels(m.com, isOnboarding)
+	modelsDialog, err := dialog.NewModels(m.com)
 	if err != nil {
 		return util.ReportError(err)
 	}

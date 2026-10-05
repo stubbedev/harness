@@ -8,9 +8,9 @@ import (
 	"github.com/stubbedev/harness/internal/ui/util"
 )
 
-// initializeProject starts project initialization and transitions to the landing view.
+// initializeProject starts project initialization: it clears the session
+// and sends the project initialization prompt as the next message.
 func (m *UI) initializeProject() tea.Cmd {
-	// clear the session
 	var cmds []tea.Cmd
 	if cmd := m.newSession(); cmd != nil {
 		cmds = append(cmds, cmd)

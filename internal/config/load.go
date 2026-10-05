@@ -367,7 +367,8 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 
 		switch {
 		case p.ID == catalog.InferenceProviderAnthropic && config.OAuthToken != nil:
-			// Claude Code subscription is not supported anymore. Remove to show onboarding.
+			// Claude Code subscription is not supported anymore. Remove it
+			// so the provider connects fresh with an API key.
 			// RemoveConfigField persists the deletion to disk. The in-memory
 			// state is kept consistent by the Providers.Del call below; any
 			// concurrent reload that races with this write will also see the

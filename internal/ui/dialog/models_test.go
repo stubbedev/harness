@@ -25,7 +25,7 @@ func newTestModelGroup(t *testing.T, providerID, providerName string, modelNames
 		model := catalog.Model{ID: providerID + ":" + name, Name: name}
 		items = append(items, NewModelItem(&s, provider, model, ModelTypeLarge, false))
 	}
-	return NewModelGroup(&s, providerName, true, items...)
+	return NewModelGroup(&s, providerName, items...)
 }
 
 // stubWorkspace feeds the models dialog a config without touching a real
@@ -37,7 +37,7 @@ type stubWorkspace struct {
 
 func (w *stubWorkspace) Config() *config.Config { return w.cfg }
 
-func newModelsDialogForTest(t *testing.T, cfg *config.Config, providers []catalog.Provider, isOnboarding bool) *Models {
+func newModelsDialogForTest(t *testing.T, cfg *config.Config, providers []catalog.Provider) *Models {
 	t.Helper()
 
 	// Keep setProviderItems off the shared catalog cache: the
@@ -50,10 +50,9 @@ func newModelsDialogForTest(t *testing.T, cfg *config.Config, providers []catalo
 
 	s := styles.CharmtonePantera()
 	m := &Models{
-		com:          &common.Common{Workspace: &stubWorkspace{cfg: cfg}, Styles: &s},
-		isOnboarding: isOnboarding,
-		modelType:    ModelTypeLarge,
-		providers:    providers,
+		com:       &common.Common{Workspace: &stubWorkspace{cfg: cfg}, Styles: &s},
+		modelType: ModelTypeLarge,
+		providers: providers,
 	}
 	m.list = NewModelsList(&s)
 	require.NoError(t, m.setProviderItems())
@@ -91,23 +90,9 @@ func testCatalogProviders() []catalog.Provider {
 func TestModelsDialogHidesUnconfiguredProviders(t *testing.T) {
 	t.Parallel()
 
-	m := newModelsDialogForTest(t, configuredTestConfig(t, "openai"), testCatalogProviders(), false)
+	m := newModelsDialogForTest(t, configuredTestConfig(t, "openai"), testCatalogProviders())
 	require.Len(t, m.list.groups, 1)
 	assert.Equal(t, "openai", m.list.groups[0].Title, "the group is named from the config when no display name is set")
-}
-
-// TestModelsDialogShowsCatalogDuringOnboarding pins the one case where the
-// full catalog must stay visible: onboarding, which is the only way to pick
-// a first provider before the connect dialog is reachable.
-func TestModelsDialogShowsCatalogDuringOnboarding(t *testing.T) {
-	t.Parallel()
-
-	m := newModelsDialogForTest(t, configuredTestConfig(t, "openai"), testCatalogProviders(), true)
-	assert.Len(t, m.list.groups, 2, "onboarding shows the whole catalog")
-	for _, g := range m.list.groups {
-		assert.NotContains(t, []string{"Azure", "Google Vertex"}, g.Title,
-			"providers the TUI cannot authenticate never show")
-	}
 }
 
 // TestModelsDialogWithoutConfiguredProvidersIsEmpty pins that the dialog no
@@ -117,8 +102,8 @@ func TestModelsDialogShowsCatalogDuringOnboarding(t *testing.T) {
 func TestModelsDialogWithoutConfiguredProvidersIsEmpty(t *testing.T) {
 	t.Parallel()
 
-	m := newModelsDialogForTest(t, configuredTestConfig(t), testCatalogProviders(), false)
-	assert.Empty(t, m.list.groups, "an unconnected provider never shows outside onboarding")
+	m := newModelsDialogForTest(t, configuredTestConfig(t), testCatalogProviders())
+	assert.Empty(t, m.list.groups, "an unconnected provider never shows")
 }
 
 // TestModelsListIncrementalFilterMatchesOneShot pins the incremental
@@ -234,19 +219,4 @@ func TestShowProviderForAmbiguousModelsIgnoresEmptyNames(t *testing.T) {
 
 	require.False(t, first.Items[0].showProvider)
 	require.False(t, second.Items[0].showProvider)
-}
-
-// TestModelsDialogDropsConfiguredBadgeWhenEveryGroupIsConfigured pins that
-// the badge only shows while the catalog is on screen: once the list is
-// nothing but configured providers, a badge on every row says nothing.
-func TestModelsDialogDropsConfiguredBadgeWhenEveryGroupIsConfigured(t *testing.T) {
-	t.Parallel()
-
-	m := newModelsDialogForTest(t, configuredTestConfig(t, "openai"), testCatalogProviders(), false)
-	require.Len(t, m.list.groups, 1)
-	assert.False(t, m.list.groups[0].configured, "no badge when there is nothing to tell apart")
-
-	m = newModelsDialogForTest(t, configuredTestConfig(t, "openai"), testCatalogProviders(), true)
-	require.Len(t, m.list.groups, 2)
-	assert.True(t, m.list.groups[0].configured, "onboarding mixes both, so the badge marks the ready one")
 }

@@ -41,8 +41,7 @@ const OAuthID ID = "oauth"
 
 // OAuth handles the OAuth flow authentication.
 type OAuth struct {
-	com          *common.Common
-	isOnboarding bool
+	com *common.Common
 
 	provider      catalog.Provider
 	model         config.SelectedModel
@@ -73,7 +72,6 @@ var _ Dialog = (*OAuth)(nil)
 // newOAuth creates a new device flow component.
 func newOAuth(
 	com *common.Common,
-	isOnboarding bool,
 	provider catalog.Provider,
 	model config.SelectedModel,
 	modelType config.SelectedModelType,
@@ -83,7 +81,6 @@ func newOAuth(
 
 	m := OAuth{}
 	m.com = com
-	m.isOnboarding = isOnboarding
 	m.provider = provider
 	m.model = model
 	m.modelType = modelType
@@ -226,13 +223,8 @@ func (m *OAuth) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		dialogStyle = ActiveFrame(t).Width(dialogWidth)
 	)
 	m.width = dialogWidth
-	if m.isOnboarding {
-		view := m.dialogContent()
-		DrawOnboarding(scr, area, view)
-	} else {
-		view := dialogStyle.Render(m.dialogContent())
-		DrawCenter(scr, area, view)
-	}
+	view := dialogStyle.Render(m.dialogContent())
+	DrawCenter(scr, area, view)
 	return nil
 }
 
@@ -254,14 +246,10 @@ func (m *OAuth) headerContent() string {
 	var (
 		t            = m.com.Styles
 		titleStyle   = t.Dialog.Title
-		textStyle    = t.Dialog.PrimaryText
 		dialogStyle  = ActiveFrame(t).Width(m.width)
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
 		dialogTitle  = fmt.Sprintf("Let’s authenticate with %s", m.oAuthProvider.name())
 	)
-	if m.isOnboarding {
-		return textStyle.Render(dialogTitle)
-	}
 	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 }
 

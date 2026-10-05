@@ -210,6 +210,14 @@ func (c *Connect) setItems(providers []catalog.Provider) {
 	c.list.ScrollToTop()
 }
 
+// isConfigOnlyProvider reports whether a catalog provider can only be
+// configured outside the TUI: the API-key dialog's connection test has no
+// verification path for these provider types, so offering them would
+// dead-end. Mirrors the type switch in config.TestConnection.
+func isConfigOnlyProvider(provider catalog.Provider) bool {
+	return provider.Type == catalog.TypeAzure || provider.Type == catalog.TypeVertexAI
+}
+
 // connectable reports whether a catalog provider belongs in this dialog: it
 // must have models to offer, credentials the TUI can actually collect, and
 // no configuration already (those live in the models dialog).

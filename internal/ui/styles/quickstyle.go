@@ -903,9 +903,6 @@ func quickStyle(o quickStyleOpts) Styles {
 	// as part of the selection instead of staying muted.
 	s.Dialog.ListItem.InfoFocused = lipgloss.NewStyle().Foreground(o.onPrimary)
 
-	// Dialog.Models
-	s.Dialog.Models.ConfiguredText = lipgloss.NewStyle().Foreground(o.fgMostSubtle)
-
 	// Dialog.Permissions
 
 	s.Dialog.View = base.Border(lipgloss.RoundedBorder()).BorderForeground(o.primary)

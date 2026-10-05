@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
 )
 
@@ -355,26 +354,6 @@ func DrawCenterCursor(scr uv.Screen, area uv.Rectangle, view string, cur *tea.Cu
 // DrawCenter draws the given string view centered in the screen area.
 func DrawCenter(scr uv.Screen, area uv.Rectangle, view string) {
 	DrawCenterCursor(scr, area, view, nil)
-}
-
-// DrawOnboarding draws the given string view centered in the screen area.
-func DrawOnboarding(scr uv.Screen, area uv.Rectangle, view string) {
-	DrawOnboardingCursor(scr, area, view, nil)
-}
-
-// DrawOnboardingCursor draws the given string view positioned at the bottom
-// left area of the screen. Content larger than the area is clamped to fit.
-func DrawOnboardingCursor(scr uv.Screen, area uv.Rectangle, view string, cur *tea.Cursor) {
-	width, height := lipgloss.Size(view)
-	// Clamp to available area so oversized dialogs don't draw outside bounds.
-	width = min(width, area.Dx())
-	height = min(height, area.Dy())
-	bottomLeft := common.BottomLeftRect(area, width, height)
-	if cur != nil {
-		cur.X += bottomLeft.Min.X
-		cur.Y += bottomLeft.Min.Y
-	}
-	uv.NewStyledString(view).Draw(scr, bottomLeft)
 }
 
 // Draw renders the overlay and its dialogs.

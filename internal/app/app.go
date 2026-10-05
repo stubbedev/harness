@@ -159,10 +159,10 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 		// Created eagerly (rather than lazily in initCoderAgent) so
 		// Subscribe's one-time nil check always finds a live Runtime: on an
 		// unconfigured install, New returns before InitCoderAgent runs, and
-		// Subscribe (already running by the time onboarding finishes and
-		// InitCoderAgent runs for the first time) would otherwise never wire
-		// up the subagent-events forwarding goroutine for the rest of the
-		// process.
+		// Subscribe (already running by the time the first provider gets
+		// connected and InitCoderAgent runs for the first time) would
+		// otherwise never wire up the subagent-events forwarding goroutine
+		// for the rest of the process.
 		SubagentRuntime: subagents.NewRuntime(),
 
 		globalCtx: ctx,
