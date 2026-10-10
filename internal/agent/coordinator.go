@@ -196,6 +196,14 @@ type coordinator struct {
 	// same lifetime and role as expandedMCPTools.
 	expandedBuiltins *csync.Map[string, bool]
 
+	// expandMu serialises a load through tool_search or an MCP search tool:
+	// marking the tools expanded, then rebuilding the coder's tool set.
+	// Those tools run in parallel, and two loads racing would lose one:
+	// the read-modify-write of a server's expanded set drops a name, or a
+	// rebuild that read the marks before the other load set its own lands
+	// last and installs a tool set without it.
+	expandMu sync.Mutex
+
 	// runtime tracks which sub-agents are currently running.
 	runtime *subagents.Runtime
 

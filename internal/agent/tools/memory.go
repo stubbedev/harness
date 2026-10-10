@@ -46,8 +46,13 @@ type MemoryParams struct {
 // NewMemoryTool builds the tool that lets the agent maintain durable
 // notes across sessions. Memories are workspace-scoped and survive
 // session boundaries.
+//
+// The tool is parallel. Reads, searches and listings are plain queries;
+// saves serialise in the memory service, which is where the
+// read-then-create of an upsert has to be atomic anyway (the store is
+// shared by every session and sub-agent, not just this tool's calls).
 func NewMemoryTool(svc memory.Service) fantasy.AgentTool {
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		MemoryToolName,
 		memoryDescription,
 		func(ctx context.Context, params MemoryParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {

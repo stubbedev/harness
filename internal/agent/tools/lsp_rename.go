@@ -50,6 +50,15 @@ func renameAction(
 		sessionID := GetSessionFromContext(ctx)
 		affectedFiles := collectAffectedFiles(edit)
 
+		// The lsp tool runs in parallel with edit and write, which take a
+		// file's edit lock around their read-modify-write. A rename is the
+		// same thing across many files, so it holds all of theirs from the
+		// history snapshot until it returns: otherwise an edit landing
+		// mid-apply is silently overwritten, or recorded in history as
+		// part of the rename.
+		unlock := lockFiles(affectedFiles...)
+		defer unlock()
+
 		recordHistory := files != nil && sessionID != ""
 		before := make(map[string]string, len(affectedFiles))
 		if recordHistory {

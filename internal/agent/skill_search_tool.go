@@ -60,6 +60,9 @@ func (s *skillSearchTool) Info() fantasy.ToolInfo {
 		// explicit: a nil Required marshals to JSON null, which the
 		// OpenAI Responses API rejects as not an array.
 		Required: []string{},
+		// Searching and loading only read skill files; the one write, the
+		// skill tracker's loaded mark, is behind the tracker's own lock.
+		Parallel: true,
 	}
 }
 

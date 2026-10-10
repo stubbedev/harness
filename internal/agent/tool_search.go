@@ -66,6 +66,9 @@ func (s *toolSearchTool) Info() fantasy.ToolInfo {
 			},
 		},
 		Required: []string{"load"},
+		// A load is serialised by expandMu, so concurrent calls cannot
+		// lose one another's tools.
+		Parallel: true,
 	}
 }
 
@@ -119,6 +122,8 @@ func (c *coordinator) builtinToolExpanded(name string) bool {
 // expandBuiltinTools marks deferred built-in tools as loaded and rebuilds
 // the coder agent's tool set so they are live from the next step.
 func (c *coordinator) expandBuiltinTools(ctx context.Context, names []string) error {
+	c.expandMu.Lock()
+	defer c.expandMu.Unlock()
 	added := false
 	for _, name := range names {
 		if _, loaded := c.expandedBuiltins.Get(name); slices.Contains(deferredBuiltinTools, name) && !loaded {

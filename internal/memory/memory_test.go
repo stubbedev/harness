@@ -2,12 +2,43 @@ package memory
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/db"
 )
+
+// Saves race in practice: the memory tool is parallel and every session
+// shares the service. Saves of one title must all succeed and leave one
+// memory, not fail on the primary key when two pass the look-up together.
+func TestConcurrentSavesOfOneTitleUpsert(t *testing.T) {
+	svc := newTestService(t, nil)
+
+	const n = 16
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := range n {
+		wg.Go(func() {
+			_, err := svc.Save(t.Context(), SaveInput{
+				Title:   "Shared note",
+				Content: fmt.Sprintf("version %d", i),
+			})
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	items, err := svc.List(t.Context())
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+}
 
 func newTestService(t *testing.T, reap func() int) Service {
 	t.Helper()

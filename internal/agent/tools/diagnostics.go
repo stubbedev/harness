@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
-	"time"
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/lsp"
 )
 
@@ -24,27 +24,70 @@ const DiagnosticsToolName = "lsp_diagnostics"
 // all of them buys nothing the count does not already say.
 const maxReportedDiagnostics = 10
 
+// The notes that follow a diagnostics listing that is not the last word:
+// one taken while a server is still answering, or before any server for the
+// file was running. Both tell the model it does not have to poll for the
+// rest, since the step sweep delivers it.
+const (
+	diagnosticsSettlingNote = "Language servers are still analysing. Whatever they report from here " +
+		"on is delivered to you automatically before your next step; there is no need to call this again."
+	diagnosticsStartingNote = "No language server was running for this file yet; any that handles it " +
+		"is being started. What it reports is delivered to you automatically before your next step; " +
+		"there is no need to call this again."
+)
+
+// diagnosticsAction lists what the language servers hold right now and
+// returns. It waits for nothing: not a cold server's start (seconds for
+// gopls on a large module), and not a running one's analysis (the settle
+// window in [lsp.Client.WaitForDiagnostics] is at least a third of a
+// second and up to [lsp.SettleTimeout]). The listing is recorded in the
+// session's ledger, so whatever the servers work out afterwards is a
+// difference against it, and the sweep before the model's next step
+// ([DiagnosticsSweep]) reports exactly that difference — new problems and
+// resolved ones alike.
 func diagnosticsAction(lspManager *lsp.Manager) func(context.Context, DiagnosticsParams) (fantasy.ToolResponse, error) {
 	return func(ctx context.Context, params DiagnosticsParams) (fantasy.ToolResponse, error) {
-		// The one caller that exists to report diagnostics and nothing
-		// else, so it is the one that waits: for a cold server to come up
-		// rather than answering "no problems" because nothing is running,
-		// and for the servers to finish answering rather than reporting
-		// what they happened to have said so far.
+		starting := false
 		if params.FilePath != "" && lspManager != nil {
-			lspManager.Start(ctx, params.FilePath)
-			lspManager.NotifyChangeAsync(ctx, params.FilePath)
+			starting = announceForDiagnostics(ctx, lspManager, params.FilePath)
 		} else {
 			lspManager.NotifyWorkspaceChangeAsync(ctx)
 		}
-		lspManager.AwaitSettled(ctx, lsp.SettleTimeout)
 
 		output := fullDiagnosticsReport(ctx, lspManager, params.FilePath)
 		if output == "" {
 			output = "No diagnostics reported."
 		}
+		switch {
+		case starting:
+			output += "\n\n" + diagnosticsStartingNote
+		case lspManager.Settling():
+			output += "\n\n" + diagnosticsSettlingNote
+		}
 		return fantasy.NewTextResponse(output), nil
 	}
+}
+
+// announceForDiagnostics hands path to the servers so they analyse it, and
+// reports whether none was running for it yet. A running server is told
+// directly; those notifications are one-way writes, the same thing every
+// edit does. With none running, the start and the announcement both happen
+// in the background: the file is opened on the server only once it is up,
+// and its first publish reaches the model through the step sweep.
+func announceForDiagnostics(ctx context.Context, manager *lsp.Manager, path string) (starting bool) {
+	if findLSPClient(manager, path) != nil {
+		manager.NotifyChangeAsync(ctx, path)
+		return false
+	}
+	// Detached from the tool call's context: the call returns long before
+	// a cold server finishes starting, and cancelling it then would leave
+	// the server half-initialized.
+	detached := context.WithoutCancel(ctx)
+	crash.Go("lsp.diagnostics.start", func() {
+		manager.Start(detached, path)
+		manager.NotifyChangeAsync(detached, path)
+	})
+	return true
 }
 
 // DiagnosticsSweep reports whatever the language servers have worked out since
@@ -108,15 +151,6 @@ func ForgetReportedDiagnostics(manager *lsp.Manager, sessionID string) {
 		return
 	}
 	manager.Ledger().Forget(sessionID)
-}
-
-// reportDiagnosticsNow is reportDiagnostics with no wait at all: it describes
-// what the servers already hold and returns. Use it from tool paths that must
-// never pay a server's analysis time — reads and writes alike. If a server is
-// still working, it reports nothing here; the answer reaches the model through
-// the sweep before its next step instead.
-func reportDiagnosticsNow(ctx context.Context, manager *lsp.Manager, focus ...string) string {
-	return reportDiagnostics(ctx, manager, 0, focus...)
 }
 
 // openInLSPs makes the LSP servers aware of the file without blocking on any
@@ -213,21 +247,20 @@ func resolvedLines(resolved []lsp.ResolvedDiagnostic, live map[string]diagnostic
 	return lines
 }
 
-// reportDiagnostics describes what the language servers have learned since the
-// last report for this session, and nothing else. A problem the model has
+// reportDiagnosticsNow describes what the language servers have learned since
+// the last report for this session, and nothing else. A problem the model has
 // already been told about is not repeated; one that has gone away is named
 // once, so the model can see that the fix landed.
 //
-// It never waits for a server beyond grace: anything still being worked out
-// shows up in the next report. A grace of zero never waits at all — use it
-// from paths that must return immediately (a file read); the answer the
-// servers are still computing reaches the model through the sweep before its
-// next step instead.
-func reportDiagnostics(ctx context.Context, manager *lsp.Manager, grace time.Duration, focus ...string) string {
+// It never waits for a server: it describes what the servers already hold and
+// returns, so the tool paths that call it — reads, writes and the step sweep
+// alike — never pay a server's analysis time. If a server is still working,
+// it reports nothing here; the answer reaches the model through the sweep
+// before a later step instead.
+func reportDiagnosticsNow(ctx context.Context, manager *lsp.Manager, focus ...string) string {
 	if manager == nil {
 		return ""
 	}
-	manager.AwaitSettled(ctx, grace)
 	if manager.Settling() {
 		// A server is still answering. Reporting now would describe a file
 		// mid-republish — problems it is about to restate read as resolved,

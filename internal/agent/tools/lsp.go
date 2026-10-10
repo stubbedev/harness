@@ -3,10 +3,12 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/stubbedev/harness/internal/presence"
 
@@ -100,23 +102,96 @@ func lspActions(lspManager *lsp.Manager, files history.Service, filetracker file
 	}
 }
 
+// lspMutatingActions are the actions that write files or replace a running
+// client. Everything else only asks a server a question, which servers
+// answer concurrently, so only these are serialised; see
+// [lockLSPMutation].
+var lspMutatingActions = map[LSPAction]bool{
+	LSPActionRename:        true,
+	LSPActionReplaceSymbol: true,
+	LSPActionRestart:       true,
+}
+
+// LSPCallReadOnly reports whether an lsp call's input names an action that
+// only asks a server a question. Input that does not parse, or names no
+// known action, is not read-only: the caller cannot tell what it would do.
+func LSPCallReadOnly(input string) bool {
+	var p struct {
+		Action LSPAction `json:"action"`
+	}
+	if err := json.Unmarshal([]byte(input), &p); err != nil {
+		return false
+	}
+	switch p.Action {
+	case LSPActionDiagnostics, LSPActionSymbols, LSPActionDefinition, LSPActionReferences, LSPActionCallHierarchy:
+		return true
+	case LSPActionRename, LSPActionReplaceSymbol, LSPActionRestart:
+		return false
+	}
+	return false
+}
+
+// lspMutationLocks holds one single-slot semaphore per language-server
+// manager. It is keyed by the manager rather than held by the tool because
+// the tool is rebuilt whenever an agent's tool set is (a tool search load,
+// a sub-agent dispatch), and every one of those instances edits the same
+// workspace through the same servers.
+var lspMutationLocks sync.Map // *lsp.Manager -> chan struct{}
+
+// lockLSPMutation waits for the right to run a mutating lsp action against
+// manager and returns its release. Two renames at once would each compute
+// their workspace edit from a tree the other is rewriting, and a restart
+// would pull the client out from under a rename mid-apply, so mutations
+// take turns. Read-only actions never take it. The wait gives up when ctx
+// ends, so a cancelled call does not queue behind a slow rename.
+func lockLSPMutation(ctx context.Context, manager *lsp.Manager) (func(), error) {
+	slot, _ := lspMutationLocks.LoadOrStore(manager, make(chan struct{}, 1))
+	sem := slot.(chan struct{})
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // NewLSPTool folds the language-server actions into one tool: the model
 // sees one schema, the code keeps one behaviour per action.
 func NewLSPTool(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service, reg *presence.Registry) fantasy.AgentTool {
-	actions := lspActions(lspManager, files, filetracker, reg)
+	return newLSPTool(lspManager, filetracker, lspActions(lspManager, files, filetracker, reg))
+}
+
+// newLSPTool builds the lsp tool over a given action table, so a test can
+// drive the dispatch and its locking with actions of its own.
+//
+// The tool is parallel: definition, references, symbols, call hierarchy
+// and diagnostics are questions a server answers concurrently, and a
+// sequential tool holds every other call of its step behind it. The
+// actions that change files serialise among themselves instead (see
+// [lockLSPMutation]).
+func newLSPTool(lspManager *lsp.Manager, filetracker filetracker.Service, actions map[LSPAction]lspActionFunc) fantasy.AgentTool {
 	var known []string
 	for _, action := range slices.Sorted(maps.Keys(actions)) {
 		known = append(known, string(action))
 	}
 
-	return fantasy.NewAgentTool(
+	return fantasy.NewParallelAgentTool(
 		LSPToolName,
 		lspDescription,
 		func(ctx context.Context, params LSPParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			action, ok := actions[LSPAction(params.Action)]
+			name := LSPAction(params.Action)
+			action, ok := actions[name]
 			if !ok {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf(
 					"unknown action %q. Available: %s", params.Action, strings.Join(known, ", "))), nil
+			}
+			if lspMutatingActions[name] {
+				unlock, err := lockLSPMutation(ctx, lspManager)
+				if err != nil {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf(
+						"%s cancelled while waiting for another lsp change to finish: %s", name, err)), nil
+				}
+				defer unlock()
 			}
 			ctx = context.WithValue(ctx, sourceEvidenceKey{}, filetracker)
 			return action(ctx, params)

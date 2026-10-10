@@ -94,8 +94,9 @@ func (s *Manager) NotifyWorkspaceChangeAsync(ctx context.Context) {
 }
 
 // settleInBackground waits for each client to stop republishing, off the
-// caller's goroutine, and registers the wait so [Manager.AwaitSettled] can
-// find it.
+// caller's goroutine, and registers the wait so [Manager.Settling] can see
+// it. Nothing on a tool or model path waits on it: a reporter that finds a
+// settle in flight reports nothing and leaves the answer to a later sweep.
 func (s *Manager) settleInBackground(ctx context.Context, clients []*Client) {
 	if len(clients) == 0 {
 		return
@@ -125,35 +126,6 @@ func (s *Manager) settleInBackground(ctx context.Context, clients []*Client) {
 		}
 		wg.Wait()
 	}()
-}
-
-// AwaitSettled waits up to budget for the background settle waits that are
-// already in flight. It is the small grace period a reporter gives a fast
-// server so a change made moments ago is described in this report rather than
-// the next one; a slow server simply misses the budget and is reported later.
-func (s *Manager) AwaitSettled(ctx context.Context, budget time.Duration) {
-	if s == nil || budget <= 0 {
-		return
-	}
-	s.settleMu.Lock()
-	pending := make([]chan struct{}, len(s.settlePending))
-	copy(pending, s.settlePending)
-	s.settleMu.Unlock()
-	if len(pending) == 0 {
-		return
-	}
-
-	deadline := time.NewTimer(budget)
-	defer deadline.Stop()
-	for _, done := range pending {
-		select {
-		case <-done:
-		case <-deadline.C:
-			return
-		case <-ctx.Done():
-			return
-		}
-	}
 }
 
 // Settling reports whether a server is still answering for a change. A report

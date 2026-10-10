@@ -65,6 +65,9 @@ Tools: %s
 		// explicit: a nil Required marshals to JSON null, which the
 		// OpenAI Responses API rejects as not an array.
 		Required: []string{},
+		// A search reads the server's tool list; a load is serialised by
+		// expandMu, so concurrent calls cannot lose one another's tools.
+		Parallel: true,
 	}
 }
 
@@ -223,6 +226,8 @@ func (c *coordinator) mcpToolExpanded(server, toolName string) bool {
 // and rebuilds the coder agent's tool set so they are live. Unknown names
 // are ignored; callers validate first.
 func (c *coordinator) expandMCPServerTools(ctx context.Context, server string, names []string) error {
+	c.expandMu.Lock()
+	defer c.expandMu.Unlock()
 	existing, _ := c.expandedMCPTools.Get(server)
 	next := make(map[string]bool, len(existing)+len(names))
 	for k := range existing {
@@ -237,7 +242,9 @@ func (c *coordinator) expandMCPServerTools(ctx context.Context, server string, n
 		}
 	}
 	c.expandedMCPTools.Set(server, next)
-	if !added {
+	if !added || c.cfg == nil || c.currentAgent == nil {
+		// Nothing new, or no running agent to rebuild for yet: the next
+		// build picks the marks up.
 		return nil
 	}
 	return c.refreshCoderTools(ctx)
@@ -245,7 +252,8 @@ func (c *coordinator) expandMCPServerTools(ctx context.Context, server string, n
 
 // refreshCoderTools rebuilds the coder agent's tool list in place. Cheap
 // enough to call mid-turn: PrepareStep re-reads the tool slice every step,
-// so new tools are picked up without restarting the stream.
+// so new tools are picked up without restarting the stream. Callers hold
+// expandMu, so the last rebuild to land is built from every mark set.
 func (c *coordinator) refreshCoderTools(ctx context.Context) error {
 	agentCfg, ok := c.cfg.Config().Agents[config.AgentCoder]
 	if !ok {

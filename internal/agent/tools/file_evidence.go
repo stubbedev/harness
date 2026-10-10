@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -21,13 +22,41 @@ import (
 
 var fileLocks [128]sync.Mutex
 
-func lockFile(path string) func() {
+// fileLockIndex is the stripe of fileLocks that guards path.
+func fileLockIndex(path string) int {
 	path = filepathext.Key(path)
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(path))
-	mu := &fileLocks[h.Sum32()%uint32(len(fileLocks))]
+	return int(h.Sum32() % uint32(len(fileLocks)))
+}
+
+func lockFile(path string) func() {
+	mu := &fileLocks[fileLockIndex(path)]
 	mu.Lock()
 	return mu.Unlock
+}
+
+// lockFiles takes the edit lock of every path at once, for a change that
+// rewrites several files as one (a rename). Stripes are taken in index
+// order and each only once: two paths can share a stripe, the mutexes are
+// not reentrant, and a fixed order keeps two multi-file lockers from
+// deadlocking on each other. Every other caller holds a single stripe, so
+// it cannot form a cycle with this one either.
+func lockFiles(paths ...string) func() {
+	stripes := make([]int, 0, len(paths))
+	for _, path := range paths {
+		stripes = append(stripes, fileLockIndex(path))
+	}
+	slices.Sort(stripes)
+	stripes = slices.Compact(stripes)
+	for _, i := range stripes {
+		fileLocks[i].Lock()
+	}
+	return func() {
+		for _, i := range slices.Backward(stripes) {
+			fileLocks[i].Unlock()
+		}
+	}
 }
 
 // fileStamp is the identity a file had when its content was read: its

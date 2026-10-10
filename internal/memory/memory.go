@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -144,6 +145,12 @@ type service struct {
 	conn    *sql.DB
 	reapFn  func() int
 	scrubFn func(string) (string, int)
+	// saveMu makes Save's look-up-then-create-or-update one step. Callers
+	// run concurrently (the memory tool is parallel, and every session
+	// shares the service), and two saves of one title racing past the
+	// look-up would both try to create it, the second failing on the
+	// primary key.
+	saveMu sync.Mutex
 }
 
 // Option customizes a Service.
@@ -213,6 +220,9 @@ func (s *service) Save(ctx context.Context, input SaveInput) (SaveResult, error)
 		slog.Warn("Redacted likely secrets from saved memory", "title", input.Title, "count", redactions)
 	}
 	embedding := encodeEmbedding(Embed(input.Title + "\n" + content))
+
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
 
 	id := input.ID
 	if id == "" {

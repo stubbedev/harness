@@ -109,7 +109,20 @@ func (m *Tool) Info() fantasy.ToolInfo {
 		Description: boundedMCPDescription(m.tool.Description),
 		Parameters:  parameters,
 		Required:    required,
+		Parallel:    m.readOnly(),
 	}
+}
+
+// readOnly reports whether the server declares the tool free of side
+// effects (the readOnlyHint annotation). Only those run in parallel. Every
+// other MCP tool stays sequential, because nothing says its calls are
+// independent and plenty are not: a browser server's navigate-then-click,
+// or any server holding a cursor or session, depends on calls landing in
+// the order the model wrote them. The session itself is safe to share —
+// requests are multiplexed and renewal is serialised per server — so the
+// order of effects is the only reason to serialise.
+func (m *Tool) readOnly() bool {
+	return m.tool != nil && m.tool.Annotations != nil && m.tool.Annotations.ReadOnlyHint
 }
 
 const maxRefDepth = 64

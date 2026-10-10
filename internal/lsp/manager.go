@@ -52,8 +52,9 @@ type Manager struct {
 	// ledger tracks which diagnostics each session has already been shown.
 	ledger *Ledger
 	// settleMu guards settlePending, the done channels of the background
-	// waits started by NotifyChangeAsync. A caller that is about to report
-	// diagnostics uses them to give an in-flight wait a moment to land.
+	// waits started by NotifyChangeAsync. Nothing waits on them: they say
+	// whether a server is still answering a change, so the diagnostics
+	// sweep can leave what it would report for the next step instead.
 	settleMu      sync.Mutex
 	settlePending []chan struct{}
 	// startLocks holds one mutex per server name, serialising
