@@ -120,6 +120,10 @@ type SessionAgentCall struct {
 	FrequencyPenalty *float64
 	PresencePenalty  *float64
 	NonInteractive   bool
+	// ToolStepProviderOptions, when non-nil, replaces ProviderOptions for
+	// the steps that digest tool results mid-turn, which run at a lower
+	// reasoning effort; see step_effort.go.
+	ToolStepProviderOptions fantasy.ProviderOptions
 	// OverflowRecovered marks a call that has already been summarized and
 	// requeued once after a context-window overflow, so the recovery path
 	// does not loop on a session that still exceeds the window after
@@ -1260,6 +1264,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// injections is everything this turn added to its requests beyond
 	// what fantasy carries between steps; see turnInjections.
 	var injections turnInjections
+	toolStepOptions := withPromptCacheKey(call.SessionID, call.ToolStepProviderOptions)
 	streamCall := fantasy.AgentStreamCall{
 		Prompt:           message.PromptWithTextAttachments(outboundPrompt, call.Attachments),
 		Files:            files,
@@ -1281,6 +1286,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// the ones this step produces.
 			appendAt := len(options.Messages)
 			prepared.Messages = injections.apply(options.Messages)
+			replayed := len(prepared.Messages)
 
 			// Use latest tools (updated by SetTools when MCP tools change).
 			prepared.Tools = a.tools.Copy()
@@ -1364,6 +1370,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					injections.add(appendAt, note...)
 					prepared.Messages = append(prepared.Messages, note...)
 				}
+			}
+
+			// A step digesting tool results runs at the lower tool-step
+			// effort; one that folded in a user prompt or a sub-agent
+			// message above answers it at the turn's.
+			if toolStepOptions != nil && len(prepared.Messages) == replayed && toolResultStep(options) {
+				prepared.ProviderOptions = toolStepOptions
 			}
 
 			// Context the harness adds for the model - directory

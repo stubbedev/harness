@@ -188,6 +188,38 @@ Besides `provider` and `model`: `max_tokens`, `think`, `reasoning_effort`
 made in the TUI are written to the state file, so the config only needs this
 block when you want to pin a model for a project or a machine.
 
+### Reasoning effort on tool steps
+
+Most requests in a coding turn are the model reading a tool result and
+choosing the next call. The request that answers your message runs at the
+configured `reasoning_effort`; the ones that digest tool results mid-turn run
+one level lower, so a model at `max` thinks at `high` between tool calls:
+
+```yaml
+options:
+  tool_step_reasoning_effort: auto # auto | same | a level such as low
+```
+
+- `auto` (the default) steps down one of the model's own levels, and never
+  below `low`: a model whose levels are `low`, `high` and `max` goes from
+  `max` to `high` and from `high` to `low`, and one already at its lowest
+  level stays there. Thinking is never switched off.
+- `same` sends every request at the configured effort.
+- A level name uses that level when the model has it and it is below the
+  configured effort; otherwise `auto` applies.
+
+A request also keeps the configured effort when a tool in the previous step
+failed, and when a message you queued mid-turn is folded into it. Sub-agents
+follow the same rule from their own effort.
+
+`auto` leaves Claude and OpenAI models at the configured effort, wherever
+they are served. Anthropic invalidates the cached conversation whenever the
+effort or thinking settings change between requests, and OpenAI's reasoning
+models carry the effort ahead of the cached prompt, so alternating efforts
+would re-write the whole conversation into the cache twice a turn. Setting a
+level explicitly applies it to them anyway. A `reasoning_effort` pinned in
+`provider_options` applies to every request, tool steps included.
+
 ## MCP servers
 
 ```yaml
@@ -307,6 +339,7 @@ options:
   notifications: auto # auto | native | osc | bell | disabled
   request_timeout: 60 # seconds of inactivity per model request; 0 disables it
   max_retries: 3 # retries for a failing request
+  tool_step_reasoning_effort: auto # effort between tool calls; see Models
 
   # Context is kept in bounds between turns and never shows in the
   # transcript: old tool results are stubbed past half the window, the

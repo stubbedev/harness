@@ -4023,6 +4023,10 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "tool_step_reasoning_effort": {
+                    "description": "ToolStepReasoningEffort is the reasoning effort of the steps that\ndigest tool results in the middle of a turn. The step answering a\nuser message always runs at the model's configured effort. See\nToolStepReasoningEffortAuto and ToolStepReasoningEffortSame.",
+                    "type": "string"
+                },
                 "tui": {
                     "$ref": "#/definitions/config.TUIOptions"
                 }

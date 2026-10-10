@@ -680,6 +680,22 @@
             8,
             48
           ]
+        },
+        "tool_step_reasoning_effort": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "same",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "description": "Reasoning effort for the steps that process tool results mid-turn. auto (default) runs them one level below the configured effort where that does not cost the prompt cache (not Claude or OpenAI models); same keeps the configured effort; a level name uses that level when the model supports it and it is below the configured one.",
+          "default": "auto"
         }
       },
       "additionalProperties": false,

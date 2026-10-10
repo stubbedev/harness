@@ -555,6 +555,31 @@ type Options struct {
 	// MaxConcurrentSubagents bounds how many dispatched sub-agents run at
 	// once. Dispatches beyond the limit wait for a slot instead of failing.
 	MaxConcurrentSubagents *int `json:"max_concurrent_subagents,omitempty" jsonschema:"description=Maximum sub-agents running at once. Dispatches beyond the limit wait for a free slot rather than failing. Values below 1 are clamped to 1.,minimum=1,default=24,example=8,example=48"`
+	// ToolStepReasoningEffort is the reasoning effort of the steps that
+	// digest tool results in the middle of a turn. The step answering a
+	// user message always runs at the model's configured effort. See
+	// ToolStepReasoningEffortAuto and ToolStepReasoningEffortSame.
+	ToolStepReasoningEffort string `json:"tool_step_reasoning_effort,omitempty" jsonschema:"description=Reasoning effort for the steps that process tool results mid-turn. auto (default) runs them one level below the configured effort where that does not cost the prompt cache (not Claude or OpenAI models); same keeps the configured effort; a level name uses that level when the model supports it and it is below the configured one.,enum=auto,enum=same,enum=none,enum=minimal,enum=low,enum=medium,enum=high,enum=xhigh,enum=max,default=auto"`
+}
+
+const (
+	// ToolStepReasoningEffortAuto runs tool-result steps one reasoning
+	// level below the configured effort, unless changing the effort
+	// between requests would invalidate the provider's prompt cache.
+	ToolStepReasoningEffortAuto = "auto"
+	// ToolStepReasoningEffortSame runs tool-result steps at the
+	// configured effort, which turns the adaptation off.
+	ToolStepReasoningEffortSame = "same"
+)
+
+// GetToolStepReasoningEffort returns the configured tool-step reasoning
+// effort, defaulting to ToolStepReasoningEffortAuto. The nil receiver is
+// the default too, so callers can ask without unwrapping Options.
+func (o *Options) GetToolStepReasoningEffort() string {
+	if o == nil || o.ToolStepReasoningEffort == "" {
+		return ToolStepReasoningEffortAuto
+	}
+	return o.ToolStepReasoningEffort
 }
 
 // DefaultRequestTimeout bounds each LLM API request when the user has not

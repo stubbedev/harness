@@ -506,7 +506,7 @@ func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID st
 	// back. Every attempt fantasy makes after an auth refresh reuses
 	// the same RunID; the coalesce closure publishes the final outcome
 	// under that same correlator.
-	call := newModelCall(model, providerCfg)
+	call := newModelCall(model, providerCfg, c.cfg.Config().Options.GetToolStepReasoningEffort())
 	call.SessionID = sessionID
 	call.RunID = RunIDFromContext(ctx)
 	call.Prompt = prompt
@@ -844,19 +844,22 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 // and the sampling parameters, each falling back from the user's model
 // config to the catalog's defaults. The main run and sub-agent runs both
 // start from it so neither can drop a setting the other applies.
-func newModelCall(model Model, providerCfg config.ProviderConfig) SessionAgentCall {
+// toolStepEffort is options.tool_step_reasoning_effort; see
+// toolStepProviderOptions.
+func newModelCall(model Model, providerCfg config.ProviderConfig, toolStepEffort string) SessionAgentCall {
 	maxTokens := model.CatalogCfg.DefaultMaxTokens
 	if model.ModelCfg.MaxTokens != 0 {
 		maxTokens = model.ModelCfg.MaxTokens
 	}
 	return SessionAgentCall{
-		MaxOutputTokens:  maxTokens,
-		ProviderOptions:  getProviderOptions(model, providerCfg),
-		Temperature:      cmp.Or(model.ModelCfg.Temperature, model.CatalogCfg.Options.Temperature),
-		TopP:             cmp.Or(model.ModelCfg.TopP, model.CatalogCfg.Options.TopP),
-		TopK:             callTopK(providerCfg, cmp.Or(model.ModelCfg.TopK, model.CatalogCfg.Options.TopK)),
-		FrequencyPenalty: cmp.Or(model.ModelCfg.FrequencyPenalty, model.CatalogCfg.Options.FrequencyPenalty),
-		PresencePenalty:  cmp.Or(model.ModelCfg.PresencePenalty, model.CatalogCfg.Options.PresencePenalty),
+		MaxOutputTokens:         maxTokens,
+		ProviderOptions:         getProviderOptions(model, providerCfg),
+		ToolStepProviderOptions: toolStepProviderOptions(model, providerCfg, toolStepEffort),
+		Temperature:             cmp.Or(model.ModelCfg.Temperature, model.CatalogCfg.Options.Temperature),
+		TopP:                    cmp.Or(model.ModelCfg.TopP, model.CatalogCfg.Options.TopP),
+		TopK:                    callTopK(providerCfg, cmp.Or(model.ModelCfg.TopK, model.CatalogCfg.Options.TopK)),
+		FrequencyPenalty:        cmp.Or(model.ModelCfg.FrequencyPenalty, model.CatalogCfg.Options.FrequencyPenalty),
+		PresencePenalty:         cmp.Or(model.ModelCfg.PresencePenalty, model.CatalogCfg.Options.PresencePenalty),
 	}
 }
 
@@ -2457,7 +2460,7 @@ func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, sess
 		}
 	}
 
-	call := newModelCall(model, providerCfg)
+	call := newModelCall(model, providerCfg, c.cfg.Config().Options.GetToolStepReasoningEffort())
 	call.SessionID = session.ID
 	call.Prompt = params.Prompt
 	call.NonInteractive = true

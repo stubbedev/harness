@@ -56,3 +56,35 @@ func LowestReasoningLevel(levels []string) string {
 	}
 	return rankedLevels(levels)[0]
 }
+
+// StepDownReasoningLevel returns the strongest level among levels that is
+// weaker than from, or "" when there is none. It never steps below "low":
+// "minimal" and "none" switch thinking almost or entirely off, which is a
+// different decision from thinking less. Names the effort table does not
+// know are not ranked, so a model with custom level names is never
+// stepped.
+func StepDownReasoningLevel(levels []string, from string) string {
+	fromRank, ok := effortRank[from]
+	if !ok {
+		return ""
+	}
+	best, bestRank := "", -1
+	for _, level := range levels {
+		rank, known := effortRank[level]
+		if !known || rank >= fromRank || rank < effortRank["low"] {
+			continue
+		}
+		if rank > bestRank {
+			best, bestRank = level, rank
+		}
+	}
+	return best
+}
+
+// WeakerReasoningLevel reports whether level a is weaker than level b.
+// It is false when either name is not a known effort level.
+func WeakerReasoningLevel(a, b string) bool {
+	rankA, okA := effortRank[a]
+	rankB, okB := effortRank[b]
+	return okA && okB && rankA < rankB
+}
