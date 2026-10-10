@@ -175,6 +175,7 @@ type (
 		// that raced a session switch is discarded.
 		forSession   string
 		sessionFiles []SessionFile
+		err          error
 	}
 
 	// clearChatMouseMsg clears the chat's mouse selection state once a
@@ -209,6 +210,13 @@ type UI struct {
 	com          *common.Common
 	session      *session.Session
 	sessionFiles []SessionFile
+	// sessionFilesLoading is the session whose file list is being
+	// loaded, empty when no load is in flight; sessionFilesStale records
+	// that a file event arrived during that load. A burst of writes then
+	// costs one reload after the one running, not one reload per write
+	// (see handleFileEvent).
+	sessionFilesLoading string
+	sessionFilesStale   bool
 
 	// keeps track of read files while we don't have a session id
 	sessionFileReads []string
@@ -968,14 +976,34 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case sessionFilesUpdatesMsg:
+		if msg.forSession == m.sessionFilesLoading {
+			m.sessionFilesLoading = ""
+			if m.sessionFilesStale {
+				m.sessionFilesStale = false
+				cmds = append(cmds, m.loadSessionFilesCmd())
+			}
+		}
 		if msg.forSession != m.currentSessionID() {
 			break
 		}
-		m.sessionFiles = msg.sessionFiles
+		if msg.err != nil {
+			cmds = append(cmds, util.ReportError(msg.err))
+			break
+		}
+		// Only files new to the list need their servers started: the
+		// rest were started for when they first appeared, and the tools
+		// that touch a file start its servers themselves.
+		known := make(map[string]struct{}, len(m.sessionFiles))
+		for _, f := range m.sessionFiles {
+			known[f.LatestVersion.Path] = struct{}{}
+		}
 		var paths []string
 		for _, f := range msg.sessionFiles {
-			paths = append(paths, f.LatestVersion.Path)
+			if _, ok := known[f.LatestVersion.Path]; !ok {
+				paths = append(paths, f.LatestVersion.Path)
+			}
 		}
+		m.sessionFiles = msg.sessionFiles
 		cmds = append(cmds, m.startLSPs(paths))
 
 	case sendMessageMsg:

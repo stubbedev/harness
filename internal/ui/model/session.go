@@ -201,20 +201,33 @@ func (m *UI) handleFileEvent(file history.File) tea.Cmd {
 	if file.SessionID != m.session.ID && !m.knownChildSessionIDs[file.SessionID] {
 		return nil
 	}
+	return m.loadSessionFilesCmd()
+}
 
+// loadSessionFilesCmd reloads the current session's file list, unless a
+// load for it is already running: then the change is noted and one more
+// load follows that one. Each load reads and diffs every version of
+// every file the session touched, so running one per file event turns a
+// burst of writes into a quadratic pile of identical reloads.
+func (m *UI) loadSessionFilesCmd() tea.Cmd {
+	if m.session == nil {
+		return nil
+	}
 	// Capture the ID now: the command runs off the Update goroutine, where
 	// m.session may already be nil or point at another session.
 	sessionID := m.session.ID
+	if m.sessionFilesLoading == sessionID {
+		m.sessionFilesStale = true
+		return nil
+	}
+	m.sessionFilesLoading = sessionID
+	m.sessionFilesStale = false
 	return func() tea.Msg {
 		sessionFiles, err := m.loadSessionFiles(sessionID)
-		// could not load session files
-		if err != nil {
-			return util.NewErrorMsg(err)
-		}
-
 		return sessionFilesUpdatesMsg{
 			forSession:   sessionID,
 			sessionFiles: sessionFiles,
+			err:          err,
 		}
 	}
 }

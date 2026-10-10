@@ -266,8 +266,10 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		return
 	}
 
+	// A live client was announced when it started; announcing it again
+	// on every Start - once per server, per file, whether it handles the
+	// file or not - is what floods the event queue on a burst of edits.
 	if client, ok := s.clients.Get(name); ok && client.GetServerState().isLive() {
-		s.callback(name, client)
 		return
 	}
 
@@ -286,7 +288,8 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 	defer unlock()
 
 	if client, ok := s.clients.Get(name); ok && client.GetServerState().isLive() {
-		s.callback(name, client)
+		// The winner of the race announces it (see the deferred
+		// callback below).
 		return
 	}
 
