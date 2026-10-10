@@ -1520,11 +1520,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// and requeue while leaving nothing behind for a turn that never
 			// happened.
 			if cw := usableContextWindow(a.largeModel.Get()); cw > 0 && !a.disableAutoSummarize {
-				projected := requestTokens.Messages(prepared.Messages)
+				// Both checks of this figure - the abort below and the
+				// stop condition after the step - ask whether it reaches
+				// cw - threshold, so it only has to be exact that far:
+				// a step far from the limit tokenizes nothing new.
+				threshold := autoSummarizeThreshold(cw, a.autoSummarizeRatio, a.autoSummarizeBuffer)
+				projected := requestTokens.Project(prepared.Messages, cw-threshold)
 				sessionLock.Lock()
 				projectedRequestTokens = projected
 				sessionLock.Unlock()
-				threshold := autoSummarizeThreshold(cw, a.autoSummarizeRatio, a.autoSummarizeBuffer)
 				if projected+threshold >= cw {
 					return callContext, prepared, fmt.Errorf(
 						"%w: next request projected at ~%d tokens against a %d-token usable window",
@@ -1702,6 +1706,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				toolResult.IsError = true
 			}
 			execution.Ingest([]message.Message{{Parts: []message.ContentPart{toolResult}}})
+			// Count the result now, while the rest of the batch runs, so the
+			// next step's projection finds it counted should it get close
+			// enough to the limit to need it.
+			if text, ok := result.Result.(fantasy.ToolResultOutputContentText); ok && len(text.Text) >= tokenCacheMinBytes {
+				crash.Go("agent.warmTokenCount", func() { warmTokenCount(text.Text) })
+			}
 			// Use parent ctx instead of genCtx to ensure the message is created
 			// even if the request is canceled mid-stream
 			_, createMsgErr := a.messages.Create(ctx, currentAssistant.SessionID, message.CreateMessageParams{

@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"cmp"
 	"fmt"
 	"hash/maphash"
+	"maps"
+	"slices"
 	"sync"
+	"unicode/utf8"
 	"unsafe"
 
 	"charm.land/fantasy"
@@ -90,10 +94,37 @@ type stringIdentity struct {
 // strings, which are counted afresh; nothing has to detect the rewrite.
 // Only the strings of the latest estimate are kept, so memory tracks
 // the current request rather than the whole turn.
+//
+// [historyTokenEstimator.Project] goes further for a request that is
+// only compared against a limit: a string nothing has counted yet is
+// first taken at a rough estimate, bounded above by tokenUpperBound, and
+// the tokenizer runs only when the bounds leave the comparison open.
 type historyTokenEstimator struct {
 	mu   sync.Mutex
-	prev map[stringIdentity]int64
-	cur  map[stringIdentity]int64
+	prev map[stringIdentity]tokenCount
+	cur  map[stringIdentity]tokenCount
+
+	// pending holds, during one estimate, the strings it has not counted
+	// with the tokenizer, and slack how far the true count of those
+	// strings can lie above their estimates.
+	pending map[stringIdentity]*pendingTokens
+	slack   int64
+}
+
+// tokenCount is the count remembered for one string: exact when the
+// tokenizer produced it, a rough estimate otherwise.
+type tokenCount struct {
+	n     int64
+	exact bool
+}
+
+// pendingTokens is a string an estimate took at its rough count, with
+// the bound on its true count and how many times the request holds it.
+type pendingTokens struct {
+	s           string
+	estimate    int64
+	upper       int64
+	occurrences int64
 }
 
 func newHistoryTokenEstimator() *historyTokenEstimator {
@@ -102,28 +133,123 @@ func newHistoryTokenEstimator() *historyTokenEstimator {
 
 // Messages estimates messages as estimateMessageTokens does.
 func (e *historyTokenEstimator) Messages(messages []fantasy.Message) int64 {
+	return e.estimate(messages, 0, true)
+}
+
+// Project estimates messages for a check against limit, running the
+// tokenizer only as far as that check needs it. The result reaches limit
+// exactly when the full count would, so a decision taken by comparing it
+// with limit is the one the full count gives; below limit it may be a
+// rougher figure than Messages returns.
+//
+// Far from the limit nothing new is tokenized: every uncounted string is
+// at most one token per byte, and when even that bound leaves the request
+// under limit the rough figure stands. Closer in, the uncounted strings
+// are tokenized largest first until the bound clears limit or none is
+// left. A string left uncounted is looked at again on the next estimate.
+func (e *historyTokenEstimator) Project(messages []fantasy.Message, limit int64) int64 {
+	return e.estimate(messages, limit, false)
+}
+
+func (e *historyTokenEstimator) estimate(messages []fantasy.Message, limit int64, exact bool) int64 {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.cur = make(map[stringIdentity]int64, len(e.prev))
+	e.cur = make(map[stringIdentity]tokenCount, len(e.prev))
+	e.pending = make(map[stringIdentity]*pendingTokens)
+	e.slack = 0
 	tokens := estimateMessageTokensWith(e.count, messages)
-	e.prev, e.cur = e.cur, nil
+
+	if len(e.pending) > 0 {
+		ids := slices.Collect(maps.Keys(e.pending))
+		slices.SortFunc(ids, func(a, b stringIdentity) int {
+			return cmp.Compare(e.pending[b].upper-e.pending[b].estimate, e.pending[a].upper-e.pending[a].estimate)
+		})
+		for _, id := range ids {
+			if !exact && tokens+e.slack < limit {
+				break
+			}
+			p := e.pending[id]
+			n := approxTokenCount(p.s)
+			tokens += p.occurrences * (n - p.estimate)
+			e.slack -= p.occurrences * (p.upper - p.estimate)
+			e.cur[id] = tokenCount{n: n, exact: true}
+			delete(e.pending, id)
+		}
+		for id, p := range e.pending {
+			e.cur[id] = tokenCount{n: p.estimate}
+		}
+	}
+
+	e.prev, e.cur, e.pending = e.cur, nil, nil
 	return tokens
 }
 
+// count is the per-string count of an estimate in progress: the exact
+// count when one is known, the rough estimate otherwise, with the string
+// recorded as pending so estimate can settle it if it has to.
 func (e *historyTokenEstimator) count(s string) int64 {
 	if s == "" {
 		return 0
 	}
 	id := stringIdentity{data: unsafe.StringData(s), n: len(s)}
-	if n, ok := e.cur[id]; ok {
+	if p, ok := e.pending[id]; ok {
+		p.occurrences++
+		e.slack += p.upper - p.estimate
+		return p.estimate
+	}
+	if c, ok := e.cur[id]; ok {
+		return c.n
+	}
+	if c, ok := e.prev[id]; ok && c.exact {
+		e.cur[id] = c
+		return c.n
+	}
+	// Short strings are cheaper to count than to track, and a string
+	// counted before - a result warmed when it arrived, or one an
+	// earlier turn counted - costs a lookup.
+	n, ok := cachedTokenCount(s)
+	if !ok && len(s) < tokenCacheMinBytes {
+		n, ok = approxTokenCount(s), true
+	}
+	if ok {
+		e.cur[id] = tokenCount{n: n, exact: true}
 		return n
 	}
-	n, ok := e.prev[id]
-	if !ok {
-		n = approxTokenCount(s)
+	p := &pendingTokens{s: s, estimate: roughTokenCount(s), upper: tokenUpperBound(s), occurrences: 1}
+	e.pending[id] = p
+	e.slack += p.upper - p.estimate
+	return p.estimate
+}
+
+// roughTokenCount is the four-bytes-per-token rule, a fair middle for
+// prose and code.
+func roughTokenCount(s string) int64 {
+	return int64((len(s) + 3) / 4)
+}
+
+// tokenUpperBound bounds the tokens approxTokenCount can find in s. Every
+// BPE token covers at least one byte of the text the tokenizer sees, which
+// is s itself when s is valid UTF-8; otherwise each invalid byte reaches
+// it as a three-byte replacement character.
+func tokenUpperBound(s string) int64 {
+	if utf8.ValidString(s) {
+		return int64(len(s))
 	}
-	e.cur[id] = n
-	return n
+	return 3 * int64(len(s))
+}
+
+// warmTokenCount counts s with the tokenizer so a later estimate finds
+// the count cached. A tool result is warmed as it arrives, while the
+// rest of its batch is still running, so the step that sends it seldom
+// has to count it itself.
+func warmTokenCount(s string) {
+	if len(s) < tokenCacheMinBytes {
+		return
+	}
+	if _, ok := cachedTokenCount(s); ok {
+		return
+	}
+	approxTokenCount(s)
 }
 
 func estimateStepCompletionTokens(step fantasy.StepResult) int64 {
@@ -291,13 +417,30 @@ func approxTokenCount(s string) int64 {
 		return n
 	}
 	n = countTokens(codec, s)
+	storeTokenCount(key, n)
+	return n
+}
+
+// cachedTokenCount returns the count approxTokenCount cached for s, if
+// it has one, without ever running the tokenizer.
+func cachedTokenCount(s string) (int64, bool) {
+	if len(s) < tokenCacheMinBytes {
+		return 0, false
+	}
+	key := maphash.String(tokenCacheSeed, s)
+	tokenCountCache.Lock()
+	defer tokenCountCache.Unlock()
+	n, ok := tokenCountCache.counts[key]
+	return n, ok
+}
+
+func storeTokenCount(key uint64, n int64) {
 	tokenCountCache.Lock()
 	if len(tokenCountCache.counts) >= tokenCacheMaxEntries {
 		tokenCountCache.counts = map[uint64]int64{}
 	}
 	tokenCountCache.counts[key] = n
 	tokenCountCache.Unlock()
-	return n
 }
 
 func countTokens(codec tokenizer.Codec, s string) int64 {
