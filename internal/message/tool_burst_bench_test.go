@@ -16,12 +16,13 @@ import (
 // wired the way the app wires it, and creates a session to write into.
 func benchService(b *testing.B) (Service, string) {
 	b.Helper()
-	conn, err := db.Connect(b.Context(), b.TempDir())
+	dataDir := b.TempDir()
+	conn, err := db.Connect(b.Context(), dataDir)
 	if err != nil {
 		b.Fatal(err)
 	}
-	b.Cleanup(func() { _ = conn.Close() })
-	q := db.New(conn)
+	b.Cleanup(func() { _ = db.Release(dataDir) })
+	q := db.New(db.Routed(conn))
 	sess, err := session.NewService(q, conn).Create(b.Context(), "bench")
 	if err != nil {
 		b.Fatal(err)

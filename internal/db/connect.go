@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pressly/goose/v3"
 )
@@ -33,8 +35,27 @@ var (
 		"secure_delete": "FAST",
 		"busy_timeout":  "30000",
 	}
+	// readerPragmas are applied to every reader connection. query_only
+	// makes a write that reached a reader by mistake fail instead of
+	// becoming a second writer; the file-level settings (journal mode,
+	// page size) are the writer's to make.
+	readerPragmas = map[string]string{
+		"query_only":   "1",
+		"temp_store":   "MEMORY",
+		"cache_size":   "-8000",
+		"busy_timeout": "30000",
+	}
 	gooseInitOnce sync.Once
 	gooseInitErr  error
+)
+
+const (
+	// readerConns bounds the reader pool. Reads come from the UI, the
+	// agent loop and its tools; a handful covers their overlap.
+	readerConns = 4
+	// readerIdleTime closes reader connections nothing has used for a
+	// while, along with the page cache each one holds.
+	readerIdleTime = 5 * time.Minute
 )
 
 //go:embed migrations/*.sql
@@ -58,13 +79,22 @@ func init() {
 type connEntry struct {
 	db       *sql.DB
 	refCount int
+	// reader is the read-only pool opened alongside db, or nil when it
+	// could not be opened; see [Routed].
+	reader *sql.DB
 	// unlock releases the data-dir lock, or is nil when none is held.
 	unlock func()
 }
 
-// close closes the connection and drops the data-dir lock, if held.
+// close closes the connection and drops the data-dir lock, if held. The
+// readers close first, so the writer is the last connection to the file
+// and the one that checkpoints the WAL on its way out.
 func (e *connEntry) close() error {
-	err := e.db.Close()
+	var err error
+	if e.reader != nil {
+		err = e.reader.Close()
+	}
+	err = errors.Join(err, e.db.Close())
 	if e.unlock != nil {
 		e.unlock()
 	}
@@ -163,7 +193,8 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 	// serializes writes at the file level anyway, and allowing multiple
 	// pool connections to interleave writes/checkpoints (especially
 	// under concurrent sub-agents) has caused WAL/header desync
-	// resulting in SQLITE_NOTADB (26) on the next open.
+	// resulting in SQLITE_NOTADB (26) on the next open. Reads have a
+	// query_only pool of their own, opened below.
 	conn.SetMaxOpenConns(1)
 
 	if err = conn.PingContext(ctx); err != nil {
@@ -183,11 +214,41 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
+	// Reads get a pool of their own. In WAL mode readers never wait on
+	// the writer, but behind the single writer connection every read
+	// queued behind every write, a burst of parallel tool results
+	// included. The pool connects lazily, so a caller that never routes
+	// a read through it never holds the file open twice.
+	if reader, readerErr := openReader(dbPath); readerErr != nil {
+		slog.Warn("Failed to open read-only database pool; reads share the writer", "error", readerErr)
+	} else {
+		reader.SetMaxOpenConns(readerConns)
+		reader.SetMaxIdleConns(readerConns)
+		reader.SetConnMaxIdleTime(readerIdleTime)
+		entry.reader = reader
+	}
+
 	runtime.GC()
 	debug.FreeOSMemory()
 
 	pool[absPath] = entry
 	return conn, nil
+}
+
+// Routed returns the DBTX for conn that [New] should be given: read-only
+// statements go to the reader pool Connect opened alongside conn, and
+// everything else to conn itself. A conn without a reader pool, or one
+// Connect did not open, is returned as is. Transactions are unaffected:
+// they are begun on conn and bound with [Queries.WithTx].
+func Routed(conn *sql.DB) DBTX {
+	poolMu.Lock()
+	defer poolMu.Unlock()
+	for _, entry := range pool {
+		if entry.db == conn && entry.reader != nil {
+			return routedDB{writer: conn, reader: entry.reader}
+		}
+	}
+	return conn
 }
 
 // poolKey resolves dbPath to an absolute path so that different

@@ -123,7 +123,9 @@ func newPresence(ctx context.Context, dataDir string) *presence.Registry {
 // skills.NewManager + skills.DiscoverFromConfig). subagentsMgr carries
 // the per-workspace subagent discovery results; may be nil.
 func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr *skills.Manager, subagentsMgr *subagents.Manager) (*App, error) {
-	q := db.New(conn)
+	// Reads go to the database's reader pool, so the UI and the tools
+	// never queue behind the agent loop's writes.
+	q := db.New(db.Routed(conn))
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 	files := history.NewService(q)

@@ -25,6 +25,23 @@ func openDBReadOnly(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
+// openReader opens the query_only pool reads are routed to. It is not
+// opened with mode=ro: a read-only open of a WAL database needs the
+// shared-memory file to be writable or present, and query_only gives the
+// same guarantee without depending on either.
+func openReader(dbPath string) (*sql.DB, error) {
+	params := url.Values{}
+	for name, value := range readerPragmas {
+		params.Add("_pragma", fmt.Sprintf("%s(%s)", name, value))
+	}
+	dsn := fmt.Sprintf("file:%s?%s", uriPath(dbPath), params.Encode())
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database reader: %w", err)
+	}
+	return db, nil
+}
+
 func openDB(dbPath string) (*sql.DB, error) {
 	// Set pragmas for better performance via _pragma query params.
 	// Format: _pragma=name(value)
