@@ -8,6 +8,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/memory"
+	"github.com/stubbedev/harness/internal/projects"
 )
 
 // startupDataRoot is the global data root as the process started with
@@ -31,6 +32,7 @@ func openMemory(ctx context.Context, store *config.ConfigStore) (memory.Service,
 		slog.Warn("Failed to open the memory store; memory is off for this workspace", "error", err)
 		return nil, noop
 	}
+	importLegacyMemories(ctx, memStore)
 	repoKey := memory.RepoKey(ctx, store.WorkingDir())
 	slog.Debug("Opened the memory store", "repo_key", repoKey)
 
@@ -43,4 +45,29 @@ func openMemory(ctx context.Context, store *config.ConfigStore) (memory.Service,
 		return config.DefaultMaxMemories
 	}))
 	return svc, func(context.Context) error { return memStore.Close() }
+}
+
+// importLegacyMemories carries the memories of the per-workspace
+// databases that predate the shared store into it, each once.
+func importLegacyMemories(ctx context.Context, memStore *memory.Store) {
+	projectDirs := map[string]string{}
+	if list, err := projects.List(); err != nil {
+		slog.Warn("Failed to read the project list for the memory import", "error", err)
+	} else {
+		// The list is most recently used first: a data directory that
+		// served several working directories takes the latest.
+		for _, p := range list {
+			if _, ok := projectDirs[p.DataDir]; !ok && p.DataDir != "" {
+				projectDirs[p.DataDir] = p.Path
+			}
+		}
+	}
+	report, err := memStore.ImportLegacy(ctx, memory.LegacySources(config.GlobalWorkspacesDir(), projectDirs))
+	if err != nil {
+		slog.Warn("Failed to import memories from workspace databases", "error", err)
+		return
+	}
+	if report.Sources > 0 {
+		slog.Info("Imported memories from workspace databases", "workspaces", report.Sources, "memories", report.Memories, "failed", report.Failed)
+	}
 }

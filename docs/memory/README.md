@@ -36,6 +36,15 @@ for GitHub, GitLab and Bitbucket, which ignore its case. A repository without a
 remote is keyed by its root commit, and a directory outside any repository by
 its path.
 
+### Upgrading from per-workspace memories
+
+Earlier versions kept memories in each workspace's own database. When the
+shared store first opens it imports them, once per workspace: `user` and
+`feedback` memories become global, the rest belong to the repository the
+workspace's project directory is in. A title saved in several workspaces is
+merged, keeping the most recently updated content. The old tables are left
+untouched as a backup, and are no longer read.
+
 ## How it works
 
 1. **Prompt steering.** While memory is enabled, the coder system prompt carries a `# Memory` block telling the agent what is worth saving (user preferences, corrections, non-obvious project facts, decisions and their rationale, recurring patterns), to save the moment it learns something rather than batching to the end, and what to keep out (rediscoverable facts, secrets). The block renders even on an empty store, so a fresh workspace is steered from the first session.
