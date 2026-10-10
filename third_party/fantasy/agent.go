@@ -112,6 +112,11 @@ type PrepareStepResult struct {
 	ActiveTools     []string
 	DisableAllTools bool
 	Tools           []AgentTool
+	// ProviderOptions, when non-nil, replaces the call's provider options
+	// for this step only. Like the call's own, they are layered over the
+	// agent's WithProviderOptions. A consumer uses it to vary per-step
+	// settings such as reasoning effort without rebuilding the call.
+	ProviderOptions ProviderOptions
 }
 
 // ToolCallRepairOptions contains the options for repairing a tool call.
@@ -475,6 +480,7 @@ func (a *agent) Generate(ctx context.Context, opts AgentCall) (*AgentResult, err
 		}
 		disableAllTools := false
 		stepTools := a.settings.tools
+		stepProviderOptions := opts.ProviderOptions
 		if opts.PrepareStep != nil {
 			updatedCtx, prepared, err := opts.PrepareStep(ctx, PrepareStepFunctionOptions{
 				Model:      stepModel,
@@ -507,6 +513,9 @@ func (a *agent) Generate(ctx context.Context, opts AgentCall) (*AgentResult, err
 			disableAllTools = prepared.DisableAllTools
 			if prepared.Tools != nil {
 				stepTools = prepared.Tools
+			}
+			if prepared.ProviderOptions != nil {
+				stepProviderOptions = a.layerProviderOptions(prepared.ProviderOptions)
 			}
 		}
 
@@ -556,7 +565,7 @@ func (a *agent) Generate(ctx context.Context, opts AgentCall) (*AgentResult, err
 				ToolChoice:       &stepToolChoice,
 				UserAgent:        a.settings.userAgent,
 				Headers:          opts.Headers,
-				ProviderOptions:  opts.ProviderOptions,
+				ProviderOptions:  stepProviderOptions,
 			})
 		})
 		if err != nil {
@@ -972,6 +981,7 @@ func (a *agent) Stream(ctx context.Context, opts AgentStreamCall) (*AgentResult,
 		}
 		disableAllTools := false
 		stepTools := a.settings.tools
+		stepProviderOptions := call.ProviderOptions
 		// Apply step preparation if provided
 		if call.PrepareStep != nil {
 			updatedCtx, prepared, err := call.PrepareStep(ctx, PrepareStepFunctionOptions{
@@ -1004,6 +1014,9 @@ func (a *agent) Stream(ctx context.Context, opts AgentStreamCall) (*AgentResult,
 			disableAllTools = prepared.DisableAllTools
 			if prepared.Tools != nil {
 				stepTools = prepared.Tools
+			}
+			if prepared.ProviderOptions != nil {
+				stepProviderOptions = a.layerProviderOptions(prepared.ProviderOptions)
 			}
 		}
 
@@ -1042,7 +1055,7 @@ func (a *agent) Stream(ctx context.Context, opts AgentStreamCall) (*AgentResult,
 			ToolChoice:       &stepToolChoice,
 			UserAgent:        a.settings.userAgent,
 			Headers:          call.Headers,
-			ProviderOptions:  call.ProviderOptions,
+			ProviderOptions:  stepProviderOptions,
 		}
 
 		// Execute step with retry logic wrapping both stream creation and processing
@@ -2008,6 +2021,15 @@ func WithUserAgent(ua string) AgentOption {
 	return func(s *agentSettings) {
 		s.userAgent = ua
 	}
+}
+
+// layerProviderOptions returns step options layered over the agent's
+// WithProviderOptions, the same way a call's options are.
+func (a *agent) layerProviderOptions(step ProviderOptions) ProviderOptions {
+	layered := ProviderOptions{}
+	maps.Copy(layered, a.settings.providerOptions)
+	maps.Copy(layered, step)
+	return layered
 }
 
 // WithProviderOptions sets the provider options for the agent.

@@ -12,12 +12,14 @@ The agent step loop in `agent.go` decides when the model's tool calls run.
 Upstream waits for the whole assistant message to finish streaming before
 it starts any tool, and runs each sequential tool on its dispatcher
 goroutine, so parallel tools emitted after a slow sequential one wait for
-it. Both are carried here until they can be proposed upstream.
+it. Upstream's `PrepareStep` also cannot change a step's provider options,
+which Harness needs to run tool-result steps at a lower reasoning effort.
+All of these are carried here until they can be proposed upstream.
 
 ## Local changes
 
-All of them are in `agent.go`. Tests are in `agent_early_dispatch_test.go`
-and `agent_repair_routing_test.go`.
+All of them are in `agent.go`. Tests are in `agent_early_dispatch_test.go`,
+`agent_repair_routing_test.go` and `agent_step_provider_options_test.go`.
 
 - **Early dispatch.** `WithEarlyToolDispatch` (or
   `AgentStreamCall.EarlyToolDispatch`) takes a predicate. A tool call that
@@ -49,6 +51,13 @@ and `agent_repair_routing_test.go`.
   always used the agent-level repair and ignored `AgentCall.RepairToolCall`.
   Both paths now repair with the call's function, falling back to the
   agent's, and with the step's system prompt.
+
+- **Per-step provider options.** `PrepareStepResult.ProviderOptions`, when
+  non-nil, replaces the call's provider options for that step only, layered
+  over the agent's `WithProviderOptions` the same way the call's are. Nil
+  keeps the call's, which is upstream behaviour. Both `Generate` and
+  `Stream` honour it. Harness uses it to send the steps that digest tool
+  results at a lower reasoning effort than the step that answers the user.
 
 Results still land in step content in call order, whatever order the tools
 finish in.
