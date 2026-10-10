@@ -5,7 +5,7 @@ func isControlCode(c rune) bool {
 }
 
 func (t *State) parse(c rune) {
-	t.logf("%q", string(c))
+	t.traceRune(c)
 	if isControlCode(c) {
 		if t.handleControlCodes(c) || t.cur.Attr.Mode&attrGfx == 0 {
 			return
@@ -35,13 +35,13 @@ func (t *State) parseEsc(c rune) {
 	if t.handleControlCodes(c) {
 		return
 	}
-	next := t.parse
-	t.logf("%q", string(c))
+	next := (*State).parse
+	t.traceRune(c)
 	switch c {
 	case '[':
-		next = t.parseEscCSI
+		next = (*State).parseEscCSI
 	case '#':
-		next = t.parseEscTest
+		next = (*State).parseEscTest
 	case 'P', // DCS - Device Control String
 		'_', // APC - Application Program Command
 		'^', // PM - Privacy Message
@@ -49,9 +49,9 @@ func (t *State) parseEsc(c rune) {
 		'k': // old title set compatibility
 		t.str.reset()
 		t.str.typ = c
-		next = t.parseEscStr
+		next = (*State).parseEscStr
 	case '(': // set primary charset G0
-		next = t.parseEscAltCharset
+		next = (*State).parseEscAltCharset
 	case ')', // set secondary charset G1 (ignored)
 		'*', // set tertiary charset G2 (ignored)
 		'+': // set quaternary charset G3 (ignored)
@@ -94,20 +94,20 @@ func (t *State) parseEscCSI(c rune) {
 	if t.handleControlCodes(c) {
 		return
 	}
-	t.logf("%q", string(c))
+	t.traceRune(c)
 	if t.csi.put(byte(c)) {
-		t.state = t.parse
+		t.state = (*State).parse
 		t.handleCSI()
 	}
 }
 
 func (t *State) parseEscStr(c rune) {
-	t.logf("%q", string(c))
+	t.traceRune(c)
 	switch c {
 	case '\033':
-		t.state = t.parseEscStrEnd
+		t.state = (*State).parseEscStrEnd
 	case '\a': // backwards compatiblity to xterm
-		t.state = t.parse
+		t.state = (*State).parse
 		t.handleSTR()
 	default:
 		t.str.put(c)
@@ -118,8 +118,8 @@ func (t *State) parseEscStrEnd(c rune) {
 	if t.handleControlCodes(c) {
 		return
 	}
-	t.logf("%q", string(c))
-	t.state = t.parse
+	t.traceRune(c)
+	t.state = (*State).parse
 	if c == '\\' {
 		t.handleSTR()
 	}
@@ -129,7 +129,7 @@ func (t *State) parseEscAltCharset(c rune) {
 	if t.handleControlCodes(c) {
 		return
 	}
-	t.logf("%q", string(c))
+	t.traceRune(c)
 	switch c {
 	case '0': // line drawing set
 		t.cur.Attr.Mode |= attrGfx
@@ -143,7 +143,7 @@ func (t *State) parseEscAltCharset(c rune) {
 	default:
 		t.logf("unknown alt. charset '%c'\n", c)
 	}
-	t.state = t.parse
+	t.state = (*State).parse
 }
 
 func (t *State) parseEscTest(c rune) {
@@ -158,7 +158,7 @@ func (t *State) parseEscTest(c rune) {
 			}
 		}
 	}
-	t.state = t.parse
+	t.state = (*State).parse
 }
 
 func (t *State) handleControlCodes(c rune) bool {
@@ -186,7 +186,7 @@ func (t *State) handleControlCodes(c rune) bool {
 	// ESC
 	case 0o33:
 		t.csi.reset()
-		t.state = t.parseEsc
+		t.state = (*State).parseEsc
 	// SO, SI
 	case 0o16, 0o17:
 		// different charsets not supported. apps should use the correct

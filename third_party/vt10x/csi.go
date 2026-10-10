@@ -1,9 +1,9 @@
 package vt10x
 
 import (
+	"bytes"
 	"fmt"
-	"strconv"
-	"strings"
+	"math"
 )
 
 // CSI (Control Sequence Introducer)
@@ -36,22 +36,68 @@ func (c *csiEscape) parse() {
 	if len(c.buf) == 1 {
 		return
 	}
-	s := string(c.buf)
+	b := c.buf
 	c.args = c.args[:0]
-	if s[0] == '?' {
+	if b[0] == '?' {
 		c.priv = true
-		s = s[1:]
+		b = b[1:]
 	}
-	s = s[:len(s)-1]
-	ss := strings.Split(s, ";")
-	for _, p := range ss {
-		i, err := strconv.Atoi(p)
-		if err != nil {
-			//t.logf("invalid CSI arg '%s'\n", p)
+	b = b[:len(b)-1]
+	// The arguments are read straight out of the buffer: converting it to
+	// a string and splitting it allocated several times per sequence, and
+	// a colourised build log carries a few sequences per line. A piece
+	// that is not a number ends the list, as strconv.Atoi failing did.
+	for {
+		end := bytes.IndexByte(b, ';')
+		piece := b
+		if end >= 0 {
+			piece = b[:end]
+		}
+		i, ok := atoiBytes(piece)
+		if !ok {
 			break
 		}
 		c.args = append(c.args, i)
+		if end < 0 {
+			break
+		}
+		b = b[end+1:]
 	}
+}
+
+// atoiBytes is strconv.Atoi for a byte slice, without converting it: a
+// decimal number with an optional sign, false for anything else
+// (empty, stray bytes, or out of range for an int).
+func atoiBytes(b []byte) (int, bool) {
+	neg := false
+	if len(b) > 0 && (b[0] == '+' || b[0] == '-') {
+		neg = b[0] == '-'
+		b = b[1:]
+	}
+	if len(b) == 0 {
+		return 0, false
+	}
+	const cutoff = math.MaxInt/10 + 1
+	n := 0
+	for _, d := range b {
+		if d < '0' || d > '9' {
+			return 0, false
+		}
+		if n >= cutoff {
+			return 0, false
+		}
+		n = n*10 + int(d-'0')
+		if n < 0 {
+			if neg && n == math.MinInt {
+				return n, true
+			}
+			return 0, false
+		}
+	}
+	if neg {
+		n = -n
+	}
+	return n, true
 }
 
 func (c *csiEscape) arg(i, def int) int {

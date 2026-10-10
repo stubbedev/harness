@@ -76,7 +76,11 @@ type Cursor struct {
 	State uint8
 }
 
-type parseState func(c rune)
+// parseState is the parser's current state, a method expression applied
+// to the State it belongs to. A bound method value (t.parse) would be a
+// closure allocated each time the parser changes state, which is twice
+// for every escape sequence in the output.
+type parseState func(t *State, c rune)
 
 // State represents the terminal emulation state. Use Lock/Unlock
 // methods to synchronize data access with VT.
@@ -113,6 +117,16 @@ func newState(w io.Writer) *State {
 func (t *State) logf(format string, args ...interface{}) {
 	if t.DebugLogger != nil {
 		t.DebugLogger.Printf(format, args...)
+	}
+}
+
+// traceRune logs a rune the parser is handling. The check comes before
+// the call, not inside logf: logf's arguments are built before it can
+// look at the logger, and boxing string(c) for it allocated on every
+// rune of output even with no logger set.
+func (t *State) traceRune(c rune) {
+	if t.DebugLogger != nil {
+		t.DebugLogger.Printf("%q", string(c))
 	}
 }
 
@@ -207,7 +221,7 @@ func (t *State) restoreCursor() {
 }
 
 func (t *State) put(c rune) {
-	t.state(c)
+	t.state(t, c)
 }
 
 func (t *State) putTab(forward bool) {
@@ -371,12 +385,11 @@ func (t *State) clear(x0, y0, x1, y1 int) {
 	y0 = clamp(y0, 0, t.rows-1)
 	y1 = clamp(y1, 0, t.rows-1)
 	t.changed |= ChangedScreen
+	blank := t.cur.Attr
+	blank.Char = ' '
 	for y := y0; y <= y1; y++ {
 		t.dirty[y] = true
-		for x := x0; x <= x1; x++ {
-			t.lines[y][x] = t.cur.Attr
-			t.lines[y][x].Char = ' '
-		}
+		fillGlyphs(t.lines[y][x0:x1+1], blank)
 	}
 }
 
@@ -474,14 +487,43 @@ func (t *State) scrollDown(orig, n int) {
 	// TODO: selection scroll
 }
 
+// fillGlyphs sets every cell of row to g. It doubles the filled prefix
+// with copy rather than assigning cell by cell: clearing the line that
+// scrolls in is on the path of every newline at the bottom of the screen,
+// and copy moves a wide row in a handful of memmoves.
+func fillGlyphs(row []Glyph, g Glyph) {
+	if len(row) == 0 {
+		return
+	}
+	row[0] = g
+	for filled := 1; filled < len(row); filled *= 2 {
+		copy(row[filled:], row[:filled])
+	}
+}
+
 func (t *State) scrollUp(orig, n int) {
 	n = clamp(n, 0, t.bottom-orig+1)
 	t.clear(0, orig, t.cols-1, orig+n-1)
 	t.changed |= ChangedScreen
-	for i := orig; i <= t.bottom-n; i++ {
-		t.lines[i], t.lines[i+n] = t.lines[i+n], t.lines[i]
-		t.dirty[i] = true
-		t.dirty[i+n] = true
+	if n > 0 && orig+n <= t.bottom {
+		// The cleared lines move to the bottom and the rest move up n: one
+		// rotation of the region in copies of row headers, where the
+		// pairwise swaps it replaces walked the region swap by swap on
+		// every newline. The blank lines can land in another order than
+		// the swaps left them in; being blank, the screen is the same.
+		region := t.lines[orig : t.bottom+1]
+		if n == 1 {
+			first := region[0]
+			copy(region, region[1:])
+			region[len(region)-1] = first
+		} else {
+			scrolled := append([]line(nil), region[:n]...)
+			copy(region, region[n:])
+			copy(region[len(region)-n:], scrolled)
+		}
+		for i := orig; i <= t.bottom; i++ {
+			t.dirty[i] = true
+		}
 	}
 
 	// TODO: selection scroll

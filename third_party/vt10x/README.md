@@ -35,3 +35,21 @@ Everything else is byte-identical to the upstream pseudo-version.
 Delete this directory, remove the
 `replace github.com/hinshun/vt10x => ./third_party/vt10x` line from the
 root `go.mod`, and run `go mod tidy`.
+- Throughput. The terminal session feeds every byte of a command's output
+  through the emulator on its read loop, so parsing speed is command
+  latency. Measured on 600KB of build output at 280x80
+  (`bench_test.go`): plain 133 ms to about 12 ms, colourised 195 ms to
+  about 16 ms, and 1.3 million allocations to under 200.
+  - `parse.go`: the per-rune trace log built its `string(c)` argument
+    before checking for a logger; `traceRune` checks first.
+  - `state.go`/`parse.go`/`vt_*.go`: the parser state is a method
+    expression (`(*State).parse`) rather than a bound method value, which
+    allocated a closure on every state change.
+  - `state.go`: `clear` fills a row with doubling copies instead of cell
+    by cell; `scrollUp` rotates the region's row headers instead of
+    swapping them pairwise (the cleared rows may land in a different
+    order; they are blank either way - `scroll_test.go` checks the screen
+    against the upstream implementation).
+  - `csi.go`: CSI arguments are parsed from the buffer in place, with
+    `atoiBytes` matching `strconv.Atoi`'s acceptance, instead of a string
+    conversion, a split and an Atoi per argument.
