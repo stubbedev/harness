@@ -42,8 +42,8 @@ is kept out of every prompt rather than carried in all of them.
 - **Format**: `just fmt` (`golangci-lint fmt`). This applies the same gofumpt
   `just lint` gates on, so formatting and linting can never disagree. Do not
   reach for a standalone `gofumpt` binary - see **Formatting** below.
-- **Modernize**: `just modernize` (runs `modernize` which makes code
-  simplifications)
+- **Modernize**: `just modernize` (applies golangci-lint's modernize fixes,
+  the same ones `just lint` gates on)
 - **Dev**: `just dev` (runs with profiling enabled)
 
 ## Code Style Guidelines

@@ -64,16 +64,15 @@ fmt-html:
 lint: lint-log
     GOEXPERIMENT= golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m
 
-lint-fix:
-    GOEXPERIMENT= golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m --fix
+lint-fix *args:
+    GOEXPERIMENT= golangci-lint run --path-mode=abs --config=".golangci.yml" --timeout=5m --fix {{ args }}
 
 # Check that log messages start with capital letters.
 lint-log:
     ./scripts/check_log_capitalization.sh
 
-# Apply golang.org/x/tools modernize fixes (golangci-lint enforces them too).
-modernize:
-    modernize -fix -test ./...
+# Apply the modernize fixes the lint gate enforces, at the version it pins.
+modernize: (lint-fix "--enable-only=modernize")
 
 # Build, then run the binary with any extra arguments.
 run *args: build
