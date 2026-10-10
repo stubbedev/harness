@@ -24,7 +24,14 @@ func newHookRunner(t *testing.T) *ptyRunner {
 	if runtime.GOOS == "windows" {
 		t.Skip("pty sessions are unsupported on windows")
 	}
-	for _, shell := range []string{"/bin/bash", "/usr/bin/zsh", "/bin/zsh"} {
+	shells := []string{"/bin/bash", "/usr/bin/zsh", "/bin/zsh"}
+	// Shells outside the FHS paths (NixOS, Homebrew) are found on PATH.
+	for _, name := range []string{"bash", "zsh"} {
+		if p, err := exec.LookPath(name); err == nil {
+			shells = append(shells, p)
+		}
+	}
+	for _, shell := range shells {
 		if _, err := os.Stat(shell); err != nil {
 			continue
 		}
@@ -291,4 +298,51 @@ func TestPosixPromptHookShape(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		require.NoError(t, err, "%s rejected the hook: %s", shell, out)
 	}
+}
+
+// A single command line's completion is read from the prompt account:
+// the exit code and directory come from the file, and no sentinel runs
+// after the command - the shell shows exactly one prompt per command.
+func TestPtyRunner_CompletionFromPromptState(t *testing.T) {
+	r := newHookRunner(t)
+	require.NoError(t, os.Mkdir(filepath.Join(r.cwd, "sub"), 0o755))
+	// The first command fences the fresh session, a prompt of its own;
+	// from then on the session is left settled and is not fenced again.
+	_, err := r.Type(t.Context(), "true", 10)
+	require.NoError(t, err)
+
+	before, ok := r.readPromptState()
+	require.True(t, ok)
+
+	var res PTYResult
+	res, err = r.Type(t.Context(), "printf 'out\\n'; (exit 3)", 10)
+	require.NoError(t, err)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 3, *res.ExitCode)
+	require.Contains(t, res.Output, "out")
+	require.NotContains(t, res.Output, "__exit_")
+
+	res, err = r.Type(t.Context(), "cd sub", 10)
+	require.NoError(t, err)
+	require.NotNil(t, res.ExitCode)
+	require.Equal(t, 0, *res.ExitCode)
+	require.Equal(t, "sub", filepath.Base(res.Cwd))
+
+	after, ok := r.readPromptState()
+	require.True(t, ok)
+	require.Equal(t, before.seq+2, after.seq, "a sentinel ran after a command whose completion the account already held")
+}
+
+// The guard the sentinel used to carry rides the prompt hook: an alias a
+// command defines is gone by the next command.
+func TestPtyRunner_PromptHookKeepsGuard(t *testing.T) {
+	r := newHookRunner(t)
+
+	_, err := r.Type(t.Context(), "alias harnessprobe='echo aliased'", 10)
+	require.NoError(t, err)
+	res, err := r.Type(t.Context(), "harnessprobe", 10)
+	require.NoError(t, err)
+	require.NotContains(t, res.Output, "aliased")
+	require.NotNil(t, res.ExitCode)
+	require.NotEqual(t, 0, *res.ExitCode)
 }

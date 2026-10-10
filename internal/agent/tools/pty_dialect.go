@@ -74,10 +74,16 @@ const (
 // defining a function named precmd is zsh's oldest prompt hook, and
 // PROMPT_COMMAND is bash's; the definition the other shell ignores is
 // inert.
+//
+// The hook also re-asserts the session guard the sentinel carries (see
+// posixDialect): a command whose completion is read from this file has
+// no sentinel run after it, and the next command must still not inherit
+// aliases or history settings it brought back.
 const (
 	posixPromptFunc = `__harness_prompt() { __harness_rc=$?; [ -n "$HARNESS_PROMPT_STATE" ] || return 0; ` +
 		`__harness_seq=$((__harness_seq+1)); ` +
-		`printf '%s\t%s\t%s\n' "$__harness_seq" "$__harness_rc" "$PWD" > "$HARNESS_PROMPT_STATE" 2>/dev/null; }`
+		`printf '%s\t%s\t%s\n' "$__harness_seq" "$__harness_rc" "$PWD" > "$HARNESS_PROMPT_STATE" 2>/dev/null; ` +
+		`unalias -a 2>/dev/null; HISTFILE=/dev/null; }`
 	posixPromptHook = posixPromptFunc + `; precmd() { __harness_prompt; }; PROMPT_COMMAND=__harness_prompt`
 )
 

@@ -2005,6 +2005,10 @@ func (r *ptyRunner) screenResult(s ptyTerminal) PTYResult {
 // waits for it, and parses exit code and cwd out of the drained
 // output.
 func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult, error) {
+	if res, ok := r.collectFromPromptState(ctx, s); ok {
+		r.clearStuck()
+		return res, nil
+	}
 	var mark sentinel
 	var echo []string
 	r.setState(func() { mark, echo = r.sentinel, r.lastEcho })
@@ -2054,6 +2058,57 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 		})
 	}
 	return res, nil
+}
+
+// collectFromPromptState reads a finished command's completion from the
+// shell's own prompt account instead of typing the sentinel after it.
+// The hook wrote the exit code and directory before the prompt marker
+// was printed, so once the marker is on the wire the sentinel's round
+// trip - one more command line, one more prompt and every precmd hook
+// the user's shell runs at it - only says again what the file already
+// holds.
+//
+// It applies to one typed line whose prompt was the very next one the
+// shell showed. Lines typed one after another each end at a prompt of
+// their own, and only the sentinel, queued behind the last of them,
+// waits for them all. A shell with no hook, a prompt marker that could
+// not be installed, or an account that reads torn leaves the sentinel
+// to do it.
+func (r *ptyRunner) collectFromPromptState(ctx context.Context, s ptyTerminal) (PTYResult, bool) {
+	var echo []string
+	var promptRe *regexp.Regexp
+	var tail bool
+	var sent int
+	r.setState(func() { echo, promptRe, tail, sent = r.lastEcho, r.promptRe, r.promptTail, r.sentSeq })
+	if promptRe != ptyPromptRe || len(echo) != 1 || sent < 0 {
+		return PTYResult{}, false
+	}
+	st, ok := r.readPromptState()
+	if !ok || st.seq != sent+1 {
+		return PTYResult{}, false
+	}
+	// The account is written before the prompt is drawn: when the shell
+	// was seen to finish through the file alone, its marker may still
+	// be on the way. The wait's own match may already have consumed it
+	// from the scan, so the pending bytes are looked at first.
+	if !promptRe.Match(s.Pending()) && s.WaitForAny(ctx, []*regexp.Regexp{promptRe}, ptyFenceSettle) != 0 {
+		return PTYResult{}, false
+	}
+	if tail {
+		_, _ = s.WaitForAnyOrQuiet(ctx, []*regexp.Regexp{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
+	}
+	drained := string(s.Drain())
+	cut := drained
+	if loc := promptRe.FindStringIndex(drained); loc != nil {
+		cut = drained[:loc[0]]
+	}
+	code := st.code
+	res := PTYResult{Output: r.clean(cut, echo), ExitCode: &code, Cwd: st.cwd}
+	r.setState(func() {
+		r.lastCwd = res.Cwd
+		r.settled = true
+	})
+	return res, true
 }
 
 // knownCwd returns the session's working directory as of its last
