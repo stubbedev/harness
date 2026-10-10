@@ -392,3 +392,39 @@ func TestUnmarshalParts_SkipsUnknownType(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []ContentPart{TextContent{Text: "hi"}}, parts)
 }
+
+// Streaming a tool call's input and finishing it update the call in
+// place: the fields only AddToolCall sets survive both.
+func TestToolCallStreamingKeepsFields(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{Role: Assistant}
+	msg.AddToolCall(ToolCall{ID: "c1", Name: "srv_tool", MCPServer: "srv", ProviderExecuted: true})
+	msg.AddToolCall(ToolCall{ID: "c2", Name: "view"})
+	msg.AppendToolCallInput("c1", `{"a":`)
+	msg.AppendToolCallInput("c2", `{"file`)
+	msg.AppendToolCallInput("c1", `1}`)
+	msg.AppendToolCallInput("c2", `_path":"x"}`)
+	msg.FinishToolCall("c1")
+
+	calls := msg.ToolCalls()
+	require.Len(t, calls, 2)
+	require.Equal(t, ToolCall{ID: "c1", Name: "srv_tool", Input: `{"a":1}`, MCPServer: "srv", ProviderExecuted: true, Finished: true}, calls[0])
+	require.Equal(t, ToolCall{ID: "c2", Name: "view", Input: `{"file_path":"x"}`}, calls[1])
+}
+
+// A clone appends into its own buffer: the original's input is unchanged
+// by what the clone receives.
+func TestToolCallInputCloneIndependent(t *testing.T) {
+	t.Parallel()
+
+	msg := &Message{Role: Assistant}
+	msg.AddToolCall(ToolCall{ID: "c1", Name: "write"})
+	msg.AppendToolCallInput("c1", "ab")
+	clone := msg.Clone()
+	clone.AppendToolCallInput("c1", "CLONE")
+	msg.AppendToolCallInput("c1", "cd")
+
+	require.Equal(t, "abcd", msg.ToolCalls()[0].Input)
+	require.Equal(t, "abCLONE", clone.ToolCalls()[0].Input)
+}

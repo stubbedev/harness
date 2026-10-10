@@ -60,3 +60,17 @@ func BenchmarkAppendBuilderBaseline(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkAppendToolCallInput(b *testing.B) {
+	for _, shape := range streamShapes {
+		b.Run(shape.name, func(b *testing.B) {
+			for b.Loop() {
+				msg := &Message{Role: Assistant}
+				msg.AddToolCall(ToolCall{ID: "c1", Name: "write"})
+				for range shape.deltas {
+					msg.AppendToolCallInput("c1", shape.delta)
+				}
+			}
+		})
+	}
+}

@@ -351,6 +351,12 @@ type Message struct {
 	// is rebuilt from it. See [Message.appendTo].
 	textBuilder      *strings.Builder
 	reasoningBuilder *strings.Builder
+	// toolInputBuilder does the same for the input of the tool call
+	// streaming now, the one toolInputID names. Calls stream one after
+	// another; a provider that interleaves them only costs a rebuild
+	// when the stream switches calls.
+	toolInputBuilder *strings.Builder
+	toolInputID      string
 }
 
 // appendTo appends delta to current using builder, returning the grown
@@ -544,34 +550,35 @@ func (m *Message) ThinkingDuration() time.Duration {
 	return time.Duration(endTime-reasoning.StartedAt) * time.Second
 }
 
+// FinishToolCall marks a streamed tool call complete. The call is
+// updated in place, so every other field it carries (the MCP server it
+// belongs to, whether the provider ran it) survives.
 func (m *Message) FinishToolCall(toolCallID string) {
 	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == toolCallID {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input,
-					Finished: true,
-				}
-				return
+		if c, ok := part.(ToolCall); ok && c.ID == toolCallID {
+			c.Finished = true
+			m.Parts[i] = c
+			if m.toolInputID == toolCallID {
+				m.toolInputBuilder, m.toolInputID = nil, ""
 			}
+			return
 		}
 	}
 }
 
+// AppendToolCallInput grows a streaming tool call's input by one provider
+// delta. Like AppendContent it appends into a builder rather than
+// concatenating, which would copy the whole input received so far on
+// every delta, and it updates the call in place so no field is lost.
 func (m *Message) AppendToolCallInput(toolCallID string, inputDelta string) {
 	for i, part := range m.Parts {
-		if c, ok := part.(ToolCall); ok {
-			if c.ID == toolCallID {
-				m.Parts[i] = ToolCall{
-					ID:       c.ID,
-					Name:     c.Name,
-					Input:    c.Input + inputDelta,
-					Finished: c.Finished,
-				}
-				return
+		if c, ok := part.(ToolCall); ok && c.ID == toolCallID {
+			if m.toolInputID != toolCallID {
+				m.toolInputBuilder, m.toolInputID = nil, toolCallID
 			}
+			c.Input = appendTo(&m.toolInputBuilder, c.Input, inputDelta)
+			m.Parts[i] = c
+			return
 		}
 	}
 }
@@ -626,6 +633,8 @@ func (m *Message) Clone() Message {
 	// already hold stay valid however the original's buffer grows.
 	clone.textBuilder = nil
 	clone.reasoningBuilder = nil
+	clone.toolInputBuilder = nil
+	clone.toolInputID = ""
 	return clone
 }
 
