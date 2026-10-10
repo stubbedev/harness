@@ -23,6 +23,8 @@ is kept out of every prompt rather than carried in all of them.
 
 ## Build/Test/Lint Commands
 
+- **Dev environment**: `devenv shell` provides every tool the recipes below
+  call (see `devenv.nix`) and loads `.env` when present.
 - **Build**: `go build .` or `go run .`
 - **Test**: `just test` or `go test ./...` (run single test:
   `go test ./internal/agent/prompt -run TestGetGitStatusCachesWithinTTL`)

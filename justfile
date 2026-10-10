@@ -1,6 +1,7 @@
 # Harness dev tasks.
 # `just check` mirrors the CI gates. No task here needs an API key: the
 # agent tests drive a scripted model rather than a recorded provider.
+# Every tool a recipe calls comes from the devenv shell (devenv.nix).
 
 # The build is pure Go — the SQLite driver needs no cgo — and greenteagc is
 # what release builds use, so local builds match.
@@ -70,12 +71,9 @@ lint-fix:
 lint-log:
     ./scripts/check_log_capitalization.sh
 
-lint-install:
-    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
-
 # Apply golang.org/x/tools modernize fixes (golangci-lint enforces them too).
 modernize:
-    go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest -fix -test ./...
+    modernize -fix -test ./...
 
 # Build, then run the binary with any extra arguments.
 run *args: build
@@ -106,7 +104,7 @@ schema:
 
 # Regenerate the OpenAPI spec from the swag annotations.
 swag:
-    go run github.com/swaggo/swag/cmd/swag@v1.16.6 init --generalInfo main.go --dir . --output internal/swagger --packageName swagger --parseDependency --parseInternal --parseDepth 5
+    swag init --generalInfo main.go --dir . --output internal/swagger --packageName swagger --parseDependency --parseInternal --parseDepth 5
 
 # Regenerate the database layer from internal/db/sql.
 sqlc:
