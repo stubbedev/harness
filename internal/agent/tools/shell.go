@@ -327,6 +327,10 @@ func NewShellTool(workingDir, owner string, questions question.Service, tracker 
 				sb.WriteString(shellExitNote(result.ShellExit))
 				sb.WriteString("\n")
 			}
+			if note := session.oomNote(); note != "" {
+				sb.WriteString(note)
+				sb.WriteString("\n")
+			}
 			if header != "" {
 				sb.WriteString(header)
 				sb.WriteString("\n")

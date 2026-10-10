@@ -63,6 +63,11 @@ const (
 	// its prompt hook writes its per-prompt account to. Harness sets it
 	// into the session; the hook the session setup installs reads it.
 	PromptStateFile = "HARNESS_PROMPT_STATE"
+	// ShellMemoryMax caps the memory a terminal session's processes may
+	// hold, as systemd's MemoryMax reads it (default 75% of RAM);
+	// "infinity" keeps the session's scope without a cap and "off" runs
+	// shells without one (Linux with a systemd user manager only).
+	ShellMemoryMax = "HARNESS_SHELL_MEMORY_MAX"
 )
 
 // The client/server split.
@@ -95,7 +100,7 @@ func All() []string {
 		SubagentsDir, ExtensionsDir, CommandsDir, SkipDataDirLock,
 		DisableProviderAutoUpdate, DisableDefaultProviders,
 		DisableAnthropicCache, DisablePromptCacheKey,
-		CoreUtils, PTYRows, PTYCols, PTYTerm, PromptStateFile,
+		CoreUtils, PTYRows, PTYCols, PTYTerm, PromptStateFile, ShellMemoryMax,
 		ClientServer, ServerIdleTimeout, ServerDetachGrace, ServerReadyTimeout,
 		Profile, UIDebug,
 	}

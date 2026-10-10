@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/dustin/go-humanize"
 
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/envvars"
@@ -452,6 +453,11 @@ type ptyRunner struct {
 	announcedCwd string
 	ask          question.Service
 	session      ptyTerminal
+	// oomSession and oomSeen are the session whose out-of-memory kills
+	// were last counted and that count, so each kill is reported once,
+	// on the result that follows it (see oomNote).
+	oomSession ptyTerminal
+	oomSeen    int
 
 	startedAt time.Time
 	lastUsed  time.Time
@@ -2923,4 +2929,51 @@ func (r *ptyRunner) cwdIfMoved(cwd string) string {
 	}
 	r.announcedCwd = cwd
 	return cwd
+}
+
+// oomCounter is the part of a terminal session that can say how many of
+// its processes the kernel killed for running out of memory (see
+// term.Session.OOMKills). Sessions that cannot count do not implement
+// it.
+type oomCounter interface {
+	OOMKills() (int, bool)
+	MemoryLimit() (int64, bool)
+}
+
+// oomNote reports the out-of-memory kills in the session since the last
+// result: the one fact about a killed command its output does not carry.
+// The shell prints only that something was killed; why is in the
+// session's cgroup. Empty when there were none, or nothing to count
+// them with.
+func (r *ptyRunner) oomNote() string {
+	r.mu.Lock()
+	s := r.session
+	r.mu.Unlock()
+	counter, ok := s.(oomCounter)
+	if !ok {
+		return ""
+	}
+	n, ok := counter.OOMKills()
+	if !ok {
+		return ""
+	}
+	r.mu.Lock()
+	if r.oomSession != s {
+		// A new session counts from its own start.
+		r.oomSession, r.oomSeen = s, 0
+	}
+	killed := n - r.oomSeen
+	r.oomSeen = n
+	r.mu.Unlock()
+	if killed <= 0 {
+		return ""
+	}
+	what := "a process"
+	if killed > 1 {
+		what = fmt.Sprintf("%d processes", killed)
+	}
+	if limit, ok := counter.MemoryLimit(); ok {
+		return fmt.Sprintf("[out of memory: the kernel killed %s at the session's %s memory limit]", what, humanize.IBytes(uint64(limit)))
+	}
+	return fmt.Sprintf("[out of memory: the kernel killed %s]", what)
 }

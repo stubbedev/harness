@@ -612,6 +612,7 @@ These configure Harness from the environment. Boolean variables take `1`,
 | `HARNESS_PTY_ROWS`, `HARNESS_PTY_COLS` | Size new terminal sessions open with. |
 | `HARNESS_PTY_TERM` | `TERM` terminal sessions run with. |
 | `HARNESS_PROMPT_STATE` | Set into terminal sessions: the file the shell's prompt hook writes its per-prompt account to. Not for users; do not set. |
+| `HARNESS_SHELL_MEMORY_MAX` | Memory a terminal session's processes may hold between them, in systemd `MemoryMax` syntax (`75%` of RAM by default, `16G`, ...). Each session runs in a systemd scope of its own, so a command the kernel kills for running out of memory takes neither Harness nor the terminal around it down; `infinity` keeps the scope without a cap, `off` runs shells without one. Linux with a systemd user manager only. |
 | `HARNESS_CLIENT_SERVER` | Runs the TUI against a Harness server process. |
 | `HARNESS_SERVER_IDLE_TIMEOUT` | Seconds a server with no clients lingers before exiting; `0` exits at once. |
 | `HARNESS_SERVER_DETACH_GRACE` | Seconds a workspace outlives its last client detaching. |

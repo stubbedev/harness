@@ -106,6 +106,12 @@ type Session struct {
 	// mode sequence split across two reads is still seen.
 	bracketedPaste bool
 	modeCarry      []byte
+
+	// unit is the systemd scope the shell was started in, empty when
+	// sessions run uncontained (see containedCommand); cgroup is that
+	// scope's cgroup directory once it has been seen (see scopeCgroup).
+	unit   string
+	cgroup string
 }
 
 // Shell returns the shell the terminal session should run and whether
@@ -228,7 +234,8 @@ func StartShell(cwd string, args []string, env ...string) (*Session, error) {
 	// once, on startup, and the shell's first prompt is laid out for it.
 	_ = p.Resize(cols, rows)
 
-	cmd := p.Command(shell, args...)
+	name, argv, unit := containedCommand(shell, args)
+	cmd := p.Command(name, argv...)
 	cmd.Dir = cwd
 	cmd.Env = append(withoutSizeEnv(os.Environ()), withoutSizeEnv(env)...)
 	cmd.Env = append(cmd.Env, "TERM="+termValue())
@@ -237,8 +244,10 @@ func StartShell(cwd string, args []string, env ...string) (*Session, error) {
 		return nil, fmt.Errorf("failed to start terminal session: %w", err)
 	}
 	afterStart(p)
+	afterContainedStart(cmd.Process)
 
 	s := newSession(p, cmd.Process, rows, cols)
+	s.unit = unit
 	// Assign the shell to a job object before it can spawn anything:
 	// every descendant then dies with the session on Windows. A no-op
 	// returning 0 elsewhere.
@@ -878,6 +887,11 @@ func (s *Session) Close() {
 		s.mu.Lock()
 		exited := s.exited
 		s.mu.Unlock()
+		if dir := s.scopeDir(); dir != "" {
+			// Everything the session started is in its scope, whatever
+			// group or session it moved itself to: one write ends it all.
+			killCgroup(dir)
+		}
 		if !exited {
 			// The shell is a session leader (Setsid), so its pid is the
 			// group id and the group holds every descendant that did not
@@ -894,6 +908,39 @@ func (s *Session) Close() {
 	case <-s.closed:
 	case <-time.After(5 * time.Second):
 	}
+}
+
+// scopeDir returns the cgroup directory of the session's scope, or ""
+// when the session has none or it is not known yet.
+func (s *Session) scopeDir() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cgroup == "" && s.unit != "" {
+		s.cgroup = scopeCgroup(s.proc.Pid, s.unit)
+	}
+	return s.cgroup
+}
+
+// OOMKills reports how many processes in the session the kernel has
+// killed for running out of memory since it started, and whether that
+// is known at all: only a session in a scope of its own (Linux, with a
+// systemd user manager) has the count.
+func (s *Session) OOMKills() (int, bool) {
+	dir := s.scopeDir()
+	if dir == "" {
+		return 0, false
+	}
+	return cgroupOOMKills(dir)
+}
+
+// MemoryLimit reports the memory, in bytes, the session's processes may
+// hold between them; false when there is no limit.
+func (s *Session) MemoryLimit() (int64, bool) {
+	dir := s.scopeDir()
+	if dir == "" {
+		return 0, false
+	}
+	return cgroupMemoryMax(dir)
 }
 
 // Pending returns a copy of the undrained output without consuming it,
