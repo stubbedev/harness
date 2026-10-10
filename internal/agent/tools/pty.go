@@ -1762,7 +1762,14 @@ func waitingForInput(s ptyTerminal, a term.JobActivity) bool {
 		return false
 	}
 	if a.WchanReadable {
-		return a.InputWait
+		// The kernel says where the job sleeps but not always on what: a
+		// line editor - readline in a nested shell, a REPL - waits in
+		// select or poll on the terminal, which is not counted as a
+		// terminal read because a server idling in one looks the same.
+		// The termios tells them apart: a line editor has taken the
+		// terminal out of line mode to read keys itself. Without this,
+		// every call to a REPL sat out its whole wait budget.
+		return a.InputWait || s.SecretRead() == term.SecretReadRaw
 	}
 	if s.ForegroundIsShell() {
 		return true

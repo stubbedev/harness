@@ -92,6 +92,31 @@ func TestPtyRunner_NestedInteractiveShell(t *testing.T) {
 	require.Equal(t, "back", done.Output)
 }
 
+// A nested shell with a line editor waits for keys in select or poll,
+// not in a terminal read, with the terminal in raw mode. What is typed
+// at it has to reach it rather than queue for a prompt that is already
+// showing.
+func TestPtyRunner_NestedLineEditorShell(t *testing.T) {
+	requireProgram(t, "bash")
+	r := newTestRunner(t)
+
+	res, err := r.Type(t.Context(), "bash --norc --noprofile -i", 5)
+	require.NoError(t, err)
+	require.True(t, res.Running)
+
+	res, err = r.Type(t.Context(), "echo nested-editor\n", 10)
+	require.NoError(t, err)
+	require.False(t, res.Queued, "the line queued behind a shell that was reading it")
+	require.Contains(t, res.Output, "nested-editor")
+
+	_, err = r.Type(t.Context(), "\x04", 10)
+	require.NoError(t, err)
+
+	done, err := r.Type(t.Context(), "echo back", 10)
+	require.NoError(t, err)
+	require.Equal(t, "back", done.Output)
+}
+
 // The session opens at the configured size; a program reads it once,
 // on startup, and there is no resizing after that.
 func TestPtyRunner_OpensAtConfiguredSize(t *testing.T) {
