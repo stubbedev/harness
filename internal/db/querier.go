@@ -18,10 +18,8 @@ type Querier interface {
 	// Inserts the path's next version, computed in the same statement so a
 	// concurrent writer cannot take it in between.
 	CreateFileNextVersion(ctx context.Context, arg CreateFileNextVersionParams) (File, error)
-	CreateMemory(ctx context.Context, arg CreateMemoryParams) (Memory, error)
 	CreateMessage(ctx context.Context, arg CreateMessageParams) (Message, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
-	DeleteMemory(ctx context.Context, id string) (int64, error)
 	DeleteMessage(ctx context.Context, id string) error
 	// Deletes the anchor message and every message after it in the session,
 	// in the order ListMessagesBySession reads them, as one statement.
@@ -37,8 +35,6 @@ type Querier interface {
 	// skip fetching the parts blob and the rest of the row.
 	GetLastAssistantMessageBySession(ctx context.Context, sessionID string) (GetLastAssistantMessageBySessionRow, error)
 	GetLastSession(ctx context.Context) (Session, error)
-	GetMemory(ctx context.Context, id string) (Memory, error)
-	GetMemoryByTitle(ctx context.Context, lower string) (Memory, error)
 	GetMessage(ctx context.Context, id string) (Message, error)
 	GetModelCatalog(ctx context.Context) (ModelCatalog, error)
 	GetRecentActivity(ctx context.Context) ([]GetRecentActivityRow, error)
@@ -52,11 +48,6 @@ type Querier interface {
 	ListCheckpointsBySession(ctx context.Context, sessionID string) ([]Checkpoint, error)
 	ListChildSessions(ctx context.Context, parentSessionID sql.NullString) ([]Session, error)
 	ListFilesBySessionWithChildren(ctx context.Context, arg ListFilesBySessionWithChildrenParams) ([]File, error)
-	// The id tie-breaks: updated_at has whole-second resolution, so
-	// memories saved in the same second would otherwise come back in
-	// whatever order SQLite chose, and the index the model reads would
-	// reshuffle between runs.
-	ListMemories(ctx context.Context) ([]Memory, error)
 	// created_at has whole-second resolution and a prompt and its reply
 	// often share a second; rowid is insertion order and breaks the tie.
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
@@ -69,7 +60,6 @@ type Querier interface {
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
 	ListSessions(ctx context.Context) ([]Session, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
-	ReapMemories(ctx context.Context, limit int64) (int64, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	// Adds a step's cost and replaces whichever token counter the step
 	// measured (NULL leaves a counter alone), in one statement so a concurrent
@@ -77,8 +67,6 @@ type Querier interface {
 	RecordSessionUsage(ctx context.Context, arg RecordSessionUsageParams) (Session, error)
 	RenameSession(ctx context.Context, arg RenameSessionParams) error
 	SaveModelCatalog(ctx context.Context, data string) (ModelCatalog, error)
-	TouchMemory(ctx context.Context, id string) error
-	UpdateMemory(ctx context.Context, arg UpdateMemoryParams) (Memory, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	// Writes the compaction pointers, and the token counters when given,

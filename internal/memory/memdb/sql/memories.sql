@@ -13,7 +13,7 @@ LIMIT 1;
 
 -- name: GetMemoryByTitle :one
 SELECT * FROM memories
-WHERE scope = ? AND repo_key = ? AND lower(title) = lower(?)
+WHERE scope = ? AND repo_key = ? AND lower(title) = lower(sqlc.arg(title))
 LIMIT 1;
 
 -- name: ListVisibleMemories :many

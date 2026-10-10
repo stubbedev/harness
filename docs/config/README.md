@@ -543,15 +543,16 @@ delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 ### Memory
 
 The agent keeps durable notes across sessions (user preferences, feedback,
-non-obvious project facts, references) in the workspace database and loads a
-compact index of them into every session. See
+non-obvious project facts, references) in a store shared by every workspace on
+the machine, globally or per repository, and loads a compact index of them into
+every session. See
 [the memory docs](../memory/README.md) for how it works.
 
 ```yaml
 options:
   memory:
     enabled: true # turn the memory tool and index injection off with false
-    max_memories: 500 # least-used unpinned memories are deleted beyond this
+    max_memories: 500 # per scope; least-used unpinned memories are deleted beyond this
     index_budget: 4000 # characters of index injected into the system prompt
 ```
 

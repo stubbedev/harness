@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/stubbedev/harness/internal/db"
 )
 
 // Saves race in practice: the memory tool is parallel and every session
@@ -40,22 +39,25 @@ func TestConcurrentSavesOfOneTitleUpsert(t *testing.T) {
 	require.Len(t, items, 1)
 }
 
+// testRepoKey is the repository the test services sit in.
+const testRepoKey = "example.com/team/tool"
+
 func newTestService(t *testing.T, reap func() int) Service {
 	t.Helper()
-	dataDir := t.TempDir()
-	t.Cleanup(func() {
-		require.NoError(t, db.Release(dataDir))
-		db.ResetPool()
-	})
-
-	conn, err := db.Connect(t.Context(), dataDir)
-	require.NoError(t, err)
-
 	opts := []Option{WithScrubber(func(s string) (string, int) { return s, 0 })}
 	if reap != nil {
 		opts = append(opts, WithReapLimit(reap))
 	}
-	return NewService(db.New(conn), conn, opts...)
+	return NewService(newTestStore(t, t.TempDir()), testRepoKey, opts...)
+}
+
+// newTestStore opens the store in dir for the test's lifetime.
+func newTestStore(t *testing.T, dir string) *Store {
+	t.Helper()
+	store, err := OpenStore(t.Context(), dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	return store
 }
 
 func TestSaveCreatesThenUpdatesByTitle(t *testing.T) {
@@ -128,30 +130,32 @@ func TestGetTouchesUsageAndReportsNotFound(t *testing.T) {
 	saved, err := svc.Save(t.Context(), SaveInput{Title: "t", Content: "c"})
 	require.NoError(t, err)
 
-	got, err := svc.Get(t.Context(), saved.Item.ID)
+	got, err := svc.Get(t.Context(), ScopeRepo, saved.Item.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, got.UseCount)
 
-	got, err = svc.Get(t.Context(), saved.Item.ID)
+	got, err = svc.Get(t.Context(), ScopeRepo, saved.Item.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, got.UseCount)
 
-	_, err = svc.Get(t.Context(), "missing")
+	_, err = svc.Get(t.Context(), ScopeRepo, "missing")
 	require.ErrorIs(t, err, ErrNotFound)
 }
 
-func TestGetByTitle(t *testing.T) {
+func TestLookupTitle(t *testing.T) {
 	svc := newTestService(t, nil)
 
 	_, err := svc.Save(t.Context(), SaveInput{Title: "Build commands", Content: "just build"})
 	require.NoError(t, err)
 
-	got, err := svc.GetByTitle(t.Context(), "build COMMANDS")
+	got, err := svc.LookupTitle(t.Context(), "build COMMANDS")
 	require.NoError(t, err)
-	require.Equal(t, "build-commands", got.ID)
+	require.Len(t, got, 1)
+	require.Equal(t, "build-commands", got[0].ID)
 
-	_, err = svc.GetByTitle(t.Context(), "nope")
-	require.ErrorIs(t, err, ErrNotFound)
+	got, err = svc.LookupTitle(t.Context(), "nope")
+	require.NoError(t, err)
+	require.Empty(t, got)
 }
 
 func TestSearchMatchesTitleAndContent(t *testing.T) {
@@ -182,8 +186,8 @@ func TestDelete(t *testing.T) {
 	saved, err := svc.Save(t.Context(), SaveInput{Title: "t", Content: "c"})
 	require.NoError(t, err)
 
-	require.NoError(t, svc.Delete(t.Context(), saved.Item.ID))
-	require.ErrorIs(t, svc.Delete(t.Context(), saved.Item.ID), ErrNotFound)
+	require.NoError(t, svc.Delete(t.Context(), ScopeRepo, saved.Item.ID))
+	require.ErrorIs(t, svc.Delete(t.Context(), ScopeRepo, saved.Item.ID), ErrNotFound)
 }
 
 func TestIndexRespectsBudget(t *testing.T) {
@@ -196,11 +200,11 @@ func TestIndexRespectsBudget(t *testing.T) {
 
 	full, err := svc.Index(t.Context(), 0)
 	require.NoError(t, err)
-	require.Len(t, strings.Split(full, "\n"), 3)
+	require.Len(t, strings.Split(full, "\n"), 4, "a heading and three lines")
 
-	// Fits "- (project) alpha" but not the second line plus its
-	// newline separator.
-	tight, err := svc.Index(t.Context(), len("- (project) alpha")+len("- (project) beta"))
+	// Fits the heading and "- (project) alpha" but not the second line
+	// plus its newline separator.
+	tight, err := svc.Index(t.Context(), len("This repository:")+len("- (project) alpha")+len("- (project) beta"))
 	require.NoError(t, err)
 	require.Contains(t, tight, "alpha")
 	require.NotContains(t, tight, "gamma")
@@ -218,7 +222,7 @@ func TestReapEvictsLeastUsedUnpinned(t *testing.T) {
 	_, err = svc.Save(t.Context(), SaveInput{Title: "stale", Content: "never read"})
 	require.NoError(t, err)
 
-	_, err = svc.Get(t.Context(), "used")
+	_, err = svc.Get(t.Context(), ScopeRepo, "used")
 	require.NoError(t, err)
 
 	// The fourth save exceeds the limit of 3; the never-read unpinned
@@ -236,14 +240,7 @@ func TestReapEvictsLeastUsedUnpinned(t *testing.T) {
 }
 
 func TestSaveScrubsSecrets(t *testing.T) {
-	dataDir := t.TempDir()
-	t.Cleanup(func() {
-		require.NoError(t, db.Release(dataDir))
-		db.ResetPool()
-	})
-	conn, err := db.Connect(t.Context(), dataDir)
-	require.NoError(t, err)
-	svc := NewService(db.New(conn), conn)
+	svc := NewService(newTestStore(t, t.TempDir()), testRepoKey)
 
 	result, err := svc.Save(t.Context(), SaveInput{
 		Title:   "Creds",
@@ -255,9 +252,9 @@ func TestSaveScrubsSecrets(t *testing.T) {
 	require.NotContains(t, result.Item.Content, "sk-ant-")
 	require.Contains(t, result.Item.Content, Redacted)
 
-	_, err = svc.Get(t.Context(), result.Item.ID)
+	_, err = svc.Get(t.Context(), ScopeRepo, result.Item.ID)
 	require.NoError(t, err)
-	_, err = svc.Get(t.Context(), "nope")
+	_, err = svc.Get(t.Context(), ScopeRepo, "nope")
 	require.True(t, errors.Is(err, ErrNotFound))
 }
 

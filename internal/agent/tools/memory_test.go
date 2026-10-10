@@ -5,20 +5,15 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
-	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/memory"
 )
 
 func newMemoryToolForTest(t *testing.T) fantasy.AgentTool {
 	t.Helper()
-	dataDir := t.TempDir()
-	t.Cleanup(func() {
-		require.NoError(t, db.Release(dataDir))
-		db.ResetPool()
-	})
-	conn, err := db.Connect(t.Context(), dataDir)
+	store, err := memory.OpenStore(t.Context(), t.TempDir())
 	require.NoError(t, err)
-	return NewMemoryTool(memory.NewService(db.New(conn), conn))
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	return NewMemoryTool(memory.NewService(store, "example.com/team/tool"))
 }
 
 func runMemoryTool(t *testing.T, tool fantasy.AgentTool, input string) fantasy.ToolResponse {
@@ -32,7 +27,7 @@ func TestMemoryToolRoundTrip(t *testing.T) {
 	tool := newMemoryToolForTest(t)
 
 	saved := runMemoryTool(t, tool, `{"action":"save","title":"Build commands","content":"just build","category":"project"}`)
-	require.Contains(t, saved.Content, "Saved memory - [build-commands] (project) Build commands")
+	require.Contains(t, saved.Content, "Saved memory - [build-commands] (repo, project) Build commands")
 
 	// Saving the same title again updates instead of duplicating.
 	updated := runMemoryTool(t, tool, `{"action":"save","title":"Build commands","content":"just build && just test"}`)
@@ -80,8 +75,8 @@ func TestMemoryToolEdit(t *testing.T) {
 
 	// Omitted category and pinned keep the stored values.
 	read := runMemoryTool(t, tool, `{"action":"read","id":"build-commands"}`)
-	require.Contains(t, read.Content, "(project)")
-	require.NotContains(t, read.Content, "(feedback)")
+	require.Contains(t, read.Content, "(repo, project)")
+	require.NotContains(t, read.Content, "feedback")
 
 	listed := runMemoryTool(t, tool, `{"action":"list"}`)
 	require.Contains(t, listed.Content, "1 memories", "edit must not duplicate the memory")
@@ -89,7 +84,7 @@ func TestMemoryToolEdit(t *testing.T) {
 	// Edit by id works too.
 	byID := runMemoryTool(t, tool, `{"action":"edit","id":"build-commands","content":"just ci","category":"reference"}`)
 	require.Contains(t, byID.Content, "just ci")
-	require.Contains(t, byID.Content, "(reference)")
+	require.Contains(t, byID.Content, "(repo, reference)")
 
 	// A title that does not exist is an error pointing at save.
 	_, err := tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","title":"Typo Title","content":"x"}`})
@@ -175,7 +170,7 @@ func TestMemoryToolEditFuzzyTitle(t *testing.T) {
 	require.Contains(t, listed.Content, "1 memories", "fuzzy edit must not duplicate")
 
 	read := runMemoryTool(t, tool, `{"action":"read","id":"diagnostics-relay"}`)
-	require.Contains(t, read.Content, "(project) Diagnostics relay", "fuzzy edit must not rename")
+	require.Contains(t, read.Content, "(repo, project) Diagnostics relay", "fuzzy edit must not rename")
 	require.Contains(t, read.Content, "sweep runs when a turn ends")
 }
 
@@ -209,4 +204,45 @@ func TestMemoryToolSaveWarnsOnNearDuplicate(t *testing.T) {
 	same := runMemoryTool(t, tool, `{"action":"save","title":"Build commands","content":"just build && just test"}`)
 	require.Contains(t, same.Content, "Updated memory")
 	require.NotContains(t, same.Content, "near-duplicate")
+}
+
+func TestMemoryToolScopes(t *testing.T) {
+	tool := newMemoryToolForTest(t)
+
+	// The category picks the scope of a new memory; scope overrides it.
+	user := runMemoryTool(t, tool, `{"action":"save","title":"Style","content":"terse","category":"user"}`)
+	require.Contains(t, user.Content, "[style] (global, user) Style")
+	repo := runMemoryTool(t, tool, `{"action":"save","title":"Style","content":"gofumpt","category":"user","scope":"repo"}`)
+	require.Contains(t, repo.Content, "Saved memory - [style] (repo, user) Style", "the same title in another scope is another memory")
+	require.Contains(t, repo.Content, "near-duplicate memory exists: - [style] (global, user) Style")
+
+	listed := runMemoryTool(t, tool, `{"action":"list"}`)
+	require.Contains(t, listed.Content, "2 memories")
+	globalOnly := runMemoryTool(t, tool, `{"action":"list","scope":"global"}`)
+	require.Contains(t, globalOnly.Content, "1 memories")
+	require.Contains(t, globalOnly.Content, "(global, user)")
+
+	// Without a scope the repository's memory wins and the response
+	// points at the global one.
+	read := runMemoryTool(t, tool, `{"action":"read","id":"style"}`)
+	require.Contains(t, read.Content, "(repo, user) Style")
+	require.Contains(t, read.Content, "gofumpt")
+	require.Contains(t, read.Content, `a global memory of the same name also exists; pass scope "global"`)
+	read = runMemoryTool(t, tool, `{"action":"read","id":"style","scope":"global"}`)
+	require.Contains(t, read.Content, "terse")
+	require.NotContains(t, read.Content, "also exists")
+
+	edited := runMemoryTool(t, tool, `{"action":"edit","title":"Style","scope":"global","content":"terse, no emojis"}`)
+	require.Contains(t, edited.Content, "Edited memory - [style] (global, user) Style")
+
+	deleted := runMemoryTool(t, tool, `{"action":"delete","id":"style"}`)
+	require.Contains(t, deleted.Content, "Deleted memory - [style] (repo, user) Style")
+	require.Contains(t, deleted.Content, "also exists")
+	read = runMemoryTool(t, tool, `{"action":"read","id":"style"}`)
+	require.Contains(t, read.Content, "terse, no emojis")
+
+	_, err := tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"delete","id":"style","scope":"repo"}`})
+	require.ErrorContains(t, err, "not found")
+	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"list","scope":"galaxy"}`})
+	require.ErrorContains(t, err, "invalid scope")
 }

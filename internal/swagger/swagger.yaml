@@ -234,8 +234,9 @@ definitions:
         type: integer
       max_memories:
         description: |-
-          MaxMemories caps how many memories are kept. When exceeded, the
-          least-used unpinned memories are reaped.
+          MaxMemories caps how many memories each scope keeps: the global
+          ones, and each repository's. When exceeded, the least-used
+          unpinned memories of that scope are reaped.
         type: integer
     type: object
   config.SelectedModel:

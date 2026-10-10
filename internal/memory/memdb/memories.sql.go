@@ -110,18 +110,18 @@ func (q *Queries) GetMemory(ctx context.Context, arg GetMemoryParams) (Memory, e
 
 const getMemoryByTitle = `-- name: GetMemoryByTitle :one
 SELECT scope, repo_key, id, category, title, content, pinned, use_count, last_used_at, embedding, created_at, updated_at FROM memories
-WHERE scope = ? AND repo_key = ? AND lower(title) = lower(?)
+WHERE scope = ? AND repo_key = ? AND lower(title) = lower(?3)
 LIMIT 1
 `
 
 type GetMemoryByTitleParams struct {
 	Scope   string `json:"scope"`
 	RepoKey string `json:"repo_key"`
-	LOWER   string `json:"LOWER"`
+	Title   string `json:"title"`
 }
 
 func (q *Queries) GetMemoryByTitle(ctx context.Context, arg GetMemoryByTitleParams) (Memory, error) {
-	row := q.db.QueryRowContext(ctx, getMemoryByTitle, arg.Scope, arg.RepoKey, arg.LOWER)
+	row := q.db.QueryRowContext(ctx, getMemoryByTitle, arg.Scope, arg.RepoKey, arg.Title)
 	var i Memory
 	err := row.Scan(
 		&i.Scope,

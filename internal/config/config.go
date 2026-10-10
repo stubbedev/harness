@@ -428,9 +428,10 @@ func (t *TUIOptions) CompletionLimits() (depth, items int) {
 // MemoryOptions configures the agent's durable cross-session memory.
 type MemoryOptions struct {
 	Enabled *bool `json:"enabled,omitempty" jsonschema:"description=Let the agent keep durable notes across sessions and load their index into every session,default=true"`
-	// MaxMemories caps how many memories are kept. When exceeded, the
-	// least-used unpinned memories are reaped.
-	MaxMemories *int `json:"max_memories,omitempty" jsonschema:"description=Maximum memories to keep. Beyond this the least-used unpinned memories are deleted,minimum=1,default=500,example=100"`
+	// MaxMemories caps how many memories each scope keeps: the global
+	// ones, and each repository's. When exceeded, the least-used
+	// unpinned memories of that scope are reaped.
+	MaxMemories *int `json:"max_memories,omitempty" jsonschema:"description=Maximum memories to keep per scope (global and each repository). Beyond this the least-used unpinned memories of the scope are deleted,minimum=1,default=500,example=100"`
 	// IndexBudget bounds the character size of the memory index injected
 	// into the system prompt.
 	IndexBudget *int `json:"index_budget,omitempty" jsonschema:"description=Character budget for the memory index injected into the system prompt,minimum=200,default=4000,example=2000"`

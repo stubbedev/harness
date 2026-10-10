@@ -129,14 +129,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
 	files := history.NewService(q)
-	// Memory reads its reap limit lazily so live config reloads of
-	// options.memory.max_memories are honored without rebuilding.
-	memories := memory.NewService(q, conn, memory.WithReapLimit(func() int {
-		if cfg := store.Config(); cfg != nil && cfg.Options != nil {
-			return cfg.Options.Memory.GetMaxMemories()
-		}
-		return config.DefaultMaxMemories
-	}))
+	memories, closeMemory := openMemory(ctx, store)
 	cfg := store.Config()
 	app := &App{
 		Sessions:    sessions,
@@ -219,6 +212,7 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	app.cleanupFuncs = append(
 		app.cleanupFuncs,
 		func(context.Context) error { return db.Release(dataDir) },
+		closeMemory,
 		func(ctx context.Context) error { return mcp.Close(ctx) },
 		func(context.Context) error { app.Extensions.Close(); return nil },
 	)

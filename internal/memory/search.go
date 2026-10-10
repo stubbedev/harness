@@ -48,9 +48,9 @@ func (s *service) Search(ctx context.Context, query string) ([]Item, error) {
 		return nil, nil
 	}
 
-	byID := make(map[string]Item, len(items))
+	byKey := make(map[itemKey]Item, len(items))
 	for _, item := range items {
-		byID[item.ID] = item
+		byKey[keyFor(item)] = item
 	}
 
 	candidates, err := s.searchFTSLadder(ctx, query)
@@ -62,38 +62,39 @@ func (s *service) Search(ctx context.Context, query string) ([]Item, error) {
 		item  Item
 		score float64
 	}
-	results := make(map[string]result, len(candidates))
+	results := make(map[itemKey]result, len(candidates))
 	qvec := Embed(query)
 	for rank, hit := range candidates {
-		item, ok := byID[hit.id]
+		item, ok := byKey[hit.key]
 		if !ok {
 			continue
 		}
 		item.Snippet = hit.snippet
-		byID[hit.id] = item
+		byKey[hit.key] = item
 		lexical := float64(len(candidates)-rank) / float64(len(candidates))
-		results[hit.id] = result{item: item, score: lexical + semWeight*cosine(qvec, vectors[hit.id])}
+		results[hit.key] = result{item: item, score: lexical + semWeight*cosine(qvec, vectors[hit.key])}
 	}
 	// Embedding fill: memories the lexical layer never saw but the
 	// semantics clearly match. This is the paraphrase and typo path.
 	if len(results) == 0 || len(results) < searchLimit {
-		filler := make([]string, 0, len(items))
+		filler := make([]itemKey, 0, len(items))
 		for _, item := range items {
-			if _, seen := results[item.ID]; seen {
+			key := keyFor(item)
+			if _, seen := results[key]; seen {
 				continue
 			}
-			if cosine(qvec, vectors[item.ID]) >= minFillCosine {
-				filler = append(filler, item.ID)
+			if cosine(qvec, vectors[key]) >= minFillCosine {
+				filler = append(filler, key)
 			}
 		}
-		slices.SortFunc(filler, func(a, b string) int {
+		slices.SortFunc(filler, func(a, b itemKey) int {
 			return cmp.Compare(cosine(qvec, vectors[b]), cosine(qvec, vectors[a]))
 		})
-		for _, id := range filler {
+		for _, key := range filler {
 			if len(results) >= searchLimit {
 				break
 			}
-			results[id] = result{item: byID[id], score: semWeight * cosine(qvec, vectors[id])}
+			results[key] = result{item: byKey[key], score: semWeight * cosine(qvec, vectors[key])}
 		}
 	}
 
@@ -103,7 +104,7 @@ func (s *service) Search(ctx context.Context, query string) ([]Item, error) {
 			if !ok {
 				continue
 			}
-			results[item.ID] = result{item: item, score: float64(res.Score)}
+			results[keyFor(item)] = result{item: item, score: float64(res.Score)}
 		}
 	}
 
@@ -115,7 +116,10 @@ func (s *service) Search(ctx context.Context, query string) ([]Item, error) {
 		if c := cmp.Compare(b.score, a.score); c != 0 {
 			return c
 		}
-		return cmp.Compare(a.item.ID, b.item.ID)
+		if c := cmp.Compare(a.item.ID, b.item.ID); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.item.Scope, b.item.Scope)
 	})
 	if len(ordered) > searchLimit {
 		ordered = ordered[:searchLimit]
@@ -127,21 +131,30 @@ func (s *service) Search(ctx context.Context, query string) ([]Item, error) {
 		r.item.UseCount++
 		r.item.LastUsedAt = now
 		items = append(items, r.item)
-		s.touch(ctx, r.item.ID)
+		s.touch(ctx, r.item.Scope, r.item.ID)
 	}
 	return items, nil
 }
 
-// listWithVectors loads every memory with its embedding, computing
-// embeddings on the fly for rows saved before they existed. Returned
+// itemKey identifies a memory among those a workspace sees: one id can
+// name a global memory and one of the repository.
+type itemKey struct {
+	scope Scope
+	id    string
+}
+
+func keyFor(item Item) itemKey { return itemKey{scope: item.Scope, id: item.ID} }
+
+// listWithVectors loads every visible memory with its embedding,
+// computing embeddings on the fly for rows that lack one. Returned
 // vectors are always unit vectors (zero vectors for empty text).
-func (s *service) listWithVectors(ctx context.Context) ([]Item, map[string][]float32, error) {
-	rows, err := s.q.ListMemories(ctx)
+func (s *service) listWithVectors(ctx context.Context) ([]Item, map[itemKey][]float32, error) {
+	rows, err := s.store.queries.ListVisibleMemories(ctx, s.repoKey)
 	if err != nil {
 		return nil, nil, err
 	}
 	items := make([]Item, 0, len(rows))
-	vectors := make(map[string][]float32, len(rows))
+	vectors := make(map[itemKey][]float32, len(rows))
 	for _, row := range rows {
 		vec := decodeEmbedding(row.Embedding)
 		if vec == nil {
@@ -149,14 +162,14 @@ func (s *service) listWithVectors(ctx context.Context) ([]Item, map[string][]flo
 		}
 		item := fromDB(row)
 		items = append(items, item)
-		vectors[item.ID] = vec
+		vectors[keyFor(item)] = vec
 	}
 	return items, vectors, nil
 }
 
 // ftsHit is one FTS5 candidate before fusion.
 type ftsHit struct {
-	id      string
+	key     itemKey
 	snippet string
 }
 
@@ -193,14 +206,15 @@ func (s *service) searchFTS(ctx context.Context, match string) ([]ftsHit, error)
 	if match == "" {
 		return nil, nil
 	}
-	const q = `SELECT m.id,
+	const q = `SELECT m.scope, m.id,
        snippet(memories_fts, 1, '', '', ' ... ', 12) AS snippet
 FROM memories m
 JOIN memories_fts ON memories_fts.rowid = m.rowid
 WHERE memories_fts MATCH ?
-ORDER BY bm25(memories_fts, 3.0, 1.0), m.id
+  AND (m.scope = 'global' OR (m.scope = 'repo' AND m.repo_key = ?))
+ORDER BY bm25(memories_fts, 3.0, 1.0), m.id, m.scope
 LIMIT ?`
-	rows, err := s.conn.QueryContext(ctx, q, match, ftsCandidates)
+	rows, err := s.store.reader.QueryContext(ctx, q, match, s.repoKey, ftsCandidates)
 	if err != nil {
 		return nil, fmt.Errorf("searching memories: %w", err)
 	}
@@ -208,7 +222,7 @@ LIMIT ?`
 	hits := make([]ftsHit, 0, ftsCandidates)
 	for rows.Next() {
 		var hit ftsHit
-		if err := rows.Scan(&hit.id, &hit.snippet); err != nil {
+		if err := rows.Scan(&hit.key.scope, &hit.key.id, &hit.snippet); err != nil {
 			return nil, err
 		}
 		hit.snippet = strings.TrimSpace(hit.snippet)

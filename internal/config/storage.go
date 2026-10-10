@@ -20,6 +20,24 @@ const workspacesDirName = "workspaces"
 // holds the shared model catalog cache.
 const catalogDirName = "catalog"
 
+// memoryDirName is the directory under the global data root that holds
+// the machine-wide memory store.
+const memoryDirName = "memory"
+
+// GlobalMemoryDir returns the directory holding the memory store. Memory
+// is shared by every workspace on the machine: global memories hold in
+// all of them, and a repository's memories in every clone and worktree
+// of it, which per-workspace databases could not offer.
+func GlobalMemoryDir() string {
+	return filepath.Join(filepath.Dir(GlobalConfigData()), memoryDirName)
+}
+
+// GlobalWorkspacesDir returns the directory holding one data directory
+// per workspace (see DefaultWorkspaceDataDirectory).
+func GlobalWorkspacesDir() string {
+	return filepath.Join(filepath.Dir(GlobalConfigData()), workspacesDirName)
+}
+
 // GlobalCatalogDir returns the directory holding the provider and model
 // catalog cache. The catalog describes the outside world, not a
 // project, so it is shared by every workspace on the machine: one
@@ -38,8 +56,7 @@ func GlobalCatalogDir() string {
 // Subdirectories of one repository share a single workspace directory,
 // matching the sharing the legacy in-repo .harness discovery provided.
 func DefaultWorkspaceDataDirectory(workingDir string) string {
-	root := filepath.Dir(GlobalConfigData())
-	return filepath.Join(root, workspacesDirName, workspaceDirName(projectBoundary(workingDir)))
+	return filepath.Join(GlobalWorkspacesDir(), workspaceDirName(projectBoundary(workingDir)))
 }
 
 // workspaceDirName derives a deterministic, filesystem-safe directory

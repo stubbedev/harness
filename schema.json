@@ -338,7 +338,7 @@
         "max_memories": {
           "type": "integer",
           "minimum": 1,
-          "description": "Maximum memories to keep. Beyond this the least-used unpinned memories are deleted",
+          "description": "Maximum memories to keep per scope (global and each repository). Beyond this the least-used unpinned memories of the scope are deleted",
           "default": 500,
           "examples": [
             100

@@ -6,18 +6,42 @@ Context files are static and user-owned; memory is dynamic and agent-owned.
 
 ## Storage
 
-Memories live in the workspace SQLite database (in the workspace data directory
-under the global data root, or your `options.data_directory`) in a `memories` table, alongside sessions. That gives
-per-project scoping and cross-session durability for free: a new session in the
-same workspace sees everything saved before. No markdown files are written into
-your repo, and nothing memory-related needs gitignoring.
+Memories live in one SQLite database shared by every workspace and every
+Harness process on the machine: `memory/memory.db` under the global data root
+(`~/.local/share/harness`, `$XDG_DATA_HOME/harness` or `$HARNESS_GLOBAL_DATA`).
+No markdown files are written into your repo, and nothing memory-related needs
+gitignoring.
+
+### Scopes
+
+Each memory has a scope:
+
+| Scope    | Seen from                                                         |
+| -------- | ----------------------------------------------------------------- |
+| `global` | Every workspace                                                   |
+| `repo`   | Every clone, worktree and subdirectory of one repository          |
+
+A new memory's scope follows its category unless the save names one: `user` and
+`feedback` memories are global, `project` and `reference` memories belong to the
+repository. The same title can exist once in each scope; a read, edit or delete
+that names no scope picks the repository's, and says so.
+
+A repository is identified by its upstream, not its path, so another clone, a
+worktree, or the same repository on another machine shares its memories. The
+key is the URL of the `origin` remote (else the first remote by name) reduced
+to host and path: `git@github.com:owner/repo.git`, `https://github.com/owner/repo`
+and `ssh://git@github.com/owner/repo` are all `github.com/owner/repo`. Scheme,
+user info, port and a trailing `.git` are dropped, and the path is lowercased
+for GitHub, GitLab and Bitbucket, which ignore its case. A repository without a
+remote is keyed by its root commit, and a directory outside any repository by
+its path.
 
 ## How it works
 
 1. **Prompt steering.** While memory is enabled, the coder system prompt carries a `# Memory` block telling the agent what is worth saving (user preferences, corrections, non-obvious project facts, decisions and their rationale, recurring patterns), to save the moment it learns something rather than batching to the end, and what to keep out (rediscoverable facts, secrets). The block renders even on an empty store, so a fresh workspace is steered from the first session.
-2. **Index injection.** The block also carries a compact index (one line per memory: id, category, title), refreshed at the start of every turn and bounded by `options.memory.index_budget` characters (default 4000). Saving or deleting a memory is reflected on the next turn.
+2. **Index injection.** The block also carries a compact index (one line per memory: category and title, global memories first, then the repository's), refreshed at the start of every turn and bounded by `options.memory.index_budget` characters (default 4000). Each scope is guaranteed half the budget, and the share one does not use goes to the other. Saving or deleting a memory is reflected on the next turn.
 3. **The `memory` tool.** The agent reads full notes on demand and maintains
-   the store via five actions: `save`, `read`, `search`, `list`, `delete`.
+   the store via six actions: `save`, `edit`, `read`, `search`, `list`, `delete`.
    Saving without an id upserts by title, so re-saving the same title updates
    the note instead of duplicating it.
 
@@ -32,9 +56,11 @@ your repo, and nothing memory-related needs gitignoring.
 
 ## Reaping
 
-The store is capped at `options.memory.max_memories` (default 500). When a save
-exceeds the cap, the least useful memories are deleted: lowest use count first,
-then least recently used, then oldest. Every `read` or `search` hit touches a
+Each scope is capped at `options.memory.max_memories` (default 500): the global
+memories, and each repository's. When a save exceeds its scope's cap, the least
+useful memories of that scope are deleted: lowest use count first, then least
+recently used, then oldest. A busy repository therefore never evicts global
+memories or another repository's. Every `read` or `search` hit touches a
 memory's usage counters. Pinned memories (`pinned: true` on save) are never
 reaped.
 
@@ -52,7 +78,7 @@ guarantee — never ask the agent to memorize credentials.
 By default only the orchestrator (coder agent) has the `memory` tool; the
 built-in `task` and `fast` sub-agents resolve to a subagent tool set that
 excludes it. A custom subagent definition can opt in by listing `memory` in its
-`tools` frontmatter; it then shares the workspace store with the orchestrator.
+`tools` frontmatter; it then shares the store with the orchestrator.
 
 ## Disabling
 

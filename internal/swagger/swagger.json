@@ -3705,7 +3705,7 @@
                     "type": "integer"
                 },
                 "max_memories": {
-                    "description": "MaxMemories caps how many memories are kept. When exceeded, the\nleast-used unpinned memories are reaped.",
+                    "description": "MaxMemories caps how many memories each scope keeps: the global\nones, and each repository's. When exceeded, the least-used\nunpinned memories of that scope are reaped.",
                     "type": "integer"
                 }
             }
