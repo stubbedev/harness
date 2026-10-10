@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -345,4 +346,32 @@ func TestPtyRunner_PromptHookKeepsGuard(t *testing.T) {
 	require.NotContains(t, res.Output, "aliased")
 	require.NotNil(t, res.ExitCode)
 	require.NotEqual(t, 0, *res.ExitCode)
+}
+
+// A prompt framework that rewrites the prompt from its own precmd hook at
+// every prompt - starship, powerlevel10k and themes all do - must not
+// take the marker away: commands keep completing on the marker, quickly,
+// rather than on the fallback detection.
+func TestPtyRunner_PromptFrameworkKeepsMarker(t *testing.T) {
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("no zsh on this machine")
+	}
+	rc := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(rc, ".zshrc"), []byte(
+		"fancy_prompt() { PROMPT='fancy> '; RPROMPT='[right]' }\nprecmd_functions+=(fancy_prompt)\n"), 0o644))
+	t.Setenv("ZDOTDIR", rc)
+	r := newRunnerWithShell(t, zsh)
+	require.Equal(t, ptyPromptRe, r.promptRe, "the setup's own prompt lost the marker")
+
+	for i := range 3 {
+		start := time.Now()
+		res, err := r.Type(t.Context(), fmt.Sprintf("echo round-%d", i), 10)
+		require.NoError(t, err)
+		require.NotNil(t, res.ExitCode)
+		require.Equal(t, 0, *res.ExitCode)
+		require.Contains(t, res.Output, fmt.Sprintf("round-%d", i))
+		require.NotContains(t, res.Output, "fancy>")
+		require.Less(t, time.Since(start), time.Second, "round %d waited on the fallback detection", i)
+	}
 }

@@ -75,16 +75,29 @@ const (
 // PROMPT_COMMAND is bash's; the definition the other shell ignores is
 // inert.
 //
+// The hook puts the prompt marker back at every prompt too. A prompt
+// framework (starship, powerlevel10k, a theme) rewrites PS1 from its own
+// precmd hook each time, and a prompt without the marker sends every
+// command to the fallback detection, seconds per command instead of
+// milliseconds. zsh runs the precmd function before the
+// precmd_functions array the frameworks hook into, so the hook also
+// keeps __harness_ps1 last in that array, where it runs after them; the
+// array syntax is behind eval so the shells that only parse this line
+// (dash, POSIX sh) never see it.
+//
 // The hook also re-asserts the session guard the sentinel carries (see
 // posixDialect): a command whose completion is read from this file has
 // no sentinel run after it, and the next command must still not inherit
 // aliases or history settings it brought back.
 const (
-	posixPromptFunc = `__harness_prompt() { __harness_rc=$?; [ -n "$HARNESS_PROMPT_STATE" ] || return 0; ` +
+	posixPromptFunc = `__harness_ps1() { PS1=$'\033]133;A\007'; RPS1=; RPROMPT=; }; ` +
+		`__harness_prompt() { __harness_rc=$?; __harness_ps1; [ -n "$HARNESS_PROMPT_STATE" ] || return 0; ` +
 		`__harness_seq=$((__harness_seq+1)); ` +
 		`printf '%s\t%s\t%s\n' "$__harness_seq" "$__harness_rc" "$PWD" > "$HARNESS_PROMPT_STATE" 2>/dev/null; ` +
 		`unalias -a 2>/dev/null; HISTFILE=/dev/null; }`
-	posixPromptHook = posixPromptFunc + `; precmd() { __harness_prompt; }; PROMPT_COMMAND=__harness_prompt`
+	posixPromptHook = posixPromptFunc + `; precmd() { __harness_prompt; ` +
+		`[ -n "$ZSH_VERSION" ] && eval 'precmd_functions=(${precmd_functions:#__harness_ps1} __harness_ps1)'; }; ` +
+		`PROMPT_COMMAND=__harness_prompt`
 )
 
 // posixDialect drives bash, zsh and the rest of the Bourne family.
