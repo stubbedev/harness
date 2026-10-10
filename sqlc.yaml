@@ -12,3 +12,15 @@ sql:
         emit_interface: true
         emit_exact_table_names: false
         emit_empty_slices: true
+  - engine: "sqlite"
+    schema: "internal/memory/memdb/migrations"
+    queries: "internal/memory/memdb/sql"
+    gen:
+      go:
+        package: "memdb"
+        out: "internal/memory/memdb"
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
