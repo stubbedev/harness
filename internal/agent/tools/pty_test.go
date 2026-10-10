@@ -1522,3 +1522,43 @@ func TestWaitingStreakStateMachine(t *testing.T) {
 	require.Zero(t, r.runningIdle.streak, "a reset ends the running streak with the session it belongs to")
 	r.mu.Unlock()
 }
+
+// PrewarmShell opens the session the shell tool's first call will use,
+// in the background, and a later prewarm reuses it.
+func TestPrewarmShellOpensDefaultSession(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh on this platform")
+	}
+	t.Setenv("SHELL", "/bin/sh")
+
+	ptyRunnersMu.Lock()
+	saved := ptyRunners
+	ptyRunners = map[string]*ptyRunner{}
+	ptyRunnersMu.Unlock()
+	t.Cleanup(func() {
+		ptyRunnersMu.Lock()
+		for _, r := range ptyRunners {
+			r.Close()
+		}
+		ptyRunners = saved
+		ptyRunnersMu.Unlock()
+	})
+
+	cwd := t.TempDir()
+	PrewarmShell(cwd, "coder", "session-1", nil)
+	name, err := sessionName("")
+	require.NoError(t, err)
+	key := runnerKey(shellOwner("coder", "session-1"), name)
+	ptyRunnersMu.Lock()
+	r := ptyRunners[key]
+	ptyRunnersMu.Unlock()
+	require.NotNil(t, r, "prewarm did not create the default session's runner")
+	require.Eventually(t, func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.session != nil && r.session.Alive()
+	}, 10*time.Second, 10*time.Millisecond, "the prewarmed shell never opened")
+
+	PrewarmShell(cwd, "coder", "session-1", nil)
+	require.Same(t, r, ptyRunnerFor("coder", "session-1", name, cwd, nil), "a second prewarm opened another runner")
+}

@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/fantasy"
@@ -134,6 +135,11 @@ type coordinator struct {
 
 	currentAgent SessionAgent
 	agents       map[string]SessionAgent
+
+	// shellPrewarm opens the top-level agent's shell for a session ahead
+	// of its first command; nil when that agent has no shell tool (see
+	// buildTools and run).
+	shellPrewarm atomic.Pointer[func(sessionID string)]
 
 	// Skills discovery. skillsMgr is the live source of truth (its snapshot
 	// changes when the skills Library reloads); allSkills/activeSkills are the
@@ -457,6 +463,12 @@ func (c *coordinator) RunAccepted(ctx context.Context, accept *AcceptedRun, sess
 func (c *coordinator) run(ctx context.Context, accept *AcceptedRun, sessionID string, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error) {
 	if err := c.Warmup(ctx); err != nil {
 		return nil, err
+	}
+	// The shell starts while the model reads the prompt: a first command
+	// otherwise waits out the shell's whole startup, rc files and all,
+	// after the model has already decided to run it.
+	if prewarm := c.shellPrewarm.Load(); prewarm != nil {
+		(*prewarm)(sessionID)
 	}
 
 	model := c.currentAgent.Model()
@@ -1211,6 +1223,15 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 		if slices.Contains(agent.AllowedTools, tool.Info().Name) {
 			filteredTools = append(filteredTools, tool)
 		}
+	}
+	if !isSubAgent {
+		var prewarm *func(string)
+		if slices.ContainsFunc(filteredTools, func(t fantasy.AgentTool) bool { return t.Info().Name == tools.ShellToolName }) {
+			workingDir, agentID := store.WorkingDir(), agent.ID
+			f := func(sessionID string) { tools.PrewarmShell(workingDir, agentID, sessionID, c.questions) }
+			prewarm = &f
+		}
+		c.shellPrewarm.Store(prewarm)
 	}
 
 	// Tool search: servers whose tools are defer-loaded are hidden

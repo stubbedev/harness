@@ -458,6 +458,19 @@ func normalizeWorkingDir(path string) string {
 // ShellAvailable reports whether a shell could be identified to run a
 // terminal session in. Callers assembling a tool set use it to leave
 // the shell tool out rather than advertising one that cannot open.
+// PrewarmShell opens the default terminal session the shell tool will
+// use for owner's calls in sessionID, if it is not open already, without
+// waiting for it: the shell's startup then overlaps whatever comes before
+// the first command instead of delaying it. It is a no-op when no shell
+// can be identified.
+func PrewarmShell(workingDir, owner, sessionID string, questions question.Service) {
+	if !ShellAvailable() {
+		return
+	}
+	name, _ := sessionName("")
+	ptyRunnerFor(owner, sessionID, name, workingDir, questions)
+}
+
 func ShellAvailable() bool {
 	_, ok := term.Shell()
 	return ok
