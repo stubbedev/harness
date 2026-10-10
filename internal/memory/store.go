@@ -53,7 +53,7 @@ func OpenStore(ctx context.Context, dir string) (*Store, error) {
 	release := lockStore(ctx, dir)
 	defer release()
 
-	path := filepath.Join(dir, storeFile)
+	path := StorePath(dir)
 	conn, err := db.ConnectFile(ctx, path, memdb.Migrations())
 	if err != nil {
 		return nil, fmt.Errorf("opening memory store: %w", err)
@@ -66,6 +66,11 @@ func OpenStore(ctx context.Context, dir string) (*Store, error) {
 		queries: memdb.New(routed),
 		reader:  routed,
 	}, nil
+}
+
+// StorePath returns the database file of the store kept in dir.
+func StorePath(dir string) string {
+	return filepath.Join(dir, storeFile)
 }
 
 // lockStore takes the cross-process lock that serializes opening the

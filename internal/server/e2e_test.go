@@ -18,7 +18,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/backend"
+	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/db"
+	"github.com/stubbedev/harness/internal/memory"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
@@ -348,11 +350,14 @@ func TestE2E_TwoClientsReceiveSameMessage(t *testing.T) {
 	// Override the shutdown callback so test cleanup doesn't run
 	// the full app.Shutdown path (which would tear down LSP/MCP
 	// resources the test doesn't need to exercise), but still
-	// release the pooled DB connection so Windows can clean up
-	// the temp data directory.
+	// release the pooled DB connections - the workspace's and the
+	// machine-wide memory store's - so Windows can clean up the temp
+	// data directories.
 	wsDataDir := ws.Cfg.Config().Options.DataDirectory
+	memoryDB := memory.StorePath(config.GlobalMemoryDir())
 	backend.SetWorkspaceShutdownFnForTest(ws, func() {
 		_ = db.Release(wsDataDir)
+		_ = db.ReleaseFile(memoryDB)
 	})
 
 	evcA, cancelA := h.subscribeSSE(t, ctx, ws.ID, cidA)
