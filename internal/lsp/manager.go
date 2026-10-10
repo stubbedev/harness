@@ -330,6 +330,10 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 		slog.Error("Failed to create LSP client", "name", name, "error", err)
 		return
 	}
+	// A server that dies under the client - crashed, or killed in its
+	// scope for running out of memory - puts it in StateError; observers
+	// hear of it like any other state change.
+	client.onDead = func() { s.callback(name, client) }
 	// A stored client here is dead (error or stopped); shut it down
 	// before replacing it so a restart never orphans its process.
 	if existing, ok := s.clients.Get(name); ok {

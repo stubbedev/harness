@@ -24,6 +24,7 @@ import (
 	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/oauth"
 	mcpoauth "github.com/stubbedev/harness/internal/oauth/mcp"
+	"github.com/stubbedev/harness/internal/procscope"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/version"
 	"golang.org/x/oauth2"
@@ -53,14 +54,20 @@ type ClientSession struct {
 	*mcp.ClientSession
 	cancel       context.CancelFunc
 	oauthHandler *mcpoauth.Handler
+	// scope is the systemd scope a stdio server runs in, nil for a
+	// remote server or one run uncontained (see scopedTransport).
+	scope *procscope.Scope
 }
 
 // Close cancels the session context and then closes the underlying session.
+// A stdio server's scope is killed last, so nothing the server started
+// outlives the session, even after the server itself has died.
 func (s *ClientSession) Close() error {
 	s.cancel()
 	if s.oauthHandler != nil {
 		s.oauthHandler.Close()
 	}
+	defer s.scope.Kill()
 	return s.ClientSession.Close()
 }
 
@@ -1060,6 +1067,14 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 		}
 	}
 
+	// A stdio server runs in a scope of its own, so the kernel killing it
+	// for running out of memory leaves Harness standing.
+	var scoped *scopedTransport
+	if ct, ok := transport.(*mcp.CommandTransport); ok {
+		scoped = newScopedTransport(name, ct)
+		transport = scoped
+	}
+
 	// Wrap the transport so channel notifications can be intercepted. The
 	// gate starts undecided: notifications that arrive during capability
 	// negotiation are buffered. After Connect resolves, the gate is opened
@@ -1145,10 +1160,15 @@ func createSession(ctx context.Context, cfg *config.ConfigStore, name string, m 
 		channelGate.resolve(false)
 	}
 
+	var scope *procscope.Scope
+	if scoped != nil {
+		scope = scoped.serverScope()
+	}
 	return &ClientSession{
 		ClientSession: session,
 		cancel:        cancel,
 		oauthHandler:  oauthHandler,
+		scope:         scope,
 	}, nil
 }
 
@@ -1468,7 +1488,10 @@ func stdioCheck(old *exec.Cmd) error {
 	if len(args) > 0 {
 		args = args[1:]
 	}
-	cmd := exec.CommandContext(ctx, old.Path, args...)
+	// The re-run is contained like the server it stands in for.
+	name, argv, scope := procscope.Servers.Command("mcp-check", old.Path, args)
+	defer scope.Kill()
+	cmd := exec.CommandContext(ctx, name, argv...)
 	cmd.Env = old.Env
 	out, err := cmd.CombinedOutput()
 	if err == nil || errors.Is(ctx.Err(), context.DeadlineExceeded) {

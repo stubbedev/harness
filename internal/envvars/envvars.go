@@ -68,6 +68,11 @@ const (
 	// "infinity" keeps the session's scope without a cap and "off" runs
 	// shells without one (Linux with a systemd user manager only).
 	ShellMemoryMax = "HARNESS_SHELL_MEMORY_MAX"
+	// LSPMCPMemoryMax caps the memory each language server and stdio MCP
+	// server may hold, as systemd's MemoryMax reads it (default 50% of
+	// RAM); "infinity" keeps each server's scope without a cap and "off"
+	// runs servers without one (Linux with a systemd user manager only).
+	LSPMCPMemoryMax = "HARNESS_LSP_MCP_MEMORY_MAX"
 )
 
 // The client/server split.
@@ -101,6 +106,7 @@ func All() []string {
 		DisableProviderAutoUpdate, DisableDefaultProviders,
 		DisableAnthropicCache, DisablePromptCacheKey,
 		CoreUtils, PTYRows, PTYCols, PTYTerm, PromptStateFile, ShellMemoryMax,
+		LSPMCPMemoryMax,
 		ClientServer, ServerIdleTimeout, ServerDetachGrace, ServerReadyTimeout,
 		Profile, UIDebug,
 	}

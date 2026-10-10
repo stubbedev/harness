@@ -3,22 +3,27 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/charmbracelet/x/powernap/pkg/transport"
+	"github.com/sourcegraph/jsonrpc2"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/home"
+	"github.com/stubbedev/harness/internal/procscope"
 )
 
 // DiagnosticCounts holds the count of diagnostics by severity.
@@ -32,9 +37,16 @@ type DiagnosticCounts struct {
 type Client struct {
 	// conn is the powernap connection. Restart swaps it while other
 	// goroutines are mid-request, so it is only reached through pn.
-	conn  atomic.Pointer[powernap.Client]
-	name  string
-	debug bool
+	conn atomic.Pointer[powernap.Client]
+	// scope is the systemd scope the server behind conn runs in, nil
+	// when servers run uncontained (see procscope.Servers). It is
+	// swapped with conn.
+	scope atomic.Pointer[procscope.Scope]
+	// closing is the connection Close, Kill or Shutdown is taking down;
+	// a request failing on it is no sign the server died on its own.
+	closing atomic.Pointer[powernap.Client]
+	name    string
+	debug   bool
 
 	// Working directory this LSP is scoped to.
 	cwd string
@@ -70,6 +82,11 @@ type Client struct {
 
 	// Server state, a ServerState.
 	serverState atomic.Int32
+
+	// onDead is told when the server is found to have died under a live
+	// client (see noteConnErr), so the state change reaches observers.
+	// It is set before the client is shared and never changed.
+	onDead func()
 }
 
 // pn returns the current powernap connection.
@@ -148,6 +165,7 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 	if err := c.pn().Initialize(ctx, false); err != nil {
 		return nil, fmt.Errorf("failed to initialize the lsp client: %w", err)
 	}
+	c.raiseOOMScore()
 
 	// Convert powernap capabilities to protocol capabilities
 	caps := c.pn().GetCapabilities()
@@ -176,14 +194,20 @@ func (c *Client) Initialize(ctx context.Context, workspaceDir string) (*protocol
 const closeTimeout = 5 * time.Second
 
 // Kill kills the client without doing anything else.
-func (c *Client) Kill() { c.pn().Kill() }
+func (c *Client) Kill() {
+	c.closing.Store(c.pn())
+	c.pn().Kill()
+	c.scope.Load().Kill()
+}
 
 // Shutdown permanently cancels the client's long-lived context and kills the
 // underlying process. Unlike Restart, this is terminal: the client cannot be
 // reused after Shutdown.
 func (c *Client) Shutdown() {
+	c.closing.Store(c.pn())
 	c.cancelLife()
 	c.pn().Kill()
+	c.scope.Load().Kill()
 }
 
 // GetOffsetEncoding returns the negotiated offset encoding for this client.
@@ -194,6 +218,11 @@ func (c *Client) GetOffsetEncoding() powernap.OffsetEncoding {
 // Close closes all open files in the client, then shuts down gracefully.
 // If shutdown takes longer than closeTimeout, it falls back to Kill().
 func (c *Client) Close(ctx context.Context) error {
+	// Whichever way the server goes, whatever it started goes with it: a
+	// process that left the server's process group is still in its scope.
+	defer c.scope.Load().Kill()
+	c.closing.Store(c.pn())
+
 	c.CloseAllFiles(ctx)
 
 	// Use a timeout to prevent hanging on unresponsive LSP servers.
@@ -238,9 +267,15 @@ func (c *Client) createPowernapClient() error {
 		return fmt.Errorf("invalid lsp env: %w", err)
 	}
 
+	// The server is put in a scope of its own at the last moment, so
+	// everything that reads the configured command - auto-start checks,
+	// logs, the UI - still sees the server rather than systemd-run.
+	command = home.Long(command)
+	spawn, spawnArgs, scope := procscope.Servers.Command("lsp-"+c.name, command, args)
+
 	clientConfig := powernap.ClientConfig{
-		Command:     home.Long(command),
-		Args:        args,
+		Command:     spawn,
+		Args:        spawnArgs,
 		RootURI:     rootURI,
 		Environment: envs,
 		Settings:    c.config.Options,
@@ -255,11 +290,64 @@ func (c *Client) createPowernapClient() error {
 
 	powernapClient, err := powernap.NewClient(clientConfig)
 	if err != nil {
+		scope.Kill()
 		return fmt.Errorf("failed to create lsp client: %w", err)
 	}
+	// powernap names the client after the program it ran, and Initialize
+	// sends gopls its extra setup when that name says gopls: it must name
+	// the server, not systemd-run.
+	powernapClient.ID, powernapClient.Name = command, command
 
 	c.conn.Store(powernapClient)
+	c.scope.Store(scope)
 	return nil
+}
+
+// raiseOOMScore raises the oom_score_adj of the server's processes once
+// it is up (see procscope.OOMScoreAdj). powernap never hands out the
+// server's pid, so they are found through the scope.
+func (c *Client) raiseOOMScore() { c.scope.Load().RaiseOOMScore() }
+
+// noteConnErr marks the client failed when err says the server behind
+// conn is gone: it exited, crashed or was killed for running out of
+// memory. Nothing else would notice - the connection reports itself
+// running until it is closed from this side - so without this a dead
+// server would stay "ready" and never be started again. In StateError
+// the next file that needs the server starts a fresh one.
+//
+// Only a live client on its current connection is marked: an error from
+// a connection Restart or Close is replacing, or from one deliberately
+// shut down, is not news.
+func (c *Client) noteConnErr(conn *powernap.Client, err error) {
+	if !isConnGone(err) || conn == nil || c.conn.Load() != conn || c.closing.Load() == conn {
+		return
+	}
+	if ctx := c.lifeContext(); ctx == nil || ctx.Err() != nil {
+		return
+	}
+	if !c.serverState.CompareAndSwap(int32(StateReady), int32(StateError)) &&
+		!c.serverState.CompareAndSwap(int32(StateStarting), int32(StateError)) {
+		return
+	}
+	if kills, ok := c.scope.Load().OOMKills(); ok && kills > 0 {
+		slog.Warn("LSP server was killed for running out of memory", "name", c.name, "oom_kills", kills)
+	} else {
+		slog.Warn("LSP server is gone", "name", c.name, "error", err)
+	}
+	if c.onDead != nil {
+		c.onDead()
+	}
+}
+
+// isConnGone reports whether err is the server's end of the connection
+// having gone away rather than the server refusing one request.
+func isConnGone(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, jsonrpc2.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) ||
+		strings.Contains(err.Error(), "connection is closed")
 }
 
 // registerHandlers registers the standard LSP notification and request handlers.
@@ -326,6 +414,7 @@ func (c *Client) Restart() error {
 		c.SetServerState(StateError)
 		return fmt.Errorf("failed to initialize lsp client: %w", err)
 	}
+	c.raiseOOMScore()
 
 	if err := c.WaitForServerReady(initCtx); err != nil {
 		slog.Error("Server failed to become ready after restart", "name", c.name, "error", err)
@@ -468,7 +557,9 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	}
 
 	// Notify the server about the opened document
-	if err = c.pn().NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content)); err != nil {
+	if err = c.notify(func(pn *powernap.Client) error {
+		return pn.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content))
+	}); err != nil {
 		return err
 	}
 
@@ -509,7 +600,9 @@ func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
 		},
 	}
 
-	return c.pn().NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes)
+	return c.notify(func(pn *powernap.Client) error {
+		return pn.NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes)
+	})
 }
 
 // IsFileOpen checks if a file is currently open.
@@ -640,8 +733,10 @@ func (c *Client) NotifyWorkspaceChange(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
-	return c.pn().NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
-		{URI: protocol.URIFromPath(c.cwd), Type: protocol.Changed},
+	return c.notify(func(pn *powernap.Client) error {
+		return pn.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
+			{URI: protocol.URIFromPath(c.cwd), Type: protocol.Changed},
+		})
 	})
 }
 
@@ -671,7 +766,9 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 				},
 			},
 		}
-		if err := c.pn().NotifyDidChangeTextDocument(ctx, uri, int(info.Version), changes); err != nil {
+		if err := c.notify(func(pn *powernap.Client) error {
+			return pn.NotifyDidChangeTextDocument(ctx, uri, int(info.Version), changes)
+		}); err != nil {
 			slog.Warn("Failed to notify file change", "uri", uri, "error", err)
 		}
 	}
@@ -775,7 +872,9 @@ func (c *Client) FindReferences(ctx context.Context, filepath string, line, char
 
 	// NOTE: line and character should be 0-based.
 	// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position
-	return c.pn().FindReferences(ctx, filepath, line-1, character-1, includeDeclaration)
+	return request(c, func(pn *powernap.Client) ([]protocol.Location, error) {
+		return pn.FindReferences(ctx, filepath, line-1, character-1, includeDeclaration) //nolint:wrapcheck
+	})
 }
 
 // Rename renames the symbol at the given position across all files.
@@ -787,7 +886,9 @@ func (c *Client) Rename(ctx context.Context, filepath string, line, character in
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.pn().RequestRename(ctx, filepath, line-1, character-1, newName) //nolint:wrapcheck
+	return request(c, func(pn *powernap.Client) (*protocol.WorkspaceEdit, error) {
+		return pn.RequestRename(ctx, filepath, line-1, character-1, newName) //nolint:wrapcheck
+	})
 }
 
 // DocumentSymbols returns the document symbols for the given file.
@@ -799,7 +900,9 @@ func (c *Client) DocumentSymbols(ctx context.Context, filepath string) ([]protoc
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.pn().RequestDocumentSymbols(ctx, filepath) //nolint:wrapcheck
+	return request(c, func(pn *powernap.Client) ([]protocol.DocumentSymbolResult, error) {
+		return pn.RequestDocumentSymbols(ctx, filepath) //nolint:wrapcheck
+	})
 }
 
 // Definition finds the definition of the symbol at the given position.
@@ -811,7 +914,9 @@ func (c *Client) Definition(ctx context.Context, filepath string, line, characte
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.pn().RequestDefinition(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+	return request(c, func(pn *powernap.Client) ([]protocol.Location, error) {
+		return pn.RequestDefinition(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+	})
 }
 
 // PrepareCallHierarchy prepares a call hierarchy item at the given position.
@@ -823,7 +928,9 @@ func (c *Client) PrepareCallHierarchy(ctx context.Context, filepath string, line
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	return c.pn().PrepareCallHierarchy(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+	return request(c, func(pn *powernap.Client) ([]protocol.CallHierarchyItem, error) {
+		return pn.PrepareCallHierarchy(ctx, filepath, line-1, character-1) //nolint:wrapcheck
+	})
 }
 
 // IncomingCalls returns all callers of the given call hierarchy item.
@@ -831,7 +938,9 @@ func (c *Client) IncomingCalls(ctx context.Context, item protocol.CallHierarchyI
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.pn().IncomingCalls(ctx, item) //nolint:wrapcheck
+	return request(c, func(pn *powernap.Client) ([]protocol.CallHierarchyIncomingCall, error) {
+		return pn.IncomingCalls(ctx, item) //nolint:wrapcheck
+	})
 }
 
 // OutgoingCalls returns all callees of the given call hierarchy item.
@@ -839,5 +948,25 @@ func (c *Client) OutgoingCalls(ctx context.Context, item protocol.CallHierarchyI
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	return c.pn().OutgoingCalls(ctx, item) //nolint:wrapcheck
+	return request(c, func(pn *powernap.Client) ([]protocol.CallHierarchyOutgoingCall, error) {
+		return pn.OutgoingCalls(ctx, item) //nolint:wrapcheck
+	})
+}
+
+// notify sends a notification on the current connection, noting a
+// server found gone (see noteConnErr).
+func (c *Client) notify(send func(*powernap.Client) error) error {
+	conn := c.pn()
+	err := send(conn)
+	c.noteConnErr(conn, err)
+	return err
+}
+
+// request makes a request on the client's current connection, noting a
+// server found gone (see noteConnErr).
+func request[T any](c *Client, call func(*powernap.Client) (T, error)) (T, error) {
+	conn := c.pn()
+	v, err := call(conn)
+	c.noteConnErr(conn, err)
+	return v, err
 }
