@@ -53,12 +53,17 @@ const (
 )
 
 type Broker[T any] struct {
-	subs                 map[chan Event[T]]struct{}
-	mu                   sync.RWMutex
-	done                 chan struct{}
-	channelBufferSize    int
-	mustDeliverTimeout   time.Duration
-	dropCount            atomic.Uint64
+	subs               map[chan Event[T]]struct{}
+	mu                 sync.RWMutex
+	done               chan struct{}
+	channelBufferSize  int
+	mustDeliverTimeout time.Duration
+	dropCount          atomic.Uint64
+	// dropLoggedAt and dropLoggedCount are when the last drop warning
+	// was written and dropCount as of then: a saturated subscriber drops
+	// thousands of events a second, and one line per drop buries the log.
+	dropLoggedAt         atomic.Int64
+	dropLoggedCount      atomic.Uint64
 	mustDeliverDropCount atomic.Uint64
 }
 
@@ -194,10 +199,27 @@ func (b *Broker[T]) Publish(t EventType, payload T) {
 			// Channel is full, subscriber is slow — skip this event.
 			// Lossy by design; counted and logged so saturation is
 			// observable.
-			b.dropCount.Add(1)
-			slog.Warn("Pubsub buffer full; dropping event", "type", t)
+			b.logDrop(t, b.dropCount.Add(1))
 		}
 	}
+}
+
+// dropLogInterval is the least time between two drop warnings.
+const dropLogInterval = time.Second
+
+// logDrop warns about dropped events at most once per dropLogInterval,
+// with the number dropped since the last warning.
+func (b *Broker[T]) logDrop(t EventType, total uint64) {
+	now := time.Now().UnixNano()
+	last := b.dropLoggedAt.Load()
+	if last != 0 && now-last < int64(dropLogInterval) {
+		return
+	}
+	if !b.dropLoggedAt.CompareAndSwap(last, now) {
+		return
+	}
+	dropped := total - b.dropLoggedCount.Swap(total)
+	slog.Warn("Pubsub buffer full; dropping events", "type", t, "dropped", dropped)
 }
 
 // PublishMustDeliver delivers an event with bounded-blocking semantics.
