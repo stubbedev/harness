@@ -202,12 +202,19 @@ func TestIndexRespectsBudget(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, strings.Split(full, "\n"), 4, "a heading and three lines")
 
-	// Fits the heading and "- (project) alpha" but not the second line
-	// plus its newline separator.
+	// Fits the heading and one entry but not a second plus its newline
+	// separator. Which entry comes first depends on the saves' update
+	// times, one-second stamps that a slow run can split, so only the
+	// count is asserted.
 	tight, err := svc.Index(t.Context(), len("This repository:")+len("- (project) alpha")+len("- (project) beta"))
 	require.NoError(t, err)
-	require.Contains(t, tight, "alpha")
-	require.NotContains(t, tight, "gamma")
+	entries := 0
+	for line := range strings.SplitSeq(tight, "\n") {
+		if strings.HasPrefix(line, "- (project) ") {
+			entries++
+		}
+	}
+	require.Equal(t, 1, entries, "exactly one entry fits: %q", tight)
 	require.Contains(t, tight, "(+2 more")
 }
 
