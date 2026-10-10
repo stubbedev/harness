@@ -51,6 +51,17 @@ type Service interface {
 	pubsub.Subscriber[Message]
 	Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error)
 	Update(ctx context.Context, message Message) error
+	// UpdateBuffered is [Service.Update] for structural changes that
+	// arrive in a burst, such as the tool calls fantasy reports one after
+	// another once a stream has ended. Subscribers see message at once,
+	// on the must-deliver path a terminal Update takes, but the SQL
+	// write is coalesced with the rest of the burst: it lands on the
+	// debounce tick, on the next synchronous Update or Flush of the
+	// message, or ahead of the next [Service.Create] in its session,
+	// whichever comes first. The last rule is what keeps a row that
+	// refers to the message, such as the result of one of its tool
+	// calls, from reaching the database before the message does.
+	UpdateBuffered(ctx context.Context, message Message) error
 	Get(ctx context.Context, id string) (Message, error)
 	List(ctx context.Context, sessionID string) ([]Message, error)
 	// ListFrom lists the session's messages from the one with fromID on,
@@ -120,6 +131,31 @@ type pendingState struct {
 	// ID; until then baseline is the zero value and must not be
 	// treated as a real prior state.
 	hasFlushed bool
+
+	// sessionID is the session the message belongs to, so Create can
+	// find the buffered writes it must not overtake.
+	sessionID string
+
+	// seq numbers the snapshots accepted for this ID; latest is
+	// snapshot seq.
+	seq uint64
+
+	// bufferedSeq is the newest snapshot accepted by UpdateBuffered and
+	// writtenSeq the newest one written to SQL. A buffered write is
+	// outstanding while bufferedSeq is ahead of writtenSeq.
+	bufferedSeq uint64
+	writtenSeq  uint64
+
+	// publishedSeq is the newest snapshot handed to subscribers. A
+	// publish of an older one is skipped, so a flush that lands after
+	// UpdateBuffered published a newer state never steps subscribers
+	// back to the state it wrote.
+	publishedSeq uint64
+
+	// publishMu serializes publishing for this ID, so the check against
+	// publishedSeq and the publish it allows happen as one step. It is
+	// never taken while service.mu is held.
+	publishMu sync.Mutex
 }
 
 // flushBaseline is the compact projection of a flushed [Message] that
@@ -242,6 +278,12 @@ func (s *service) DeleteFrom(ctx context.Context, sessionID, fromID string) ([]M
 }
 
 func (s *service) Create(ctx context.Context, sessionID string, params CreateMessageParams) (Message, error) {
+	// A buffered update goes to SQL ahead of the new row: a tool result
+	// must never be stored before the assistant message holding its
+	// call, or a crash in between leaves a result with no call.
+	if err := s.flushBuffered(ctx, sessionID); err != nil {
+		return Message{}, err
+	}
 	if params.Role != Assistant {
 		params.Parts = append(params.Parts, Finish{
 			Reason: "stop",
@@ -289,25 +331,13 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 	// that explicitly opted out via [WithDebounce].
 	if s.debounce <= 0 {
 		s.mu.Lock()
-		p, ok := s.pending[msg.ID]
-		if !ok {
-			p = &pendingState{}
-			s.pending[msg.ID] = p
-		}
-		p.latest = cloned
-		p.dirty = true
+		s.acceptLocked(cloned)
 		s.mu.Unlock()
 		return s.flushOne(ctx, msg.ID, true)
 	}
 
 	s.mu.Lock()
-	p, ok := s.pending[msg.ID]
-	if !ok {
-		p = &pendingState{}
-		s.pending[msg.ID] = p
-	}
-	p.latest = cloned
-	p.dirty = true
+	p := s.acceptLocked(cloned)
 
 	var prev *flushBaseline
 	if p.hasFlushed {
@@ -324,19 +354,96 @@ func (s *service) Update(ctx context.Context, msg Message) error {
 		return s.flushOne(ctx, msg.ID, true)
 	}
 
-	// Debounce: schedule a single flush per pending state. If a flush
-	// is already running we let it finish; the trailing dirty bit will
-	// be picked up by the next Update or by Flush.
-	if p.timer == nil && !p.flushing {
-		id := msg.ID
-		p.timer = time.AfterFunc(s.debounce, func() {
-			// Detached from caller ctx so a cancelled stream context
-			// does not strand the buffered write.
-			_ = s.flushOne(context.Background(), id, false)
-		})
-	}
+	s.scheduleLocked(msg.ID, p)
 	s.mu.Unlock()
 	return nil
+}
+
+// UpdateBuffered implements [Service.UpdateBuffered].
+func (s *service) UpdateBuffered(ctx context.Context, msg Message) error {
+	if s.debounce <= 0 {
+		return s.Update(ctx, msg)
+	}
+	cloned := msg.Clone()
+	s.mu.Lock()
+	p := s.acceptLocked(cloned)
+	p.bufferedSeq = p.seq
+	seq := p.seq
+	s.scheduleLocked(msg.ID, p)
+	s.mu.Unlock()
+	s.publish(ctx, p, cloned, seq, true)
+	return nil
+}
+
+// acceptLocked records msg as the latest state of its ID and returns
+// the pending state holding it. Caller holds s.mu.
+func (s *service) acceptLocked(msg Message) *pendingState {
+	p, ok := s.pending[msg.ID]
+	if !ok {
+		p = &pendingState{}
+		s.pending[msg.ID] = p
+	}
+	p.latest = msg
+	p.dirty = true
+	p.sessionID = msg.SessionID
+	p.seq++
+	return p
+}
+
+// scheduleLocked arms one debounce flush for id, unless one is armed or
+// a flush is running: a running flush picks the trailing dirty bit up
+// itself, a sync flusher by looping and a timer-fired one by arming a
+// timer on its way out. Caller holds s.mu.
+func (s *service) scheduleLocked(id string, p *pendingState) {
+	if p.timer != nil || p.flushing {
+		return
+	}
+	p.timer = time.AfterFunc(s.debounce, func() {
+		// Detached from caller ctx so a cancelled stream context does
+		// not strand the buffered write.
+		_ = s.flushOne(context.Background(), id, false)
+	})
+}
+
+// flushBuffered writes every buffered update of the session's messages
+// that has not reached SQL yet. Create runs it first, so a new row never
+// lands ahead of a message state it may refer to.
+func (s *service) flushBuffered(ctx context.Context, sessionID string) error {
+	s.mu.Lock()
+	var ids []string
+	for id, p := range s.pending {
+		if p.sessionID == sessionID && p.bufferedSeq > p.writtenSeq {
+			ids = append(ids, id)
+		}
+	}
+	s.mu.Unlock()
+	for _, id := range ids {
+		if err := s.flushOne(ctx, id, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// publish hands snapshot seq of p to subscribers unless a newer one was
+// published already, on the must-deliver path when mustDeliver is set.
+func (s *service) publish(ctx context.Context, p *pendingState, msg Message, seq uint64, mustDeliver bool) {
+	p.publishMu.Lock()
+	defer p.publishMu.Unlock()
+	s.mu.Lock()
+	stale := seq <= p.publishedSeq
+	if !stale {
+		p.publishedSeq = seq
+	}
+	s.mu.Unlock()
+	if stale {
+		return
+	}
+	if mustDeliver {
+		s.PublishMustDeliver(ctx, pubsub.UpdatedEvent, msg)
+	} else {
+		s.Publish(pubsub.UpdatedEvent, msg)
+	}
 }
 
 // Flush implements [Service.Flush].
@@ -407,6 +514,7 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 			p.timer = nil
 		}
 		snap := p.latest
+		snapSeq := p.seq
 		// Decide whether this snapshot represents a terminal event
 		// against the prior baseline. We must do this before resetting
 		// dirty/flushing because shouldFlushNow looks at p.baseline
@@ -427,6 +535,7 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 		if err == nil {
 			p.baseline = newFlushBaseline(&snap)
 			p.hasFlushed = true
+			p.writtenSeq = snapSeq
 		} else {
 			// Restore dirty so the next caller retries.
 			p.dirty = true
@@ -444,6 +553,12 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 			} else {
 				p.latest = Message{}
 			}
+		} else if !syncCaller && err == nil {
+			// State accepted during a timer-fired write gets a timer of
+			// its own rather than waiting on a caller that may never
+			// come. A failed write is left to the next caller instead
+			// of retrying on a loop.
+			s.scheduleLocked(id, p)
 		}
 		s.mu.Unlock()
 
@@ -453,12 +568,10 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 
 		// Terminal events — message finished, tool call added or
 		// finished, reasoning ended — use the bounded must-deliver
-		// path so they never get dropped under channel contention.
-		if isTerminal {
-			s.PublishMustDeliver(ctx, pubsub.UpdatedEvent, snap)
-		} else {
-			s.Publish(pubsub.UpdatedEvent, snap)
-		}
+		// path so they never get dropped under channel contention. A
+		// snapshot older than one UpdateBuffered already published is
+		// not published again.
+		s.publish(ctx, p, snap, snapSeq, isTerminal)
 
 		if wasDirty && syncCaller {
 			continue

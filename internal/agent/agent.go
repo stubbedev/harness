@@ -1613,9 +1613,13 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				MCPServer:        a.mcpServerOf(toolName),
 			}
 			currentAssistant.AddToolCall(toolCall)
-			// Use parent ctx instead of genCtx to ensure the update succeeds
-			// even if the request is canceled mid-stream
-			return a.messages.Update(ctx, *currentAssistant)
+			// Buffered, like the OnToolCall burst below: the transcript
+			// shows the call at once, and its write folds into the
+			// debounced one the input deltas take instead of storing the
+			// whole message again for every call the model opens. Use
+			// parent ctx instead of genCtx to ensure the update succeeds
+			// even if the request is canceled mid-stream.
+			return a.messages.UpdateBuffered(ctx, *currentAssistant)
 		},
 		// The input arrives in pieces; each one lands on the stored call
 		// so the transcript can show the command or path as it is typed,
@@ -1680,9 +1684,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// The execution state locks itself; holding sessionLock over
 			// it too only made the other callbacks wait on it.
 			execution.Ingest([]message.Message{{Parts: []message.ContentPart{toolCall}}})
+			// Fantasy runs OnToolCall for every call of the batch before it
+			// dispatches any, so a synchronous write here stored the whole
+			// message once per call: quadratic in the batch, and all of it
+			// ahead of the first tool. Buffered, the transcript still sees
+			// each call as it is reported, and the message is written once,
+			// on the debounce tick or ahead of the first tool result's row,
+			// whichever comes first (see message.Service.UpdateBuffered).
 			// Use parent ctx instead of genCtx to ensure the update succeeds
-			// even if the request is canceled mid-stream
-			return a.messages.Update(ctx, *currentAssistant)
+			// even if the request is canceled mid-stream.
+			return a.messages.UpdateBuffered(ctx, *currentAssistant)
 		},
 		OnToolResult: func(result fantasy.ToolResultContent) error {
 			toolResult := a.convertToToolResult(result)
@@ -2110,7 +2121,8 @@ func (a *sessionAgent) persistFailedTurn(
 			tc.Finished = true
 			tc.Input = "{}"
 			currentAssistant.AddToolCall(tc)
-			updateErr := a.messages.Update(cleanupCtx, *currentAssistant)
+			// Buffered: the result row created below writes it first.
+			updateErr := a.messages.UpdateBuffered(cleanupCtx, *currentAssistant)
 			if updateErr != nil {
 				return updateErr
 			}
