@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-if grep -rE 'slog\.(Error|Info|Warn|Debug|Fatal|Print|Println|Printf)\(["\"][a-z]' --include="*.go" . 2>/dev/null; then
+set -euo pipefail
+
+status=0
+git grep --untracked -nE 'slog\.(Error|Info|Warn|Debug|Fatal|Print|Println|Printf)\("[a-z]' -- '*.go' || status=$?
+case "$status" in
+0)
   echo "❌ Log messages must start with a capital letter. Found lowercase logs above."
   exit 1
-fi
+  ;;
+1) ;;
+*) exit "$status" ;;
+esac
