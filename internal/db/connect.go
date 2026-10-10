@@ -6,6 +6,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -142,16 +143,62 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 		opt(&cfg)
 	}
 	wantLock := cfg.lockDataDir && !skipDataDirLock()
+	lockDir := ""
+	if wantLock {
+		lockDir = dataDir
+	}
+	return connect(ctx, filepath.Join(dataDir, "harness.db"), lockDir, migrateWorkspace)
+}
 
-	dbPath := filepath.Join(dataDir, "harness.db")
+// ConnectFile opens the SQLite database at dbPath with the driver
+// configuration [Connect] uses and applies the goose migrations at the
+// root of migrations, which are tracked in that database alone: the set
+// is independent of the workspace schema. Connections are pooled by path
+// as with Connect; pair each call with a [ReleaseFile]. It is for stores
+// that are not a workspace database, such as the machine-wide memory
+// store several harness processes share.
+func ConnectFile(ctx context.Context, dbPath string, migrations fs.FS) (*sql.DB, error) {
+	if dbPath == "" {
+		return nil, fmt.Errorf("database path is empty")
+	}
+	return connect(ctx, dbPath, "", func(ctx context.Context, conn *sql.DB) error {
+		provider, err := goose.NewProvider(goose.DialectSQLite3, conn, migrations,
+			goose.WithDisableGlobalRegistry(true),
+		)
+		if err != nil {
+			return err
+		}
+		_, err = provider.Up(ctx)
+		return err
+	})
+}
+
+// ReleaseFile is [Release] for a database opened with [ConnectFile].
+func ReleaseFile(dbPath string) error {
+	return release(poolKey(dbPath))
+}
+
+// migrateWorkspace applies the workspace schema embedded in [FS].
+func migrateWorkspace(_ context.Context, conn *sql.DB) error {
+	if err := initGoose(); err != nil {
+		slog.Error("Failed to initialize goose", "error", err)
+		return fmt.Errorf("failed to initialize goose: %w", err)
+	}
+	return goose.Up(conn, "migrations")
+}
+
+// connect opens (or shares) the pooled connection to dbPath and migrates
+// it. A non-empty lockDir is the data directory whose lock the
+// connection must hold.
+func connect(ctx context.Context, dbPath, lockDir string, migrate func(context.Context, *sql.DB) error) (*sql.DB, error) {
 	absPath := poolKey(dbPath)
 
 	poolMu.Lock()
 	defer poolMu.Unlock()
 
 	if entry, ok := pool[absPath]; ok {
-		if wantLock && entry.unlock == nil {
-			unlock, err := acquireDataDirLock(dataDir)
+		if lockDir != "" && entry.unlock == nil {
+			unlock, err := acquireDataDirLock(lockDir)
 			if err != nil {
 				return nil, err
 			}
@@ -163,17 +210,18 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 
 	// Take the per-data-directory lock before opening the database so
 	// we fail fast and with a clear error rather than racing another
-	// harness process on the same SQLite file. Ensuring the data
-	// directory exists is required because the lock file lives inside
-	// it. Locking is opt-in via WithDataDirLock so that local-mode
-	// invocations do not refuse a second harness against the same data
-	// dir until client/server becomes the default.
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return nil, fmt.Errorf("failed to create data directory %q: %w", dataDir, err)
+	// harness process on the same SQLite file. Ensuring the directory
+	// exists is required because the lock file lives inside it. Locking
+	// is opt-in via WithDataDirLock so that local-mode invocations do
+	// not refuse a second harness against the same data dir until
+	// client/server becomes the default.
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("failed to create data directory %q: %w", dir, err)
 	}
 	entry := &connEntry{refCount: 1}
-	if wantLock {
-		unlock, err := acquireDataDirLock(dataDir)
+	if lockDir != "" {
+		unlock, err := acquireDataDirLock(lockDir)
 		if err != nil {
 			return nil, err
 		}
@@ -202,15 +250,9 @@ func Connect(ctx context.Context, dataDir string, opts ...ConnectOption) (*sql.D
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	if err := initGoose(); err != nil {
+	if err := migrate(ctx, conn); err != nil {
 		entry.close()
-		slog.Error("Failed to initialize goose", "error", err)
-		return nil, fmt.Errorf("failed to initialize goose: %w", err)
-	}
-
-	if err := goose.Up(conn, "migrations"); err != nil {
-		entry.close()
-		slog.Error("Failed to apply migrations", "error", err)
+		slog.Error("Failed to apply migrations", "path", dbPath, "error", err)
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
@@ -271,8 +313,12 @@ func uriPath(path string) string {
 // data directory. When the count reaches zero the underlying connection
 // is closed and removed from the pool.
 func Release(dataDir string) error {
-	absPath := poolKey(filepath.Join(dataDir, "harness.db"))
+	return release(poolKey(filepath.Join(dataDir, "harness.db")))
+}
 
+// release drops one reference to the pooled entry at absPath, closing
+// it with the last.
+func release(absPath string) error {
 	poolMu.Lock()
 	defer poolMu.Unlock()
 

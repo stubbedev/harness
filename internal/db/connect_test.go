@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/lock"
@@ -251,4 +252,45 @@ func TestConnect_DataDirWithURIMetacharacters(t *testing.T) {
 	require.NoError(t, conn.PingContext(context.Background()))
 	require.FileExists(t, filepath.Join(dataDir, "harness.db"))
 	require.NoError(t, Release(dataDir))
+}
+
+func TestConnectFile_AppliesItsOwnMigrationSet(t *testing.T) {
+	t.Cleanup(ResetPool)
+
+	migrations := fstest.MapFS{
+		"00001_notes.sql": {Data: []byte("-- +goose Up\nCREATE TABLE notes (body TEXT NOT NULL);\n\n-- +goose Down\nDROP TABLE notes;\n")},
+	}
+	dbPath := filepath.Join(t.TempDir(), "store", "notes.db")
+
+	conn, err := ConnectFile(t.Context(), dbPath, migrations)
+	require.NoError(t, err)
+	again, err := ConnectFile(t.Context(), dbPath, migrations)
+	require.NoError(t, err)
+	require.Same(t, conn, again, "one path shares one pooled connection")
+
+	_, err = conn.ExecContext(t.Context(), "INSERT INTO notes (body) VALUES ('hi')")
+	require.NoError(t, err)
+
+	// The workspace schema is not applied to a file with its own set.
+	var tables int
+	require.NoError(t, conn.QueryRowContext(t.Context(),
+		"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").Scan(&tables))
+	require.Zero(t, tables)
+
+	var mode string
+	require.NoError(t, conn.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&mode))
+	require.Equal(t, "wal", mode)
+
+	require.NoError(t, ReleaseFile(dbPath))
+	require.NoError(t, conn.PingContext(t.Context()), "a partial release keeps the connection")
+	require.NoError(t, ReleaseFile(dbPath))
+	require.Error(t, conn.PingContext(t.Context()), "the last release closes it")
+
+	// Reopening finds the migrations already applied.
+	conn, err = ConnectFile(t.Context(), dbPath, migrations)
+	require.NoError(t, err)
+	var count int
+	require.NoError(t, conn.QueryRowContext(t.Context(), "SELECT count(*) FROM notes").Scan(&count))
+	require.Equal(t, 1, count)
+	require.NoError(t, ReleaseFile(dbPath))
 }
