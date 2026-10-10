@@ -238,23 +238,54 @@ func formatSearchResults(results []SearchResult) string {
 var (
 	lastSearchMu   sync.Mutex
 	lastSearchTime time.Time
+	// recentSearches are the start times of the searches inside the
+	// current burst window; throttledUntil is when the spacing that
+	// followed a throttled search lifts again.
+	recentSearches []time.Time
+	throttledUntil time.Time
 )
 
-// maybeDelaySearch spaces searches out: each one starts a random 0.5 to 2
-// seconds after the one before it, so a burst does not read as a scraper
-// to the search backend. A search reserves its start time under the lock
-// and waits for it outside, so the lock is never held across a sleep, and
-// a caller that gives up - a turn interrupted with searches queued - stops
-// waiting at once instead of sitting out every gap ahead of it. It returns
-// the context's error when that happens.
+const (
+	// searchBurst searches may start back to back inside
+	// searchBurstWindow: the handful of queries a model fires at once
+	// for one question is not what gets a client flagged, and spacing
+	// them out cost every such step up to seconds of nothing.
+	searchBurst       = 3
+	searchBurstWindow = 10 * time.Second
+	// searchThrottleCooldown is how long, after the backend has turned a
+	// search away, every search keeps the full spacing again.
+	searchThrottleCooldown = 2 * time.Minute
+)
+
+// maybeDelaySearch spaces searches out once a burst is spent: up to
+// searchBurst searches in searchBurstWindow start at once, and each one
+// past that starts a random 0.5 to 2 seconds after the one before it, so
+// a long run does not read as a scraper to the search backend. After the
+// backend has throttled a search (noteSearchThrottled) every search is
+// spaced until the cooldown passes. A search reserves its start time
+// under the lock and waits for it outside, so the lock is never held
+// across a sleep, and a caller that gives up - a turn interrupted with
+// searches queued - stops waiting at once instead of sitting out every
+// gap ahead of it. It returns the context's error when that happens.
 func maybeDelaySearch(ctx context.Context) error {
 	lastSearchMu.Lock()
-	minGap := time.Duration(500+rand.IntN(1500)) * time.Millisecond
-	start := time.Now()
-	if next := lastSearchTime.Add(minGap); next.After(start) {
-		start = next
+	now := time.Now()
+	kept := recentSearches[:0]
+	for _, at := range recentSearches {
+		if now.Sub(at) < searchBurstWindow {
+			kept = append(kept, at)
+		}
+	}
+	recentSearches = kept
+	start := now
+	if now.Before(throttledUntil) || len(recentSearches) >= searchBurst {
+		minGap := time.Duration(500+rand.IntN(1500)) * time.Millisecond
+		if next := lastSearchTime.Add(minGap); next.After(start) {
+			start = next
+		}
 	}
 	lastSearchTime = start
+	recentSearches = append(recentSearches, start)
 	lastSearchMu.Unlock()
 
 	wait := time.Until(start)
@@ -269,4 +300,12 @@ func maybeDelaySearch(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// noteSearchThrottled records that the backend turned a search away, so
+// the searches after it are spaced out again (see maybeDelaySearch).
+func noteSearchThrottled() {
+	lastSearchMu.Lock()
+	throttledUntil = time.Now().Add(searchThrottleCooldown)
+	lastSearchMu.Unlock()
 }

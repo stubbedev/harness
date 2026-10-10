@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -52,6 +53,9 @@ func NewWebSearchTool(client *http.Client) fantasy.AgentTool {
 			results, err := searchDuckDuckGo(ctx, client, params.Query, maxResults)
 			slog.Debug("Web search completed", "query", params.Query, "results", len(results), "err", err)
 			if err != nil {
+				if errors.Is(err, errSearchRateLimited) {
+					noteSearchThrottled()
+				}
 				return fantasy.NewTextErrorResponse("Failed to search: " + err.Error()), nil
 			}
 
