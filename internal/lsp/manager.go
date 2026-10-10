@@ -60,6 +60,11 @@ type Manager struct {
 	// startLocks holds one mutex per server name, serialising
 	// startServer for that name.
 	startLocks sync.Map
+	// configNames maps a server name to the key of the user's config
+	// entry for it, where the two differ: an entry named after something
+	// else (its command, a name of the user's own) is merged into the
+	// bundled server it configures (see resolveServerName).
+	configNames map[string]string
 }
 
 // lockStart takes the start lock for one server and returns its release.
@@ -76,16 +81,21 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 	manager.LoadDefaults()
 
 	// Merge user-configured LSPs into the manager.
+	configNames := make(map[string]string)
 	for name, clientConfig := range cfg.Config().LSP {
+		// The user might name the entry after the server's command, or
+		// anything at all with the command pointing at a bundled server's
+		// binary. Either way it configures that server: merging under a
+		// name of its own would run the same server twice.
+		actualName := resolveServerName(manager, name, clientConfig.Command)
+		if actualName != name {
+			configNames[actualName] = name
+		}
 		if clientConfig.Disabled {
 			slog.Debug("LSP disabled by user config", "name", name)
-			manager.RemoveServer(name)
+			manager.RemoveServer(actualName)
 			continue
 		}
-
-		// HACK: the user might have the command name in their config instead
-		// of the actual name. Find and use the correct name.
-		actualName := resolveServerName(manager, name)
 		manager.AddServer(actualName, &powernapconfig.ServerConfig{
 			Command:     clientConfig.Command,
 			Args:        clientConfig.Args,
@@ -108,7 +118,22 @@ func NewManager(cfg *config.ConfigStore) *Manager {
 		now:             time.Now,
 		lookPath:        exec.LookPath,
 		ledger:          NewLedger(),
+		configNames:     configNames,
 	}
+}
+
+// userConfig returns the user's config entry for a server, whichever key
+// the user filed it under.
+func (s *Manager) userConfig(name string) (config.LSPConfig, bool) {
+	lsps := s.cfg.Config().LSP
+	if cfg, ok := lsps[name]; ok {
+		return cfg, true
+	}
+	if key, ok := s.configNames[name]; ok {
+		cfg, ok := lsps[key]
+		return cfg, ok
+	}
+	return config.LSPConfig{}, false
 }
 
 // Ledger returns the record of which diagnostics each session has already been
@@ -370,7 +395,7 @@ func (s *Manager) canAutoStart(
 }
 
 func (s *Manager) isUserConfigured(name string) bool {
-	cfg, ok := s.cfg.Config().LSP[name]
+	cfg, ok := s.userConfig(name)
 	return ok && !cfg.Disabled
 }
 
@@ -404,22 +429,47 @@ func (s *Manager) buildConfig(name string, server *powernapconfig.ServerConfig) 
 		InitOptions: server.InitOptions,
 		Options:     server.Settings,
 	}
-	if userCfg, ok := s.cfg.Config().LSP[name]; ok {
+	if userCfg, ok := s.userConfig(name); ok {
 		cfg.Timeout = userCfg.Timeout
 	}
 	return cfg
 }
 
-func resolveServerName(manager *powernapconfig.Manager, name string) string {
+// resolveServerName finds the bundled server a user config entry
+// configures: the one with the entry's name, else the one whose command
+// the name is, else the one whose command is the binary the entry runs
+// (an absolute path such as a Nix store path names the same program as
+// the bare command). A command several servers share says nothing about
+// which one is meant, so it resolves to none of them; neither does a
+// name nothing matches, which is then a server of the user's own.
+func resolveServerName(manager *powernapconfig.Manager, name, command string) string {
 	if _, ok := manager.GetServer(name); ok {
 		return name
 	}
-	for sname, server := range manager.GetServers() {
-		if server.Command == name {
-			return sname
+	if match, ok := uniqueServerByCommand(manager, name); ok {
+		return match
+	}
+	if command != "" {
+		if match, ok := uniqueServerByCommand(manager, filepath.Base(command)); ok {
+			return match
 		}
 	}
 	return name
+}
+
+// uniqueServerByCommand returns the one server whose command is command.
+func uniqueServerByCommand(manager *powernapconfig.Manager, command string) (string, bool) {
+	match := ""
+	for sname, server := range manager.GetServers() {
+		if filepath.Base(server.Command) != command {
+			continue
+		}
+		if match != "" {
+			return "", false
+		}
+		match = sname
+	}
+	return match, match != ""
 }
 
 func handlesFiletype(sname string, fileTypes []string, filePath string) bool {
