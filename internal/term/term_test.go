@@ -58,7 +58,7 @@ func waitReady(t *testing.T, s *Session) {
 // WaitForAny keeps scanning from where the last match ended instead.
 func waitOutput(t *testing.T, s *Session, pattern *regexp.Regexp, timeout time.Duration) bool {
 	t.Helper()
-	return s.WaitForAny(t.Context(), []*regexp.Regexp{pattern}, timeout) >= 0
+	return s.WaitForAny(t.Context(), []Pattern{pattern}, timeout) >= 0
 }
 
 func startTestSession(t *testing.T) *Session {

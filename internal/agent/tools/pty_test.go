@@ -682,11 +682,11 @@ func (s *stuckReaderTerm) reading() bool {
 	return !s.killed
 }
 
-func (s *stuckReaderTerm) WaitForAny(context.Context, []*regexp.Regexp, time.Duration) int {
+func (s *stuckReaderTerm) WaitForAny(context.Context, []term.Pattern, time.Duration) int {
 	return -1
 }
 
-func (s *stuckReaderTerm) WaitForAnyOrQuiet(context.Context, []*regexp.Regexp, time.Duration, time.Duration) (int, bool) {
+func (s *stuckReaderTerm) WaitForAnyOrQuiet(context.Context, []term.Pattern, time.Duration, time.Duration) (int, bool) {
 	return -1, true
 }
 

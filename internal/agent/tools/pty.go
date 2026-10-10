@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -227,6 +228,9 @@ var (
 	// by the hidden-line read it blocks in.
 	credPromptRe = regexp.MustCompile(`(?i)(?:\[sudo\][^:\n]{0,60}:|` +
 		`\b(?:password|passphrase|passcode|passwort|pass phrase|mot de passe|contraseña|pin)\b[^:\n]{0,64}:)`)
+	// credPromptScan finds what credPromptRe does, for the waits that
+	// scan a command's whole output for it (see breakGated).
+	credPromptScan = breakGated{re: credPromptRe, reach: credPromptReach}
 	// ptyPromptRe matches the OSC 133 prompt marker installed by
 	// ptySetupCmd. Seeing it after a command means the shell - not some
 	// program the command started - has control back.
@@ -394,8 +398,8 @@ type shellExit struct {
 // so tests can substitute a scripted terminal.
 type ptyTerminal interface {
 	Send(b []byte) error
-	WaitForAny(ctx context.Context, patterns []*regexp.Regexp, timeout time.Duration) int
-	WaitForAnyOrQuiet(ctx context.Context, patterns []*regexp.Regexp, quiet, timeout time.Duration) (int, bool)
+	WaitForAny(ctx context.Context, patterns []term.Pattern, timeout time.Duration) int
+	WaitForAnyOrQuiet(ctx context.Context, patterns []term.Pattern, quiet, timeout time.Duration) (int, bool)
 	WaitForOutput(ctx context.Context, timeout time.Duration) bool
 	WaitForQuiet(ctx context.Context, quiet, timeout time.Duration) bool
 	Drain() []byte
@@ -951,7 +955,7 @@ func (r *ptyRunner) ensureSessionLocked(ctx context.Context) (ptyTerminal, error
 	r.settled = false
 	r.dialect = dialect
 	r.sentinel = newSentinel(dialect)
-	if native && s.WaitForAny(ctx, []*regexp.Regexp{ptyPromptRe}, ptyStartupWait) == 0 {
+	if native && s.WaitForAny(ctx, []term.Pattern{ptyPromptRe}, ptyStartupWait) == 0 {
 		// The shell ran the setup from its own rc file (see launchFor):
 		// its first prompt is the marker, and startup is over. The same
 		// rc file turned the line editor off, so no mode tail follows.
@@ -999,7 +1003,7 @@ func (r *ptyRunner) setupSessionLocked(ctx context.Context, s ptyTerminal, diale
 				return false
 			}
 		}
-		return s.WaitForAny(ctx, []*regexp.Regexp{r.sentinel.beginRe}, ptyStartupWait) == 0
+		return s.WaitForAny(ctx, []term.Pattern{r.sentinel.beginRe}, ptyStartupWait) == 0
 	}
 	ready := setup()
 	if !ready && s.Alive() && ctx.Err() == nil {
@@ -1009,7 +1013,7 @@ func (r *ptyRunner) setupSessionLocked(ctx context.Context, s ptyTerminal, diale
 		ready = setup()
 	}
 	promptRe := ptyPasteRe
-	if ready && s.WaitForAny(ctx, []*regexp.Regexp{ptyPromptRe}, ptyStartupWait) == 0 {
+	if ready && s.WaitForAny(ctx, []term.Pattern{ptyPromptRe}, ptyStartupWait) == 0 {
 		promptRe = ptyPromptRe
 	} else {
 		slog.Warn("Terminal session prompt marker not seen; using fallback prompt detection")
@@ -1024,7 +1028,7 @@ func (r *ptyRunner) setupSessionLocked(ctx context.Context, s ptyTerminal, diale
 // write or two; it is taken with the prompt so the first command starts
 // from a clean buffer. Callers must hold r.mu.
 func (r *ptyRunner) takePromptTail(ctx context.Context, s ptyTerminal) {
-	m, _ := s.WaitForAnyOrQuiet(ctx, []*regexp.Regexp{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
+	m, _ := s.WaitForAnyOrQuiet(ctx, []term.Pattern{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
 	r.promptTail = m == 0
 	s.Drain()
 }
@@ -1113,13 +1117,13 @@ func (r *ptyRunner) fence(ctx context.Context, s ptyTerminal) {
 	if err := r.send(s, []byte(mark.begin+term.Enter)); err != nil {
 		return
 	}
-	if s.WaitForAny(ctx, []*regexp.Regexp{mark.beginRe}, ptyFenceWait) != 0 {
+	if s.WaitForAny(ctx, []term.Pattern{mark.beginRe}, ptyFenceWait) != 0 {
 		return
 	}
 	// Taking the prompt that follows the fence is the point of waiting
 	// here: left in the buffer, it is exactly what the next wait would
 	// read as the command it is about to send having already finished.
-	_ = s.WaitForAny(ctx, []*regexp.Regexp{promptRe}, ptyFenceSettle)
+	_ = s.WaitForAny(ctx, []term.Pattern{promptRe}, ptyFenceSettle)
 	// A line editor's prompt does not end at its marker: the mode tail -
 	// the bracketed-paste enable included - trails it by a write or two.
 	// Wait for that too (or a short quiet spell, should it not come) so
@@ -1127,7 +1131,7 @@ func (r *ptyRunner) fence(ctx context.Context, s ptyTerminal) {
 	// settled before the drain. A shell whose prompts have no tail is
 	// done at the marker.
 	if tail {
-		_, _ = s.WaitForAnyOrQuiet(ctx, []*regexp.Regexp{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
+		_, _ = s.WaitForAnyOrQuiet(ctx, []term.Pattern{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
 	}
 	s.Drain()
 }
@@ -1513,7 +1517,7 @@ func (r *ptyRunner) typeWhileBusy(ctx context.Context, s ptyTerminal, text strin
 // code.
 func (r *ptyRunner) awaitCompletion(ctx context.Context, s ptyTerminal, echo []string, waitSeconds int) (PTYResult, error) {
 	s.ResetWaitSample()
-	pats := []*regexp.Regexp{r.promptRe, credPromptRe, ptyAltScreenRe}
+	pats := []term.Pattern{r.promptRe, credPromptScan, ptyAltScreenRe}
 	budget := time.Duration(waitSeconds) * time.Second
 	// Output within the lease window counts as progress; the window is
 	// capped by the budget so a short-budget call still returns on time
@@ -2016,7 +2020,7 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 	if err := r.send(s, []byte(mark.cmd+term.Enter)); err != nil {
 		return PTYResult{}, err
 	}
-	if s.WaitForAny(ctx, []*regexp.Regexp{mark.loose}, 10*time.Second) != 0 {
+	if s.WaitForAny(ctx, []term.Pattern{mark.loose}, 10*time.Second) != 0 {
 		// Sentinel never printed: something is still holding the
 		// terminal after all. Report it as running - with no exit code
 		// and no claim that the command finished - so the caller keeps
@@ -2035,9 +2039,9 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 	var promptRe *regexp.Regexp
 	var tail bool
 	r.setState(func() { promptRe, tail = r.promptRe, r.promptTail })
-	settled := s.WaitForAny(ctx, []*regexp.Regexp{promptRe}, ptyFenceSettle) == 0
+	settled := s.WaitForAny(ctx, []term.Pattern{promptRe}, ptyFenceSettle) == 0
 	if settled && tail {
-		_, _ = s.WaitForAnyOrQuiet(ctx, []*regexp.Regexp{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
+		_, _ = s.WaitForAnyOrQuiet(ctx, []term.Pattern{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
 	}
 	drained := string(s.Drain())
 	cut := drained
@@ -2091,11 +2095,11 @@ func (r *ptyRunner) collectFromPromptState(ctx context.Context, s ptyTerminal) (
 	// was seen to finish through the file alone, its marker may still
 	// be on the way. The wait's own match may already have consumed it
 	// from the scan, so the pending bytes are looked at first.
-	if !promptRe.Match(s.Pending()) && s.WaitForAny(ctx, []*regexp.Regexp{promptRe}, ptyFenceSettle) != 0 {
+	if !promptRe.Match(s.Pending()) && s.WaitForAny(ctx, []term.Pattern{promptRe}, ptyFenceSettle) != 0 {
 		return PTYResult{}, false
 	}
 	if tail {
-		_, _ = s.WaitForAnyOrQuiet(ctx, []*regexp.Regexp{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
+		_, _ = s.WaitForAnyOrQuiet(ctx, []term.Pattern{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
 	}
 	drained := string(s.Drain())
 	cut := drained
@@ -3031,4 +3035,51 @@ func (r *ptyRunner) oomNote() string {
 		return fmt.Sprintf("[out of memory: the kernel killed %s at the session's %s memory limit]", what, humanize.IBytes(uint64(limit)))
 	}
 	return fmt.Sprintf("[out of memory: the kernel killed %s]", what)
+}
+
+// credPromptReach bounds how far before its colon a credPromptRe match
+// can start: the longest keyword, up to 64 characters of up to four bytes
+// each, and the colon, with room to spare.
+const credPromptReach = 300
+
+// breakGated finds the matches of a pattern whose every match ends at a
+// colon and holds no other colon or newline - credPromptRe's shape.
+//
+// The regexp alone is the slow part of reading a large output: a
+// case-insensitive alternation behind \b has no literal to skip ahead
+// on, so it walks every byte, 40 ms for 600 KB of build log, more than
+// the rest of the read path put together. Only a colon can end a match,
+// and a match starts after the colon or newline before it, so the
+// regexp runs over just that stretch for each colon - every byte at most
+// once, and none at all in output with no colons. The break byte the
+// stretch starts at is kept as context, so \b sees what precedes the
+// match as the full scan would. A stretch cut short at reach starts
+// further back than any match can, so no match is lost and none is
+// invented at its edge.
+type breakGated struct {
+	re    *regexp.Regexp
+	reach int
+}
+
+// FindIndex returns the leftmost match, as re.FindIndex(b) does. Matches
+// cannot span a colon, so the first colon whose stretch matches holds
+// the leftmost one.
+func (g breakGated) FindIndex(b []byte) []int {
+	from := 0
+	for {
+		i := bytes.IndexByte(b[from:], ':')
+		if i < 0 {
+			return nil
+		}
+		colon := from + i
+		start := max(colon-g.reach, 0)
+		if nl := bytes.LastIndexByte(b[start:colon], '\n'); nl >= 0 {
+			start += nl
+		}
+		start = max(start, from-1, 0)
+		if loc := g.re.FindIndex(b[start : colon+1]); loc != nil {
+			return []int{start + loc[0], start + loc[1]}
+		}
+		from = colon + 1
+	}
 }

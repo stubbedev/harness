@@ -56,6 +56,13 @@ const (
 	maxPending = 16 << 20 // 16 MiB
 )
 
+// Pattern is what the waits look for in a session's output: a
+// *regexp.Regexp, or a matcher that finds the same matches faster.
+// FindIndex reports the leftmost match as regexp.Regexp.FindIndex does.
+type Pattern interface {
+	FindIndex(b []byte) []int
+}
+
 // Session is a persistent PTY running an interactive shell.
 type Session struct {
 	mu     sync.Mutex
@@ -502,7 +509,7 @@ func (s *Session) Send(b []byte) error {
 // matched. Scanning starts where the last match ended (or where the
 // last Drain/RescanFromStart left it), so bytes that arrive while no
 // one is waiting are seen by the next call rather than skipped.
-func (s *Session) WaitForAny(ctx context.Context, patterns []*regexp.Regexp, timeout time.Duration) int {
+func (s *Session) WaitForAny(ctx context.Context, patterns []Pattern, timeout time.Duration) int {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 
@@ -536,7 +543,7 @@ func (s *Session) WaitForAny(ctx context.Context, patterns []*regexp.Regexp, tim
 // the output not yet consumed, advancing the scan position past the
 // whole match so it cannot be reported twice.
 // Callers must hold s.mu.
-func (s *Session) scanLocked(patterns []*regexp.Regexp) int {
+func (s *Session) scanLocked(patterns []Pattern) int {
 	rest := s.pending[min(s.scanFrom, len(s.pending)):]
 	matched := -1
 	var matchLoc []int
@@ -641,7 +648,7 @@ func (s *Session) WaitForQuiet(ctx context.Context, quiet, timeout time.Duration
 // none matched) and whether the quiet window elapsed instead. Everything
 // is driven by the arrival of output: no timers tick while bytes keep
 // coming, and bytes that arrive between waits are not skipped.
-func (s *Session) WaitForAnyOrQuiet(ctx context.Context, patterns []*regexp.Regexp, quiet, timeout time.Duration) (int, bool) {
+func (s *Session) WaitForAnyOrQuiet(ctx context.Context, patterns []Pattern, quiet, timeout time.Duration) (int, bool) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 
