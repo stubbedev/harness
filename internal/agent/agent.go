@@ -1045,6 +1045,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// missing label - rather than spending a turn asking the model
 		// to send it again.
 		fantasy.WithRepairToolCall(tools.RepairToolCall),
+		// Start read-only calls while the rest of the message streams.
+		fantasy.WithEarlyToolDispatch(earlyToolDispatch),
 	)
 
 	sessionLock := sync.Mutex{}

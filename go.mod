@@ -221,3 +221,9 @@ replace github.com/u-root/u-root => ./third_party/u-root
 // u-root's termios, which has no DragonFly or Solaris implementation; the
 // fork drops the helper (unused here) and with it that dependency.
 replace github.com/aymanbagabas/go-pty => ./third_party/go-pty
+
+// charm.land/fantasy is forked so that the agent step loop can start
+// opted-in read-only tools while the model is still streaming, and so that
+// a slow sequential tool no longer holds up the parallel ones queued behind
+// it. See third_party/fantasy/README.md.
+replace charm.land/fantasy => ./third_party/fantasy
