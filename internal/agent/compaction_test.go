@@ -527,7 +527,7 @@ func TestCompactionExecutionStatePersistsIndependentOfNarrative(t *testing.T) {
 	for _, msg := range executionMessages("write", "write", `{"file_path":"/project/a.go"}`, `{"file_mutations":[{"path":"/project/a.go","version":"sha256:first"}]}`, false) {
 		createMessage(t, env, sess.ID, msg.Role, msg.Parts...)
 	}
-	for _, msg := range executionMessages("test", "shell", `{"command":"go test ./..."}`, `{"exit_code":3}`, false) {
+	for _, msg := range executionMessages("test", "shell", `{"command":"go test ./..."}`, `{"outcome":"exited","exit_code":3}`, false) {
 		createMessage(t, env, sess.ID, msg.Role, msg.Parts...)
 	}
 	require.NoError(t, sa.Summarize(t.Context(), sess.ID, nil, nil, ""))

@@ -433,3 +433,68 @@ func TestQueuedHeader(t *testing.T) {
 		queuedHeader(PTYResult{Queued: true, QueuedCount: 1}))
 	require.Contains(t, queuedHeader(PTYResult{Queued: true, QueuedCount: 3}), "3 commands")
 }
+
+func TestShellOutcome(t *testing.T) {
+	t.Parallel()
+
+	zero, one, nine := 0, 1, 9
+	for _, tc := range []struct {
+		name   string
+		params ShellParams
+		res    PTYResult
+		want   ShellOutcome
+	}{
+		{"reset", ShellParams{Reset: true}, PTYResult{QueuedDropped: 2}, ShellOutcomeReset},
+		{"interrupted", ShellParams{}, PTYResult{Interrupted: true, Running: true, AltScreen: true}, ShellOutcomeInterrupted},
+		{"queued", ShellParams{Command: "ls"}, PTYResult{Queued: true, Running: true}, ShellOutcomeQueued},
+		{"busy", ShellParams{}, PTYResult{WhileBusy: true, AltScreen: true, Running: true}, ShellOutcomeBusy},
+		{"busy while waiting", ShellParams{}, PTYResult{WhileBusy: true, Waiting: true, Running: true}, ShellOutcomeBusy},
+		{"waiting", ShellParams{}, PTYResult{Waiting: true, Running: true}, ShellOutcomeWaiting},
+		{"waiting on full screen", ShellParams{}, PTYResult{Waiting: true, AltScreen: true, Running: true}, ShellOutcomeWaiting},
+		{"fullscreen", ShellParams{}, PTYResult{AltScreen: true, Running: true}, ShellOutcomeFullscreen},
+		{"running", ShellParams{}, PTYResult{Running: true}, ShellOutcomeRunning},
+		{"running in fresh shell", ShellParams{}, PTYResult{Running: true, ShellExit: &shellExit{Code: &nine}}, ShellOutcomeRunning},
+		{"exited zero", ShellParams{Command: "true"}, PTYResult{ExitCode: &zero}, ShellOutcomeExited},
+		{"exited nonzero", ShellParams{Command: "false"}, PTYResult{ExitCode: &one, ShellExit: &shellExit{Code: &nine}}, ShellOutcomeExited},
+		{"shell exited", ShellParams{}, PTYResult{ShellExit: &shellExit{Code: &nine}}, ShellOutcomeShellExited},
+		{"idle", ShellParams{}, PTYResult{}, ShellOutcomeIdle},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, shellOutcome(tc.params, tc.res))
+		})
+	}
+}
+
+func TestShellHeader(t *testing.T) {
+	t.Parallel()
+
+	zero, one, nine := 0, 1, 9
+	for _, tc := range []struct {
+		name   string
+		params ShellParams
+		res    PTYResult
+		want   string
+	}{
+		{"reset", ShellParams{Reset: true}, PTYResult{}, "[session reset]"},
+		{"interrupted", ShellParams{}, PTYResult{Interrupted: true, Running: true}, "[interrupted]"},
+		{"queued", ShellParams{Command: "ls"}, PTYResult{Queued: true, QueuedCount: 1, Running: true}, "[queued; the shell runs it when the current command exits]"},
+		{"busy while waiting", ShellParams{}, PTYResult{WhileBusy: true, Waiting: true, Running: true}, "[another command holds the session; its screen follows]"},
+		{"waiting", ShellParams{}, PTYResult{Waiting: true, Running: true}, "[waiting for input]"},
+		{"fullscreen", ShellParams{}, PTYResult{AltScreen: true, Running: true, Output: "screen"}, "[full-screen program; 80x24 screen follows]"},
+		{"fullscreen unchanged", ShellParams{}, PTYResult{AltScreen: true, Running: true, Unchanged: true}, "[full-screen program; screen unchanged]"},
+		{"running with output", ShellParams{}, PTYResult{Running: true, Output: "x"}, "[still running; an empty call waits for it]"},
+		{"running idle", ShellParams{}, PTYResult{Running: true}, "[still running, idle]"},
+		{"running in fresh shell", ShellParams{}, PTYResult{Running: true, ShellExit: &shellExit{Code: &nine}}, ""},
+		{"exited zero", ShellParams{Command: "true"}, PTYResult{ExitCode: &zero}, ""},
+		{"exited nonzero", ShellParams{Command: "false"}, PTYResult{ExitCode: &one}, "[exit 1]"},
+		{"shell exited", ShellParams{}, PTYResult{ShellExit: &shellExit{Code: &nine}}, ""},
+		{"idle poll", ShellParams{}, PTYResult{}, "[no new output]"},
+		{"idle command", ShellParams{Command: "x"}, PTYResult{}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, shellHeader(shellOutcome(tc.params, tc.res), tc.params, tc.res, 24, 80))
+		})
+	}
+}

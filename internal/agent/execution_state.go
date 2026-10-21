@@ -329,6 +329,7 @@ const (
 	executionQueued      = "queued"
 	executionWaiting     = "waiting"
 	executionRunning     = "running"
+	executionIdle        = "idle"
 	executionShellExited = "shell_exited"
 	executionChanged     = "changed"
 	executionReported    = "reported"
@@ -433,7 +434,7 @@ func (s *executionState) ingestShell(call message.ToolCall, result message.ToolR
 		name = params.Session
 	}
 	if name == "" {
-		name = "main"
+		name = tools.DefaultShellSession
 	}
 	entry.Input = executionClip(params.Command, executionTextLimit)
 	var previous *executionEntry
@@ -447,37 +448,44 @@ func (s *executionState) ingestShell(call message.ToolCall, result message.ToolR
 		entry.Input = previous.Input
 		entry.Key = previous.Detail
 	}
-	entry.ExitCode = meta.ExitCode
-	entry.Status = executionUnknown
-	switch {
-	case result.IsError:
-		entry.Status = executionFailed
-	case params.Reset:
-		entry.Status = executionReset
-	case meta.Interrupted:
-		entry.Status = executionInterrupted
-	case meta.Queued:
-		entry.Status = executionQueued
-	case meta.Waiting:
-		entry.Status = executionWaiting
-	case meta.Running || meta.WhileBusy || meta.AltScreen:
-		entry.Status = executionRunning
-	case meta.ExitCode != nil && *meta.ExitCode != 0:
-		entry.Status = executionFailed
-	case meta.ExitCode != nil:
-		entry.Status = executionSucceeded
-	case meta.ShellExited:
-		entry.Status = executionShellExited
-		entry.ExitCode = meta.ShellExitCode
+	entry.Status, entry.ExitCode = shellExecutionStatus(meta)
+	if result.IsError {
+		entry.Status, entry.ExitCode = executionFailed, meta.ExitCode
 	}
 	s.put(&s.Commands, entry)
-	if !result.IsError && !meta.Queued && !meta.WhileBusy {
+	if !result.IsError && meta.Outcome != tools.ShellOutcomeQueued && meta.Outcome != tools.ShellOutcomeBusy {
 		sessionEntry := entry
 		sessionEntry.Key = name
 		sessionEntry.Detail = entry.Key
 		s.put(&s.Sessions, sessionEntry)
 	}
 	return result.IsError || entry.Status == executionFailed || (entry.Status == executionShellExited && entry.ExitCode != nil && *entry.ExitCode != 0) || entry.Status == executionInterrupted, entry.Status == executionSucceeded, entry
+}
+
+func shellExecutionStatus(meta tools.ShellResponseMetadata) (string, *int) {
+	switch meta.Outcome {
+	case tools.ShellOutcomeReset:
+		return executionReset, meta.ExitCode
+	case tools.ShellOutcomeInterrupted:
+		return executionInterrupted, meta.ExitCode
+	case tools.ShellOutcomeQueued:
+		return executionQueued, meta.ExitCode
+	case tools.ShellOutcomeWaiting:
+		return executionWaiting, meta.ExitCode
+	case tools.ShellOutcomeBusy, tools.ShellOutcomeFullscreen, tools.ShellOutcomeRunning:
+		return executionRunning, meta.ExitCode
+	case tools.ShellOutcomeExited:
+		if meta.ExitCode != nil && *meta.ExitCode != 0 {
+			return executionFailed, meta.ExitCode
+		}
+		return executionSucceeded, meta.ExitCode
+	case tools.ShellOutcomeShellExited:
+		return executionShellExited, meta.ShellExitCode
+	case tools.ShellOutcomeIdle:
+		return executionIdle, meta.ExitCode
+	default:
+		return executionUnknown, meta.ExitCode
+	}
 }
 
 func compactVerificationMetadata(metadata map[string]json.RawMessage) json.RawMessage {

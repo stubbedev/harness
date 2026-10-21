@@ -26,7 +26,7 @@ func benchmarkExecutionHistory() []message.Message {
 		id := fmt.Sprintf("call-%d", i)
 		msgs = append(msgs,
 			message.Message{Role: message.Assistant, Parts: []message.ContentPart{message.ToolCall{ID: id, Name: "shell", Input: fmt.Sprintf(`{"command":"go test ./pkg%d/..."}`, i), Finished: true}}},
-			message.Message{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: id, Name: "shell", Content: benchmarkToolOutput(25<<10, i), Metadata: `{"exit_code":0,"session":"main"}`}}},
+			message.Message{Role: message.Tool, Parts: []message.ContentPart{message.ToolResult{ToolCallID: id, Name: "shell", Content: benchmarkToolOutput(25<<10, i), Metadata: `{"outcome":"exited","exit_code":0,"session":"main"}`}}},
 		)
 	}
 	msgs = append(msgs,
@@ -47,7 +47,7 @@ func BenchmarkExecutionStateIngestResult(b *testing.B) {
 		id := fmt.Sprintf("call-%d", i)
 		state.Ingest([]message.Message{{Parts: []message.ContentPart{
 			message.ToolCall{ID: id, Name: "shell", Input: `{"command":"go test ./..."}`, Finished: true},
-			message.ToolResult{ToolCallID: id, Name: "shell", Content: content, Metadata: `{"exit_code":0}`},
+			message.ToolResult{ToolCallID: id, Name: "shell", Content: content, Metadata: `{"outcome":"exited","exit_code":0}`},
 		}}})
 	}
 }

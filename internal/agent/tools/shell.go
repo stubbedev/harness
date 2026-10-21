@@ -39,22 +39,31 @@ type ShellParams struct {
 }
 
 type ShellResponseMetadata struct {
-	StartTime        int64  `json:"start_time"`
-	EndTime          int64  `json:"end_time"`
-	Output           string `json:"output"`
-	Description      string `json:"description"`
-	WorkingDirectory string `json:"working_directory"`
-	Session          string `json:"session,omitempty"`
-	ExitCode         *int   `json:"exit_code,omitempty"`
-	Running          bool   `json:"running"`
-	Waiting          bool   `json:"waiting"`
-	Queued           bool   `json:"queued,omitempty"`
-	WhileBusy        bool   `json:"while_busy,omitempty"`
-	AltScreen        bool   `json:"alt_screen,omitempty"`
-	Interrupted      bool   `json:"interrupted,omitempty"`
-	ShellExited      bool   `json:"shell_exited,omitempty"`
-	ShellExitCode    *int   `json:"shell_exit_code,omitempty"`
+	StartTime        int64        `json:"start_time"`
+	EndTime          int64        `json:"end_time"`
+	Output           string       `json:"output"`
+	Description      string       `json:"description"`
+	WorkingDirectory string       `json:"working_directory"`
+	Session          string       `json:"session,omitempty"`
+	ExitCode         *int         `json:"exit_code,omitempty"`
+	Outcome          ShellOutcome `json:"outcome"`
+	ShellExitCode    *int         `json:"shell_exit_code,omitempty"`
 }
+
+type ShellOutcome string
+
+const (
+	ShellOutcomeInterrupted ShellOutcome = "interrupted"
+	ShellOutcomeQueued      ShellOutcome = "queued"
+	ShellOutcomeBusy        ShellOutcome = "busy"
+	ShellOutcomeWaiting     ShellOutcome = "waiting"
+	ShellOutcomeFullscreen  ShellOutcome = "fullscreen"
+	ShellOutcomeRunning     ShellOutcome = "running"
+	ShellOutcomeExited      ShellOutcome = "exited"
+	ShellOutcomeReset       ShellOutcome = "reset"
+	ShellOutcomeShellExited ShellOutcome = "shell_exited"
+	ShellOutcomeIdle        ShellOutcome = "idle"
+)
 
 const (
 	// ShellToolName is the terminal-session tool's name: it runs the
@@ -64,6 +73,7 @@ const (
 	DefaultAutoBackgroundAfter = 60 // Seconds an idle command is held before it is reported as still running
 	MaxOutputLength            = 30000
 	ShellNoOutput              = "no output"
+	DefaultShellSession        = "main"
 )
 
 //go:embed shell.md.tpl
@@ -101,12 +111,12 @@ func shellDescription(shell string) string {
 }
 
 // sessionName validates and normalizes the session parameter. The
-// default session is "main"; a name that would not make a sane
-// registry key or UI label is an error to name, not to guess at.
+// default session is DefaultShellSession; a name that would not make a
+// sane registry key or UI label is an error to name, not to guess at.
 func sessionName(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return "main", nil
+		return DefaultShellSession, nil
 	}
 	if len(s) > 32 || !sessionNameRe.MatchString(s) {
 		return "", fmt.Errorf("session must match %s (letters, digits, dot, dash, underscore)", sessionNamePattern)
@@ -260,36 +270,9 @@ func NewShellTool(workingDir, owner string, questions question.Service, tracker 
 
 			stdout := TruncateOutput(result.Output)
 
-			// The header names the state the call ended in and nothing
-			// else. What to do about each state belongs to the model,
-			// which knows how terminals work; repeating it on every
-			// call would spend context on advice it did not ask for.
-			var header string
-			switch {
-			case result.Interrupted:
-				header = "[interrupted]"
-			case result.Queued:
-				header = queuedHeader(result)
-			case result.WhileBusy:
-				header = "[another command holds the session; its screen follows]"
-			case result.Waiting:
-				header = waitingHeader(result)
-			case result.AltScreen && result.Unchanged:
-				header = "[full-screen program; screen unchanged]"
-			case result.AltScreen:
-				rows, cols := session.Size()
-				header = fmt.Sprintf("[full-screen program; %dx%d screen follows]", cols, rows)
-			case result.Running && result.Output != "":
-				header = "[still running; an empty call waits for it]"
-			case result.Running && result.ShellExit == nil:
-				header = runningHeader(result)
-			case result.ExitCode != nil && *result.ExitCode != 0:
-				header = fmt.Sprintf("[exit %d]", *result.ExitCode)
-			case params.Reset:
-				header = resetHeader(result)
-			case result.Output == "" && params.Command == "" && result.ShellExit == nil:
-				header = "[no new output]"
-			}
+			outcome := shellOutcome(params, result)
+			rows, cols := session.Size()
+			header := shellHeader(outcome, params, result, rows, cols)
 
 			// The best knowledge of where the session is: the last
 			// command's sentinel, else the last completed command on
@@ -304,13 +287,7 @@ func NewShellTool(workingDir, owner string, questions question.Service, tracker 
 				WorkingDirectory: cwd,
 				Session:          name,
 				ExitCode:         result.ExitCode,
-				Running:          result.Running,
-				Waiting:          result.Waiting,
-				Queued:           result.Queued,
-				WhileBusy:        result.WhileBusy,
-				AltScreen:        result.AltScreen,
-				Interrupted:      result.Interrupted,
-				ShellExited:      result.ShellExit != nil,
+				Outcome:          outcome,
 			}
 			if result.ShellExit != nil {
 				metadata.ShellExitCode = result.ShellExit.Code
@@ -347,6 +324,72 @@ func NewShellTool(workingDir, owner string, questions question.Service, tracker 
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(sb.String()), metadata), nil
 		},
 	)
+}
+
+func shellOutcome(params ShellParams, res PTYResult) ShellOutcome {
+	switch {
+	case params.Reset:
+		return ShellOutcomeReset
+	case res.Interrupted:
+		return ShellOutcomeInterrupted
+	case res.Queued:
+		return ShellOutcomeQueued
+	case res.WhileBusy:
+		return ShellOutcomeBusy
+	case res.Waiting:
+		return ShellOutcomeWaiting
+	case res.AltScreen:
+		return ShellOutcomeFullscreen
+	case res.Running:
+		return ShellOutcomeRunning
+	case res.ExitCode != nil:
+		return ShellOutcomeExited
+	case res.ShellExit != nil:
+		return ShellOutcomeShellExited
+	default:
+		return ShellOutcomeIdle
+	}
+}
+
+// shellHeader names the state the call ended in and nothing else. What
+// to do about each state belongs to the model, which knows how
+// terminals work; repeating it on every call would spend context on
+// advice it did not ask for.
+func shellHeader(outcome ShellOutcome, params ShellParams, res PTYResult, rows, cols int) string {
+	switch outcome {
+	case ShellOutcomeInterrupted:
+		return "[interrupted]"
+	case ShellOutcomeQueued:
+		return queuedHeader(res)
+	case ShellOutcomeBusy:
+		return "[another command holds the session; its screen follows]"
+	case ShellOutcomeWaiting:
+		return waitingHeader(res)
+	case ShellOutcomeFullscreen:
+		if res.Unchanged {
+			return "[full-screen program; screen unchanged]"
+		}
+		return fmt.Sprintf("[full-screen program; %dx%d screen follows]", cols, rows)
+	case ShellOutcomeRunning:
+		switch {
+		case res.Output != "":
+			return "[still running; an empty call waits for it]"
+		case res.ShellExit == nil:
+			return runningHeader(res)
+		}
+	case ShellOutcomeExited:
+		if *res.ExitCode != 0 {
+			return fmt.Sprintf("[exit %d]", *res.ExitCode)
+		}
+	case ShellOutcomeReset:
+		return resetHeader(res)
+	case ShellOutcomeIdle:
+		if res.Output == "" && params.Command == "" {
+			return "[no new output]"
+		}
+	case ShellOutcomeShellExited:
+	}
+	return ""
 }
 
 // queuedHeader is the header for a call whose text was queued rather

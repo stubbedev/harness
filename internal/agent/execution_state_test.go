@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/message"
 )
 
@@ -51,14 +52,19 @@ func TestExecutionStateShellOutcomes(t *testing.T) {
 		name, metadata, status string
 		failure                bool
 	}{
-		{"nonzero", `{"exit_code":1}`, "failed", true},
-		{"zero", `{"exit_code":0}`, "succeeded", false},
-		{"running", `{"running":true}`, "running", false},
-		{"waiting", `{"waiting":true}`, "waiting", false},
-		{"queued", `{"queued":true}`, "queued", false},
+		{"nonzero", `{"outcome":"exited","exit_code":1}`, "failed", true},
+		{"zero", `{"outcome":"exited","exit_code":0}`, "succeeded", false},
+		{"running", `{"outcome":"running"}`, "running", false},
+		{"fullscreen", `{"outcome":"fullscreen"}`, "running", false},
+		{"busy", `{"outcome":"busy"}`, "running", false},
+		{"waiting", `{"outcome":"waiting"}`, "waiting", false},
+		{"queued", `{"outcome":"queued"}`, "queued", false},
+		{"reset", `{"outcome":"reset"}`, "reset", false},
+		{"idle", `{"outcome":"idle"}`, "idle", false},
 		{"legacy", `{}`, "unknown", false},
-		{"interrupted", `{"interrupted":true}`, "interrupted", true},
-		{"shell died", `{"shell_exited":true,"shell_exit_code":9}`, "shell_exited", true},
+		{"interrupted", `{"outcome":"interrupted"}`, "interrupted", true},
+		{"shell died", `{"outcome":"shell_exited","shell_exit_code":9}`, "shell_exited", true},
+		{"shell exited cleanly", `{"outcome":"shell_exited","shell_exit_code":0}`, "shell_exited", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -71,15 +77,32 @@ func TestExecutionStateShellOutcomes(t *testing.T) {
 	}
 }
 
+func TestExecutionStateBusyAndQueuedLeaveSessionAlone(t *testing.T) {
+	t.Parallel()
+	for _, outcome := range []tools.ShellOutcome{tools.ShellOutcomeBusy, tools.ShellOutcomeQueued} {
+		t.Run(string(outcome), func(t *testing.T) {
+			t.Parallel()
+			state := newExecutionState("")
+			state.Ingest(executionMessages("first", "shell", `{"command":"cat"}`, `{"outcome":"waiting"}`, false))
+			metadata, err := json.Marshal(tools.ShellResponseMetadata{Outcome: outcome})
+			require.NoError(t, err)
+			state.Ingest(executionMessages("peek", "shell", `{"command":"ls"}`, string(metadata), false))
+			require.Len(t, state.Sessions, 1)
+			require.Equal(t, tools.DefaultShellSession, state.Sessions[0].Key)
+			require.Equal(t, "waiting", state.Sessions[0].Status)
+		})
+	}
+}
+
 func TestExecutionStatePollSurvivesRestartAndRetry(t *testing.T) {
 	t.Parallel()
 	state := newExecutionState("")
-	state.Ingest(executionMessages("first", "shell", `{"command":"false","session":"test"}`, `{"running":true,"session":"test"}`, false))
+	state.Ingest(executionMessages("first", "shell", `{"command":"false","session":"test"}`, `{"outcome":"running","session":"test"}`, false))
 	state = newExecutionState(state.Summary("forgot command"))
-	state.Ingest(executionMessages("poll", "shell", `{"session":"test"}`, `{"exit_code":2,"session":"test"}`, false))
+	state.Ingest(executionMessages("poll", "shell", `{"session":"test"}`, `{"outcome":"exited","exit_code":2,"session":"test"}`, false))
 	require.Len(t, state.Failures, 1)
 	require.Equal(t, "false", state.Failures[0].Input)
-	state.Ingest(executionMessages("retry", "shell", `{"session":"test","command":"false"}`, `{"exit_code":0,"session":"test"}`, false))
+	state.Ingest(executionMessages("retry", "shell", `{"session":"test","command":"false"}`, `{"outcome":"exited","exit_code":0,"session":"test"}`, false))
 	require.Empty(t, state.Failures)
 	require.Equal(t, "succeeded", state.Sessions[0].Status)
 }
@@ -89,7 +112,7 @@ func TestExecutionStateBoundsAndVersions(t *testing.T) {
 	state := newExecutionState("")
 	for i := range 100 {
 		state.Ingest(executionMessages(fmt.Sprint(i), "write", `{"file_path":"/a"}`, fmt.Sprintf(`{"file_mutations":[{"path":"/file/%d","version":"v%d"}]}`, i, i), false))
-		state.Ingest(executionMessages(fmt.Sprintf("cmd%d", i), "shell", fmt.Sprintf(`{"command":"echo %d"}`, i), `{"exit_code":0}`, false))
+		state.Ingest(executionMessages(fmt.Sprintf("cmd%d", i), "shell", fmt.Sprintf(`{"command":"echo %d"}`, i), `{"outcome":"exited","exit_code":0}`, false))
 	}
 	require.Len(t, state.Files, executionFilesLimit)
 	require.Len(t, state.Commands, executionCommandsLimit)
@@ -159,11 +182,11 @@ func TestExecutionStatePartialEditAndVerificationRetry(t *testing.T) {
 func TestExecutionStateIgnoresRewrittenResultBodies(t *testing.T) {
 	t.Parallel()
 	state := newExecutionState("")
-	failed := executionMessages("first", "shell", `{"command":"go test ./..."}`, `{"exit_code":1}`, false)
+	failed := executionMessages("first", "shell", `{"command":"go test ./..."}`, `{"outcome":"exited","exit_code":1}`, false)
 	result := failed[1].Parts[0].(message.ToolResult)
 	result.Content = strings.Repeat("FAIL\n", 200)
 	failed[1].Parts[0] = result
-	passed := executionMessages("second", "shell", `{"command":"go test ./..."}`, `{"exit_code":0}`, false)
+	passed := executionMessages("second", "shell", `{"command":"go test ./..."}`, `{"outcome":"exited","exit_code":0}`, false)
 	history := append(append([]message.Message(nil), failed...), passed...)
 	state.Ingest(history)
 	require.Empty(t, state.Failures)
@@ -181,11 +204,11 @@ func TestExecutionStateIgnoresRewrittenResultBodies(t *testing.T) {
 func TestExecutionStateReusedToolCallID(t *testing.T) {
 	t.Parallel()
 	state := newExecutionState("")
-	state.Ingest(executionMessages("call_0", "shell", `{"command":"make"}`, `{"exit_code":2}`, false))
+	state.Ingest(executionMessages("call_0", "shell", `{"command":"make"}`, `{"outcome":"exited","exit_code":2}`, false))
 	require.Len(t, state.Failures, 1)
 	// A provider that numbers calls per step sends call_0 again for a
 	// different call; its outcome still counts.
-	state.Ingest(executionMessages("call_0", "shell", `{"command":"make"}`, `{"exit_code":0}`, false))
+	state.Ingest(executionMessages("call_0", "shell", `{"command":"make"}`, `{"outcome":"exited","exit_code":0}`, false))
 	require.Empty(t, state.Failures)
 }
 
