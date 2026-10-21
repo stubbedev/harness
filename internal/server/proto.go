@@ -12,7 +12,7 @@ import (
 	"github.com/stubbedev/harness/internal/backend"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/proto"
-	"github.com/stubbedev/harness/internal/workspace"
+	"github.com/stubbedev/harness/internal/session"
 )
 
 type controllerV1 struct {
@@ -300,9 +300,7 @@ func (c *controllerV1) handleGetWorkspaceLSPs(w http.ResponseWriter, r *http.Req
 		if err != nil {
 			return nil, err
 		}
-		return mapValues(states, func(v workspace.LSPClientInfo) proto.LSPClientInfo {
-			return proto.LSPClientInfo(v)
-		}), nil
+		return mapValues(states, proto.LSPClientInfoFromDomain), nil
 	})
 }
 
@@ -339,11 +337,7 @@ func (c *controllerV1) handleGetWorkspaceSessions(w http.ResponseWriter, r *http
 		if err != nil {
 			return nil, err
 		}
-		result := make([]proto.Session, len(sessions))
-		for i, s := range sessions {
-			result[i] = sessionOut(ws, s)
-		}
-		return result, nil
+		return mapSlice(sessions, func(s session.Session) proto.Session { return sessionOut(ws, s) }), nil
 	})
 }
 
@@ -1108,6 +1102,14 @@ func mapValues[K comparable, V, U any](in map[K]V, f func(V) U) map[K]U {
 	out := make(map[K]U, len(in))
 	for k, v := range in {
 		out[k] = f(v)
+	}
+	return out
+}
+
+func mapSlice[T, U any](in []T, f func(T) U) []U {
+	out := make([]U, len(in))
+	for i, v := range in {
+		out[i] = f(v)
 	}
 	return out
 }

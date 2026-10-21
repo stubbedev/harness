@@ -85,64 +85,6 @@ type ConnectionEvent struct {
 	Stuck bool
 }
 
-// LSPClientInfo holds information about an LSP client's state. This is
-// the frontend-facing type; implementations translate from the
-// underlying app or proto representation.
-type LSPClientInfo struct {
-	Name            string
-	State           lsp.ServerState
-	Error           error
-	DiagnosticCount int
-	ConnectedAt     time.Time
-	// SessionDisabled marks a server turned off at runtime for the rest
-	// of the process, so the UI can tell it from a merely stopped one.
-	SessionDisabled bool
-}
-
-// StatusText returns the human-readable status of the server: the one
-// line a server listing shows next to the server name.
-func (i LSPClientInfo) StatusText() string {
-	if i.SessionDisabled {
-		return "disabled for this session"
-	}
-	switch i.State {
-	case lsp.StateUnstarted:
-		return "not started yet"
-	case lsp.StateStopped:
-		return "stopped"
-	case lsp.StateStarting:
-		return "starting…"
-	case lsp.StateReady:
-		return "ready"
-	case lsp.StateError:
-		if i.Error != nil {
-			return "error: " + i.Error.Error()
-		}
-		return "error"
-	case lsp.StateDisabled:
-		return "disabled"
-	default:
-		return "unknown"
-	}
-}
-
-// LSPEventType represents the type of LSP event.
-type LSPEventType string
-
-const (
-	LSPEventStateChanged       LSPEventType = "state_changed"
-	LSPEventDiagnosticsChanged LSPEventType = "diagnostics_changed"
-)
-
-// LSPEvent represents an LSP event forwarded to the TUI.
-type LSPEvent struct {
-	Type            LSPEventType
-	Name            string
-	State           lsp.ServerState
-	Error           error
-	DiagnosticCount int
-}
-
 // AgentModel holds the model information exposed to the UI.
 type AgentModel struct {
 	CatalogCfg catalog.Model
@@ -237,7 +179,7 @@ type Workspace interface {
 	// LSP
 	LSPStart(ctx context.Context, path string) error
 	LSPStopAll(ctx context.Context) error
-	LSPGetStates() (map[string]LSPClientInfo, error)
+	LSPGetStates() (map[string]lsp.ClientInfo, error)
 	LSPGetDiagnosticCounts(name string) (lsp.DiagnosticCounts, error)
 	// LSPFileDiagnostics aggregates every server's current diagnostics into
 	// per-file severity counts. It backs the transcript's live diagnostics

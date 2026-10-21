@@ -13,13 +13,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
-	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/commands"
+	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/update"
 )
 
 // TestProtoToMessageToolResult ensures that ToolResult metadata,
@@ -165,7 +166,7 @@ func TestNewClientWorkspace_SeedsSkillsCache(t *testing.T) {
 
 // TestTranslateEvent_UpdateAvailable verifies that an incoming
 // proto.UpdateAvailable event is converted back into the
-// app.UpdateAvailableMsg that the TUI expects, so client/server mode
+// update.AvailableMsg that the TUI expects, so client/server mode
 // shows the same update notification as local mode.
 func TestTranslateEvent_UpdateAvailable(t *testing.T) {
 	t.Parallel()
@@ -181,8 +182,8 @@ func TestTranslateEvent_UpdateAvailable(t *testing.T) {
 	}
 
 	out := w.translateEvent(ev)
-	got, ok := out.(app.UpdateAvailableMsg)
-	require.True(t, ok, "expected app.UpdateAvailableMsg, got %T", out)
+	got, ok := out.(update.AvailableMsg)
+	require.True(t, ok, "expected update.AvailableMsg, got %T", out)
 	require.Equal(t, "1.0.0", got.CurrentVersion)
 	require.Equal(t, "1.1.0", got.LatestVersion)
 	require.True(t, got.IsDevelopment)
@@ -888,4 +889,34 @@ func TestClientWorkspace_RecoveryCreateIsBounded(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("recoverWorkspace blocked on an unresponsive server")
 	}
+}
+
+func TestTranslateEvent_LSPDeliversTheDomainEvent(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	out := w.translateEvent(pubsub.Event[proto.LSPEvent]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: proto.LSPEvent{Type: lsp.EventStateChanged, Name: "gopls", State: lsp.StateError, Error: "boom"},
+	})
+	got, ok := out.(pubsub.Event[lsp.Event])
+	require.True(t, ok, "expected pubsub.Event[lsp.Event], got %T", out)
+	require.Equal(t, "gopls", got.Payload.Name)
+	require.Equal(t, lsp.StateError, got.Payload.State)
+	require.EqualError(t, got.Payload.Error, "boom")
+}
+
+func TestTranslateEvent_ConfigChangedPassesThrough(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	ev := pubsub.Event[proto.ConfigChanged]{Type: pubsub.UpdatedEvent, Payload: proto.ConfigChanged{WorkspaceID: "ws"}}
+	require.Equal(t, ev, w.translateEvent(ev))
+}
+
+func TestTranslateEvent_UnknownEventIsDropped(t *testing.T) {
+	t.Parallel()
+
+	w := NewClientWorkspace(nil, proto.Workspace{})
+	require.Nil(t, w.translateEvent(struct{}{}))
 }

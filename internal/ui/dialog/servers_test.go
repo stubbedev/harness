@@ -130,7 +130,7 @@ func TestLSPServersConstructAndBrowse(t *testing.T) {
 
 	d := NewLSPServers(
 		newServersTestCommon(),
-		map[string]workspace.LSPClientInfo{
+		map[string]lsp.ClientInfo{
 			"gopls":         {Name: "gopls", State: lsp.StateReady, ConnectedAt: time.Now().Add(-time.Minute)},
 			"rust-analyzer": {Name: "rust-analyzer", State: lsp.StateError, Error: errors.New("no such binary")},
 		},

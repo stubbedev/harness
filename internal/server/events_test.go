@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
-	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/update"
 )
 
 // TestMessageToProtoToolResult ensures that ToolResult metadata,
@@ -185,14 +185,14 @@ func TestRunCompleteToProto_Error(t *testing.T) {
 }
 
 // TestUpdateAvailableMsgToProto_RoundTrip verifies that an
-// app.UpdateAvailableMsg — published directly (not wrapped in
+// update.AvailableMsg — published directly (not wrapped in
 // pubsub.Event) by app.checkForUpdates — survives the SSE envelope
 // conversion. Without this, client/server mode silently drops update
 // notifications because wrapEvent hits its default branch.
 func TestUpdateAvailableMsgToProto_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	src := app.UpdateAvailableMsg{
+	src := update.AvailableMsg{
 		CurrentVersion: "1.0.0",
 		LatestVersion:  "1.1.0",
 		IsDevelopment:  false,

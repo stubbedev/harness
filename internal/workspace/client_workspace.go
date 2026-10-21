@@ -12,10 +12,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
-	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/agentstate"
-	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/commands"
@@ -370,23 +368,12 @@ func (w *ClientWorkspace) LSPStopAll(ctx context.Context) error {
 	return w.client.LSPStopAll(ctx, w.workspaceID())
 }
 
-func (w *ClientWorkspace) LSPGetStates() (map[string]LSPClientInfo, error) {
+func (w *ClientWorkspace) LSPGetStates() (map[string]lsp.ClientInfo, error) {
 	states, err := w.client.GetLSPs(context.Background(), w.workspaceID())
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]LSPClientInfo, len(states))
-	for k, v := range states {
-		result[k] = LSPClientInfo{
-			Name:            v.Name,
-			State:           v.State,
-			Error:           v.Error,
-			DiagnosticCount: v.DiagnosticCount,
-			ConnectedAt:     v.ConnectedAt,
-			SessionDisabled: v.SessionDisabled,
-		}
-	}
-	return result, nil
+	return proto.LSPClientInfosToDomain(states), nil
 }
 
 func (w *ClientWorkspace) LSPGetDiagnosticCounts(name string) (lsp.DiagnosticCounts, error) {
@@ -628,27 +615,7 @@ func (w *ClientWorkspace) ListMCPPrompts(ctx context.Context) ([]commands.MCPPro
 	if err != nil {
 		return nil, err
 	}
-	result := make([]commands.MCPPrompt, len(prompts))
-	for i, prompt := range prompts {
-		arguments := make([]commands.Argument, len(prompt.Arguments))
-		for j, argument := range prompt.Arguments {
-			arguments[j] = commands.Argument{
-				ID:          argument.ID,
-				Title:       argument.Title,
-				Description: argument.Description,
-				Required:    argument.Required,
-			}
-		}
-		result[i] = commands.MCPPrompt{
-			ID:          prompt.ID,
-			Title:       prompt.Title,
-			Description: prompt.Description,
-			PromptID:    prompt.PromptID,
-			ClientID:    prompt.ClientID,
-			Arguments:   arguments,
-		}
-	}
-	return result, nil
+	return proto.MCPPromptsToDomain(prompts), nil
 }
 
 func (w *ClientWorkspace) GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error) {
@@ -702,11 +669,7 @@ func (w *ClientWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
 		logErr("fetch MCP pending auth", err)
 		return nil
 	}
-	result := make([]mcp.PendingAuthServer, len(pending))
-	for i, p := range pending {
-		result[i] = mcp.PendingAuthServer{Name: p.Name, URL: p.URL}
-	}
-	return result
+	return proto.MCPPendingAuthServersToDomain(pending)
 }
 
 func (w *ClientWorkspace) MCPAuthURL(name string) (string, error) {
@@ -1015,56 +978,15 @@ func (w *ClientWorkspace) awaitSubscription() {
 // process-local skills.Manager so callers reading
 // skills.GetLatestStates see fresh data.
 func (w *ClientWorkspace) translateEvent(ev any) tea.Msg {
-	switch e := ev.(type) {
-	case pubsub.Event[proto.LSPEvent]:
-		return pubsub.Event[LSPEvent]{
-			Type: e.Type,
-			Payload: LSPEvent{
-				Type:            LSPEventType(e.Payload.Type),
-				Name:            e.Payload.Name,
-				State:           e.Payload.State,
-				Error:           e.Payload.Error,
-				DiagnosticCount: e.Payload.DiagnosticCount,
-			},
-		}
-	case pubsub.Event[proto.MCPEvent]:
-		return pubsub.Event[mcp.Event]{Type: e.Type, Payload: e.Payload.ToDomain()}
-	case pubsub.Event[proto.QuestionRequest]:
-		return pubsub.Event[question.Request]{Type: e.Type, Payload: e.Payload.ToDomain()}
-	case pubsub.Event[proto.QuestionNotification]:
-		return pubsub.Event[question.Notification]{Type: e.Type, Payload: question.Notification(e.Payload)}
-	case pubsub.Event[proto.Message]:
-		return pubsub.Event[message.Message]{Type: e.Type, Payload: e.Payload.ToDomain()}
-	case pubsub.Event[proto.Session]:
-		return pubsub.Event[session.Session]{Type: e.Type, Payload: e.Payload.ToDomain()}
-	case pubsub.Event[proto.File]:
-		return pubsub.Event[history.File]{Type: e.Type, Payload: e.Payload.ToDomain()}
-	case pubsub.Event[proto.AgentEvent]:
-		return pubsub.Event[notify.Notification]{Type: e.Type, Payload: e.Payload.ToDomain()}
-	case pubsub.Event[proto.RunComplete]:
-		// The TUI does not act on RunComplete, but converting it keeps
-		// the bridge symmetric with the server's wrapEvent and keeps the
-		// default branch from warning on every run.
-		return pubsub.Event[notify.RunComplete]{Type: e.Type, Payload: e.Payload.ToDomain()}
-	case pubsub.Event[proto.SkillsEvent]:
-		states := proto.SkillStatesToDomain(e.Payload.States)
-		if w.skills != nil {
-			w.skills.SetLatestStates(states)
-		}
-		return pubsub.Event[skills.Event]{
-			Type:    e.Type,
-			Payload: skills.Event{States: states},
-		}
-	case pubsub.Event[proto.UpdateAvailable]:
-		return app.UpdateAvailableMsg{
-			CurrentVersion: e.Payload.CurrentVersion,
-			LatestVersion:  e.Payload.LatestVersion,
-			IsDevelopment:  e.Payload.IsDevelopment,
-		}
-	default:
-		slog.Warn("Unknown event type in translateEvent", "type", fmt.Sprintf("%T", ev))
+	msg, err := proto.EventToDomain(ev)
+	if err != nil {
+		slog.Warn("Failed to translate workspace event", "error", err)
 		return nil
 	}
+	if e, ok := msg.(pubsub.Event[skills.Event]); ok && w.skills != nil {
+		w.skills.SetLatestStates(e.Payload.States)
+	}
+	return msg
 }
 
 // -- Checkpoints --
@@ -1088,26 +1010,7 @@ func (w *ClientWorkspace) ListExtensionCommands(ctx context.Context) ([]extensio
 	if err != nil {
 		return nil, err
 	}
-	result := make([]extensions.Command, len(infos))
-	for i, info := range infos {
-		args := make([]extensions.Argument, len(info.Arguments))
-		for j, arg := range info.Arguments {
-			args[j] = extensions.Argument{
-				ID:          arg.ID,
-				Title:       arg.Title,
-				Description: arg.Description,
-				Required:    arg.Required,
-			}
-		}
-		result[i] = extensions.Command{
-			ID:          info.ID,
-			Extension:   info.Extension,
-			Name:        info.Name,
-			Description: info.Description,
-			Arguments:   args,
-		}
-	}
-	return result, nil
+	return proto.ExtensionCommandsToDomain(infos), nil
 }
 
 // RunExtensionCommand asks the server to expand an extension command.

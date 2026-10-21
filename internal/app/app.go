@@ -46,13 +46,6 @@ import (
 	"github.com/stubbedev/harness/internal/version"
 )
 
-// UpdateAvailableMsg is sent when a new version is available.
-type UpdateAvailableMsg struct {
-	CurrentVersion string
-	LatestVersion  string
-	IsDevelopment  bool
-}
-
 type App struct {
 	Sessions    session.Service
 	Messages    message.Service
@@ -966,7 +959,7 @@ func (app *App) checkForUpdates(ctx context.Context) {
 	if err != nil || !info.Available() {
 		return
 	}
-	app.events.Publish(pubsub.UpdatedEvent, UpdateAvailableMsg{
+	app.events.Publish(pubsub.UpdatedEvent, update.AvailableMsg{
 		CurrentVersion: info.Current,
 		LatestVersion:  info.Latest,
 		IsDevelopment:  info.IsDevelopment(),

@@ -568,27 +568,6 @@ func (b *Backend) CreateWorkspace(args proto.Workspace) (*Workspace, proto.Works
 	return ws, workspaceToProto(ws), nil
 }
 
-// skillStatesToProto converts internal skill discovery states into the
-// wire format.
-func skillStatesToProto(states []*skills.SkillState) []proto.SkillState {
-	if len(states) == 0 {
-		return nil
-	}
-	out := make([]proto.SkillState, len(states))
-	for i, s := range states {
-		entry := proto.SkillState{
-			Name:  s.Name,
-			Path:  s.Path,
-			State: proto.SkillDiscoveryState(s.State),
-		}
-		if s.Err != nil {
-			entry.Error = s.Err.Error()
-		}
-		out[i] = entry
-	}
-	return out
-}
-
 // AttachClient registers a new SSE stream for the given client on the
 // workspace. The stream's deferred cleanup must call DetachClient with
 // the same arguments to release the claim.
@@ -1087,7 +1066,7 @@ func workspaceToProto(ws *Workspace) proto.Workspace {
 		Version:  version.Version,
 	}
 	if ws.Skills != nil {
-		out.Skills = skillStatesToProto(ws.Skills.States())
+		out.Skills = proto.SkillStatesFromDomain(ws.Skills.States())
 	}
 	return out
 }

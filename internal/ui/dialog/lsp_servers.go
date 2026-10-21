@@ -11,7 +11,6 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
-	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // LSPServersID is the identifier for the LSP servers dialog.
@@ -35,7 +34,7 @@ type ActionLSPSetSessionDisabled struct {
 // through SetStates. See servers.go.
 type LSPServers struct {
 	serversDialog
-	states      map[string]workspace.LSPClientInfo
+	states      map[string]lsp.ClientInfo
 	diagnostics map[string]lsp.DiagnosticCounts
 }
 
@@ -46,7 +45,7 @@ var (
 
 // NewLSPServers creates the LSP server manager dialog over the given
 // live states and diagnostic counts.
-func NewLSPServers(com *common.Common, states map[string]workspace.LSPClientInfo, diagnostics map[string]lsp.DiagnosticCounts) *LSPServers {
+func NewLSPServers(com *common.Common, states map[string]lsp.ClientInfo, diagnostics map[string]lsp.DiagnosticCounts) *LSPServers {
 	m := &LSPServers{states: states, diagnostics: diagnostics}
 	km := dialogKeys()
 	m.serversDialog = newServersDialog(com, m, km.LSPServers.Select, km.LSPServers.Back)
@@ -56,7 +55,7 @@ func NewLSPServers(com *common.Common, states map[string]workspace.LSPClientInfo
 
 // SetStates refreshes the dialog with fresh LSP states and diagnostic
 // counts. The current view survives the rebuild.
-func (m *LSPServers) SetStates(states map[string]workspace.LSPClientInfo, diagnostics map[string]lsp.DiagnosticCounts) {
+func (m *LSPServers) SetStates(states map[string]lsp.ClientInfo, diagnostics map[string]lsp.DiagnosticCounts) {
 	m.states = states
 	m.diagnostics = diagnostics
 	m.refresh()

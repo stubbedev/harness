@@ -30,7 +30,7 @@ var lspStatesTTL = 5 * time.Second
 // off-thread, plus the per-file counts the transcript's live diagnostics
 // overlay renders from.
 type lspStatesMsg struct {
-	states          map[string]workspace.LSPClientInfo
+	states          map[string]lsp.ClientInfo
 	diagnostics     map[string]lsp.DiagnosticCounts
 	fileDiagnostics map[string]lsp.DiagnosticCounts
 	err             error
@@ -38,7 +38,7 @@ type lspStatesMsg struct {
 
 // LSPInfo wraps LSP client information with diagnostic counts by severity.
 type LSPInfo struct {
-	workspace.LSPClientInfo
+	lsp.ClientInfo
 	Diagnostics map[protocol.DiagnosticSeverity]int
 }
 
@@ -151,15 +151,15 @@ func severityCounts(counts lsp.DiagnosticCounts) map[protocol.DiagnosticSeverity
 func (m *UI) lspInfo(width, maxItems int, isSection bool) string {
 	t := m.com.Styles
 
-	states := slices.SortedFunc(maps.Values(m.lspStates), func(a, b workspace.LSPClientInfo) int {
+	states := slices.SortedFunc(maps.Values(m.lspStates), func(a, b lsp.ClientInfo) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
 	var lsps []LSPInfo
 	for _, state := range states {
 		lsps = append(lsps, LSPInfo{
-			LSPClientInfo: state,
-			Diagnostics:   severityCounts(m.lspDiagnostics[state.Name]),
+			ClientInfo:  state,
+			Diagnostics: severityCounts(m.lspDiagnostics[state.Name]),
 		})
 	}
 

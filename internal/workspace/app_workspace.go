@@ -318,20 +318,8 @@ func (w *AppWorkspace) LSPStopAll(ctx context.Context) error {
 	return nil
 }
 
-func (w *AppWorkspace) LSPGetStates() (map[string]LSPClientInfo, error) {
-	states := app.LSPStatesWithSessionDisabled(w.app.LSPManager)
-	result := make(map[string]LSPClientInfo, len(states))
-	for k, v := range states {
-		result[k] = LSPClientInfo{
-			Name:            v.Name,
-			State:           v.State,
-			Error:           v.Error,
-			DiagnosticCount: v.DiagnosticCount,
-			ConnectedAt:     v.ConnectedAt,
-			SessionDisabled: v.SessionDisabled,
-		}
-	}
-	return result, nil
+func (w *AppWorkspace) LSPGetStates() (map[string]lsp.ClientInfo, error) {
+	return app.LSPStatesWithSessionDisabled(w.app.LSPManager), nil
 }
 
 func (w *AppWorkspace) LSPGetDiagnosticCounts(name string) (lsp.DiagnosticCounts, error) {

@@ -36,7 +36,6 @@ import (
 	"github.com/stubbedev/harness/internal/agent/notify"
 	agenttools "github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
-	"github.com/stubbedev/harness/internal/app"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/clipboard"
@@ -60,6 +59,7 @@ import (
 	"github.com/stubbedev/harness/internal/ui/notification"
 	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/ui/util"
+	"github.com/stubbedev/harness/internal/update"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
@@ -344,7 +344,7 @@ type UI struct {
 	// off-thread with a TTL backstop; see lsp.go. lspFileDiagnostics adds
 	// the per-file breakdown that the transcript's diagnostics items
 	// overlay onto their reports.
-	lspStates          map[string]workspace.LSPClientInfo
+	lspStates          map[string]lsp.ClientInfo
 	lspDiagnostics     map[string]lsp.DiagnosticCounts
 	lspFileDiagnostics map[string]lsp.DiagnosticCounts
 	lspFetchInFlight   bool
@@ -540,7 +540,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		header:              header,
 		taskSpinner:         taskSpinner,
 		frames:              newFrameCache(frameCacheTTL, frameCacheMaxEntries),
-		lspStates:           make(map[string]workspace.LSPClientInfo),
+		lspStates:           make(map[string]lsp.ClientInfo),
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
@@ -1166,14 +1166,10 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[history.File]:
 		cmds = append(cmds, m.handleFileEvent(msg.Payload))
-	case pubsub.Event[app.LSPEvent]:
+	case pubsub.Event[lsp.Event]:
 		// Refresh the memoized LSP state off-thread: LSPGetStates is a
 		// synchronous HTTP round-trip in client/server mode and diagnostics
 		// events can arrive per edited file.
-		if cmd := m.requestLSPRefresh(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	case pubsub.Event[workspace.LSPEvent]:
 		if cmd := m.requestLSPRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -1628,7 +1624,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ttl = DefaultStatusTTL
 		}
 		cmds = append(cmds, clearInfoMsgCmd(ttl))
-	case app.UpdateAvailableMsg:
+	case update.AvailableMsg:
 		text := fmt.Sprintf("Harness update available: v%s → v%s.", msg.CurrentVersion, msg.LatestVersion)
 		if msg.IsDevelopment {
 			text = fmt.Sprintf("This is a development version of Harness. The latest version is v%s.", msg.LatestVersion)

@@ -9,51 +9,19 @@ import (
 	"github.com/stubbedev/harness/internal/pubsub"
 )
 
-// LSPEventType represents the type of LSP event
-type LSPEventType string
-
-const (
-	LSPEventStateChanged       LSPEventType = "state_changed"
-	LSPEventDiagnosticsChanged LSPEventType = "diagnostics_changed"
-)
-
-// LSPEvent represents an event in the LSP system
-type LSPEvent struct {
-	Type            LSPEventType
-	Name            string
-	State           lsp.ServerState
-	Error           error
-	DiagnosticCount int
-}
-
-// LSPClientInfo holds information about an LSP client's state
 type LSPClientInfo struct {
-	Name            string
-	State           lsp.ServerState
-	Error           error
-	Client          *lsp.Client
-	DiagnosticCount int
-	ConnectedAt     time.Time
-	// SessionDisabled marks a server turned off at runtime for the rest
-	// of the process, so the UI can tell it from a merely stopped one.
-	// It is filled in by the state readers, not updateLSPState, because
-	// the mark lives in the manager rather than the state map.
-	SessionDisabled bool
+	lsp.ClientInfo
+	Client *lsp.Client
 }
 
 var (
 	lspStates = csync.NewMap[string, LSPClientInfo]()
-	lspBroker = pubsub.NewBroker[LSPEvent]()
+	lspBroker = pubsub.NewBroker[lsp.Event]()
 )
 
 // SubscribeLSPEvents returns a channel for LSP events
-func SubscribeLSPEvents(ctx context.Context) <-chan pubsub.Event[LSPEvent] {
+func SubscribeLSPEvents(ctx context.Context) <-chan pubsub.Event[lsp.Event] {
 	return lspBroker.Subscribe(ctx)
-}
-
-// GetLSPStates returns the current state of all LSP clients
-func GetLSPStates() map[string]LSPClientInfo {
-	return lspStates.Copy()
 }
 
 // GetLSPState returns the state of a specific LSP client
@@ -65,12 +33,15 @@ func GetLSPState(name string) (LSPClientInfo, bool) {
 // manager's runtime session-disable marks applied: marked servers are
 // flagged so readers can tell them from merely stopped ones, and a
 // marked server without a state entry gets a stopped entry of its own.
-func LSPStatesWithSessionDisabled(m *lsp.Manager) map[string]LSPClientInfo {
-	states := GetLSPStates()
+func LSPStatesWithSessionDisabled(m *lsp.Manager) map[string]lsp.ClientInfo {
+	states := make(map[string]lsp.ClientInfo)
+	for name, entry := range lspStates.Seq2() {
+		states[name] = entry.ClientInfo
+	}
 	for name := range m.SessionDisabled() {
 		info, ok := states[name]
 		if !ok {
-			info = LSPClientInfo{Name: name, State: lsp.StateStopped}
+			info = lsp.ClientInfo{Name: name, State: lsp.StateStopped}
 		}
 		info.SessionDisabled = true
 		states[name] = info
@@ -84,8 +55,8 @@ func updateLSPState(name string, state lsp.ServerState, err error, client *lsp.C
 		Name:            name,
 		State:           state,
 		Error:           err,
-		Client:          client,
 		DiagnosticCount: diagnosticCount,
+		Client:          client,
 	}
 	if state == lsp.StateReady {
 		info.ConnectedAt = time.Now()
@@ -95,8 +66,8 @@ func updateLSPState(name string, state lsp.ServerState, err error, client *lsp.C
 	lspStates.Set(name, info)
 
 	// Publish state change event
-	lspBroker.Publish(pubsub.UpdatedEvent, LSPEvent{
-		Type:            LSPEventStateChanged,
+	lspBroker.Publish(pubsub.UpdatedEvent, lsp.Event{
+		Type:            lsp.EventStateChanged,
 		Name:            name,
 		State:           state,
 		Error:           err,
@@ -111,8 +82,8 @@ func updateLSPDiagnostics(name string, diagnosticCount int) {
 		lspStates.Set(name, info)
 
 		// Publish diagnostics change event
-		lspBroker.Publish(pubsub.UpdatedEvent, LSPEvent{
-			Type:            LSPEventDiagnosticsChanged,
+		lspBroker.Publish(pubsub.UpdatedEvent, lsp.Event{
+			Type:            lsp.EventDiagnosticsChanged,
 			Name:            name,
 			State:           info.State,
 			Error:           info.Error,

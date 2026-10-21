@@ -1,8 +1,6 @@
 package proto
 
 import (
-	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/stubbedev/harness/internal/catalog"
@@ -72,7 +70,7 @@ type ConfigChanged struct {
 }
 
 // UpdateAvailable is published when a newer Harness release is detected
-// on the server side. It mirrors app.UpdateAvailableMsg across the SSE
+// on the server side. It mirrors update.AvailableMsg across the SSE
 // boundary so client/server mode TUI clients see the same notification
 // as local-mode clients.
 type UpdateAvailable struct {
@@ -262,116 +260,21 @@ type QuestionNotification struct {
 	BatchID string `json:"batch_id"`
 }
 
-// LSPEventType represents the type of LSP event.
-type LSPEventType string
-
-const (
-	LSPEventStateChanged       LSPEventType = "state_changed"
-	LSPEventDiagnosticsChanged LSPEventType = "diagnostics_changed"
-)
-
-// MarshalText implements the [encoding.TextMarshaler] interface.
-func (e LSPEventType) MarshalText() ([]byte, error) {
-	return []byte(e), nil
-}
-
-// UnmarshalText implements the [encoding.TextUnmarshaler] interface.
-func (e *LSPEventType) UnmarshalText(data []byte) error {
-	*e = LSPEventType(data)
-	return nil
-}
-
-// LSPEvent represents an event in the LSP system.
 type LSPEvent struct {
-	Type            LSPEventType    `json:"type"`
+	Type            lsp.EventType   `json:"type"`
 	Name            string          `json:"name"`
 	State           lsp.ServerState `json:"state"`
-	Error           error           `json:"error,omitempty"`
+	Error           string          `json:"error,omitempty"`
 	DiagnosticCount int             `json:"diagnostic_count,omitempty"`
 }
 
-// MarshalJSON implements the [json.Marshaler] interface.
-func (e LSPEvent) MarshalJSON() ([]byte, error) {
-	type Alias LSPEvent
-	return json.Marshal(&struct {
-		Error string `json:"error,omitempty"`
-		Alias
-	}{
-		Error: func() string {
-			if e.Error != nil {
-				return e.Error.Error()
-			}
-			return ""
-		}(),
-		Alias: Alias(e),
-	})
-}
-
-// UnmarshalJSON implements the [json.Unmarshaler] interface.
-func (e *LSPEvent) UnmarshalJSON(data []byte) error {
-	type Alias LSPEvent
-	aux := &struct {
-		Error string `json:"error,omitempty"`
-		Alias
-	}{
-		Alias: Alias(*e),
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	*e = LSPEvent(aux.Alias)
-	if aux.Error != "" {
-		e.Error = errors.New(aux.Error)
-	}
-	return nil
-}
-
-// LSPClientInfo holds information about an LSP client's state.
 type LSPClientInfo struct {
 	Name            string          `json:"name"`
 	State           lsp.ServerState `json:"state"`
-	Error           error           `json:"error,omitempty"`
+	Error           string          `json:"error,omitempty"`
 	DiagnosticCount int             `json:"diagnostic_count,omitempty"`
 	ConnectedAt     time.Time       `json:"connected_at"`
-	// SessionDisabled marks a server turned off at runtime for the rest
-	// of the process, so the UI can tell it from a merely stopped one.
-	SessionDisabled bool `json:"session_disabled,omitempty"`
-}
-
-// MarshalJSON implements the [json.Marshaler] interface.
-func (i LSPClientInfo) MarshalJSON() ([]byte, error) {
-	type Alias LSPClientInfo
-	return json.Marshal(&struct {
-		Error string `json:"error,omitempty"`
-		Alias
-	}{
-		Error: func() string {
-			if i.Error != nil {
-				return i.Error.Error()
-			}
-			return ""
-		}(),
-		Alias: Alias(i),
-	})
-}
-
-// UnmarshalJSON implements the [json.Unmarshaler] interface.
-func (i *LSPClientInfo) UnmarshalJSON(data []byte) error {
-	type Alias LSPClientInfo
-	aux := &struct {
-		Error string `json:"error,omitempty"`
-		Alias
-	}{
-		Alias: Alias(*i),
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	*i = LSPClientInfo(aux.Alias)
-	if aux.Error != "" {
-		i.Error = errors.New(aux.Error)
-	}
-	return nil
+	SessionDisabled bool            `json:"session_disabled,omitempty"`
 }
 
 // SummarizeRequest steers what a session summary keeps. An empty

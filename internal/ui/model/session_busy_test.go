@@ -33,7 +33,7 @@ type countingWorkspace struct {
 	agentBusy       bool
 	queued          []string
 	model           workspace.AgentModel
-	lspStates       map[string]workspace.LSPClientInfo
+	lspStates       map[string]lsp.ClientInfo
 	lspDiags        map[string]lsp.DiagnosticCounts
 	runningSubagent []workspace.RunningSubagentInfo
 
@@ -113,7 +113,7 @@ func (w *countingWorkspace) AgentModel() (workspace.AgentModel, error) {
 	return w.model, nil
 }
 
-func (w *countingWorkspace) LSPGetStates() (map[string]workspace.LSPClientInfo, error) {
+func (w *countingWorkspace) LSPGetStates() (map[string]lsp.ClientInfo, error) {
 	w.lspStateCalls++
 	return w.lspStates, nil
 }
@@ -751,7 +751,7 @@ func TestRenderHelpersDoNotProbeWorkspace(t *testing.T) {
 	ws := &countingWorkspace{ready: true}
 	m := newBusyUI(ws)
 	m.agentReady = true
-	m.lspStates = map[string]workspace.LSPClientInfo{
+	m.lspStates = map[string]lsp.ClientInfo{
 		"gopls": {Name: "gopls", State: lsp.StateReady, DiagnosticCount: 3},
 	}
 	m.lspDiagnostics = map[string]lsp.DiagnosticCounts{
@@ -863,23 +863,23 @@ func TestLSPEventRefreshIsOffThreadAndDeduped(t *testing.T) {
 
 	ws := &countingWorkspace{
 		ready:     true,
-		lspStates: map[string]workspace.LSPClientInfo{"gopls": {Name: "gopls", DiagnosticCount: 3}},
+		lspStates: map[string]lsp.ClientInfo{"gopls": {Name: "gopls", DiagnosticCount: 3}},
 		lspDiags:  map[string]lsp.DiagnosticCounts{"gopls": {Error: 2, Warning: 1}},
 	}
 	m := newBusyUI(ws)
 	warmCaches(m, false)
 	ws.resetCounters()
 
-	_, cmd := m.Update(pubsub.Event[workspace.LSPEvent]{
-		Payload: workspace.LSPEvent{Type: workspace.LSPEventDiagnosticsChanged, Name: "gopls"},
+	_, cmd := m.Update(pubsub.Event[lsp.Event]{
+		Payload: lsp.Event{Type: lsp.EventDiagnosticsChanged, Name: "gopls"},
 	})
 	require.Zero(t, ws.syncProbes(), "the LSP event handler must not probe synchronously")
 	require.True(t, m.lspFetchInFlight, "an LSP event must schedule an off-thread refresh")
 
 	// A second event while the fetch is in flight queues a re-fetch instead
 	// of stacking another dispatch.
-	m.Update(pubsub.Event[workspace.LSPEvent]{
-		Payload: workspace.LSPEvent{Type: workspace.LSPEventDiagnosticsChanged, Name: "gopls"},
+	m.Update(pubsub.Event[lsp.Event]{
+		Payload: lsp.Event{Type: lsp.EventDiagnosticsChanged, Name: "gopls"},
 	})
 	require.Zero(t, ws.syncProbes())
 	require.True(t, m.lspRefreshQueued, "an event during an in-flight fetch must queue a re-fetch")

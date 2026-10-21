@@ -5,8 +5,6 @@ import (
 	"net/http"
 
 	"github.com/stubbedev/harness/internal/backend"
-	"github.com/stubbedev/harness/internal/commands"
-	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/proto"
 )
 
@@ -184,11 +182,7 @@ func (c *controllerV1) handleGetWorkspaceSkills(w http.ResponseWriter, r *http.R
 		if err != nil {
 			return nil, err
 		}
-		result := make([]proto.SkillInfo, len(entries))
-		for i, e := range entries {
-			result[i] = proto.SkillInfoFromDomain(e)
-		}
-		return result, nil
+		return mapSlice(entries, proto.SkillInfoFromDomain), nil
 	})
 }
 
@@ -268,27 +262,8 @@ func (c *controllerV1) handleGetWorkspaceMCPPrompts(w http.ResponseWriter, r *ht
 		if err != nil {
 			return nil, err
 		}
-		result := make([]proto.MCPPrompt, len(prompts))
-		for i, p := range prompts {
-			result[i] = mcpPromptToProto(p)
-		}
-		return result, nil
+		return mapSlice(prompts, proto.MCPPromptFromDomain), nil
 	})
-}
-
-func mcpPromptToProto(p commands.MCPPrompt) proto.MCPPrompt {
-	args := make([]proto.MCPPromptArgument, len(p.Arguments))
-	for i, a := range p.Arguments {
-		args[i] = proto.MCPPromptArgument{ID: a.ID, Title: a.Title, Description: a.Description, Required: a.Required}
-	}
-	return proto.MCPPrompt{
-		ID:          p.ID,
-		Title:       p.Title,
-		Description: p.Description,
-		PromptID:    p.PromptID,
-		ClientID:    p.ClientID,
-		Arguments:   args,
-	}
 }
 
 // handlePostWorkspaceMCPGetPrompt retrieves a prompt from an MCP server.
@@ -348,11 +323,7 @@ func (c *controllerV1) handleGetWorkspaceMCPStates(w http.ResponseWriter, r *htt
 func (c *controllerV1) handleGetWorkspaceMCPPendingAuth(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
 		pending := ws.Ops().MCPPendingAuth()
-		result := make([]proto.MCPPendingAuthServer, len(pending))
-		for i, p := range pending {
-			result[i] = proto.MCPPendingAuthServer(p)
-		}
-		return result, nil
+		return mapSlice(pending, proto.MCPPendingAuthServerFromDomain), nil
 	})
 }
 
@@ -503,26 +474,8 @@ func (c *controllerV1) handleGetWorkspaceExtensionCommands(w http.ResponseWriter
 		if err != nil {
 			return nil, err
 		}
-		result := make([]proto.ExtensionCommandInfo, len(cmds))
-		for i, cmd := range cmds {
-			result[i] = extensionCommandToProto(cmd)
-		}
-		return result, nil
+		return mapSlice(cmds, proto.ExtensionCommandFromDomain), nil
 	})
-}
-
-func extensionCommandToProto(cmd extensions.Command) proto.ExtensionCommandInfo {
-	args := make([]proto.ExtensionCommandArgument, len(cmd.Arguments))
-	for i, a := range cmd.Arguments {
-		args[i] = proto.ExtensionCommandArgument{ID: a.ID, Title: a.Title, Description: a.Description, Required: a.Required}
-	}
-	return proto.ExtensionCommandInfo{
-		ID:          cmd.ID,
-		Extension:   cmd.Extension,
-		Name:        cmd.Name,
-		Description: cmd.Description,
-		Arguments:   args,
-	}
 }
 
 // handlePostWorkspaceExtensionCommandRun expands an extension command

@@ -11,12 +11,16 @@ import (
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/checkpoints"
+	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/history"
+	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/update"
 )
 
 // filler sets every exported field it can reach to a distinct non-zero
@@ -200,4 +204,61 @@ func TestNotifyRoundTrip(t *testing.T) {
 
 	rc := filled[notify.RunComplete](f)
 	require.Equal(t, rc, RunCompleteFromDomain(rc).ToDomain())
+}
+
+func TestLSPRoundTrip(t *testing.T) {
+	t.Parallel()
+	f := &filler{}
+
+	ev := filled[lsp.Event](f)
+	ev.Error = errors.New("crashed")
+	gotEv := LSPEventFromDomain(ev).ToDomain()
+	require.EqualError(t, gotEv.Error, "crashed")
+	gotEv.Error = ev.Error
+	require.Equal(t, ev, gotEv)
+
+	info := filled[lsp.ClientInfo](f)
+	info.Error = errors.New("stopped")
+	gotInfo := LSPClientInfoFromDomain(info).ToDomain()
+	require.EqualError(t, gotInfo.Error, "stopped")
+	gotInfo.Error = info.Error
+	require.Equal(t, info, gotInfo)
+
+	clean := filled[lsp.ClientInfo](f)
+	require.Equal(t, map[string]lsp.ClientInfo{"x": clean},
+		LSPClientInfosToDomain(map[string]LSPClientInfo{"x": LSPClientInfoFromDomain(clean)}))
+}
+
+func TestCommandListingsRoundTrip(t *testing.T) {
+	t.Parallel()
+	f := &filler{}
+
+	prompts := filled[[]commands.MCPPrompt](f)
+	require.Equal(t, prompts, MCPPromptsToDomain(mapSlice(prompts, MCPPromptFromDomain)))
+
+	cmds := filled[[]extensions.Command](f)
+	require.Equal(t, cmds, ExtensionCommandsToDomain(mapSlice(cmds, ExtensionCommandFromDomain)))
+
+	pending := filled[[]mcp.PendingAuthServer](f)
+	require.Equal(t, pending, MCPPendingAuthServersToDomain(mapSlice(pending, MCPPendingAuthServerFromDomain)))
+}
+
+func TestEventPayloadsRoundTrip(t *testing.T) {
+	t.Parallel()
+	f := &filler{}
+
+	n := filled[question.Notification](f)
+	require.Equal(t, n, QuestionNotificationFromDomain(n).ToDomain())
+
+	u := filled[update.AvailableMsg](f)
+	require.Equal(t, u, UpdateAvailableFromDomain(u).ToDomain())
+
+	e := filled[skills.Event](f)
+	require.Equal(t, e, SkillsEventFromDomain(e).ToDomain())
+}
+
+func TestSkillStatesFromDomainKeepsNilAndEmptyDistinct(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, SkillStatesFromDomain(nil))
+	require.Equal(t, []SkillState{}, SkillStatesFromDomain([]*skills.SkillState{}))
 }

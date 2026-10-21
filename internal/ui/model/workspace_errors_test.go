@@ -25,7 +25,7 @@ func (w *unreachableWorkspace) AgentIsBusy() (bool, error) { return false, errUn
 
 func (w *unreachableWorkspace) AgentCancelTurn(string) error { return errUnreachable }
 
-func (w *unreachableWorkspace) LSPGetStates() (map[string]workspace.LSPClientInfo, error) {
+func (w *unreachableWorkspace) LSPGetStates() (map[string]lsp.ClientInfo, error) {
 	return nil, errUnreachable
 }
 
@@ -69,7 +69,7 @@ func TestLSPRefreshErrorKeepsLiveDiagnostics(t *testing.T) {
 	m := newUnreachableUI(t)
 	warmCaches(m, false)
 	prev := map[string]lsp.DiagnosticCounts{"/tmp/a.go": {Error: 2}}
-	m.lspStates = map[string]workspace.LSPClientInfo{"gopls": {Name: "gopls", State: lsp.StateReady}}
+	m.lspStates = map[string]lsp.ClientInfo{"gopls": {Name: "gopls", State: lsp.StateReady}}
 	m.lspFileDiagnostics = prev
 
 	runCmds(m, m.dispatchLSPRefresh())
@@ -83,7 +83,7 @@ func TestLSPRefreshSuccessAppliesDiagnostics(t *testing.T) {
 	pinTTLs(t)
 	ws := &countingWorkspace{
 		ready:     true,
-		lspStates: map[string]workspace.LSPClientInfo{"gopls": {Name: "gopls", State: lsp.StateReady}},
+		lspStates: map[string]lsp.ClientInfo{"gopls": {Name: "gopls", State: lsp.StateReady}},
 		lspDiags:  map[string]lsp.DiagnosticCounts{"gopls": {Warning: 3}},
 	}
 	m := newBusyUI(ws)

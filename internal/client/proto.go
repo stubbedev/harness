@@ -121,12 +121,11 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				continue
 			}
 
-			decode, ok := eventDecoders[p.Type]
-			if !ok {
+			e, err := proto.DecodeEvent(p)
+			if errors.Is(err, proto.ErrUnknownEventTag) {
 				slog.Warn("Unknown event type", "type", p.Type)
 				continue
 			}
-			e, err := decode(p.Payload)
 			if err != nil {
 				// A zero-value event would reach the UI as, say, an
 				// empty message; dropping it is the lesser harm.
@@ -140,31 +139,6 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 	}()
 
 	return events, nil
-}
-
-// eventDecoders maps each SSE payload type to the decoder for its
-// typed pubsub event.
-var eventDecoders = map[pubsub.PayloadType]func(json.RawMessage) (any, error){
-	pubsub.PayloadTypeLSPEvent:             decodeEvent[proto.LSPEvent],
-	pubsub.PayloadTypeMCPEvent:             decodeEvent[proto.MCPEvent],
-	pubsub.PayloadTypeQuestionRequest:      decodeEvent[proto.QuestionRequest],
-	pubsub.PayloadTypeQuestionNotification: decodeEvent[proto.QuestionNotification],
-	pubsub.PayloadTypeMessage:              decodeEvent[proto.Message],
-	pubsub.PayloadTypeSession:              decodeEvent[proto.Session],
-	pubsub.PayloadTypeFile:                 decodeEvent[proto.File],
-	pubsub.PayloadTypeAgentEvent:           decodeEvent[proto.AgentEvent],
-	pubsub.PayloadTypeConfigChanged:        decodeEvent[proto.ConfigChanged],
-	pubsub.PayloadTypeSkillsEvent:          decodeEvent[proto.SkillsEvent],
-	pubsub.PayloadTypeRunComplete:          decodeEvent[proto.RunComplete],
-	pubsub.PayloadTypeUpdateAvailable:      decodeEvent[proto.UpdateAvailable],
-}
-
-func decodeEvent[T any](raw json.RawMessage) (any, error) {
-	var e pubsub.Event[T]
-	if err := json.Unmarshal(raw, &e); err != nil {
-		return nil, err
-	}
-	return e, nil
 }
 
 func sendEvent(ctx context.Context, evc chan any, ev any) bool {

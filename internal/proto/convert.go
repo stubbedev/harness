@@ -6,11 +6,15 @@ import (
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/checkpoints"
+	"github.com/stubbedev/harness/internal/commands"
+	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/history"
+	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/update"
 )
 
 // This file holds both directions of every domain <-> wire conversion
@@ -529,4 +533,138 @@ func RunCompleteFromDomain(r notify.RunComplete) RunComplete {
 // ToDomain converts a wire run completion back.
 func (r RunComplete) ToDomain() notify.RunComplete {
 	return notify.RunComplete(r)
+}
+
+func LSPEventFromDomain(e lsp.Event) LSPEvent {
+	return LSPEvent{
+		Type:            e.Type,
+		Name:            e.Name,
+		State:           e.State,
+		Error:           errorString(e.Error),
+		DiagnosticCount: e.DiagnosticCount,
+	}
+}
+
+func (e LSPEvent) ToDomain() lsp.Event {
+	return lsp.Event{
+		Type:            e.Type,
+		Name:            e.Name,
+		State:           e.State,
+		Error:           stringError(e.Error),
+		DiagnosticCount: e.DiagnosticCount,
+	}
+}
+
+func LSPClientInfoFromDomain(i lsp.ClientInfo) LSPClientInfo {
+	return LSPClientInfo{
+		Name:            i.Name,
+		State:           i.State,
+		Error:           errorString(i.Error),
+		DiagnosticCount: i.DiagnosticCount,
+		ConnectedAt:     i.ConnectedAt,
+		SessionDisabled: i.SessionDisabled,
+	}
+}
+
+func (i LSPClientInfo) ToDomain() lsp.ClientInfo {
+	return lsp.ClientInfo{
+		Name:            i.Name,
+		State:           i.State,
+		Error:           stringError(i.Error),
+		DiagnosticCount: i.DiagnosticCount,
+		ConnectedAt:     i.ConnectedAt,
+		SessionDisabled: i.SessionDisabled,
+	}
+}
+
+func SkillsEventFromDomain(e skills.Event) SkillsEvent {
+	return SkillsEvent{States: SkillStatesFromDomain(e.States)}
+}
+
+func (e SkillsEvent) ToDomain() skills.Event {
+	return skills.Event{States: SkillStatesToDomain(e.States)}
+}
+
+func QuestionNotificationFromDomain(n question.Notification) QuestionNotification {
+	return QuestionNotification(n)
+}
+
+func (n QuestionNotification) ToDomain() question.Notification {
+	return question.Notification(n)
+}
+
+func UpdateAvailableFromDomain(m update.AvailableMsg) UpdateAvailable {
+	return UpdateAvailable(m)
+}
+
+func (u UpdateAvailable) ToDomain() update.AvailableMsg {
+	return update.AvailableMsg(u)
+}
+
+func MCPPromptFromDomain(p commands.MCPPrompt) MCPPrompt {
+	return MCPPrompt{
+		ID:          p.ID,
+		Title:       p.Title,
+		Description: p.Description,
+		PromptID:    p.PromptID,
+		ClientID:    p.ClientID,
+		Arguments:   mapSlice(p.Arguments, func(a commands.Argument) MCPPromptArgument { return MCPPromptArgument(a) }),
+	}
+}
+
+func (p MCPPrompt) ToDomain() commands.MCPPrompt {
+	return commands.MCPPrompt{
+		ID:          p.ID,
+		Title:       p.Title,
+		Description: p.Description,
+		PromptID:    p.PromptID,
+		ClientID:    p.ClientID,
+		Arguments:   mapSlice(p.Arguments, func(a MCPPromptArgument) commands.Argument { return commands.Argument(a) }),
+	}
+}
+
+func ExtensionCommandFromDomain(c extensions.Command) ExtensionCommandInfo {
+	return ExtensionCommandInfo{
+		ID:          c.ID,
+		Extension:   c.Extension,
+		Name:        c.Name,
+		Description: c.Description,
+		Arguments:   mapSlice(c.Arguments, func(a extensions.Argument) ExtensionCommandArgument { return ExtensionCommandArgument(a) }),
+	}
+}
+
+func (c ExtensionCommandInfo) ToDomain() extensions.Command {
+	return extensions.Command{
+		ID:          c.ID,
+		Extension:   c.Extension,
+		Name:        c.Name,
+		Description: c.Description,
+		Arguments:   mapSlice(c.Arguments, func(a ExtensionCommandArgument) extensions.Argument { return extensions.Argument(a) }),
+	}
+}
+
+func MCPPendingAuthServerFromDomain(p mcp.PendingAuthServer) MCPPendingAuthServer {
+	return MCPPendingAuthServer(p)
+}
+
+func (p MCPPendingAuthServer) ToDomain() mcp.PendingAuthServer {
+	return mcp.PendingAuthServer(p)
+}
+
+func LSPClientInfosToDomain(in map[string]LSPClientInfo) map[string]lsp.ClientInfo {
+	out := make(map[string]lsp.ClientInfo, len(in))
+	for k, v := range in {
+		out[k] = v.ToDomain()
+	}
+	return out
+}
+
+func MCPPromptsToDomain(ps []MCPPrompt) []commands.MCPPrompt { return mapSlice(ps, MCPPrompt.ToDomain) }
+
+func ExtensionCommandsToDomain(cs []ExtensionCommandInfo) []extensions.Command {
+	return mapSlice(cs, ExtensionCommandInfo.ToDomain)
+}
+
+func MCPPendingAuthServersToDomain(ps []MCPPendingAuthServer) []mcp.PendingAuthServer {
+	return mapSlice(ps, MCPPendingAuthServer.ToDomain)
 }

@@ -26,6 +26,12 @@ type Info struct {
 	URL     string
 }
 
+type AvailableMsg struct {
+	CurrentVersion string
+	LatestVersion  string
+	IsDevelopment  bool
+}
+
 // Matches a version string like:
 // v0.0.0-0.20251231235959-06c807842604
 var goInstallRegexp = regexp.MustCompile(`^v?\d+\.\d+\.\d+-\d+\.\d{14}-[0-9a-f]{12}$`)

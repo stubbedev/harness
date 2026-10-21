@@ -4543,12 +4543,13 @@ const docTemplate = `{
                 "diagnostic_count": {
                     "type": "integer"
                 },
-                "error": {},
+                "error": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
                 "session_disabled": {
-                    "description": "SessionDisabled marks a server turned off at runtime for the rest\nof the process, so the UI can tell it from a merely stopped one.",
                     "type": "boolean"
                 },
                 "state": {
