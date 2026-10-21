@@ -63,7 +63,7 @@ func insertRunCompleteWorkspace(t *testing.T, b *Backend, base context.Context, 
 		ID:           uuid.New().String(),
 		Path:         t.TempDir(),
 		resolvedPath: t.TempDir(),
-		clients:      make(map[string]*clientState),
+		clients:      make(map[proto.ClientID]*clientState),
 		shutdownFn:   func() {},
 	}
 	ws.App = a

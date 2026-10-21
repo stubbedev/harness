@@ -20,6 +20,53 @@ const maxRequestBody = 1 << 20
 // answers 200 with no body.
 type wsFunc func(ctx context.Context, ws *backend.Workspace) (any, error)
 
+type sessionFunc func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error)
+
+func parseInput[T any](c *controllerV1, w http.ResponseWriter, r *http.Request, parse func(string) (T, error), raw string) (T, bool) {
+	v, err := parse(raw)
+	if err != nil {
+		c.handleError(w, r, err)
+		return v, false
+	}
+	return v, true
+}
+
+func (c *controllerV1) sessionID(w http.ResponseWriter, r *http.Request) (proto.SessionID, bool) {
+	return parseInput(c, w, r, proto.ParseSessionID, r.PathValue("sid"))
+}
+
+func (c *controllerV1) clientID(w http.ResponseWriter, r *http.Request) (proto.ClientID, bool) {
+	return parseInput(c, w, r, proto.ParseClientID, r.URL.Query().Get("client_id"))
+}
+
+func (c *controllerV1) serveSession(w http.ResponseWriter, r *http.Request, fn sessionFunc) {
+	sid, ok := c.sessionID(w, r)
+	if !ok {
+		return
+	}
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		return fn(ctx, ws, sid)
+	})
+}
+
+func serveSessionBody[Req any](c *controllerV1, w http.ResponseWriter, r *http.Request, fn func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID, req Req) (any, error)) {
+	serveSessionDecoded(c, w, r, false, fn)
+}
+
+func serveSessionOptionalBody[Req any](c *controllerV1, w http.ResponseWriter, r *http.Request, fn func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID, req Req) (any, error)) {
+	serveSessionDecoded(c, w, r, true, fn)
+}
+
+func serveSessionDecoded[Req any](c *controllerV1, w http.ResponseWriter, r *http.Request, allowEmpty bool, fn func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID, req Req) (any, error)) {
+	sid, ok := c.sessionID(w, r)
+	if !ok {
+		return
+	}
+	serveDecoded(c, w, r, allowEmpty, func(ctx context.Context, ws *backend.Workspace, req Req) (any, error) {
+		return fn(ctx, ws, sid, req)
+	})
+}
+
 // serve resolves the {id} workspace, runs fn, and writes its result or
 // error. Every workspace-scoped handler goes through it, so an unknown
 // workspace always answers the 404 clients recover on.

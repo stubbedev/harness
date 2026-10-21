@@ -1,5 +1,11 @@
 package proto
 
+import (
+	"encoding/json"
+
+	"github.com/stubbedev/harness/internal/checkpoints"
+)
+
 // Session represents a session in the proto layer.
 //
 // IsBusy is computed on read (it is not persisted with the session) and
@@ -71,8 +77,18 @@ type Checkpoint struct {
 
 // RewindRequest restores a session to an earlier turn. MessageID is
 // the user message to rewind to; Mode is one of "conversation",
-// "files", or "both".
+// "files", or "both", and an empty or absent mode selects "both".
 type RewindRequest struct {
-	MessageID string `json:"message_id"`
-	Mode      string `json:"mode"`
+	MessageID string           `json:"message_id"`
+	Mode      checkpoints.Mode `json:"mode"`
+}
+
+func (r *RewindRequest) UnmarshalJSON(data []byte) error {
+	type wire RewindRequest
+	v := wire{Mode: checkpoints.ModeBoth}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*r = RewindRequest(v)
+	return nil
 }

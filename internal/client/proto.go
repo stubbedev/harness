@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/message"
@@ -451,6 +452,6 @@ func (c *Client) ListCheckpoints(ctx context.Context, id string, sessionID strin
 }
 
 // RewindSession rewinds a session to an earlier turn.
-func (c *Client) RewindSession(ctx context.Context, id, sessionID, messageID, mode string) error {
+func (c *Client) RewindSession(ctx context.Context, id, sessionID, messageID string, mode checkpoints.Mode) error {
 	return c.do(ctx, "rewind session", post(wsPath(id, "sessions", sessionID, "rewind"), proto.RewindRequest{MessageID: messageID, Mode: mode}))
 }

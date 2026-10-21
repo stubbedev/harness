@@ -780,24 +780,7 @@ func (w *AppWorkspace) Rewind(ctx context.Context, sessionID, messageID string, 
 	if busy {
 		return fmt.Errorf("cannot rewind: %w", ErrSessionBusy)
 	}
-	mode, err = normalizeRewindMode(mode)
-	if err != nil {
-		return err
-	}
 	return w.app.Checkpoints.Rewind(ctx, sessionID, messageID, mode)
-}
-
-// normalizeRewindMode defaults an empty mode to rewinding both the
-// transcript and the files, and rejects anything unknown.
-func normalizeRewindMode(mode checkpoints.Mode) (checkpoints.Mode, error) {
-	if mode == "" {
-		return checkpoints.ModeBoth, nil
-	}
-	m, err := checkpoints.ParseMode(string(mode))
-	if err != nil {
-		return mode, fmt.Errorf("%w: rewind mode %q", ErrInvalidArgument, string(mode))
-	}
-	return m, nil
 }
 
 // ListExtensionCommands returns the slash commands the workspace's Lua

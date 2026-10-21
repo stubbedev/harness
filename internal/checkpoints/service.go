@@ -41,14 +41,26 @@ const (
 	ModeBoth Mode = "both"
 )
 
-// ParseMode converts a wire string into a Mode.
+// ParseMode converts a wire string into a Mode. An empty string selects
+// ModeBoth.
 func ParseMode(s string) (Mode, error) {
 	switch Mode(s) {
+	case "":
+		return ModeBoth, nil
 	case ModeConversation, ModeFiles, ModeBoth:
 		return Mode(s), nil
 	default:
 		return "", fmt.Errorf("invalid rewind mode %q", s)
 	}
+}
+
+func (m *Mode) UnmarshalText(text []byte) error {
+	parsed, err := ParseMode(string(text))
+	if err != nil {
+		return err
+	}
+	*m = parsed
+	return nil
 }
 
 // Checkpoint maps a user message to the git commit that snapshots the

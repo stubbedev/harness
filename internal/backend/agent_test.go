@@ -80,7 +80,7 @@ func insertAgentWorkspace(t *testing.T, b *Backend, coord agent.Coordinator) *Wo
 		ID:           uuid.New().String(),
 		Path:         t.TempDir(),
 		resolvedPath: t.TempDir(),
-		clients:      make(map[string]*clientState),
+		clients:      make(map[proto.ClientID]*clientState),
 		shutdownFn:   func() {},
 	}
 	ws.App = &app.App{AgentCoordinator: coord}
@@ -133,13 +133,13 @@ func TestSendMessage_RejectsNonUUIDIdentifiers(t *testing.T) {
 	ws := insertAgentWorkspace(t, b, newBlockingCoordinator())
 
 	err := b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "S1", Prompt: "hi"})
-	require.ErrorIs(t, err, ErrInvalidSessionID)
+	require.ErrorIs(t, err, proto.ErrInvalidSessionID)
 
 	err = b.SendMessage(ws.ID, proto.AgentMessage{SessionID: "../../etc", Prompt: "hi"})
-	require.ErrorIs(t, err, ErrInvalidSessionID)
+	require.ErrorIs(t, err, proto.ErrInvalidSessionID)
 
 	err = b.SendMessage(ws.ID, proto.AgentMessage{SessionID: testSessionID, RunID: "run-1", Prompt: "hi"})
-	require.ErrorIs(t, err, ErrInvalidRunID)
+	require.ErrorIs(t, err, proto.ErrInvalidRunID)
 }
 
 func TestSendMessage_WorkspaceClosing(t *testing.T) {

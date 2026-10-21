@@ -55,7 +55,7 @@ func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 		DataDir:  filepath.Join(wdA, ".harness"),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = b.DeleteWorkspace(wsA.ID, cidA) })
+	t.Cleanup(func() { b.DeleteWorkspace(wsA.ID, proto.ClientID(cidA)) })
 
 	wsB, _, err := b.CreateWorkspace(proto.Workspace{
 		ClientID: cidB,
@@ -63,7 +63,7 @@ func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 		DataDir:  filepath.Join(wdB, ".harness"),
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = b.DeleteWorkspace(wsB.ID, cidB) })
+	t.Cleanup(func() { b.DeleteWorkspace(wsB.ID, proto.ClientID(cidB)) })
 
 	require.NotNil(t, wsA.Skills, "workspace A must have its own skills.Manager")
 	require.NotNil(t, wsB.Skills, "workspace B must have its own skills.Manager")

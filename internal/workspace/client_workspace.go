@@ -996,7 +996,7 @@ func (w *ClientWorkspace) ListCheckpoints(ctx context.Context, sessionID string)
 }
 
 func (w *ClientWorkspace) Rewind(ctx context.Context, sessionID, messageID string, mode checkpoints.Mode) error {
-	return w.client.RewindSession(ctx, w.workspaceID(), sessionID, messageID, string(mode))
+	return w.client.RewindSession(ctx, w.workspaceID(), sessionID, messageID, mode)
 }
 
 // ListExtensionCommands returns the extension commands the server

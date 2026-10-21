@@ -23,7 +23,7 @@ import (
 // ErrWorkspaceNotFound if the workspace is missing, ErrAgentNotInitialized
 // if its coordinator is nil, the structural validation errors from
 // agent.ValidateCall (ErrEmptyPrompt, ErrSessionMissing) when the prompt
-// or session is missing, ErrInvalidSessionID or ErrInvalidRunID when an
+// or session is missing, proto.ErrInvalidSessionID or proto.ErrInvalidRunID when an
 // identifier is not the canonical UUID shape harness mints them in, and
 // ErrWorkspaceClosing if the workspace is being torn down.
 func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error {
@@ -44,20 +44,15 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return err
 	}
 
-	sessionID := msg.SessionID
-	// The ID arrives over the wire and reaches scratch directory names,
-	// context values, and git command environments downstream, so only
-	// the canonical UUID shape every session is minted in is accepted.
-	if !agent.UUIDPattern.MatchString(sessionID) {
-		return ErrInvalidSessionID
+	sid, err := proto.ParseSessionID(msg.SessionID)
+	if err != nil {
+		return err
 	}
+	sessionID := string(sid)
 
 	runID := msg.RunID
-	// Same boundary, same rule for the optional run correlator: an empty
-	// RunID means the caller supplied none, anything else must be the
-	// canonical UUID shape `harness run` mints.
-	if !agent.OptionalUUIDPattern.MatchString(runID) {
-		return ErrInvalidRunID
+	if err := proto.ValidateRunID(runID); err != nil {
+		return err
 	}
 
 	accept := ws.AgentCoordinator.BeginAccepted(sessionID)

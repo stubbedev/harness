@@ -140,7 +140,7 @@ func TestSessionListIdleSessionIsNotBusy(t *testing.T) {
 
 func TestSessionGetIncludesIsBusy(t *testing.T) {
 	t.Parallel()
-	const sid = "s-busy"
+	sid := uuid.New().String()
 	c, wsID := buildBusyWorkspace(t, sid, true)
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/workspaces/"+wsID+"/sessions/"+sid, nil)
@@ -252,7 +252,7 @@ func TestSessionListIncludesAttachedClients(t *testing.T) {
 	require.Equal(t, 0, counts["S2"])
 
 	// Attach A, set to S1: S1=1.
-	cidA := uuid.New().String()
+	cidA := proto.ClientID(uuid.New().String())
 	require.NoError(t, c.backend.AttachClient(ws.ID, cidA))
 	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cidA) })
 	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cidA, "S1"))
@@ -261,7 +261,7 @@ func TestSessionListIncludesAttachedClients(t *testing.T) {
 	require.Equal(t, 0, counts["S2"])
 
 	// Attach B, set to S1: S1=2.
-	cidB := uuid.New().String()
+	cidB := proto.ClientID(uuid.New().String())
 	require.NoError(t, c.backend.AttachClient(ws.ID, cidB))
 	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cidB, "S1"))
 	counts = countsBySessionID(listSessions(t, c, ws.ID))
@@ -289,9 +289,9 @@ func TestSessionListExcludesHoldOnlyClient(t *testing.T) {
 	t.Parallel()
 	c, ws := buildMultiSessionWorkspace(t, "S1")
 
-	cid := uuid.New().String()
-	require.NoError(t, backend.RegisterClientForTesting(c.backend, ws, cid))
-	t.Cleanup(func() { _ = c.backend.DeleteWorkspace(ws.ID, cid) })
+	cid := proto.ClientID(uuid.New().String())
+	backend.RegisterClientForTesting(c.backend, ws, cid)
+	t.Cleanup(func() { c.backend.DeleteWorkspace(ws.ID, cid) })
 
 	counts := countsBySessionID(listSessions(t, c, ws.ID))
 	require.Equal(t, 0, counts["S1"], "hold-only client must not be counted")
@@ -304,7 +304,7 @@ func TestSessionListExcludesUnselectedAttachedClient(t *testing.T) {
 	t.Parallel()
 	c, ws := buildMultiSessionWorkspace(t, "S1")
 
-	cid := uuid.New().String()
+	cid := proto.ClientID(uuid.New().String())
 	require.NoError(t, c.backend.AttachClient(ws.ID, cid))
 	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
 	// Intentionally do NOT call SetCurrentSession.
@@ -318,17 +318,18 @@ func TestSessionListExcludesUnselectedAttachedClient(t *testing.T) {
 // handler also populates AttachedClients.
 func TestSessionGetIncludesAttachedClients(t *testing.T) {
 	t.Parallel()
-	c, ws := buildMultiSessionWorkspace(t, "S1")
+	sid := uuid.New().String()
+	c, ws := buildMultiSessionWorkspace(t, sid)
 
-	cid := uuid.New().String()
+	cid := proto.ClientID(uuid.New().String())
 	require.NoError(t, c.backend.AttachClient(ws.ID, cid))
 	t.Cleanup(func() { c.backend.DetachClient(ws.ID, cid) })
-	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cid, "S1"))
+	require.NoError(t, c.backend.SetCurrentSession(ws.ID, cid, sid))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
-		"/v1/workspaces/"+ws.ID+"/sessions/S1", nil)
+		"/v1/workspaces/"+ws.ID+"/sessions/"+sid, nil)
 	req.SetPathValue("id", ws.ID)
-	req.SetPathValue("sid", "S1")
+	req.SetPathValue("sid", sid)
 	rec := httptest.NewRecorder()
 	c.handleGetWorkspaceSession(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -356,7 +357,8 @@ func (s *stubSessions) Rename(_ context.Context, id, title string) error {
 // pointer because the wire names never matched the untagged fields.
 func TestSessionRenameKeepsStoredFields(t *testing.T) {
 	t.Parallel()
-	c, ws := buildMultiSessionWorkspace(t, "S1")
+	sid := uuid.New().String()
+	c, ws := buildMultiSessionWorkspace(t, sid)
 	stub := ws.Sessions.(*stubSessions)
 	stub.all[0].PromptTokens = 42
 	stub.all[0].SummaryMessageID = "sum"
@@ -364,9 +366,9 @@ func TestSessionRenameKeepsStoredFields(t *testing.T) {
 	body, err := json.Marshal(proto.SessionRenameRequest{Title: "renamed"})
 	require.NoError(t, err)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPut,
-		"/v1/workspaces/"+ws.ID+"/sessions/S1", bytes.NewReader(body))
+		"/v1/workspaces/"+ws.ID+"/sessions/"+sid, bytes.NewReader(body))
 	req.SetPathValue("id", ws.ID)
-	req.SetPathValue("sid", "S1")
+	req.SetPathValue("sid", sid)
 	rec := httptest.NewRecorder()
 	c.handlePutWorkspaceSession(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)

@@ -1,6 +1,10 @@
 package backend
 
-import "context"
+import (
+	"context"
+
+	"github.com/stubbedev/harness/internal/proto"
+)
 
 // InsertWorkspaceForTest registers ws with b under its current ID and
 // path. It is intended for tests in other packages that need to drive
@@ -16,7 +20,7 @@ func InsertWorkspaceForTest(b *Backend, ws *Workspace) {
 		ws.resolvedPath = ws.Path
 	}
 	if ws.clients == nil {
-		ws.clients = make(map[string]*clientState)
+		ws.clients = make(map[proto.ClientID]*clientState)
 	}
 	if ws.ctx == nil {
 		parent := b.ctx
@@ -37,12 +41,8 @@ func InsertWorkspaceForTest(b *Backend, ws *Workspace) {
 // ws using the backend's normal registerClient path. Intended for
 // tests in other packages that need to drive a hold-only client
 // (streams == 0) without booting a real CreateWorkspace flow.
-func RegisterClientForTesting(b *Backend, ws *Workspace, clientID string) error {
-	if _, err := validateClientID(clientID); err != nil {
-		return err
-	}
+func RegisterClientForTesting(b *Backend, ws *Workspace, clientID proto.ClientID) {
 	b.registerClient(ws, clientID)
-	return nil
 }
 
 // SetWorkspaceShutdownFnForTest overrides the workspace teardown

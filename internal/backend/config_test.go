@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/proto"
@@ -51,7 +50,7 @@ func newPublishingWorkspace(t *testing.T) (*Backend, *Workspace, <-chan pubsub.E
 	b.SetCreateGrace(2 * time.Second)
 	t.Cleanup(func() { drainBackend(t, b) })
 
-	cid := uuid.New().String()
+	cid := newClientID(t)
 	ws, _, err := b.CreateWorkspace(protoWS(cwd, dataDir, cid))
 	require.NoError(t, err)
 

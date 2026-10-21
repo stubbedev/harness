@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/stubbedev/harness/internal/backend"
-	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/session"
 )
@@ -128,23 +126,6 @@ func (c *controllerV1) handlePostWorkspaces(w http.ResponseWriter, r *http.Reque
 	jsonEncode(w, result)
 }
 
-// requireClientID reads the client_id query parameter and validates it
-// as a UUID. On failure it writes a 400 and returns false.
-func (c *controllerV1) requireClientID(w http.ResponseWriter, r *http.Request) (string, bool) {
-	cid := r.URL.Query().Get("client_id")
-	if cid == "" {
-		c.server.logError(r, "Missing client_id query parameter")
-		jsonError(w, http.StatusBadRequest, "client_id is required")
-		return "", false
-	}
-	if _, err := uuid.Parse(cid); err != nil {
-		c.server.logError(r, "Invalid client_id", "error", err)
-		jsonError(w, http.StatusBadRequest, "client_id is not a valid UUID")
-		return "", false
-	}
-	return cid, true
-}
-
 // handlePostWorkspaceCurrentSession records the calling client's
 // current session selection for the workspace. An empty session_id
 // clears the entry (e.g. the client is on the landing screen).
@@ -161,7 +142,7 @@ func (c *controllerV1) requireClientID(w http.ResponseWriter, r *http.Request) (
 //	@Failure		404	{object}	proto.Error
 //	@Router			/workspaces/{id}/current-session [post]
 func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, r *http.Request) {
-	clientID, ok := c.requireClientID(w, r)
+	clientID, ok := c.clientID(w, r)
 	if !ok {
 		return
 	}
@@ -183,9 +164,11 @@ func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, 
 //	@Failure		400	{object}	proto.Error
 //	@Router			/clients/{client_id} [delete]
 func (c *controllerV1) handleDeleteClient(w http.ResponseWriter, r *http.Request) {
-	if err := c.backend.RetireClient(r.PathValue("client_id")); err != nil {
-		c.handleError(w, r, err)
+	clientID, ok := parseInput(c, w, r, proto.ParseClientID, r.PathValue("client_id"))
+	if !ok {
+		return
 	}
+	c.backend.RetireClient(clientID)
 }
 
 // handleDeleteWorkspaces deletes a workspace.
@@ -197,13 +180,11 @@ func (c *controllerV1) handleDeleteClient(w http.ResponseWriter, r *http.Request
 //	@Failure		404	{object}	proto.Error
 //	@Router			/workspaces/{id} [delete]
 func (c *controllerV1) handleDeleteWorkspaces(w http.ResponseWriter, r *http.Request) {
-	clientID, ok := c.requireClientID(w, r)
+	clientID, ok := c.clientID(w, r)
 	if !ok {
 		return
 	}
-	if err := c.backend.DeleteWorkspace(r.PathValue("id"), clientID); err != nil {
-		c.handleError(w, r, err)
-	}
+	c.backend.DeleteWorkspace(r.PathValue("id"), clientID)
 }
 
 // handleGetWorkspaceConfig returns workspace configuration.
@@ -235,7 +216,7 @@ func (c *controllerV1) handleGetWorkspaceConfig(w http.ResponseWriter, r *http.R
 func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.Request) {
 	flusher := http.NewResponseController(w)
 	id := r.PathValue("id")
-	clientID, ok := c.requireClientID(w, r)
+	clientID, ok := c.clientID(w, r)
 	if !ok {
 		return
 	}
@@ -369,8 +350,8 @@ func (c *controllerV1) handlePostWorkspaceSessions(w http.ResponseWriter, r *htt
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid} [get]
 func (c *controllerV1) handleGetWorkspaceSession(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		s, err := ws.Ops().GetSession(ctx, r.PathValue("sid"))
+	c.serveSession(w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		s, err := ws.Ops().GetSession(ctx, string(sid))
 		return sessionResult(ws, s, err)
 	})
 }
@@ -387,8 +368,8 @@ func (c *controllerV1) handleGetWorkspaceSession(w http.ResponseWriter, r *http.
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid}/history [get]
 func (c *controllerV1) handleGetWorkspaceSessionHistory(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		files, err := ws.Ops().ListSessionHistory(ctx, r.PathValue("sid"))
+	c.serveSession(w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		files, err := ws.Ops().ListSessionHistory(ctx, string(sid))
 		return proto.FilesFromDomain(files), err
 	})
 }
@@ -405,8 +386,8 @@ func (c *controllerV1) handleGetWorkspaceSessionHistory(w http.ResponseWriter, r
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid}/messages [get]
 func (c *controllerV1) handleGetWorkspaceSessionMessages(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		msgs, err := ws.Ops().ListMessages(ctx, r.PathValue("sid"))
+	c.serveSession(w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		msgs, err := ws.Ops().ListMessages(ctx, string(sid))
 		return proto.MessagesFromDomain(msgs), err
 	})
 }
@@ -428,13 +409,12 @@ func (c *controllerV1) handleGetWorkspaceSessionMessages(w http.ResponseWriter, 
 //	@Failure		500		{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid} [put]
 func (c *controllerV1) handlePutWorkspaceSession(w http.ResponseWriter, r *http.Request) {
-	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.SessionRenameRequest) (any, error) {
-		sid := r.PathValue("sid")
+	serveSessionBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID, req proto.SessionRenameRequest) (any, error) {
 		ops := ws.Ops()
-		if err := ops.RenameSession(ctx, sid, req.Title); err != nil {
+		if err := ops.RenameSession(ctx, string(sid), req.Title); err != nil {
 			return nil, err
 		}
-		s, err := ops.GetSession(ctx, sid)
+		s, err := ops.GetSession(ctx, string(sid))
 		return sessionResult(ws, s, err)
 	})
 }
@@ -450,8 +430,8 @@ func (c *controllerV1) handlePutWorkspaceSession(w http.ResponseWriter, r *http.
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid} [delete]
 func (c *controllerV1) handleDeleteWorkspaceSession(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		return done(ws.Ops().DeleteSession(ctx, r.PathValue("sid")))
+	c.serveSession(w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		return done(ws.Ops().DeleteSession(ctx, string(sid)))
 	})
 }
 
@@ -467,8 +447,8 @@ func (c *controllerV1) handleDeleteWorkspaceSession(w http.ResponseWriter, r *ht
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid}/messages/user [get]
 func (c *controllerV1) handleGetWorkspaceSessionUserMessages(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		msgs, err := ws.Ops().ListUserMessages(ctx, r.PathValue("sid"))
+	c.serveSession(w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		msgs, err := ws.Ops().ListUserMessages(ctx, string(sid))
 		return proto.MessagesFromDomain(msgs), err
 	})
 }
@@ -487,8 +467,14 @@ func (c *controllerV1) handleGetWorkspaceSessionUserMessages(w http.ResponseWrit
 //	@Router			/workspaces/{id}/prompt-history [get]
 //	@Router			/workspaces/{id}/sessions/{sid}/prompt-history [get]
 func (c *controllerV1) handleGetWorkspacePromptHistory(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		return ws.Ops().PromptHistory(ctx, r.PathValue("sid"))
+	if r.PathValue("sid") == "" {
+		c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+			return ws.Ops().PromptHistory(ctx, "")
+		})
+		return
+	}
+	c.serveSession(w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		return ws.Ops().PromptHistory(ctx, string(sid))
 	})
 }
 
@@ -504,8 +490,8 @@ func (c *controllerV1) handleGetWorkspacePromptHistory(w http.ResponseWriter, r 
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid}/filetracker/files [get]
 func (c *controllerV1) handleGetWorkspaceSessionFileTrackerFiles(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		return ws.Ops().FileTrackerListReadFiles(ctx, r.PathValue("sid"))
+	c.serveSession(w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		return ws.Ops().FileTrackerListReadFiles(ctx, string(sid))
 	})
 }
 
@@ -748,8 +734,8 @@ func (c *controllerV1) handlePostWorkspaceAgentUpdate(w http.ResponseWriter, r *
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid} [get]
 func (c *controllerV1) handleGetWorkspaceAgentSession(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		s, err := ws.Ops().GetSession(ctx, r.PathValue("sid"))
+	c.serveSession(w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		s, err := ws.Ops().GetSession(ctx, string(sid))
 		if err != nil {
 			return nil, err
 		}
@@ -771,8 +757,8 @@ func (c *controllerV1) handleGetWorkspaceAgentSession(w http.ResponseWriter, r *
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/cancel [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionCancel(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return done(ws.Ops().AgentCancel(r.PathValue("sid")))
+	c.serveSession(w, r, func(_ context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		return done(ws.Ops().AgentCancel(string(sid)))
 	})
 }
 
@@ -788,8 +774,8 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionCancel(w http.ResponseWrit
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/queued [get]
 func (c *controllerV1) handleGetWorkspaceAgentSessionPromptQueued(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return ws.Ops().AgentQueuedPrompts(r.PathValue("sid"))
+	c.serveSession(w, r, func(_ context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		return ws.Ops().AgentQueuedPrompts(string(sid))
 	})
 }
 
@@ -804,8 +790,8 @@ func (c *controllerV1) handleGetWorkspaceAgentSessionPromptQueued(w http.Respons
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/clear [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return done(ws.Ops().AgentClearQueue(r.PathValue("sid")))
+	c.serveSession(w, r, func(_ context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		return done(ws.Ops().AgentClearQueue(string(sid)))
 	})
 }
 
@@ -823,8 +809,8 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.Respons
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/summarize [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseWriter, r *http.Request) {
 	// The body carries optional focus instructions from /compact.
-	serveOptionalBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.SummarizeRequest) (any, error) {
-		return done(ws.Ops().AgentSummarize(ctx, r.PathValue("sid"), req.Instructions))
+	serveSessionOptionalBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID, req proto.SummarizeRequest) (any, error) {
+		return done(ws.Ops().AgentSummarize(ctx, string(sid), req.Instructions))
 	})
 }
 
@@ -842,8 +828,8 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionSummarize(w http.ResponseW
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/goal [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionGoal(w http.ResponseWriter, r *http.Request) {
-	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.GoalRequest) (any, error) {
-		return done(ws.Ops().AgentSetGoal(ctx, r.PathValue("sid"), req.Condition))
+	serveSessionBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID, req proto.GoalRequest) (any, error) {
+		return done(ws.Ops().AgentSetGoal(ctx, string(sid), req.Condition))
 	})
 }
 
@@ -862,8 +848,8 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionGoal(w http.ResponseWriter
 //	@Failure		500		{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/shell [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionShell(w http.ResponseWriter, r *http.Request) {
-	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.ShellCommandRequest) (any, error) {
-		return ws.Ops().AgentRunShellCommand(ctx, r.PathValue("sid"), req.Command, req.TermWidth, nil, req.IsFirstMessage)
+	serveSessionBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID, req proto.ShellCommandRequest) (any, error) {
+		return ws.Ops().AgentRunShellCommand(ctx, string(sid), req.Command, req.TermWidth, nil, req.IsFirstMessage)
 	})
 }
 
@@ -879,8 +865,8 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionShell(w http.ResponseWrite
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/list [get]
 func (c *controllerV1) handleGetWorkspaceAgentSessionPromptList(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return ws.Ops().AgentQueuedPromptsList(r.PathValue("sid"))
+	c.serveSession(w, r, func(_ context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		return ws.Ops().AgentQueuedPromptsList(string(sid))
 	})
 }
 
@@ -950,8 +936,8 @@ func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter,
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid}/checkpoints [get]
 func (c *controllerV1) handleGetWorkspaceSessionCheckpoints(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		cps, err := ws.Ops().ListCheckpoints(ctx, r.PathValue("sid"))
+	c.serveSession(w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		cps, err := ws.Ops().ListCheckpoints(ctx, string(sid))
 		return proto.CheckpointsFromDomain(cps), err
 	})
 }
@@ -972,8 +958,8 @@ func (c *controllerV1) handleGetWorkspaceSessionCheckpoints(w http.ResponseWrite
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/sessions/{sid}/rewind [post]
 func (c *controllerV1) handlePostWorkspaceSessionRewind(w http.ResponseWriter, r *http.Request) {
-	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.RewindRequest) (any, error) {
-		return done(ws.Ops().Rewind(ctx, r.PathValue("sid"), req.MessageID, checkpoints.Mode(req.Mode)))
+	serveSessionBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID, req proto.RewindRequest) (any, error) {
+		return done(ws.Ops().Rewind(ctx, string(sid), req.MessageID, req.Mode))
 	})
 }
 
@@ -1010,10 +996,10 @@ var errorClasses = []struct {
 	{backend.ErrPathRequired, classInvalid},
 	{backend.ErrInvalidPermissionAction, classInvalid},
 	{backend.ErrUnknownCommand, classInvalid},
-	{backend.ErrInvalidClientID, classInvalid},
+	{proto.ErrInvalidClientID, classInvalid},
 	{backend.ErrInvalidWorkspacePath, classInvalid},
-	{backend.ErrInvalidSessionID, classInvalid},
-	{backend.ErrInvalidRunID, classInvalid},
+	{proto.ErrInvalidSessionID, classInvalid},
+	{proto.ErrInvalidRunID, classInvalid},
 	{backend.ErrInvalidDataDir, classInvalid},
 	{backend.ErrInvalidArgument, classInvalid},
 	// 409, not 404: the workspace exists, the caller just has no live
