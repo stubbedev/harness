@@ -207,6 +207,17 @@ func newSentinel(d shellDialect) sentinel {
 	}
 }
 
+func (m sentinel) split(drained string) (cut string, exitCode *int, cwd string, found bool) {
+	loc := m.parse.FindStringSubmatchIndex(drained)
+	if loc == nil {
+		return drained, nil, "", false
+	}
+	if code, err := strconv.Atoi(drained[loc[2]:loc[3]]); err == nil {
+		exitCode = &code
+	}
+	return drained[:loc[0]], exitCode, drained[loc[4]:loc[5]], true
+}
+
 var (
 	// credPromptRe matches output that looks like a credential prompt:
 	// sudo's in any locale (the "[sudo] ... :" shape survives
@@ -2058,19 +2069,11 @@ func (r *ptyRunner) collectResult(ctx context.Context, s ptyTerminal) (PTYResult
 	if settled && tail {
 		_, _ = s.WaitForAnyOrQuiet(ctx, []term.Pattern{ptyPasteRe}, ptyFenceQuietMs*time.Millisecond, ptyFenceSettle)
 	}
-	drained := string(s.Drain())
-	cut := drained
-	var match []string
-	if loc := mark.parse.FindStringIndex(drained); loc != nil {
-		match = mark.parse.FindStringSubmatch(drained)
-		cut = drained[:loc[0]]
-	}
+	cut, exitCode, cwd, found := mark.split(string(s.Drain()))
 	res := PTYResult{Output: r.clean(cut, echo)}
-	if match != nil {
-		if code, err := strconv.Atoi(match[1]); err == nil {
-			res.ExitCode = &code
-		}
-		res.Cwd = match[2]
+	if found {
+		res.ExitCode = exitCode
+		res.Cwd = cwd
 		r.setState(func() {
 			r.lastCwd = res.Cwd
 			r.settled = settled
