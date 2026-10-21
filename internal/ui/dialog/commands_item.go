@@ -271,8 +271,8 @@ func (c *CommandItem) ArgumentHint() string {
 // for arguments is put in the editor to be finished there, anything
 // else runs.
 func (c *CommandItem) SelectAction() Action {
-	if c.ArgumentHint() != "" {
-		return ActionInsertInvocation{Name: c.SlashName()}
+	if a, ok := c.action.(ArgAction); ok && c.ArgumentHint() != "" {
+		return ActionInsertInvocation{Name: c.SlashName(), Action: a}
 	}
 	return ActionInvoke{Action: c.action, Name: c.SlashName()}
 }

@@ -97,7 +97,15 @@ func (m *UI) commandCatalog() *dialog.Catalog {
 // it is focused on the prompt itself, not a shell command, an inline
 // form, or an agent being steered.
 func (m *UI) invocationsLive() bool {
-	return m.focus == uiFocusEditor && !m.bangMode && m.activeInline == nil && m.agentView.shown == ""
+	return m.focus == uiFocusEditor && m.editorReadsInvocations()
+}
+
+func (m *UI) editorReadsInvocations() bool {
+	return m.editorTakesPrefixes() && m.agentView.shown == ""
+}
+
+func (m *UI) editorTakesPrefixes() bool {
+	return !m.bangMode && m.activeInline == nil
 }
 
 // editorInvocation reads value as a command invocation. ok is false when

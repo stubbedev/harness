@@ -107,6 +107,23 @@ func TestShellModeHintOnlyWhileEditorIdle(t *testing.T) {
 	require.False(t, hasDesc(m.ShortHelp(), "shell mode"))
 }
 
+func TestAgentViewHintsOmitInvocation(t *testing.T) {
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.agentView.shown = "m1$$a1"
+
+	short := m.ShortHelp()
+	require.False(t, hasDesc(short, "run command"))
+	require.Equal(t, "ctrl+p", helpKey(t, short, "commands"))
+	require.Equal(t, "!", helpKey(t, short, "shell mode"))
+
+	flat := flatHelp(m.FullHelp())
+	require.False(t, hasDesc(flat, "run command"))
+	require.Equal(t, "ctrl+p", helpKey(t, flat, "commands"))
+	require.Equal(t, "!", helpKey(t, flat, "shell mode"))
+}
+
 // TestNewlineHintNamesShiftEnter pins the newline hint to the key users
 // actually press; ctrl+j is only the fallback for terminals that cannot
 // send shift+enter.

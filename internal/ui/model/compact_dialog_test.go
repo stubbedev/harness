@@ -87,6 +87,41 @@ func TestPalettePutsArgumentTakingCommandInEditor(t *testing.T) {
 	require.Empty(t, ws.summarizeCalls, "picking must not compact")
 }
 
+func TestPaletteOpensArgumentsFormWhereEditorCannotInvoke(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]func(m *UI){
+		"agent view": func(m *UI) { m.agentView.shown = "m1$$a1" },
+		"shell mode": func(m *UI) { m.bangMode = true },
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m, _ := newCompactUI(t)
+			setup(m)
+
+			selectCommand(t, m, "Set Goal")
+
+			require.Equal(t, dialog.ArgumentsID, m.dialog.DialogLast().ID())
+			require.False(t, m.dialog.ContainsDialog(dialog.CommandsID))
+			require.Empty(t, m.textarea.Value(), "the invocation must not land in the editor")
+			require.Nil(t, m.session.Goal)
+		})
+	}
+}
+
+func TestPaletteSetGoalInsertsInvocationInNormalState(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newCompactUI(t)
+
+	selectCommand(t, m, "Set Goal")
+
+	require.False(t, m.dialog.HasDialogs())
+	require.Equal(t, "/goal ", m.textarea.Value())
+}
+
 // TestCompactInvocationSubmitsFocus pins the whole /compact chain: the text
 // after the name reaches AgentSummarize as the focus.
 func TestCompactInvocationSubmitsFocus(t *testing.T) {

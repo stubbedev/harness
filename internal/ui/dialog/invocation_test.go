@@ -78,7 +78,8 @@ func TestSelectActionFollowsArgSpec(t *testing.T) {
 
 	items := invocationCatalog().Invocables()
 
-	assert.Equal(t, ActionInsertInvocation{Name: "compact"}, FindInvocable(items, "compact").SelectAction(),
+	compact := FindInvocable(items, "compact")
+	assert.Equal(t, ActionInsertInvocation{Name: "compact", Action: compact.Action().(ArgAction)}, compact.SelectAction(),
 		"a command that asks for arguments goes to the editor")
 	assert.Equal(t, "[focus]", FindInvocable(items, "compact").ArgumentHint(), "the hint is the ArgSpec's")
 	_, runs := FindInvocable(items, "review").SelectAction().(ActionInvoke)

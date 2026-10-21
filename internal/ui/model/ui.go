@@ -2097,6 +2097,10 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 		m.closeCommandDialogs()
 		m.dialog.OpenDialog(dialog.NewArguments(m.com, msg.Action, msg.Args))
 	case dialog.ActionInsertInvocation:
+		if !m.editorReadsInvocations() || m.invocationPrefix() == "" {
+			cmds = append(cmds, m.handleAction(dialog.ActionOpenArguments{Action: msg.Action}))
+			break
+		}
 		m.closeCommandDialogs()
 		cmds = append(cmds, m.insertInvocation(msg.Name))
 	case dialog.ActionCompact:
@@ -2979,24 +2983,23 @@ func (m *UI) applyProgressBar(v *tea.View) {
 	}
 }
 
-// commandHints returns the hints for reaching commands. The global chord
-// (ctrl+p) opens the palette and the editor's first characters start a
-// command invocation ("/") or a shell command ("!"), but they are never
-// hinted together: the first characters stand in while the editor is
-// empty and idle, and the global chord covers every other state, where
-// they would just be typed.
-func commandHints(k *KeyMap, show bool) []key.Binding {
-	if !show {
-		return []key.Binding{k.Commands}
+func (m *UI) commandHints() []key.Binding {
+	var binds []key.Binding
+	if m.shellModeKeyLive() {
+		binds = append(binds, m.keyMap.Editor.ShellMode)
 	}
-	return []key.Binding{k.Editor.ShellMode, k.Editor.Commands}
+	if m.editorPalettesLive() {
+		return append(binds, m.keyMap.Editor.Commands)
+	}
+	return append(binds, m.keyMap.Commands)
 }
 
-// editorPalettesLive reports whether the editor's first characters ("!",
-// "/") start a shell command or a command invocation: the editor is
-// focused, empty, and not already in shell mode.
 func (m *UI) editorPalettesLive() bool {
-	return m.focus == uiFocusEditor && m.textarea.Value() == "" && !m.bangMode
+	return m.invocationsLive() && m.textarea.Value() == ""
+}
+
+func (m *UI) shellModeKeyLive() bool {
+	return m.focus == uiFocusEditor && m.editorTakesPrefixes() && m.textarea.Value() == ""
 }
 
 // ShortHelp implements [help.KeyMap].
@@ -3038,7 +3041,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		}
 
 		binds = append(binds, tab)
-		binds = append(binds, commandHints(k, m.editorPalettesLive())...)
+		binds = append(binds, m.commandHints()...)
 		binds = append(binds, k.Models)
 		// Details only routes in a chat session, so it is only hinted there;
 		// the details dialog itself declares the close/toggle hints while open.
@@ -3077,7 +3080,7 @@ func (m *UI) ShortHelp() []key.Binding {
 		binds = append(
 			binds,
 			append(
-				commandHints(k, m.editorPalettesLive()),
+				m.commandHints(),
 				k.Models,
 			)...,
 		)
@@ -3135,7 +3138,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 		}
 
 		mainBinds = append(mainBinds, tab)
-		mainBinds = append(mainBinds, commandHints(k, m.editorPalettesLive())...)
+		mainBinds = append(mainBinds, m.commandHints()...)
 		mainBinds = append(
 			mainBinds,
 			k.Models,
@@ -3205,7 +3208,7 @@ func (m *UI) FullHelp() [][]key.Binding {
 			binds = append(
 				binds,
 				append(
-					commandHints(k, m.editorPalettesLive()),
+					m.commandHints(),
 					k.Models,
 					k.Sessions,
 					k.Themes,

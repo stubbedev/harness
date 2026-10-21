@@ -114,7 +114,8 @@ type (
 	// ActionInsertInvocation puts a command's name in the editor for the
 	// user to follow with its arguments.
 	ActionInsertInvocation struct {
-		Name string
+		Name   string
+		Action ArgAction
 	}
 	// ActionOpenArguments opens the arguments form for Action with what
 	// was already typed filled in.
