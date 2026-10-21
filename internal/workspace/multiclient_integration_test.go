@@ -143,7 +143,7 @@ func compactMode(cfg *config.Config) bool {
 // TestClientWorkspace_ConfigChangedSignalArrives is a smaller test
 // that asserts the SSE wiring delivers a ConfigChanged event to the
 // raw client subscription. It catches breakage in the
-// wrapEvent/decoder bridge independent of the workspace cache.
+// EncodeEvent/DecodeEvent bridge independent of the workspace cache.
 func TestClientWorkspace_ConfigChangedSignalArrives(t *testing.T) {
 	xdgIsolate(t)
 	rt := newRuntimeServer(t)

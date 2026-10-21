@@ -104,11 +104,10 @@ func TestEveryCodecRoundTripsOverTheWire(t *testing.T) {
 			}
 			msg := v.Interface()
 
-			payload, err := WrapEvent(msg)
+			frame, err := EncodeEvent(msg)
 			require.NoError(t, err)
-			require.Equal(t, c.tag, payload.Type)
 
-			wire, err := DecodeEvent(*payload)
+			wire, err := DecodeEvent(frame)
 			require.NoError(t, err)
 			require.Equal(t, c.wireType, reflect.TypeOf(wire))
 
@@ -119,34 +118,64 @@ func TestEveryCodecRoundTripsOverTheWire(t *testing.T) {
 	}
 }
 
-func TestWrapEventRejectsUnknownAndWirelessEvents(t *testing.T) {
+func TestEncodeEventRejectsUnknownAndWirelessEvents(t *testing.T) {
 	t.Parallel()
-	_, err := WrapEvent(struct{}{})
+	_, err := EncodeEvent(struct{}{})
 	require.ErrorIs(t, err, ErrUnknownEvent)
 
-	_, err = WrapEvent(pubsub.Event[mcp.Event]{Payload: mcp.Event{Type: mcp.EventChannelMessage}})
+	_, err = EncodeEvent(pubsub.Event[mcp.Event]{Payload: mcp.Event{Type: mcp.EventChannelMessage}})
 	require.ErrorIs(t, err, ErrNoWireForm)
 
-	_, err = DecodeEvent(pubsub.Payload{Type: "nope"})
+	_, err = DecodeEvent([]byte(`{"type":"nope","payload":{}}`))
 	require.ErrorIs(t, err, ErrUnknownEventTag)
 
 	_, err = EventToDomain(struct{}{})
 	require.ErrorIs(t, err, ErrUnknownEvent)
 }
 
-func TestDecodeEventReportsMalformedPayload(t *testing.T) {
+func TestDecodeEventReportsMalformedFrames(t *testing.T) {
 	t.Parallel()
-	_, err := DecodeEvent(pubsub.Payload{Type: pubsub.PayloadTypeLSPEvent, Payload: []byte(`{"payload":`)})
-	require.Error(t, err)
-	require.NotErrorIs(t, err, ErrUnknownEventTag)
+	for name, tc := range map[string]struct {
+		frame string
+		want  error
+	}{
+		"truncated payload":     {frame: `{"type":"lsp_event","payload":`},
+		"payload before type":   {frame: `{"payload":{},"type":"lsp_event"}`, want: ErrPayloadBeforeType},
+		"no payload":            {frame: `{"type":"lsp_event"}`, want: ErrNoPayload},
+		"non-string type":       {frame: `{"type":1,"payload":{}}`},
+		"not an object":         {frame: `[]`},
+		"trailing garbage":      {frame: `{"type":"lsp_event","payload":{}} x`},
+		"part data before type": {frame: `{"type":"message","payload":{"type":"updated","payload":{"parts":[{"data":{},"type":"text"}]}}}`, want: ErrPartDataBeforeType},
+		"part without data":     {frame: `{"type":"message","payload":{"type":"updated","payload":{"parts":[{"type":"text"}]}}}`, want: ErrPartWithoutData},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := DecodeEvent([]byte(tc.frame))
+			require.Error(t, err)
+			require.NotErrorIs(t, err, ErrUnknownEventTag)
+			if tc.want != nil {
+				require.ErrorIs(t, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDecodeEventSkipsUnknownFramesKeysAndParts(t *testing.T) {
+	t.Parallel()
+	wire, err := DecodeEvent([]byte(`{"id":7,"type":"message","payload":{"type":"updated","payload":{"id":"m1","parts":[{"type":"hologram","data":{"x":1}},{"type":"text","extra":[1],"data":{"text":"hi"}}]}}}`))
+	require.NoError(t, err)
+	require.Equal(t, pubsub.Event[Message]{
+		Type:    pubsub.UpdatedEvent,
+		Payload: Message{ID: "m1", Parts: []ContentPart{TextContent{Text: "hi"}}},
+	}, wire)
 }
 
 func TestLSPEventErrorCrossesTheWire(t *testing.T) {
 	t.Parallel()
-	payload, err := WrapEvent(pubsub.Event[lsp.Event]{
+	frame, err := EncodeEvent(pubsub.Event[lsp.Event]{
 		Type:    pubsub.UpdatedEvent,
 		Payload: lsp.Event{Type: lsp.EventStateChanged, Name: "gopls", State: lsp.StateError, Error: errors.New("boom")},
 	})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"type":"updated","payload":{"type":"state_changed","name":"gopls","state":3,"error":"boom"}}`, string(payload.Payload))
+	require.JSONEq(t, `{"type":"lsp_event","payload":{"type":"updated","payload":{"type":"state_changed","name":"gopls","state":3,"error":"boom"}}}`, string(frame))
 }

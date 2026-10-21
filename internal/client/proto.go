@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +17,6 @@ import (
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
-	"github.com/stubbedev/harness/internal/pubsub"
 )
 
 // ListWorkspaces retrieves all workspaces from the server.
@@ -90,8 +88,10 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 		defer close(events)
 
 		scr := bufio.NewReader(rsp.Body)
+		var line []byte
 		for {
-			line, err := scr.ReadBytes('\n')
+			var err error
+			line, err = readLine(scr, line[:0])
 			if err != nil {
 				// Any read error is terminal: the body keeps returning
 				// it, so retrying the read would spin forever. Closing
@@ -102,34 +102,23 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 				}
 				return
 			}
-			line = bytes.TrimSpace(line)
-			if len(line) == 0 {
-				continue
-			}
-
-			data, ok := bytes.CutPrefix(line, []byte("data:"))
+			data, ok := bytes.CutPrefix(bytes.TrimSpace(line), []byte("data:"))
 			if !ok {
-				slog.Warn("Invalid event format", "line", string(line))
+				if len(bytes.TrimSpace(line)) > 0 {
+					slog.Warn("Invalid event format", "line", string(line))
+				}
 				continue
 			}
 
-			data = bytes.TrimSpace(data)
-
-			var p pubsub.Payload
-			if err := json.Unmarshal(data, &p); err != nil {
-				slog.Error("Unmarshaling event envelope", "error", err)
-				continue
-			}
-
-			e, err := proto.DecodeEvent(p)
+			e, err := proto.DecodeEvent(data)
 			if errors.Is(err, proto.ErrUnknownEventTag) {
-				slog.Warn("Unknown event type", "type", p.Type)
+				slog.Warn("Unknown event type", "error", err)
 				continue
 			}
 			if err != nil {
 				// A zero-value event would reach the UI as, say, an
 				// empty message; dropping it is the lesser harm.
-				slog.Error("Unmarshaling event payload", "type", p.Type, "error", err)
+				slog.Error("Decoding event frame", "error", err)
 				continue
 			}
 			if !sendEvent(ctx, events, e) {
@@ -139,6 +128,16 @@ func (c *Client) SubscribeEvents(ctx context.Context, id string) (<-chan any, er
 	}()
 
 	return events, nil
+}
+
+func readLine(r *bufio.Reader, buf []byte) ([]byte, error) {
+	for {
+		chunk, err := r.ReadSlice('\n')
+		buf = append(buf, chunk...)
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return buf, err
+		}
+	}
 }
 
 func sendEvent(ctx context.Context, evc chan any, ev any) bool {

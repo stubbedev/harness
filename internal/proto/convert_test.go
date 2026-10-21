@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -121,12 +122,12 @@ func TestEveryDomainPartCrossesTheWire(t *testing.T) {
 			wire := partFromDomain(part)
 			require.NotNil(t, wire, "no wire form for %T", part)
 
-			encoded, err := MarshalParts([]ContentPart{wire})
+			encoded, err := json.Marshal(Message{Parts: []ContentPart{wire}})
 			require.NoError(t, err)
-			decoded, err := UnmarshalParts(encoded)
-			require.NoError(t, err)
-			require.Len(t, decoded, 1, "wire codec dropped %T", wire)
-			require.Equal(t, part, partToDomain(decoded[0]))
+			var decoded Message
+			require.NoError(t, json.Unmarshal(encoded, &decoded))
+			require.Len(t, decoded.Parts, 1, "wire codec dropped %T", wire)
+			require.Equal(t, part, partToDomain(decoded.Parts[0]))
 		})
 	}
 }

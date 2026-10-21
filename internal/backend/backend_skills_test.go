@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/backend"
@@ -85,12 +85,12 @@ func TestBackend_WorkspaceSkillsIsolation(t *testing.T) {
 	// Subscribe to each workspace's SSE event stream.
 	ctxA, cancelA := context.WithCancel(t.Context())
 	t.Cleanup(cancelA)
-	chA, err := b.SubscribeEvents(ctxA, wsA.ID)
+	chA, err := b.SubscribeEventFrames(ctxA, wsA.ID)
 	require.NoError(t, err)
 
 	ctxB, cancelB := context.WithCancel(t.Context())
 	t.Cleanup(cancelB)
-	chB, err := b.SubscribeEvents(ctxB, wsB.ID)
+	chB, err := b.SubscribeEventFrames(ctxB, wsB.ID)
 	require.NoError(t, err)
 
 	// Trigger a republish on workspace A only. The marker name lets us
@@ -144,7 +144,7 @@ func containsSkillName(states []*skills.SkillState, name string) bool {
 // the timeout elapses. Non-skills events on the channel are silently
 // skipped — the backend fans in many event types and we only care
 // about skills here.
-func waitForSkillsEvent(t *testing.T, ch <-chan pubsub.Event[tea.Msg], marker string, timeout time.Duration) bool {
+func waitForSkillsEvent(t *testing.T, ch <-chan pubsub.Event[[]byte], marker string, timeout time.Duration) bool {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
@@ -153,11 +153,13 @@ func waitForSkillsEvent(t *testing.T, ch <-chan pubsub.Event[tea.Msg], marker st
 			if !ok {
 				return false
 			}
-			se, ok := ev.Payload.(pubsub.Event[skills.Event])
+			wire, err := proto.DecodeEvent(ev.Payload)
+			require.NoError(t, err)
+			se, ok := wire.(pubsub.Event[proto.SkillsEvent])
 			if !ok {
 				continue
 			}
-			if containsSkillName(se.Payload.States, marker) {
+			if slices.ContainsFunc(se.Payload.States, func(s proto.SkillState) bool { return s.Name == marker }) {
 				return true
 			}
 		case <-deadline:

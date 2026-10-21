@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
@@ -127,11 +129,7 @@ func TestSubscribeEventsReadErrorClosesEvents(t *testing.T) {
 func TestSubscribeEventsSkipsUndecodablePayload(t *testing.T) {
 	t.Parallel()
 
-	bad, err := json.Marshal(pubsub.Payload{
-		Type:    pubsub.PayloadTypeAgentEvent,
-		Payload: json.RawMessage(`{"payload": 7}`),
-	})
-	require.NoError(t, err)
+	bad := `{"type":"agent_event","payload":{"payload": 7}}`
 	good := marshalSSEPayload(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -151,6 +149,38 @@ func TestSubscribeEventsSkipsUndecodablePayload(t *testing.T) {
 	ev, ok := got[0].(pubsub.Event[proto.AgentEvent])
 	require.True(t, ok)
 	require.Equal(t, proto.AgentEventTypeResponse, ev.Payload.Type)
+}
+
+func TestSubscribeEventsDecodesFramesLargerThanTheReadBuffer(t *testing.T) {
+	t.Parallel()
+
+	big := strings.Repeat("x", 64<<10)
+	frames := make([][]byte, 2)
+	for i, text := range []string{big, "small"} {
+		frame, err := proto.EncodeEvent(pubsub.Event[message.Message]{
+			Type:    pubsub.UpdatedEvent,
+			Payload: message.Message{ID: "m1", Parts: []message.ContentPart{message.TextContent{Text: text}}},
+		})
+		require.NoError(t, err)
+		frames[i] = frame
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, ": comment\n\ndata: %s\n\ndata:%s\n\n", frames[0], frames[1])
+	}))
+	defer srv.Close()
+
+	c := captureClient(t, srv)
+	events, err := c.SubscribeEvents(t.Context(), "ws1")
+	require.NoError(t, err)
+
+	var texts []string
+	for ev := range events {
+		msg, ok := ev.(pubsub.Event[proto.Message])
+		require.True(t, ok, "got %T", ev)
+		texts = append(texts, msg.Payload.Content().Text)
+	}
+	require.Equal(t, []string{big, "small"}, texts)
 }
 
 func TestSendMessageAcceptsStatusAccepted(t *testing.T) {
@@ -233,11 +263,5 @@ func marshalSSEPayload(t *testing.T) []byte {
 		},
 	})
 	require.NoError(t, err)
-
-	payload, err := json.Marshal(pubsub.Payload{
-		Type:    pubsub.PayloadTypeAgentEvent,
-		Payload: eventPayload,
-	})
-	require.NoError(t, err)
-	return payload
+	return []byte(`{"type":"` + pubsub.PayloadTypeAgentEvent + `","payload":` + string(eventPayload) + `}`)
 }

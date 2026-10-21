@@ -1,9 +1,6 @@
 package pubsub
 
-import (
-	"context"
-	"encoding/json"
-)
+import "context"
 
 const (
 	CreatedEvent EventType = "created"
@@ -29,12 +26,6 @@ const (
 	PayloadTypeQuestionRequest      PayloadType = "question_batch_request"
 	PayloadTypeQuestionNotification PayloadType = "question_batch_notification"
 )
-
-// Payload wraps a discriminated JSON payload with a type tag.
-type Payload struct {
-	Type    PayloadType     `json:"type"`
-	Payload json.RawMessage `json:"payload"`
-}
 
 // Subscriber can subscribe to events of type T.
 type Subscriber[T any] interface {

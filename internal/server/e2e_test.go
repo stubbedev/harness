@@ -198,13 +198,8 @@ func (h *e2eHarness) subscribeSSE(t *testing.T, ctx context.Context, workspaceID
 			if !ok {
 				continue
 			}
-			data = bytes.TrimSpace(data)
-			var p pubsub.Payload
-			if err := json.Unmarshal(data, &p); err != nil {
-				continue
-			}
-			ev, decoded := decodeSSEEnvelope(p)
-			if !decoded {
+			ev, err := proto.DecodeEvent(data)
+			if err != nil || !e2eObserved(ev) {
 				continue
 			}
 			select {
@@ -217,38 +212,12 @@ func (h *e2eHarness) subscribeSSE(t *testing.T, ctx context.Context, workspaceID
 	return out, cancel
 }
 
-// decodeSSEEnvelope decodes the discriminated SSE envelope into the
-// concrete pubsub.Event[proto.X] payload the e2e tests care about.
-// Unknown payload types are skipped so tests can match on type
-// assertions without worrying about envelope noise.
-func decodeSSEEnvelope(p pubsub.Payload) (any, bool) {
-	switch p.Type {
-	case pubsub.PayloadTypeQuestionNotification:
-		var e pubsub.Event[proto.QuestionNotification]
-		if err := json.Unmarshal(p.Payload, &e); err != nil {
-			return nil, false
-		}
-		return e, true
-	case pubsub.PayloadTypeMessage:
-		var e pubsub.Event[proto.Message]
-		if err := json.Unmarshal(p.Payload, &e); err != nil {
-			return nil, false
-		}
-		return e, true
-	case pubsub.PayloadTypeAgentEvent:
-		var e pubsub.Event[proto.AgentEvent]
-		if err := json.Unmarshal(p.Payload, &e); err != nil {
-			return nil, false
-		}
-		return e, true
-	case pubsub.PayloadTypeRunComplete:
-		var e pubsub.Event[proto.RunComplete]
-		if err := json.Unmarshal(p.Payload, &e); err != nil {
-			return nil, false
-		}
-		return e, true
+func e2eObserved(ev any) bool {
+	switch ev.(type) {
+	case pubsub.Event[proto.QuestionNotification], pubsub.Event[proto.Message], pubsub.Event[proto.AgentEvent], pubsub.Event[proto.RunComplete]:
+		return true
 	}
-	return nil, false
+	return false
 }
 
 // waitForAttached spins until the workspace's clients map reports at

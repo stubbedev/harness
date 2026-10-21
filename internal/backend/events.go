@@ -2,22 +2,63 @@ package backend
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/crash"
+	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
 
-// SubscribeEvents returns a per-caller event channel for a workspace.
-// Each caller receives all events; multiple callers do not compete.
-func (b *Backend) SubscribeEvents(ctx context.Context, workspaceID string) (<-chan pubsub.Event[tea.Msg], error) {
+func (b *Backend) SubscribeEventFrames(ctx context.Context, workspaceID string) (<-chan pubsub.Event[[]byte], error) {
 	ws, err := b.GetWorkspace(workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	return ws.Events(ctx), nil
+	return ws.EventFrames(ctx), nil
+}
+
+func (ws *Workspace) EventFrames(ctx context.Context) <-chan pubsub.Event[[]byte] {
+	ws.framesOnce.Do(ws.startFrameEncoder)
+	return ws.frames.Subscribe(ctx)
+}
+
+func (ws *Workspace) startFrameEncoder() {
+	ws.frames = pubsub.NewStreamingBroker[[]byte]()
+	events := ws.Events(ws.ctx)
+	crash.Go("backend.eventFrames", func() {
+		defer ws.frames.Shutdown()
+		for ev := range events {
+			if ws.frames.GetSubscriberCount() == 0 {
+				continue
+			}
+			frame := encodeEventFrame(ev.Payload)
+			if frame == nil {
+				continue
+			}
+			if ev.MustDeliver {
+				ws.frames.PublishMustDeliver(ws.ctx, ev.Type, frame)
+			} else {
+				ws.frames.Publish(ev.Type, frame)
+			}
+		}
+	})
+}
+
+func encodeEventFrame(ev any) []byte {
+	frame, err := proto.EncodeEvent(ev)
+	switch {
+	case err == nil:
+		return frame
+	case errors.Is(err, proto.ErrNoWireForm):
+		slog.Debug("Dropping event with no wire form for SSE", "error", err)
+	default:
+		slog.Warn("Failed to encode event for SSE", "error", err)
+	}
+	return nil
 }
 
 // GetLSPDiagnostics returns diagnostics for a specific LSP client in

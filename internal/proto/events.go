@@ -1,27 +1,33 @@
 package proto
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 
+	jsonv2 "github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
+	jsonv1 "github.com/go-json-experiment/json/v1"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/update"
 )
 
 var (
-	ErrUnknownEvent    = errors.New("unknown event")
-	ErrNoWireForm      = errors.New("event has no wire form")
-	ErrUnknownEventTag = errors.New("unknown event payload type")
+	ErrUnknownEvent      = errors.New("unknown event")
+	ErrNoWireForm        = errors.New("event has no wire form")
+	ErrUnknownEventTag   = errors.New("unknown event payload type")
+	ErrPayloadBeforeType = errors.New("event payload precedes its type")
+	ErrNoPayload         = errors.New("event frame has no payload")
 )
+
+var wireOptions = jsonv1.DefaultOptionsV1()
 
 type eventCodec struct {
 	tag        pubsub.PayloadType
 	domainType reflect.Type
 	wireType   reflect.Type
 	wrap       func(any) (any, bool)
-	decode     func(json.RawMessage) (any, error)
+	decode     func(*jsontext.Decoder) (any, error)
 	toDomain   func(any) any
 }
 
@@ -33,9 +39,9 @@ func codec[M, W any](tag pubsub.PayloadType, fromDomain func(M) (W, bool), toDom
 		wrap: func(m any) (any, bool) {
 			return fromDomain(m.(M))
 		},
-		decode: func(raw json.RawMessage) (any, error) {
+		decode: func(dec *jsontext.Decoder) (any, error) {
 			var w W
-			if err := json.Unmarshal(raw, &w); err != nil {
+			if err := jsonv2.UnmarshalDecode(dec, &w); err != nil {
 				return nil, err
 			}
 			return w, nil
@@ -102,7 +108,12 @@ func indexCodecs[K comparable](key func(eventCodec) K) map[K]eventCodec {
 	return index
 }
 
-func WrapEvent(msg any) (*pubsub.Payload, error) {
+type eventFrame struct {
+	Type    pubsub.PayloadType `json:"type"`
+	Payload any                `json:"payload"`
+}
+
+func EncodeEvent(msg any) ([]byte, error) {
 	c, ok := codecsByDomain[reflect.TypeOf(msg)]
 	if !ok {
 		return nil, fmt.Errorf("%w: %T", ErrUnknownEvent, msg)
@@ -111,19 +122,69 @@ func WrapEvent(msg any) (*pubsub.Payload, error) {
 	if !ok {
 		return nil, fmt.Errorf("%w: %T", ErrNoWireForm, msg)
 	}
-	raw, err := json.Marshal(wire)
+	frame, err := jsonv2.Marshal(&eventFrame{Type: c.tag, Payload: wire}, wireOptions)
 	if err != nil {
 		return nil, fmt.Errorf("marshal %s event: %w", c.tag, err)
 	}
-	return &pubsub.Payload{Type: c.tag, Payload: raw}, nil
+	return frame, nil
 }
 
-func DecodeEvent(p pubsub.Payload) (any, error) {
-	c, ok := codecsByTag[p.Type]
-	if !ok {
-		return nil, fmt.Errorf("%w: %q", ErrUnknownEventTag, p.Type)
+type frameDecoder struct {
+	event any
+}
+
+func (f *frameDecoder) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	if err := readDelim(dec, '{'); err != nil {
+		return err
 	}
-	return c.decode(p.Payload)
+	var tag pubsub.PayloadType
+	for dec.PeekKind() != '}' {
+		name, err := dec.ReadToken()
+		if err != nil {
+			return err
+		}
+		switch name.String() {
+		case "type":
+			tok, err := dec.ReadToken()
+			if err != nil {
+				return err
+			}
+			if tok.Kind() != '"' {
+				return fmt.Errorf("event type is JSON %v, want a string", tok.Kind())
+			}
+			tag = tok.String()
+		case "payload":
+			if tag == "" {
+				return ErrPayloadBeforeType
+			}
+			c, ok := codecsByTag[tag]
+			if !ok {
+				return fmt.Errorf("%w: %q", ErrUnknownEventTag, tag)
+			}
+			if f.event, err = c.decode(dec); err != nil {
+				return fmt.Errorf("decode %s event: %w", tag, err)
+			}
+		default:
+			if err := dec.SkipValue(); err != nil {
+				return err
+			}
+		}
+	}
+	if err := readDelim(dec, '}'); err != nil {
+		return err
+	}
+	if f.event == nil {
+		return ErrNoPayload
+	}
+	return nil
+}
+
+func DecodeEvent(frame []byte) (any, error) {
+	var f frameDecoder
+	if err := jsonv2.Unmarshal(frame, &f, wireOptions); err != nil {
+		return nil, err
+	}
+	return f.event, nil
 }
 
 func EventToDomain(wire any) (any, error) {

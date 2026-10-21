@@ -1,40 +1,15 @@
 package server
 
 import (
-	"encoding/json"
-	"errors"
 	"io"
-	"log/slog"
 
 	"github.com/stubbedev/harness/internal/backend"
-	"github.com/stubbedev/harness/internal/proto"
-	"github.com/stubbedev/harness/internal/pubsub"
 )
 
-func wrapEvent(ev any) *pubsub.Payload {
-	p, err := proto.WrapEvent(ev)
-	switch {
-	case err == nil:
-		return p
-	case errors.Is(err, proto.ErrNoWireForm):
-		slog.Debug("Dropping event with no wire form for SSE", "error", err)
-	default:
-		slog.Warn("Failed to wrap event for SSE", "error", err)
-	}
-	return nil
-}
-
-// writeSSEPayload writes p as one SSE data frame. The inner payload is
-// already encoded JSON; framing the envelope by hand spares re-encoding
-// it, which for a streaming message is the whole transcript entry again
-// on every update.
-func writeSSEPayload(w io.Writer, p *pubsub.Payload) {
-	typ, _ := json.Marshal(p.Type)
-	_, _ = io.WriteString(w, `data: {"type":`)
-	_, _ = w.Write(typ)
-	_, _ = io.WriteString(w, `,"payload":`)
-	_, _ = w.Write(p.Payload)
-	_, _ = io.WriteString(w, "}\n\n")
+func writeSSEFrame(w io.Writer, frame []byte) {
+	_, _ = io.WriteString(w, "data: ")
+	_, _ = w.Write(frame)
+	_, _ = io.WriteString(w, "\n\n")
 }
 
 // isSessionBusy reports whether the given workspace has an in-flight

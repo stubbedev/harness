@@ -3,9 +3,13 @@ package proto
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
+	jsonv2 "github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/message"
 )
@@ -216,44 +220,35 @@ type ContextNote struct {
 
 func (ContextNote) partType() partType { return contextNoteType }
 
+type messageFields Message
+
+type messageWire struct {
+	Parts messageParts `json:"parts"`
+	messageFields
+}
+
+func (m Message) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return jsonv2.MarshalEncode(enc, &messageWire{Parts: m.Parts, messageFields: messageFields(m)})
+}
+
+func (m *Message) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	w := messageWire{Parts: m.Parts, messageFields: messageFields(*m)}
+	if err := jsonv2.UnmarshalDecode(dec, &w); err != nil {
+		return err
+	}
+	*m = Message(w.messageFields)
+	m.Parts = w.Parts
+	return nil
+}
+
 // MarshalJSON implements the [json.Marshaler] interface.
 func (m Message) MarshalJSON() ([]byte, error) {
-	parts, err := MarshalParts(m.Parts)
-	if err != nil {
-		return nil, err
-	}
-
-	type Alias Message
-	return json.Marshal(&struct {
-		Parts json.RawMessage `json:"parts"`
-		*Alias
-	}{
-		Parts: json.RawMessage(parts),
-		Alias: (*Alias)(&m),
-	})
+	return jsonv2.Marshal(m, wireOptions)
 }
 
 // UnmarshalJSON implements the [json.Unmarshaler] interface.
 func (m *Message) UnmarshalJSON(data []byte) error {
-	type Alias Message
-	aux := &struct {
-		Parts json.RawMessage `json:"parts"`
-		*Alias
-	}{
-		Alias: (*Alias)(m),
-	}
-
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	parts, err := UnmarshalParts([]byte(aux.Parts))
-	if err != nil {
-		return err
-	}
-
-	m.Parts = parts
-	return nil
+	return jsonv2.Unmarshal(data, m, wireOptions)
 }
 
 // Content returns the first text content part.
@@ -385,24 +380,135 @@ const (
 	contextNoteType  partType = "context_note"
 )
 
-type partWrapper struct {
-	Type partType    `json:"type"`
-	Data ContentPart `json:"data"`
+var (
+	ErrPartDataBeforeType = errors.New("message part data precedes its type")
+	ErrPartWithoutData    = errors.New("message part has no data")
+)
+
+type messageParts []ContentPart
+
+func (p messageParts) MarshalJSONTo(enc *jsontext.Encoder) error {
+	if err := enc.WriteToken(jsontext.BeginArray); err != nil {
+		return err
+	}
+	for _, part := range p {
+		if err := writePart(enc, part); err != nil {
+			return err
+		}
+	}
+	return enc.WriteToken(jsontext.EndArray)
 }
 
-// MarshalParts marshals content parts to JSON.
-func MarshalParts(parts []ContentPart) ([]byte, error) {
-	wrappedParts := make([]partWrapper, len(parts))
-	for i, part := range parts {
-		wrappedParts[i] = partWrapper{Type: part.partType(), Data: part}
+func writePart(enc *jsontext.Encoder, part ContentPart) error {
+	for _, tok := range []jsontext.Token{jsontext.BeginObject, jsontext.String("type"), jsontext.String(string(part.partType())), jsontext.String("data")} {
+		if err := enc.WriteToken(tok); err != nil {
+			return err
+		}
 	}
-	return json.Marshal(wrappedParts)
+	if err := jsonv2.MarshalEncode(enc, part); err != nil {
+		return err
+	}
+	return enc.WriteToken(jsontext.EndObject)
+}
+
+func (p *messageParts) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	if dec.PeekKind() == 'n' {
+		_, err := dec.ReadToken()
+		*p = nil
+		return err
+	}
+	if err := readDelim(dec, '['); err != nil {
+		return err
+	}
+	parts := []ContentPart{}
+	for dec.PeekKind() != ']' {
+		part, err := readPart(dec)
+		if err != nil {
+			return err
+		}
+		if part != nil {
+			parts = append(parts, part)
+		}
+	}
+	if err := readDelim(dec, ']'); err != nil {
+		return err
+	}
+	*p = parts
+	return nil
+}
+
+func readPart(dec *jsontext.Decoder) (ContentPart, error) {
+	if err := readDelim(dec, '{'); err != nil {
+		return nil, err
+	}
+	var (
+		typ    partType
+		part   ContentPart
+		decode func(*jsontext.Decoder) (ContentPart, error)
+		known  bool
+	)
+	for dec.PeekKind() != '}' {
+		name, err := dec.ReadToken()
+		if err != nil {
+			return nil, err
+		}
+		switch name.String() {
+		case "type":
+			tok, err := dec.ReadToken()
+			if err != nil {
+				return nil, err
+			}
+			if tok.Kind() != '"' {
+				return nil, fmt.Errorf("message part type is JSON %v, want a string", tok.Kind())
+			}
+			typ = partType(tok.String())
+			decode, known = partDecoders[typ]
+		case "data":
+			if typ == "" {
+				return nil, ErrPartDataBeforeType
+			}
+			if known {
+				part, err = decode(dec)
+			} else {
+				err = dec.SkipValue()
+			}
+			if err != nil {
+				return nil, err
+			}
+		default:
+			if err := dec.SkipValue(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := readDelim(dec, '}'); err != nil {
+		return nil, err
+	}
+	if !known {
+		slog.Warn("Skipping unknown message part type", "type", typ)
+		return nil, nil
+	}
+	if part == nil {
+		return nil, fmt.Errorf("%w: %q", ErrPartWithoutData, typ)
+	}
+	return part, nil
+}
+
+func readDelim(dec *jsontext.Decoder, want jsontext.Kind) error {
+	tok, err := dec.ReadToken()
+	if err != nil {
+		return err
+	}
+	if tok.Kind() != want {
+		return fmt.Errorf("got JSON %v, want %v", tok.Kind(), want)
+	}
+	return nil
 }
 
 // partDecoders maps each wire part type to its decoder. A type missing
 // here cannot be sent: TestEveryDomainPartCrossesTheWire walks every
 // domain part through the conversion and back.
-var partDecoders = map[partType]func(json.RawMessage) (ContentPart, error){
+var partDecoders = map[partType]func(*jsontext.Decoder) (ContentPart, error){
 	reasoningType:    decodePart[ReasoningContent],
 	textType:         decodePart[TextContent],
 	imageURLType:     decodePart[ImageURLContent],
@@ -415,40 +521,12 @@ var partDecoders = map[partType]func(json.RawMessage) (ContentPart, error){
 	contextNoteType:  decodePart[ContextNote],
 }
 
-func decodePart[T ContentPart](data json.RawMessage) (ContentPart, error) {
+func decodePart[T ContentPart](dec *jsontext.Decoder) (ContentPart, error) {
 	var part T
-	if err := json.Unmarshal(data, &part); err != nil {
+	if err := jsonv2.UnmarshalDecode(dec, &part); err != nil {
 		return nil, err
 	}
 	return part, nil
-}
-
-// UnmarshalParts unmarshals content parts from JSON. A part type this
-// build does not know (sent by a newer server) is skipped rather than
-// failing the whole message, matching how the message store reads rows.
-func UnmarshalParts(data []byte) ([]ContentPart, error) {
-	var wrappers []struct {
-		Type partType        `json:"type"`
-		Data json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(data, &wrappers); err != nil {
-		return nil, err
-	}
-
-	parts := make([]ContentPart, 0, len(wrappers))
-	for _, wrapper := range wrappers {
-		decode, ok := partDecoders[wrapper.Type]
-		if !ok {
-			slog.Warn("Skipping unknown message part type", "type", wrapper.Type)
-			continue
-		}
-		part, err := decode(wrapper.Data)
-		if err != nil {
-			return nil, err
-		}
-		parts = append(parts, part)
-	}
-	return parts, nil
 }
 
 // Attachment represents a file attachment.

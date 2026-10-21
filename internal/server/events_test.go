@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -69,12 +68,7 @@ func TestSkillsEventToProto_RoundTrip(t *testing.T) {
 		},
 	}
 
-	env := wrapEvent(src)
-	require.NotNil(t, env)
-	require.Equal(t, pubsub.PayloadTypeSkillsEvent, env.Type)
-
-	var decoded pubsub.Event[proto.SkillsEvent]
-	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	decoded := roundTripEvent[proto.SkillsEvent](t, src)
 	require.Equal(t, pubsub.UpdatedEvent, decoded.Type)
 	require.Len(t, decoded.Payload.States, 2)
 
@@ -109,12 +103,7 @@ func TestRunCompleteToProto_RoundTrip(t *testing.T) {
 		},
 	}
 
-	env := wrapEvent(src)
-	require.NotNil(t, env)
-	require.Equal(t, pubsub.PayloadTypeRunComplete, env.Type)
-
-	var decoded pubsub.Event[proto.RunComplete]
-	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	decoded := roundTripEvent[proto.RunComplete](t, src)
 	require.Equal(t, pubsub.UpdatedEvent, decoded.Type)
 	require.Equal(t, "S", decoded.Payload.SessionID)
 	require.Equal(t, "run-42", decoded.Payload.RunID,
@@ -144,12 +133,7 @@ func TestAgentErrorToProto_PreservesRunID(t *testing.T) {
 		},
 	}
 
-	env := wrapEvent(src)
-	require.NotNil(t, env)
-	require.Equal(t, pubsub.PayloadTypeAgentEvent, env.Type)
-
-	var decoded pubsub.Event[proto.AgentEvent]
-	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	decoded := roundTripEvent[proto.AgentEvent](t, src)
 	require.Equal(t, proto.AgentEventTypeError, decoded.Payload.Type)
 	require.Equal(t, "S", decoded.Payload.SessionID)
 	require.Equal(t, "run-99", decoded.Payload.RunID,
@@ -176,10 +160,7 @@ func TestRunCompleteToProto_Error(t *testing.T) {
 		},
 	}
 
-	env := wrapEvent(src)
-	require.NotNil(t, env)
-	var decoded pubsub.Event[proto.RunComplete]
-	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	decoded := roundTripEvent[proto.RunComplete](t, src)
 	require.Equal(t, "context canceled", decoded.Payload.Error)
 	require.True(t, decoded.Payload.Cancelled)
 }
@@ -188,7 +169,7 @@ func TestRunCompleteToProto_Error(t *testing.T) {
 // update.AvailableMsg — published directly (not wrapped in
 // pubsub.Event) by app.checkForUpdates — survives the SSE envelope
 // conversion. Without this, client/server mode silently drops update
-// notifications because wrapEvent hits its default branch.
+// notifications because EncodeEvent hits its default branch.
 func TestUpdateAvailableMsgToProto_RoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -198,12 +179,7 @@ func TestUpdateAvailableMsgToProto_RoundTrip(t *testing.T) {
 		IsDevelopment:  false,
 	}
 
-	env := wrapEvent(src)
-	require.NotNil(t, env)
-	require.Equal(t, pubsub.PayloadTypeUpdateAvailable, env.Type)
-
-	var decoded pubsub.Event[proto.UpdateAvailable]
-	require.NoError(t, json.Unmarshal(env.Payload, &decoded))
+	decoded := roundTripEvent[proto.UpdateAvailable](t, src)
 	require.Equal(t, pubsub.UpdatedEvent, decoded.Type)
 	require.Equal(t, "1.0.0", decoded.Payload.CurrentVersion)
 	require.Equal(t, "1.1.0", decoded.Payload.LatestVersion)
@@ -229,13 +205,13 @@ func TestMCPChannelMessageNotWrappedAsStateChange(t *testing.T) {
 		},
 	}
 
-	env := wrapEvent(src)
-	require.Nil(t, env, "EventChannelMessage must not be wrapped as an SSE event (no proto representation yet)")
+	_, err := proto.EncodeEvent(src)
+	require.ErrorIs(t, err, proto.ErrNoWireForm, "EventChannelMessage must not be wrapped as an SSE event (no proto representation yet)")
 }
 
 // TestMCPUnknownEventTypeNotMappedToStateChange verifies that any
 // unrecognized MCP event type is not silently coerced to state_changed —
-// the mapping must return ok=false so wrapEvent can drop it instead of
+// the mapping must return ok=false so EncodeEvent can drop it instead of
 // fabricating a state change.
 func TestMCPUnknownEventTypeNotMappedToStateChange(t *testing.T) {
 	t.Parallel()
@@ -273,15 +249,20 @@ func TestMessageToProtoPrismModel(t *testing.T) {
 	require.Equal(t, 0.002, *got.PrismDollarSavings)
 }
 
-// TestWriteSSEPayloadMatchesMarshal pins the hand-framed SSE envelope to
-// what encoding the Payload would produce, so clients decode it the same.
-func TestWriteSSEPayloadMatchesMarshal(t *testing.T) {
-	t.Parallel()
-
-	p := &pubsub.Payload{Type: pubsub.PayloadTypeMessage, Payload: json.RawMessage(`{"id":"m1","parts":[]}`)}
-	var buf bytes.Buffer
-	writeSSEPayload(&buf, p)
-	want, err := json.Marshal(p)
+func roundTripEvent[P any](t *testing.T, src any) pubsub.Event[P] {
+	t.Helper()
+	frame, err := proto.EncodeEvent(src)
 	require.NoError(t, err)
-	require.Equal(t, "data: "+string(want)+"\n\n", buf.String())
+	wire, err := proto.DecodeEvent(frame)
+	require.NoError(t, err)
+	decoded, ok := wire.(pubsub.Event[P])
+	require.True(t, ok, "decoded %T", wire)
+	return decoded
+}
+
+func TestWriteSSEFrame(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	writeSSEFrame(&buf, []byte(`{"type":"message","payload":{}}`))
+	require.Equal(t, "data: {\"type\":\"message\",\"payload\":{}}\n\n", buf.String())
 }

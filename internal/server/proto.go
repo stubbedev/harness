@@ -244,7 +244,7 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	// detect a live subscriber; subscribing first guarantees that
 	// once a client appears attached, any published event is
 	// delivered rather than dropped on a not-yet-registered stream.
-	events, err := c.backend.SubscribeEvents(r.Context(), id)
+	events, err := c.backend.SubscribeEventFrames(r.Context(), id)
 	if err != nil {
 		c.handleError(w, r, err)
 		return
@@ -274,11 +274,7 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 			if !ok {
 				return
 			}
-			wrapped := wrapEvent(ev.Payload)
-			if wrapped == nil {
-				continue
-			}
-			writeSSEPayload(w, wrapped)
+			writeSSEFrame(w, ev.Payload)
 			flusher.Flush()
 		}
 	}
