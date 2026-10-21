@@ -54,6 +54,47 @@ var worktreeExcludedDirNames = map[string]struct{}{
 
 type worktreeExclusions struct {
 	trackedDirs map[string]struct{}
+	ignoredDirs map[string]struct{}
+}
+
+func worktreeIgnoredDirs(ctx context.Context, root string, pin []string) (map[string]struct{}, error) {
+	out, err := worktreeGit(ctx, root, pin, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+	if err != nil {
+		return nil, err
+	}
+	dirs := make(map[string]struct{})
+	for entry := range bytes.SplitSeq(out, []byte{0}) {
+		if dir, isDir := bytes.CutSuffix(entry, []byte{'/'}); isDir && len(dir) > 0 {
+			dirs[string(dir)] = struct{}{}
+		}
+	}
+	return dirs, nil
+}
+
+func (e *worktreeExclusions) addIgnored(dirs map[string]struct{}) {
+	if e.ignoredDirs == nil {
+		e.ignoredDirs = make(map[string]struct{}, len(dirs))
+	}
+	maps.Copy(e.ignoredDirs, dirs)
+}
+
+func (e *worktreeExclusions) filter(entries map[string]worktreeEntry) map[string]worktreeEntry {
+	kept := make(map[string]worktreeEntry, len(entries))
+	for name, entry := range entries {
+		if !e.ignoredBelow(name) {
+			kept[name] = entry
+		}
+	}
+	return kept
+}
+
+func (e *worktreeExclusions) ignoredBelow(name string) bool {
+	for dir := name; dir != "." && dir != "/"; dir = path.Dir(dir) {
+		if _, ignored := e.ignoredDirs[dir]; ignored {
+			return true
+		}
+	}
+	return false
 }
 
 func worktreeTrackedDirs(index []byte) map[string]struct{} {
@@ -71,6 +112,9 @@ func worktreeTrackedDirs(index []byte) map[string]struct{} {
 func (e *worktreeExclusions) skipDir(walkPath, name string) bool {
 	if e == nil {
 		return false
+	}
+	if _, ignored := e.ignoredDirs[walkPath]; ignored {
+		return true
 	}
 	if _, excluded := worktreeExcludedDirNames[name]; !excluded {
 		return false

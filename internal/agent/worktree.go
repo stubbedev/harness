@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/stubbedev/harness/internal/filepathext"
+	"github.com/stubbedev/harness/internal/fsext"
 )
 
 type AgentWorktree struct {
@@ -85,7 +86,11 @@ func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *Age
 			return nil, errors.New("worktree isolation does not support submodules; source preserved")
 		}
 	}
-	exclusions := &worktreeExclusions{trackedDirs: worktreeTrackedDirs(tracked)}
+	ignoredDirs, err := worktreeIgnoredDirs(ctx, root, pin)
+	if err != nil {
+		return nil, err
+	}
+	exclusions := &worktreeExclusions{trackedDirs: worktreeTrackedDirs(tracked), ignoredDirs: ignoredDirs}
 	if parentDir == "" {
 		parentDir = os.TempDir()
 	}
@@ -184,6 +189,12 @@ func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 	if err != nil || string(gitFile) != w.gitFile {
 		return result, errors.Join(err, errors.New("worktree Git identity changed; preserving worktree"))
 	}
+	childIgnored, err := worktreeIgnoredDirs(ctx, w.Path, w.gitPin())
+	if err != nil {
+		return result, err
+	}
+	w.exclusions.addIgnored(childIgnored)
+	baseline := w.exclusions.filter(w.baseline)
 	currentPath, err := os.MkdirTemp(w.scratch, "inspection-")
 	if err != nil {
 		return result, err
@@ -196,7 +207,7 @@ func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 	if err != nil {
 		return result, err
 	}
-	result.Changed = !equalWorktreeEntries(w.baseline, current) || state != w.baselineGit
+	result.Changed = !equalWorktreeEntries(baseline, current) || state != w.baselineGit
 	if result.Changed {
 		tree, treeErr := w.snapshotTree(ctx, currentPath)
 		if treeErr != nil {
@@ -244,6 +255,9 @@ func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
+	if err := fsext.MakeDirsWritable(w.Path); err != nil {
+		return result, fmt.Errorf("make unchanged worktree removable: %w", err)
+	}
 	pin := []string{"--git-dir=" + w.gitDir, "--work-tree=" + w.SourceRoot}
 	if _, err = worktreeGit(ctx, w.SourceRoot, pin, "worktree", "remove", "--force", w.Path); err != nil {
 		return result, fmt.Errorf("remove unchanged worktree: %w", err)
@@ -253,11 +267,15 @@ func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 	if _, err = worktreeGit(ctx, w.SourceRoot, pin, "update-ref", "-d", "refs/heads/"+w.Branch, w.head); err != nil {
 		return result, fmt.Errorf("remove unchanged branch: %w", err)
 	}
-	return result, os.RemoveAll(w.scratch)
+	return result, fsext.RemoveAllWritable(w.scratch)
+}
+
+func (w *AgentWorktree) gitPin() []string {
+	return []string{"--git-dir=" + filepath.Join(w.Path, ".git"), "--work-tree=" + w.Path}
 }
 
 func (w *AgentWorktree) git(ctx context.Context, args ...string) ([]byte, error) {
-	return worktreeGit(ctx, w.Path, []string{"--git-dir=" + filepath.Join(w.Path, ".git"), "--work-tree=" + w.Path}, args...)
+	return worktreeGit(ctx, w.Path, w.gitPin(), args...)
 }
 
 func (w *AgentWorktree) gitState(ctx context.Context) (string, error) {
@@ -282,34 +300,41 @@ func (w *AgentWorktree) snapshotTree(ctx context.Context, path string) (string, 
 	if err != nil {
 		return "", err
 	}
-	root, err := os.OpenRoot(path)
-	if err != nil {
-		return "", err
-	}
-	defer root.Close()
 	var index bytes.Buffer
+	var paths bytes.Buffer
+	var files []string
 	for name, entry := range entries {
 		if entry.Mode.IsDir() {
 			continue
 		}
-		mode := "100644"
-		var data []byte
 		if entry.Mode&os.ModeSymlink != 0 {
-			mode, data = "120000", []byte(entry.Link)
-		} else {
-			if entry.Mode&0o111 != 0 {
-				mode = "100755"
-			}
-			data, err = root.ReadFile(name)
+			object, err := worktreeGitInput(ctx, path, pin, []byte(entry.Link), "hash-object", "-w", "--no-filters", "--stdin")
 			if err != nil {
 				return "", err
 			}
+			fmt.Fprintf(&index, "120000 %s\t%s\x00", strings.TrimSpace(string(object)), name)
+			continue
 		}
-		object, err := worktreeGitInput(ctx, path, pin, data, "hash-object", "-w", "--no-filters", "--stdin")
+		files = append(files, name)
+		paths.WriteString(quoteStdinPath(name))
+		paths.WriteByte('\n')
+	}
+	if len(files) > 0 {
+		out, err := worktreeGitInput(ctx, path, pin, paths.Bytes(), "hash-object", "-w", "--no-filters", "--stdin-paths")
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&index, "%s %s\t%s\x00", mode, strings.TrimSpace(string(object)), name)
+		objects := strings.Fields(string(out))
+		if len(objects) != len(files) {
+			return "", fmt.Errorf("git hash-object returned %d objects for %d files", len(objects), len(files))
+		}
+		for i, name := range files {
+			mode := "100644"
+			if entries[name].Mode&0o111 != 0 {
+				mode = "100755"
+			}
+			fmt.Fprintf(&index, "%s %s\t%s\x00", mode, objects[i], name)
+		}
 	}
 	if _, err := worktreeGitInput(ctx, path, pin, index.Bytes(), "update-index", "-z", "--index-info"); err != nil {
 		return "", err
@@ -320,6 +345,31 @@ func (w *AgentWorktree) snapshotTree(ctx context.Context, path string) (string, 
 
 func worktreeGit(ctx context.Context, root string, pin []string, args ...string) ([]byte, error) {
 	return worktreeGitInput(ctx, root, pin, nil, args...)
+}
+
+func quoteStdinPath(name string) string {
+	if !strings.ContainsAny(name, "\"\\\n\r\t") {
+		return name
+	}
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := range len(name) {
+		switch c := name[i]; c {
+		case '"', '\\':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 func worktreeGitInput(ctx context.Context, root string, pin []string, input []byte, args ...string) ([]byte, error) {
