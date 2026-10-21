@@ -758,9 +758,11 @@ func (c *controllerV1) handleGetWorkspaceAgentSession(w http.ResponseWriter, r *
 	})
 }
 
-// handlePostWorkspaceAgentSessionCancel cancels a running agent session.
+// handlePostWorkspaceAgentSessionCancel stops everything the session is
+// doing: the active run, queued prompts, accepted runs, and the
+// background subagents it dispatched.
 //
-//	@Summary		Cancel agent session
+//	@Summary		Stop agent session
 //	@Tags			agent
 //	@Param			id	path	string	true	"Workspace ID"
 //	@Param			sid	path	string	true	"Session ID"
@@ -771,24 +773,6 @@ func (c *controllerV1) handleGetWorkspaceAgentSession(w http.ResponseWriter, r *
 func (c *controllerV1) handlePostWorkspaceAgentSessionCancel(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
 		return done(ws.Ops().AgentCancel(r.PathValue("sid")))
-	})
-}
-
-// handlePostWorkspaceAgentSessionCancelTurn interrupts the session's
-// active run only; queued prompts survive and run once the interrupted
-// turn unwinds. It backs the TUI's escape key.
-//
-//	@Summary		Cancel the session's active agent turn
-//	@Tags			agent
-//	@Param			id	path	string	true	"Workspace ID"
-//	@Param			sid	path	string	true	"Session ID"
-//	@Success		200
-//	@Failure		404	{object}	proto.Error
-//	@Failure		500	{object}	proto.Error
-//	@Router			/workspaces/{id}/agent/sessions/{sid}/cancel-turn [post]
-func (c *controllerV1) handlePostWorkspaceAgentSessionCancelTurn(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return done(ws.Ops().AgentCancelTurn(r.PathValue("sid")))
 	})
 }
 

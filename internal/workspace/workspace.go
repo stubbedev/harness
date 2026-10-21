@@ -130,12 +130,10 @@ type Workspace interface {
 	// Agent
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
+	// AgentCancel stops everything the session is doing: the active
+	// run, queued prompts, accepted runs, and the background subagents
+	// it dispatched.
 	AgentCancel(sessionID string) error
-	// AgentCancelTurn interrupts the session's active run only: queued
-	// prompts survive and run once the interrupted turn unwinds. It is
-	// the interrupt-and-steer escape path; AgentCancel is the
-	// drop-everything variant.
-	AgentCancelTurn(sessionID string) error
 	AgentIsBusy() (bool, error)
 	AgentIsSessionBusy(sessionID string) (bool, error)
 	AgentModel() (AgentModel, error)

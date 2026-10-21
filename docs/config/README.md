@@ -429,6 +429,10 @@ item" in the model picker, the session list and the command palette at once
 Not rebindable yet: the textarea's movement and editing keys (word-jump,
 delete-word, ...) beyond `editor.line_start`, and bang-mode `!` entry/exit.
 
+`chat.cancel` counts presses made in the editor within a short window: the
+second stops everything the session's agent is doing, the third opens the
+rewind picker. `editor.escape` only leaves prompt-history browsing.
+
 | Action | Default key(s) |
 | --- | --- |
 | `chat.background_tasks` | `ctrl+b` |

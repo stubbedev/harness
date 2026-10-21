@@ -40,7 +40,6 @@ func TestClientWorkspace_ServerDownMutatorsReturnErrors(t *testing.T) {
 
 	calls := map[string]func() error{
 		"AgentCancel":           func() error { return ws.AgentCancel("s1") },
-		"AgentCancelTurn":       func() error { return ws.AgentCancelTurn("s1") },
 		"AgentClearQueue":       func() error { return ws.AgentClearQueue("s1") },
 		"FileTrackerRecordRead": func() error { return ws.FileTrackerRecordRead(ctx, "s1", "/tmp/x") },
 		"LSPStart":              func() error { return ws.LSPStart(ctx, "/tmp/x") },

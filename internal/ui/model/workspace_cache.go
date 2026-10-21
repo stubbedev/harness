@@ -150,7 +150,9 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	m.busyFetchInFlight = true
 	ws := m.com.Workspace
 	gen := m.busyFetchGen
+	stopDone := m.stopDone
 	return func() tea.Msg {
+		awaitStop(stopDone)
 		return probeBusyState(ws, gen)
 	}
 }
@@ -205,7 +207,7 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 		m.agentBusyCache.retain()
 		return nil
 	}
-	m.agentBusyCache.set(msg.agentBusy)
+	m.agentBusyCache.set(m.settleStop(msg.agentBusy))
 	m.agentReady = msg.ready
 	m.agentModel = msg.model
 	// A model or effort selection queued while the turn was running
@@ -244,7 +246,9 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 	ws := m.com.Workspace
 	sessionID := m.session.ID
 	gen := m.promptQueueGen
+	stopDone := m.stopDone
 	return func() tea.Msg {
+		awaitStop(stopDone)
 		msg := promptQueueMsg{forSession: sessionID, gen: gen}
 		ready, err := agentReady(ws)
 		if err != nil {

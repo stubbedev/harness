@@ -220,10 +220,6 @@ func (w *ClientWorkspace) AgentCancel(sessionID string) error {
 	return w.client.CancelAgentSession(context.Background(), w.workspaceID(), sessionID)
 }
 
-func (w *ClientWorkspace) AgentCancelTurn(sessionID string) error {
-	return w.client.CancelAgentSessionTurn(context.Background(), w.workspaceID(), sessionID)
-}
-
 func (w *ClientWorkspace) AgentIsBusy() (bool, error) {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
 	if err != nil {

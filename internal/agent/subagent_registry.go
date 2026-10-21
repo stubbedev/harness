@@ -92,6 +92,29 @@ func (r *subagentRegistry) cancelAll() {
 	}
 }
 
+func (r *subagentRegistry) cancelDescendants(session string) {
+	r.mu.Lock()
+	tree := map[string]bool{session: true}
+	var cancels []context.CancelFunc
+	for grew := true; grew; {
+		grew = false
+		for _, run := range r.runs {
+			if !tree[run.parentSession] || tree[run.childSession] {
+				continue
+			}
+			tree[run.childSession] = true
+			grew = true
+			if cancel, ok := r.cancels[run.childSession]; ok {
+				cancels = append(cancels, cancel)
+			}
+		}
+	}
+	r.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+}
+
 func (r *subagentRegistry) isRunning(childSession string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()

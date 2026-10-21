@@ -385,12 +385,6 @@ func (c *Client) CancelAgentSession(ctx context.Context, id string, sessionID st
 	return c.do(ctx, "cancel agent session", post(wsPath(id, "agent", "sessions", sessionID, "cancel"), nil))
 }
 
-// CancelAgentSessionTurn interrupts the session's active run only;
-// queued prompts survive and run once the interrupted turn unwinds.
-func (c *Client) CancelAgentSessionTurn(ctx context.Context, id string, sessionID string) error {
-	return c.do(ctx, "cancel agent session turn", post(wsPath(id, "agent", "sessions", sessionID, "cancel-turn"), nil))
-}
-
 // GetAgentSessionQueuedPromptsList retrieves the list of queued prompt
 // strings for a session.
 func (c *Client) GetAgentSessionQueuedPromptsList(ctx context.Context, id string, sessionID string) ([]string, error) {

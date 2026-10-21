@@ -51,7 +51,6 @@ type countingWorkspace struct {
 	permSetCalls    int
 	clearQueueCalls int
 	cancelCalls     int
-	cancelTurnCalls int
 	modelCalls      int
 	lspStateCalls   int
 	lspDiagCalls    int
@@ -96,10 +95,6 @@ func (w *countingWorkspace) AgentClearQueue(string) error {
 }
 
 func (w *countingWorkspace) AgentCancel(string) error { w.cancelCalls++; return nil }
-
-// cancelTurnCalls records AgentCancelTurn requests (the esc-while-busy
-// path) separately from full cancels.
-func (w *countingWorkspace) AgentCancelTurn(string) error { w.cancelTurnCalls++; return nil }
 
 // ListCheckpoints returns none; the rewind picker opens fine without
 // working-tree snapshots (turns simply list without the files-only
@@ -170,7 +165,6 @@ func (w *countingWorkspace) resetCounters() {
 	w.readyCalls, w.agentBusyCalls = 0, 0
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
 	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
-	w.cancelTurnCalls = 0
 	w.modelCalls, w.lspStateCalls, w.lspDiagCalls = 0, 0, 0
 }
 
@@ -199,11 +193,12 @@ func newBusyUI(ws *countingWorkspace) *UI {
 // boundary (the tests using it must not call t.Parallel).
 func pinTTLs(t *testing.T) {
 	t.Helper()
-	oldBusy, oldQueue, oldLSP := busyCacheTTL, promptQueueTTL, lspStatesTTL
+	oldBusy, oldQueue, oldLSP, oldEsc := busyCacheTTL, promptQueueTTL, lspStatesTTL, escPressWindow
 	busyCacheTTL = time.Hour
 	promptQueueTTL = time.Hour
 	lspStatesTTL = time.Hour
-	t.Cleanup(func() { busyCacheTTL, promptQueueTTL, lspStatesTTL = oldBusy, oldQueue, oldLSP })
+	escPressWindow = 0
+	t.Cleanup(func() { busyCacheTTL, promptQueueTTL, lspStatesTTL, escPressWindow = oldBusy, oldQueue, oldLSP, oldEsc })
 }
 
 // warmCaches marks all memoized workspace state fresh so only explicit
@@ -518,60 +513,6 @@ func TestStaleParentTitleFetchDiscarded(t *testing.T) {
 }
 
 // TestLocalYoloToggleSupersedesInFlightProbe pins the generation bump in
-// TestSendMessageSetsOptimisticBusy pins the esc-after-enter behavior:
-// submitting a prompt optimistically marks the agent busy so an immediate
-// esc routes to cancelAgent instead of reading a stale idle value and doing
-// nothing.
-func TestSendMessageSetsOptimisticBusy(t *testing.T) {
-	pinTTLs(t)
-
-	ws := &countingWorkspace{ready: true} // workspace still reports idle
-	m := newBusyUI(ws)
-	warmCaches(m, false)
-
-	require.False(t, m.isAgentBusy())
-	cmd := m.sendMessage("hello") // returned cmds (AgentRun etc.) deliberately not run
-	require.NotNil(t, cmd)
-	require.True(t, m.isAgentBusy(),
-		"sendMessage must optimistically mark the agent busy")
-
-	// esc right after enter: isAgentBusy gates cancelAgent, first press
-	// arms the double-press cancel.
-	require.Zero(t, len(m.promptQueueItems))
-	m.cancelAgent()
-	require.Equal(t, escCancel, m.esc.state, "first esc press must arm cancellation")
-
-	// Second press must actually cancel, off the key path.
-	runCmds(m, m.cancelAgent())
-	require.Equal(t, 1, ws.cancelTurnCalls, "second esc press must interrupt the running turn")
-}
-
-// TestCancelAgentCancelsTurnNotQueue: escape while the agent is busy
-// interrupts the running turn and leaves the queued prompts alone — no
-// synchronous queue probe on the esc path, and no queue clear either.
-func TestCancelAgentCancelsTurnNotQueue(t *testing.T) {
-	pinTTLs(t)
-
-	ws := &countingWorkspace{ready: true, agentBusy: true, queued: []string{"a"}}
-	m := newBusyUI(ws)
-	warmCaches(m, true)
-	m.promptQueueItems = make([]string, 1)
-	m.promptQueueItems = []string{"a"}
-	ws.resetCounters()
-
-	require.NotNil(t, m.cancelAgent(), "first esc press arms the double-press cancel")
-	require.Equal(t, escCancel, m.esc.state, "first esc press must arm cancellation")
-	require.Zero(t, ws.clearQueueCalls, "esc must not clear the queue")
-	require.Zero(t, ws.cancelTurnCalls, "the armed press cancels nothing yet")
-
-	runCmds(m, m.cancelAgent())
-	require.Equal(t, 1, ws.cancelTurnCalls, "second esc press interrupts the turn")
-	require.Zero(t, ws.cancelCalls, "the TUI esc path never issues a full cancel")
-	require.Zero(t, ws.clearQueueCalls, "the queue must survive a turn cancel")
-	require.Equal(t, 1, len(m.promptQueueItems), "the cached queue count is untouched")
-	require.Equal(t, []string{"a"}, m.promptQueueItems)
-}
-
 // TestBackstopRefreshesStaleCaches: when the memoized state outlives its TTL
 // with no event edge, the Update tail schedules exactly one off-thread
 // refresh (deduplicated while in flight) and the result lands as a message.

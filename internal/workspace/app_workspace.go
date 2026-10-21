@@ -188,13 +188,6 @@ func (w *AppWorkspace) AgentCancel(sessionID string) error {
 	return nil
 }
 
-func (w *AppWorkspace) AgentCancelTurn(sessionID string) error {
-	if w.app.AgentCoordinator != nil {
-		w.app.AgentCoordinator.CancelTurn(sessionID)
-	}
-	return nil
-}
-
 func (w *AppWorkspace) AgentIsBusy() (bool, error) {
 	if w.app.AgentCoordinator == nil {
 		return false, nil

@@ -9,27 +9,12 @@ import (
 	"github.com/stubbedev/harness/internal/ui/keys"
 )
 
-const (
-	cancelTimerDuration = 2 * time.Second
-	quitTimerDuration   = 1 * time.Second
-)
+const quitTimerDuration = 1 * time.Second
 
-// escArm is what the first escape press of a double-escape armed. The two
-// meanings share one window and are mutually exclusive by construction:
-// while the agent is busy escape cancels the turn, while idle it opens the
-// rewind picker (the cancel-last-message path).
-type escArm uint8
-
-const (
-	escNone escArm = iota
-	escCancel
-	escRewind
-)
-
-// timedArm is the state armed by the first press of a double-press key,
-// disarmed when its window expires. Every change bumps gen, and the expiry
-// message carries the gen it was started under, so a stale timer from an
-// earlier press never disarms a newer one.
+// timedArm is the state armed by a press of a multi-press key, disarmed
+// when its window expires. Every change bumps gen, and the expiry message
+// carries the gen it was started under, so a stale timer from an earlier
+// press never disarms a newer one.
 type timedArm[S comparable] struct {
 	state S
 	gen   uint64
@@ -57,20 +42,8 @@ func (a *timedArm[S]) expire(gen uint64) {
 	}
 }
 
-type (
-	// cancelTimerExpiredMsg is sent when the escape window expires.
-	cancelTimerExpiredMsg struct{ gen uint64 }
-	// quitTimerExpiredMsg is sent when the quit window expires.
-	quitTimerExpiredMsg struct{ gen uint64 }
-)
-
-// armEsc arms the escape window with s and starts its timer.
-func (m *UI) armEsc(s escArm) tea.Cmd {
-	gen := m.esc.set(s)
-	return tea.Tick(cancelTimerDuration, func(time.Time) tea.Msg {
-		return cancelTimerExpiredMsg{gen: gen}
-	})
-}
+// quitTimerExpiredMsg is sent when the quit window expires.
+type quitTimerExpiredMsg struct{ gen uint64 }
 
 // armQuit arms the quit window and starts its timer.
 func (m *UI) armQuit() tea.Cmd {
@@ -78,28 +51,6 @@ func (m *UI) armQuit() tea.Cmd {
 	return tea.Tick(quitTimerDuration, func(time.Time) tea.Msg {
 		return quitTimerExpiredMsg{gen: gen}
 	})
-}
-
-// escHintBinding returns the escape hint for the chat, if any: the cancel
-// binding while the agent is busy (relabelled once armed), or the rewind
-// prompt while idle with the first escape pressed. Esc acts only from the
-// editor, so it is hinted only there.
-func (m *UI) escHintBinding() (key.Binding, bool) {
-	if m.focus != uiFocusEditor {
-		return key.Binding{}, false
-	}
-	b := m.keyMap.Chat.Cancel
-	switch {
-	case m.isAgentBusy():
-		if m.esc.state == escCancel {
-			b.SetHelp(keys.HelpKeys(b), "press again to cancel")
-		}
-		return b, true
-	case m.esc.state == escRewind:
-		b.SetHelp(keys.HelpKeys(b), "press again to rewind")
-		return b, true
-	}
-	return key.Binding{}, false
 }
 
 // quitHintBinding returns the quit binding, relabelled while armed.

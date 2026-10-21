@@ -58,6 +58,7 @@ func TestBusyTurnRenderSurvivesStress(t *testing.T) {
 			_, _ = u.Update(tea.KeyPressMsg{Code: '@'})
 			_, _ = u.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
 			_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+			_, _ = u.Update(escWindowExpiredMsg{gen: u.esc.gen})
 		}
 		u.width, u.height = 120-(i%7), 40-(i%5)
 		u.updateLayoutAndSize()

@@ -15,7 +15,7 @@ import (
 // cancelStreamModel streams normally on every attempt after the first.
 // The first Stream call blocks until its context is canceled and then
 // returns the cancellation error, which is how a provider stream cut off
-// by CancelTurn surfaces inside Run.
+// by a cancel surfaces inside Run.
 type cancelStreamModel struct {
 	attempts atomic.Int32
 }
@@ -58,15 +58,12 @@ func (m *cancelStreamModel) StreamObject(ctx context.Context, call fantasy.Objec
 	return nil, context.DeadlineExceeded
 }
 
-// TestCancelTurn_KeepsQueueAndAcceptedRuns pins the distinction between
-// the two cancel variants: CancelTurn interrupts the active request only,
-// leaving queued prompts and accepted runs untouched, while Cancel drops
-// pending work.
-func TestCancelTurn_KeepsQueueAndAcceptedRuns(t *testing.T) {
+func TestCancel_StopsTurnQueueAcceptedRunsAndSubagents(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	model := &cancelStreamModel{}
 	sa := testSessionAgent(env, model, model, "system").(*sessionAgent)
+	coord := newCoordinatorForTest(&coordinator{currentAgent: sa})
 
 	sess, err := env.sessions.Create(t.Context(), "session")
 	require.NoError(t, err)
@@ -77,22 +74,36 @@ func TestCancelTurn_KeepsQueueAndAcceptedRuns(t *testing.T) {
 	accept := sa.BeginAccepted(sess.ID)
 	defer accept.Close()
 
-	sa.CancelTurn(sess.ID)
+	var childCanceled, grandchildCanceled, foreignCanceled atomic.Bool
+	child, _ := coord.subagentRuns.registerBackground(sess.ID, "child", "worker", func() { childCanceled.Store(true) })
+	coord.subagentRuns.registerBackground(child.childSession, "grandchild", "worker", func() { grandchildCanceled.Store(true) })
+	coord.subagentRuns.registerBackground("other-session", "foreign", "worker", func() { foreignCanceled.Store(true) })
 
-	require.True(t, activeCanceled.Load(), "the active cancel func must fire")
-	require.Equal(t, 1, sa.QueuedPrompts(sess.ID), "a turn-only cancel must keep the queue")
-	require.False(t, sa.hasPendingCancel(sess.ID), "a turn-only cancel must not poison accepted runs")
+	coord.Cancel(sess.ID)
 
-	// The drop-everything variant clears the queue for contrast.
-	sa.Cancel(sess.ID)
-	require.Equal(t, 0, sa.QueuedPrompts(sess.ID), "a full cancel drops the queue")
+	require.True(t, activeCanceled.Load(), "the active turn must be canceled")
+	require.Zero(t, sa.QueuedPrompts(sess.ID), "queued prompts must be dropped")
+	require.True(t, sa.hasPendingCancel(sess.ID), "accepted runs must be covered by the cancel")
+	require.True(t, childCanceled.Load(), "a background subagent the session dispatched must be canceled")
+	require.True(t, grandchildCanceled.Load(), "a background subagent dispatched by that subagent must be canceled")
+	require.False(t, foreignCanceled.Load(), "another session's subagents must keep running")
 }
 
-// TestRun_CanceledTurnRunsQueuedFollowUp is the interrupt-and-steer
-// contract: canceling the active turn must not strand prompts queued
-// behind it. The follow-up runs as its own turn once the canceled turn
-// unwinds.
-func TestRun_CanceledTurnRunsQueuedFollowUp(t *testing.T) {
+func TestCancel_ChildSessionStopsItsDescendants(t *testing.T) {
+	t.Parallel()
+	coord := newCoordinatorForTest(&coordinator{currentAgent: &mockSessionAgent{}})
+
+	var childCanceled, grandchildCanceled atomic.Bool
+	child, _ := coord.subagentRuns.registerBackground("main", "child", "worker", func() { childCanceled.Store(true) })
+	coord.subagentRuns.registerBackground(child.childSession, "grandchild", "worker", func() { grandchildCanceled.Store(true) })
+
+	coord.Cancel(child.childSession)
+
+	require.True(t, childCanceled.Load())
+	require.True(t, grandchildCanceled.Load())
+}
+
+func TestRun_PromptQueuedWhileCanceledTurnUnwindsRunsAsFollowUp(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	model := &cancelStreamModel{}
@@ -121,8 +132,13 @@ func TestRun_CanceledTurnRunsQueuedFollowUp(t *testing.T) {
 		}
 		return sa.IsSessionBusy(sess.ID)
 	}, 5*time.Second, 10*time.Millisecond, "the main turn must become active")
+	mu := sa.sessionMu(sess.ID)
+	mu.Lock()
+	ac, ok := sa.activeRequests.Get(sess.ID)
+	require.True(t, ok)
+	ac.cancel()
 	sa.enqueueCallLocked(SessionAgentCall{SessionID: sess.ID, Prompt: "next", acceptSeq: 1})
-	sa.CancelTurn(sess.ID)
+	mu.Unlock()
 
 	select {
 	case runErr := <-runDone:

@@ -86,10 +86,6 @@ type Coordinator interface {
 	RunAccepted(ctx context.Context, accept *AcceptedRun, sessionID, prompt string, attachments ...message.Attachment) (*fantasy.AgentResult, error)
 	BeginAccepted(sessionID string) *AcceptedRun
 	Cancel(sessionID string)
-	// CancelTurn interrupts the session's active run only: queued
-	// prompts and accepted runs survive and run once the interrupted
-	// turn unwinds. Cancel is the drop-everything variant.
-	CancelTurn(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
@@ -1677,6 +1673,7 @@ func (c *coordinator) BeginAccepted(sessionID string) *AcceptedRun {
 }
 
 func (c *coordinator) Cancel(sessionID string) {
+	c.subagentRuns.cancelDescendants(sessionID)
 	// Running subagents live on ad-hoc SessionAgents, invisible to
 	// currentAgent's activeRequests — cancel them via the registry keyed by
 	// child session ID. A child session has no queued or accepted state on
@@ -1685,10 +1682,6 @@ func (c *coordinator) Cancel(sessionID string) {
 		return
 	}
 	c.currentAgent.Cancel(sessionID)
-}
-
-func (c *coordinator) CancelTurn(sessionID string) {
-	c.currentAgent.CancelTurn(sessionID)
 }
 
 func (c *coordinator) CancelAll() {

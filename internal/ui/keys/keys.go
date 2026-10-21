@@ -30,7 +30,7 @@ type KeyMap struct {
 		// ShellMode enters bang mode: the prompt becomes a shell command.
 		ShellMode key.Binding
 
-		// Escape leaves rewind arming and history preview in the editor.
+		// Escape leaves history preview in the editor.
 		Escape key.Binding
 
 		// History navigation.
@@ -322,7 +322,7 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Editor.Escape = key.NewBinding(
 		key.WithKeys("esc"),
-		key.WithHelp("esc", "rewind"),
+		key.WithHelp("esc", "leave history"),
 	)
 	km.Editor.HistoryPrev = key.NewBinding(
 		key.WithKeys("up"),
@@ -363,7 +363,7 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Chat.Cancel = key.NewBinding(
 		key.WithKeys("esc"),
-		key.WithHelp("esc", "cancel"),
+		key.WithHelp("esc", "press twice to stop"),
 	)
 	km.Chat.Details = key.NewBinding(
 		key.WithKeys("ctrl+d"),

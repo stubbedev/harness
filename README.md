@@ -91,6 +91,13 @@ BSDs: see [Releases](https://github.com/stubbedev/harness/releases).
 
 Press <kbd>ctrl+l</kbd> to open the model picker, choose a provider, and paste
 your API key. Harness stores it in its state file and you're off.
+
+Press <kbd>esc</kbd> twice in quick succession in the editor to stop the
+agent: the running turn, queued prompts (their text returns to the editor),
+background agents and a running `!` command all stop, and the editor is yours
+at once. A third press opens the rewind picker. While idle, three presses open
+the rewind picker.
+
 ## API Keys
 
 You can also use Harness with many other providers such as Anthropic, OpenAI,

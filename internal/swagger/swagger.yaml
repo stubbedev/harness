@@ -1586,34 +1586,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/proto.Error'
-      summary: Cancel agent session
-      tags:
-      - agent
-  /workspaces/{id}/agent/sessions/{sid}/cancel-turn:
-    post:
-      parameters:
-      - description: Workspace ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Session ID
-        in: path
-        name: sid
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/proto.Error'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/proto.Error'
-      summary: Cancel the session's active agent turn
+      summary: Stop agent session
       tags:
       - agent
   /workspaces/{id}/agent/sessions/{sid}/goal:

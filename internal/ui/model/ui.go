@@ -271,9 +271,9 @@ type UI struct {
 	dialog *dialog.Overlay
 	status *Status
 
-	// esc is what the first press of a double-escape armed: a turn
-	// cancel while busy, the rewind picker while idle.
-	esc timedArm[escArm]
+	esc      timedArm[int]
+	stopping bool
+	stopDone chan struct{}
 	// quitArm is set once the quit key has been pressed, arming the
 	// double-press quit window.
 	quitArm timedArm[bool]
@@ -290,7 +290,7 @@ type UI struct {
 
 	// bangCancel cancels a running bang-mode shell command. Nil when no
 	// bang command is in progress. Set by runShellCommand, cleared by
-	// shellResultMsg. Checked by isAgentBusy and cancelAgent so that
+	// shellResultMsg. Checked by isAgentBusy and stopAgent so that
 	// Escape works for bang commands the same way it does for agent runs.
 	bangCancel context.CancelFunc
 
@@ -1278,7 +1278,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case pubsub.Event[question.Notification]:
 		cmds = append(cmds, m.handleQuestionNotification(msg.Payload))
-	case cancelTimerExpiredMsg:
+	case escWindowExpiredMsg:
 		m.esc.expire(msg.gen)
 	case quitTimerExpiredMsg:
 		m.quitArm.expire(msg.gen)
@@ -2383,14 +2383,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 
-	// Escape cancels a busy run only while the editor is focused. From
-	// the chat or the background tasks strip it goes out a level instead
-	// (collapsing an expanded group, call, or task) and never cancels.
-	if key.Matches(msg, m.keyMap.Chat.Cancel) && m.focus == uiFocusEditor && m.isAgentBusy() {
-		if cmd := m.cancelAgent(); cmd != nil {
-			cmds = append(cmds, cmd)
+	if key.Matches(msg, m.keyMap.Chat.Cancel) {
+		if consumed, cmd := m.handleEscape(); consumed {
+			return tea.Batch(append(cmds, cmd)...)
 		}
-		return tea.Batch(cmds...)
 	}
 
 	switch m.state {
@@ -2579,12 +2575,6 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					cmds = append(cmds, cmd)
 				}
 			case key.Matches(msg, m.keyMap.Editor.Escape):
-				if consumed, cmd := m.handleRewindEscape(); consumed {
-					if cmd != nil {
-						cmds = append(cmds, cmd)
-					}
-					break
-				}
 				cmd := m.handleHistoryEscape(msg)
 				if cmd != nil {
 					cmds = append(cmds, cmd)
@@ -4017,19 +4007,22 @@ func (m *UI) sendReadyMessage(content string, attachments ...message.Attachment)
 	willQueue := m.isAgentBusy() || len(m.promptQueueItems) > 0
 	// Optimistically mark the agent busy: the prompt we are about to submit
 	// either starts a run or is enqueued behind one. This keeps esc pressed
-	// right after enter routing to cancelAgent instead of reading a stale
+	// right after enter routing to the stop instead of reading a stale
 	// idle value; the authoritative state arrives via agentRunSubmittedMsg.
 	// Bump the busy/queue generations so any probe started before this
 	// optimistic write is discarded rather than reverting us to idle.
 	m.agentBusyCache.set(true)
 	m.busyFetchGen++
+	m.stopping = false
 	m.invalidatePromptQueue()
 	if willQueue {
 		m.appendQueuedPrompt(content)
 	}
 	// A new turn supersedes any lingering retry notice.
 	m.clearRetryNotice()
+	stopDone := m.stopDone
 	cmds = append(cmds, func() tea.Msg {
+		awaitStop(stopDone)
 		// AgentRun is fire-and-forget: it returns once the prompt has
 		// been accepted (HTTP 202) or synchronously with a validation
 		// or transport error. Run failures and cancellation surface
@@ -4169,86 +4162,6 @@ func (m *UI) quit() tea.Cmd {
 		util.ReportWarn("Press "+m.keyMap.Quit.Help().Key+" again to quit"),
 		m.armQuit(),
 	)
-}
-
-// cancelAgent handles the cancel key press while the agent is busy. The
-// first press arms the escape window for a cancel. The second
-// press (before the timer expires) interrupts the running turn — the
-// turn only: queued prompts survive it (they stay rendered in the
-// transcript and run once the interrupted turn unwinds), so escape never
-// cancels the message.
-func (m *UI) cancelAgent() tea.Cmd {
-	if !m.hasSession() {
-		return nil
-	}
-
-	// Gate on the memoized ready state: esc is a hot key and AgentIsReady
-	// is a synchronous HTTP round-trip in client/server mode.
-	if !m.agentReady {
-		return nil
-	}
-
-	if m.esc.state == escCancel {
-		// Second escape press — interrupt the running turn.
-		m.esc.clear()
-
-		// Cancel a running bang command if one is in progress.
-		if m.bangCancel != nil {
-			m.bangCancel()
-			m.bangCancel = nil
-		}
-
-		// The cancel is a server round trip in client/server mode, so it
-		// runs off the key path; the busy refresh waits for it, or it
-		// would read the turn as still running.
-		// Drop the memoized busy state the cancel is about to change; the
-		// refresh (and the agent's own events) land next. The
-		// queued-prompt cache stays: a turn-only cancel keeps the queue.
-		m.invalidateBusyCaches()
-		sessionID, refresh := m.session.ID, m.dispatchBusyRefresh()
-		return func() tea.Msg {
-			if err := m.com.Workspace.AgentCancelTurn(sessionID); err != nil {
-				return util.NewErrorMsg(err)
-			}
-			if refresh == nil {
-				return nil
-			}
-			return refresh()
-		}
-	}
-
-	// First escape press - arm the cancel window.
-	return m.armEsc(escCancel)
-}
-
-// handleRewindEscape implements the idle half of the escape contract:
-// with no LLM action running, a double escape opens the rewind picker —
-// rewinding to the newest turn cancels the last message and restores
-// its text into the editor. It reports whether it consumed the press; a
-// draft, open completions, or history browsing own the press instead,
-// and while the agent is busy escape stays the turn cancel.
-func (m *UI) handleRewindEscape() (bool, tea.Cmd) {
-	if m.state != uiChat || m.focus != uiFocusEditor || m.isAgentBusy() || !m.hasSession() {
-		m.disarmRewind()
-		return false, nil
-	}
-	// A draft or history browsing owns the press.
-	if m.promptHistory.pos > 0 || m.textarea.Value() != "" {
-		m.disarmRewind()
-		return false, nil
-	}
-	if m.esc.state == escRewind {
-		m.esc.clear()
-		return true, m.openRewindDialog()
-	}
-	return true, m.armEsc(escRewind)
-}
-
-// disarmRewind drops a pending rewind arm, leaving a cancel arm alone.
-func (m *UI) disarmRewind() {
-	if m.esc.state == escRewind {
-		m.esc.clear()
-	}
 }
 
 // openDialog opens a dialog by its ID.
@@ -4620,6 +4533,7 @@ func (m *UI) resetSessionScope() {
 	m.subagentColor = ""
 	m.pendingModelAction = nil
 	m.promptQueueItems = nil
+	m.stopping = false
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
 }

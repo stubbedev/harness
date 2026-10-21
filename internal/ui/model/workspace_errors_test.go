@@ -23,7 +23,7 @@ func (w *unreachableWorkspace) AgentReadyErr() error {
 
 func (w *unreachableWorkspace) AgentIsBusy() (bool, error) { return false, errUnreachable }
 
-func (w *unreachableWorkspace) AgentCancelTurn(string) error { return errUnreachable }
+func (w *unreachableWorkspace) AgentCancel(string) error { return errUnreachable }
 
 func (w *unreachableWorkspace) LSPGetStates() (map[string]lsp.ClientInfo, error) {
 	return nil, errUnreachable
@@ -95,14 +95,11 @@ func TestLSPRefreshSuccessAppliesDiagnostics(t *testing.T) {
 	require.Equal(t, lsp.DiagnosticCounts{Warning: 3}, m.lspDiagnostics["gopls"])
 }
 
-func TestCancelTurnErrorIsReported(t *testing.T) {
+func TestStopErrorIsReported(t *testing.T) {
 	m := newUnreachableUI(t)
 	warmCaches(m, true)
 
-	m.cancelAgent()
-	cmd := m.cancelAgent()
-	require.NotNil(t, cmd)
-
+	cmd := cancelSession(m.com.Workspace, m.session.ID, make(chan struct{}))
 	msg := cmd()
 	info, ok := msg.(util.InfoMsg)
 	require.True(t, ok, "a failed cancel must surface, got %T", msg)

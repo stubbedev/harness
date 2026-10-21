@@ -186,9 +186,6 @@ type SessionAgent interface {
 	SetTools(tools []fantasy.AgentTool)
 	SetSystemPrompt(systemPrompt string)
 	Cancel(sessionID string)
-	// CancelTurn interrupts the session's active run only; queued
-	// prompts and accepted runs survive it.
-	CancelTurn(sessionID string)
 	CancelAll()
 	IsSessionBusy(sessionID string) bool
 	IsBusy() bool
@@ -1318,7 +1315,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// a RunID are left queued so each runs as its own turn (with
 			// its own RunComplete) via the recursive run path below.
 			//
-			// A step whose context is already canceled — a CancelTurn that
+			// A step whose context is already canceled — a cancel that
 			// landed between this run registering itself and its first
 			// PrepareStep — must not drain the queue: the follow-up prompts
 			// belong to the turn that runs after this one unwinds, and
@@ -1560,7 +1557,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 
 			var assistantMsg message.Message
 			// The assistant row must exist for the turn's terminal persistence
-			// even when a CancelTurn raced this step: create it on a detached
+			// even when a cancel raced this step: create it on a detached
 			// context so a dead step context fails the step only after the
 			// model observed the cancel, letting the turn unwind through the
 			// normal canceled path (and hand off to queued follow-ups).
@@ -1922,10 +1919,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return nil, err
 		}
 		// A canceled turn falls through to the queue handoff below
-		// instead of returning early: the queue survives a turn-only
-		// cancel (CancelTurn), and its prompts run as follow-up turns —
-		// the interrupt-and-steer flow. A full Cancel drops the queue
-		// itself, so the handoff sees an empty queue and returns.
+		// instead of returning early: Cancel drops the queue it saw, and a
+		// prompt submitted while the canceled turn unwinds runs as the
+		// follow-up turn.
 	}
 
 	// Recover from a context-window overflow: summarize the session and
@@ -2811,18 +2807,6 @@ func sessionUsage(model Model, usage fantasy.Usage, overrideCost *float64, estim
 	delta.CompletionTokens = usage.OutputTokens
 	delta.PromptTokens = usage.InputTokens + usage.CacheCreationTokens + usage.CacheReadTokens
 	return delta
-}
-
-func (a *sessionAgent) CancelTurn(sessionID string) {
-	// Turn-only cancel: interrupt the active request (regular or
-	// summarize) and nothing else. Queued prompts and accepted runs are
-	// left untouched so they still run once the interrupted turn
-	// unwinds — this is the interrupt-and-steer path. Cancel is the
-	// drop-everything variant.
-	if ac, ok := a.activeRequests.Get(sessionID); ok && ac != nil {
-		slog.Debug("Turn cancellation initiated", "session_id", sessionID)
-		ac.cancel()
-	}
 }
 
 func (a *sessionAgent) Cancel(sessionID string) {
