@@ -1,7 +1,7 @@
 # Harness dev tasks.
 # `just check` mirrors the CI gates. No task here needs an API key: the
 # agent tests drive a scripted model rather than a recorded provider.
-# Every tool a recipe calls comes from the devenv shell (devenv.nix).
+# Every tool a recipe calls comes from the flake dev shell (nix/shell.nix).
 
 # The build is pure Go — the SQLite driver needs no cgo — and greenteagc is
 # what release builds use, so local builds match.

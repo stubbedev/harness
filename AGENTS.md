@@ -23,8 +23,9 @@ is kept out of every prompt rather than carried in all of them.
 
 ## Build/Test/Lint Commands
 
-- **Dev environment**: `devenv shell` provides every tool the recipes below
-  call (see `devenv.nix`) and loads `.env` when present.
+- **Dev environment**: the flake's dev shell (`nix develop`, or direnv with
+  nix-direnv via `.envrc`) provides every tool the recipes below call (see
+  `nix/shell.nix`); direnv also loads `.env` when present.
 - **Build**: `go build .` or `go run .`
 - **Test**: `just test` or `go test ./...` (run single test:
   `go test ./internal/agent/prompt -run TestGetGitStatusCachesWithinTTL`)

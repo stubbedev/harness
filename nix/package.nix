@@ -4,6 +4,7 @@
   ...
 }: {
   perSystem = {
+    buildGoModule,
     lib,
     pkgs,
     self',
@@ -26,7 +27,7 @@
     };
 
     packages = {
-      harness = pkgs.buildGo127Module {
+      harness = buildGoModule {
         pname = "harness";
         inherit version;
 

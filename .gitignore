@@ -58,7 +58,3 @@ completions/harness.*sh
 # Worktrees the agent tooling creates for parallel work.
 .claude/worktrees/
 
-# Devenv
-.devenv*
-devenv.local.nix
-devenv.local.yaml
