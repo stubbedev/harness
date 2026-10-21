@@ -429,7 +429,7 @@ func formatWhitespaceHint(contentLines []string, startLine, endLine int) string 
 	b.WriteString("A whitespace-normalized match was found, so the text exists but with different whitespace (tabs vs spaces, or different indentation).\n")
 	fmt.Fprintf(&b, "Actual file content (lines %d-%d):\n", startLine+1, endLine+1)
 	for i := startLine; i <= endLine && i < len(contentLines); i++ {
-		fmt.Fprintf(&b, "%6d|%s\n", i+1, visualizeWS(contentLines[i]))
+		writeNumberedLine(&b, i+1, visualizeWS(contentLines[i]))
 	}
 	b.WriteString("Use the exact whitespace shown above (→ = tab, · = space).")
 	return b.String()
@@ -701,15 +701,16 @@ func formatLineMatchHint(contentLines, trimmedOld []string, start, matched int, 
 		j := i - start
 		cand := strings.TrimSpace(contentLines[i])
 		if j < 0 || j >= len(trimmedOld) || cand == trimmedOld[j] {
-			fmt.Fprintf(&b, "%6d|%s\n", i+1, visualizeWS(contentLines[i]))
+			writeNumberedLine(&b, i+1, visualizeWS(contentLines[i]))
 			continue
 		}
 		mark := "×"
 		if lineSimilarity(cand, trimmedOld[j]) >= nearLineThreshold {
 			mark = "~"
 		}
-		fmt.Fprintf(&b, "%s %5d|%s\n         your line: %s\n", mark, i+1,
-			visualizeWS(contentLines[i]), elideLine(trimmedOld[j], 100))
+		b.WriteString(mark + " ")
+		writeNumberedLine(&b, i+1, visualizeWS(contentLines[i]))
+		fmt.Fprintf(&b, "  your line: %s\n", elideLine(trimmedOld[j], 100))
 	}
 	if fuzzy {
 		b.WriteString("Copy the file's lines above into old_string (→ = tab, · = space); marked lines differ from your old_string. If the text is genuinely absent, re-read the region.")

@@ -1005,3 +1005,12 @@ func (h hostRewritingTransport) RoundTrip(req *http.Request) (*http.Response, er
 	}
 	return resp, err
 }
+
+func TestFindLinesUsesViewLineNumberFormat(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{"alpha", "beta\r", "gamma"}
+	got, err := findLines(lines, 10, "beta")
+	require.NoError(t, err)
+	require.Equal(t, "1 lines match \"beta\":\n"+addLineNumbers("alpha\nbeta\ngamma", 11), got)
+}

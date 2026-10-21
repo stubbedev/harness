@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -149,7 +150,12 @@ func TestViewToolBlocksOversizedReturnedSections(t *testing.T) {
 	})
 
 	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "Content section is too large")
+	require.Equal(t, "Content section is too large (206102 bytes, maximum 204800 bytes); read a smaller range with offset/limit (e.g. limit=102)", resp.Content)
+
+	resp = runViewTool(t, tool, ctx, ViewParams{FilePath: filePath, Limit: 102})
+	require.False(t, resp.IsError)
+	resp = runViewTool(t, tool, ctx, ViewParams{FilePath: filePath, Limit: 103})
+	require.True(t, resp.IsError)
 }
 
 func TestViewToolBlocksOversizedImages(t *testing.T) {
@@ -167,7 +173,7 @@ func TestViewToolBlocksOversizedImages(t *testing.T) {
 	})
 
 	require.True(t, resp.IsError)
-	require.Contains(t, resp.Content, "Image file is too large")
+	require.Equal(t, "Image file is too large (204801 bytes, maximum 204800 bytes); images are read whole, so view a smaller copy (resize or crop it with a shell command first)", resp.Content)
 }
 
 func TestReadTextFileEnforcesMaxContentSize(t *testing.T) {
@@ -183,7 +189,9 @@ func TestReadTextFileEnforcesMaxContentSize(t *testing.T) {
 	require.NoError(t, os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o644))
 
 	content, hasMore, err := readTextFile(filePath, 0, len(lines), MaxLineLength)
-	require.ErrorAs(t, err, &contentTooLargeError{})
+	tooLarge, ok := errors.AsType[contentTooLargeError](err)
+	require.True(t, ok)
+	require.Equal(t, 1, tooLarge.FitLines)
 	require.Empty(t, content)
 	require.False(t, hasMore)
 

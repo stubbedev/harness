@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -102,22 +103,62 @@ func checkFileEvidence(ctx context.Context, tracker filetracker.Service, session
 	return nil
 }
 
+const (
+	conflictExcerptBefore = 512
+	conflictExcerptMax    = 2048
+)
+
 func conflictEvidence(ctx context.Context, tracker filetracker.Service, session, path string, content []byte, at int, reason error) error {
-	at = max(0, min(at, len(content)))
-	start := max(0, at-512)
-	end := min(len(content), start+2048)
-	for start < end && !utf8.RuneStart(content[start]) {
-		start++
+	at = max(0, min(at, len(content)-1))
+	start := bytes.LastIndexByte(content[:at], '\n') + 1
+	end := lineEnd(content, at)
+	firstLine := bytes.Count(content[:start], []byte("\n")) + 1
+	lastLine := firstLine
+	size := numberedLineSize(start, end, firstLine)
+	if size > conflictExcerptMax {
+		return fmt.Errorf("%w\nLine %d of %q is longer than %d bytes; read it with view (offset=%d, limit=1) before retrying", reason, firstLine, path, conflictExcerptMax, firstLine-1)
 	}
-	for end < len(content) && end > start && !utf8.RuneStart(content[end]) {
-		end--
+	for start > 0 {
+		prev := bytes.LastIndexByte(content[:start-1], '\n') + 1
+		lineSize := numberedLineSize(prev, start, firstLine-1)
+		if at-prev > conflictExcerptBefore || size+lineSize > conflictExcerptMax {
+			break
+		}
+		start = prev
+		firstLine--
+		size += lineSize
+	}
+	for end < len(content) {
+		next := lineEnd(content, end)
+		lineSize := numberedLineSize(end, next, lastLine+1)
+		if size+lineSize > conflictExcerptMax {
+			break
+		}
+		end = next
+		lastLine++
+		size += lineSize
 	}
 	excerpt := content[start:end]
 	if !utf8.Valid(excerpt) {
 		return fmt.Errorf("%w\nRead the affected range with view before retrying (non-UTF-8 content)", reason)
 	}
 	filetracker.Observe(ctx, tracker, session, path, content, []filetracker.Range{{Start: start, End: end}})
-	return fmt.Errorf("%w\nCurrent file %q, bytes %d-%d (bounded excerpt; retry explicitly):\n%s", reason, path, start, end, excerpt)
+	if len(content) == 0 {
+		return fmt.Errorf("%w\nCurrent file %q is empty", reason, path)
+	}
+	text := strings.TrimSuffix(string(excerpt), "\n")
+	return fmt.Errorf("%w\nCurrent file %q, lines %d-%d (bounded excerpt; retry explicitly):\n%s", reason, path, firstLine, lastLine, addLineNumbers(text, firstLine))
+}
+
+func numberedLineSize(start, end, lineNum int) int {
+	return end - start + len(strconv.Itoa(lineNum)) + 1
+}
+
+func lineEnd(content []byte, from int) int {
+	if i := bytes.IndexByte(content[from:], '\n'); i >= 0 {
+		return from + i + 1
+	}
+	return len(content)
 }
 
 // changedRanges returns the ranges of before that changes, its udiff edits

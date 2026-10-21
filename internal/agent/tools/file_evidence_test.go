@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -233,7 +234,12 @@ func TestFileEvidenceStaleWriteAndReplaceAll(t *testing.T) {
 	current, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Equal(t, data, current)
-	require.NoError(t, tracker.(filetracker.Evidence).Check(ctx, "s", path, current, []filetracker.Range{{Start: 0, End: 2048}}))
+	var first, last int
+	_, scanErr := fmt.Sscanf(resp.Content[strings.Index(resp.Content, "lines "):], "lines %d-%d", &first, &last)
+	require.NoError(t, scanErr)
+	require.Equal(t, 1, first)
+	shownEnd := len(strings.Join(strings.SplitAfter(string(current), "\n")[:last], ""))
+	require.NoError(t, tracker.(filetracker.Evidence).Check(ctx, "s", path, current, []filetracker.Range{{Start: 0, End: shownEnd}}))
 	require.ErrorIs(t, tracker.(filetracker.Evidence).Check(ctx, "s", path, current, []filetracker.Range{{Start: 0, End: len(current)}}), filetracker.ErrUnread)
 }
 
@@ -443,4 +449,56 @@ func BenchmarkViewOffset(b *testing.B) {
 			})
 		}
 	}
+}
+
+func TestConflictEvidenceReportsNumberedLineRange(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	for i := 1; i <= 200; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	content := []byte(b.String())
+	at := strings.Index(b.String(), "line 100\n")
+	err := conflictEvidence(t.Context(), nil, "s", "f.txt", content, at+2, filetracker.ErrStale)
+	require.ErrorIs(t, err, filetracker.ErrStale)
+	msg := err.Error()
+	require.NotContains(t, msg, "bytes")
+	require.Contains(t, msg, "\n100|line 100\n")
+	require.LessOrEqual(t, len(msg), conflictExcerptMax+200)
+
+	var first, last int
+	_, scanErr := fmt.Sscanf(msg[strings.Index(msg, "lines "):], "lines %d-%d", &first, &last)
+	require.NoError(t, scanErr)
+	require.Less(t, first, 100)
+	require.Greater(t, last, 100)
+	excerpt := msg[strings.Index(msg, "\n"+strconv.Itoa(first)+"|")+1:]
+	require.Equal(t, addLineNumbers(strings.Join(strings.Split(b.String(), "\n")[first-1:last], "\n"), first), excerpt)
+}
+
+func TestConflictEvidenceExcerptIsBoundedIncludingNumbers(t *testing.T) {
+	t.Parallel()
+
+	content := []byte(strings.Repeat("x\n", 5000))
+	err := conflictEvidence(t.Context(), nil, "s", "f.txt", content, len(content)/2, filetracker.ErrStale)
+	excerpt := err.Error()[strings.Index(err.Error(), "):\n")+3:]
+	require.LessOrEqual(t, len(excerpt)+1, conflictExcerptMax)
+}
+
+func TestConflictEvidenceOverlongLinePointsAtView(t *testing.T) {
+	t.Parallel()
+
+	content := []byte("short\n" + strings.Repeat("y", conflictExcerptMax+1) + "\nafter\n")
+	err := conflictEvidence(t.Context(), nil, "s", "f.txt", content, 10, filetracker.ErrStale)
+	require.ErrorIs(t, err, filetracker.ErrStale)
+	require.Contains(t, err.Error(), "Line 2 of \"f.txt\" is longer than 2048 bytes; read it with view (offset=1, limit=1)")
+	require.NotContains(t, err.Error(), "yyyy")
+}
+
+func TestConflictEvidenceAtEndOfFileShowsLastLine(t *testing.T) {
+	t.Parallel()
+
+	content := []byte("one\ntwo\n")
+	err := conflictEvidence(t.Context(), nil, "s", "f.txt", content, len(content), filetracker.ErrStale)
+	require.Contains(t, err.Error(), "lines 1-2 (bounded excerpt; retry explicitly):\n1|one\n2|two")
 }

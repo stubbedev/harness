@@ -24,6 +24,8 @@ func TestDiagnoseMismatch(t *testing.T) {
 		require.Contains(t, hint, "whitespace-normalized match")
 		require.Contains(t, hint, "→")
 		require.Contains(t, hint, "lines 1-3")
+		require.Contains(t, hint, "\n2|→fmt.Println")
+		require.NotContains(t, hint, "     2|")
 	})
 
 	t.Run("wrong indent depth", func(t *testing.T) {
@@ -52,6 +54,8 @@ func TestDiagnoseMismatch(t *testing.T) {
 		require.Contains(t, hint, "Closest match")
 		require.Contains(t, hint, "×")
 		require.Contains(t, hint, "your line: qux()")
+		require.Contains(t, hint, "\n1|func foo() {\n")
+		require.Contains(t, hint, "\n× 3|→baz()\n  your line: qux()\n")
 	})
 
 	t.Run("single-line typo anchors a fuzzy hint", func(t *testing.T) {

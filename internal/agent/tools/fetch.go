@@ -238,7 +238,7 @@ func findLines(lines []string, base int, pattern string) (string, error) {
 			b.WriteString("--\n")
 		}
 		for i := start; i <= end; i++ {
-			fmt.Fprintf(&b, "%d|%s\n", base+i+1, lines[i])
+			writeNumberedLine(&b, base+i+1, lines[i])
 		}
 		last = max(last, end)
 	}

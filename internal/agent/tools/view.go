@@ -104,12 +104,19 @@ const (
 )
 
 type contentTooLargeError struct {
-	Size int
-	Max  int
+	Size     int
+	Max      int
+	FitLines int
 }
 
 func (e contentTooLargeError) Error() string {
-	return fmt.Sprintf("content section is too large (%d bytes). Maximum size is %d bytes", e.Size, e.Max)
+	return fmt.Sprintf("Content section is too large (%d bytes, maximum %d bytes); read a smaller range with offset/limit (e.g. limit=%d)",
+		e.Size, e.Max, max(e.FitLines, 1))
+}
+
+func imageTooLargeMessage(size int64) string {
+	return fmt.Sprintf("Image file is too large (%d bytes, maximum %d bytes); images are read whole, so view a smaller copy (resize or crop it with a shell command first)",
+		size, MaxViewSize)
 }
 
 // viewTool carries the view tool's dependencies; one method per call
@@ -211,8 +218,7 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 	isSupportedImage, mimeType := getImageMimeType(filePath)
 	if isSupportedImage {
 		if fileInfo.Size() > MaxViewSize {
-			return viewFileContent{}, failureResponse(fmt.Sprintf("Image file is too large (%d bytes). Maximum size is %d bytes",
-				fileInfo.Size(), MaxViewSize)), nil
+			return viewFileContent{}, failureResponse(imageTooLargeMessage(fileInfo.Size())), nil
 		}
 		if !GetSupportsImagesFromContext(ctx) {
 			modelName := GetModelNameFromContext(ctx)
@@ -245,9 +251,8 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 	}
 	read, err := readTextForView(filePath, params.Offset, params.Limit, maxContentSize, v.filetracker)
 	if err != nil {
-		if tooLarge, ok := errors.AsType[contentTooLargeError](err); ok {
-			return viewFileContent{}, failureResponse(fmt.Sprintf("Content section is too large (%d bytes). Maximum size is %d bytes",
-				tooLarge.Size, tooLarge.Max)), nil
+		if _, ok := errors.AsType[contentTooLargeError](err); ok {
+			return viewFileContent{}, failureResponse(err.Error()), nil
 		}
 		return viewFileContent{}, unreadableResponse(filePath, err), nil
 	}
@@ -450,16 +455,18 @@ func addLineNumbers(content string, startLine int) string {
 	var result strings.Builder
 	lineNum := startLine
 	for line := range strings.SplitSeq(content, "\n") {
-		line = strings.TrimSuffix(line, "\r")
-
-		result.WriteString(strconv.Itoa(lineNum))
-		result.WriteByte('|')
-		result.WriteString(line)
-		result.WriteByte('\n')
+		writeNumberedLine(&result, lineNum, line)
 		lineNum++
 	}
 
 	return strings.TrimSuffix(result.String(), "\n")
+}
+
+func writeNumberedLine(b *strings.Builder, lineNum int, line string) {
+	b.WriteString(strconv.Itoa(lineNum))
+	b.WriteByte('|')
+	b.WriteString(strings.TrimSuffix(line, "\r"))
+	b.WriteByte('\n')
 }
 
 // textView is the outcome of one read of a file: the requested
@@ -688,7 +695,7 @@ func streamText(source *bufio.Reader, offset, limit, maxContentSize int) (textVi
 			projectedSize++
 		}
 		if maxContentSize > 0 && projectedSize > maxContentSize {
-			return textView{}, contentTooLargeError{Size: projectedSize, Max: maxContentSize}
+			return textView{}, contentTooLargeError{Size: projectedSize, Max: maxContentSize, FitLines: lines}
 		}
 		contentSize = projectedSize
 		if lines > 0 {
