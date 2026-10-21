@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path"
@@ -75,7 +76,7 @@ func TestWorktreeDirtyBaselineAndIndependentChildren(t *testing.T) {
 	changed, err := first.Finish(t.Context())
 	require.NoError(t, err)
 	require.True(t, changed.Changed)
-	require.True(t, changed.Preserved)
+	require.False(t, changed.Removed)
 	require.FileExists(t, changed.PatchPath)
 	require.DirExists(t, changed.Path)
 	unchanged, err := second.Finish(t.Context())
@@ -163,7 +164,7 @@ func TestWorktreeCancellationPreserves(t *testing.T) {
 	worktreeTestWrite(t, w.Path, "untracked", "keep\n")
 	result, err := w.Finish(ctx)
 	require.ErrorIs(t, err, context.Canceled)
-	require.True(t, result.Preserved)
+	require.False(t, result.Removed)
 	require.FileExists(t, filepath.Join(w.Path, "untracked"))
 	result, err = w.Finish(t.Context())
 	require.NoError(t, err)
@@ -211,7 +212,7 @@ func TestWorktreeUncertainIdentityPreserved(t *testing.T) {
 	worktreeTestWrite(t, w.Path, ".git", "invalid\n")
 	result, err := w.Finish(t.Context())
 	require.Error(t, err)
-	require.True(t, result.Preserved)
+	require.False(t, result.Removed)
 	require.DirExists(t, w.Path)
 }
 
@@ -226,7 +227,7 @@ func TestWorktreeStagedOnlyChangesPreserved(t *testing.T) {
 	result, err := w.Finish(t.Context())
 	require.NoError(t, err)
 	require.True(t, result.Changed)
-	require.True(t, result.Preserved)
+	require.False(t, result.Removed)
 	require.Contains(t, worktreeTestGit(t, w.Path, "diff", "--cached"), "staged child")
 	patch, err := os.ReadFile(result.IndexPatchPath)
 	require.NoError(t, err)
@@ -244,7 +245,7 @@ func TestWorktreeNestedRepositoryFailsClosed(t *testing.T) {
 	require.NotNil(t, w)
 	result, err := w.Finish(t.Context())
 	require.Error(t, err)
-	require.True(t, result.Preserved)
+	require.False(t, result.Removed)
 	require.DirExists(t, filepath.Join(nested, ".git"))
 }
 
@@ -275,7 +276,7 @@ func TestWorktreeUntrackedOnlyChangePreserved(t *testing.T) {
 	result, err := w.Finish(t.Context())
 	require.NoError(t, err)
 	require.True(t, result.Changed)
-	require.True(t, result.Preserved)
+	require.False(t, result.Removed)
 	require.FileExists(t, filepath.Join(w.Path, "ignored"))
 	patch, err := os.ReadFile(result.PatchPath)
 	require.NoError(t, err)
@@ -338,7 +339,7 @@ func TestWorktreeKeepsTrackedRegeneratedDirectory(t *testing.T) {
 	result, err := w.Finish(t.Context())
 	require.NoError(t, err)
 	require.True(t, result.Changed)
-	require.True(t, result.Preserved)
+	require.False(t, result.Removed)
 	require.Empty(t, result.Excluded)
 	data, err := os.ReadFile(filepath.Join(result.Path, "vendor", "dep.txt"))
 	require.NoError(t, err)
@@ -355,6 +356,18 @@ func TestWorktreeReplacedDirectoryPreserved(t *testing.T) {
 	require.NoError(t, os.Symlink(moved, w.Path))
 	result, err := w.Finish(t.Context())
 	require.ErrorContains(t, err, "directory identity changed")
-	require.True(t, result.Preserved)
+	require.False(t, result.Removed)
 	require.FileExists(t, filepath.Join(moved, "tracked"))
+}
+
+func TestWorktreeResultJSONCarriesOnlyRemoved(t *testing.T) {
+	t.Parallel()
+	for _, removed := range []bool{true, false} {
+		data, err := json.Marshal(WorktreeResult{Removed: removed})
+		require.NoError(t, err)
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal(data, &fields))
+		require.Equal(t, removed, fields["removed"])
+		require.NotContains(t, fields, "preserved")
+	}
 }

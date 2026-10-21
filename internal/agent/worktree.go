@@ -51,7 +51,6 @@ type WorktreeResult struct {
 	PatchPath      string           `json:"patch_path,omitempty"`
 	IndexPatchPath string           `json:"index_patch_path,omitempty"`
 	Changed        bool             `json:"changed"`
-	Preserved      bool             `json:"preserved"`
 	Removed        bool             `json:"removed"`
 	Excluded       []string         `json:"excluded,omitempty"`
 }
@@ -177,7 +176,7 @@ func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *Age
 func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	result := WorktreeResult{Path: w.Path, Branch: w.Branch, Base: w.head, Excluded: w.excluded, Preserved: !w.removed, Removed: w.removed}
+	result := WorktreeResult{Path: w.Path, Branch: w.Branch, Base: w.head, Excluded: w.excluded, Removed: w.removed}
 	if w.removed {
 		return result, nil
 	}
@@ -278,7 +277,7 @@ func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 		return result, fmt.Errorf("remove unchanged worktree: %w", err)
 	}
 	w.removed = true
-	result.Preserved, result.Removed = false, true
+	result.Removed = true
 	if _, err = worktreeGit(ctx, w.SourceRoot, pin, "update-ref", "-d", "refs/heads/"+w.Branch, w.head); err != nil {
 		return result, fmt.Errorf("remove unchanged branch: %w", err)
 	}

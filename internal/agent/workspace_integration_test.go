@@ -130,7 +130,7 @@ func TestIsolatedDispatchFinishRetainsPatchAndMetadata(t *testing.T) {
 	require.Contains(t, response.Content, "Nothing has been merged")
 	require.NotContains(t, response.Content, "cherry-pick")
 	require.Empty(t, result.Commits)
-	require.True(t, result.Preserved)
+	require.False(t, result.Removed)
 	require.FileExists(t, result.PatchPath)
 	original, err := os.ReadFile(filepath.Join(root, "tracked"))
 	require.NoError(t, err)
