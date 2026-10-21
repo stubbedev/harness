@@ -157,7 +157,7 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 					return ActionCmd{util.ReportError(err)}
 				}
 				if busy {
-					return ActionCmd{util.ReportWarn("Agent is busy, please wait...")}
+					return ActionCmd{util.ReportAgentBusy("deleting a session")}
 				}
 				s.sessionsMode = sessionsModeDeleting
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)

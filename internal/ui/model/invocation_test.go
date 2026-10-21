@@ -53,7 +53,7 @@ func TestPickerTabCompletes(t *testing.T) {
 	typeText(m, "/summ")
 	pressKey(t, m, tea.KeyTab)
 
-	require.Equal(t, "/summarize ", m.textarea.Value())
+	require.Equal(t, "/compact ", m.textarea.Value(), "an alias completes to the command's preferred name")
 	require.False(t, m.commandPicker.visible())
 }
 

@@ -265,7 +265,7 @@ payload carries `notification_type` and `message`. Informational.
 
 Fire immediately before and after a session is summarized — either
 automatically (context window threshold, `trigger: "auto"`) or on demand
-(`/summarize`, `trigger: "manual"`). Informational: a hook cannot veto or
+(`/compact`, `trigger: "manual"`). Informational: a hook cannot veto or
 steer a compaction.
 
 Hooks are keyed by event name. Only `command` is required. `matcher` only
@@ -759,7 +759,7 @@ Extends the common payload:
 {
   // ...common fields...
 
-  // string. "auto" (context window threshold) or "manual" (/summarize).
+  // string. "auto" (context window threshold) or "manual" (/compact).
   "trigger": "auto",
 }
 ```

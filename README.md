@@ -566,15 +566,17 @@ name at the start of the editor, followed by whatever it takes.
 
 A picker above the editor lists the commands the name could become:
 <kbd>↑</kbd>/<kbd>↓</kbd> choose, <kbd>tab</kbd> completes the name, and
-<kbd>enter</kbd> runs a command that takes nothing or completes one that
-takes arguments. A line naming no command is sent as an ordinary message, so
-`/etc/hosts is broken` stays a message. <kbd>ctrl+p</kbd> opens the full
-palette for browsing; picking a command that takes arguments there puts it in
-the editor to be finished.
+<kbd>enter</kbd> runs a command whose arguments are all optional or
+completes one that asks for arguments. A line naming no command is sent as an
+ordinary message, so `/etc/hosts is broken` stays a message. <kbd>ctrl+p</kbd>
+opens the full palette for browsing; picking a command that asks for
+arguments there puts it in the editor to be finished, and anything else runs
+(picking Compact Session compacts with a general summary; type
+`/compact <focus>` to steer it).
 
-Built-in commands answer to their palette name (`/new-session`,
-`/switch-model`, `/compact`, `/goal`, ...), skills and custom commands to
-theirs. A command missing a required argument opens a form for it with what
+Built-in commands answer to their palette name and aliases (`/new-session`
+or `/clear`, `/switch-model`, `/compact` or `/summarize`, `/goal`, ...),
+skills and custom commands to theirs. A command missing a required argument opens a form for it with what
 was typed filled in.
 
 Custom commands are Markdown files. `user:` commands live in

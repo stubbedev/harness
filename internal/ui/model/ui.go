@@ -2006,6 +2006,9 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 	if action == nil {
 		return nil
 	}
+	if idle, ok := action.(dialog.IdleAction); ok && m.isAgentBusy() {
+		return util.ReportAgentBusy(idle.RequiresIdle())
+	}
 
 	switch msg := action.(type) {
 	// Generic dialog messages
@@ -2071,25 +2074,9 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 		}
 		m.dialog.CloseDialog(dialog.NotificationsID)
 	case dialog.ActionNewSession:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before starting a new session..."))
-			break
-		}
 		if cmd := m.newSession(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case dialog.ActionSummarize:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
-			break
-		}
-		cmds = append(cmds, func() tea.Msg {
-			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID, "")
-			if err != nil {
-				return util.ReportError(err)()
-			}
-			return nil
-		})
 	case dialog.ActionInvoke:
 		cmds = append(cmds, m.invoke(msg))
 	case dialog.ActionRun:
@@ -2106,10 +2093,6 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 		m.closeCommandDialogs()
 		cmds = append(cmds, m.insertInvocation(msg.Name))
 	case dialog.ActionCompact:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before compacting session..."))
-			break
-		}
 		focus := msg.Args.Value("focus")
 		cmds = append(cmds, func() tea.Msg {
 			err := m.com.Workspace.AgentSummarize(context.Background(), msg.SessionID, focus)
@@ -2123,11 +2106,6 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 	case dialog.ActionClearGoal:
 		cmds = append(cmds, m.clearGoal())
 	case dialog.ActionSaveSummary:
-
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before saving the summary..."))
-			break
-		}
 		cmds = append(cmds, m.saveSummaryToFile(msg.SessionID))
 	case dialog.ActionExportConversation:
 		cmds = append(cmds, m.exportConversationToFile(msg.SessionID))
@@ -2138,10 +2116,6 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 		m.status.ToggleHelp()
 		m.updateLayoutAndSize()
 	case dialog.ActionExternalEditor:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
-			break
-		}
 		editorValue, shell := m.textarea.Value(), false
 		if m.bangMode {
 			if prefix := m.shellPrefix(); prefix != "" {
@@ -2201,10 +2175,6 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 	case dialog.ActionQuit:
 		cmds = append(cmds, tea.Quit)
 	case dialog.ActionInitializeProject:
-		if m.isAgentBusy() {
-			cmds = append(cmds, util.ReportWarn("Agent is busy, please wait before summarizing session..."))
-			break
-		}
 		cmds = append(cmds, m.initializeProject())
 
 	case dialog.ActionSelectModel:
@@ -2350,7 +2320,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 			}
 		case key.Matches(msg, m.keyMap.Suspend):
 			if m.isAgentBusy() {
-				cmds = append(cmds, util.ReportWarn("Agent is busy, please wait..."))
+				cmds = append(cmds, util.ReportAgentBusy("suspending"))
 				return true
 			}
 			cmds = append(cmds, tea.Suspend)
@@ -4321,7 +4291,7 @@ func (m *UI) openRewindDialog() tea.Cmd {
 		return nil
 	}
 	if m.isAgentBusy() {
-		return util.ReportWarn("Agent is working, please wait...")
+		return util.ReportAgentBusy("rewinding")
 	}
 	rewind, err := dialog.NewRewind(m.com, m.session.ID)
 	if err != nil {

@@ -80,6 +80,16 @@ func TestArgSpecHintText(t *testing.T) {
 	assert.Equal(t, "<n>", ArgSpec{Fields: []Argument{{ID: "PR"}}, Hint: "<n>"}.HintText(), "an explicit hint wins")
 }
 
+func TestArgSpecAsksForArgs(t *testing.T) {
+	t.Parallel()
+
+	assert.False(t, ArgSpec{}.AsksForArgs())
+	assert.False(t, ArgSpec{FreeText: true}.AsksForArgs())
+	assert.False(t, ArgSpec{Fields: []Argument{{ID: "focus"}}}.AsksForArgs(), "optional fields do not hold a pick back")
+	assert.True(t, ArgSpec{Fields: []Argument{{ID: "focus"}, {ID: "pr", Required: true}}}.AsksForArgs())
+	assert.True(t, ArgSpec{FreeText: true, Hint: "<file>"}.AsksForArgs(), "an explicit hint asks for what it names")
+}
+
 func TestArgsExpand(t *testing.T) {
 	t.Parallel()
 

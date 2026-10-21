@@ -9,6 +9,7 @@ import (
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/dialog"
+	"github.com/stubbedev/harness/internal/ui/util"
 )
 
 // compactWorkspace gives the counting workspace stub a config, which the
@@ -72,19 +73,53 @@ func pressKey(t *testing.T, m *UI, code rune) {
 	runCmds(m, cmd)
 }
 
-// TestPalettePutsArgumentTakingCommandInEditor pins the palette's pick of
-// a command that takes arguments: it is put in the editor, followed by a
-// space, for its arguments to be typed after it - nothing runs yet.
-func TestPalettePutsArgumentTakingCommandInEditor(t *testing.T) {
+func TestPaletteCompactRunsImmediately(t *testing.T) {
 	t.Parallel()
 
 	m, ws := newCompactUI(t)
 
 	selectCommand(t, m, "compact")
 
-	require.False(t, m.dialog.HasDialogs(), "the palette hands over to the editor")
-	require.Equal(t, "/compact ", m.textarea.Value())
-	require.Empty(t, ws.summarizeCalls, "picking must not compact")
+	require.False(t, m.dialog.HasDialogs())
+	require.Empty(t, m.textarea.Value(), "an optional focus does not send compact to the editor")
+	require.Equal(t, []summarizeCall{{sessionID: "s1", instructions: ""}}, ws.summarizeCalls)
+}
+
+func TestIdleActionsRefusedWhileBusy(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		action dialog.IdleAction
+		want   string
+	}{
+		{dialog.ActionNewSession{}, "Agent is busy, please wait before starting a new session..."},
+		{dialog.ActionCompact{SessionID: "s1"}, "Agent is busy, please wait before compacting the session..."},
+		{dialog.ActionSaveSummary{SessionID: "s1"}, "Agent is busy, please wait before saving the summary..."},
+		{dialog.ActionExternalEditor{}, "Agent is busy, please wait before opening the editor..."},
+		{dialog.ActionInitializeProject{}, "Agent is busy, please wait before initializing the project..."},
+	}
+	for _, tc := range cases {
+		m, ws := newCompactUI(t)
+		warmCaches(m, true)
+
+		info := infoOf(t, m.handleAction(tc.action))
+
+		require.Equal(t, util.InfoTypeWarn, info.Type)
+		require.Equal(t, tc.want, info.Msg, "%T", tc.action)
+		require.Empty(t, ws.summarizeCalls)
+	}
+}
+
+func TestInvokedCompactRefusedWhileBusy(t *testing.T) {
+	t.Parallel()
+
+	m, ws := newCompactUI(t)
+	warmCaches(m, true)
+
+	typeText(m, "/compact keep the notes")
+	pressKey(t, m, tea.KeyEnter)
+
+	require.Empty(t, ws.summarizeCalls)
 }
 
 func TestPaletteOpensArgumentsFormWhereEditorCannotInvoke(t *testing.T) {
@@ -129,8 +164,7 @@ func TestCompactInvocationSubmitsFocus(t *testing.T) {
 
 	m, ws := newCompactUI(t)
 
-	selectCommand(t, m, "compact")
-	typeText(m, "Focus on the auth refactor")
+	typeText(m, "/compact Focus on the auth refactor")
 	pressKey(t, m, tea.KeyEnter)
 
 	require.Equal(t, []summarizeCall{{sessionID: "s1", instructions: "Focus on the auth refactor"}}, ws.summarizeCalls)
@@ -153,9 +187,7 @@ func TestCompactTypedInFullRuns(t *testing.T) {
 	require.False(t, m.commandPicker.visible())
 }
 
-// TestPickerCompletesPartialName pins the picker: enter on a partial name
-// completes the selected command that takes arguments.
-func TestPickerCompletesPartialName(t *testing.T) {
+func TestPickerRunsPartialNameWithOptionalArgs(t *testing.T) {
 	t.Parallel()
 
 	m, ws := newCompactUI(t)
@@ -163,8 +195,22 @@ func TestPickerCompletesPartialName(t *testing.T) {
 	typeText(m, "/compa")
 	pressKey(t, m, tea.KeyEnter)
 
-	require.Equal(t, "/compact ", m.textarea.Value())
-	require.Empty(t, ws.summarizeCalls)
+	require.Empty(t, m.textarea.Value())
+	require.Equal(t, []summarizeCall{{sessionID: "s1", instructions: ""}}, ws.summarizeCalls)
+}
+
+// TestPickerCompletesPartialName pins the picker: enter on a partial name
+// completes the selected command that asks for arguments.
+func TestPickerCompletesPartialName(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newCompactUI(t)
+
+	typeText(m, "/goa")
+	pressKey(t, m, tea.KeyEnter)
+
+	require.Equal(t, "/goal ", m.textarea.Value())
+	require.Nil(t, m.session.Goal)
 }
 
 // TestMissingRequiredArgumentOpensForm pins the fallback: an invocation
@@ -205,17 +251,17 @@ func TestUnknownInvocationIsAMessage(t *testing.T) {
 func TestArgumentsToCommandWithoutArgumentsWarn(t *testing.T) {
 	t.Parallel()
 
-	m, ws := newCompactUI(t)
+	m, _ := newCompactUI(t)
 
-	typeText(m, "/summarize now please")
+	typeText(m, "/new-session now please")
 	pressKey(t, m, tea.KeyEnter)
 
-	require.Empty(t, ws.summarizeCalls)
+	require.NotNil(t, m.session)
+	require.Equal(t, "s1", m.session.ID)
 }
 
-// TestSummarizeActionPassesEmptyFocus pins the non-/compact entry point:
-// the summarize command takes nothing, runs on pick and always asks for a
-// general summary.
+// TestSummarizeActionPassesEmptyFocus pins the /summarize alias: it is the
+// compact entry, runs on pick and asks for a general summary.
 func TestSummarizeActionPassesEmptyFocus(t *testing.T) {
 	t.Parallel()
 

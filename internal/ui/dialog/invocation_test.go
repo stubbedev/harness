@@ -64,8 +64,12 @@ func TestInvokeBindsThroughArgSpec(t *testing.T) {
 	assert.IsType(t, ActionRunCustomCommand{}, open.Action)
 
 	// Text for a command that takes none is refused, not dropped.
-	_, err = Invoke(ActionInvoke{Action: FindInvocable(items, "summarize").Action(), Name: "summarize", Raw: "now"})
-	require.EqualError(t, err, "/summarize takes no arguments")
+	_, err = Invoke(ActionInvoke{Action: FindInvocable(items, "rewind").Action(), Name: "rewind", Raw: "now"})
+	require.EqualError(t, err, "/rewind takes no arguments")
+
+	act, err = Invoke(ActionInvoke{Action: FindInvocable(items, "summarize").Action(), Name: "summarize", Raw: "keep the notes"})
+	require.NoError(t, err)
+	assert.Equal(t, "keep the notes", act.(ActionRun).Action.(ActionCompact).Args.Value("focus"), "/summarize is /compact")
 
 	// "/goal clear" clears instead of setting a goal named "clear".
 	act, err = Invoke(ActionInvoke{Action: FindInvocable(items, "goal").Action(), Name: "goal", Raw: "clear"})
@@ -79,9 +83,27 @@ func TestSelectActionFollowsArgSpec(t *testing.T) {
 	items := invocationCatalog().Invocables()
 
 	compact := FindInvocable(items, "compact")
-	assert.Equal(t, ActionInsertInvocation{Name: "compact", Action: compact.Action().(ArgAction)}, compact.SelectAction(),
-		"a command that asks for arguments goes to the editor")
-	assert.Equal(t, "[focus]", FindInvocable(items, "compact").ArgumentHint(), "the hint is the ArgSpec's")
+	assert.Equal(t, ActionInvoke{Action: compact.Action(), Name: "compact"}, compact.SelectAction(),
+		"a command whose arguments are all optional runs on pick")
+	assert.Equal(t, "[focus]", compact.ArgumentHint(), "the hint is the ArgSpec's")
+	goal := FindInvocable(items, "goal")
+	assert.Equal(t, ActionInsertInvocation{Name: "goal", Action: goal.Action().(ArgAction)}, goal.SelectAction(),
+		"a command with a required field goes to the editor")
+	_, inserts := FindInvocable(items, "fixup").SelectAction().(ActionInsertInvocation)
+	assert.True(t, inserts, "a custom command with a required field goes to the editor")
 	_, runs := FindInvocable(items, "review").SelectAction().(ActionInvoke)
 	assert.True(t, runs, "a skill without a hint runs on pick")
+}
+
+func TestSummarizeIsCompactAlias(t *testing.T) {
+	t.Parallel()
+
+	items := invocationCatalog().Invocables()
+
+	compact := FindInvocable(items, "compact")
+	require.NotNil(t, compact)
+	require.Same(t, compact, FindInvocable(items, "summarize"), "/summarize answers to the compact entry")
+	for _, item := range items {
+		assert.NotEqual(t, "summarize", item.ID(), "there is no separate summarize entry")
+	}
 }

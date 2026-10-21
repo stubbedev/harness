@@ -269,9 +269,9 @@ func (c *CommandItem) ArgumentHint() string {
 
 // SelectAction is what picking the command yields: a command that asks
 // for arguments is put in the editor to be finished there, anything
-// else runs.
+// else, including a command whose arguments are all optional, runs.
 func (c *CommandItem) SelectAction() Action {
-	if a, ok := c.action.(ArgAction); ok && c.ArgumentHint() != "" {
+	if a, ok := c.action.(ArgAction); ok && a.ArgSpec().AsksForArgs() {
 		return ActionInsertInvocation{Name: c.SlashName(), Action: a}
 	}
 	return ActionInvoke{Action: c.action, Name: c.SlashName()}

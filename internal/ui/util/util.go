@@ -67,6 +67,10 @@ func ReportWarn(warn string) tea.Cmd {
 	return CmdHandler(NewWarnMsg(warn))
 }
 
+func ReportAgentBusy(doing string) tea.Cmd {
+	return ReportWarn("Agent is busy, please wait before " + doing + "...")
+}
+
 type (
 	InfoMsg struct {
 		Type InfoType

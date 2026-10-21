@@ -158,9 +158,8 @@ func (c *Catalog) defaultCommands() []*CommandItem {
 
 	// Only show compact command if there's an active session
 	if c.state.hasSession() {
-		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", ActionSummarize{SessionID: c.state.SessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "compact", "Compact Session", ActionCompact{SessionID: c.state.SessionID}).WithAliases("summarize"))
 		commands = append(commands, NewCommandItem(c.com.Styles, "rewind", "Rewind to Earlier Turn", ActionOpenDialog{RewindID}))
-		commands = append(commands, NewCommandItem(c.com.Styles, "compact", "Compact Session", ActionCompact{SessionID: c.state.SessionID}))
 	}
 
 	commands = append(commands, NewCommandItem(c.com.Styles, "goal", "Set Goal", ActionSetGoal{}))

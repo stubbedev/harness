@@ -54,10 +54,13 @@ func (s ArgSpec) TakesArgs() bool {
 	return len(s.Fields) > 0 || s.FreeText
 }
 
+func (s ArgSpec) AsksForArgs() bool {
+	return s.Hint != "" || slices.ContainsFunc(s.Fields, func(arg Argument) bool { return arg.Required })
+}
+
 // HintText is the usage hint shown after the command's name:
 // "<required> [optional]", or the explicit Hint. It is empty for a
-// command that asks for nothing, which is then run as soon as it is
-// picked.
+// command that takes nothing.
 func (s ArgSpec) HintText() string {
 	if s.Hint != "" {
 		return s.Hint

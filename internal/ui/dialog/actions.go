@@ -47,9 +47,6 @@ type (
 	}
 	ActionToggleMouseSupport struct{}
 	ActionInitializeProject  struct{}
-	ActionSummarize          struct {
-		SessionID string
-	}
 	// ActionCompact compacts (summarizes) the session, optionally steered
 	// by focus instructions.
 	ActionCompact struct {
@@ -210,6 +207,25 @@ func (a ActionRunMCPPrompt) WithArgs(args commands.Args) Action {
 	return a
 }
 
+type IdleAction interface {
+	Action
+	RequiresIdle() string
+}
+
+var (
+	_ IdleAction = ActionNewSession{}
+	_ IdleAction = ActionCompact{}
+	_ IdleAction = ActionSaveSummary{}
+	_ IdleAction = ActionExternalEditor{}
+	_ IdleAction = ActionInitializeProject{}
+)
+
+func (ActionNewSession) RequiresIdle() string        { return "starting a new session" }
+func (ActionCompact) RequiresIdle() string           { return "compacting the session" }
+func (ActionSaveSummary) RequiresIdle() string       { return "saving the summary" }
+func (ActionExternalEditor) RequiresIdle() string    { return "opening the editor" }
+func (ActionInitializeProject) RequiresIdle() string { return "initializing the project" }
+
 // Messages for MCP OAuth authentication dialog.
 type (
 	// ActionMCPAuthStarted is sent when the user approves authentication
@@ -315,9 +331,6 @@ func (ActionToggleMouseSupport) isAction() {}
 
 // isAction marks ActionInitializeProject as an [Action].
 func (ActionInitializeProject) isAction() {}
-
-// isAction marks ActionSummarize as an [Action].
-func (ActionSummarize) isAction() {}
 
 // isAction marks ActionCompact as an [Action].
 func (ActionCompact) isAction() {}
