@@ -3,13 +3,14 @@ package proto
 import (
 	"encoding/base64"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
-	jsonv2 "github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
+	jsonv2 "encoding/json/v2"
+
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/message"
 )

@@ -1,13 +1,14 @@
 package proto
 
 import (
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"reflect"
 
-	jsonv2 "github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
-	jsonv1 "github.com/go-json-experiment/json/v1"
+	jsonv2 "encoding/json/v2"
+
+	jsonv1 "encoding/json"
 	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/update"
 )
