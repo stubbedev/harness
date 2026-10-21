@@ -25,6 +25,18 @@ func TestPathBuildersEscapeUserKeys(t *testing.T) {
 	require.Equal(t, "k", gjson.Get(doc, ProviderFieldPath("my.llm", "api_key")).String())
 }
 
+func TestProviderPathEscapesAndPrefixesFieldPath(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "providers.anthropic", ProviderPath("anthropic"))
+	require.Equal(t, ProviderPath("my.llm")+".api_key", ProviderFieldPath("my.llm", "api_key"))
+
+	doc, err := sjson.Delete(`{"providers":{"my.llm":{"api_key":"k"},"other":{}}}`, ProviderPath("my.llm"))
+	require.NoError(t, err)
+	require.False(t, gjson.Get(doc, "providers").Get(`my\.llm`).Exists())
+	require.True(t, gjson.Get(doc, "providers.other").Exists())
+}
+
 // TestLiteralConfigPathsNameRealFields finds every string literal passed
 // as a path to the config setters and requires it to resolve to a field of
 // Config through the JSON tags. A renamed tag otherwise leaves the write

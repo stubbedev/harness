@@ -719,6 +719,49 @@ func TestConfig_configureProvidersMigratesRenamedIDs(t *testing.T) {
 	require.Len(t, pc.Models, 1)
 }
 
+func anthropicOAuthConfig(t *testing.T, globalDataPath string) (*Config, *ConfigStore, []catalog.Provider) {
+	t.Helper()
+	knownProviders := []catalog.Provider{{
+		ID:          catalog.InferenceProviderAnthropic,
+		APIKey:      "$ANTHROPIC_API_KEY",
+		APIEndpoint: "https://api.anthropic.com",
+		Models:      []catalog.Model{{ID: "claude"}},
+	}}
+	cfg := &Config{Providers: csync.NewMap[catalog.InferenceProvider, ProviderConfig]()}
+	cfg.Providers.Set(catalog.InferenceProviderAnthropic, ProviderConfig{OAuthToken: &oauth.Token{AccessToken: "subscription"}})
+	cfg.setDefaults(t.TempDir(), "")
+	return cfg, &ConfigStore{config: cfg, globalDataPath: globalDataPath}, knownProviders
+}
+
+func TestConfig_configureProvidersRemovesAnthropicOAuth(t *testing.T) {
+	t.Parallel()
+	globalPath := filepath.Join(t.TempDir(), stateConfigFile)
+	cfg, store, knownProviders := anthropicOAuthConfig(t, globalPath)
+	require.NoError(t, store.SetConfigField(ScopeGlobal, ProviderFieldPath(catalog.InferenceProviderAnthropic, "oauth"), oauth.Token{AccessToken: "subscription"}))
+	require.True(t, store.HasConfigField(ScopeGlobal, ProviderPath(catalog.InferenceProviderAnthropic)))
+
+	environ := env.NewFromMap(map[string]string{})
+	require.NoError(t, cfg.configureProviders(context.Background(), store, environ, NewShellVariableResolver(environ), knownProviders))
+
+	_, inMemory := cfg.Providers.Get(catalog.InferenceProviderAnthropic)
+	require.False(t, inMemory)
+	require.False(t, store.HasConfigField(ScopeGlobal, ProviderPath(catalog.InferenceProviderAnthropic)))
+}
+
+func TestConfig_configureProvidersFailsWhenAnthropicOAuthRemovalFails(t *testing.T) {
+	t.Parallel()
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	require.NoError(t, os.WriteFile(blocker, nil, 0o600))
+	cfg, store, knownProviders := anthropicOAuthConfig(t, filepath.Join(blocker, stateConfigFile))
+
+	environ := env.NewFromMap(map[string]string{})
+	err := cfg.configureProviders(context.Background(), store, environ, NewShellVariableResolver(environ), knownProviders)
+	require.ErrorContains(t, err, "remove unsupported anthropic OAuth provider")
+
+	_, inMemory := cfg.Providers.Get(catalog.InferenceProviderAnthropic)
+	require.True(t, inMemory)
+}
+
 // TestConfig_configureProvidersKeepsCurrentIDOverLegacy covers a config
 // that names both spellings: the current id wins and the stale entry is
 // dropped rather than overwriting it.

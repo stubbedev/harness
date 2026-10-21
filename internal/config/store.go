@@ -1011,7 +1011,7 @@ func NewTestStoreWithWorkingDir(cfg *Config, workingDir string, loadedPaths ...s
 
 // ImportCopilot attempts to import a GitHub Copilot token from disk.
 func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
-	if s.HasConfigField(ScopeGlobal, "providers.copilot.api_key") || s.HasConfigField(ScopeGlobal, "providers.copilot.oauth") {
+	if s.HasConfigField(ScopeGlobal, ProviderFieldPath(catalog.InferenceProviderCopilot, "api_key")) || s.HasConfigField(ScopeGlobal, ProviderFieldPath(catalog.InferenceProviderCopilot, "oauth")) {
 		return nil, false
 	}
 

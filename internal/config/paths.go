@@ -25,9 +25,13 @@ func pathKey(key string) string {
 	return b.String()
 }
 
+func ProviderPath(providerID catalog.InferenceProvider) string {
+	return "providers." + pathKey(string(providerID))
+}
+
 // ProviderFieldPath is the config path of field on the provider with id.
 func ProviderFieldPath(providerID catalog.InferenceProvider, field string) string {
-	return "providers." + pathKey(string(providerID)) + "." + field
+	return ProviderPath(providerID) + "." + field
 }
 
 // MCPFieldPath is the config path of field on the MCP server name.
