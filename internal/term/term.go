@@ -438,24 +438,40 @@ func (s *Session) append(b []byte) {
 // skip auto-indent, history expansion and immediate execution - which
 // is exactly what mangles multi-line text written straight into them.
 // vt10x does not track the mode, so watch the stream for it.
+const (
+	bracketedPasteOnSeq  = "\x1b[?2004h"
+	bracketedPasteOffSeq = "\x1b[?2004l"
+)
+
 var (
-	bracketedPasteOn  = []byte("\x1b[?2004h")
-	bracketedPasteOff = []byte("\x1b[?2004l")
+	bracketedPasteOn  = []byte(bracketedPasteOnSeq)
+	bracketedPasteOff = []byte(bracketedPasteOffSeq)
 )
 
 // trackBracketedPasteLocked follows the mode across chunk boundaries by
 // keeping the tail of the previous chunk: the sequence is 8 bytes and a
 // read can split it anywhere. Callers must hold s.mu.
 func (s *Session) trackBracketedPasteLocked(b []byte) {
-	scan := b
-	if len(s.modeCarry) > 0 {
-		scan = append(append([]byte{}, s.modeCarry...), b...)
+	const tail = len(bracketedPasteOnSeq) - 1
+	var buf [2 * tail]byte
+	window := append(append(buf[:0], s.modeCarry...), b[:min(len(b), tail)]...)
+	if !s.applyBracketedPasteLocked(b) {
+		s.applyBracketedPasteLocked(window)
 	}
-	if on, off := bytes.LastIndex(scan, bracketedPasteOn), bytes.LastIndex(scan, bracketedPasteOff); on >= 0 || off >= 0 {
-		s.bracketedPaste = on > off
+	carry := window
+	if len(b) >= tail {
+		carry = b
 	}
-	carry := min(len(scan), len(bracketedPasteOn)-1)
-	s.modeCarry = append(s.modeCarry[:0], scan[len(scan)-carry:]...)
+	s.modeCarry = append(s.modeCarry[:0], carry[len(carry)-min(len(carry), tail):]...)
+}
+
+func (s *Session) applyBracketedPasteLocked(scan []byte) bool {
+	on, off := bytes.LastIndex(scan, bracketedPasteOn), bytes.LastIndex(scan, bracketedPasteOff)
+	if on < 0 && off < 0 {
+		return false
+	}
+	s.bracketedPaste = on > off
+	return true
 }
 
 // BracketedPaste reports whether whatever is running has asked for
