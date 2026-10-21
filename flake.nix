@@ -3,41 +3,23 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    flake-parts = {
+      url = "github:hercules-ci/flake-parts";
+      inputs.nixpkgs-lib.follows = "nixpkgs";
+    };
   };
 
-  outputs = {
-    self,
-    nixpkgs,
-    flake-utils,
-  }:
-    flake-utils.lib.eachDefaultSystem (
-      system: let
-        # FSL-1.1-MIT is source-available rather than open source, so nixpkgs
-        # classifies it as unfree. Allowing it for this instance keeps
-        # `nix run github:stubbedev/harness` working without every consumer
-        # having to set allowUnfree themselves.
-        pkgs = import nixpkgs {
-          inherit system;
-          config.allowUnfree = true;
-        };
-        rev = self.shortRev or self.dirtyShortRev or "unknown";
-        # Nix has no version to read from the source tree, so builds from a
-        # checkout are stamped with the commit date and hash. Tagged releases
-        # are consumed through the Go module path, not from here.
-        version = "0-unstable-${self.lastModifiedDate or "0"}";
-      in {
-        packages = rec {
-          harness = pkgs.callPackage ./package.nix {inherit rev version;};
-          default = harness;
-        };
-
-        apps = rec {
-          harness = flake-utils.lib.mkApp {drv = self.packages.${system}.harness;};
-          default = harness;
-        };
-
-        formatter = pkgs.alejandra;
-      }
-    );
+  outputs = inputs @ {flake-parts, ...}:
+    flake-parts.lib.mkFlake {inherit inputs;} {
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+      imports = [
+        ./nix/package.nix
+        ./nix/formatter.nix
+      ];
+    };
 }

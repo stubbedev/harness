@@ -3,9 +3,9 @@ name: Flake
 on:
   push:
     branches: [main]
-    paths: ['go.mod', 'go.sum', 'flake.nix', 'flake.lock', 'package.nix', '**/*.go']
+    paths: ['go.mod', 'go.sum', 'flake.nix', 'flake.lock', 'nix/**', '**/*.go']
   pull_request:
-    paths: ['go.mod', 'go.sum', 'flake.nix', 'flake.lock', 'package.nix', '**/*.go']
+    paths: ['go.mod', 'go.sum', 'flake.nix', 'flake.lock', 'nix/**', '**/*.go']
   workflow_dispatch:
 
 permissions:
@@ -38,11 +38,11 @@ jobs:
       - name: Recompute vendorHash
         run: |
           FAKE="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-          CUR="$(grep -oP 'vendorHash = "\K[^"]+' package.nix)"
-          sed -i "s#vendorHash = \"${CUR}\"#vendorHash = \"${FAKE}\"#" package.nix
+          CUR="$(grep -oP 'vendorHash = "\K[^"]+' nix/package.nix)"
+          sed -i "s#vendorHash = \"${CUR}\"#vendorHash = \"${FAKE}\"#" nix/package.nix
           GOT="$(nix build .#default --no-link 2>&1 | grep -oP 'got:\s+\K(sha256-\S+)' | head -1 || true)"
           [ -z "$GOT" ] && GOT="$CUR"
-          sed -i "s#vendorHash = \"${FAKE}\"#vendorHash = \"${GOT}\"#" package.nix
+          sed -i "s#vendorHash = \"${FAKE}\"#vendorHash = \"${GOT}\"#" nix/package.nix
           echo "vendorHash = ${GOT}"
 
       - name: Build check
@@ -57,13 +57,13 @@ jobs:
       - name: Commit updated vendorHash
         if: github.event_name != 'pull_request'
         run: |
-          if git diff --quiet package.nix; then
+          if git diff --quiet nix/package.nix; then
             echo "vendorHash already current."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.nix
+          git add nix/package.nix
           git commit -m "chore(nix): update vendorHash [skip ci]"
           # just release-* can push the same vendorHash commit to main
           # while this job runs. Both commits carry the same content, so

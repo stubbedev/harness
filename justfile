@@ -121,16 +121,16 @@ update-golden:
 
 # CI does this on every dependency change (see .github/workflows/flake.yml);
 # run it locally when you want `nix build` to work before pushing.
-# Recompute package.nix's vendorHash from go.mod/go.sum.
+# Recompute nix/package.nix's vendorHash from go.mod/go.sum.
 nix-vendor-hash:
     #!/usr/bin/env bash
     set -euo pipefail
     FAKE="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    CUR="$(grep -oP 'vendorHash = "\K[^"]+' package.nix)"
-    sed -i "s#vendorHash = \"${CUR}\"#vendorHash = \"${FAKE}\"#" package.nix
+    CUR="$(grep -oP 'vendorHash = "\K[^"]+' nix/package.nix)"
+    sed -i "s#vendorHash = \"${CUR}\"#vendorHash = \"${FAKE}\"#" nix/package.nix
     GOT="$(nix build .#default --no-link 2>&1 | grep -oP 'got:\s+\K(sha256-\S+)' | head -1 || true)"
     [ -z "$GOT" ] && GOT="$CUR"
-    sed -i "s#vendorHash = \"${FAKE}\"#vendorHash = \"${GOT}\"#" package.nix
+    sed -i "s#vendorHash = \"${FAKE}\"#vendorHash = \"${GOT}\"#" nix/package.nix
     echo "vendorHash = ${GOT}"
 
 # Build the Nix package and print the store path.
@@ -180,10 +180,10 @@ release level:
     echo "releasing $v -> $new"
     just nix-vendor-hash
     just check
-    # nix-vendor-hash rewrites package.nix when dependencies moved; that has to
+    # nix-vendor-hash rewrites nix/package.nix when dependencies moved; that has to
     # land before the tag so the tagged tree builds under Nix.
-    if ! git diff --quiet package.nix; then
-        git add package.nix
+    if ! git diff --quiet nix/package.nix; then
+        git add nix/package.nix
         git commit -m "chore(nix): update vendorHash for $new"
     fi
     # GitHub honours [skip ci] on a tag push too, so a tag landing on the
