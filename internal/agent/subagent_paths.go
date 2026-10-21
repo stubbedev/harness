@@ -104,10 +104,7 @@ func missingCitedPaths(report, workdir string) []string {
 // paths would itself be a disclosure. Globs match when at least one
 // file or directory matches.
 func pathExists(workdir, token string, glob bool) bool {
-	target := token
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(workdir, target)
-	}
+	target := filepath.Clean(filepathext.SmartJoin(workdir, token))
 	if _, ok := filepathext.RelWithin(workdir, target); !ok {
 		return false
 	}

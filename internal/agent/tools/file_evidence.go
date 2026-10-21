@@ -353,10 +353,7 @@ func shellCommandFiles(command, workingDir string) []string {
 		if token == "" || token == "<<" {
 			continue
 		}
-		path := token
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(workingDir, path)
-		}
+		path := filepathext.SmartJoin(workingDir, token)
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			paths = append(paths, path)
 			if len(paths) >= shellTrackedPathLimit {

@@ -121,10 +121,7 @@ func activationPath(workingDir, file string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	if !filepath.IsAbs(file) {
-		file = filepath.Join(root, file)
-	}
-	rel, ok := filepathext.RelWithin(root, filepath.Clean(file))
+	rel, ok := filepathext.RelWithin(root, filepath.Clean(filepathext.SmartJoin(root, file)))
 	if !ok {
 		return "", false
 	}

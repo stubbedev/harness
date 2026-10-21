@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/fsext"
 )
 
@@ -181,10 +182,7 @@ func fileKey(path, base string) string {
 	if path == "" {
 		return ""
 	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(base, path)
-	}
-	path = filepath.ToSlash(filepath.Clean(path))
+	path = filepath.ToSlash(filepath.Clean(filepathext.SmartJoin(base, path)))
 	// A Unix path keeps its leading slash; trimRepoPath would take it
 	// along with the trailing ones.
 	lead := ""

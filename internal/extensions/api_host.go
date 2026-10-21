@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/shell"
 	lua "github.com/yuin/gopher-lua"
 )
@@ -30,10 +31,7 @@ const maxHTTPBody = 8 << 20
 // resolvePath makes a relative path absolute against the workspace root,
 // so an extension can address project files the way the user does.
 func (in *instance) resolvePath(path string) string {
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path)
-	}
-	return filepath.Join(in.host.opts.WorkingDir, path)
+	return filepath.Clean(filepathext.SmartJoin(in.host.opts.WorkingDir, path))
 }
 
 func (in *instance) luaFSRead(L *lua.LState) int {

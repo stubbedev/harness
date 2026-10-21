@@ -3,10 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/filepathext"
 )
 
 type workspaceLSPTool struct {
@@ -31,9 +31,7 @@ func (t workspaceLSPTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 		if path == "" && field == "file_path" {
 			continue
 		}
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(t.root, path)
-		}
+		path = filepathext.SmartJoin(t.root, path)
 		input[field], _ = json.Marshal(path)
 	}
 	encoded, err := json.Marshal(input)
