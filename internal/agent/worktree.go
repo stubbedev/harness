@@ -10,10 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/fsext"
 )
+
+const worktreeGitWaitDelay = 2 * time.Second
 
 type AgentWorktree struct {
 	SourceRoot string
@@ -386,6 +389,7 @@ func worktreeGitInput(ctx context.Context, root string, pin []string, input []by
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	cmd.WaitDelay = worktreeGitWaitDelay
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), errors.Join(ctx.Err(), err), strings.TrimSpace(stderr.String()))

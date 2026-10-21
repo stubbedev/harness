@@ -442,9 +442,10 @@ type ptyRunner struct {
 	// holds (all dispatches, all directories) with an exact match. key
 	// is the registry key (owner and directory) and cwd the directory
 	// the shell started in.
-	agentID string
-	key     string
-	cwd     string
+	agentID   string
+	sessionID string
+	key       string
+	cwd       string
 	// lastCwd is the working directory the last completed command's
 	// sentinel reported - the session's cwd as of then. Calls that run
 	// no command (poll, keys, input) have no sentinel to read, so they
@@ -651,6 +652,13 @@ func CloseTerminalSessionsUnder(dir string) {
 	})
 }
 
+func CloseTerminalSessionsOf(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	closeTerminalSessions(func(r *ptyRunner) bool { return r.sessionID == sessionID })
+}
+
 // closeTerminalSessions removes the runners keep selects from the
 // registry and closes them, off the registry lock, waiting for each.
 func closeTerminalSessions(keep func(*ptyRunner) bool) {
@@ -743,7 +751,7 @@ func ptyRunnerFor(agentID, sessionID, sessionName, cwd string, ask question.Serv
 		}
 	}
 	r := &ptyRunner{
-		agentID: agentID, key: key, cwd: cwd, ask: ask, lastUsed: time.Now(),
+		agentID: agentID, sessionID: sessionID, key: key, cwd: cwd, ask: ask, lastUsed: time.Now(),
 	}
 	ptyRunners[key] = r
 	ptyReaperStart()

@@ -2442,6 +2442,7 @@ func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, sess
 	if params.FinishWorkspace != nil {
 		defer func() { params.FinishWorkspace(&response) }()
 	}
+	defer tools.CloseTerminalSessionsOf(session.ID)
 	// Get model configuration
 	model := params.Agent.Model()
 	providerCfg, ok := c.cfg.Config().Providers.Get(model.ModelCfg.Provider)

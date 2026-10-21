@@ -1284,6 +1284,48 @@ func TestPtyRunner_DispatchesGetSeparateSessions(t *testing.T) {
 	ptyRunnersMu.Unlock()
 }
 
+func TestCloseTerminalSessionsOfClosesEveryDirectoryOfOneDispatch(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh on this platform")
+	}
+
+	ptyRunnersMu.Lock()
+	saved := ptyRunners
+	ptyRunners = map[string]*ptyRunner{}
+	ptyRunnersMu.Unlock()
+	t.Cleanup(func() {
+		ptyRunnersMu.Lock()
+		for _, r := range ptyRunners {
+			r.Close()
+		}
+		ptyRunners = saved
+		ptyRunnersMu.Unlock()
+	})
+
+	worktree := t.TempDir()
+	source := t.TempDir()
+	inWorktree := ptyRunnerFor("fast", "child-1", "main", worktree, nil)
+	inSource := ptyRunnerFor("fast", "child-1", "source", source, nil)
+	sibling := ptyRunnerFor("fast", "child-2", "main", source, nil)
+
+	CloseTerminalSessionsUnder(worktree)
+	ptyRunnersMu.Lock()
+	_, sourceAlive := ptyRunners[inSource.key]
+	ptyRunnersMu.Unlock()
+	require.True(t, sourceAlive, "a directory sweep misses a terminal the child opened elsewhere")
+
+	CloseTerminalSessionsOf("child-1")
+	CloseTerminalSessionsOf("")
+	ptyRunnersMu.Lock()
+	defer ptyRunnersMu.Unlock()
+	_, worktreeAlive := ptyRunners[inWorktree.key]
+	_, sourceAlive = ptyRunners[inSource.key]
+	_, siblingAlive := ptyRunners[sibling.key]
+	require.False(t, worktreeAlive)
+	require.False(t, sourceAlive, "every terminal of the finished dispatch must close, wherever it was opened")
+	require.True(t, siblingAlive, "another dispatch keeps its terminals")
+}
+
 // Reset is the way out of a session that cannot be talked down: the
 // shell is killed and a fresh one takes its place, so everything the
 // old one held is gone and commands work again.

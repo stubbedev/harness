@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -98,6 +100,65 @@ func TestWorktreeHashesNamesThatNeedQuoting(t *testing.T) {
 	for i := range names {
 		require.Contains(t, string(patch), fmt.Sprintf("+content %d\n", i))
 	}
+}
+
+func TestWorktreeFinalizationNeverTouchesTheSourceCheckout(t *testing.T) {
+	t.Parallel()
+	root := worktreeTestRepo(t)
+	worktreeTestWrite(t, root, "tracked", "staged\n")
+	worktreeTestGit(t, root, "add", "tracked")
+	worktreeTestWrite(t, root, "tracked", "dirty\n")
+	worktreeTestWrite(t, root, "untracked", "local\n")
+	indexPath := filepath.Join(root, ".git", "index")
+	indexBefore, err := os.ReadFile(indexPath)
+	require.NoError(t, err)
+	headBefore := worktreeTestGit(t, root, "rev-parse", "HEAD")
+	sourceBefore, _, err := snapshotWorktree(t.Context(), root, "", nil)
+	require.NoError(t, err)
+
+	committed, err := NewWorktree(t.Context(), root, t.TempDir())
+	require.NoError(t, err)
+	unchanged, err := NewWorktree(t.Context(), root, t.TempDir())
+	require.NoError(t, err)
+	timedOut, err := NewWorktree(t.Context(), root, t.TempDir())
+	require.NoError(t, err)
+
+	worktreeTestWrite(t, committed.Path, "added", "new file\n")
+	worktreeTestGit(t, committed.Path, "add", "added", "tracked")
+	worktreeTestGit(t, committed.Path, "commit", "-m", "child")
+	worktreeTestWrite(t, timedOut.Path, "tracked", "child edit\n")
+
+	expired, cancel := context.WithTimeout(t.Context(), time.Nanosecond)
+	defer cancel()
+	<-expired.Done()
+	_, err = timedOut.Finish(expired)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	for _, w := range []*AgentWorktree{committed, unchanged, timedOut} {
+		_, err := w.Finish(t.Context())
+		require.NoError(t, err)
+	}
+
+	indexAfter, err := os.ReadFile(indexPath)
+	require.NoError(t, err)
+	require.Equal(t, indexBefore, indexAfter, "the source index must be byte-identical")
+	require.Equal(t, headBefore, worktreeTestGit(t, root, "rev-parse", "HEAD"))
+	sourceAfter, _, err := snapshotWorktree(t.Context(), root, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, sourceBefore, sourceAfter)
+}
+
+func TestWorktreeGitDoesNotOutliveItsContext(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell alias")
+	}
+	root := worktreeTestRepo(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := worktreeGit(ctx, root, nil, "-c", "alias.hang=!sleep 30", "hang")
+	require.Error(t, err)
+	require.Less(t, time.Since(start), 10*time.Second, "a child holding the output pipe must not keep the call alive past its context")
 }
 
 func BenchmarkWorktreeSnapshotTree(b *testing.B) {
