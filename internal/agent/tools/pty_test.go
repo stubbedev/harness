@@ -1037,6 +1037,53 @@ func TestPtyRunner_MidsizeHeredocOnBracketedPasteShell(t *testing.T) {
 	runHeredocRoundTrip(t, r, 60)
 }
 
+func tabIndentedHeredocCommand() (string, []string) {
+	var cmd strings.Builder
+	var bodies []string
+	for i := range 3 {
+		var body strings.Builder
+		fmt.Fprintf(&body, "package p%d\n\ntype T struct {\n\tName\tstring\n\tf\tint\t// f%d\n}\n\nfunc F%d() {\n", i, i, i)
+		for j := range 40 {
+			fmt.Fprintf(&body, "\tif x := %d; x > %d {\n\t\treturn\n\t}\n", j, i)
+		}
+		body.WriteString("}\n")
+		bodies = append(bodies, body.String())
+		fmt.Fprintf(&cmd, "cat > f%d.go <<'EOF'\n%sEOF\nsleep 0.2\n", i, body.String())
+	}
+	cmd.WriteString("cat f0.go f1.go f2.go | wc -c\necho done")
+	return cmd.String(), bodies
+}
+
+func requireTabIndentedHeredocs(t *testing.T, r *ptyRunner) {
+	t.Helper()
+	cmd, bodies := tabIndentedHeredocCommand()
+	require.Greater(t, len(cmd), 4<<10)
+	res, err := r.Type(t.Context(), cmd, 30)
+	require.NoError(t, err)
+	require.NotNil(t, res.ExitCode, "output: %q", res.Output)
+	require.Equal(t, 0, *res.ExitCode, "output: %q", res.Output)
+	total := 0
+	for i, body := range bodies {
+		got, err := os.ReadFile(filepath.Join(r.cwd, fmt.Sprintf("f%d.go", i)))
+		require.NoError(t, err)
+		require.Equal(t, body, string(got))
+		total += len(body)
+	}
+	require.Contains(t, res.Output, strconv.Itoa(total))
+	require.Contains(t, res.Output, "done")
+}
+
+func TestPtyRunner_TabIndentedHeredocsRunFromFile(t *testing.T) {
+	requireTabIndentedHeredocs(t, newTestRunner(t))
+}
+
+func TestPtyRunner_ZshTabIndentedHeredocsRunFromFile(t *testing.T) {
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("zsh not installed")
+	}
+	requireTabIndentedHeredocs(t, newRunnerWithShell(t, "zsh"))
+}
+
 func TestRenderLines(t *testing.T) {
 	t.Parallel()
 

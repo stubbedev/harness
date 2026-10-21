@@ -2528,10 +2528,7 @@ func (r *ptyRunner) sendSourced(s ptyTerminal, body string) ([]string, error) {
 	d := r.sourcing()
 	path := filepath.Join(dir, d.scriptName)
 	if strings.ContainsAny(path, "'\"") {
-		// A path the shell cannot say safely: type the block and lean
-		// on the paced send, as before this delivery existed.
-		echo := strings.Split(body, "\n")
-		return echo, r.send(s, []byte(keystrokes(body)+term.Enter))
+		return nil, fmt.Errorf("command file path %q cannot be quoted for the shell", path)
 	}
 	if err := os.WriteFile(path, []byte(body+"\n"), 0o600); err != nil {
 		return nil, fmt.Errorf("failed to write command file: %w", err)

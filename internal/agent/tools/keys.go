@@ -1,5 +1,7 @@
 package tools
 
+import "strings"
+
 // Input to the shell tool is the literal byte stream a terminal would
 // receive: command text, with the keys that have no character of their
 // own sent as their terminal sequences - "\n" (or "\r") for enter,
@@ -10,14 +12,19 @@ package tools
 // containsKeyBytes reports whether input carries bytes the terminal
 // treats as keys rather than text: escape, delete, or a control
 // character other than newline. Newline is the documented enter and
-// stays text, so a multi-line command still travels as one paste; a
+// stays text, so a multi-line command still travels as one paste, and
+// a tab inside a multi-line block is indentation, not completion; a
 // carriage return is an explicit enter, typed as such. Keyed input is
 // program-bound keystrokes: it is typed into whatever runs, and it is
 // never wrapped in paste markers, which would deliver its escape
 // sequences as literal characters.
 func containsKeyBytes(input string) bool {
+	tabIsText := strings.Contains(strings.TrimSuffix(input, "\n"), "\n")
 	for i := 0; i < len(input); i++ {
 		b := input[i]
+		if b == '\t' && tabIsText {
+			continue
+		}
 		if b == 0x1b || b == 0x7f || b < 0x20 && b != '\n' {
 			return true
 		}

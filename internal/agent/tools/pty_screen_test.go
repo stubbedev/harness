@@ -171,6 +171,11 @@ func TestContainsKeyBytes(t *testing.T) {
 	require.True(t, containsKeyBytes("\x03"))
 	require.True(t, containsKeyBytes("\x1b[A"))
 	require.True(t, containsKeyBytes("\x7f"))
+
+	require.False(t, containsKeyBytes("cat <<'EOF'\n\tindented\tbody\nEOF\n"))
+	require.True(t, containsKeyBytes("git che\t"))
+	require.True(t, containsKeyBytes("git che\t\n"))
+	require.True(t, containsKeyBytes("a\n\tb\x1b[A"))
 }
 
 func TestEndsKeyed(t *testing.T) {
