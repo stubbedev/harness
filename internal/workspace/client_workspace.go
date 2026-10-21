@@ -200,7 +200,7 @@ func (w *ClientWorkspace) ListUserMessages(ctx context.Context, sessionID string
 	return proto.MessagesToDomain(msgs), nil
 }
 
-func (w *ClientWorkspace) PromptHistory(ctx context.Context, sessionID string) ([]string, error) {
+func (w *ClientWorkspace) PromptHistory(ctx context.Context, sessionID string) ([]message.PromptHistoryEntry, error) {
 	return w.client.PromptHistory(ctx, w.workspaceID(), sessionID)
 }
 

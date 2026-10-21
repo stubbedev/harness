@@ -400,11 +400,11 @@ func (c *Client) ListUserMessages(ctx context.Context, id string, sessionID stri
 
 // PromptHistory retrieves the prompt-history entries of a session's user
 // messages, or of every session when sessionID is empty.
-func (c *Client) PromptHistory(ctx context.Context, id string, sessionID string) ([]string, error) {
+func (c *Client) PromptHistory(ctx context.Context, id string, sessionID string) ([]message.PromptHistoryEntry, error) {
 	if sessionID == "" {
-		return call[[]string](ctx, c, "get prompt history", get(wsPath(id, "prompt-history")))
+		return call[[]message.PromptHistoryEntry](ctx, c, "get prompt history", get(wsPath(id, "prompt-history")))
 	}
-	return call[[]string](ctx, c, "get prompt history", get(wsPath(id, "sessions", sessionID, "prompt-history")))
+	return call[[]message.PromptHistoryEntry](ctx, c, "get prompt history", get(wsPath(id, "sessions", sessionID, "prompt-history")))
 }
 
 // CancelAgentSession cancels an ongoing agent operation for a session.

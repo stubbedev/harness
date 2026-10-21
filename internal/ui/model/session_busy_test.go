@@ -135,7 +135,7 @@ func (w *countingWorkspace) ListUserMessages(context.Context, string) ([]message
 	return nil, nil
 }
 
-func (w *countingWorkspace) PromptHistory(context.Context, string) ([]string, error) {
+func (w *countingWorkspace) PromptHistory(context.Context, string) ([]message.PromptHistoryEntry, error) {
 	return nil, nil
 }
 

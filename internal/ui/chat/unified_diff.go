@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -154,7 +153,7 @@ func toolOutputDiffContentFromUnified(sty *styles.Styles, content string, width 
 	if len(lines) > maxLines && !expanded {
 		truncMsg := sty.Tool.DiffTruncation.
 			Width(width).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
+			Render(truncationHint(len(lines) - maxLines))
 		combined = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
 	}
 	return sty.Tool.Body.Render(combined)

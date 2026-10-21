@@ -284,7 +284,7 @@ func (m *OAuth) innerDialogContent() string {
 		// whole concatenation in a single style would lose the text
 		// color after enterKeyStyle's reset code.
 		instructionText := instructionStyle.Render("Press ") +
-			enterKeyStyle.Render("enter") +
+			enterKeyStyle.Render(m.keyMap.Submit.Help().Key) +
 			instructionStyle.Render(" to copy the code below and open the browser.")
 		instructions := lipgloss.NewStyle().
 			Width(innerWidth).

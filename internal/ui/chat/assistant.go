@@ -14,20 +14,29 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/anim"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
-// assistantMessageTruncateFormat is the text shown when an assistant message is
+// truncationHint is the text shown when an assistant message is
 // truncated in the collapsed state.
-const assistantMessageTruncateFormat = "… (%d lines hidden) [click or space to expand]"
+func truncationHint(hidden int) string {
+	return fmt.Sprintf("… (%d lines hidden) [click or %s to expand]", hidden, expandKey())
+}
 
-// assistantMessageTailWindowFormat is shown above a tail-windowed thinking
+// tailWindowHint is shown above a tail-windowed thinking
 // block to advertise that earlier lines exist and that the user can
 // promote the view to a full expansion. The promotion is wired through
 // the existing ToggleExpanded path (click / space) — F5 deliberately
 // does not add a new keybinding.
-const assistantMessageTailWindowFormat = "… %d earlier lines hidden [click or space for full view]"
+func tailWindowHint(hidden int) string {
+	return fmt.Sprintf("… %d earlier lines hidden [click or %s for full view]", hidden, expandKey())
+}
+
+func expandKey() string {
+	return keys.Active().Chat.Expand.Help().Key
+}
 
 // maxCollapsedThinkingHeight defines the maximum height of the thinking
 const maxCollapsedThinkingHeight = 10
@@ -648,7 +657,7 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 		if totalLines > maxCollapsedThinkingHeight {
 			tail, hidden := tailLines(rendered, maxCollapsedThinkingHeight, totalLines)
 			hint := a.sty.Messages.ThinkingTruncationHint.Render(
-				fmt.Sprintf(assistantMessageTruncateFormat, hidden),
+				truncationHint(hidden),
 			)
 			lines = append([]string{hint, ""}, strings.Split(tail, "\n")...)
 		} else {
@@ -659,7 +668,7 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 		if totalLines > maxExpandedThinkingTailLines {
 			tail, hidden := tailLines(rendered, maxExpandedThinkingTailLines, totalLines)
 			hint := a.sty.Messages.ThinkingTruncationHint.Render(
-				fmt.Sprintf(assistantMessageTailWindowFormat, hidden),
+				tailWindowHint(hidden),
 			)
 			lines = append([]string{hint, ""}, strings.Split(tail, "\n")...)
 		} else {

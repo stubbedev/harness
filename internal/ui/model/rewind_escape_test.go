@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/dialog"
 )
 
@@ -57,7 +58,7 @@ func TestRewindEscapeDeclinesWhenOwned(t *testing.T) {
 	m.textarea.Reset()
 
 	// History browsing owns it too.
-	m.promptHistory.messages = []string{"older prompt"}
+	m.promptHistory.messages = []message.PromptHistoryEntry{{Text: "older prompt"}}
 	m.promptHistory.pos = 1
 	consumed, _ = m.handleRewindEscape()
 	require.False(t, consumed, "history browsing swallows the escape")

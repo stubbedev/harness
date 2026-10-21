@@ -100,7 +100,8 @@ const (
 )
 
 type openEditorMsg struct {
-	Text string
+	Text  string
+	Shell bool
 }
 
 // rewindSession performs the rewind on a background command and, for
@@ -471,12 +472,12 @@ type UI struct {
 
 	// Prompt history for up/down navigation through previous messages.
 	promptHistory struct {
-		messages []string
+		messages []message.PromptHistoryEntry
 		// pos is the browsing position: 0 is the draft (not browsing),
 		// n > 0 shows messages[n-1]. The zero value is therefore "not
 		// browsing" before any history has loaded.
 		pos   int
-		draft string
+		draft message.PromptHistoryEntry
 	}
 
 	// parentTitle holds the resolved parent session title for the breadcrumb.
@@ -1564,9 +1565,10 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.insertInlineAttachment(msg)
 	case openEditorMsg:
 		prevHeight := m.textarea.Height()
-		m.textarea.SetValue(msg.Text)
+		text, prefixed := m.cutShellPrefix(msg.Text)
+		m.textarea.SetValue(text)
 		m.textarea.MoveToEnd()
-		m.syncBangModeFromTextarea()
+		m.setShellMode(prefixed || msg.Shell)
 		cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 	case cursor.BlinkMsg:
 		// The editor caret's blink tick. The centralized model is the only
@@ -2140,11 +2142,15 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 			cmds = append(cmds, util.ReportWarn("Agent is working, please wait..."))
 			break
 		}
-		editorValue := m.textarea.Value()
+		editorValue, shell := m.textarea.Value(), false
 		if m.bangMode {
-			editorValue = "!" + editorValue
+			if prefix := m.shellPrefix(); prefix != "" {
+				editorValue = prefix + editorValue
+			} else {
+				shell = true
+			}
 		}
-		cmds = append(cmds, m.openEditor(editorValue))
+		cmds = append(cmds, m.openEditor(editorValue, shell))
 	case dialog.ActionToggleThinking:
 		cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
 			cfg := m.com.Config()
@@ -2659,7 +2665,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				prevHeight := m.textarea.Height()
 				cmds = append(cmds, m.updateTextareaWithPrevHeight(msg, prevHeight))
 
-				// Bang mode: enter when the shell-mode key ("!") is typed
+				// Bang mode: enter when the shell-mode key is typed
 				// at the start of the prompt, optionally preceded by
 				// whitespace (either on an empty/whitespace-only prompt or
 				// prepended to existing text). Exit on backspace clearing
@@ -2667,15 +2673,16 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				newVal := m.textarea.Value()
 				trimmedNew := strings.TrimLeftFunc(newVal, unicode.IsSpace)
 				trimmedCur := strings.TrimLeftFunc(curValue, unicode.IsSpace)
-				if !m.bangMode && key.Matches(msg, m.keyMap.Editor.ShellMode) && strings.HasPrefix(trimmedNew, "!") && !strings.HasPrefix(trimmedCur, "!") {
+				stripped, typedShell := m.cutShellPrefix(trimmedNew)
+				_, hadShell := m.cutShellPrefix(trimmedCur)
+				if !m.bangMode && key.Matches(msg, m.keyMap.Editor.ShellMode) && typedShell && !hadShell {
 					m.bangMode = true
 					m.bangWasEmpty = len(strings.TrimSpace(curValue)) == 0
-					// Strip leading whitespace and the "!" from the textarea
-					// while preserving the cursor position relative to the
-					// command text.
+					// Strip leading whitespace and the shell prefix from the
+					// textarea while preserving the cursor position relative
+					// to the command text.
 					col := m.textarea.Column()
 					line := m.textarea.Line()
-					stripped := trimmedNew[1:]
 					m.textarea.SetValue(stripped)
 					m.textarea.SetCursorColumn(max(0, col-(len(newVal)-len(stripped))))
 					_ = line // cursor line doesn't change; prefix removed
@@ -2999,7 +3006,7 @@ func (m *UI) editorPalettesLive() bool {
 }
 
 func (m *UI) shellModeKeyLive() bool {
-	return m.focus == uiFocusEditor && m.editorTakesPrefixes() && m.textarea.Value() == ""
+	return m.focus == uiFocusEditor && m.editorTakesPrefixes() && m.textarea.Value() == "" && len(m.shellPrefixes()) > 0
 }
 
 // ShortHelp implements [help.KeyMap].
@@ -3540,7 +3547,7 @@ type uiLayout struct {
 	status uv.Rectangle
 }
 
-func (m *UI) openEditor(value string) tea.Cmd {
+func (m *UI) openEditor(value string, shell bool) tea.Cmd {
 	tmpfile, err := os.CreateTemp("", "msg_*.md")
 	if err != nil {
 		return util.ReportError(err)
@@ -3583,7 +3590,8 @@ func (m *UI) openEditor(value string) tea.Cmd {
 			return util.ReportWarn("Message is empty")
 		}
 		return openEditorMsg{
-			Text: strings.TrimSpace(string(content)),
+			Text:  strings.TrimSpace(string(content)),
+			Shell: shell,
 		}
 	})
 }
@@ -4188,12 +4196,8 @@ func (m *UI) quit() tea.Cmd {
 		return m.clearEditorDraft()
 	}
 
-	keyHint := "ctrl+c"
-	if keys := m.keyMap.Quit.Keys(); len(keys) > 0 {
-		keyHint = keys[0]
-	}
 	return tea.Batch(
-		util.ReportWarn("Press "+keyHint+" again to quit"),
+		util.ReportWarn("Press "+m.keyMap.Quit.Help().Key+" again to quit"),
 		m.armQuit(),
 	)
 }
@@ -4746,20 +4750,20 @@ func (m *UI) exportConversationToFile(sessionID string) tea.Cmd {
 }
 
 // checkBangModeAfterPaste engages bang mode when pasted text starts with
-// optional whitespace followed by "!". It strips the prefix and adjusts
-// the cursor, mirroring the keypress bang-mode entry logic.
+// optional whitespace followed by a shell prefix. It strips the prefix
+// and adjusts the cursor, mirroring the keypress bang-mode entry logic.
 func (m *UI) checkBangModeAfterPaste() {
 	if m.bangMode {
 		return
 	}
 	val := m.textarea.Value()
 	trimmed := strings.TrimLeftFunc(val, unicode.IsSpace)
-	if !strings.HasPrefix(trimmed, "!") {
+	stripped, ok := m.cutShellPrefix(trimmed)
+	if !ok {
 		return
 	}
 	m.bangMode = true
 	m.bangWasEmpty = true
-	stripped := trimmed[1:]
 	m.textarea.SetValue(stripped)
 	col := m.textarea.Column()
 	m.textarea.SetCursorColumn(max(0, col-(len(val)-len(stripped))))

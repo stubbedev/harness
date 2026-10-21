@@ -53,7 +53,7 @@ type Querier interface {
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListMessagesBySessionFrom(ctx context.Context, arg ListMessagesBySessionFromParams) ([]Message, error)
 	// The prompt-history entries of user messages, newest message first: each
-	// text part as written and each shell command prefixed with "!", read
+	// text part and each shell command as written with its part type, read
 	// straight from the stored parts so no binary attachment or context note
 	// is decoded. An empty session_id reads every session.
 	ListPromptHistory(ctx context.Context, sessionID interface{}) ([]ListPromptHistoryRow, error)

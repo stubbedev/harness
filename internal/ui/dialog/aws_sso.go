@@ -186,7 +186,7 @@ func (m *AWSSSO) innerDialogContent() string {
 			// one style would drop the text color after enterKeyStyle's
 			// reset code.
 			instructionText := instructionStyle.Render("Press ") +
-				enterKeyStyle.Render("enter") +
+				enterKeyStyle.Render(m.keyMap.Open.Help().Key) +
 				instructionStyle.Render(" to open the authorization page.")
 			instructions := lipgloss.NewStyle().
 				Width(innerWidth).

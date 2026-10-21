@@ -174,7 +174,7 @@ type Workspace interface {
 	ListUserMessages(ctx context.Context, sessionID string) ([]message.Message, error)
 	// PromptHistory returns the prompt-history entries of the session's
 	// user messages, newest first; an empty sessionID reads every session.
-	PromptHistory(ctx context.Context, sessionID string) ([]string, error)
+	PromptHistory(ctx context.Context, sessionID string) ([]message.PromptHistoryEntry, error)
 
 	// Checkpoints
 	// ListCheckpoints returns the per-turn working-tree snapshots

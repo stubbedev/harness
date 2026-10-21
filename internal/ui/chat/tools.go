@@ -918,7 +918,7 @@ func toolOutputPlainContent(sty *styles.Styles, content string, width int, expan
 	if !expanded && wasTruncated {
 		out = append(out, sty.Tool.ContentTruncation.
 			Width(width).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-responseContextHeight)))
+			Render(truncationHint(len(lines)-responseContextHeight)))
 	}
 
 	return strings.Join(out, "\n")
@@ -970,7 +970,7 @@ func toolOutputCodeContent(sty *styles.Styles, path, content string, offset, wid
 		out = append(
 			out, sty.Tool.ContentCodeTruncation.
 				Width(width).
-				Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines)),
+				Render(truncationHint(len(lines)-maxLines)),
 		)
 	}
 
@@ -1219,7 +1219,7 @@ func toolOutputDiffContent(sty *styles.Styles, file, oldContent, newContent stri
 	if len(lines) > maxLines && !expanded {
 		truncMsg := sty.Tool.DiffTruncation.
 			Width(width).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
+			Render(truncationHint(len(lines) - maxLines))
 		formatted = strings.Join(lines[:maxLines], "\n") + "\n" + truncMsg
 	}
 
@@ -1261,7 +1261,7 @@ func toolOutputEditDiffContent(sty *styles.Styles, file string, meta tools.EditR
 	if len(lines) > maxLines && !expanded {
 		truncMsg := sty.Tool.DiffTruncation.
 			Width(width).
-			Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines))
+			Render(truncationHint(len(lines) - maxLines))
 		formatted = truncMsg + "\n" + strings.Join(lines[:maxLines], "\n")
 	}
 
@@ -1307,7 +1307,7 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 		out = append(
 			out, sty.Tool.ContentTruncation.
 				Width(width).
-				Render(fmt.Sprintf(assistantMessageTruncateFormat, len(lines)-maxLines)),
+				Render(truncationHint(len(lines)-maxLines)),
 		)
 	}
 

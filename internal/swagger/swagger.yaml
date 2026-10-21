@@ -545,6 +545,13 @@ definitions:
     - StateError
     - StateStopped
     - StateDisabled
+  message.PromptHistoryEntry:
+    properties:
+      shell:
+        type: boolean
+      text:
+        type: string
+    type: object
   oauth.OAuthClient:
     properties:
       auth_style:
@@ -2951,7 +2958,7 @@ paths:
           description: OK
           schema:
             items:
-              type: string
+              $ref: '#/definitions/message.PromptHistoryEntry'
             type: array
         "404":
           description: Not Found
@@ -3372,7 +3379,7 @@ paths:
           description: OK
           schema:
             items:
-              type: string
+              $ref: '#/definitions/message.PromptHistoryEntry'
             type: array
         "404":
           description: Not Found

@@ -81,7 +81,7 @@ RETURNING *;
 
 -- name: ListPromptHistory :many
 -- The prompt-history entries of user messages, newest message first: each
--- text part as written and each shell command prefixed with "!", read
+-- text part and each shell command as written with its part type, read
 -- straight from the stored parts so no binary attachment or context note
 -- is decoded. An empty session_id reads every session.
 SELECT

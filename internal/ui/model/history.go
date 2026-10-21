@@ -3,9 +3,9 @@ package model
 import (
 	"context"
 	"log/slog"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/stubbedev/harness/internal/message"
 )
 
 // promptHistoryLoadedMsg is sent when prompt history is loaded.
@@ -13,7 +13,7 @@ type promptHistoryLoadedMsg struct {
 	// forSession is the session the load was scoped to ("" for all
 	// sessions); a result that raced a session switch is discarded.
 	forSession string
-	messages   []string
+	messages   []message.PromptHistoryEntry
 }
 
 // loadPromptHistory loads user messages for history navigation.
@@ -79,9 +79,7 @@ func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 	// Return to current draft when browsing history.
 	if m.promptHistory.pos > 0 {
 		m.promptHistory.pos = 0
-		m.textarea.Reset()
-		m.textarea.InsertString(m.promptHistory.draft)
-		m.syncBangModeFromTextarea()
+		m.showPromptEntry(m.promptHistory.draft)
 		return m.updateTextareaWithPrevHeight(nil, prevHeight)
 	}
 
@@ -92,30 +90,19 @@ func (m *UI) handleHistoryEscape(msg tea.Msg) tea.Cmd {
 // updateHistoryDraft updates history state when text is modified.
 func (m *UI) updateHistoryDraft(oldValue string) {
 	if m.textarea.Value() != oldValue {
-		m.promptHistory.draft = m.textarea.Value()
+		m.promptHistory.draft = m.currentPromptEntry()
 		m.promptHistory.pos = 0
 	}
 }
 
-// syncBangModeFromTextarea engages or disengages bang mode based on
-// whether the current textarea value starts with "!". The "!" prefix
-// is stripped when entering bang mode and re-added when leaving it so
-// the visible text always reflects the correct state.
-func (m *UI) syncBangModeFromTextarea() {
-	val := m.textarea.Value()
-	hasBang := strings.HasPrefix(val, "!")
-	if hasBang {
-		if !m.bangMode {
-			m.bangMode = true
-			m.bangWasEmpty = false
-		}
-		m.textarea.SetValue(strings.TrimPrefix(val, "!"))
-		m.textarea.MoveToBegin()
-	} else if m.bangMode {
-		m.bangMode = false
-		m.bangWasEmpty = false
-	}
-	m.setEditorPrompt()
+func (m *UI) currentPromptEntry() message.PromptHistoryEntry {
+	return message.PromptHistoryEntry{Text: m.textarea.Value(), Shell: m.bangMode}
+}
+
+func (m *UI) showPromptEntry(entry message.PromptHistoryEntry) {
+	m.textarea.Reset()
+	m.textarea.InsertString(entry.Text)
+	m.setShellMode(entry.Shell)
 }
 
 // historyPrev changes the text area content to the previous message in the history
@@ -126,13 +113,11 @@ func (m *UI) historyPrev() bool {
 		return false
 	}
 	if h.pos == 0 {
-		h.draft = m.textarea.Value()
+		h.draft = m.currentPromptEntry()
 	}
 	h.pos++
-	m.textarea.Reset()
-	m.textarea.InsertString(h.messages[h.pos-1])
+	m.showPromptEntry(h.messages[h.pos-1])
 	m.textarea.MoveToBegin()
-	m.syncBangModeFromTextarea()
 	return true
 }
 
@@ -144,13 +129,11 @@ func (m *UI) historyNext() bool {
 		return false
 	}
 	h.pos--
-	m.textarea.Reset()
 	if h.pos == 0 {
-		m.textarea.InsertString(h.draft)
+		m.showPromptEntry(h.draft)
 	} else {
-		m.textarea.InsertString(h.messages[h.pos-1])
+		m.showPromptEntry(h.messages[h.pos-1])
 	}
-	m.syncBangModeFromTextarea()
 	return true
 }
 
@@ -158,7 +141,7 @@ func (m *UI) historyNext() bool {
 // it just sets the current draft to empty and the position in the history.
 func (m *UI) historyReset() {
 	m.promptHistory.pos = 0
-	m.promptHistory.draft = ""
+	m.promptHistory.draft = message.PromptHistoryEntry{}
 }
 
 // clearEditorDraft empties the input together with the state riding it
@@ -167,7 +150,7 @@ func (m *UI) clearEditorDraft() tea.Cmd {
 	prevHeight := m.textarea.Height()
 	m.textarea.Reset()
 	m.historyReset()
-	m.syncBangModeFromTextarea()
+	m.setShellMode(false)
 	return m.handleTextareaHeightChange(prevHeight)
 }
 

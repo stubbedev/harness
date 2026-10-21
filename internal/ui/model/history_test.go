@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
@@ -25,7 +26,7 @@ func TestHistoryBangCommandStripsPrefixWhileAlreadyInBangMode(t *testing.T) {
 
 	u := newTestUI()
 	u.com.Workspace = historyWorkspace{}
-	u.promptHistory.messages = []string{"!echo one", "!echo two"}
+	u.promptHistory.messages = []message.PromptHistoryEntry{{Text: "echo one", Shell: true}, {Text: "echo two", Shell: true}}
 	u.promptHistory.pos = 0
 
 	require.True(t, u.historyPrev())

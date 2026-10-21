@@ -61,8 +61,12 @@ func (p *commandPicker) close() {
 // the editor: the single-character keys of the editor.commands binding,
 // so a rebind moves them.
 func (m *UI) invocationPrefixes() []string {
+	return prefixKeys(m.keyMap.Editor.Commands)
+}
+
+func prefixKeys(b key.Binding) []string {
 	var prefixes []string
-	for _, k := range m.keyMap.Editor.Commands.Keys() {
+	for _, k := range b.Keys() {
 		if utf8.RuneCountInString(k) == 1 {
 			prefixes = append(prefixes, k)
 		}

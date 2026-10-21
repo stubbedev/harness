@@ -285,7 +285,7 @@ func (m *MCPAuth) innerContent() string {
 	switch m.state {
 	case MCPAuthStatePrompt:
 		instructions := instructionStyle.Render("Press ") +
-			enterStyle.Render("enter") +
+			enterStyle.Render(m.keyMap.Submit.Help().Key) +
 			instructionStyle.Render(" to open your browser.") +
 			statusStyle.Render(progress)
 		return lipgloss.JoinVertical(

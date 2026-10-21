@@ -491,7 +491,7 @@ func (c *controllerV1) handleGetWorkspaceSessionUserMessages(w http.ResponseWrit
 //	@Tags			workspaces
 //	@Produce		json
 //	@Param			id	path		string			true	"Workspace ID"
-//	@Success		200	{array}		string
+//	@Success		200	{array}		message.PromptHistoryEntry
 //	@Failure		404	{object}	proto.Error
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/prompt-history [get]

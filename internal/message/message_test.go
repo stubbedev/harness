@@ -869,7 +869,7 @@ func TestMessageCountCountsVisibleMessagesOnly(t *testing.T) {
 }
 
 // TestPromptHistoryReadsOnlyPromptText pins the history query: prompt
-// text and "!"-prefixed shell commands, newest first, scoped to a session
+// text and shell commands marked as such, newest first, scoped to a session
 // or across all of them, and nothing from other roles or part types.
 func TestPromptHistoryReadsOnlyPromptText(t *testing.T) {
 	t.Parallel()
@@ -896,9 +896,9 @@ func TestPromptHistoryReadsOnlyPromptText(t *testing.T) {
 
 	got, err := svc.PromptHistory(t.Context(), one.ID)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"!ls", "first"}, got)
+	require.ElementsMatch(t, []PromptHistoryEntry{{Text: "ls", Shell: true}, {Text: "first"}}, got)
 
 	all, err := svc.PromptHistory(t.Context(), "")
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"!ls", "first", "elsewhere"}, all)
+	require.ElementsMatch(t, []PromptHistoryEntry{{Text: "ls", Shell: true}, {Text: "first"}, {Text: "elsewhere"}}, all)
 }

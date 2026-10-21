@@ -2605,7 +2605,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "type": "string"
+                                "$ref": "#/definitions/message.PromptHistoryEntry"
                             }
                         }
                     },
@@ -3244,7 +3244,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "type": "string"
+                                "$ref": "#/definitions/message.PromptHistoryEntry"
                             }
                         }
                     },
@@ -4106,6 +4106,17 @@ const docTemplate = `{
                 "StateStopped",
                 "StateDisabled"
             ]
+        },
+        "message.PromptHistoryEntry": {
+            "type": "object",
+            "properties": {
+                "shell": {
+                    "type": "boolean"
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
         },
         "oauth.OAuthClient": {
             "type": "object",
