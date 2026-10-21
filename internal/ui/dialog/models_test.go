@@ -37,6 +37,8 @@ type stubWorkspace struct {
 
 func (w *stubWorkspace) Config() *config.Config { return w.cfg }
 
+func (w *stubWorkspace) Resolver() config.VariableResolver { return config.IdentityResolver() }
+
 func newModelsDialogForTest(t *testing.T, cfg *config.Config, providers []catalog.Provider) *Models {
 	t.Helper()
 
@@ -97,7 +99,7 @@ func TestModelsDialogHidesUnconfiguredProviders(t *testing.T) {
 
 // TestModelsDialogWithoutConfiguredProvidersIsEmpty pins that the dialog no
 // longer falls back to the catalog when nothing is connected: connecting a
-// provider is the connect dialog's job, and an unconnected entry here would
+// provider is the providers dialog's job, and an unconnected entry here would
 // only dead-end.
 func TestModelsDialogWithoutConfiguredProvidersIsEmpty(t *testing.T) {
 	t.Parallel()

@@ -87,6 +87,26 @@ func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, prov
 	})
 }
 
+func (b *Backend) ProviderSettings(workspaceID string, providerID catalog.InferenceProvider) (config.ProviderConfig, bool, error) {
+	ws, err := b.GetWorkspace(workspaceID)
+	if err != nil {
+		return config.ProviderConfig{}, false, err
+	}
+	return ws.Ops().ProviderSettings(providerID)
+}
+
+func (b *Backend) UpdateProvider(ctx context.Context, workspaceID string, scope config.Scope, providerID catalog.InferenceProvider, update config.ProviderUpdate) error {
+	return b.mutateConfig(workspaceID, func(ops *workspace.AppWorkspace) error {
+		return ops.UpdateProvider(ctx, scope, providerID, update)
+	})
+}
+
+func (b *Backend) RemoveProvider(ctx context.Context, workspaceID string, scope config.Scope, providerID catalog.InferenceProvider) error {
+	return b.mutateConfig(workspaceID, func(ops *workspace.AppWorkspace) error {
+		return ops.RemoveProvider(ctx, scope, providerID)
+	})
+}
+
 // RefreshOAuthToken refreshes the OAuth token for a provider.
 func (b *Backend) RefreshOAuthToken(ctx context.Context, workspaceID string, scope config.Scope, providerID catalog.InferenceProvider) error {
 	return b.mutateConfig(workspaceID, func(ops *workspace.AppWorkspace) error {

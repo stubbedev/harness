@@ -44,8 +44,6 @@ type OAuth struct {
 	com *common.Common
 
 	provider      catalog.Provider
-	model         config.SelectedModel
-	modelType     config.SelectedModelType
 	oAuthProvider OAuthProvider
 
 	State OAuthState
@@ -73,8 +71,6 @@ var _ Dialog = (*OAuth)(nil)
 func newOAuth(
 	com *common.Common,
 	provider catalog.Provider,
-	model config.SelectedModel,
-	modelType config.SelectedModelType,
 	oAuthProvider OAuthProvider,
 ) (*OAuth, tea.Cmd) {
 	t := com.Styles
@@ -82,8 +78,6 @@ func newOAuth(
 	m := OAuth{}
 	m.com = com
 	m.provider = provider
-	m.model = model
-	m.modelType = modelType
 	m.oAuthProvider = oAuthProvider
 	m.width = 0 // Set dynamically in Draw().
 	m.State = OAuthStateInitializing
@@ -134,7 +128,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, m.keyMap.Submit):
 			switch m.State {
 			case OAuthStateSuccess:
-				return m.confirmAndSelectModel()
+				return m.confirm()
 
 			case OAuthStateSaving:
 				// Save in progress; ignore submits until it finishes.
@@ -148,7 +142,7 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, m.keyMap.Close):
 			switch m.State {
 			case OAuthStateSuccess:
-				return m.confirmAndSelectModel()
+				return m.confirm()
 
 			case OAuthStateSaving:
 				// Save in progress; ignore submits until it finishes.
@@ -189,9 +183,6 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		return ActionCmd{cmd}
 
 	case oauthSaveDoneMsg:
-		// Credential saved and models fetched. Present the confirmation
-		// screen; the actual model selection happens when the user
-		// acknowledges it (fast, since the work is already done).
 		m.State = OAuthStateSuccess
 		return nil
 
@@ -204,9 +195,6 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
-// oauthSaveDoneMsg is emitted by the background save command once the
-// credential has been persisted and models fetched. The model-selection
-// details are read from the dialog's own fields when the user confirms.
 type oauthSaveDoneMsg struct{}
 
 // oauthSaveErrMsg is emitted by the background save command when persisting
@@ -431,13 +419,6 @@ func (m *OAuth) saveCredential() tea.Cmd {
 	}
 }
 
-// confirmAndSelectModel is invoked when the user acknowledges the success
-// screen. The credential is already saved, so this only resumes model
-// selection, which closes the dialog.
-func (m *OAuth) confirmAndSelectModel() Action {
-	return ActionSelectModel{
-		Provider:  m.provider,
-		Model:     m.model,
-		ModelType: m.modelType,
-	}
+func (m *OAuth) confirm() Action {
+	return ActionProviderConfigured{ProviderID: m.provider.ID}
 }

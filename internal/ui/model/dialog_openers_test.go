@@ -89,7 +89,7 @@ var dialogIDNames = []struct {
 	{"ModelsID", dialog.ModelsID},
 	{"CommandsID", dialog.CommandsID},
 	{"ReasoningID", dialog.ReasoningID},
-	{"ConnectID", dialog.ConnectID},
+	{"ProvidersID", dialog.ProvidersID},
 	{"ThemesID", dialog.ThemesID},
 	{"RewindID", dialog.RewindID},
 	{"NotificationsID", dialog.NotificationsID},

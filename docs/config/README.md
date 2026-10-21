@@ -139,8 +139,22 @@ providers:
 | `extra_headers`        | Extra HTTP headers (map)                                       |
 | `extra_body`           | Object merged into request bodies (**not** expanded)           |
 | `provider_options`     | Provider-specific object merged into requests                  |
+| `api_version`          | Azure OpenAI API version (defaults to `$AZURE_OPENAI_API_VERSION`) |
+| `project`              | Vertex AI project (defaults to `$VERTEXAI_PROJECT`)            |
+| `location`             | Vertex AI location (defaults to `$VERTEXAI_LOCATION`)          |
+| `region`               | Bedrock AWS region (defaults to the AWS SDK's resolution)      |
+| `profile`              | Bedrock AWS shared-config profile (defaults to `$AWS_PROFILE`) |
 | `aws_auth_refresh`     | Command that refreshes AWS credentials                         |
 | `models`               | Custom models offered by this provider                         |
+
+`/configure_provider` in the TUI (also reachable as `/connect_provider`,
+`/connect`, `/provider`, `/auth` and `/login`, or `ctrl+e` on a model in the
+models dialog) lists every provider, sets up a new one, edits a configured
+one and disconnects it. The form writes only the fields you change to the
+global `state.yaml`, tests the connection before saving, never touches the
+selected models, and shows secrets masked to their last four characters;
+values that are `$VAR` or `$(command)` references are shown and written as
+typed.
 
 ### Custom models
 
@@ -484,6 +498,11 @@ rewind picker. `editor.escape` only leaves prompt-history browsing.
 | `dialog.oauth.copy` | `c` |
 | `dialog.oauth.copy_url` | `u` |
 | `dialog.previous` | `up`, `ctrl+p` |
+| `dialog.providers.cancel_remove` | `n`, `esc` |
+| `dialog.providers.confirm_remove` | `y`, `enter` |
+| `dialog.providers.remove` | `ctrl+x` |
+| `dialog.providers.save` | `ctrl+s` |
+| `dialog.providers.test` | `ctrl+t` |
 | `dialog.question.confirm` | `enter` |
 | `dialog.question.down` | `down`, `j` |
 | `dialog.question.left` | `left` |
@@ -568,6 +587,7 @@ Selected string fields are expanded through Harness's embedded POSIX shell
 | Surface                                                         | Expansion                          |
 | --------------------------------------------------------------- | ---------------------------------- |
 | Provider `api_key`, `base_url`, `api_endpoint`, `extra_headers` | yes                                |
+| Provider `api_version`, `project`, `location`, `region`, `profile` | yes                             |
 | Provider `extra_body`                                           | **no** (passed through verbatim)   |
 | MCP `command`, `args`, `env`, `headers`, `url`                  | yes                                |
 | MCP `oauth_client_id`, `oauth_client_secret`                    | yes                                |

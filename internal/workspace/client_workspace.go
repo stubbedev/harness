@@ -477,6 +477,26 @@ func (w *ClientWorkspace) RemoveConfigField(scope config.Scope, key string) erro
 	return err
 }
 
+func (w *ClientWorkspace) ProviderSettings(providerID catalog.InferenceProvider) (config.ProviderConfig, bool, error) {
+	return w.client.ProviderSettings(context.Background(), w.workspaceID(), providerID)
+}
+
+func (w *ClientWorkspace) UpdateProvider(ctx context.Context, scope config.Scope, providerID catalog.InferenceProvider, update config.ProviderUpdate) error {
+	err := w.client.UpdateProvider(ctx, w.workspaceID(), scope, providerID, update)
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
+}
+
+func (w *ClientWorkspace) RemoveProvider(ctx context.Context, scope config.Scope, providerID catalog.InferenceProvider) error {
+	err := w.client.RemoveProvider(ctx, w.workspaceID(), scope, providerID)
+	if err == nil {
+		w.refreshWorkspace()
+	}
+	return err
+}
+
 func (w *ClientWorkspace) ImportCopilot() (*oauth.Token, bool) {
 	token, ok, err := w.client.ImportCopilot(context.Background(), w.workspaceID())
 	if err != nil {

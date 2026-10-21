@@ -433,6 +433,7 @@ type UI struct {
 	// started with; the queued action is re-dispatched when the turn
 	// finishes, so the choice applies at the next turn.
 	pendingModelAction tea.Msg
+	rejectedProviders  map[catalog.InferenceProvider]bool
 	// queuedPromptItem is the single transcript placeholder for prompts
 	// queued behind the running turn (see queued_prompts.go), joining
 	// every queued prompt into one entry. It is UI-local: nothing
@@ -912,7 +913,13 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modelSelectedMsg:
 		cmds = append(cmds, m.applyModelSelected(msg))
 	case copilotImportedMsg:
-		cmds = append(cmds, m.selectModel(msg.action, false))
+		cmds = append(cmds, m.applyCopilotImported(msg))
+	case providerTargetLoadedMsg:
+		cmds = append(cmds, m.applyProviderTargetLoaded(msg))
+	case providerSavedMsg:
+		cmds = append(cmds, m.applyProviderSaved(msg))
+	case providerRemovedMsg:
+		cmds = append(cmds, m.applyProviderRemoved(msg))
 	case reasoningEffortSavedMsg:
 		cmds = append(cmds, m.applyReasoningEffortSaved(msg))
 	case sessionModelRestoredMsg:
@@ -2182,6 +2189,15 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 		if cmd := m.handleSelectReasoningEffort(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case dialog.ActionConfigureProvider:
+		m.dialog.CloseDialog(dialog.ModelsID)
+		cmds = append(cmds, m.configureProvider(msg.ProviderID))
+	case dialog.ActionSaveProvider:
+		cmds = append(cmds, m.saveProvider(msg))
+	case dialog.ActionRemoveProvider:
+		cmds = append(cmds, m.removeProvider(msg.ProviderID))
+	case dialog.ActionProviderConfigured:
+		cmds = append(cmds, m.providerConfigured(msg.ProviderID))
 	case dialog.ActionPreviewTheme:
 		m.previewTheme(msg.Name)
 		if msg.Cmd != nil {
@@ -2241,27 +2257,6 @@ func (m *UI) applyPendingModelAction() tea.Cmd {
 		return m.handleSelectReasoningEffort(action)
 	}
 	return nil
-}
-
-func (m *UI) openAuthenticationDialog(provider catalog.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {
-	var (
-		dlg dialog.Dialog
-		cmd tea.Cmd
-	)
-
-	switch provider.ID {
-	case catalog.InferenceProviderCopilot:
-		dlg, cmd = dialog.NewOAuthCopilot(m.com, provider, model, modelType)
-	default:
-		dlg, cmd = dialog.NewAPIKeyInput(m.com, provider, model, modelType)
-	}
-
-	if m.dialog.FocusIfOpen(dlg.ID()) {
-		return nil
-	}
-
-	m.dialog.OpenDialogWithGrace(dlg)
-	return cmd
 }
 
 func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
@@ -4173,7 +4168,7 @@ var dialogOpeners = map[dialog.ID]func(*UI) tea.Cmd{
 	dialog.ModelsID:        (*UI).openModelsDialog,
 	dialog.CommandsID:      (*UI).openCommandsDialog,
 	dialog.ReasoningID:     (*UI).openReasoningDialog,
-	dialog.ConnectID:       (*UI).openConnectDialog,
+	dialog.ProvidersID:     (*UI).openProvidersDialog,
 	dialog.ThemesID:        (*UI).openThemesDialog,
 	dialog.RewindID:        (*UI).openRewindDialog,
 	dialog.NotificationsID: (*UI).openNotificationsDialog,
@@ -4226,24 +4221,6 @@ func (m *UI) openModelsDialog() tea.Cmd {
 
 	m.dialog.OpenDialog(modelsDialog)
 
-	return nil
-}
-
-// openConnectDialog opens the provider connection dialog. An open models
-// dialog gives way to it: the two are the same list seen from either side
-// of having credentials.
-func (m *UI) openConnectDialog() tea.Cmd {
-	if m.dialog.FocusIfOpen(dialog.ConnectID) {
-		return nil
-	}
-
-	connectDialog, err := dialog.NewConnect(m.com)
-	if err != nil {
-		return util.ReportError(err)
-	}
-
-	m.dialog.CloseDialog(dialog.ModelsID)
-	m.dialog.OpenDialog(connectDialog)
 	return nil
 }
 
@@ -4455,22 +4432,6 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	return tea.Batch(cmds...)
-}
-
-func (m *UI) handleReAuthenticate(providerID catalog.InferenceProvider) tea.Cmd {
-	cfg := m.com.Config()
-	if cfg == nil {
-		return nil
-	}
-	providerCfg, ok := cfg.Providers.Get(providerID)
-	if !ok {
-		return nil
-	}
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
-	if !ok {
-		return nil
-	}
-	return m.openAuthenticationDialog(providerCfg.ToProvider(), cfg.Models[agentCfg.Model], agentCfg.Model)
 }
 
 // handleAWSSSOAuth opens the AWS SSO progress dialog (or updates the SSO URL

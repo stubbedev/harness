@@ -87,6 +87,26 @@ type ConfigRefreshOAuthRequest struct {
 	ProviderID catalog.InferenceProvider `json:"provider_id"`
 }
 
+type ConfigProviderRequest struct {
+	ProviderID catalog.InferenceProvider `json:"provider_id"`
+}
+
+type ConfigProviderSettingsResponse struct {
+	Settings   config.ProviderConfig `json:"settings"`
+	Configured bool                  `json:"configured"`
+}
+
+type ConfigProviderUpdateRequest struct {
+	Scope      config.Scope              `json:"scope"`
+	ProviderID catalog.InferenceProvider `json:"provider_id"`
+	Update     config.ProviderUpdate     `json:"update"`
+}
+
+type ConfigProviderRemoveRequest struct {
+	Scope      config.Scope              `json:"scope"`
+	ProviderID catalog.InferenceProvider `json:"provider_id"`
+}
+
 // ImportCopilotResponse represents the response from importing Copilot credentials.
 type ImportCopilotResponse struct {
 	Token   *oauth.Token `json:"token"`

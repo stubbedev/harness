@@ -396,16 +396,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		switch p.ID {
 		// Handle specific providers that require additional configuration
 		case catalog.InferenceProviderVertexAI:
-			var (
-				project  = env.Get("VERTEXAI_PROJECT")
-				location = env.Get("VERTEXAI_LOCATION")
-			)
-			if project == "" || location == "" {
-				skip("Skipping Vertex AI provider due to missing credentials")
+			params, err := prepared.resolveParamsFor(catalog.TypeVertexAI, resolver)
+			if err != nil {
+				skip("Skipping Vertex AI provider due to missing credentials", "error", err)
 				continue
 			}
-			prepared.ExtraParams["project"] = project
-			prepared.ExtraParams["location"] = location
+			maps.Copy(prepared.ExtraParams, params)
 		case catalog.InferenceProviderAzure:
 			endpoint, err := resolver.ResolveValue(p.APIEndpoint)
 			if err != nil || endpoint == "" {
@@ -413,19 +409,31 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				continue
 			}
 			prepared.BaseURL = endpoint
-			prepared.ExtraParams["apiVersion"] = env.Get("AZURE_OPENAI_API_VERSION")
+			params, err := prepared.resolveParamsFor(catalog.TypeAzure, resolver)
+			if err != nil {
+				skip("Skipping Azure provider due to an unresolvable setting", "error", err)
+				continue
+			}
+			maps.Copy(prepared.ExtraParams, params)
 		case catalog.InferenceProviderBedrock:
 			// The catalog carries "$AWS_ACCESS_KEY_ID" as the key, so the
 			// template is never empty: resolve it before deciding, or
 			// Bedrock configures itself on every machine, credentials or
 			// not, and then shows up as a connected provider.
-			if (prepared.ResolvedAPIKey == "" || prepared.APIKeyResolutionError != nil) && !hasAWSCredentials(env) {
+			params, err := prepared.resolveParamsFor(catalog.TypeBedrock, resolver)
+			if err != nil {
+				skip("Skipping Bedrock provider due to an unresolvable setting", "error", err)
+				continue
+			}
+			awsCredentials := hasAWSCredentials(env) || params[ProviderParamProfile] != "" || params[ProviderParamRegion] != ""
+			if (prepared.ResolvedAPIKey == "" || prepared.APIKeyResolutionError != nil) && !awsCredentials {
 				skip("Skipping Bedrock provider due to missing AWS credentials")
 				continue
 			}
-			if hasAWSCredentials(env) {
+			if awsCredentials {
 				prepared.APIKeyResolutionError = nil
 			}
+			maps.Copy(prepared.ExtraParams, params)
 		default:
 			// OAuth providers authenticate with their token, not the API key template.
 			if prepared.OAuthToken == nil && (prepared.ResolvedAPIKey == "" || prepared.APIKeyResolutionError != nil) {

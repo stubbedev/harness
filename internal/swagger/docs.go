@@ -1100,6 +1100,168 @@ const docTemplate = `{
                 }
             }
         },
+        "/workspaces/{id}/config/provider/remove": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Remove provider settings",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Provider remove request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.ConfigProviderRemoveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/config/provider/settings": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Get provider settings",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Provider request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.ConfigProviderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/proto.ConfigProviderSettingsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
+        "/workspaces/{id}/config/provider/update": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Update provider settings",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Provider update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/proto.ConfigProviderUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/proto.Error"
+                        }
+                    }
+                }
+            }
+        },
         "/workspaces/{id}/config/refresh-oauth": {
             "post": {
                 "consumes": [
@@ -3390,6 +3552,93 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "catalog.InferenceProvider": {
+            "type": "string",
+            "enum": [
+                "openai",
+                "anthropic",
+                "google",
+                "azure",
+                "amazon-bedrock",
+                "google-vertex",
+                "xai",
+                "zai",
+                "zai-coding-plan",
+                "zhipuai",
+                "zhipuai-coding-plan",
+                "groq",
+                "openrouter",
+                "cerebras",
+                "deepseek",
+                "deepinfra",
+                "venice",
+                "chutes",
+                "huggingface",
+                "mistral",
+                "cohere",
+                "perplexity",
+                "togetherai",
+                "aihubmix",
+                "kimi-for-coding",
+                "github-copilot",
+                "cortecs",
+                "vercel",
+                "minimax",
+                "minimax-cn",
+                "io-net",
+                "qiniu-ai",
+                "nebius",
+                "neuralwatt",
+                "opencode",
+                "opencode-go",
+                "alibaba",
+                "fireworks-ai",
+                "baseten",
+                "moonshotai"
+            ],
+            "x-enum-varnames": [
+                "InferenceProviderOpenAI",
+                "InferenceProviderAnthropic",
+                "InferenceProviderGemini",
+                "InferenceProviderAzure",
+                "InferenceProviderBedrock",
+                "InferenceProviderVertexAI",
+                "InferenceProviderXAI",
+                "InferenceProviderZAI",
+                "InferenceProviderZAICoding",
+                "InferenceProviderZhipu",
+                "InferenceProviderZhipuCoding",
+                "InferenceProviderGROQ",
+                "InferenceProviderOpenRouter",
+                "InferenceProviderCerebras",
+                "InferenceProviderDeepSeek",
+                "InferenceProviderDeepInfra",
+                "InferenceProviderVenice",
+                "InferenceProviderChutes",
+                "InferenceProviderHuggingFace",
+                "InferenceProviderMistral",
+                "InferenceProviderCohere",
+                "InferenceProviderPerplexity",
+                "InferenceProviderTogetherAI",
+                "InferenceAIHubMix",
+                "InferenceKimiCoding",
+                "InferenceProviderCopilot",
+                "InferenceProviderCortecs",
+                "InferenceProviderVercel",
+                "InferenceProviderMiniMax",
+                "InferenceProviderMiniMaxChina",
+                "InferenceProviderIoNet",
+                "InferenceProviderQiniuCloud",
+                "InferenceProviderNebius",
+                "InferenceProviderNeuralwatt",
+                "InferenceProviderOpenCodeZen",
+                "InferenceProviderOpenCodeGo",
+                "InferenceProviderAlibabaSingapore",
+                "InferenceProviderFireworks",
+                "InferenceProviderBaseten",
+                "InferenceProviderMoonshot"
+            ]
+        },
         "catalog.Model": {
             "type": "object",
             "properties": {
@@ -3460,6 +3709,44 @@ const docTemplate = `{
                     "type": "number"
                 }
             }
+        },
+        "catalog.Type": {
+            "type": "string",
+            "enum": [
+                "openai",
+                "openai-compat",
+                "openrouter",
+                "vercel",
+                "anthropic",
+                "google",
+                "azure",
+                "bedrock",
+                "google-vertex"
+            ],
+            "x-enum-varnames": [
+                "TypeOpenAI",
+                "TypeOpenAICompat",
+                "TypeOpenRouter",
+                "TypeVercel",
+                "TypeAnthropic",
+                "TypeGoogle",
+                "TypeAzure",
+                "TypeBedrock",
+                "TypeVertexAI"
+            ]
+        },
+        "checkpoints.Mode": {
+            "type": "string",
+            "enum": [
+                "conversation",
+                "files",
+                "both"
+            ],
+            "x-enum-varnames": [
+                "ModeConversation",
+                "ModeFiles",
+                "ModeBoth"
+            ]
         },
         "config.Completions": {
             "type": "object",
@@ -3676,6 +3963,155 @@ const docTemplate = `{
                 }
             }
         },
+        "config.ProviderConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "The configured API key template.",
+                    "type": "string"
+                },
+                "api_version": {
+                    "type": "string"
+                },
+                "aws_auth_refresh": {
+                    "description": "AWSAuthRefresh is a shell command run when Bedrock returns a\ncredential error. Output is discarded to avoid corrupting the TUI.",
+                    "type": "string"
+                },
+                "base_url": {
+                    "description": "The provider's API endpoint.",
+                    "type": "string"
+                },
+                "disable": {
+                    "description": "Marks the provider as disabled.",
+                    "type": "boolean"
+                },
+                "disable_http2": {
+                    "description": "DisableHTTP2 forces HTTP/1.1 for this provider. Needed for gateways\nthat are broken only on their HTTP/2 path -- ai.eu.corti.app answers\n413 to any body over ~64KB over HTTP/2 while serving the same body\nfine over HTTP/1.1, which makes it reject every Harness turn.",
+                    "type": "boolean"
+                },
+                "discover_models": {
+                    "description": "AutoDiscoverModels controls model discovery via /v1/models endpoint.\nWhen Models is empty and this is nil or true, Harness auto-discovers\nmodels. When true and Models is non-empty, discovered models are\nmerged in (user-specified models take precedence). When false,\nonly explicitly listed models are used.",
+                    "type": "boolean"
+                },
+                "extra_body": {
+                    "description": "ExtraBody is merged verbatim into OpenAI-compatible request\nbodies. String values are NOT shell-expanded: this is a plain\nJSON passthrough so that arbitrary provider-extension fields\n(numbers, nested objects, booleans) round-trip without a\nrecursive walker guessing at intent. If you need an env-var-\ndriven value at request time, put it in extra_headers, or in\nthe provider's top-level api_key / base_url, all of which do\nexpand.",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "extra_headers": {
+                    "description": "Extra headers to send with each request to the provider. Values\nrun through shell expansion at config-load time, so $VAR and\n$(cmd) work the same way they do in MCP headers. A header whose\nvalue resolves to the empty string (unset bare $VAR under\nlenient nounset, $(echo), or literal \"\") is omitted from the\noutgoing request rather than sent as \"Header:\".",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "flat_rate": {
+                    "description": "Skip cost accumulation for this provider when using subscription or flat rate billing.",
+                    "type": "boolean"
+                },
+                "id": {
+                    "description": "The provider's id.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/catalog.InferenceProvider"
+                        }
+                    ]
+                },
+                "location": {
+                    "type": "string"
+                },
+                "models": {
+                    "description": "The provider models",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/catalog.Model"
+                    }
+                },
+                "name": {
+                    "description": "The provider's name, used for display purposes.",
+                    "type": "string"
+                },
+                "oauth": {
+                    "description": "OAuthToken for providers that use OAuth2 authentication.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/oauth.Token"
+                        }
+                    ]
+                },
+                "profile": {
+                    "type": "string"
+                },
+                "project": {
+                    "type": "string"
+                },
+                "provider_options": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "region": {
+                    "type": "string"
+                },
+                "system_prompt_prefix": {
+                    "description": "Custom system prompt prefix.",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "The provider type, e.g. \"openai\", \"anthropic\", etc. if empty it defaults to openai.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/catalog.Type"
+                        }
+                    ]
+                }
+            }
+        },
+        "config.ProviderField": {
+            "type": "string",
+            "enum": [
+                "name",
+                "type",
+                "base_url",
+                "api_key",
+                "extra_headers",
+                "api_version",
+                "project",
+                "location",
+                "region",
+                "profile",
+                "models",
+                "discover_models"
+            ],
+            "x-enum-varnames": [
+                "ProviderFieldName",
+                "ProviderFieldType",
+                "ProviderFieldBaseURL",
+                "ProviderFieldAPIKey",
+                "ProviderFieldExtraHeaders",
+                "ProviderFieldAPIVersion",
+                "ProviderFieldProject",
+                "ProviderFieldLocation",
+                "ProviderFieldRegion",
+                "ProviderFieldProfile",
+                "ProviderFieldModels",
+                "ProviderFieldDiscover"
+            ]
+        },
+        "config.ProviderUpdate": {
+            "type": "object",
+            "properties": {
+                "set": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "unset": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/config.ProviderField"
+                    }
+                }
+            }
+        },
         "config.SelectedModel": {
             "type": "object",
             "properties": {
@@ -3695,7 +4131,11 @@ const docTemplate = `{
                 },
                 "provider": {
                     "description": "The model provider, same as the key/id used in the providers config.\nRequired.",
-                    "type": "string"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/catalog.InferenceProvider"
+                        }
+                    ]
                 },
                 "provider_options": {
                     "description": "Override provider specific options.",
@@ -3780,7 +4220,7 @@ const docTemplate = `{
                 }
             }
         },
-        "csync.Map-string-config_ProviderConfig": {
+        "csync.Map-catalog_InferenceProvider-config_ProviderConfig": {
             "type": "object"
         },
         "github_com_stubbedev_harness_internal_config.Config": {
@@ -3837,7 +4277,7 @@ const docTemplate = `{
                     "description": "The providers that are configured",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/csync.Map-string-config_ProviderConfig"
+                            "$ref": "#/definitions/csync.Map-catalog_InferenceProvider-config_ProviderConfig"
                         }
                     ]
                 },
@@ -4034,7 +4474,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
-                    "type": "string"
+                    "$ref": "#/definitions/catalog.InferenceProvider"
                 },
                 "role": {
                     "$ref": "#/definitions/proto.MessageRole"
@@ -4293,10 +4733,54 @@ const docTemplate = `{
                     "$ref": "#/definitions/proto.APIKeyKind"
                 },
                 "provider_id": {
-                    "type": "string"
+                    "$ref": "#/definitions/catalog.InferenceProvider"
                 },
                 "scope": {
                     "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Scope"
+                }
+            }
+        },
+        "proto.ConfigProviderRemoveRequest": {
+            "type": "object",
+            "properties": {
+                "provider_id": {
+                    "$ref": "#/definitions/catalog.InferenceProvider"
+                },
+                "scope": {
+                    "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Scope"
+                }
+            }
+        },
+        "proto.ConfigProviderRequest": {
+            "type": "object",
+            "properties": {
+                "provider_id": {
+                    "$ref": "#/definitions/catalog.InferenceProvider"
+                }
+            }
+        },
+        "proto.ConfigProviderSettingsResponse": {
+            "type": "object",
+            "properties": {
+                "configured": {
+                    "type": "boolean"
+                },
+                "settings": {
+                    "$ref": "#/definitions/config.ProviderConfig"
+                }
+            }
+        },
+        "proto.ConfigProviderUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "provider_id": {
+                    "$ref": "#/definitions/catalog.InferenceProvider"
+                },
+                "scope": {
+                    "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Scope"
+                },
+                "update": {
+                    "$ref": "#/definitions/config.ProviderUpdate"
                 }
             }
         },
@@ -4304,7 +4788,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "provider_id": {
-                    "type": "string"
+                    "$ref": "#/definitions/catalog.InferenceProvider"
                 },
                 "scope": {
                     "$ref": "#/definitions/github_com_stubbedev_harness_internal_config.Scope"
@@ -4800,7 +5284,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "mode": {
-                    "type": "string"
+                    "$ref": "#/definitions/checkpoints.Mode"
                 }
             }
         },

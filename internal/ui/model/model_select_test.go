@@ -189,16 +189,13 @@ func TestCopilotImportDoesNotBlockUpdate(t *testing.T) {
 	copilot := catalog.InferenceProviderCopilot
 
 	cmd := returnsPromptly(t, func() tea.Cmd {
-		return m.handleAction(dialog.ActionSelectModel{
-			Model:     config.SelectedModel{Provider: copilot, Model: "gpt"},
-			ModelType: config.SelectedModelTypeLarge,
-		})
+		return m.handleAction(dialog.ActionConfigureProvider{ProviderID: copilot})
 	})
 	require.Empty(t, ws.recorded())
 
 	close(ws.release)
 	imported := findMsg[copilotImportedMsg](t, drainMsgs(cmd))
-	require.Equal(t, copilot, imported.action.Model.Provider)
+	require.False(t, imported.imported)
 	require.Equal(t, []string{"import-copilot"}, ws.recorded())
 }
 

@@ -18,8 +18,9 @@ All of these are carried here until they can be proposed upstream.
 
 ## Local changes
 
-All of them are in `agent.go`. Tests are in `agent_early_dispatch_test.go`,
-`agent_repair_routing_test.go` and `agent_step_provider_options_test.go`.
+The agent-loop changes are in `agent.go`. Tests are in
+`agent_early_dispatch_test.go`, `agent_repair_routing_test.go` and
+`agent_step_provider_options_test.go`.
 
 - **Early dispatch.** `WithEarlyToolDispatch` (or
   `AgentStreamCall.EarlyToolDispatch`) takes a predicate. A tool call that
@@ -61,6 +62,11 @@ All of them are in `agent.go`. Tests are in `agent_early_dispatch_test.go`,
 
 Results still land in step content in call order, whatever order the tools
 finish in.
+
+- **Bedrock profile.** `bedrock.WithProfile` (backed by
+  `anthropic.WithBedrockProfile`) loads the AWS shared config from the named
+  profile instead of `$AWS_PROFILE`, so a provider configured in Harness can
+  name its profile without touching the process environment.
 
 Not vendored: `providertests/` (provider integration tests and their 4.7MB
 of recorded cassettes), `.github/`, `.helix/`, `scripts/`, `Taskfile.yaml`,

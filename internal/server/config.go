@@ -108,6 +108,65 @@ func (c *controllerV1) handlePostWorkspaceConfigProviderKey(w http.ResponseWrite
 	})
 }
 
+// handlePostWorkspaceConfigProviderSettings returns a provider's settings as written.
+//
+//	@Summary		Get provider settings
+//	@Tags			config
+//	@Accept			json
+//	@Produce		json
+//	@Param			id		path		string							true	"Workspace ID"
+//	@Param			request	body		proto.ConfigProviderRequest		true	"Provider request"
+//	@Success		200		{object}	proto.ConfigProviderSettingsResponse
+//	@Failure		400		{object}	proto.Error
+//	@Failure		404		{object}	proto.Error
+//	@Failure		500		{object}	proto.Error
+//	@Router			/workspaces/{id}/config/provider/settings [post]
+func (c *controllerV1) handlePostWorkspaceConfigProviderSettings(w http.ResponseWriter, r *http.Request) {
+	serveBody(c, w, r, func(_ context.Context, ws *backend.Workspace, req proto.ConfigProviderRequest) (any, error) {
+		settings, configured, err := c.backend.ProviderSettings(ws.ID, req.ProviderID)
+		if err != nil {
+			return nil, err
+		}
+		return proto.ConfigProviderSettingsResponse{Settings: settings, Configured: configured}, nil
+	})
+}
+
+// handlePostWorkspaceConfigProviderUpdate writes changed provider settings.
+//
+//	@Summary		Update provider settings
+//	@Tags			config
+//	@Accept			json
+//	@Param			id		path	string								true	"Workspace ID"
+//	@Param			request	body	proto.ConfigProviderUpdateRequest	true	"Provider update request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/config/provider/update [post]
+func (c *controllerV1) handlePostWorkspaceConfigProviderUpdate(w http.ResponseWriter, r *http.Request) {
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.ConfigProviderUpdateRequest) (any, error) {
+		return done(c.backend.UpdateProvider(ctx, ws.ID, req.Scope, req.ProviderID, req.Update))
+	})
+}
+
+// handlePostWorkspaceConfigProviderRemove removes a provider's settings.
+//
+//	@Summary		Remove provider settings
+//	@Tags			config
+//	@Accept			json
+//	@Param			id		path	string								true	"Workspace ID"
+//	@Param			request	body	proto.ConfigProviderRemoveRequest	true	"Provider remove request"
+//	@Success		200
+//	@Failure		400	{object}	proto.Error
+//	@Failure		404	{object}	proto.Error
+//	@Failure		500	{object}	proto.Error
+//	@Router			/workspaces/{id}/config/provider/remove [post]
+func (c *controllerV1) handlePostWorkspaceConfigProviderRemove(w http.ResponseWriter, r *http.Request) {
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.ConfigProviderRemoveRequest) (any, error) {
+		return done(c.backend.RemoveProvider(ctx, ws.ID, req.Scope, req.ProviderID))
+	})
+}
+
 // handlePostWorkspaceConfigImportCopilot imports Copilot credentials.
 //
 //	@Summary		Import Copilot credentials

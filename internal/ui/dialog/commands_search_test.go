@@ -108,7 +108,7 @@ func TestRankCommandsTiers(t *testing.T) {
 
 	require.Equal(t, "quit", RankCommands(items, "exi")[0].ID(), "an alias prefix ranks first")
 	require.Equal(t, "init", RankCommands(items, "project")[0].ID(), "the title is searched")
-	require.Equal(t, "custom_rust-expert", RankCommands(items, "guidance")[0].ID(), "the description is searched")
+	require.Equal(t, "custom_rust-expert", RankCommands(items, "expert guidance")[0].ID(), "the description is searched")
 	require.Equal(t, commandIDs(items), commandIDs(RankCommands(items, "")), "an empty query lists everything")
 }
 

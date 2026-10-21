@@ -129,6 +129,7 @@ type DialogKeys struct {
 	Models    ModelsDialogKeys
 	Commands  CommandsDialogKeys
 	Sessions  SessionsDialogKeys
+	Providers ProvidersDialogKeys
 	Rewind    RewindDialogKeys
 	Arguments ArgumentsDialogKeys
 	OAuth     OAuthDialogKeys
@@ -163,6 +164,14 @@ type SessionsDialogKeys struct {
 	KeepTitle     key.Binding
 	ConfirmDelete key.Binding
 	CancelDelete  key.Binding
+}
+
+type ProvidersDialogKeys struct {
+	Remove        key.Binding
+	ConfirmRemove key.Binding
+	CancelRemove  key.Binding
+	Test          key.Binding
+	Save          key.Binding
 }
 
 // RewindDialogKeys are the rewind picker's own bindings.
@@ -482,7 +491,7 @@ func DefaultKeyMap() KeyMap {
 	)
 	km.Dialog.Models.Connect = key.NewBinding(
 		key.WithKeys("ctrl+g"),
-		key.WithHelp("ctrl+g", "connect"),
+		key.WithHelp("ctrl+g", "providers"),
 	)
 
 	km.Dialog.Commands.Tab = key.NewBinding(
@@ -525,6 +534,27 @@ func DefaultKeyMap() KeyMap {
 	km.Dialog.Sessions.CancelDelete = key.NewBinding(
 		key.WithKeys("n", "esc"),
 		key.WithHelp("n", "cancel"),
+	)
+
+	km.Dialog.Providers.Remove = key.NewBinding(
+		key.WithKeys("ctrl+x"),
+		key.WithHelp("ctrl+x", "disconnect"),
+	)
+	km.Dialog.Providers.ConfirmRemove = key.NewBinding(
+		key.WithKeys("y", "enter"),
+		key.WithHelp("y", "disconnect"),
+	)
+	km.Dialog.Providers.CancelRemove = key.NewBinding(
+		key.WithKeys("n", "esc"),
+		key.WithHelp("n", "cancel"),
+	)
+	km.Dialog.Providers.Test = key.NewBinding(
+		key.WithKeys("ctrl+t"),
+		key.WithHelp("ctrl+t", "test connection"),
+	)
+	km.Dialog.Providers.Save = key.NewBinding(
+		key.WithKeys("ctrl+s"),
+		key.WithHelp("ctrl+s", "test & save"),
 	)
 
 	km.Dialog.Rewind.Select = key.NewBinding(
@@ -773,49 +803,54 @@ func (km *KeyMap) keybindActions() map[string]*key.Binding {
 		"chat.scroll_right":           &km.Chat.ScrollRight,
 		"chat.background_tasks":       &km.Chat.BackgroundTasks,
 
-		"dialog.select":                  &km.Dialog.Select,
-		"dialog.next":                    &km.Dialog.Next,
-		"dialog.previous":                &km.Dialog.Previous,
-		"dialog.up_down":                 &km.Dialog.UpDown,
-		"dialog.close":                   &km.Dialog.Close,
-		"dialog.models.toggle_type":      &km.Dialog.Models.ToggleType,
-		"dialog.models.edit":             &km.Dialog.Models.Edit,
-		"dialog.models.connect":          &km.Dialog.Models.Connect,
-		"dialog.commands.tab":            &km.Dialog.Commands.Tab,
-		"dialog.commands.shift_tab":      &km.Dialog.Commands.ShiftTab,
-		"dialog.sessions.select":         &km.Dialog.Sessions.Select,
-		"dialog.sessions.delete":         &km.Dialog.Sessions.Delete,
-		"dialog.sessions.rename":         &km.Dialog.Sessions.Rename,
-		"dialog.sessions.confirm_rename": &km.Dialog.Sessions.ConfirmRename,
-		"dialog.sessions.cancel_rename":  &km.Dialog.Sessions.CancelRename,
-		"dialog.sessions.keep_title":     &km.Dialog.Sessions.KeepTitle,
-		"dialog.sessions.confirm_delete": &km.Dialog.Sessions.ConfirmDelete,
-		"dialog.sessions.cancel_delete":  &km.Dialog.Sessions.CancelDelete,
-		"dialog.rewind.select":           &km.Dialog.Rewind.Select,
-		"dialog.rewind.back":             &km.Dialog.Rewind.Back,
-		"dialog.arguments.confirm":       &km.Dialog.Arguments.Confirm,
-		"dialog.arguments.next":          &km.Dialog.Arguments.Next,
-		"dialog.arguments.previous":      &km.Dialog.Arguments.Previous,
-		"dialog.oauth.copy":              &km.Dialog.OAuth.Copy,
-		"dialog.oauth.copy_url":          &km.Dialog.OAuth.CopyURL,
-		"dialog.mcp_auth.copy":           &km.Dialog.MCPAuth.Copy,
-		"dialog.mcp_auth.skip":           &km.Dialog.MCPAuth.Skip,
-		"dialog.question.up":             &km.Dialog.Question.Up,
-		"dialog.question.down":           &km.Dialog.Question.Down,
-		"dialog.question.left":           &km.Dialog.Question.Left,
-		"dialog.question.right":          &km.Dialog.Question.Right,
-		"dialog.question.confirm":        &km.Dialog.Question.Confirm,
-		"dialog.question.yes":            &km.Dialog.Question.Yes,
-		"dialog.question.no":             &km.Dialog.Question.No,
-		"dialog.question.note":           &km.Dialog.Question.Note,
-		"dialog.question.toggle":         &km.Dialog.Question.Toggle,
-		"dialog.question.newline":        &km.Dialog.Question.Newline,
-		"dialog.question.prev_tab":       &km.Dialog.Question.PrevTab,
-		"dialog.question.next_tab":       &km.Dialog.Question.NextTab,
-		"dialog.mcp_servers.select":      &km.Dialog.MCPServers.Select,
-		"dialog.mcp_servers.back":        &km.Dialog.MCPServers.Back,
-		"dialog.lsp_servers.select":      &km.Dialog.LSPServers.Select,
-		"dialog.lsp_servers.back":        &km.Dialog.LSPServers.Back,
+		"dialog.select":                   &km.Dialog.Select,
+		"dialog.next":                     &km.Dialog.Next,
+		"dialog.previous":                 &km.Dialog.Previous,
+		"dialog.up_down":                  &km.Dialog.UpDown,
+		"dialog.close":                    &km.Dialog.Close,
+		"dialog.models.toggle_type":       &km.Dialog.Models.ToggleType,
+		"dialog.models.edit":              &km.Dialog.Models.Edit,
+		"dialog.models.connect":           &km.Dialog.Models.Connect,
+		"dialog.commands.tab":             &km.Dialog.Commands.Tab,
+		"dialog.commands.shift_tab":       &km.Dialog.Commands.ShiftTab,
+		"dialog.sessions.select":          &km.Dialog.Sessions.Select,
+		"dialog.sessions.delete":          &km.Dialog.Sessions.Delete,
+		"dialog.sessions.rename":          &km.Dialog.Sessions.Rename,
+		"dialog.sessions.confirm_rename":  &km.Dialog.Sessions.ConfirmRename,
+		"dialog.sessions.cancel_rename":   &km.Dialog.Sessions.CancelRename,
+		"dialog.sessions.keep_title":      &km.Dialog.Sessions.KeepTitle,
+		"dialog.sessions.confirm_delete":  &km.Dialog.Sessions.ConfirmDelete,
+		"dialog.sessions.cancel_delete":   &km.Dialog.Sessions.CancelDelete,
+		"dialog.providers.remove":         &km.Dialog.Providers.Remove,
+		"dialog.providers.confirm_remove": &km.Dialog.Providers.ConfirmRemove,
+		"dialog.providers.cancel_remove":  &km.Dialog.Providers.CancelRemove,
+		"dialog.providers.test":           &km.Dialog.Providers.Test,
+		"dialog.providers.save":           &km.Dialog.Providers.Save,
+		"dialog.rewind.select":            &km.Dialog.Rewind.Select,
+		"dialog.rewind.back":              &km.Dialog.Rewind.Back,
+		"dialog.arguments.confirm":        &km.Dialog.Arguments.Confirm,
+		"dialog.arguments.next":           &km.Dialog.Arguments.Next,
+		"dialog.arguments.previous":       &km.Dialog.Arguments.Previous,
+		"dialog.oauth.copy":               &km.Dialog.OAuth.Copy,
+		"dialog.oauth.copy_url":           &km.Dialog.OAuth.CopyURL,
+		"dialog.mcp_auth.copy":            &km.Dialog.MCPAuth.Copy,
+		"dialog.mcp_auth.skip":            &km.Dialog.MCPAuth.Skip,
+		"dialog.question.up":              &km.Dialog.Question.Up,
+		"dialog.question.down":            &km.Dialog.Question.Down,
+		"dialog.question.left":            &km.Dialog.Question.Left,
+		"dialog.question.right":           &km.Dialog.Question.Right,
+		"dialog.question.confirm":         &km.Dialog.Question.Confirm,
+		"dialog.question.yes":             &km.Dialog.Question.Yes,
+		"dialog.question.no":              &km.Dialog.Question.No,
+		"dialog.question.note":            &km.Dialog.Question.Note,
+		"dialog.question.toggle":          &km.Dialog.Question.Toggle,
+		"dialog.question.newline":         &km.Dialog.Question.Newline,
+		"dialog.question.prev_tab":        &km.Dialog.Question.PrevTab,
+		"dialog.question.next_tab":        &km.Dialog.Question.NextTab,
+		"dialog.mcp_servers.select":       &km.Dialog.MCPServers.Select,
+		"dialog.mcp_servers.back":         &km.Dialog.MCPServers.Back,
+		"dialog.lsp_servers.select":       &km.Dialog.LSPServers.Select,
+		"dialog.lsp_servers.back":         &km.Dialog.LSPServers.Back,
 
 		"completions.up":              &km.Completions.Up,
 		"completions.down":            &km.Completions.Down,

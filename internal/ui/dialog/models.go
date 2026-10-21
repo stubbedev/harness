@@ -13,6 +13,7 @@ import (
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
+	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/util"
 )
 
@@ -110,7 +111,7 @@ func NewModels(com *common.Common) (*Models, error) {
 	km := dialogKeys()
 	m.keyMap.Tab = km.Models.ToggleType
 	m.keyMap.Select = km.Select
-	m.keyMap.Edit = km.Models.Edit
+	m.keyMap.Edit = keys.WithDesc(km.Models.Edit, "edit provider")
 	m.keyMap.Connect = km.Models.Connect
 	m.keyMap.UpDown = km.UpDown
 	m.keyMap.Next = km.Next
@@ -153,27 +154,24 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, m.keyMap.Next):
 			m.list.Focus()
 			selectNextWrap(m.list)
-		case key.Matches(msg, m.keyMap.Select, m.keyMap.Edit):
-			selectedItem := m.list.SelectedItem()
-			if selectedItem == nil {
-				break
-			}
-
-			modelItem, ok := selectedItem.(*ModelItem)
+		case key.Matches(msg, m.keyMap.Select):
+			modelItem, ok := m.list.SelectedItem().(*ModelItem)
 			if !ok {
 				break
 			}
-
-			isEdit := key.Matches(msg, m.keyMap.Edit)
-
 			return ActionSelectModel{
-				Provider:       modelItem.prov,
-				Model:          modelItem.SelectedModel(),
-				ModelType:      modelItem.SelectedModelType(),
-				ReAuthenticate: isEdit,
+				Provider:  modelItem.prov,
+				Model:     modelItem.SelectedModel(),
+				ModelType: modelItem.SelectedModelType(),
 			}
+		case key.Matches(msg, m.keyMap.Edit):
+			modelItem, ok := m.list.SelectedItem().(*ModelItem)
+			if !ok || !m.isSelectedConfigured() {
+				break
+			}
+			return ActionConfigureProvider{ProviderID: modelItem.prov.ID}
 		case key.Matches(msg, m.keyMap.Connect):
-			return ActionOpenDialog{DialogID: ConnectID}
+			return ActionOpenDialog{DialogID: ProvidersID}
 		case key.Matches(msg, m.keyMap.Tab):
 			if m.modelType == ModelTypeLarge {
 				m.modelType = ModelTypeSmall
@@ -238,7 +236,7 @@ func (m *Models) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		// Nothing is connected, so the list has nothing to offer. Say
 		// where the models come from instead of showing an empty box.
 		rc.AddPart(t.Dialog.SecondaryText.Render(fmt.Sprintf(
-			"No providers connected. Press %s to connect one.",
+			"No providers connected. Press %s to configure one.",
 			m.keyMap.Connect.Help().Key,
 		)))
 	} else {

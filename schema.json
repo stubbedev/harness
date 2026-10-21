@@ -786,6 +786,35 @@
           "type": "object",
           "description": "Additional provider-specific options for this provider"
         },
+        "api_version": {
+          "type": "string",
+          "description": "Azure OpenAI API version (Azure only); falls back to $AZURE_OPENAI_API_VERSION",
+          "examples": [
+            "2025-01-01-preview"
+          ]
+        },
+        "project": {
+          "type": "string",
+          "description": "Google Cloud project (Vertex AI only); falls back to $VERTEXAI_PROJECT"
+        },
+        "location": {
+          "type": "string",
+          "description": "Google Cloud location (Vertex AI only); falls back to $VERTEXAI_LOCATION",
+          "examples": [
+            "us-east5"
+          ]
+        },
+        "region": {
+          "type": "string",
+          "description": "AWS region (Bedrock only); falls back to the AWS SDK's own resolution",
+          "examples": [
+            "us-east-1"
+          ]
+        },
+        "profile": {
+          "type": "string",
+          "description": "AWS shared config profile (Bedrock only); falls back to $AWS_PROFILE"
+        },
         "aws_auth_refresh": {
           "type": "string",
           "description": "Shell command to run when AWS credentials expire (Bedrock only)."
@@ -1079,6 +1108,11 @@
               "dialog.oauth.copy",
               "dialog.oauth.copy_url",
               "dialog.previous",
+              "dialog.providers.cancel_remove",
+              "dialog.providers.confirm_remove",
+              "dialog.providers.remove",
+              "dialog.providers.save",
+              "dialog.providers.test",
               "dialog.question.confirm",
               "dialog.question.down",
               "dialog.question.left",

@@ -74,6 +74,26 @@ func (c *Client) SetProviderAPIKey(ctx context.Context, id string, scope config.
 	}))
 }
 
+func (c *Client) ProviderSettings(ctx context.Context, id string, providerID catalog.InferenceProvider) (config.ProviderConfig, bool, error) {
+	resp, err := call[proto.ConfigProviderSettingsResponse](ctx, c, "get provider settings", post(wsPath(id, "config", "provider", "settings"), proto.ConfigProviderRequest{ProviderID: providerID}))
+	return resp.Settings, resp.Configured, err
+}
+
+func (c *Client) UpdateProvider(ctx context.Context, id string, scope config.Scope, providerID catalog.InferenceProvider, update config.ProviderUpdate) error {
+	return c.do(ctx, "update provider", post(wsPath(id, "config", "provider", "update"), proto.ConfigProviderUpdateRequest{
+		Scope:      scope,
+		ProviderID: providerID,
+		Update:     update,
+	}))
+}
+
+func (c *Client) RemoveProvider(ctx context.Context, id string, scope config.Scope, providerID catalog.InferenceProvider) error {
+	return c.do(ctx, "remove provider", post(wsPath(id, "config", "provider", "remove"), proto.ConfigProviderRemoveRequest{
+		Scope:      scope,
+		ProviderID: providerID,
+	}))
+}
+
 // ImportCopilot attempts to import a GitHub Copilot token on the
 // server.
 func (c *Client) ImportCopilot(ctx context.Context, id string) (*oauth.Token, bool, error) {

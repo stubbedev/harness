@@ -159,8 +159,9 @@ type options struct {
 	vertexLocation string
 	skipAuth       bool
 
-	useBedrock    bool
-	bedrockRegion string
+	useBedrock     bool
+	bedrockRegion  string
+	bedrockProfile string
 
 	objectMode fantasy.ObjectMode
 }
@@ -229,6 +230,12 @@ func WithBedrock() Option {
 func WithBedrockRegion(region string) Option {
 	return func(o *options) {
 		o.bedrockRegion = region
+	}
+}
+
+func WithBedrockProfile(profile string) Option {
+	return func(o *options) {
+		o.bedrockProfile = profile
 	}
 }
 
@@ -319,7 +326,11 @@ func (a *provider) LanguageModel(ctx context.Context, modelID string) (fantasy.L
 				bedrock.WithConfig(bedrockBasicAuthConfig(a.options.apiKey, a.options.bedrockRegion)),
 			)
 		} else {
-			if cfg, err := config.LoadDefaultConfig(ctx); err == nil {
+			var loadOpts []func(*config.LoadOptions) error
+			if a.options.bedrockProfile != "" {
+				loadOpts = append(loadOpts, config.WithSharedConfigProfile(a.options.bedrockProfile))
+			}
+			if cfg, err := config.LoadDefaultConfig(ctx, loadOpts...); err == nil {
 				// The upstream Anthropic SDK prioritizes a BearerAuthTokenProvider
 				// over SigV4 credentials. When using AWS SSO, the default config
 				// populates both, causing the SSO bearer token to be sent to

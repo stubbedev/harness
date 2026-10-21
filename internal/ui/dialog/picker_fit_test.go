@@ -49,12 +49,12 @@ func pickerFixtures() []pickerFixture {
 			},
 		},
 		{
-			name: "connect",
+			name: "providers",
 			long: func(t *testing.T) Dialog {
-				return newConnectDialogForTest(t, configuredTestConfig(t), manyConnectProviders(fitListLength))
+				return newProvidersDialogForTest(t, configuredTestConfig(t), manyCatalogProviders(fitListLength))
 			},
 			short: func(t *testing.T) Dialog {
-				return newConnectDialogForTest(t, configuredTestConfig(t), manyConnectProviders(3))
+				return newProvidersDialogForTest(t, configuredTestConfig(t), manyCatalogProviders(3))
 			},
 		},
 		{name: "notifications", long: notifications, short: notifications},
@@ -91,7 +91,7 @@ func typeFilter(d Dialog, s string) {
 	}
 }
 
-func manyConnectProviders(n int) []catalog.Provider {
+func manyCatalogProviders(n int) []catalog.Provider {
 	providers := make([]catalog.Provider, n)
 	for i := range providers {
 		id := fmt.Sprintf("provider-%02d", i)
@@ -249,7 +249,7 @@ func visibleLabels(t *testing.T, d Dialog) []string {
 	switch d := d.(type) {
 	case *Themes:
 		labels = filterableLabels(t, d.list.FilteredItems())
-	case *Connect:
+	case *Providers:
 		labels = filterableLabels(t, d.list.FilteredItems())
 	case *simplePicker[string]:
 		labels = filterableLabels(t, d.list.FilteredItems())

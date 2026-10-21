@@ -198,6 +198,9 @@ type Workspace interface {
 	SetProviderAPIKey(scope config.Scope, providerID catalog.InferenceProvider, apiKey any) error
 	SetConfigField(scope config.Scope, key string, value any) error
 	RemoveConfigField(scope config.Scope, key string) error
+	ProviderSettings(providerID catalog.InferenceProvider) (config.ProviderConfig, bool, error)
+	UpdateProvider(ctx context.Context, scope config.Scope, providerID catalog.InferenceProvider, update config.ProviderUpdate) error
+	RemoveProvider(ctx context.Context, scope config.Scope, providerID catalog.InferenceProvider) error
 	ImportCopilot() (*oauth.Token, bool)
 	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID catalog.InferenceProvider) error
 

@@ -38,10 +38,6 @@ type sessionModelRestoredMsg struct {
 	modelWrite
 }
 
-type copilotImportedMsg struct {
-	action dialog.ActionSelectModel
-}
-
 func saveModel(ws workspace.Workspace, modelType config.SelectedModelType, model config.SelectedModel, steps ...func() error) modelWrite {
 	if err := ws.UpdatePreferredModel(config.ScopeGlobal, modelType, model); err != nil {
 		return modelWrite{err: err}
@@ -203,12 +199,7 @@ func (m *UI) applyReasoningEffortSaved(msg reasoningEffortSavedMsg) tea.Cmd {
 // handleSelectModel performs the model selection after any provider
 // pre-checks have completed.
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
-	return m.selectModel(msg, true)
-}
-
-func (m *UI) selectModel(msg dialog.ActionSelectModel, importCopilot bool) tea.Cmd {
-	// we ignore dialogs with the oauth id as they need to be able to be dismissed
-	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
+	if m.isAgentBusy() {
 		// The in-flight turn keeps the model it started with; the
 		// choice is queued and applied when the turn finishes.
 		m.pendingModelAction = msg
@@ -222,16 +213,8 @@ func (m *UI) selectModel(msg dialog.ActionSelectModel, importCopilot bool) tea.C
 	}
 
 	providerID := msg.Model.Provider
-	_, configured := cfg.Providers.Get(providerID)
-
-	if importCopilot && !configured && !msg.ReAuthenticate && providerID == catalog.InferenceProviderCopilot {
-		return m.importCopilotCmd(msg)
-	}
-
-	if !configured || msg.ReAuthenticate {
-		m.dialog.CloseDialog(dialog.ModelsID)
-		m.dialog.CloseDialog(dialog.ConnectID)
-		return m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType)
+	if _, configured := cfg.Providers.Get(providerID); !configured {
+		return util.ReportError(fmt.Errorf("%w: %s", errProviderNotConfigured, providerID))
 	}
 
 	// Restore a remembered per-model reasoning effort so manual choices
@@ -251,14 +234,6 @@ func (m *UI) selectModel(msg dialog.ActionSelectModel, importCopilot bool) tea.C
 	})
 }
 
-func (m *UI) importCopilotCmd(msg dialog.ActionSelectModel) tea.Cmd {
-	ws := m.com.Workspace
-	return func() tea.Msg {
-		ws.ImportCopilot()
-		return copilotImportedMsg{action: msg}
-	}
-}
-
 func (m *UI) applyModelSelected(msg modelSelectedMsg) tea.Cmd {
 	if !msg.saved {
 		return util.ReportError(msg.err)
@@ -266,10 +241,7 @@ func (m *UI) applyModelSelected(msg modelSelectedMsg) tea.Cmd {
 	if msg.action.ModelType == config.SelectedModelTypeLarge {
 		m.applyThemeForProvider(msg.action.Model.Provider)
 	}
-	m.dialog.CloseDialog(dialog.APIKeyInputID)
-	m.dialog.CloseDialog(dialog.OAuthID)
 	m.dialog.CloseDialog(dialog.ModelsID)
-	m.dialog.CloseDialog(dialog.ConnectID)
 	if msg.err != nil {
 		return util.ReportError(msg.err)
 	}

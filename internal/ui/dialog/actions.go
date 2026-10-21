@@ -30,10 +30,26 @@ type ActionSelectSession struct {
 
 // ActionSelectModel is a message indicating a model has been selected.
 type ActionSelectModel struct {
-	Provider       catalog.Provider
-	Model          config.SelectedModel
-	ModelType      config.SelectedModelType
-	ReAuthenticate bool
+	Provider  catalog.Provider
+	Model     config.SelectedModel
+	ModelType config.SelectedModelType
+}
+
+type ActionConfigureProvider struct {
+	ProviderID catalog.InferenceProvider
+}
+
+type ActionSaveProvider struct {
+	ProviderID catalog.InferenceProvider
+	Update     config.ProviderUpdate
+}
+
+type ActionRemoveProvider struct {
+	ProviderID catalog.InferenceProvider
+}
+
+type ActionProviderConfigured struct {
+	ProviderID catalog.InferenceProvider
 }
 
 // Messages for commands
@@ -249,13 +265,6 @@ type (
 	}
 )
 
-// Messages for API key input dialog.
-type (
-	ActionChangeAPIKeyState struct {
-		State APIKeyInputState
-	}
-)
-
 // Messages for OAuth2 device flow dialog.
 type (
 	// ActionInitiateOAuth is sent when the device auth is initiated
@@ -380,8 +389,13 @@ func (ActionMCPAuthComplete) isAction() {}
 // isAction marks ActionMCPAuthErrored as an [Action].
 func (ActionMCPAuthErrored) isAction() {}
 
-// isAction marks ActionChangeAPIKeyState as an [Action].
-func (ActionChangeAPIKeyState) isAction() {}
+func (ActionConfigureProvider) isAction() {}
+
+func (ActionSaveProvider) isAction() {}
+
+func (ActionRemoveProvider) isAction() {}
+
+func (ActionProviderConfigured) isAction() {}
 
 // isAction marks ActionInitiateOAuth as an [Action].
 func (ActionInitiateOAuth) isAction() {}

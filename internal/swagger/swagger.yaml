@@ -1,5 +1,89 @@
 basePath: /v1
 definitions:
+  catalog.InferenceProvider:
+    enum:
+    - openai
+    - anthropic
+    - google
+    - azure
+    - amazon-bedrock
+    - google-vertex
+    - xai
+    - zai
+    - zai-coding-plan
+    - zhipuai
+    - zhipuai-coding-plan
+    - groq
+    - openrouter
+    - cerebras
+    - deepseek
+    - deepinfra
+    - venice
+    - chutes
+    - huggingface
+    - mistral
+    - cohere
+    - perplexity
+    - togetherai
+    - aihubmix
+    - kimi-for-coding
+    - github-copilot
+    - cortecs
+    - vercel
+    - minimax
+    - minimax-cn
+    - io-net
+    - qiniu-ai
+    - nebius
+    - neuralwatt
+    - opencode
+    - opencode-go
+    - alibaba
+    - fireworks-ai
+    - baseten
+    - moonshotai
+    type: string
+    x-enum-varnames:
+    - InferenceProviderOpenAI
+    - InferenceProviderAnthropic
+    - InferenceProviderGemini
+    - InferenceProviderAzure
+    - InferenceProviderBedrock
+    - InferenceProviderVertexAI
+    - InferenceProviderXAI
+    - InferenceProviderZAI
+    - InferenceProviderZAICoding
+    - InferenceProviderZhipu
+    - InferenceProviderZhipuCoding
+    - InferenceProviderGROQ
+    - InferenceProviderOpenRouter
+    - InferenceProviderCerebras
+    - InferenceProviderDeepSeek
+    - InferenceProviderDeepInfra
+    - InferenceProviderVenice
+    - InferenceProviderChutes
+    - InferenceProviderHuggingFace
+    - InferenceProviderMistral
+    - InferenceProviderCohere
+    - InferenceProviderPerplexity
+    - InferenceProviderTogetherAI
+    - InferenceAIHubMix
+    - InferenceKimiCoding
+    - InferenceProviderCopilot
+    - InferenceProviderCortecs
+    - InferenceProviderVercel
+    - InferenceProviderMiniMax
+    - InferenceProviderMiniMaxChina
+    - InferenceProviderIoNet
+    - InferenceProviderQiniuCloud
+    - InferenceProviderNebius
+    - InferenceProviderNeuralwatt
+    - InferenceProviderOpenCodeZen
+    - InferenceProviderOpenCodeGo
+    - InferenceProviderAlibabaSingapore
+    - InferenceProviderFireworks
+    - InferenceProviderBaseten
+    - InferenceProviderMoonshot
   catalog.Model:
     properties:
       can_reason:
@@ -47,6 +131,38 @@ definitions:
       top_p:
         type: number
     type: object
+  catalog.Type:
+    enum:
+    - openai
+    - openai-compat
+    - openrouter
+    - vercel
+    - anthropic
+    - google
+    - azure
+    - bedrock
+    - google-vertex
+    type: string
+    x-enum-varnames:
+    - TypeOpenAI
+    - TypeOpenAICompat
+    - TypeOpenRouter
+    - TypeVercel
+    - TypeAnthropic
+    - TypeGoogle
+    - TypeAzure
+    - TypeBedrock
+    - TypeVertexAI
+  checkpoints.Mode:
+    enum:
+    - conversation
+    - files
+    - both
+    type: string
+    x-enum-varnames:
+    - ModeConversation
+    - ModeFiles
+    - ModeBoth
   config.Completions:
     properties:
       max_depth:
@@ -239,6 +355,140 @@ definitions:
           unpinned memories of that scope are reaped.
         type: integer
     type: object
+  config.ProviderConfig:
+    properties:
+      api_key:
+        description: The configured API key template.
+        type: string
+      api_version:
+        type: string
+      aws_auth_refresh:
+        description: |-
+          AWSAuthRefresh is a shell command run when Bedrock returns a
+          credential error. Output is discarded to avoid corrupting the TUI.
+        type: string
+      base_url:
+        description: The provider's API endpoint.
+        type: string
+      disable:
+        description: Marks the provider as disabled.
+        type: boolean
+      disable_http2:
+        description: |-
+          DisableHTTP2 forces HTTP/1.1 for this provider. Needed for gateways
+          that are broken only on their HTTP/2 path -- ai.eu.corti.app answers
+          413 to any body over ~64KB over HTTP/2 while serving the same body
+          fine over HTTP/1.1, which makes it reject every Harness turn.
+        type: boolean
+      discover_models:
+        description: |-
+          AutoDiscoverModels controls model discovery via /v1/models endpoint.
+          When Models is empty and this is nil or true, Harness auto-discovers
+          models. When true and Models is non-empty, discovered models are
+          merged in (user-specified models take precedence). When false,
+          only explicitly listed models are used.
+        type: boolean
+      extra_body:
+        additionalProperties: {}
+        description: |-
+          ExtraBody is merged verbatim into OpenAI-compatible request
+          bodies. String values are NOT shell-expanded: this is a plain
+          JSON passthrough so that arbitrary provider-extension fields
+          (numbers, nested objects, booleans) round-trip without a
+          recursive walker guessing at intent. If you need an env-var-
+          driven value at request time, put it in extra_headers, or in
+          the provider's top-level api_key / base_url, all of which do
+          expand.
+        type: object
+      extra_headers:
+        additionalProperties:
+          type: string
+        description: |-
+          Extra headers to send with each request to the provider. Values
+          run through shell expansion at config-load time, so $VAR and
+          $(cmd) work the same way they do in MCP headers. A header whose
+          value resolves to the empty string (unset bare $VAR under
+          lenient nounset, $(echo), or literal "") is omitted from the
+          outgoing request rather than sent as "Header:".
+        type: object
+      flat_rate:
+        description: Skip cost accumulation for this provider when using subscription
+          or flat rate billing.
+        type: boolean
+      id:
+        allOf:
+        - $ref: '#/definitions/catalog.InferenceProvider'
+        description: The provider's id.
+      location:
+        type: string
+      models:
+        description: The provider models
+        items:
+          $ref: '#/definitions/catalog.Model'
+        type: array
+      name:
+        description: The provider's name, used for display purposes.
+        type: string
+      oauth:
+        allOf:
+        - $ref: '#/definitions/oauth.Token'
+        description: OAuthToken for providers that use OAuth2 authentication.
+      profile:
+        type: string
+      project:
+        type: string
+      provider_options:
+        additionalProperties: {}
+        type: object
+      region:
+        type: string
+      system_prompt_prefix:
+        description: Custom system prompt prefix.
+        type: string
+      type:
+        allOf:
+        - $ref: '#/definitions/catalog.Type'
+        description: The provider type, e.g. "openai", "anthropic", etc. if empty
+          it defaults to openai.
+    type: object
+  config.ProviderField:
+    enum:
+    - name
+    - type
+    - base_url
+    - api_key
+    - extra_headers
+    - api_version
+    - project
+    - location
+    - region
+    - profile
+    - models
+    - discover_models
+    type: string
+    x-enum-varnames:
+    - ProviderFieldName
+    - ProviderFieldType
+    - ProviderFieldBaseURL
+    - ProviderFieldAPIKey
+    - ProviderFieldExtraHeaders
+    - ProviderFieldAPIVersion
+    - ProviderFieldProject
+    - ProviderFieldLocation
+    - ProviderFieldRegion
+    - ProviderFieldProfile
+    - ProviderFieldModels
+    - ProviderFieldDiscover
+  config.ProviderUpdate:
+    properties:
+      set:
+        additionalProperties: {}
+        type: object
+      unset:
+        items:
+          $ref: '#/definitions/config.ProviderField'
+        type: array
+    type: object
   config.SelectedModel:
     properties:
       frequency_penalty:
@@ -254,10 +504,11 @@ definitions:
       presence_penalty:
         type: number
       provider:
+        allOf:
+        - $ref: '#/definitions/catalog.InferenceProvider'
         description: |-
           The model provider, same as the key/id used in the providers config.
           Required.
-        type: string
       provider_options:
         additionalProperties: {}
         description: Override provider specific options.
@@ -320,7 +571,7 @@ definitions:
       theme:
         type: string
     type: object
-  csync.Map-string-config_ProviderConfig:
+  csync.Map-catalog_InferenceProvider-config_ProviderConfig:
     type: object
   github_com_stubbedev_harness_internal_config.Config:
     properties:
@@ -360,7 +611,7 @@ definitions:
         $ref: '#/definitions/github_com_stubbedev_harness_internal_config.Options'
       providers:
         allOf:
-        - $ref: '#/definitions/csync.Map-string-config_ProviderConfig'
+        - $ref: '#/definitions/csync.Map-catalog_InferenceProvider-config_ProviderConfig'
         description: The providers that are configured
       reasoning_efforts:
         additionalProperties:
@@ -521,7 +772,7 @@ definitions:
       prism_model_name:
         type: string
       provider:
-        type: string
+        $ref: '#/definitions/catalog.InferenceProvider'
       role:
         $ref: '#/definitions/proto.MessageRole'
       session_id:
@@ -694,14 +945,42 @@ definitions:
       kind:
         $ref: '#/definitions/proto.APIKeyKind'
       provider_id:
-        type: string
+        $ref: '#/definitions/catalog.InferenceProvider'
       scope:
         $ref: '#/definitions/github_com_stubbedev_harness_internal_config.Scope'
+    type: object
+  proto.ConfigProviderRemoveRequest:
+    properties:
+      provider_id:
+        $ref: '#/definitions/catalog.InferenceProvider'
+      scope:
+        $ref: '#/definitions/github_com_stubbedev_harness_internal_config.Scope'
+    type: object
+  proto.ConfigProviderRequest:
+    properties:
+      provider_id:
+        $ref: '#/definitions/catalog.InferenceProvider'
+    type: object
+  proto.ConfigProviderSettingsResponse:
+    properties:
+      configured:
+        type: boolean
+      settings:
+        $ref: '#/definitions/config.ProviderConfig'
+    type: object
+  proto.ConfigProviderUpdateRequest:
+    properties:
+      provider_id:
+        $ref: '#/definitions/catalog.InferenceProvider'
+      scope:
+        $ref: '#/definitions/github_com_stubbedev_harness_internal_config.Scope'
+      update:
+        $ref: '#/definitions/config.ProviderUpdate'
     type: object
   proto.ConfigRefreshOAuthRequest:
     properties:
       provider_id:
-        type: string
+        $ref: '#/definitions/catalog.InferenceProvider'
       scope:
         $ref: '#/definitions/github_com_stubbedev_harness_internal_config.Scope'
     type: object
@@ -1033,7 +1312,7 @@ definitions:
       message_id:
         type: string
       mode:
-        type: string
+        $ref: '#/definitions/checkpoints.Mode'
     type: object
   proto.RunExtensionCommandRequest:
     properties:
@@ -1970,6 +2249,112 @@ paths:
           schema:
             $ref: '#/definitions/proto.Error'
       summary: Set provider API key
+      tags:
+      - config
+  /workspaces/{id}/config/provider/remove:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Provider remove request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ConfigProviderRemoveRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Remove provider settings
+      tags:
+      - config
+  /workspaces/{id}/config/provider/settings:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Provider request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ConfigProviderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/proto.ConfigProviderSettingsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Get provider settings
+      tags:
+      - config
+  /workspaces/{id}/config/provider/update:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Provider update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/proto.ConfigProviderUpdateRequest'
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/proto.Error'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/proto.Error'
+      summary: Update provider settings
       tags:
       - config
   /workspaces/{id}/config/refresh-oauth:

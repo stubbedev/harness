@@ -1448,10 +1448,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 		azure.WithUseResponsesAPI(),
 	}
 	opts = append(opts, azure.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)))
-	if options == nil {
-		options = make(map[string]string)
-	}
-	if apiVersion, ok := options["apiVersion"]; ok {
+	if apiVersion := options[config.ProviderParamAPIVersion]; apiVersion != "" {
 		opts = append(opts, azure.WithAPIVersion(apiVersion))
 	}
 	if len(headers) > 0 {
@@ -1461,7 +1458,7 @@ func (c *coordinator) buildAzureProvider(baseURL, apiKey string, headers map[str
 	return azure.New(opts...)
 }
 
-func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, disableHTTP2 bool) (fantasy.Provider, error) {
+func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]string, options map[string]string, disableHTTP2 bool) (fantasy.Provider, error) {
 	opts := []bedrock.Option{
 		bedrock.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)),
 	}
@@ -1478,7 +1475,12 @@ func (c *coordinator) buildBedrockProvider(apiKey string, headers map[string]str
 		// Skip, let the SDK do authentication.
 	}
 
-	opts = append(opts, bedrock.WithRegion("us-east-1"))
+	if region := options[config.ProviderParamRegion]; region != "" {
+		opts = append(opts, bedrock.WithRegion(region))
+	}
+	if profile := options[config.ProviderParamProfile]; profile != "" {
+		opts = append(opts, bedrock.WithProfile(profile))
+	}
 
 	return bedrock.New(opts...)
 }
@@ -1503,8 +1505,8 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 		opts = append(opts, google.WithHeaders(headers))
 	}
 
-	project := options["project"]
-	location := options["location"]
+	project := options[config.ProviderParamProject]
+	location := options[config.ProviderParamLocation]
 
 	opts = append(opts, google.WithVertex(project, location))
 
@@ -1516,7 +1518,7 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 // credentials for the project and location in options.
 func (c *coordinator) buildAnthropicVertexProvider(headers map[string]string, options map[string]string, disableHTTP2 bool) (fantasy.Provider, error) {
 	opts := []anthropic.Option{
-		anthropic.WithVertex(options["project"], options["location"]),
+		anthropic.WithVertex(options[config.ProviderParamProject], options[config.ProviderParamLocation]),
 		anthropic.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)),
 	}
 	if len(headers) > 0 {
@@ -1640,7 +1642,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case azure.Name:
 		return c.buildAzureProvider(baseURL, apiKey, headers, providerCfg.ExtraParams, providerCfg.DisableHTTP2)
 	case bedrock.Name:
-		return c.buildBedrockProvider(apiKey, headers, providerCfg.DisableHTTP2)
+		return c.buildBedrockProvider(apiKey, headers, providerCfg.ExtraParams, providerCfg.DisableHTTP2)
 	case google.Name:
 		if providerCfg.Type == catalog.TypeVertexAI {
 			return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams, providerCfg.DisableHTTP2)

@@ -13,15 +13,15 @@ import (
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
-func newAPIKeyInputForTest(t *testing.T) *APIKeyInput {
+func newProviderFormForTest(t *testing.T) *ProviderForm {
 	t.Helper()
 	s := styles.CharmtonePantera()
 	com := &common.Common{Workspace: &stubWorkspace{cfg: &config.Config{}}, Styles: &s}
-	d, _ := NewAPIKeyInput(com, catalog.Provider{ID: "anthropic", Name: "Anthropic"}, config.SelectedModel{}, config.SelectedModelTypeLarge)
-	return d
+	provider := catalog.Provider{ID: "anthropic", Name: "Anthropic", Type: catalog.TypeAnthropic}
+	return NewProviderForm(com, NewProviderTarget(nil, []catalog.Provider{provider}, provider.ID, config.ProviderConfig{}))
 }
 
-func typeAPIKey(d *APIKeyInput, text string) {
+func typeAPIKey(d *ProviderForm, text string) {
 	for _, r := range text {
 		d.HandleMsg(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
@@ -37,11 +37,11 @@ func requireCursorAfter(t *testing.T, cur *tea.Cursor, rows []string, typed stri
 		"cursor must sit on the cell right after the typed text:\n%s", strings.Join(rows, "\n"))
 }
 
-func assertAPIKeyCursorPlacement(t *testing.T) {
+func assertProviderFormCursorPlacement(t *testing.T) {
 	t.Helper()
 
 	t.Run("end of key", func(t *testing.T) {
-		d := newAPIKeyInputForTest(t)
+		d := newProviderFormForTest(t)
 		drawRows(t, d, 100, 30)
 		typeAPIKey(d, "sk-test")
 		cur, rows := drawRows(t, d, 100, 30)
@@ -49,7 +49,7 @@ func assertAPIKeyCursorPlacement(t *testing.T) {
 	})
 
 	t.Run("after moving left", func(t *testing.T) {
-		d := newAPIKeyInputForTest(t)
+		d := newProviderFormForTest(t)
 		drawRows(t, d, 100, 30)
 		typeAPIKey(d, "sk-test")
 		for range 4 {
@@ -60,7 +60,7 @@ func assertAPIKeyCursorPlacement(t *testing.T) {
 	})
 
 	t.Run("long key scrolled horizontally", func(t *testing.T) {
-		d := newAPIKeyInputForTest(t)
+		d := newProviderFormForTest(t)
 		drawRows(t, d, 100, 30)
 		key := "sk-" + strings.Repeat("abcdefghij", 20) + "-END"
 		typeAPIKey(d, key)
@@ -69,16 +69,16 @@ func assertAPIKeyCursorPlacement(t *testing.T) {
 	})
 }
 
-func TestAPIKeyInputCursorPlacementBottomAnchored(t *testing.T) {
+func TestProviderFormCursorPlacementBottomAnchored(t *testing.T) {
 	t.Cleanup(func() { InstallPlacement(config.DialogPlacementBottom) })
 	InstallPlacement(config.DialogPlacementBottom)
-	assertAPIKeyCursorPlacement(t)
+	assertProviderFormCursorPlacement(t)
 }
 
-func TestAPIKeyInputCursorPlacementTopFloating(t *testing.T) {
+func TestProviderFormCursorPlacementTopFloating(t *testing.T) {
 	t.Cleanup(func() { InstallPlacement(config.DialogPlacementBottom) })
 	InstallPlacement(config.DialogPlacementTop)
-	assertAPIKeyCursorPlacement(t)
+	assertProviderFormCursorPlacement(t)
 }
 
 func assertArgumentsCursorPlacement(t *testing.T) {

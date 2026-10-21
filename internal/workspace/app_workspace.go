@@ -383,6 +383,22 @@ func (w *AppWorkspace) RemoveConfigField(scope config.Scope, key string) error {
 	return w.store.RemoveConfigField(scope, key)
 }
 
+func (w *AppWorkspace) ProviderSettings(providerID catalog.InferenceProvider) (config.ProviderConfig, bool, error) {
+	return w.store.ProviderSettings(providerID)
+}
+
+func (w *AppWorkspace) UpdateProvider(ctx context.Context, scope config.Scope, providerID catalog.InferenceProvider, update config.ProviderUpdate) error {
+	if err := w.store.UpdateProvider(ctx, scope, providerID, update); err != nil {
+		return err
+	}
+	w.store.SignalAuthComplete(providerID)
+	return nil
+}
+
+func (w *AppWorkspace) RemoveProvider(ctx context.Context, scope config.Scope, providerID catalog.InferenceProvider) error {
+	return w.store.RemoveProvider(ctx, scope, providerID)
+}
+
 func (w *AppWorkspace) ImportCopilot() (*oauth.Token, bool) {
 	return w.store.ImportCopilot()
 }
