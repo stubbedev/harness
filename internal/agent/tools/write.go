@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/stubbedev/harness/internal/toolname"
 
 	"charm.land/fantasy"
-	"github.com/stubbedev/harness/internal/diff"
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/history"
@@ -85,17 +83,7 @@ func NewWriteTool(
 				return fantasy.NewTextErrorResponse(fileAccessFailure("create the parent directories of", filePath, err)), nil
 			}
 
-			diffText, additions, removals := diff.GenerateDiff(
-				oldContent,
-				params.Content,
-				strings.TrimPrefix(filePath, workingDir),
-			)
-			// The metadata rides along in every persisted message; a whole
-			// file rewrites the diff into a whole file, so past the same cap
-			// the edit metadata uses, the renderer falls back to the input.
-			if len(diffText) > maxMetadataDiffBytes {
-				diffText = ""
-			}
+			changes := newEditResponseMetadata(filePath, workingDir, oldContent, params.Content)
 
 			written := []byte(params.Content)
 			err = guardedWrite(filePath, oldBytes, written, create)
@@ -117,9 +105,9 @@ func NewWriteTool(
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(result),
 				WriteResponseMetadata{
-					Diff:          diffText,
-					Additions:     additions,
-					Removals:      removals,
+					Diff:          changes.Diff,
+					Additions:     changes.Additions,
+					Removals:      changes.Removals,
 					FileMutations: []FileMutation{newFileMutation(filePath, written)},
 				},
 			), nil

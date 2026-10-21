@@ -71,7 +71,7 @@ func adapt[P any](run func(context.Context, P) (fantasy.ToolResponse, error), pi
 }
 
 // lspActions maps each lsp action to its behaviour.
-func lspActions(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service, reg *presence.Registry) map[LSPAction]lspActionFunc {
+func lspActions(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service, reg *presence.Registry, workingDir string) map[LSPAction]lspActionFunc {
 	return map[LSPAction]lspActionFunc{
 		LSPActionDiagnostics: adapt(diagnosticsAction(lspManager), func(p LSPParams) DiagnosticsParams {
 			return DiagnosticsParams{FilePath: p.FilePath}
@@ -93,7 +93,7 @@ func lspActions(lspManager *lsp.Manager, files history.Service, filetracker file
 		}),
 		// The action parameter would shadow replace_symbol's own "action",
 		// so the model sends that one as "mode".
-		LSPActionReplaceSymbol: adapt(replaceSymbolAction(lspManager, files, filetracker, reg), func(p LSPParams) ReplaceSymbolParams {
+		LSPActionReplaceSymbol: adapt(replaceSymbolAction(lspManager, files, filetracker, reg, workingDir), func(p LSPParams) ReplaceSymbolParams {
 			return ReplaceSymbolParams{Symbol: p.Symbol, FilePath: p.FilePath, Replacement: p.Replacement, Action: p.Mode}
 		}),
 		LSPActionRestart: adapt(lspRestartAction(lspManager), func(p LSPParams) LSPRestartParams {
@@ -157,8 +157,8 @@ func lockLSPMutation(ctx context.Context, manager *lsp.Manager) (func(), error) 
 
 // NewLSPTool folds the language-server actions into one tool: the model
 // sees one schema, the code keeps one behaviour per action.
-func NewLSPTool(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service, reg *presence.Registry) fantasy.AgentTool {
-	return newLSPTool(lspManager, filetracker, lspActions(lspManager, files, filetracker, reg))
+func NewLSPTool(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service, reg *presence.Registry, workingDir string) fantasy.AgentTool {
+	return newLSPTool(lspManager, filetracker, lspActions(lspManager, files, filetracker, reg, workingDir))
 }
 
 // newLSPTool builds the lsp tool over a given action table, so a test can

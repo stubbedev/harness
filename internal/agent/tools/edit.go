@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/stubbedev/harness/internal/toolname"
 
@@ -70,7 +69,7 @@ const (
 // copy path render; the contents remain for small files and for
 // rendering results persisted before the cap existed.
 func newEditResponseMetadata(filePath, workingDir, oldContent, newContent string) EditResponseMetadata {
-	diffText, additions, removals := diff.GenerateDiff(oldContent, newContent, strings.TrimPrefix(filePath, workingDir))
+	diffText, additions, removals := diff.GenerateDiff(oldContent, newContent, diffLabel(workingDir, filePath))
 	meta := EditResponseMetadata{Additions: additions, Removals: removals}
 	if len(diffText) <= maxMetadataDiffBytes {
 		meta.Diff = diffText
@@ -80,6 +79,14 @@ func newEditResponseMetadata(filePath, workingDir, oldContent, newContent string
 		meta.NewContent = newContent
 	}
 	return meta
+}
+
+func diffLabel(workingDir, filePath string) string {
+	path := filepathext.SmartJoin(workingDir, filePath)
+	if rel, ok := filepathext.RelWithin(workingDir, path); ok {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(path)
 }
 
 const EditToolName = toolname.Edit

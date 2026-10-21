@@ -12,7 +12,6 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	"github.com/stubbedev/harness/internal/diff"
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
@@ -81,6 +80,7 @@ func replaceSymbolAction(
 	files history.Service,
 	tracker filetracker.Service,
 	reg *presence.Registry,
+	workingDir string,
 ) func(context.Context, ReplaceSymbolParams) (fantasy.ToolResponse, error) {
 	return func(ctx context.Context, params ReplaceSymbolParams) (fantasy.ToolResponse, error) {
 		if params.Symbol == "" {
@@ -119,7 +119,7 @@ func replaceSymbolAction(
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("symbol '%s' not found in %s", params.Symbol, params.FilePath)), nil
 		}
 
-		return spliceSymbol(ctx, lspManager, files, tracker, reg, params, action, op, target.GetRange())
+		return spliceSymbol(ctx, lspManager, files, tracker, reg, workingDir, params, action, op, target.GetRange())
 	}
 }
 
@@ -132,6 +132,7 @@ func spliceSymbol(
 	files history.Service,
 	tracker filetracker.Service,
 	reg *presence.Registry,
+	workingDir string,
 	params ReplaceSymbolParams,
 	action string,
 	op replaceSymbolOp,
@@ -181,14 +182,13 @@ func spliceSymbol(
 
 	summary := op.summary(params.Symbol, params.FilePath, startLine+1, endLine+1)
 
-	meta := ReplaceSymbolResponseMetadata{FilePath: params.FilePath, Action: action}
-	diffText, _, _ := diff.GenerateDiff(string(content), newContent, params.FilePath)
-	if len(diffText) <= maxMetadataDiffBytes {
-		meta.Diff = diffText
-	}
-	if len(content) <= maxMetadataContentsBytes && len(newContent) <= maxMetadataContentsBytes {
-		meta.OldContent = string(content)
-		meta.NewContent = newContent
+	changes := newEditResponseMetadata(params.FilePath, workingDir, string(content), newContent)
+	meta := ReplaceSymbolResponseMetadata{
+		FilePath:   params.FilePath,
+		Diff:       changes.Diff,
+		OldContent: changes.OldContent,
+		NewContent: changes.NewContent,
+		Action:     action,
 	}
 	resp := fantasy.NewTextResponse(summary + "\n" + finishFileChange(ctx, lspManager, reg, params.FilePath))
 	resp = fantasy.WithResponseMetadata(resp, meta)

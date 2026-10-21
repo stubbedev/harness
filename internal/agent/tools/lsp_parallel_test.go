@@ -32,9 +32,9 @@ func callLSP(ctx context.Context, tool fantasy.AgentTool, action LSPAction) fant
 // rest of its step; mutual exclusion lives inside it, for mutations only.
 func TestLSPToolIsParallel(t *testing.T) {
 	t.Parallel()
-	require.True(t, NewLSPTool(nil, nil, nil, nil).Info().Parallel)
+	require.True(t, NewLSPTool(nil, nil, nil, nil, "").Info().Parallel)
 
-	for action := range lspActions(nil, nil, nil, nil) {
+	for action := range lspActions(nil, nil, nil, nil, "") {
 		mutates := action == LSPActionRename || action == LSPActionReplaceSymbol || action == LSPActionRestart
 		require.Equal(t, mutates, lspMutatingActions[action], "%s", action)
 	}
