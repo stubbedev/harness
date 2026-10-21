@@ -546,6 +546,13 @@ func effectiveReasoningEffort(model Model) string {
 	return catalog.DefaultReasoningLevel(model.CatalogCfg.ReasoningLevels)
 }
 
+func isResponsesAPIModel(providerCfg config.ProviderConfig, modelID string) bool {
+	if router := catalog.ResponsesAPIRouter(catalog.InferenceProvider(providerCfg.ID)); router != nil {
+		return router(modelID)
+	}
+	return openai.IsResponsesModel(modelID)
+}
+
 func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.ProviderOptions {
 	options := fantasy.ProviderOptions{}
 
@@ -605,7 +612,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		if !hasReasoningEffort && shouldSetEffort {
 			mergedOptions["reasoning_effort"] = reasoningEffort
 		}
-		if openai.IsResponsesModel(model.CatalogCfg.ID) {
+		if isResponsesAPIModel(providerCfg, model.CatalogCfg.ID) {
 			if openai.IsResponsesReasoningModel(model.CatalogCfg.ID) {
 				mergedOptions["reasoning_summary"] = "auto"
 				mergedOptions["include"] = []openai.IncludeType{openai.IncludeReasoningEncryptedContent}
@@ -1414,10 +1421,13 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	return vercel.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, isSubAgent, disableHTTP2 bool) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, wire catalog.Type, isSubAgent, disableHTTP2 bool) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
+	}
+	if wire == catalog.TypeOpenAI {
+		opts = append(opts, openaicompat.WithName(openai.Name))
 	}
 
 	// Set HTTP client based on provider and debug mode.
@@ -1548,6 +1558,10 @@ func (c *coordinator) buildAnthropicVertexProvider(headers map[string]string, op
 // providers (litellm, llamacpp, lmstudio, ollama, omlx) speak
 // OpenAI-compat.
 func wireFamily(providerCfg config.ProviderConfig, modelID string) catalog.Type {
+	if router := catalog.ResponsesAPIRouter(catalog.InferenceProvider(providerCfg.ID)); router != nil && router(modelID) {
+		return catalog.TypeOpenAI
+	}
+
 	switch t := providerCfg.Type; {
 	case catalog.UsesMessagesAPI(catalog.InferenceProvider(providerCfg.ID), modelID):
 		return catalog.TypeAnthropic
@@ -1627,6 +1641,9 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 
 	switch wire {
 	case openai.Name:
+		if providerCfg.Type == catalog.TypeOpenAICompat {
+			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, wire, isSubAgent, providerCfg.DisableHTTP2)
+		}
 		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.DisableHTTP2)
 	case anthropic.Name:
 		switch providerCfg.Type {
@@ -1664,7 +1681,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 			extra["tool_stream"] = true
 			providerCfg.ExtraBody = extra
 		}
-		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.DisableHTTP2)
+		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, wire, isSubAgent, providerCfg.DisableHTTP2)
 	default:
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}

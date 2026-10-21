@@ -8,6 +8,7 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
+	"charm.land/fantasy/providers/openai"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
@@ -59,8 +60,15 @@ func TestProviderOptionsKeyedForBuiltProvider(t *testing.T) {
 		{"openai", config.ProviderConfig{ID: "openai", Type: catalog.TypeOpenAI}, "gpt-5"},
 		{"openai-compat", config.ProviderConfig{ID: string(catalog.InferenceProviderZAICoding), Type: catalog.TypeOpenAICompat}, "glm-5.3"},
 		{"opencode-go on chat completions", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "kimi-k3"},
+		{"opencode-go on the responses api", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "gpt-5.6-luna"},
+		{"opencode-go on the responses api (grok)", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "grok-4.5"},
+		{"opencode-go on the responses api (muse spark)", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "muse-spark-pro"},
 		{"opencode-go on the messages api", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "minimax-m3"},
 		{"opencode-zen on the messages api", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeZen), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "claude-sonnet-4-5"},
+		{"opencode-zen on the responses api", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeZen), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "gpt-5.5"},
+		{"opencode-zen on the responses api (grok)", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeZen), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "grok-4.5"},
+		{"opencode-zen on the responses api (muse spark)", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeZen), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "muse-spark-pro"},
+		{"copilot on the responses api", config.ProviderConfig{ID: string(catalog.InferenceProviderCopilot), Type: catalog.TypeOpenAICompat}, "gpt-6-astra"},
 		{"vertex claude", config.ProviderConfig{ID: "vertexai", Type: catalog.TypeVertexAI, ExtraParams: map[string]string{"project": "p", "location": "us-east5"}}, "claude-sonnet-4@20250514"},
 		{"vertex gemini", config.ProviderConfig{ID: "vertexai", Type: catalog.TypeVertexAI, ExtraParams: map[string]string{"project": "p", "location": "us-east5"}}, "gemini-3-pro"},
 		{"bedrock", config.ProviderConfig{ID: "bedrock", Type: catalog.TypeBedrock}, "anthropic.claude-sonnet-4-5"},
@@ -73,10 +81,20 @@ func TestProviderOptionsKeyedForBuiltProvider(t *testing.T) {
 			model := reasoningModel(tc.providerCfg.ID, tc.modelID)
 			provider, err := wireTestCoordinator(t).buildProvider(tc.providerCfg, model.ModelCfg, false)
 			require.NoError(t, err)
+			responsesAPIModel := isResponsesAPIModel(tc.providerCfg, tc.modelID)
+			if responsesAPIModel {
+				require.Equal(t, openai.Name, provider.Name())
+			}
 
 			opts := getProviderOptions(model, tc.providerCfg)
 			require.Len(t, opts, 1)
 			require.Contains(t, opts, optionsKey(provider.Name()))
+			if responsesAPIModel {
+				parsed, ok := opts[openai.Name].(*openai.ResponsesProviderOptions)
+				require.True(t, ok, "Responses API routes must use Responses provider options")
+				require.NotNil(t, parsed.ReasoningEffort)
+				require.Equal(t, openai.ReasoningEffort("high"), *parsed.ReasoningEffort)
+			}
 		})
 	}
 }
