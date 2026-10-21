@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/env"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/tidwall/gjson"
 )
@@ -682,7 +683,7 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 	configContent := `{
 		"providers": {
 			"hyper": {
-				"api_key": "newer-access-token",
+				"api_key": "$HYPER_API_KEY",
 				"oauth": {
 					"access_token": "newer-access-token",
 					"refresh_token": "refresh-abc",
@@ -704,10 +705,11 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 
 	providers := csync.NewMap[string, ProviderConfig]()
 	providers.Set("hyper", ProviderConfig{
-		ID:         "hyper",
-		Name:       "Hyper",
-		APIKey:     oldToken.AccessToken,
-		OAuthToken: oldToken,
+		ID:             "hyper",
+		Name:           "Hyper",
+		APIKey:         "$HYPER_API_KEY",
+		ResolvedAPIKey: oldToken.AccessToken,
+		OAuthToken:     oldToken,
 	})
 
 	store := &ConfigStore{
@@ -724,9 +726,72 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 	// Verify the in-memory token was updated to the disk token
 	updatedConfig, ok := store.config.Providers.Get("hyper")
 	require.True(t, ok)
-	require.Equal(t, "newer-access-token", updatedConfig.APIKey)
+	require.Equal(t, "$HYPER_API_KEY", updatedConfig.APIKey)
+	require.Equal(t, "newer-access-token", updatedConfig.ResolvedAPIKey)
 	require.Equal(t, "newer-access-token", updatedConfig.OAuthToken.AccessToken)
 	require.Equal(t, "refresh-abc", updatedConfig.OAuthToken.RefreshToken)
+}
+
+func TestConfigStore_SetProviderKeyKeepsTemplateAndResolvedValuesSeparate(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "harness.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"providers":{"custom":{"api_key":"old"}}}`), 0o600))
+	provider := ProviderConfig{ID: "custom", APIKey: "old", ResolvedAPIKey: "old-resolved"}
+	store := NewTestStore(&Config{Providers: csync.NewMapFrom(map[string]ProviderConfig{"custom": provider})})
+	store.globalDataPath = configPath
+	store.resolver = NewShellVariableResolver(env.NewFromMap(map[string]string{
+		"CUSTOM_API_KEY": "resolved$secret",
+	}))
+
+	require.NoError(t, store.SetProviderKey(ScopeGlobal, "custom", "$CUSTOM_API_KEY"))
+
+	updated, ok := store.Config().Providers.Get("custom")
+	require.True(t, ok)
+	require.Equal(t, "$CUSTOM_API_KEY", updated.APIKey)
+	require.Equal(t, "resolved$secret", updated.ResolvedAPIKey)
+	require.NoError(t, updated.APIKeyResolutionError)
+
+	data, err := readConfigJSON(configPath)
+	require.NoError(t, err)
+	require.Equal(t, "$CUSTOM_API_KEY", gjson.GetBytes(data, "providers.custom.api_key").String())
+}
+
+func TestConfigStore_SetProviderOAuthTokenDoesNotOverwriteAPIKeyTemplate(t *testing.T) {
+	t.Parallel()
+
+	const apiKeyTemplate = "$CUSTOM_API_KEY"
+	configPath := filepath.Join(t.TempDir(), "harness.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"providers":{"custom":{"api_key":"$CUSTOM_API_KEY"}}}`), 0o600))
+	provider := ProviderConfig{ID: "custom", APIKey: apiKeyTemplate, ResolvedAPIKey: "old-key"}
+	store := NewTestStore(&Config{Providers: csync.NewMapFrom(map[string]ProviderConfig{"custom": provider})})
+	store.globalDataPath = configPath
+	token := &oauth.Token{AccessToken: "oauth$token'\\path", RefreshToken: "refresh"}
+
+	require.NoError(t, store.SetProviderOAuthToken(ScopeGlobal, "custom", token))
+
+	updated, ok := store.Config().Providers.Get("custom")
+	require.True(t, ok)
+	require.Equal(t, apiKeyTemplate, updated.APIKey)
+	require.Equal(t, token.AccessToken, updated.ResolvedAPIKey)
+	require.Same(t, token, updated.OAuthToken)
+
+	data, err := readConfigJSON(configPath)
+	require.NoError(t, err)
+	require.Equal(t, apiKeyTemplate, gjson.GetBytes(data, "providers.custom.api_key").String())
+	require.Equal(t, token.AccessToken, gjson.GetBytes(data, "providers.custom.oauth.access_token").String())
+}
+
+func TestProviderConfigDoesNotSerializeResolvedCredentialState(t *testing.T) {
+	provider := ProviderConfig{
+		APIKey:                "$CUSTOM_API_KEY",
+		ResolvedAPIKey:        "resolved-secret",
+		APIKeyResolutionError: errors.New("resolution failed"),
+	}
+
+	data, err := json.Marshal(provider)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"api_key":"$CUSTOM_API_KEY"}`, string(data))
 }
 
 // TestConfigStore_SetConfigFields_concurrentInProcess verifies that

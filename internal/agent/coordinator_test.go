@@ -66,6 +66,9 @@ func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)
+	if providerCfg.ResolvedAPIKey == "" && providerCfg.APIKey != "" && providerCfg.APIKeyResolutionError == nil {
+		providerCfg.ResolvedAPIKey, providerCfg.APIKeyResolutionError = cfg.Resolve(providerCfg.APIKey)
+	}
 	cfg.Config().Providers.Set(providerID, providerCfg)
 	return &coordinator{
 		cfg:                cfg,

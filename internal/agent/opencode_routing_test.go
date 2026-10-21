@@ -19,10 +19,11 @@ func TestBuildProviderOpenCodeRouting(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
 			providerCfg := config.ProviderConfig{
-				ID:      providerID,
-				BaseURL: "https://opencode.ai/zen/v1",
-				Type:    catalog.TypeOpenAICompat,
-				APIKey:  "$OPENCODE_API_KEY",
+				ID:             providerID,
+				BaseURL:        "https://opencode.ai/zen/v1",
+				Type:           catalog.TypeOpenAICompat,
+				APIKey:         "$OPENCODE_API_KEY",
+				ResolvedAPIKey: "test-key",
 			}
 			coord := newTestCoordinator(t, env, providerID, providerCfg)
 

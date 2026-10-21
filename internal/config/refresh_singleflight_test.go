@@ -15,16 +15,15 @@ import (
 	"github.com/stubbedev/harness/internal/oauth"
 )
 
-// writeTokenToDisk persists token as the fixture provider credential in the
-// config file at path, mimicking what another harness instance would leave
-// behind after a successful refresh.
+// writeTokenToDisk persists a token alongside the provider's configured key
+// template, mimicking another instance refreshing OAuth without changing it.
 func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 	t.Helper()
 	configContent := fmt.Sprintf(`{
 		"providers": {
 			"rotator": {
 				"base_url": "http://127.0.0.1:9/v1",
-				"api_key": %q,
+				"api_key": "$ROTATOR_API_KEY",
 				"oauth": {
 					"access_token": %q,
 					"refresh_token": %q,
@@ -34,7 +33,7 @@ func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 				"models": [{"id": "rotator-model"}]
 			}
 		}
-	}`, token.AccessToken, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.ExpiresAt)
+	}`, token.AccessToken, token.RefreshToken, token.ExpiresIn, token.ExpiresAt)
 	require.NoError(t, os.WriteFile(path, []byte(configContent), 0o600))
 }
 
@@ -61,10 +60,11 @@ func newRefreshTestStore(t *testing.T, configPath string, exchange func(ctx cont
 
 	providers := csync.NewMap[string, ProviderConfig]()
 	providers.Set("rotator", ProviderConfig{
-		ID:         "rotator",
-		Name:       "Hyper",
-		APIKey:     expired.AccessToken,
-		OAuthToken: expired,
+		ID:             "rotator",
+		Name:           "Hyper",
+		APIKey:         "$ROTATOR_API_KEY",
+		ResolvedAPIKey: expired.AccessToken,
+		OAuthToken:     expired,
 	})
 
 	return &ConfigStore{
@@ -245,7 +245,8 @@ func TestRefreshOAuthToken_StalePeerBorrowsRotatedRefreshToken(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "at4", pc.OAuthToken.AccessToken)
 	require.Equal(t, "rt4", pc.OAuthToken.RefreshToken)
-	require.Equal(t, "at4", pc.APIKey)
+	require.Equal(t, "$ROTATOR_API_KEY", pc.APIKey)
+	require.Equal(t, "at4", pc.ResolvedAPIKey)
 }
 
 // TestRefreshOAuthToken_AdoptsFresherDiskToken verifies that an instance
@@ -269,7 +270,8 @@ func TestRefreshOAuthToken_AdoptsFresherDiskToken(t *testing.T) {
 	pc, ok := store.config.Providers.Get("rotator")
 	require.True(t, ok)
 	require.Equal(t, "at9", pc.OAuthToken.AccessToken)
-	require.Equal(t, "at9", pc.APIKey)
+	require.Equal(t, "$ROTATOR_API_KEY", pc.APIKey)
+	require.Equal(t, "at9", pc.ResolvedAPIKey)
 }
 
 // TestRefreshOAuthToken_IgnoresOlderDiskToken guards against walking

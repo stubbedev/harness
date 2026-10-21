@@ -1555,7 +1555,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		cfg := &Config{
 			Providers: csync.NewMapFrom(map[string]ProviderConfig{
 				"custom": {
-					APIKey:  "test-key",
+					APIKey:  "$CUSTOM_API_KEY",
 					BaseURL: "https://api.custom.com/v1",
 					Type:    catalog.TypeOpenAI,
 					Models: []catalog.Model{{
@@ -1566,7 +1566,7 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		}
 		cfg.setDefaults("/tmp", "")
 
-		env := env.NewFromMap(map[string]string{})
+		env := env.NewFromMap(map[string]string{"CUSTOM_API_KEY": "resolved$secret"})
 		resolver := NewShellVariableResolver(env)
 		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, []catalog.Provider{})
 		require.NoError(t, err)
@@ -1575,8 +1575,59 @@ func TestConfig_configureProvidersCustomProviderValidation(t *testing.T) {
 		customProvider, exists := cfg.Providers.Get("custom")
 		require.True(t, exists)
 		require.Equal(t, "custom", customProvider.ID)
-		require.Equal(t, "test-key", customProvider.APIKey)
+		require.Equal(t, "$CUSTOM_API_KEY", customProvider.APIKey)
+		require.Equal(t, "resolved$secret", customProvider.ResolvedAPIKey)
 		require.Equal(t, "https://api.custom.com/v1", customProvider.BaseURL)
+	})
+
+	t.Run("OAuth token replaces only the resolved credential", func(t *testing.T) {
+		const apiKeyTemplate = "$CUSTOM_API_KEY"
+		token := &oauth.Token{AccessToken: "oauth$token'\\path"}
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"custom": {
+					APIKey:     apiKeyTemplate,
+					BaseURL:    "https://api.custom.com/v1",
+					OAuthToken: token,
+					Models:     []catalog.Model{{ID: "test-model"}},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{"CUSTOM_API_KEY": "must-not-be-used"})
+		resolver := NewShellVariableResolver(env)
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, nil)
+		require.NoError(t, err)
+
+		provider, exists := cfg.Providers.Get("custom")
+		require.True(t, exists)
+		require.Equal(t, apiKeyTemplate, provider.APIKey)
+		require.Equal(t, token.AccessToken, provider.ResolvedAPIKey)
+		require.NoError(t, provider.APIKeyResolutionError)
+	})
+
+	t.Run("custom API key resolution failure is retained for provider construction", func(t *testing.T) {
+		cfg := &Config{
+			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+				"custom": {
+					APIKey:  "$(false)",
+					BaseURL: "https://api.custom.com/v1",
+					Models:  []catalog.Model{{ID: "test-model"}},
+				},
+			}),
+		}
+		cfg.setDefaults("/tmp", "")
+
+		env := env.NewFromMap(map[string]string{})
+		resolver := NewShellVariableResolver(env)
+		err := cfg.configureProviders(context.Background(), testStore(cfg), env, resolver, nil)
+		require.NoError(t, err)
+
+		provider, exists := cfg.Providers.Get("custom")
+		require.True(t, exists)
+		require.Empty(t, provider.ResolvedAPIKey)
+		require.Error(t, provider.APIKeyResolutionError)
 	})
 
 	t.Run("custom anthropic provider is supported", func(t *testing.T) {

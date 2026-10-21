@@ -357,7 +357,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		prepared.Name = p.Name
 		prepared.BaseURL = p.APIEndpoint
 		prepared.APIKey = p.APIKey
-		prepared.APIKeyTemplate = p.APIKey // Store original template for re-resolution
+		if prepared.OAuthToken != nil {
+			prepared.ResolvedAPIKey = prepared.OAuthToken.AccessToken
+			prepared.APIKeyResolutionError = nil
+		} else {
+			prepared.ResolvedAPIKey, prepared.APIKeyResolutionError = resolver.ResolveValue(p.APIKey)
+		}
 		prepared.Type = p.Type
 		prepared.Models = p.Models
 		prepared.ExtraHeaders = headers
@@ -416,15 +421,16 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			// template is never empty: resolve it before deciding, or
 			// Bedrock configures itself on every machine, credentials or
 			// not, and then shows up as a connected provider.
-			key, err := resolver.ResolveValue(p.APIKey)
-			if (key == "" || err != nil) && !hasAWSCredentials(env) {
+			if (prepared.ResolvedAPIKey == "" || prepared.APIKeyResolutionError != nil) && !hasAWSCredentials(env) {
 				skip("Skipping Bedrock provider due to missing AWS credentials")
 				continue
 			}
+			if hasAWSCredentials(env) {
+				prepared.APIKeyResolutionError = nil
+			}
 		default:
-			// if the provider api or endpoint are missing we skip them
-			v, err := resolver.ResolveValue(p.APIKey)
-			if v == "" || err != nil {
+			// OAuth providers authenticate with their token, not the API key template.
+			if prepared.OAuthToken == nil && (prepared.ResolvedAPIKey == "" || prepared.APIKeyResolutionError != nil) {
 				skip("Skipping provider due to missing API key")
 				continue
 			}
@@ -504,7 +510,15 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			c.Providers.Del(id)
 			continue
 		}
-		apiKey, err := resolver.ResolveValue(providerConfig.APIKey)
+		var apiKey string
+		var err error
+		if providerConfig.OAuthToken != nil {
+			apiKey = providerConfig.OAuthToken.AccessToken
+		} else {
+			apiKey, err = resolver.ResolveValue(providerConfig.APIKey)
+		}
+		providerConfig.ResolvedAPIKey = apiKey
+		providerConfig.APIKeyResolutionError = err
 		if apiKey == "" || err != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}

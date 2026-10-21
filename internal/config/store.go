@@ -585,10 +585,16 @@ func (s *ConfigStore) SetProviderKey(scope Scope, providerID, apiKey string) err
 	if err != nil {
 		return err
 	}
+	resolvedAPIKey, err := s.Resolve(apiKey)
+	if err != nil {
+		return fmt.Errorf("failed to resolve API key for provider %s", providerID)
+	}
 	if err := s.SetConfigField(scope, ProviderFieldPath(providerID, "api_key"), apiKey); err != nil {
 		return fmt.Errorf("failed to save api key to config file: %w", err)
 	}
 	providerConfig.APIKey = apiKey
+	providerConfig.ResolvedAPIKey = resolvedAPIKey
+	providerConfig.APIKeyResolutionError = nil
 	s.Config().Providers.Set(providerID, providerConfig)
 	return nil
 }
@@ -607,10 +613,7 @@ func (s *ConfigStore) SetProviderOAuthToken(scope Scope, providerID string, toke
 	// interactively — which would silently invalidate the login they only
 	// just completed.
 	if err := s.withRefreshLock(providerID, func() error {
-		return s.SetConfigFields(scope, map[string]any{
-			ProviderFieldPath(providerID, "api_key"): token.AccessToken,
-			ProviderFieldPath(providerID, "oauth"):   token,
-		})
+		return s.SetConfigField(scope, ProviderFieldPath(providerID, "oauth"), token)
 	}); err != nil {
 		return err
 	}
@@ -744,8 +747,7 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	s.applyToken(providerConfig, refreshedToken, providerID)
 
 	if err := s.SetConfigFields(scope, map[string]any{
-		ProviderFieldPath(providerID, "api_key"): refreshedToken.AccessToken,
-		ProviderFieldPath(providerID, "oauth"):   refreshedToken,
+		ProviderFieldPath(providerID, "oauth"): refreshedToken,
 	}); err != nil {
 		return fmt.Errorf("failed to persist refreshed token: %w", err)
 	}
@@ -907,7 +909,8 @@ func (s *ConfigStore) refreshLockPath(providerID string) string {
 // applyToken updates the in-memory provider config with the given token.
 func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) {
 	providerConfig.OAuthToken = token
-	providerConfig.APIKey = token.AccessToken
+	providerConfig.ResolvedAPIKey = token.AccessToken
+	providerConfig.APIKeyResolutionError = nil
 	if providerID == string(catalog.InferenceProviderCopilot) {
 		providerConfig.SetupGitHubCopilot()
 	}

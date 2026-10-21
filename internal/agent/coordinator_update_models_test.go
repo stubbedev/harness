@@ -39,10 +39,11 @@ func (r *recordingAgent) SetTools(tools []fantasy.AgentTool) {
 // construct without network I/O, the same shape agenttest uses.
 func offlineTestProvider(models ...string) config.ProviderConfig {
 	cfg := config.ProviderConfig{
-		ID:      "test-provider",
-		Type:    "openai-compat",
-		BaseURL: "http://127.0.0.1:0/v1",
-		APIKey:  "test-key",
+		ID:             "test-provider",
+		Type:           "openai-compat",
+		BaseURL:        "http://127.0.0.1:0/v1",
+		APIKey:         "test-key",
+		ResolvedAPIKey: "test-key",
 	}
 	for _, id := range models {
 		cfg.Models = append(cfg.Models, catalog.Model{ID: id, DefaultMaxTokens: 4096})
@@ -113,11 +114,10 @@ func TestUpdateModels_RebuildsAfterInPlaceCredentialChange(t *testing.T) {
 	require.NoError(t, coord.UpdateModels(t.Context()))
 	require.Equal(t, 1, agent.modelSets)
 
-	// Rotate the credential the way the OAuth refresh and API-key
-	// re-resolution paths do: written straight into the shared Providers
-	// map, so the published config pointer does not change.
+	// Rotate the resolved credential in the shared Providers map, so the
+	// published config pointer does not change.
 	rotated := providerCfg
-	rotated.APIKey = "rotated-key"
+	rotated.ResolvedAPIKey = "rotated-key"
 	coord.cfg.Config().Providers.Set(providerCfg.ID, rotated)
 
 	require.NoError(t, coord.UpdateModels(t.Context()))
@@ -157,7 +157,7 @@ func TestModelToolGeneration_SensitiveToLiveInputs(t *testing.T) {
 	t.Run("provider credential change", func(t *testing.T) {
 		gen := coord.modelToolGeneration()
 		rotated := providerCfg
-		rotated.APIKey = "rotated-key"
+		rotated.ResolvedAPIKey = "rotated-key"
 		coord.cfg.Config().Providers.Set(providerCfg.ID, rotated)
 		require.NotEqual(t, gen, coord.modelToolGeneration())
 	})

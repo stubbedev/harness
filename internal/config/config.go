@@ -110,10 +110,12 @@ type ProviderConfig struct {
 	BaseURL string `json:"base_url,omitempty" jsonschema:"description=Base URL for the provider's API,format=uri,example=https://api.openai.com/v1"`
 	// The provider type, e.g. "openai", "anthropic", etc. if empty it defaults to openai.
 	Type catalog.Type `json:"type,omitempty" jsonschema:"description=Provider type that determines the API format,default=openai"`
-	// The provider's API key.
+	// The configured API key template.
 	APIKey string `json:"api_key,omitempty" jsonschema:"description=API key for authentication with the provider,example=$OPENAI_API_KEY"`
-	// The original API key template before resolution (for re-resolution on auth errors).
-	APIKeyTemplate string `json:"-"`
+	// ResolvedAPIKey is the credential currently used to build provider clients.
+	ResolvedAPIKey string `json:"-" jsonschema:"-"`
+	// APIKeyResolutionError prevents a provider from being built with a silently dropped credential.
+	APIKeyResolutionError error `json:"-" jsonschema:"-"`
 	// OAuthToken for providers that use OAuth2 authentication.
 	OAuthToken *oauth.Token `json:"oauth,omitempty" jsonschema:"description=OAuth2 token for authentication with the provider"`
 	// Marks the provider as disabled.

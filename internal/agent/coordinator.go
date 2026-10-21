@@ -1616,8 +1616,14 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 	}
 
-	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
-	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
+	if providerCfg.APIKeyResolutionError != nil {
+		return nil, fmt.Errorf("failed to resolve API key for provider %s", providerCfg.ID)
+	}
+	apiKey := providerCfg.ResolvedAPIKey
+	baseURL, err := c.cfg.Resolve(providerCfg.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve base URL for provider %s: %w", providerCfg.ID, err)
+	}
 
 	switch wire {
 	case openai.Name:
@@ -1946,7 +1952,8 @@ func (f fingerprint) addProviderBuildInputs(p config.ProviderConfig) fingerprint
 	f = f.addString(p.ID)
 	f = f.addString(string(p.Type))
 	f = f.addString(p.APIKey)
-	f = f.addString(p.APIKeyTemplate)
+	f = f.addString(p.ResolvedAPIKey)
+	f = f.addBool(p.APIKeyResolutionError != nil)
 	f = f.addString(p.BaseURL)
 	f = f.addBool(p.DisableHTTP2)
 	f = f.addBool(p.FlatRate)
@@ -2174,7 +2181,7 @@ func (c *coordinator) retryAfterUnauthorized(ctx context.Context, providerCfg co
 		return nil
 	case providerCfg.AWSAuthRefresh != "":
 		return c.refreshAWSCredentials(ctx, providerCfg)
-	case strings.Contains(providerCfg.APIKeyTemplate, "$"):
+	case strings.Contains(providerCfg.APIKey, "$"):
 		slog.Debug("Received 401. Refreshing API Key template and retrying", "provider", providerCfg.ID)
 		return c.refreshApiKeyTemplate(ctx, providerCfg)
 	default:
@@ -2230,7 +2237,7 @@ func isUnauthorized(err error) bool {
 // nil if no refresh mechanism is configured for the provider.
 func (c *coordinator) makeAuthRefreshCallback(providerCfg config.ProviderConfig) func(context.Context, *fantasy.ProviderError) error {
 	if providerCfg.OAuthToken == nil &&
-		!strings.Contains(providerCfg.APIKeyTemplate, "$") &&
+		!strings.Contains(providerCfg.APIKey, "$") &&
 		providerCfg.AWSAuthRefresh == "" {
 		return nil
 	}
@@ -2251,7 +2258,7 @@ func (c *coordinator) refreshOAuth2Token(ctx context.Context, providerCfg config
 }
 
 func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg config.ProviderConfig) error {
-	newAPIKey, err := c.cfg.Resolve(providerCfg.APIKeyTemplate)
+	newAPIKey, err := c.cfg.Resolve(providerCfg.APIKey)
 	if err != nil {
 		// A resolution error quotes the template the user wrote. That is
 		// usually a reference ($ANTHROPIC_API_KEY, a command
@@ -2263,7 +2270,8 @@ func (c *coordinator) refreshApiKeyTemplate(ctx context.Context, providerCfg con
 		return err
 	}
 
-	providerCfg.APIKey = newAPIKey
+	providerCfg.ResolvedAPIKey = newAPIKey
+	providerCfg.APIKeyResolutionError = nil
 	c.cfg.Config().Providers.Set(providerCfg.ID, providerCfg)
 
 	if err := c.UpdateModels(ctx); err != nil {
