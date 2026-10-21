@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/pkg/browser"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
@@ -111,7 +112,7 @@ func NewClientWorkspace(c *client.Client, ws proto.Workspace) *ClientWorkspace {
 func (w *ClientWorkspace) refreshWorkspace() {
 	updated, err := w.client.GetWorkspace(context.Background(), w.workspaceID())
 	if err != nil {
-		slog.Error("Failed to refresh workspace", "error", err)
+		logErr("refresh workspace", err)
 		return
 	}
 	if updated.Config != nil {
@@ -217,39 +218,39 @@ func (w *ClientWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, c
 	return w.client.RunShellCommand(ctx, w.workspaceID(), sessionID, command, termWidth, isFirstMessage)
 }
 
-func (w *ClientWorkspace) AgentCancel(sessionID string) {
-	_ = w.client.CancelAgentSession(context.Background(), w.workspaceID(), sessionID)
+func (w *ClientWorkspace) AgentCancel(sessionID string) error {
+	return w.client.CancelAgentSession(context.Background(), w.workspaceID(), sessionID)
 }
 
-func (w *ClientWorkspace) AgentCancelTurn(sessionID string) {
-	_ = w.client.CancelAgentSessionTurn(context.Background(), w.workspaceID(), sessionID)
+func (w *ClientWorkspace) AgentCancelTurn(sessionID string) error {
+	return w.client.CancelAgentSessionTurn(context.Background(), w.workspaceID(), sessionID)
 }
 
-func (w *ClientWorkspace) AgentIsBusy() bool {
+func (w *ClientWorkspace) AgentIsBusy() (bool, error) {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
 	if err != nil {
-		return false
+		return false, err
 	}
-	return info.IsBusy
+	return info.IsBusy, nil
 }
 
-func (w *ClientWorkspace) AgentIsSessionBusy(sessionID string) bool {
+func (w *ClientWorkspace) AgentIsSessionBusy(sessionID string) (bool, error) {
 	info, err := w.client.GetAgentSessionInfo(context.Background(), w.workspaceID(), sessionID)
 	if err != nil {
-		return false
+		return false, err
 	}
-	return info.IsBusy
+	return info.IsBusy, nil
 }
 
-func (w *ClientWorkspace) AgentModel() AgentModel {
+func (w *ClientWorkspace) AgentModel() (AgentModel, error) {
 	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
 	if err != nil {
-		return AgentModel{}
+		return AgentModel{}, err
 	}
 	return AgentModel{
 		CatalogCfg: info.Model,
 		ModelCfg:   info.ModelCfg,
-	}
+	}, nil
 }
 
 func (w *ClientWorkspace) AgentIsReady() bool {
@@ -276,24 +277,16 @@ func (w *ClientWorkspace) AgentReadyErr() error {
 	return nil
 }
 
-func (w *ClientWorkspace) AgentQueuedPrompts(sessionID string) int {
-	count, err := w.client.GetAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
-	if err != nil {
-		return 0
-	}
-	return count
+func (w *ClientWorkspace) AgentQueuedPrompts(sessionID string) (int, error) {
+	return w.client.GetAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
 }
 
-func (w *ClientWorkspace) AgentQueuedPromptsList(sessionID string) []string {
-	prompts, err := w.client.GetAgentSessionQueuedPromptsList(context.Background(), w.workspaceID(), sessionID)
-	if err != nil {
-		return nil
-	}
-	return prompts
+func (w *ClientWorkspace) AgentQueuedPromptsList(sessionID string) ([]string, error) {
+	return w.client.GetAgentSessionQueuedPromptsList(context.Background(), w.workspaceID(), sessionID)
 }
 
-func (w *ClientWorkspace) AgentClearQueue(sessionID string) {
-	_ = w.client.ClearAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
+func (w *ClientWorkspace) AgentClearQueue(sessionID string) error {
+	return w.client.ClearAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
 }
 
 func (w *ClientWorkspace) AgentSummarize(ctx context.Context, sessionID, instructions string) error {
@@ -312,12 +305,12 @@ func (w *ClientWorkspace) InitCoderAgentNonInteractive(ctx context.Context) erro
 	return w.client.InitiateAgentProcessing(ctx, w.workspaceID(), false)
 }
 
-func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
+func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) (config.SelectedModel, error) {
 	model, err := w.client.GetDefaultSmallModel(context.Background(), w.workspaceID(), providerID)
 	if err != nil {
-		return config.SelectedModel{}
+		return config.SelectedModel{}, err
 	}
-	return *model
+	return *model, nil
 }
 
 // -- Questions --
@@ -327,7 +320,7 @@ func (w *ClientWorkspace) QuestionAnswer(responses []question.Answer) bool {
 	req := proto.QuestionAnswer{Responses: proto.QuestionResponsesFromDomain(responses)}
 	resolved, err := w.client.AnswerQuestionBatch(context.Background(), w.workspaceID(), req)
 	if err != nil {
-		slog.Error("Failed to answer question", "error", err)
+		logErr("answer question", err)
 		return false
 	}
 	return resolved
@@ -337,7 +330,7 @@ func (w *ClientWorkspace) QuestionAnswer(responses []question.Answer) bool {
 func (w *ClientWorkspace) QuestionCancel() bool {
 	cancelled, err := w.client.CancelQuestionBatch(context.Background(), w.workspaceID())
 	if err != nil {
-		slog.Error("Failed to cancel question", "error", err)
+		logErr("cancel question", err)
 		return false
 	}
 	return cancelled
@@ -345,16 +338,12 @@ func (w *ClientWorkspace) QuestionCancel() bool {
 
 // -- FileTracker --
 
-func (w *ClientWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
-	_ = w.client.FileTrackerRecordRead(ctx, w.workspaceID(), sessionID, path)
+func (w *ClientWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) error {
+	return w.client.FileTrackerRecordRead(ctx, w.workspaceID(), sessionID, path)
 }
 
-func (w *ClientWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time {
-	t, err := w.client.FileTrackerLastReadTime(ctx, w.workspaceID(), sessionID, path)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
+func (w *ClientWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) (time.Time, error) {
+	return w.client.FileTrackerLastReadTime(ctx, w.workspaceID(), sessionID, path)
 }
 
 func (w *ClientWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
@@ -373,18 +362,18 @@ func (w *ClientWorkspace) ListSessionHistory(ctx context.Context, sessionID stri
 
 // -- LSP --
 
-func (w *ClientWorkspace) LSPStart(ctx context.Context, path string) {
-	_ = w.client.LSPStart(ctx, w.workspaceID(), path)
+func (w *ClientWorkspace) LSPStart(ctx context.Context, path string) error {
+	return w.client.LSPStart(ctx, w.workspaceID(), path)
 }
 
-func (w *ClientWorkspace) LSPStopAll(ctx context.Context) {
-	_ = w.client.LSPStopAll(ctx, w.workspaceID())
+func (w *ClientWorkspace) LSPStopAll(ctx context.Context) error {
+	return w.client.LSPStopAll(ctx, w.workspaceID())
 }
 
-func (w *ClientWorkspace) LSPGetStates() map[string]LSPClientInfo {
+func (w *ClientWorkspace) LSPGetStates() (map[string]LSPClientInfo, error) {
 	states, err := w.client.GetLSPs(context.Background(), w.workspaceID())
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	result := make(map[string]LSPClientInfo, len(states))
 	for k, v := range states {
@@ -397,35 +386,47 @@ func (w *ClientWorkspace) LSPGetStates() map[string]LSPClientInfo {
 			SessionDisabled: v.SessionDisabled,
 		}
 	}
-	return result
+	return result, nil
 }
 
-func (w *ClientWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
-	diags, err := w.client.GetLSPDiagnostics(context.Background(), w.workspaceID(), name)
-	if err != nil {
-		return lsp.DiagnosticCounts{}
-	}
+func (w *ClientWorkspace) LSPGetDiagnosticCounts(name string) (lsp.DiagnosticCounts, error) {
 	var counts lsp.DiagnosticCounts
+	diags, err := w.lspDiagnostics(name)
+	if err != nil {
+		return counts, err
+	}
 	for _, fileDiags := range diags {
 		countDiagnostics(&counts, fileDiags)
 	}
-	return counts
+	return counts, nil
 }
 
 // LSPFileDiagnostics folds every server's diagnostics into per-file severity
 // counts, mirroring [AppWorkspace.LSPFileDiagnostics] over the RPC boundary.
-// A server that fails to answer contributes nothing; a file no running
-// server reports is genuinely clean.
-func (w *ClientWorkspace) LSPFileDiagnostics() map[string]lsp.DiagnosticCounts {
+// A server that is no longer running contributes nothing; any other failure
+// is returned, so an unreachable server never reads as every file clean.
+func (w *ClientWorkspace) LSPFileDiagnostics() (map[string]lsp.DiagnosticCounts, error) {
+	states, err := w.LSPGetStates()
+	if err != nil {
+		return nil, err
+	}
 	counts := make(map[string]lsp.DiagnosticCounts)
-	for name := range w.LSPGetStates() {
-		diags, err := w.client.GetLSPDiagnostics(context.Background(), w.workspaceID(), name)
+	for name := range states {
+		diags, err := w.lspDiagnostics(name)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		foldFileDiagnostics(counts, diags)
 	}
-	return counts
+	return counts, nil
+}
+
+func (w *ClientWorkspace) lspDiagnostics(name string) (map[protocol.DocumentURI][]protocol.Diagnostic, error) {
+	diags, err := w.client.GetLSPDiagnostics(context.Background(), w.workspaceID(), name)
+	if errors.Is(err, client.ErrResourceNotFound) {
+		return nil, nil
+	}
+	return diags, err
 }
 
 func (w *ClientWorkspace) LSPRestartSingle(ctx context.Context, name string) error {
@@ -495,6 +496,7 @@ func (w *ClientWorkspace) RemoveConfigField(scope config.Scope, key string) erro
 func (w *ClientWorkspace) ImportCopilot() (*oauth.Token, bool) {
 	token, ok, err := w.client.ImportCopilot(context.Background(), w.workspaceID())
 	if err != nil {
+		logErr("import Copilot token", err)
 		return nil, false
 	}
 	if ok {
@@ -593,28 +595,28 @@ func (w *ClientWorkspace) SetSubagentDisabled(name string, _ bool) error {
 
 // -- MCP operations --
 
-func (w *ClientWorkspace) MCPGetStates() map[string]mcp.ClientInfo {
+func (w *ClientWorkspace) MCPGetStates() (map[string]mcp.ClientInfo, error) {
 	states, err := w.client.MCPGetStates(context.Background(), w.workspaceID())
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	result := make(map[string]mcp.ClientInfo, len(states))
 	for k, v := range states {
 		result[k] = v.ToDomain()
 	}
-	return result
+	return result, nil
 }
 
-func (w *ClientWorkspace) MCPRefreshPrompts(ctx context.Context, name string) {
-	_ = w.client.MCPRefreshPrompts(ctx, w.workspaceID(), name)
+func (w *ClientWorkspace) MCPRefreshPrompts(ctx context.Context, name string) error {
+	return w.client.MCPRefreshPrompts(ctx, w.workspaceID(), name)
 }
 
-func (w *ClientWorkspace) MCPRefreshResources(ctx context.Context, name string) {
-	_ = w.client.MCPRefreshResources(ctx, w.workspaceID(), name)
+func (w *ClientWorkspace) MCPRefreshResources(ctx context.Context, name string) error {
+	return w.client.MCPRefreshResources(ctx, w.workspaceID(), name)
 }
 
-func (w *ClientWorkspace) RefreshMCPTools(ctx context.Context, name string) {
-	_ = w.client.RefreshMCPTools(ctx, w.workspaceID(), name)
+func (w *ClientWorkspace) RefreshMCPTools(ctx context.Context, name string) error {
+	return w.client.RefreshMCPTools(ctx, w.workspaceID(), name)
 }
 
 func (w *ClientWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error) {
@@ -679,7 +681,12 @@ func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) erro
 			if opened {
 				continue
 			}
-			if u := w.MCPAuthURL(name); u != "" {
+			u, err := w.MCPAuthURL(name)
+			if err != nil {
+				logErr("poll MCP auth URL", err)
+				continue
+			}
+			if u != "" {
 				if err := browser.OpenURL(u); err != nil {
 					slog.Warn("Failed to open MCP OAuth URL in browser", "error", err)
 				}
@@ -692,7 +699,7 @@ func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) erro
 func (w *ClientWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
 	pending, err := w.client.MCPPendingAuth(context.Background(), w.workspaceID())
 	if err != nil {
-		slog.Warn("Failed to fetch MCP pending auth", "error", err)
+		logErr("fetch MCP pending auth", err)
 		return nil
 	}
 	result := make([]mcp.PendingAuthServer, len(pending))
@@ -702,16 +709,12 @@ func (w *ClientWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
 	return result
 }
 
-func (w *ClientWorkspace) MCPAuthURL(name string) string {
+func (w *ClientWorkspace) MCPAuthURL(name string) (string, error) {
 	// The server's in-progress authorization URL is exposed through the
 	// pending-auth list while the flow runs; a server in StateNeedsAuth
 	// paired with an active flow reports its URL here. Poll the server
 	// for the in-flight URL.
-	u, err := w.client.MCPAuthURL(context.Background(), w.workspaceID(), name)
-	if err != nil {
-		return ""
-	}
-	return u
+	return w.client.MCPAuthURL(context.Background(), w.workspaceID(), name)
 }
 
 func (w *ClientWorkspace) MCPReconnect(ctx context.Context, name string) error {
@@ -982,7 +985,13 @@ func (w *ClientWorkspace) Shutdown() {
 	// The server predates client retirement, so fall back to releasing
 	// the workspace we know about. Nothing better is possible against an
 	// older server.
-	_ = w.client.DeleteWorkspace(context.Background(), w.workspaceID())
+	if err := w.client.DeleteWorkspace(context.Background(), w.workspaceID()); err != nil {
+		logErr("release workspace", err)
+	}
+}
+
+func logErr(op string, err error) {
+	slog.Error("Workspace call failed", "op", op, "error", err)
 }
 
 // awaitSubscription waits for the subscription loop to return. It returns

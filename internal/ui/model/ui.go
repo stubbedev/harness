@@ -573,8 +573,12 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// frame renders the model info; the busy probe keeps it fresh
 	// afterwards.
 	if com.Workspace.AgentIsReady() {
-		ui.agentReady = true
-		ui.agentModel = com.Workspace.AgentModel()
+		if model, err := com.Workspace.AgentModel(); err != nil {
+			slog.Warn("Failed to fetch agent model", "error", err)
+		} else {
+			ui.agentReady = true
+			ui.agentModel = model
+		}
 	}
 	ui.setEditorPrompt()
 	ui.randomizePlaceholders()
@@ -2288,8 +2292,10 @@ func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
 	m.applyThemeForProvider(lastAssistant.Provider)
 
 	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-		smallModel := m.com.Workspace.GetDefaultSmallModel(lastAssistant.Provider)
-		if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+		smallModel, err := m.com.Workspace.GetDefaultSmallModel(lastAssistant.Provider)
+		if err != nil {
+			slog.Error("Failed to resolve small model during session restore", "error", err)
+		} else if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
 			slog.Error("Failed to set small model during session restore", "error", err)
 		}
 	}
@@ -2430,8 +2436,10 @@ func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
 		}
 		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
 			// Ensure small model is set is unset.
-			smallModel := m.com.Workspace.GetDefaultSmallModel(providerID)
-			if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
+			smallModel, err := m.com.Workspace.GetDefaultSmallModel(providerID)
+			if err != nil {
+				cmds = append(cmds, util.ReportError(err))
+			} else if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
 				cmds = append(cmds, util.ReportError(err))
 			}
 		}
@@ -3903,7 +3911,10 @@ func (m *UI) insertFileCompletion(path string) tea.Cmd {
 
 		if sessionID != "" {
 			// Skip attachment if file was already read and hasn't been modified.
-			lastRead := m.com.Workspace.FileTrackerLastReadTime(context.Background(), sessionID, absPath)
+			lastRead, err := m.com.Workspace.FileTrackerLastReadTime(context.Background(), sessionID, absPath)
+			if err != nil {
+				return util.NewErrorMsg(err)
+			}
 			if !lastRead.IsZero() {
 				if info, err := os.Stat(path); err == nil && !info.ModTime().After(lastRead) {
 					return nil
@@ -4227,8 +4238,12 @@ func (m *UI) sendReadyMessage(content string, attachments ...message.Attachment)
 	reads := slices.Clone(m.sessionFileReads)
 	cmds = append(cmds, func() tea.Msg {
 		for _, path := range reads {
-			m.com.Workspace.FileTrackerRecordRead(ctx, readsSessionID, path)
-			m.com.Workspace.LSPStart(ctx, path)
+			if err := m.com.Workspace.FileTrackerRecordRead(ctx, readsSessionID, path); err != nil {
+				return util.NewErrorMsg(err)
+			}
+			if err := m.com.Workspace.LSPStart(ctx, path); err != nil {
+				return util.NewErrorMsg(err)
+			}
 		}
 		return nil
 	})
@@ -4435,7 +4450,9 @@ func (m *UI) cancelAgent() tea.Cmd {
 		m.invalidateBusyCaches()
 		sessionID, refresh := m.session.ID, m.dispatchBusyRefresh()
 		return func() tea.Msg {
-			m.com.Workspace.AgentCancelTurn(sessionID)
+			if err := m.com.Workspace.AgentCancelTurn(sessionID); err != nil {
+				return util.NewErrorMsg(err)
+			}
 			if refresh == nil {
 				return nil
 			}
@@ -4871,8 +4888,7 @@ func (m *UI) newSession() tea.Cmd {
 	agenttools.ResetCache()
 	return tea.Batch(
 		func() tea.Msg {
-			m.com.Workspace.LSPStopAll(context.Background())
-			return nil
+			return util.ErrorMsgOrNil(m.com.Workspace.LSPStopAll(context.Background()))
 		},
 		m.loadPromptHistory(),
 		m.reportCurrentSession(""),
@@ -5225,31 +5241,28 @@ func (m *UI) runMCPPrompt(name, clientID, promptID string, arguments map[string]
 
 func (m *UI) handleStateChanged() tea.Cmd {
 	return m.updateAgentModelCmd(func() tea.Msg {
-		m.com.Workspace.UpdateAgentModel(context.Background())
-		return mcpStateChangedMsg{
-			states: m.com.Workspace.MCPGetStates(),
+		if err := m.com.Workspace.UpdateAgentModel(context.Background()); err != nil {
+			return util.NewErrorMsg(err)
 		}
+		return mcpStatesMsg(m.com.Workspace)
 	})
 }
 
 func handleMCPPromptsEvent(ws workspace.Workspace, name string) tea.Cmd {
 	return func() tea.Msg {
-		ws.MCPRefreshPrompts(context.Background(), name)
-		return nil
+		return util.ErrorMsgOrNil(ws.MCPRefreshPrompts(context.Background(), name))
 	}
 }
 
 func handleMCPToolsEvent(ws workspace.Workspace, name string) tea.Cmd {
 	return func() tea.Msg {
-		ws.RefreshMCPTools(context.Background(), name)
-		return nil
+		return util.ErrorMsgOrNil(ws.RefreshMCPTools(context.Background(), name))
 	}
 }
 
 func handleMCPResourcesEvent(ws workspace.Workspace, name string) tea.Cmd {
 	return func() tea.Msg {
-		ws.MCPRefreshResources(context.Background(), name)
-		return nil
+		return util.ErrorMsgOrNil(ws.MCPRefreshResources(context.Background(), name))
 	}
 }
 

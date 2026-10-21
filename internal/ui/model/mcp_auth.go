@@ -10,6 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/ui/dialog"
+	"github.com/stubbedev/harness/internal/ui/util"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // isAuthTimeout reports whether an error indicates the OAuth flow was
@@ -67,8 +69,14 @@ func (m *UI) checkPendingMCPAuth() tea.Cmd {
 		if err := mcp.WaitForInit(ctx); err != nil {
 			return nil
 		}
-		return mcpStateChangedMsg{
-			states: m.com.Workspace.MCPGetStates(),
-		}
+		return mcpStatesMsg(m.com.Workspace)
 	}
+}
+
+func mcpStatesMsg(ws workspace.Workspace) tea.Msg {
+	states, err := ws.MCPGetStates()
+	if err != nil {
+		return util.NewErrorMsg(err)
+	}
+	return mcpStateChangedMsg{states: states}
 }

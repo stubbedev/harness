@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -32,6 +33,7 @@ type lspStatesMsg struct {
 	states          map[string]workspace.LSPClientInfo
 	diagnostics     map[string]lsp.DiagnosticCounts
 	fileDiagnostics map[string]lsp.DiagnosticCounts
+	err             error
 }
 
 // LSPInfo wraps LSP client information with diagnostic counts by severity.
@@ -66,16 +68,31 @@ func (m *UI) dispatchLSPRefresh() tea.Cmd {
 	m.lspCheckedAt = time.Now()
 	ws := m.com.Workspace
 	return func() tea.Msg {
-		states := ws.LSPGetStates()
-		diagnostics := make(map[string]lsp.DiagnosticCounts, len(states))
-		for name := range states {
-			diagnostics[name] = ws.LSPGetDiagnosticCounts(name)
+		return fetchLSPStates(ws)
+	}
+}
+
+func fetchLSPStates(ws workspace.Workspace) lspStatesMsg {
+	states, err := ws.LSPGetStates()
+	if err != nil {
+		return lspStatesMsg{err: err}
+	}
+	diagnostics := make(map[string]lsp.DiagnosticCounts, len(states))
+	for name := range states {
+		counts, err := ws.LSPGetDiagnosticCounts(name)
+		if err != nil {
+			return lspStatesMsg{err: err}
 		}
-		return lspStatesMsg{
-			states:          states,
-			diagnostics:     diagnostics,
-			fileDiagnostics: ws.LSPFileDiagnostics(),
-		}
+		diagnostics[name] = counts
+	}
+	fileDiagnostics, err := ws.LSPFileDiagnostics()
+	if err != nil {
+		return lspStatesMsg{err: err}
+	}
+	return lspStatesMsg{
+		states:          states,
+		diagnostics:     diagnostics,
+		fileDiagnostics: fileDiagnostics,
 	}
 }
 
@@ -84,13 +101,17 @@ func (m *UI) dispatchLSPRefresh() tea.Cmd {
 func (m *UI) applyLSPStates(msg lspStatesMsg) tea.Cmd {
 	m.lspFetchInFlight = false
 	m.lspCheckedAt = time.Now()
-	m.lspStates = msg.states
-	m.lspDiagnostics = msg.diagnostics
-	m.lspFileDiagnostics = msg.fileDiagnostics
-	// Overlay the fresh per-file state on every diagnostics item in the
-	// transcript, so a report next to a file the servers have since
-	// cleared says so instead of leaving the old errors standing.
-	m.chat.SetLiveDiagnostics(msg.fileDiagnostics)
+	if msg.err != nil {
+		slog.Warn("Failed to refresh LSP state", "error", msg.err)
+	} else {
+		m.lspStates = msg.states
+		m.lspDiagnostics = msg.diagnostics
+		m.lspFileDiagnostics = msg.fileDiagnostics
+		// Overlay the fresh per-file state on every diagnostics item in the
+		// transcript, so a report next to a file the servers have since
+		// cleared says so instead of leaving the old errors standing.
+		m.chat.SetLiveDiagnostics(msg.fileDiagnostics)
+	}
 	if m.lspRefreshQueued {
 		m.lspRefreshQueued = false
 		return m.dispatchLSPRefresh()

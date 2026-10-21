@@ -138,9 +138,13 @@ func (w *testWorkspace) AgentIsReady() bool {
 	return false
 }
 
+func (w *testWorkspace) AgentReadyErr() error {
+	return workspace.ErrAgentNotInitialized
+}
+
 // AgentCancelTurn satisfies the busy-cancel path; the embedded nil
 // Workspace would panic, and stress tests press escape while busy.
-func (w *testWorkspace) AgentCancelTurn(string) {}
+func (w *testWorkspace) AgentCancelTurn(string) error { return nil }
 
 func (w *testWorkspace) ListMessages(_ context.Context, sessionID string) ([]message.Message, error) {
 	w.listed = append(w.listed, sessionID)

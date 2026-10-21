@@ -3,6 +3,7 @@ package dialog
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -38,7 +39,7 @@ type MCPAuth struct {
 	current   int
 	state     MCPAuthState
 	err       error
-	authURLFn func(name string) string
+	authURLFn func(name string) (string, error)
 
 	cancelAuth context.CancelFunc
 
@@ -54,7 +55,7 @@ type MCPAuth struct {
 var _ Dialog = (*MCPAuth)(nil)
 
 // NewMCPAuth creates a new MCP authentication dialog.
-func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authURLFn func(string) string) (*MCPAuth, tea.Cmd) {
+func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authURLFn func(string) (string, error)) (*MCPAuth, tea.Cmd) {
 	t := com.Styles
 	m := &MCPAuth{
 		com:       com,
@@ -200,7 +201,12 @@ func (m *MCPAuth) authURL() string {
 	if m.authURLFn == nil {
 		return ""
 	}
-	return m.authURLFn(m.currentServer().Name)
+	u, err := m.authURLFn(m.currentServer().Name)
+	if err != nil {
+		slog.Warn("Failed to fetch MCP auth URL", "server", m.currentServer().Name, "error", err)
+		return ""
+	}
+	return u
 }
 
 func (m *MCPAuth) currentServer() mcptools.PendingAuthServer {

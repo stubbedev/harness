@@ -181,41 +181,43 @@ func (w *AppWorkspace) AgentRunShellCommand(ctx context.Context, sessionID, comm
 	}, nil
 }
 
-func (w *AppWorkspace) AgentCancel(sessionID string) {
+func (w *AppWorkspace) AgentCancel(sessionID string) error {
 	if w.app.AgentCoordinator != nil {
 		w.app.AgentCoordinator.Cancel(sessionID)
 	}
+	return nil
 }
 
-func (w *AppWorkspace) AgentCancelTurn(sessionID string) {
+func (w *AppWorkspace) AgentCancelTurn(sessionID string) error {
 	if w.app.AgentCoordinator != nil {
 		w.app.AgentCoordinator.CancelTurn(sessionID)
 	}
+	return nil
 }
 
-func (w *AppWorkspace) AgentIsBusy() bool {
+func (w *AppWorkspace) AgentIsBusy() (bool, error) {
 	if w.app.AgentCoordinator == nil {
-		return false
+		return false, nil
 	}
-	return w.app.AgentCoordinator.IsBusy()
+	return w.app.AgentCoordinator.IsBusy(), nil
 }
 
-func (w *AppWorkspace) AgentIsSessionBusy(sessionID string) bool {
+func (w *AppWorkspace) AgentIsSessionBusy(sessionID string) (bool, error) {
 	if w.app.AgentCoordinator == nil {
-		return false
+		return false, nil
 	}
-	return w.app.AgentCoordinator.IsSessionBusy(sessionID)
+	return w.app.AgentCoordinator.IsSessionBusy(sessionID), nil
 }
 
-func (w *AppWorkspace) AgentModel() AgentModel {
+func (w *AppWorkspace) AgentModel() (AgentModel, error) {
 	if w.app.AgentCoordinator == nil {
-		return AgentModel{}
+		return AgentModel{}, nil
 	}
 	m := w.app.AgentCoordinator.Model()
 	return AgentModel{
 		CatalogCfg: m.CatalogCfg,
 		ModelCfg:   m.ModelCfg,
-	}
+	}, nil
 }
 
 func (w *AppWorkspace) AgentIsReady() bool {
@@ -229,24 +231,25 @@ func (w *AppWorkspace) AgentReadyErr() error {
 	return nil
 }
 
-func (w *AppWorkspace) AgentQueuedPrompts(sessionID string) int {
+func (w *AppWorkspace) AgentQueuedPrompts(sessionID string) (int, error) {
 	if w.app.AgentCoordinator == nil {
-		return 0
+		return 0, nil
 	}
-	return w.app.AgentCoordinator.QueuedPrompts(sessionID)
+	return w.app.AgentCoordinator.QueuedPrompts(sessionID), nil
 }
 
-func (w *AppWorkspace) AgentQueuedPromptsList(sessionID string) []string {
+func (w *AppWorkspace) AgentQueuedPromptsList(sessionID string) ([]string, error) {
 	if w.app.AgentCoordinator == nil {
-		return nil
+		return nil, nil
 	}
-	return w.app.AgentCoordinator.QueuedPromptsList(sessionID)
+	return w.app.AgentCoordinator.QueuedPromptsList(sessionID), nil
 }
 
-func (w *AppWorkspace) AgentClearQueue(sessionID string) {
+func (w *AppWorkspace) AgentClearQueue(sessionID string) error {
 	if w.app.AgentCoordinator != nil {
 		w.app.AgentCoordinator.ClearQueue(sessionID)
 	}
+	return nil
 }
 
 func (w *AppWorkspace) AgentSummarize(ctx context.Context, sessionID, instructions string) error {
@@ -268,8 +271,8 @@ func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
 	return w.app.InitCoderAgentNonInteractive(ctx)
 }
 
-func (w *AppWorkspace) GetDefaultSmallModel(providerID string) config.SelectedModel {
-	return w.app.GetDefaultSmallModel(providerID)
+func (w *AppWorkspace) GetDefaultSmallModel(providerID string) (config.SelectedModel, error) {
+	return w.app.GetDefaultSmallModel(providerID), nil
 }
 
 // -- Questions --
@@ -284,12 +287,13 @@ func (w *AppWorkspace) QuestionCancel() bool {
 
 // -- FileTracker --
 
-func (w *AppWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) {
+func (w *AppWorkspace) FileTrackerRecordRead(ctx context.Context, sessionID, path string) error {
 	w.app.FileTracker.RecordRead(ctx, sessionID, path)
+	return nil
 }
 
-func (w *AppWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time {
-	return w.app.FileTracker.LastReadTime(ctx, sessionID, path)
+func (w *AppWorkspace) FileTrackerLastReadTime(ctx context.Context, sessionID, path string) (time.Time, error) {
+	return w.app.FileTracker.LastReadTime(ctx, sessionID, path), nil
 }
 
 func (w *AppWorkspace) FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error) {
@@ -304,15 +308,17 @@ func (w *AppWorkspace) ListSessionHistory(ctx context.Context, sessionID string)
 
 // -- LSP --
 
-func (w *AppWorkspace) LSPStart(ctx context.Context, path string) {
+func (w *AppWorkspace) LSPStart(ctx context.Context, path string) error {
 	w.app.LSPManager.Start(ctx, path)
+	return nil
 }
 
-func (w *AppWorkspace) LSPStopAll(ctx context.Context) {
+func (w *AppWorkspace) LSPStopAll(ctx context.Context) error {
 	w.app.LSPManager.StopAll(ctx)
+	return nil
 }
 
-func (w *AppWorkspace) LSPGetStates() map[string]LSPClientInfo {
+func (w *AppWorkspace) LSPGetStates() (map[string]LSPClientInfo, error) {
 	states := app.LSPStatesWithSessionDisabled(w.app.LSPManager)
 	result := make(map[string]LSPClientInfo, len(states))
 	for k, v := range states {
@@ -325,26 +331,26 @@ func (w *AppWorkspace) LSPGetStates() map[string]LSPClientInfo {
 			SessionDisabled: v.SessionDisabled,
 		}
 	}
-	return result
+	return result, nil
 }
 
-func (w *AppWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
+func (w *AppWorkspace) LSPGetDiagnosticCounts(name string) (lsp.DiagnosticCounts, error) {
 	state, ok := app.GetLSPState(name)
 	if !ok || state.Client == nil {
-		return lsp.DiagnosticCounts{}
+		return lsp.DiagnosticCounts{}, nil
 	}
-	return state.Client.GetDiagnosticCounts()
+	return state.Client.GetDiagnosticCounts(), nil
 }
 
 // LSPFileDiagnostics folds every running server's diagnostics into per-file
 // severity counts. Servers publish whole files at a time, so a file missing
 // from the map genuinely has no diagnostics.
-func (w *AppWorkspace) LSPFileDiagnostics() map[string]lsp.DiagnosticCounts {
+func (w *AppWorkspace) LSPFileDiagnostics() (map[string]lsp.DiagnosticCounts, error) {
 	counts := make(map[string]lsp.DiagnosticCounts)
 	for _, client := range w.app.LSPManager.Clients().Seq2() {
 		foldFileDiagnostics(counts, client.GetDiagnostics())
 	}
-	return counts
+	return counts, nil
 }
 
 func (w *AppWorkspace) LSPRestartSingle(_ context.Context, name string) error {
@@ -691,20 +697,23 @@ func addOrRemove(list []string, name string, add bool) []string {
 
 // -- MCP operations --
 
-func (w *AppWorkspace) MCPGetStates() map[string]mcptools.ClientInfo {
-	return mcptools.GetStates()
+func (w *AppWorkspace) MCPGetStates() (map[string]mcptools.ClientInfo, error) {
+	return mcptools.GetStates(), nil
 }
 
-func (w *AppWorkspace) MCPRefreshPrompts(ctx context.Context, name string) {
+func (w *AppWorkspace) MCPRefreshPrompts(ctx context.Context, name string) error {
 	mcptools.RefreshPrompts(ctx, name)
+	return nil
 }
 
-func (w *AppWorkspace) MCPRefreshResources(ctx context.Context, name string) {
+func (w *AppWorkspace) MCPRefreshResources(ctx context.Context, name string) error {
 	mcptools.RefreshResources(ctx, name)
+	return nil
 }
 
-func (w *AppWorkspace) RefreshMCPTools(ctx context.Context, name string) {
+func (w *AppWorkspace) RefreshMCPTools(ctx context.Context, name string) error {
 	mcptools.RefreshTools(ctx, w.store, name)
+	return nil
 }
 
 func (w *AppWorkspace) ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error) {
@@ -740,8 +749,8 @@ func (w *AppWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
 	return mcptools.PendingAuthMCPs(w.store)
 }
 
-func (w *AppWorkspace) MCPAuthURL(name string) string {
-	return mcptools.MCPAuthURL(name)
+func (w *AppWorkspace) MCPAuthURL(name string) (string, error) {
+	return mcptools.MCPAuthURL(name), nil
 }
 
 func (w *AppWorkspace) MCPReconnect(ctx context.Context, name string) error {
@@ -783,10 +792,14 @@ func (w *AppWorkspace) ListCheckpoints(ctx context.Context, sessionID string) ([
 
 func (w *AppWorkspace) Rewind(ctx context.Context, sessionID, messageID string, mode checkpoints.Mode) error {
 	// Rewinding mid-run would race the tools still writing to the tree.
-	if w.AgentIsSessionBusy(sessionID) {
+	busy, err := w.AgentIsSessionBusy(sessionID)
+	if err != nil {
+		return err
+	}
+	if busy {
 		return fmt.Errorf("cannot rewind: %w", ErrSessionBusy)
 	}
-	mode, err := normalizeRewindMode(mode)
+	mode, err = normalizeRewindMode(mode)
 	if err != nil {
 		return err
 	}

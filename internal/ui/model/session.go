@@ -320,7 +320,9 @@ func (m *UI) startLSPs(paths []string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		for _, path := range paths {
-			m.com.Workspace.LSPStart(ctx, path)
+			if err := m.com.Workspace.LSPStart(ctx, path); err != nil {
+				return util.NewErrorMsg(err)
+			}
 		}
 		return nil
 	}

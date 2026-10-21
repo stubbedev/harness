@@ -27,6 +27,7 @@ func TestCheckStatus_TypesActionableStatuses(t *testing.T) {
 		// callers keep treating it as an ordinary failure.
 		wantUntyped bool
 		wantMsg     string
+		wantNot     error
 	}{
 		{name: "ok by default", status: http.StatusOK},
 		{
@@ -63,7 +64,15 @@ func TestCheckStatus_TypesActionableStatuses(t *testing.T) {
 			name:        "other not-found codes are ordinary failures",
 			status:      http.StatusNotFound,
 			body:        `{"message":"LSP client not found","code":"not_found"}`,
+			wantErr:     ErrResourceNotFound,
 			wantUntyped: true,
+		},
+		{
+			name:    "workspace not-found is not a missing resource",
+			status:  http.StatusNotFound,
+			body:    `{"message":"workspace not found","code":"workspace_not_found"}`,
+			wantErr: ErrNotFound,
+			wantNot: ErrResourceNotFound,
 		},
 		{
 			name:        "conflict carries no lifecycle meaning",
@@ -97,6 +106,9 @@ func TestCheckStatus_TypesActionableStatuses(t *testing.T) {
 			if tc.wantUntyped {
 				require.NotErrorIs(t, err, ErrNotFound)
 				require.NotErrorIs(t, err, ErrServerShuttingDown)
+			}
+			if tc.wantNot != nil {
+				require.NotErrorIs(t, err, tc.wantNot)
 			}
 			if tc.wantMsg != "" {
 				require.Contains(t, err.Error(), tc.wantMsg)

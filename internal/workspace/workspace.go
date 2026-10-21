@@ -188,15 +188,15 @@ type Workspace interface {
 	// Agent
 	AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error
 	AgentRunShellCommand(ctx context.Context, sessionID, command string, termWidth int, onProgress func(string), isFirstMessage bool) (proto.ShellCommandResponse, error)
-	AgentCancel(sessionID string)
+	AgentCancel(sessionID string) error
 	// AgentCancelTurn interrupts the session's active run only: queued
 	// prompts survive and run once the interrupted turn unwinds. It is
 	// the interrupt-and-steer escape path; AgentCancel is the
 	// drop-everything variant.
-	AgentCancelTurn(sessionID string)
-	AgentIsBusy() bool
-	AgentIsSessionBusy(sessionID string) bool
-	AgentModel() AgentModel
+	AgentCancelTurn(sessionID string) error
+	AgentIsBusy() (bool, error)
+	AgentIsSessionBusy(sessionID string) (bool, error)
+	AgentModel() (AgentModel, error)
 	AgentIsReady() bool
 	// AgentReadyErr reports nil when the coder agent is ready to accept
 	// work, or a descriptive error otherwise: ErrAgentNotInitialized
@@ -205,9 +205,9 @@ type Workspace interface {
 	// It lets the UI show an actionable message instead of collapsing
 	// both cases into "agent offline".
 	AgentReadyErr() error
-	AgentQueuedPrompts(sessionID string) int
-	AgentQueuedPromptsList(sessionID string) []string
-	AgentClearQueue(sessionID string)
+	AgentQueuedPrompts(sessionID string) (int, error)
+	AgentQueuedPromptsList(sessionID string) ([]string, error)
+	AgentClearQueue(sessionID string) error
 	AgentSummarize(ctx context.Context, sessionID, instructions string) error
 	// AgentSetGoal sets the session goal the agent works toward until a
 	// judge finds it met, replacing any earlier one. An empty condition
@@ -216,7 +216,7 @@ type Workspace interface {
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
-	GetDefaultSmallModel(providerID string) config.SelectedModel
+	GetDefaultSmallModel(providerID string) (config.SelectedModel, error)
 
 	// Questions
 	//
@@ -227,23 +227,23 @@ type Workspace interface {
 	QuestionCancel() bool
 
 	// FileTracker
-	FileTrackerRecordRead(ctx context.Context, sessionID, path string)
-	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) time.Time
+	FileTrackerRecordRead(ctx context.Context, sessionID, path string) error
+	FileTrackerLastReadTime(ctx context.Context, sessionID, path string) (time.Time, error)
 	FileTrackerListReadFiles(ctx context.Context, sessionID string) ([]string, error)
 
 	// History
 	ListSessionHistory(ctx context.Context, sessionID string) ([]history.File, error)
 
 	// LSP
-	LSPStart(ctx context.Context, path string)
-	LSPStopAll(ctx context.Context)
-	LSPGetStates() map[string]LSPClientInfo
-	LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts
+	LSPStart(ctx context.Context, path string) error
+	LSPStopAll(ctx context.Context) error
+	LSPGetStates() (map[string]LSPClientInfo, error)
+	LSPGetDiagnosticCounts(name string) (lsp.DiagnosticCounts, error)
 	// LSPFileDiagnostics aggregates every server's current diagnostics into
 	// per-file severity counts. It backs the transcript's live diagnostics
 	// overlay, which needs to know that a file is clean now, not just that
 	// some server somewhere still counts problems.
-	LSPFileDiagnostics() map[string]lsp.DiagnosticCounts
+	LSPFileDiagnostics() (map[string]lsp.DiagnosticCounts, error)
 	LSPRestartSingle(ctx context.Context, name string) error
 	LSPSetSessionDisabled(ctx context.Context, name string, disabled bool) error
 
@@ -280,16 +280,16 @@ type Workspace interface {
 	SetSubagentDisabled(name string, disabled bool) error
 
 	// MCP operations (server-side in client mode)
-	MCPGetStates() map[string]mcptools.ClientInfo
-	MCPRefreshPrompts(ctx context.Context, name string)
-	MCPRefreshResources(ctx context.Context, name string)
-	RefreshMCPTools(ctx context.Context, name string)
+	MCPGetStates() (map[string]mcptools.ClientInfo, error)
+	MCPRefreshPrompts(ctx context.Context, name string) error
+	MCPRefreshResources(ctx context.Context, name string) error
+	RefreshMCPTools(ctx context.Context, name string) error
 	ReadMCPResource(ctx context.Context, name, uri string) ([]MCPResourceContents, error)
 	ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error)
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	MCPAuthenticate(ctx context.Context, name string) error
 	MCPPendingAuth() []mcptools.PendingAuthServer
-	MCPAuthURL(name string) string
+	MCPAuthURL(name string) (string, error)
 	MCPReconnect(ctx context.Context, name string) error
 	MCPDisableForSession(ctx context.Context, name string) error
 

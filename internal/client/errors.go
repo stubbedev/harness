@@ -39,6 +39,8 @@ var (
 	// what is safe to do with an older server rather than treating the
 	// failure as transient.
 	ErrUnsupported = errors.New("unsupported by the running server")
+
+	ErrResourceNotFound = errors.New("resource not found")
 )
 
 // checkStatus returns nil when rsp's status code is one of ok
@@ -64,6 +66,8 @@ func checkStatus(rsp *http.Response, ok ...int) error {
 	switch {
 	case rsp.StatusCode == http.StatusNotFound && isWorkspaceGone(body.Code):
 		return fmt.Errorf("%w: %w", ErrNotFound, err)
+	case rsp.StatusCode == http.StatusNotFound:
+		return fmt.Errorf("%w: %w", ErrResourceNotFound, err)
 	case rsp.StatusCode == http.StatusServiceUnavailable:
 		return fmt.Errorf("%w: %w", ErrServerShuttingDown, err)
 	case body.Code == proto.ErrorCodeSessionBusy:

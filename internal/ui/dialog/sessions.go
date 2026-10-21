@@ -152,7 +152,11 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 				s.sessionsMode = sessionsModeUpdating
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeUpdating, s.sessions...)...)
 			case key.Matches(msg, s.keyMap.Delete):
-				if s.isCurrentSessionBusy() {
+				busy, err := s.isCurrentSessionBusy()
+				if err != nil {
+					return ActionCmd{util.ReportError(err)}
+				}
+				if busy {
 					return ActionCmd{util.ReportWarn("Agent is busy, please wait...")}
 				}
 				s.sessionsMode = sessionsModeDeleting
@@ -433,14 +437,14 @@ func (s *Session) renameSessionCmd(id, title string) tea.Cmd {
 	}
 }
 
-func (s *Session) isCurrentSessionBusy() bool {
+func (s *Session) isCurrentSessionBusy() (bool, error) {
 	sessionItem := s.selectedSessionItem()
 	if sessionItem == nil {
-		return false
+		return false, nil
 	}
 
 	if !s.com.Workspace.AgentIsReady() {
-		return false
+		return false, nil
 	}
 
 	return s.com.Workspace.AgentIsSessionBusy(sessionItem.ID())

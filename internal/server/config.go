@@ -229,8 +229,7 @@ func (c *controllerV1) handlePostWorkspaceSkillRead(w http.ResponseWriter, r *ht
 //	@Router			/workspaces/{id}/mcp/refresh-tools [post]
 func (c *controllerV1) handlePostWorkspaceMCPRefreshTools(w http.ResponseWriter, r *http.Request) {
 	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.MCPNameRequest) (any, error) {
-		ws.Ops().RefreshMCPTools(ctx, req.Name)
-		return nil, nil
+		return done(ws.Ops().RefreshMCPTools(ctx, req.Name))
 	})
 }
 
@@ -327,7 +326,11 @@ func (c *controllerV1) handlePostWorkspaceMCPGetPrompt(w http.ResponseWriter, r 
 //	@Router			/workspaces/{id}/mcp/states [get]
 func (c *controllerV1) handleGetWorkspaceMCPStates(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return mapValues(ws.Ops().MCPGetStates(), proto.MCPClientInfoFromDomain), nil
+		states, err := ws.Ops().MCPGetStates()
+		if err != nil {
+			return nil, err
+		}
+		return mapValues(states, proto.MCPClientInfoFromDomain), nil
 	})
 }
 
@@ -372,7 +375,11 @@ func (c *controllerV1) handleGetWorkspaceMCPAuthURL(w http.ResponseWriter, r *ht
 		return
 	}
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return proto.MCPAuthResponse{AuthURL: ws.Ops().MCPAuthURL(name)}, nil
+		u, err := ws.Ops().MCPAuthURL(name)
+		if err != nil {
+			return nil, err
+		}
+		return proto.MCPAuthResponse{AuthURL: u}, nil
 	})
 }
 
@@ -419,8 +426,7 @@ func (c *controllerV1) handlePostWorkspaceMCPAuth(w http.ResponseWriter, r *http
 //	@Router			/workspaces/{id}/mcp/refresh-prompts [post]
 func (c *controllerV1) handlePostWorkspaceMCPRefreshPrompts(w http.ResponseWriter, r *http.Request) {
 	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.MCPNameRequest) (any, error) {
-		ws.Ops().MCPRefreshPrompts(ctx, req.Name)
-		return nil, nil
+		return done(ws.Ops().MCPRefreshPrompts(ctx, req.Name))
 	})
 }
 
@@ -476,8 +482,7 @@ func (c *controllerV1) handlePostWorkspaceMCPDisable(w http.ResponseWriter, r *h
 //	@Router			/workspaces/{id}/mcp/refresh-resources [post]
 func (c *controllerV1) handlePostWorkspaceMCPRefreshResources(w http.ResponseWriter, r *http.Request) {
 	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.MCPNameRequest) (any, error) {
-		ws.Ops().MCPRefreshResources(ctx, req.Name)
-		return nil, nil
+		return done(ws.Ops().MCPRefreshResources(ctx, req.Name))
 	})
 }
 

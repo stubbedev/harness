@@ -107,7 +107,7 @@ func TestSendMessage_AcceptedCancelRace_RealMachinery(t *testing.T) {
 	// A cancel arriving now lands in the accepted-but-not-yet-active
 	// window and is only recorded because BeginAccepted incremented the
 	// accept counter.
-	ws.Ops().AgentCancel(sess.ID)
+	require.NoError(t, ws.Ops().AgentCancel(sess.ID))
 
 	// Release the gate so the real RunAccepted threads the handle into
 	// sessionAgent.Run, which drives cancel-on-entry.

@@ -57,8 +57,8 @@ type countingWorkspace struct {
 	lspDiagCalls    int
 }
 
-func (w *countingWorkspace) AgentIsReady() bool { w.readyCalls++; return w.ready }
-func (w *countingWorkspace) AgentIsBusy() bool  { w.agentBusyCalls++; return w.agentBusy }
+func (w *countingWorkspace) AgentIsReady() bool         { w.readyCalls++; return w.ready }
+func (w *countingWorkspace) AgentIsBusy() (bool, error) { w.agentBusyCalls++; return w.agentBusy, nil }
 
 // summarizeCall is one recorded AgentSummarize request.
 type summarizeCall struct {
@@ -79,22 +79,27 @@ func (w *countingWorkspace) AgentReadyErr() error {
 	return workspace.ErrAgentNotInitialized
 }
 
-func (w *countingWorkspace) AgentQueuedPrompts(string) int {
+func (w *countingWorkspace) AgentQueuedPrompts(string) (int, error) {
 	w.queuedCalls++
-	return len(w.queued)
+	return len(w.queued), nil
 }
 
-func (w *countingWorkspace) AgentQueuedPromptsList(string) []string {
+func (w *countingWorkspace) AgentQueuedPromptsList(string) ([]string, error) {
 	w.queueListCalls++
-	return w.queued
+	return w.queued, nil
 }
 
-func (w *countingWorkspace) AgentClearQueue(string) { w.clearQueueCalls++; w.queued = nil }
-func (w *countingWorkspace) AgentCancel(string)     { w.cancelCalls++ }
+func (w *countingWorkspace) AgentClearQueue(string) error {
+	w.clearQueueCalls++
+	w.queued = nil
+	return nil
+}
+
+func (w *countingWorkspace) AgentCancel(string) error { w.cancelCalls++; return nil }
 
 // cancelTurnCalls records AgentCancelTurn requests (the esc-while-busy
 // path) separately from full cancels.
-func (w *countingWorkspace) AgentCancelTurn(string) { w.cancelTurnCalls++ }
+func (w *countingWorkspace) AgentCancelTurn(string) error { w.cancelTurnCalls++; return nil }
 
 // ListCheckpoints returns none; the rewind picker opens fine without
 // working-tree snapshots (turns simply list without the files-only
@@ -103,23 +108,23 @@ func (w *countingWorkspace) ListCheckpoints(context.Context, string) ([]checkpoi
 	return nil, nil
 }
 
-func (w *countingWorkspace) AgentModel() workspace.AgentModel {
+func (w *countingWorkspace) AgentModel() (workspace.AgentModel, error) {
 	w.modelCalls++
-	return w.model
+	return w.model, nil
 }
 
-func (w *countingWorkspace) LSPGetStates() map[string]workspace.LSPClientInfo {
+func (w *countingWorkspace) LSPGetStates() (map[string]workspace.LSPClientInfo, error) {
 	w.lspStateCalls++
-	return w.lspStates
+	return w.lspStates, nil
 }
 
-func (w *countingWorkspace) LSPGetDiagnosticCounts(name string) lsp.DiagnosticCounts {
+func (w *countingWorkspace) LSPGetDiagnosticCounts(name string) (lsp.DiagnosticCounts, error) {
 	w.lspDiagCalls++
-	return w.lspDiags[name]
+	return w.lspDiags[name], nil
 }
 
-func (w *countingWorkspace) LSPFileDiagnostics() map[string]lsp.DiagnosticCounts {
-	return nil
+func (w *countingWorkspace) LSPFileDiagnostics() (map[string]lsp.DiagnosticCounts, error) {
+	return nil, nil
 }
 
 func (w *countingWorkspace) ListMessages(context.Context, string) ([]message.Message, error) {
@@ -136,7 +141,7 @@ func (w *countingWorkspace) PromptHistory(context.Context, string) ([]string, er
 
 func (w *countingWorkspace) WorkingDir() string { return "" }
 
-func (w *countingWorkspace) LSPStart(context.Context, string) {}
+func (w *countingWorkspace) LSPStart(context.Context, string) error { return nil }
 
 func (w *countingWorkspace) LSPRestartSingle(context.Context, string) error { return nil }
 

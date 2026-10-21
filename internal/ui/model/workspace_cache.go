@@ -25,6 +25,8 @@ package model
 // Update, no model mutation inside commands).
 
 import (
+	"errors"
+	"log/slog"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -57,6 +59,10 @@ func (c *ttlCache) set(val bool) {
 	c.at = time.Now()
 }
 
+func (c *ttlCache) retain() {
+	c.at = time.Now()
+}
+
 // invalidate marks the value stale so the next Update-tail backstop
 // re-probes; the last value keeps being served in the meantime.
 func (c *ttlCache) invalidate() {
@@ -77,6 +83,7 @@ type busyStateMsg struct {
 	// so the sidebar/landing model info renders from memoized state. Zero
 	// (and ignored) when ready is false.
 	model workspace.AgentModel
+	err   error
 }
 
 // promptQueueMsg delivers the queued prompts fetched off-thread.
@@ -89,6 +96,7 @@ type promptQueueMsg struct {
 	// overwriting newer optimistic or invalidated queue state.
 	gen     uint64
 	prompts []string
+	err     error
 }
 
 // agentRunSubmittedMsg reports that AgentRun accepted a prompt (it either
@@ -143,14 +151,28 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	ws := m.com.Workspace
 	gen := m.busyFetchGen
 	return func() tea.Msg {
-		st := busyStateMsg{gen: gen}
-		if ws.AgentIsReady() {
-			st.ready = true
-			st.agentBusy = ws.AgentIsBusy()
-			st.model = ws.AgentModel()
-		}
+		return probeBusyState(ws, gen)
+	}
+}
+
+func probeBusyState(ws workspace.Workspace, gen uint64) busyStateMsg {
+	st := busyStateMsg{gen: gen}
+	if st.ready, st.err = agentReady(ws); st.err != nil || !st.ready {
 		return st
 	}
+	if st.agentBusy, st.err = ws.AgentIsBusy(); st.err != nil {
+		return st
+	}
+	st.model, st.err = ws.AgentModel()
+	return st
+}
+
+func agentReady(ws workspace.Workspace) (bool, error) {
+	err := ws.AgentReadyErr()
+	if errors.Is(err, workspace.ErrAgentNotInitialized) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // updateAgentModelCmd sequences a coordinator model rebuild
@@ -178,6 +200,11 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 		return nil
 	}
 	prevBusy := m.isAgentBusy()
+	if msg.err != nil {
+		slog.Warn("Failed to refresh agent state", "error", msg.err)
+		m.agentBusyCache.retain()
+		return nil
+	}
 	m.agentBusyCache.set(msg.agentBusy)
 	m.agentReady = msg.ready
 	m.agentModel = msg.model
@@ -219,8 +246,13 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 	gen := m.promptQueueGen
 	return func() tea.Msg {
 		msg := promptQueueMsg{forSession: sessionID, gen: gen}
-		if ws.AgentIsReady() {
-			msg.prompts = ws.AgentQueuedPromptsList(sessionID)
+		ready, err := agentReady(ws)
+		if err != nil {
+			msg.err = err
+			return msg
+		}
+		if ready {
+			msg.prompts, msg.err = ws.AgentQueuedPromptsList(sessionID)
 		}
 		return msg
 	}
@@ -241,6 +273,10 @@ func (m *UI) applyPromptQueue(msg promptQueueMsg) []tea.Cmd {
 		return nil
 	}
 	m.promptQueueCheckedAt = time.Now()
+	if msg.err != nil {
+		slog.Warn("Failed to refresh prompt queue", "error", msg.err)
+		return nil
+	}
 	countChanged := len(msg.prompts) != len(m.promptQueueItems)
 	m.promptQueueItems = msg.prompts
 	// The authoritative queue drives the transcript's queued-prompt

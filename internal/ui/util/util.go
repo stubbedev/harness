@@ -52,6 +52,13 @@ func NewErrorMsg(err error) InfoMsg {
 	}
 }
 
+func ErrorMsgOrNil(err error) tea.Msg {
+	if err == nil {
+		return nil
+	}
+	return NewErrorMsg(err)
+}
+
 func ReportInfo(info string) tea.Cmd {
 	return CmdHandler(NewInfoMsg(info))
 }

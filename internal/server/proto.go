@@ -296,7 +296,11 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 //	@Router			/workspaces/{id}/lsps [get]
 func (c *controllerV1) handleGetWorkspaceLSPs(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return mapValues(ws.Ops().LSPGetStates(), func(v workspace.LSPClientInfo) proto.LSPClientInfo {
+		states, err := ws.Ops().LSPGetStates()
+		if err != nil {
+			return nil, err
+		}
+		return mapValues(states, func(v workspace.LSPClientInfo) proto.LSPClientInfo {
 			return proto.LSPClientInfo(v)
 		}), nil
 	})
@@ -529,8 +533,7 @@ func (c *controllerV1) handleGetWorkspaceSessionFileTrackerFiles(w http.Response
 //	@Router			/workspaces/{id}/filetracker/read [post]
 func (c *controllerV1) handlePostWorkspaceFileTrackerRead(w http.ResponseWriter, r *http.Request) {
 	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.FileTrackerReadRequest) (any, error) {
-		ws.Ops().FileTrackerRecordRead(ctx, req.SessionID, req.Path)
-		return nil, nil
+		return done(ws.Ops().FileTrackerRecordRead(ctx, req.SessionID, req.Path))
 	})
 }
 
@@ -549,7 +552,7 @@ func (c *controllerV1) handlePostWorkspaceFileTrackerRead(w http.ResponseWriter,
 func (c *controllerV1) handleGetWorkspaceFileTrackerLastRead(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
 		q := r.URL.Query()
-		return ws.Ops().FileTrackerLastReadTime(ctx, q.Get("session_id"), q.Get("path")), nil
+		return ws.Ops().FileTrackerLastReadTime(ctx, q.Get("session_id"), q.Get("path"))
 	})
 }
 
@@ -567,8 +570,7 @@ func (c *controllerV1) handleGetWorkspaceFileTrackerLastRead(w http.ResponseWrit
 //	@Router			/workspaces/{id}/lsps/start [post]
 func (c *controllerV1) handlePostWorkspaceLSPStart(w http.ResponseWriter, r *http.Request) {
 	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.LSPStartRequest) (any, error) {
-		ws.Ops().LSPStart(ctx, req.Path)
-		return nil, nil
+		return done(ws.Ops().LSPStart(ctx, req.Path))
 	})
 }
 
@@ -583,8 +585,7 @@ func (c *controllerV1) handlePostWorkspaceLSPStart(w http.ResponseWriter, r *htt
 //	@Router			/workspaces/{id}/lsps/stop [post]
 func (c *controllerV1) handlePostWorkspaceLSPStopAll(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
-		ws.Ops().LSPStopAll(ctx)
-		return nil, nil
+		return done(ws.Ops().LSPStopAll(ctx))
 	})
 }
 
@@ -664,11 +665,18 @@ func (c *controllerV1) handleGetWorkspaceAgent(w http.ResponseWriter, r *http.Re
 		if !ops.AgentIsReady() {
 			return proto.AgentInfo{}, nil
 		}
-		m := ops.AgentModel()
+		m, err := ops.AgentModel()
+		if err != nil {
+			return nil, err
+		}
+		busy, err := ops.AgentIsBusy()
+		if err != nil {
+			return nil, err
+		}
 		return proto.AgentInfo{
 			Model:    m.CatalogCfg,
 			ModelCfg: m.ModelCfg,
-			IsBusy:   ops.AgentIsBusy(),
+			IsBusy:   busy,
 			IsReady:  true,
 		}, nil
 	})
@@ -772,8 +780,7 @@ func (c *controllerV1) handleGetWorkspaceAgentSession(w http.ResponseWriter, r *
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/cancel [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionCancel(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		ws.Ops().AgentCancel(r.PathValue("sid"))
-		return nil, nil
+		return done(ws.Ops().AgentCancel(r.PathValue("sid")))
 	})
 }
 
@@ -791,8 +798,7 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionCancel(w http.ResponseWrit
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/cancel-turn [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionCancelTurn(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		ws.Ops().AgentCancelTurn(r.PathValue("sid"))
-		return nil, nil
+		return done(ws.Ops().AgentCancelTurn(r.PathValue("sid")))
 	})
 }
 
@@ -809,7 +815,7 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionCancelTurn(w http.Response
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/queued [get]
 func (c *controllerV1) handleGetWorkspaceAgentSessionPromptQueued(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return ws.Ops().AgentQueuedPrompts(r.PathValue("sid")), nil
+		return ws.Ops().AgentQueuedPrompts(r.PathValue("sid"))
 	})
 }
 
@@ -825,8 +831,7 @@ func (c *controllerV1) handleGetWorkspaceAgentSessionPromptQueued(w http.Respons
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/clear [post]
 func (c *controllerV1) handlePostWorkspaceAgentSessionPromptClear(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		ws.Ops().AgentClearQueue(r.PathValue("sid"))
-		return nil, nil
+		return done(ws.Ops().AgentClearQueue(r.PathValue("sid")))
 	})
 }
 
@@ -901,7 +906,7 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionShell(w http.ResponseWrite
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/list [get]
 func (c *controllerV1) handleGetWorkspaceAgentSessionPromptList(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return ws.Ops().AgentQueuedPromptsList(r.PathValue("sid")), nil
+		return ws.Ops().AgentQueuedPromptsList(r.PathValue("sid"))
 	})
 }
 
@@ -918,7 +923,7 @@ func (c *controllerV1) handleGetWorkspaceAgentSessionPromptList(w http.ResponseW
 //	@Router			/workspaces/{id}/agent/default-small-model [get]
 func (c *controllerV1) handleGetWorkspaceAgentDefaultSmallModel(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return ws.Ops().GetDefaultSmallModel(r.URL.Query().Get("provider_id")), nil
+		return ws.Ops().GetDefaultSmallModel(r.URL.Query().Get("provider_id"))
 	})
 }
 
