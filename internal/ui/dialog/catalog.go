@@ -150,7 +150,7 @@ func (c *Catalog) defaultCommands() []*CommandItem {
 		NewCommandItem(c.com.Styles, "new_session", "New Session", ActionNewSession{}).WithShortcut(km.Chat.NewSession).WithAliases("clear"),
 		NewCommandItem(c.com.Styles, "switch_session", "Sessions", ActionOpenDialog{SessionsID}).WithShortcut(km.Sessions).WithAliases("resume", "switch"),
 		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", ActionOpenDialog{ModelsID}).WithShortcut(km.Models),
-		NewCommandItem(c.com.Styles, "configure_provider", "Configure Provider", ActionOpenDialog{ProvidersID}).WithAliases("connect_provider", "connect", "provider", "auth", "login"),
+		NewCommandItem(c.com.Styles, "configure_provider", "Configure Provider", ActionOpenDialog{ProvidersID}).WithAliases("provider", "auth", "login"),
 		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", ActionOpenDialog{ThemesID}).WithShortcut(km.Themes),
 		NewCommandItem(c.com.Styles, "mcp_servers", "MCP Servers", ActionOpenDialog{DialogID: MCPServersID}).WithAliases("mcp"),
 		NewCommandItem(c.com.Styles, "lsp_servers", "LSP Servers", ActionOpenDialog{DialogID: LSPServersID}).WithAliases("lsp"),
