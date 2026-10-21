@@ -38,7 +38,7 @@ func TestSpliceSymbolUnreadableFileIsErrorResponse(t *testing.T) {
 	t.Parallel()
 	locked := unreadableFixture(t, t.TempDir(), "locked.go")
 
-	params := ReplaceSymbolParams{Symbol: "f", FilePath: locked, Action: "delete"}
+	params := replaceSymbolParams{Symbol: "f", File: absPath(locked), Action: "delete"}
 	resp, err := spliceSymbol(t.Context(), nil, nil, nil, nil, "", params, "delete", replaceSymbolOps["delete"], protocol.Range{})
 	require.NoError(t, err)
 	require.True(t, resp.IsError)

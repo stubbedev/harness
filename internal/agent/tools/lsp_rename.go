@@ -17,10 +17,10 @@ import (
 	lsputil "github.com/stubbedev/harness/internal/lsp/util"
 )
 
-type RenameParams struct {
-	Symbol  string `json:"symbol" description:"The symbol name to rename"`
-	NewName string `json:"new_name" description:"The new name for the symbol"`
-	Path    string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
+type renameParams struct {
+	Symbol  string
+	NewName string
+	Root    absPath
 }
 
 func renameAction(
@@ -28,12 +28,12 @@ func renameAction(
 	files history.Service,
 	tracker filetracker.Service,
 	reg *presence.Registry,
-) func(context.Context, RenameParams) (fantasy.ToolResponse, error) {
-	return func(ctx context.Context, params RenameParams) (fantasy.ToolResponse, error) {
+) func(context.Context, renameParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params renameParams) (fantasy.ToolResponse, error) {
 		if params.NewName == "" {
 			return fantasy.NewTextErrorResponse("new_name is required"), nil
 		}
-		resolved, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbol)
+		resolved, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Root, resolveSymbol)
 		if !ok {
 			return resp, nil
 		}

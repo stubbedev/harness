@@ -56,7 +56,7 @@ func TestReplaceSymbolMetadataDiffLabelIsWorkdirRelative(t *testing.T) {
 	tracker := filetracker.NewService(nil)
 	require.False(t, runViewTool(t, NewViewTool(nil, tracker, nil, workingDir), ctx, ViewParams{FilePath: path}).IsError)
 
-	params := ReplaceSymbolParams{Symbol: "f", FilePath: path, Action: "delete"}
+	params := replaceSymbolParams{Symbol: "f", File: absPath(path), Action: "delete"}
 	rng := protocol.Range{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 2}}
 	resp, err := spliceSymbol(ctx, nil, nil, tracker, nil, workingDir, params, "delete", replaceSymbolOps["delete"], rng)
 	require.NoError(t, err)

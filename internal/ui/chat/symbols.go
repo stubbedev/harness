@@ -12,12 +12,12 @@ type SymbolsToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (r *SymbolsToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
-	var params tools.SymbolsParams
+	var params tools.LSPParams
 	return renderStandardTool(sty, width, opts, opts.Name, func() ([]string, bool) {
 		_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
-		return []string{params.FilePath}, true
+		return []string{params.Path}, true
 	}, func() string {
 		// Render as code to preserve tree indentation.
-		return toolOutputCodeContent(sty, params.FilePath, opts.Result.Content, 0, width, opts.ExpandedContent)
+		return toolOutputCodeContent(sty, params.Path, opts.Result.Content, 0, width, opts.ExpandedContent)
 	})
 }

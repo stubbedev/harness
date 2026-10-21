@@ -13,9 +13,9 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 )
 
-type DefinitionParams struct {
-	Symbol string `json:"symbol" description:"The symbol name to find the definition of"`
-	Path   string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
+type definitionParams struct {
+	Symbol string
+	Root   absPath
 }
 
 // DefinitionResponseMetadata carries structured data for the renderer.
@@ -25,9 +25,9 @@ type DefinitionResponseMetadata struct {
 	Content  string `json:"content"`
 }
 
-func definitionAction(lspManager *lsp.Manager) func(context.Context, DefinitionParams) (fantasy.ToolResponse, error) {
-	return func(ctx context.Context, params DefinitionParams) (fantasy.ToolResponse, error) {
-		resolved, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbol)
+func definitionAction(lspManager *lsp.Manager) func(context.Context, definitionParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params definitionParams) (fantasy.ToolResponse, error) {
+		resolved, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Root, resolveSymbol)
 		if !ok {
 			return resp, nil
 		}

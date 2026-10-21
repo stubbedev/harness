@@ -13,8 +13,8 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 )
 
-type DiagnosticsParams struct {
-	FilePath string `json:"file_path,omitempty" description:"The path to the file to get diagnostics for (leave empty for project diagnostics)"`
+type diagnosticsParams struct {
+	File absPath
 }
 
 const DiagnosticsToolName = "lsp_diagnostics"
@@ -45,16 +45,16 @@ const (
 // difference against it, and the sweep before the model's next step
 // ([DiagnosticsSweep]) reports exactly that difference — new problems and
 // resolved ones alike.
-func diagnosticsAction(lspManager *lsp.Manager) func(context.Context, DiagnosticsParams) (fantasy.ToolResponse, error) {
-	return func(ctx context.Context, params DiagnosticsParams) (fantasy.ToolResponse, error) {
+func diagnosticsAction(lspManager *lsp.Manager) func(context.Context, diagnosticsParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params diagnosticsParams) (fantasy.ToolResponse, error) {
 		starting := false
-		if params.FilePath != "" && lspManager != nil {
-			starting = announceForDiagnostics(ctx, lspManager, params.FilePath)
+		if params.File != "" && lspManager != nil {
+			starting = announceForDiagnostics(ctx, lspManager, params.File)
 		} else {
 			lspManager.NotifyWorkspaceChangeAsync(ctx)
 		}
 
-		output := fullDiagnosticsReport(ctx, lspManager, params.FilePath)
+		output := fullDiagnosticsReport(ctx, lspManager, string(params.File))
 		if output == "" {
 			output = "No diagnostics reported."
 		}
@@ -74,9 +74,9 @@ func diagnosticsAction(lspManager *lsp.Manager) func(context.Context, Diagnostic
 // edit does. With none running, the start and the announcement both happen
 // in the background: the file is opened on the server only once it is up,
 // and its first publish reaches the model through the step sweep.
-func announceForDiagnostics(ctx context.Context, manager *lsp.Manager, path string) (starting bool) {
+func announceForDiagnostics(ctx context.Context, manager *lsp.Manager, path absPath) (starting bool) {
 	if findLSPClient(manager, path) != nil {
-		manager.NotifyChangeAsync(ctx, path)
+		manager.NotifyChangeAsync(ctx, string(path))
 		return false
 	}
 	// Detached from the tool call's context: the call returns long before
@@ -84,8 +84,8 @@ func announceForDiagnostics(ctx context.Context, manager *lsp.Manager, path stri
 	// the server half-initialized.
 	detached := context.WithoutCancel(ctx)
 	crash.Go("lsp.diagnostics.start", func() {
-		manager.Start(detached, path)
-		manager.NotifyChangeAsync(detached, path)
+		manager.Start(detached, string(path))
+		manager.NotifyChangeAsync(detached, string(path))
 	})
 	return true
 }

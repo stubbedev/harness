@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -15,7 +16,7 @@ func diagnosticsRenderItem(t *testing.T, input, result string) *LSPToolMessageIt
 	sty := &styles.Styles{}
 	item := newLSPToolMessageItem(sty, message.ToolCall{
 		ID:       "tc1",
-		Name:     "lsp_diagnostics",
+		Name:     tools.LSPToolName,
 		Input:    input,
 		Finished: true,
 	}, &message.ToolResult{Content: result}, false)
@@ -28,7 +29,7 @@ func diagnosticsRenderItem(t *testing.T, input, result string) *LSPToolMessageIt
 // stored report: nil means unknown, not resolved.
 func TestDiagnosticsRenderWithoutLiveState(t *testing.T) {
 	t.Parallel()
-	item := diagnosticsRenderItem(t, `{"file_path":"/x/f.go"}`, "Error: /x/f.go:1:1 boom")
+	item := diagnosticsRenderItem(t, `{"action":"diagnostics","path":"/x/f.go"}`, "Error: /x/f.go:1:1 boom")
 	out := item.BodyRender(80)
 	require.Contains(t, out, "boom")
 	require.NotContains(t, out, "resolved")
@@ -39,7 +40,7 @@ func TestDiagnosticsRenderWithoutLiveState(t *testing.T) {
 // leaving the old error as the last word.
 func TestDiagnosticsRenderShowsResolution(t *testing.T) {
 	t.Parallel()
-	item := diagnosticsRenderItem(t, `{"file_path":"/x/f.go"}`, "Error: /x/f.go:1:1 boom")
+	item := diagnosticsRenderItem(t, `{"action":"diagnostics","path":"/x/f.go"}`, "Error: /x/f.go:1:1 boom")
 	item.SetLiveDiagnostics(map[string]lsp.DiagnosticCounts{
 		"/x/f.go": {Error: 0, Warning: 0},
 	})
@@ -52,7 +53,7 @@ func TestDiagnosticsRenderShowsResolution(t *testing.T) {
 // Problems the servers still hold are named, not papered over.
 func TestDiagnosticsRenderShowsRemaining(t *testing.T) {
 	t.Parallel()
-	item := diagnosticsRenderItem(t, `{"file_path":"/x/f.go"}`, "Error: /x/f.go:1:1 boom")
+	item := diagnosticsRenderItem(t, `{"action":"diagnostics","path":"/x/f.go"}`, "Error: /x/f.go:1:1 boom")
 	item.SetLiveDiagnostics(map[string]lsp.DiagnosticCounts{
 		"/x/f.go": {Error: 1, Warning: 2},
 	})
@@ -66,7 +67,7 @@ func TestDiagnosticsRenderShowsRemaining(t *testing.T) {
 // not evidence it is clean.
 func TestDiagnosticsRenderSkipsUnknownFile(t *testing.T) {
 	t.Parallel()
-	item := diagnosticsRenderItem(t, `{"file_path":"/x/f.go"}`, "Error: /x/f.go:1:1 boom")
+	item := diagnosticsRenderItem(t, `{"action":"diagnostics","path":"/x/f.go"}`, "Error: /x/f.go:1:1 boom")
 	item.SetLiveDiagnostics(map[string]lsp.DiagnosticCounts{
 		"/x/other.go": {Error: 3},
 	})
@@ -98,7 +99,7 @@ func TestDiagnosticsRenderProjectTotals(t *testing.T) {
 // not pay a re-render each time.
 func TestDiagnosticsSetLiveDiagnosticsSkipsNoOps(t *testing.T) {
 	t.Parallel()
-	item := diagnosticsRenderItem(t, `{"file_path":"/x/f.go"}`, "Error: /x/f.go:1:1 boom")
+	item := diagnosticsRenderItem(t, `{"action":"diagnostics","path":"/x/f.go"}`, "Error: /x/f.go:1:1 boom")
 	live := map[string]lsp.DiagnosticCounts{"/x/f.go": {}}
 	item.SetLiveDiagnostics(live)
 	version := item.Version()

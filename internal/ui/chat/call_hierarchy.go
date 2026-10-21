@@ -13,7 +13,7 @@ type CallHierarchyToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (r *CallHierarchyToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	return renderStandardTool(sty, width, opts, opts.Name, func() ([]string, bool) {
-		var params tools.CallHierarchyParams
+		var params tools.LSPParams
 		_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 		direction := "incoming"
 		if params.Direction == "outgoing" {

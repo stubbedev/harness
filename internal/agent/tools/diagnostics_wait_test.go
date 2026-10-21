@@ -48,7 +48,7 @@ func TestDiagnosticsActionDoesNotWaitForASettle(t *testing.T) {
 	t.Cleanup(release)
 
 	start := time.Now()
-	resp, err := diagnosticsAction(manager)(sessionContext(t, "s1"), DiagnosticsParams{FilePath: file})
+	resp, err := diagnosticsAction(manager)(sessionContext(t, "s1"), diagnosticsParams{File: absPath(file)})
 	require.NoError(t, err)
 	require.Less(t, time.Since(start), promptly, "diagnostics waited on a settle")
 	require.Contains(t, resp.Content, "undefined: x")
@@ -66,7 +66,7 @@ func TestDiagnosticsActionDoesNotWaitForAColdStart(t *testing.T) {
 	manager := lsp.NewManager(config.NewTestStoreWithWorkingDir(cfg, dir))
 
 	start := time.Now()
-	resp, err := diagnosticsAction(manager)(sessionContext(t, "s1"), DiagnosticsParams{FilePath: filepath.Join(dir, "main.go")})
+	resp, err := diagnosticsAction(manager)(sessionContext(t, "s1"), diagnosticsParams{File: absPath(filepath.Join(dir, "main.go"))})
 	require.NoError(t, err)
 	require.Less(t, time.Since(start), promptly)
 	require.Contains(t, resp.Content, "No diagnostics reported.")
@@ -101,7 +101,7 @@ func TestLaterDiagnosticsArriveInTheNextSweep(t *testing.T) {
 	client.PublishTestDiagnostics(file, []protocol.Diagnostic{diag(2, protocol.SeverityError, "undefined: x")})
 
 	release := manager.HoldTestSettle()
-	_, err := diagnosticsAction(manager)(ctx, DiagnosticsParams{FilePath: file})
+	_, err := diagnosticsAction(manager)(ctx, diagnosticsParams{File: absPath(file)})
 	require.NoError(t, err)
 
 	// The server goes on to fix one file and break another, and is still

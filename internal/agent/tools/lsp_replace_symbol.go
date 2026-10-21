@@ -17,11 +17,11 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 )
 
-type ReplaceSymbolParams struct {
-	Symbol      string `json:"symbol" description:"The symbol name to target (e.g., function name, method name, type name)"`
-	FilePath    string `json:"file_path" description:"The path to the file containing the symbol"`
-	Replacement string `json:"replacement,omitempty" description:"The replacement text. Required for 'replace' action. For 'add_before'/'add_after', the text to insert. Ignored for 'delete'."`
-	Action      string `json:"action,omitempty" description:"Operation to perform: 'replace' (default, replace entire symbol), 'add_before' (insert before symbol), 'add_after' (insert after symbol), 'delete' (remove symbol entirely)"`
+type replaceSymbolParams struct {
+	Symbol      string
+	File        absPath
+	Replacement string
+	Action      string
 }
 
 // ReplaceSymbolResponseMetadata carries diff data for the renderer.
@@ -81,13 +81,10 @@ func replaceSymbolAction(
 	tracker filetracker.Service,
 	reg *presence.Registry,
 	workingDir string,
-) func(context.Context, ReplaceSymbolParams) (fantasy.ToolResponse, error) {
-	return func(ctx context.Context, params ReplaceSymbolParams) (fantasy.ToolResponse, error) {
+) func(context.Context, replaceSymbolParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params replaceSymbolParams) (fantasy.ToolResponse, error) {
 		if params.Symbol == "" {
 			return fantasy.NewTextErrorResponse("symbol is required"), nil
-		}
-		if params.FilePath == "" {
-			return fantasy.NewTextErrorResponse("file_path is required"), nil
 		}
 
 		action := params.Action
@@ -102,28 +99,29 @@ func replaceSymbolAction(
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("replacement is required for action %q", action)), nil
 		}
 
-		lspManager.Start(ctx, params.FilePath)
+		file := string(params.File)
+		lspManager.Start(ctx, file)
 
-		client := findLSPClient(lspManager, params.FilePath)
+		client := findLSPClient(lspManager, params.File)
 		if client == nil {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("no LSP client handles file: %s", params.FilePath)), nil
+			return fantasy.NewTextErrorResponse(noLSPClientMessage(lspManager, file)), nil
 		}
 
-		symbols, err := client.DocumentSymbols(ctx, params.FilePath)
+		symbols, err := client.DocumentSymbols(ctx, file)
 		if err != nil {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get document symbols: %s", err)), nil
 		}
 
 		target := findSymbolByName(symbols, params.Symbol)
 		if target == nil {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("symbol '%s' not found in %s", params.Symbol, params.FilePath)), nil
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("symbol '%s' not found in %s", params.Symbol, file)), nil
 		}
 
 		return spliceSymbol(ctx, lspManager, files, tracker, reg, workingDir, params, action, op, target.GetRange())
 	}
 }
 
-// spliceSymbol applies op to the lines rng spans in params.FilePath and
+// spliceSymbol applies op to the lines rng spans in params.File and
 // writes the result back, reporting a file it cannot read or write, or
 // one changed since it was read, as an error result for the model.
 func spliceSymbol(
@@ -133,16 +131,17 @@ func spliceSymbol(
 	tracker filetracker.Service,
 	reg *presence.Registry,
 	workingDir string,
-	params ReplaceSymbolParams,
+	params replaceSymbolParams,
 	action string,
 	op replaceSymbolOp,
 	rng protocol.Range,
 ) (fantasy.ToolResponse, error) {
-	unlock := lockFile(params.FilePath)
+	path := string(params.File)
+	unlock := lockFile(path)
 	defer unlock()
-	content, err := os.ReadFile(params.FilePath)
+	content, err := os.ReadFile(path)
 	if err != nil {
-		return fantasy.NewTextErrorResponse(fileAccessFailure("read", params.FilePath, err)), nil
+		return fantasy.NewTextErrorResponse(fileAccessFailure("read", path, err)), nil
 	}
 
 	lines := strings.Split(string(content), "\n")
@@ -163,36 +162,36 @@ func spliceSymbol(
 
 	sessionID := GetSessionFromContext(ctx)
 	affected := lineRange(content, startLine, endLine-startLine+1)
-	if err := checkFileEvidence(ctx, tracker, sessionID, params.FilePath, content, []filetracker.Range{affected}); err != nil {
-		return fantasy.NewTextErrorResponse(conflictEvidence(ctx, tracker, sessionID, params.FilePath, content, affected.Start, err).Error()), nil
+	if err := checkFileEvidence(ctx, tracker, sessionID, path, content, []filetracker.Range{affected}); err != nil {
+		return fantasy.NewTextErrorResponse(conflictEvidence(ctx, tracker, sessionID, path, content, affected.Start, err).Error()), nil
 	}
-	if err := guardedWrite(params.FilePath, content, []byte(newContent), false); err != nil {
-		if current, readErr := os.ReadFile(params.FilePath); readErr == nil {
-			err = conflictEvidence(ctx, tracker, sessionID, params.FilePath, current, affected.Start, err)
+	if err := guardedWrite(path, content, []byte(newContent), false); err != nil {
+		if current, readErr := os.ReadFile(path); readErr == nil {
+			err = conflictEvidence(ctx, tracker, sessionID, path, current, affected.Start, err)
 		}
 		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 	if files != nil && sessionID != "" {
-		if err := recordFileVersion(ctx, files, sessionID, params.FilePath, string(content), newContent); err != nil {
-			slog.Warn("Failed to record file history for replace", "path", params.FilePath, "error", err)
+		if err := recordFileVersion(ctx, files, sessionID, path, string(content), newContent); err != nil {
+			slog.Warn("Failed to record file history for replace", "path", path, "error", err)
 		}
 	}
 
-	filetracker.Advance(ctx, tracker, sessionID, params.FilePath, content, []byte(newContent))
+	filetracker.Advance(ctx, tracker, sessionID, path, content, []byte(newContent))
 
-	summary := op.summary(params.Symbol, params.FilePath, startLine+1, endLine+1)
+	summary := op.summary(params.Symbol, path, startLine+1, endLine+1)
 
-	changes := newEditResponseMetadata(params.FilePath, workingDir, string(content), newContent)
+	changes := newEditResponseMetadata(path, workingDir, string(content), newContent)
 	meta := ReplaceSymbolResponseMetadata{
-		FilePath:   params.FilePath,
+		FilePath:   path,
 		Diff:       changes.Diff,
 		OldContent: changes.OldContent,
 		NewContent: changes.NewContent,
 		Action:     action,
 	}
-	resp := fantasy.NewTextResponse(summary + "\n" + finishFileChange(ctx, lspManager, reg, params.FilePath))
+	resp := fantasy.NewTextResponse(summary + "\n" + finishFileChange(ctx, lspManager, reg, path))
 	resp = fantasy.WithResponseMetadata(resp, meta)
-	return withFileMutations(resp, params.FilePath), nil
+	return withFileMutations(resp, path), nil
 }
 
 // findSymbolByName searches for a symbol by name in the document symbol tree.

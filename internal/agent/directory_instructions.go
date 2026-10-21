@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -253,21 +254,14 @@ func directoryInstructionPaths(name, input string) ([]string, bool) {
 	case tools.ShellToolName:
 		paths = append(paths, args.WorkingDir)
 	case tools.LSPToolName:
-		switch args.Action {
-		case "symbols", "replace_symbol":
-			paths = append(paths, args.FilePath)
-		case "diagnostics":
-			if args.FilePath == "" {
-				args.FilePath = "."
-			}
-			paths = append(paths, args.FilePath)
-		case "definition", "references", "call_hierarchy", "rename":
-			if args.Path == "" {
-				args.Path = "."
-			}
+		switch tools.LSPAction(args.Action) {
+		case tools.LSPActionSymbols, tools.LSPActionReplaceSymbol:
 			paths = append(paths, args.Path)
+		case tools.LSPActionDiagnostics, tools.LSPActionDefinition, tools.LSPActionReferences, tools.LSPActionCallHierarchy, tools.LSPActionRename:
+			paths = append(paths, cmp.Or(args.Path, "."))
+		case tools.LSPActionRestart:
 		}
-		mutation = args.Action == "replace_symbol" || args.Action == "rename"
+		mutation = args.Action == string(tools.LSPActionReplaceSymbol) || args.Action == string(tools.LSPActionRename)
 	}
 	return slices.DeleteFunc(paths, func(path string) bool { return path == "" || strings.HasPrefix(path, skills.BuiltinPrefix) }), mutation
 }

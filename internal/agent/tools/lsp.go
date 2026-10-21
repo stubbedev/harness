@@ -32,8 +32,7 @@ var lspDescription string
 type LSPParams struct {
 	Action      string `json:"action" enum:"diagnostics,symbols,definition,references,call_hierarchy,rename,replace_symbol,restart"`
 	Symbol      string `json:"symbol,omitempty" description:"Symbol name, for definition, references, call_hierarchy, rename and replace_symbol"`
-	FilePath    string `json:"file_path,omitempty" description:"File to act on, for symbols, replace_symbol, and diagnostics (whole project when omitted)"`
-	Path        string `json:"path,omitempty" description:"Directory or file to narrow the symbol search to; defaults to the working directory"`
+	Path        string `json:"path,omitempty" description:"File or directory, relative to the working directory or absolute. symbols and replace_symbol need a file; diagnostics takes a file or covers the whole project when omitted; definition, references, call_hierarchy and rename search under it, defaulting to the working directory"`
 	Direction   string `json:"direction,omitempty" enum:"incoming,outgoing" description:"call_hierarchy only: who calls this, or what this calls"`
 	NewName     string `json:"new_name,omitempty" description:"rename only: the new name"`
 	Replacement string `json:"replacement,omitempty" description:"replace_symbol only: the text to write, ignored when mode is delete"`
@@ -64,40 +63,47 @@ type lspActionFunc func(context.Context, LSPParams) (fantasy.ToolResponse, error
 
 // adapt turns an action that takes its own parameter type into an
 // lspActionFunc, picking its fields out of the combined parameters.
-func adapt[P any](run func(context.Context, P) (fantasy.ToolResponse, error), pick func(LSPParams) P) lspActionFunc {
+func adapt[P any](run func(context.Context, P) (fantasy.ToolResponse, error), pick func(LSPParams) (P, error)) lspActionFunc {
 	return func(ctx context.Context, p LSPParams) (fantasy.ToolResponse, error) {
-		return run(ctx, pick(p))
+		params, err := pick(p)
+		if err != nil {
+			return fantasy.NewTextErrorResponse(err.Error()), nil
+		}
+		return run(ctx, params)
 	}
 }
 
 // lspActions maps each lsp action to its behaviour.
 func lspActions(lspManager *lsp.Manager, files history.Service, filetracker filetracker.Service, reg *presence.Registry, workingDir string) map[LSPAction]lspActionFunc {
+	paths := lspPaths{workingDir: workingDir}
 	return map[LSPAction]lspActionFunc{
-		LSPActionDiagnostics: adapt(diagnosticsAction(lspManager), func(p LSPParams) DiagnosticsParams {
-			return DiagnosticsParams{FilePath: p.FilePath}
+		LSPActionDiagnostics: adapt(diagnosticsAction(lspManager), func(p LSPParams) (diagnosticsParams, error) {
+			return diagnosticsParams{File: paths.optionalFile(p.Path)}, nil
 		}),
-		LSPActionSymbols: adapt(symbolsAction(lspManager), func(p LSPParams) SymbolsParams {
-			return SymbolsParams{FilePath: p.FilePath}
+		LSPActionSymbols: adapt(symbolsAction(lspManager), func(p LSPParams) (symbolsParams, error) {
+			file, err := paths.file(LSPActionSymbols, p.Path)
+			return symbolsParams{File: file}, err
 		}),
-		LSPActionDefinition: adapt(definitionAction(lspManager), func(p LSPParams) DefinitionParams {
-			return DefinitionParams{Symbol: p.Symbol, Path: p.Path}
+		LSPActionDefinition: adapt(definitionAction(lspManager), func(p LSPParams) (definitionParams, error) {
+			return definitionParams{Symbol: p.Symbol, Root: paths.root(p.Path)}, nil
 		}),
-		LSPActionReferences: adapt(referencesAction(lspManager), func(p LSPParams) ReferencesParams {
-			return ReferencesParams{Symbol: p.Symbol, Path: p.Path}
+		LSPActionReferences: adapt(referencesAction(lspManager), func(p LSPParams) (referencesParams, error) {
+			return referencesParams{Symbol: p.Symbol, Root: paths.root(p.Path)}, nil
 		}),
-		LSPActionCallHierarchy: adapt(callHierarchyAction(lspManager), func(p LSPParams) CallHierarchyParams {
-			return CallHierarchyParams{Symbol: p.Symbol, Direction: p.Direction, Path: p.Path}
+		LSPActionCallHierarchy: adapt(callHierarchyAction(lspManager), func(p LSPParams) (callHierarchyParams, error) {
+			return callHierarchyParams{Symbol: p.Symbol, Direction: p.Direction, Root: paths.root(p.Path)}, nil
 		}),
-		LSPActionRename: adapt(renameAction(lspManager, files, filetracker, reg), func(p LSPParams) RenameParams {
-			return RenameParams{Symbol: p.Symbol, NewName: p.NewName, Path: p.Path}
+		LSPActionRename: adapt(renameAction(lspManager, files, filetracker, reg), func(p LSPParams) (renameParams, error) {
+			return renameParams{Symbol: p.Symbol, NewName: p.NewName, Root: paths.root(p.Path)}, nil
 		}),
 		// The action parameter would shadow replace_symbol's own "action",
 		// so the model sends that one as "mode".
-		LSPActionReplaceSymbol: adapt(replaceSymbolAction(lspManager, files, filetracker, reg, workingDir), func(p LSPParams) ReplaceSymbolParams {
-			return ReplaceSymbolParams{Symbol: p.Symbol, FilePath: p.FilePath, Replacement: p.Replacement, Action: p.Mode}
+		LSPActionReplaceSymbol: adapt(replaceSymbolAction(lspManager, files, filetracker, reg, workingDir), func(p LSPParams) (replaceSymbolParams, error) {
+			file, err := paths.file(LSPActionReplaceSymbol, p.Path)
+			return replaceSymbolParams{Symbol: p.Symbol, File: file, Replacement: p.Replacement, Action: p.Mode}, err
 		}),
-		LSPActionRestart: adapt(lspRestartAction(lspManager), func(p LSPParams) LSPRestartParams {
-			return LSPRestartParams{Name: p.Name}
+		LSPActionRestart: adapt(lspRestartAction(lspManager), func(p LSPParams) (LSPRestartParams, error) {
+			return LSPRestartParams{Name: p.Name}, nil
 		}),
 	}
 }

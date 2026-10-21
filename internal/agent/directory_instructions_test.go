@@ -285,8 +285,11 @@ func TestDirectoryInstructionsStructuredPaths(t *testing.T) {
 	}{
 		{"shell", `{"command":"cat nested/file.go"}`, []string{}, false},
 		{"shell", `{"command":"anything","working_dir":"nested"}`, []string{"nested"}, false},
-		{"lsp", `{"action":"definition","path":"nested","file_path":"ignored"}`, []string{"nested"}, false},
-		{"lsp", `{"action":"replace_symbol","file_path":"nested/file.go","path":"ignored"}`, []string{"nested/file.go"}, true},
+		{"lsp", `{"action":"definition","path":"nested"}`, []string{"nested"}, false},
+		{"lsp", `{"action":"definition"}`, []string{"."}, false},
+		{"lsp", `{"action":"diagnostics","path":"nested/file.go"}`, []string{"nested/file.go"}, false},
+		{"lsp", `{"action":"symbols"}`, []string{}, false},
+		{"lsp", `{"action":"replace_symbol","path":"nested/file.go"}`, []string{"nested/file.go"}, true},
 		{"lsp", `{"action":"rename","path":"nested"}`, []string{"nested"}, true},
 		{"lsp", `{"action":"restart","path":"ignored"}`, nil, false},
 		{"view", `{"file_path":"one","files":[{"file_path":"two"}]}`, nil, false},
@@ -392,7 +395,7 @@ func TestDirectoryInstructionsLSPAndShellScopes(t *testing.T) {
 	response = directoryTestRun(t, ctx, wrapped[1], map[string]any{"action": "rename", "path": "nested"})
 	require.True(t, response.IsError)
 	tracker.Prepare(ctx, nil)
-	response = directoryTestRun(t, ctx, wrapped[1], map[string]any{"action": "replace_symbol", "file_path": "nested/file.go"})
+	response = directoryTestRun(t, ctx, wrapped[1], map[string]any{"action": "replace_symbol", "path": "nested/file.go"})
 	require.False(t, response.IsError)
 }
 

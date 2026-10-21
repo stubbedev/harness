@@ -15,7 +15,7 @@ type RenameToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (r *RenameToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	return renderStandardTool(sty, width, opts, opts.Name, func() ([]string, bool) {
-		var params tools.RenameParams
+		var params tools.LSPParams
 		_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 		toolParams := []string{params.Symbol + " → " + params.NewName}
 		if params.Path != "" {

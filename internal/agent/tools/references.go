@@ -15,14 +15,14 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 )
 
-type ReferencesParams struct {
-	Symbol string `json:"symbol" description:"The symbol name to search for (e.g., function name, variable name, type name)"`
-	Path   string `json:"path,omitempty" description:"The directory to search in. Use a directory/file to narrow down the symbol search. Defaults to the current working directory."`
+type referencesParams struct {
+	Symbol string
+	Root   absPath
 }
 
-func referencesAction(lspManager *lsp.Manager) func(context.Context, ReferencesParams) (fantasy.ToolResponse, error) {
-	return func(ctx context.Context, params ReferencesParams) (fantasy.ToolResponse, error) {
-		results, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbolResults)
+func referencesAction(lspManager *lsp.Manager) func(context.Context, referencesParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params referencesParams) (fantasy.ToolResponse, error) {
+		results, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Root, resolveSymbolResults)
 		if !ok {
 			return resp, nil
 		}

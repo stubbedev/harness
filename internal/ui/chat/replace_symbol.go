@@ -18,10 +18,10 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 		return pendingToolView(sty, opts, opts.Name, "", width)
 	}
 
-	var params tools.ReplaceSymbolParams
+	var params tools.LSPParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
-	file := home.Short(params.FilePath)
+	file := home.Short(params.Path)
 	header := toolHeader(sty, opts.Name, width, opts, params.Symbol, file)
 	if opts.Compact {
 		return header

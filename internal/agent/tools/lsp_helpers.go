@@ -3,8 +3,9 @@ package tools
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
-	"path/filepath"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -23,24 +24,24 @@ type resolvedSymbol struct {
 }
 
 // resolveSymbolTool runs the preamble every LSP tool shares: require a
-// symbol, default the working directory to ".", and resolve the
-// symbol. resolve is either resolveSymbol or resolveSymbolResults. ok
-// is false when resp carries the shared failure response (missing or
-// unresolvable symbol) and the caller must return it.
+// symbol and resolve it under root. resolve is either resolveSymbol or
+// resolveSymbolResults. ok is false when resp carries the shared failure
+// response (missing or unresolvable symbol) and the caller must return it.
 func resolveSymbolTool[T any](
 	ctx context.Context,
 	lspManager *lsp.Manager,
-	symbol, path string,
-	resolve func(context.Context, *lsp.Manager, string, string) (T, error),
+	symbol string,
+	root absPath,
+	resolve func(context.Context, *lsp.Manager, string, absPath) (T, error),
 ) (T, fantasy.ToolResponse, bool) {
 	if symbol == "" {
 		var zero T
 		return zero, fantasy.NewTextErrorResponse("symbol is required"), false
 	}
-	resolved, err := resolve(ctx, lspManager, symbol, cmp.Or(path, "."))
+	resolved, err := resolve(ctx, lspManager, symbol, root)
 	if err != nil {
 		var zero T
-		return zero, fantasy.NewTextErrorResponse(fmt.Sprintf("Symbol '%s' not found", symbol)), false
+		return zero, fantasy.NewTextErrorResponse(fmt.Sprintf("cannot resolve symbol '%s': %s", symbol, err)), false
 	}
 	return resolved, fantasy.ToolResponse{}, true
 }
@@ -49,8 +50,8 @@ func resolveSymbolTool[T any](
 // returns the first match position that a running LSP client confirms
 // is a valid identifier. Matches inside comments or strings are skipped
 // automatically because the LSP will reject them.
-func resolveSymbol(ctx context.Context, lspManager *lsp.Manager, symbol, workingDir string) (*resolvedSymbol, error) {
-	results, err := resolveSymbolResults(ctx, lspManager, symbol, workingDir)
+func resolveSymbol(ctx context.Context, lspManager *lsp.Manager, symbol string, root absPath) (*resolvedSymbol, error) {
+	results, err := resolveSymbolResults(ctx, lspManager, symbol, root)
 	if err != nil {
 		return nil, err
 	}
@@ -73,36 +74,31 @@ func resolveSymbol(ctx context.Context, lspManager *lsp.Manager, symbol, working
 // {client, path, position} tuples. Callers that need just one match
 // (definition, rename, call hierarchy) use resolveSymbol; callers that
 // want to iterate all matches (references) use this directly.
-func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, workingDir string) ([]*resolvedSymbol, error) {
-	lspManager.Start(ctx, workingDir)
+func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol string, root absPath) ([]*resolvedSymbol, error) {
+	lspManager.Start(ctx, string(root))
 
 	// Use word boundaries to avoid matching inside larger identifiers
 	// (e.g. "Bar" inside "myBar"). The symbol is already QuoteMeta'd
 	// so dots and other regex metacharacters are escaped.
 	pattern := `\b` + regexp.QuoteMeta(symbol) + `\b`
-	matches, _, err := searchFiles(ctx, pattern, workingDir, "", 100)
+	matches, _, err := searchFiles(ctx, pattern, string(root), "", 100)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search for symbol: %w", err)
+		return nil, fmt.Errorf("searching %s failed: %w", root, err)
 	}
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("symbol '%s' not found in grep results", symbol)
+		return nil, fmt.Errorf("no file under %s mentions it: check the spelling, or widen path", root)
 	}
 
 	var results []*resolvedSymbol
 	for _, match := range matches {
-		absPath, err := filepath.Abs(match.path)
-		if err != nil {
-			continue
-		}
-
-		client := findLSPClient(lspManager, absPath)
+		client := findLSPClient(lspManager, absPath(match.path))
 		if client == nil {
 			continue
 		}
 
 		results = append(results, &resolvedSymbol{
 			client: client,
-			path:   absPath,
+			path:   match.path,
 			line:   match.lineNum,
 			// The client takes a 1-based column in the server's
 			// negotiated encoding; the search reports bytes.
@@ -111,18 +107,24 @@ func resolveSymbolResults(ctx context.Context, lspManager *lsp.Manager, symbol, 
 	}
 
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no LSP client handles any file matching '%s'", symbol)
+		return nil, errors.New(noLSPClientMessage(lspManager, "any file under "+string(root)+" that mentions it"))
 	}
 	return results, nil
 }
 
-// findLSPClient returns the first LSP client that handles the given file path.
-func findLSPClient(lspManager *lsp.Manager, filePath string) *lsp.Client {
-	if abs, err := filepath.Abs(filePath); err == nil {
-		filePath = abs
+func noLSPClientMessage(lspManager *lsp.Manager, subject string) string {
+	running := slices.Sorted(maps.Keys(maps.Collect(lspManager.Clients().Seq2())))
+	state := "no client is running"
+	if len(running) > 0 {
+		state = "running: " + strings.Join(running, ", ")
 	}
+	return fmt.Sprintf("no LSP client handles %s (%s). If a server should handle it, restart it with action restart; otherwise read the code with view and grep instead", subject, state)
+}
+
+// findLSPClient returns the first LSP client that handles the given file path.
+func findLSPClient(lspManager *lsp.Manager, path absPath) *lsp.Client {
 	for c := range lspManager.Clients().Seq() {
-		if c.HandlesFile(filePath) {
+		if c.HandlesFile(string(path)) {
 			return c
 		}
 	}

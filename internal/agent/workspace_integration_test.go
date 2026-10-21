@@ -38,22 +38,6 @@ func TestDirectoryInstructionsAgentStepAcknowledgesMutation(t *testing.T) {
 	require.Len(t, large.sentCalls(), 3)
 }
 
-func TestWorkspaceToolsResolveLSPPaths(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	inner := &fakeTool{name: tools.LSPToolName, resp: fantasy.NewTextResponse("ok")}
-	tool := workspaceTools([]fantasy.AgentTool{inner}, root)[0]
-	_, err := tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"definition","symbol":"Foo"}`})
-	require.NoError(t, err)
-	var input map[string]any
-	require.NoError(t, json.Unmarshal([]byte(inner.input), &input))
-	require.Equal(t, root, input["path"])
-	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"symbols","file_path":"main.go"}`})
-	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal([]byte(inner.input), &input))
-	require.Equal(t, filepath.Join(root, "main.go"), input["file_path"])
-}
-
 func TestWorkspaceBuildToolsUseChildRoot(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

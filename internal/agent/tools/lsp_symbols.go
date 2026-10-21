@@ -10,28 +10,26 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 )
 
-type SymbolsParams struct {
-	FilePath string `json:"file_path" description:"The path to the file to get symbols for"`
+type symbolsParams struct {
+	File absPath
 }
 
-func symbolsAction(lspManager *lsp.Manager) func(context.Context, SymbolsParams) (fantasy.ToolResponse, error) {
-	return func(ctx context.Context, params SymbolsParams) (fantasy.ToolResponse, error) {
-		if params.FilePath == "" {
-			return fantasy.NewTextErrorResponse("file_path is required"), nil
-		}
-		lspManager.Start(ctx, params.FilePath)
+func symbolsAction(lspManager *lsp.Manager) func(context.Context, symbolsParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params symbolsParams) (fantasy.ToolResponse, error) {
+		file := string(params.File)
+		lspManager.Start(ctx, file)
 
-		client := findLSPClient(lspManager, params.FilePath)
+		client := findLSPClient(lspManager, params.File)
 		if client == nil {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("no LSP client handles file: %s", params.FilePath)), nil
+			return fantasy.NewTextErrorResponse(noLSPClientMessage(lspManager, file)), nil
 		}
 
-		symbols, err := client.DocumentSymbols(ctx, params.FilePath)
+		symbols, err := client.DocumentSymbols(ctx, file)
 		if err != nil {
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to get document symbols: %s", err)), nil
 		}
 		if len(symbols) == 0 {
-			return fantasy.NewTextResponse(fmt.Sprintf("No symbols found in %s", params.FilePath)), nil
+			return fantasy.NewTextResponse(fmt.Sprintf("No symbols found in %s", file)), nil
 		}
 
 		return fantasy.NewTextResponse(formatSymbols(symbols, 0)), nil

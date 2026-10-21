@@ -9,18 +9,18 @@ import (
 	"github.com/stubbedev/harness/internal/lsp"
 )
 
-type CallHierarchyParams struct {
-	Symbol    string `json:"symbol" description:"The symbol name to show call hierarchy for"`
-	Direction string `json:"direction" description:"Either 'incoming' (who calls this) or 'outgoing' (what does this call)"`
-	Path      string `json:"path,omitempty" description:"The directory to search in. Defaults to the current working directory."`
+type callHierarchyParams struct {
+	Symbol    string
+	Direction string
+	Root      absPath
 }
 
-func callHierarchyAction(lspManager *lsp.Manager) func(context.Context, CallHierarchyParams) (fantasy.ToolResponse, error) {
-	return func(ctx context.Context, params CallHierarchyParams) (fantasy.ToolResponse, error) {
+func callHierarchyAction(lspManager *lsp.Manager) func(context.Context, callHierarchyParams) (fantasy.ToolResponse, error) {
+	return func(ctx context.Context, params callHierarchyParams) (fantasy.ToolResponse, error) {
 		if params.Direction != "incoming" && params.Direction != "outgoing" {
 			return fantasy.NewTextErrorResponse("direction must be 'incoming' or 'outgoing'"), nil
 		}
-		resolved, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Path, resolveSymbol)
+		resolved, resp, ok := resolveSymbolTool(ctx, lspManager, params.Symbol, params.Root, resolveSymbol)
 		if !ok {
 			return resp, nil
 		}

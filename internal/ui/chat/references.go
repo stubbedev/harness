@@ -15,7 +15,7 @@ type ReferencesToolRenderContext struct{}
 // RenderTool implements the [ToolRenderer] interface.
 func (r *ReferencesToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	return renderStandardTool(sty, width, opts, opts.Name, func() ([]string, bool) {
-		var params tools.ReferencesParams
+		var params tools.LSPParams
 		_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 		toolParams := []string{params.Symbol}
 		if params.Path != "" {
