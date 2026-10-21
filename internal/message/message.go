@@ -1,10 +1,13 @@
 package message
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -189,6 +192,8 @@ type service struct {
 
 	mu      sync.Mutex
 	pending map[string]*pendingState
+
+	decoded *decodedParts
 }
 
 // ServiceOption configures a [Service] at construction.
@@ -209,6 +214,7 @@ func NewService(q db.Querier, opts ...ServiceOption) Service {
 		q:        q,
 		debounce: defaultUpdateDebounce,
 		pending:  make(map[string]*pendingState),
+		decoded:  newDecodedParts(decodedPartsBudget),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -235,6 +241,7 @@ func (s *service) Delete(ctx context.Context, id string) error {
 		delete(s.pending, id)
 	}
 	s.mu.Unlock()
+	s.decoded.forget(id)
 	// Clone the message before publishing to avoid race conditions with
 	// concurrent modifications to the Parts slice.
 	s.Publish(pubsub.DeletedEvent, message.Clone())
@@ -271,6 +278,9 @@ func (s *service) DeleteFrom(ctx context.Context, sessionID, fromID string) ([]M
 		}
 	}
 	s.mu.Unlock()
+	for _, msg := range deleted {
+		s.decoded.forget(msg.ID)
+	}
 	for _, msg := range deleted {
 		s.Publish(pubsub.DeletedEvent, msg.Clone())
 	}
@@ -780,7 +790,7 @@ func (s *service) convertAll(dbMessages []db.Message) ([]Message, error) {
 }
 
 func (s *service) fromDBItem(item db.Message) (Message, error) {
-	parts, err := unmarshalParts([]byte(item.Parts))
+	parts, err := s.decoded.decode(item.ID, item.Parts)
 	if err != nil {
 		return Message{}, err
 	}
@@ -830,7 +840,7 @@ func marshalParts(parts []ContentPart) ([]byte, error) {
 }
 
 // partDecoders maps each stored part type to its decoder.
-var partDecoders = map[partType]func(json.RawMessage) (ContentPart, error){
+var partDecoders = map[partType]func(*jsontext.Decoder) (ContentPart, error){
 	reasoningType:    decodePart[ReasoningContent],
 	textType:         decodePart[TextContent],
 	imageURLType:     decodePart[ImageURLContent],
@@ -843,6 +853,8 @@ var partDecoders = map[partType]func(json.RawMessage) (ContentPart, error){
 	contextNoteType:  decodePart[ContextNote],
 }
 
+var partsDecodeOptions = json.DefaultOptionsV1()
+
 // PartTypes returns a zero value of every content part type the store
 // knows, ordered by stored type name. Layers that mirror parts, such as
 // the wire protocol, walk it to prove they cover every one.
@@ -850,7 +862,7 @@ func PartTypes() []ContentPart {
 	types := slices.Sorted(maps.Keys(partDecoders))
 	parts := make([]ContentPart, 0, len(types))
 	for _, typ := range types {
-		part, err := partDecoders[typ](json.RawMessage("{}"))
+		part, err := withPartsDecoder([]byte("{}"), partDecoders[typ])
 		if err != nil {
 			panic(fmt.Sprintf("message: part type %q cannot decode its zero value: %v", typ, err))
 		}
@@ -859,9 +871,21 @@ func PartTypes() []ContentPart {
 	return parts
 }
 
-func decodePart[T ContentPart](data json.RawMessage) (ContentPart, error) {
+var partsDecoderPool = sync.Pool{New: func() any { return new(jsontext.Decoder) }}
+
+func withPartsDecoder[T any](data []byte, decode func(*jsontext.Decoder) (T, error)) (T, error) {
+	dec := partsDecoderPool.Get().(*jsontext.Decoder)
+	dec.Reset(bytes.NewBuffer(data), partsDecodeOptions)
+	defer func() {
+		dec.Reset(bytes.NewBuffer(nil))
+		partsDecoderPool.Put(dec)
+	}()
+	return decode(dec)
+}
+
+func decodePart[T ContentPart](dec *jsontext.Decoder) (ContentPart, error) {
 	var part T
-	if err := json.Unmarshal(data, &part); err != nil {
+	if err := jsonv2.UnmarshalDecode(dec, &part, partsDecodeOptions); err != nil {
 		return nil, err
 	}
 	return part, nil
@@ -871,26 +895,114 @@ func decodePart[T ContentPart](data json.RawMessage) (ContentPart, error) {
 // know (written by a newer one) is skipped rather than failing the whole
 // message, so an older binary can still open every session.
 func unmarshalParts(data []byte) ([]ContentPart, error) {
-	var wrappers []struct {
-		Type partType        `json:"type"`
-		Data json.RawMessage `json:"data"`
+	return withPartsDecoder(data, decodeParts)
+}
+
+func decodeParts(dec *jsontext.Decoder) ([]ContentPart, error) {
+	if dec.PeekKind() == 'n' {
+		if _, err := dec.ReadToken(); err != nil {
+			return nil, err
+		}
+		return []ContentPart{}, nil
 	}
-	if err := json.Unmarshal(data, &wrappers); err != nil {
+	if err := readDelim(dec, '['); err != nil {
 		return nil, err
 	}
-
-	parts := make([]ContentPart, 0, len(wrappers))
-	for _, wrapper := range wrappers {
-		decode, ok := partDecoders[wrapper.Type]
-		if !ok {
-			slog.Warn("Skipping unknown message part type", "type", wrapper.Type)
-			continue
-		}
-		part, err := decode(wrapper.Data)
+	var parts []ContentPart
+	for dec.PeekKind() != ']' {
+		part, ok, err := decodeWrappedPart(dec)
 		if err != nil {
 			return nil, err
 		}
-		parts = append(parts, part)
+		if ok {
+			parts = append(parts, part)
+		}
+	}
+	if err := readDelim(dec, ']'); err != nil {
+		return nil, err
+	}
+	if parts == nil {
+		parts = []ContentPart{}
 	}
 	return parts, nil
+}
+
+func decodeWrappedPart(dec *jsontext.Decoder) (ContentPart, bool, error) {
+	if err := readDelim(dec, '{'); err != nil {
+		return nil, false, err
+	}
+	var (
+		typ     partType
+		typed   bool
+		part    ContentPart
+		decoded bool
+		held    jsontext.Value
+	)
+	for dec.PeekKind() != '}' {
+		name, err := dec.ReadToken()
+		if err != nil {
+			return nil, false, err
+		}
+		switch name.String() {
+		case "type":
+			tok, err := dec.ReadToken()
+			if err != nil {
+				return nil, false, err
+			}
+			typ, typed = partType(tok.String()), true
+		case "data":
+			decode, known := partDecoders[typ]
+			switch {
+			case !typed:
+				value, err := dec.ReadValue()
+				if err != nil {
+					return nil, false, err
+				}
+				held = value.Clone()
+			case !known:
+				if err := dec.SkipValue(); err != nil {
+					return nil, false, err
+				}
+			default:
+				if part, err = decode(dec); err != nil {
+					return nil, false, err
+				}
+				decoded = true
+			}
+		default:
+			if err := dec.SkipValue(); err != nil {
+				return nil, false, err
+			}
+		}
+	}
+	if err := readDelim(dec, '}'); err != nil {
+		return nil, false, err
+	}
+	decode, known := partDecoders[typ]
+	if !known {
+		slog.Warn("Skipping unknown message part type", "type", typ)
+		return nil, false, nil
+	}
+	if decoded {
+		return part, true, nil
+	}
+	if held == nil {
+		return nil, false, fmt.Errorf("message parts: %q part has no data", typ)
+	}
+	part, err := withPartsDecoder(held, decode)
+	if err != nil {
+		return nil, false, err
+	}
+	return part, true, nil
+}
+
+func readDelim(dec *jsontext.Decoder, want jsontext.Kind) error {
+	tok, err := dec.ReadToken()
+	if err != nil {
+		return err
+	}
+	if tok.Kind() != want {
+		return fmt.Errorf("message parts: expected %v, found %v", want, tok.Kind())
+	}
+	return nil
 }

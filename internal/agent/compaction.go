@@ -332,10 +332,10 @@ func withSummary(summary string, history []fantasy.Message) []fantasy.Message {
 
 // projectRequest estimates the tokens the next turn's request would
 // carry for this history: system prompt, summary, and the messages.
-func (a *sessionAgent) projectRequest(summary string, msgs []message.Message, supportsImages bool) int64 {
+func (a *sessionAgent) projectRequest(estimator *historyTokenEstimator, summary string, msgs []message.Message, supportsImages bool) int64 {
 	history, _ := a.preparePrompt(msgs, supportsImages)
 	history = withSummary(summary, history)
-	return approxTokenCount(a.systemPrompt.Get()) + estimateMessageTokens(history)
+	return approxTokenCount(a.systemPrompt.Get()) + estimator.Messages(history)
 }
 
 // lastUserTurnStart is the index of the most recent message the user
@@ -424,6 +424,7 @@ func (a *sessionAgent) maintainContext(
 	trigger compactTrigger,
 	instructions string,
 	force bool,
+	estimator *historyTokenEstimator,
 ) (bool, error) {
 	sess, err := a.sessions.Get(ctx, sessionID)
 	if err != nil {
@@ -448,7 +449,7 @@ func (a *sessionAgent) maintainContext(
 	if len(tail) == 0 {
 		return false, nil
 	}
-	projected := a.projectRequest(sess.CompactionSummary, dedupToolResults(ageMessages(tail, agedIdx)), supportsImages)
+	projected := a.projectRequest(estimator, sess.CompactionSummary, dedupToolResults(ageMessages(tail, agedIdx)), supportsImages)
 	budget := compactionBudget(cw)
 	over := func(ratio float64) bool { return budget > 0 && float64(projected) > ratio*float64(budget) }
 	changed := false
@@ -457,7 +458,7 @@ func (a *sessionAgent) maintainContext(
 	// when that frees enough to be worth re-sending the prefix.
 	if force || over(compactionAgeRatio) {
 		if start := lastUserTurnStart(tail); start > 0 && tail[start-1].ID != sess.CompactionAgedID {
-			aged := a.projectRequest(sess.CompactionSummary, dedupToolResults(ageMessages(tail, start-1)), supportsImages)
+			aged := a.projectRequest(estimator, sess.CompactionSummary, dedupToolResults(ageMessages(tail, start-1)), supportsImages)
 			if force || float64(projected-aged) >= compactionAgeMinSavingRatio*float64(budget) {
 				sess.CompactionAgedID = tail[start-1].ID
 				projected = aged
@@ -489,7 +490,7 @@ func (a *sessionAgent) maintainContext(
 			sess.CompactionAgedID = ""
 			sess.SummaryMessageID = ""
 			tail = tail[cut:]
-			projected = a.projectRequest(summary, tail, supportsImages)
+			projected = a.projectRequest(estimator, summary, tail, supportsImages)
 			changed = true
 			// The transcript those diagnostics were reported into is
 			// gone. Start the record over, or a standing error stays

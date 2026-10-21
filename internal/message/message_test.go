@@ -36,7 +36,7 @@ func (s *slowUpdateQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMess
 // newTestService spins up a fresh in-memory message.Service backed by a
 // temporary on-disk SQLite database. Returns the service plus a session
 // ID to attach messages to.
-func newTestService(t *testing.T, opts ...ServiceOption) (Service, string) {
+func newTestService(t testing.TB, opts ...ServiceOption) (Service, string) {
 	t.Helper()
 	conn, err := db.Connect(t.Context(), t.TempDir())
 	require.NoError(t, err)

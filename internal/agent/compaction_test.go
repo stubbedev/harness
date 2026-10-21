@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/assert"
@@ -69,7 +70,7 @@ func TestCompactionAgesOldToolResults(t *testing.T) {
 	old := seedToolTurn(t, env, sess.ID, 1, 20000)
 	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "question 2"})
 
-	changed, err := sa.maintainContext(t.Context(), sess.ID, nil, nil, compactAuto, "", false)
+	changed, err := sa.maintainContext(t.Context(), sess.ID, nil, nil, compactAuto, "", false, newHistoryTokenEstimator())
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -107,7 +108,7 @@ func TestCompactionAgesOldToolResults(t *testing.T) {
 
 	// A second pass with nothing new is a no-op: the watermark does not
 	// creep, so the request prefix stays cacheable.
-	changed, err = sa.maintainContext(t.Context(), sess.ID, nil, nil, compactAuto, "", false)
+	changed, err = sa.maintainContext(t.Context(), sess.ID, nil, nil, compactAuto, "", false, newHistoryTokenEstimator())
 	require.NoError(t, err)
 	assert.False(t, changed)
 }
@@ -130,7 +131,7 @@ func TestCompactionFoldsOldestHistoryIntoHiddenSummary(t *testing.T) {
 		createMessage(t, env, sess.ID, message.Assistant, message.TextContent{Text: strings.Repeat(fmt.Sprintf("answer %d ", i), 550)})
 	}
 
-	changed, err := sa.maintainContext(t.Context(), sess.ID, nil, nil, compactAuto, "", false)
+	changed, err := sa.maintainContext(t.Context(), sess.ID, nil, nil, compactAuto, "", false, newHistoryTokenEstimator())
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -561,4 +562,55 @@ func TestCompactionBudgetIsCapped(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, int64(8000), compactionBudget(8000))
 	assert.Equal(t, int64(compactionWindowCeiling), compactionBudget(1_000_000))
+}
+
+func TestMaintainContextCountsWithTheTurnEstimator(t *testing.T) {
+	env := testEnv(t)
+	sess, err := env.sessions.Create(t.Context(), "estimator")
+	require.NoError(t, err)
+	sa, _ := compactionAgent(t, env, 1_000_000, "unused")
+	result := seedToolTurn(t, env, sess.ID, 1, 20000)
+	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: "question 2"})
+
+	stored, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+	var content string
+	for _, m := range stored {
+		if m.ID == result.ID {
+			content = m.ToolResults()[0].Content
+		}
+	}
+	require.NotEmpty(t, content)
+
+	estimator := newHistoryTokenEstimator()
+	changed, err := sa.maintainContext(t.Context(), sess.ID, nil, nil, compactAuto, "", false, estimator)
+	require.NoError(t, err)
+	require.False(t, changed)
+
+	estimator.mu.Lock()
+	defer estimator.mu.Unlock()
+	require.Contains(t, estimator.prev, stringIdentity{data: unsafe.StringData(content), n: len(content)},
+		"the pass reads the rows already decoded and counts them with the estimator it was handed")
+}
+
+func TestProjectRequestMatchesFullEstimate(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	sess, err := env.sessions.Create(t.Context(), "projection")
+	require.NoError(t, err)
+	sa, _ := compactionAgent(t, env, 1_000_000, "unused")
+	for i := range 3 {
+		seedToolTurn(t, env, sess.ID, i, 5000)
+	}
+	msgs, err := env.messages.List(t.Context(), sess.ID)
+	require.NoError(t, err)
+
+	history, _ := sa.preparePrompt(msgs, false)
+	history = withSummary("summary so far", history)
+	want := approxTokenCount(sa.systemPrompt.Get()) + estimateMessageTokens(history)
+
+	estimator := newHistoryTokenEstimator()
+	require.Equal(t, want, sa.projectRequest(estimator, "summary so far", msgs, false))
+	require.Equal(t, want, sa.projectRequest(estimator, "summary so far", msgs, false))
 }

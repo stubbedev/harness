@@ -1956,7 +1956,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if delErr := a.messages.Delete(ctx, userMsg.ID); delErr != nil {
 			slog.Warn("Failed to remove the overflowed user message", "error", delErr)
 		}
-		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", true); compactErr != nil {
+		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", true, requestTokens); compactErr != nil {
 			return nil, compactErr
 		}
 		requeued := call
@@ -1970,7 +1970,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if err == nil && shouldSummarize {
 		// The stop condition ended the turn with the window nearly full:
 		// fold everything, then let the turn carry on if it was not done.
-		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", true); compactErr != nil {
+		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", true, requestTokens); compactErr != nil {
 			return nil, compactErr
 		}
 		// If the agent wasn't done...
@@ -1984,7 +1984,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// waits on a compaction in the middle of an answer. Usually there
 		// is nothing to do; when there is, nothing shows in the
 		// transcript. A failure here is not the turn's failure.
-		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", false); compactErr != nil &&
+		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", false, requestTokens); compactErr != nil &&
 			!errors.Is(compactErr, context.Canceled) {
 			slog.Warn("Context maintenance failed", "session_id", call.SessionID, "error", compactErr)
 		}
@@ -2267,7 +2267,7 @@ func (a *sessionAgent) Summarize(ctx context.Context, sessionID string, opts fan
 	defer csync.CompareAndDelete(a.activeRequests, sessionID, ac)
 	defer cancel()
 
-	if _, err := a.maintainContext(genCtx, sessionID, opts, onAuthRefresh, compactManual, instructions, true); err != nil {
+	if _, err := a.maintainContext(genCtx, sessionID, opts, onAuthRefresh, compactManual, instructions, true, newHistoryTokenEstimator()); err != nil {
 		return err
 	}
 
