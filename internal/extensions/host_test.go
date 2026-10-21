@@ -160,6 +160,25 @@ end)
 	}))
 }
 
+func TestHookHandlerUnknownDecisionIsInvalid(t *testing.T) {
+	t.Parallel()
+
+	root := writeExtension(t, "sloppy", `
+harness.on("PreToolUse", function(event)
+  return { decision = "reject", reason = "nope" }
+end)
+`)
+
+	results := dispatch(t, newHost(t, []string{root}), hooks.EventContext{
+		Event:     hooks.EventPreToolUse,
+		ToolName:  "shell",
+		ToolInput: `{"command":"ls"}`,
+	})
+	require.Len(t, results, 1)
+	require.Equal(t, hooks.DecisionInvalid, results[0].Result.Decision)
+	require.Equal(t, `unknown hook decision "reject"`, results[0].Result.Reason)
+}
+
 func TestHookHandlerRewritesPrompt(t *testing.T) {
 	t.Parallel()
 

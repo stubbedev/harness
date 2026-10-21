@@ -132,15 +132,15 @@ func BuildEventEnv(ec EventContext, projectDir string) []string {
 
 // parseStdout parses the JSON output from a hook command's stdout.
 // Supports both Harness format and Claude Code format (hookSpecificOutput).
-func parseStdout(stdout string) HookResult {
+func parseStdout(stdout string) (HookResult, error) {
 	stdout = strings.TrimSpace(stdout)
 	if stdout == "" {
-		return HookResult{Decision: DecisionNone}
+		return HookResult{Decision: DecisionNone}, nil
 	}
 
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
-		return HookResult{Decision: DecisionNone}
+	if err := json.Unmarshal([]byte(stdout), &raw); err != nil || raw == nil {
+		return HookResult{}, fmt.Errorf("hook stdout is not a JSON object")
 	}
 
 	// Claude Code compat: if hookSpecificOutput is present, parse that.
@@ -158,7 +158,7 @@ func parseStdout(stdout string) HookResult {
 		UpdatedPrompt json.RawMessage `json:"updated_prompt"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil {
-		return HookResult{Decision: DecisionNone}
+		return HookResult{}, fmt.Errorf("hook stdout has an invalid shape: %w", err)
 	}
 
 	if parsed.Version > SupportedOutputVersion {
@@ -169,51 +169,50 @@ func parseStdout(stdout string) HookResult {
 		)
 	}
 
-	result := HookResult{
+	decision, err := ParseDecision(parsed.Decision)
+	if err != nil {
+		return HookResult{}, err
+	}
+	contextText, err := parseContext(parsed.Context)
+	if err != nil {
+		return HookResult{}, err
+	}
+	return HookResult{
+		Decision:      decision,
 		Halt:          parsed.Halt,
 		Reason:        parsed.Reason,
-		Context:       parseContext(parsed.Context),
+		Context:       contextText,
 		UpdatedInput:  rawToString(parsed.UpdatedInput),
 		UpdatedPrompt: rawToString(parsed.UpdatedPrompt),
-	}
-	result.Decision = ParseDecision(parsed.Decision)
-	return result
+	}, nil
 }
 
 // parseContext accepts either a single string or an array of strings and
 // returns a newline-joined value with empty entries dropped.
-func parseContext(raw json.RawMessage) string {
+func parseContext(raw json.RawMessage) (string, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return ""
+		return "", nil
 	}
-	// String form.
-	if raw[0] == '"' {
-		var s string
-		if err := json.Unmarshal(raw, &s); err == nil {
-			return s
-		}
-		return ""
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s, nil
 	}
-	// Array form.
-	if raw[0] == '[' {
-		var items []string
-		if err := json.Unmarshal(raw, &items); err != nil {
-			return ""
-		}
-		out := items[:0]
-		for _, s := range items {
-			if s != "" {
-				out = append(out, s)
-			}
-		}
-		return strings.Join(out, "\n")
+	var items []string
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return "", fmt.Errorf("hook context must be a string or an array of strings")
 	}
-	return ""
+	out := items[:0]
+	for _, item := range items {
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return strings.Join(out, "\n"), nil
 }
 
 // parseClaudeCodeOutput handles the Claude Code hook output format:
 // {"hookSpecificOutput": {"permissionDecision": "allow", ...}}
-func parseClaudeCodeOutput(data json.RawMessage) HookResult {
+func parseClaudeCodeOutput(data json.RawMessage) (HookResult, error) {
 	var hso struct {
 		PermissionDecision       string          `json:"permissionDecision"`
 		PermissionDecisionReason string          `json:"permissionDecisionReason"`
@@ -221,11 +220,15 @@ func parseClaudeCodeOutput(data json.RawMessage) HookResult {
 		AdditionalContext        string          `json:"additionalContext"`
 	}
 	if err := json.Unmarshal(data, &hso); err != nil {
-		return HookResult{Decision: DecisionNone}
+		return HookResult{}, fmt.Errorf("hook hookSpecificOutput has an invalid shape: %w", err)
 	}
 
+	decision, err := ParseDecision(hso.PermissionDecision)
+	if err != nil {
+		return HookResult{}, err
+	}
 	result := HookResult{
-		Decision: ParseDecision(hso.PermissionDecision),
+		Decision: decision,
 		Reason:   hso.PermissionDecisionReason,
 		Context:  hso.AdditionalContext,
 	}
@@ -235,7 +238,7 @@ func parseClaudeCodeOutput(data json.RawMessage) HookResult {
 		result.UpdatedInput = string(hso.UpdatedInput)
 	}
 
-	return result
+	return result, nil
 }
 
 // rawToString converts a json.RawMessage to a string suitable for use
@@ -258,16 +261,19 @@ func rawToString(raw json.RawMessage) string {
 
 // ParseDecision maps a hook-authored decision string onto a Decision.
 // Matching is case-insensitive; "deny" and "block" both deny, "allow"
-// allows, and anything else expresses no opinion. The vocabulary is
-// shared by shell-hook stdout, the Claude Code format, and Lua handlers
-// so the same verdict string means the same thing on every path.
-func ParseDecision(s string) Decision {
+// allows, and an empty string expresses no opinion. Any other string is
+// an error. The vocabulary is shared by shell-hook stdout, the Claude
+// Code format, and Lua handlers so the same verdict string means the
+// same thing on every path.
+func ParseDecision(s string) (Decision, error) {
 	switch strings.ToLower(s) {
+	case "":
+		return DecisionNone, nil
 	case "allow":
-		return DecisionAllow
+		return DecisionAllow, nil
 	case "deny", "block":
-		return DecisionDeny
+		return DecisionDeny, nil
 	default:
-		return DecisionNone
+		return DecisionNone, fmt.Errorf("unknown hook decision %q", s)
 	}
 }

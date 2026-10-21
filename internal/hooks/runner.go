@@ -104,15 +104,14 @@ func (r *Runner) Run(ctx context.Context, eventName, sessionID, toolName, toolIn
 // tested against the context's subject (tool name, or sub-agent type for
 // SubagentStop).
 func (r *Runner) RunEvent(ctx context.Context, ec EventContext) (AggregateResult, error) {
-	results, infos := r.results(ctx, ec)
-	return finalizeAggregation(ec, results, infos)
+	return finalizeAggregation(ec, r.results(ctx, ec))
 }
 
 // results runs every hook matching the event and returns the raw
 // results alongside the per-hook info, in config order. The registry
 // merges these with the results of any in-process dispatchers before
 // aggregating, so a Lua handler and a shell hook are weighed together.
-func (r *Runner) results(ctx context.Context, ec EventContext) ([]HookResult, []HookInfo) {
+func (r *Runner) results(ctx context.Context, ec EventContext) []DispatchResult {
 	if ec.CWD == "" {
 		ec.CWD = r.cwd
 	}
@@ -122,13 +121,13 @@ func (r *Runner) results(ctx context.Context, ec EventContext) ([]HookResult, []
 // resultsWithPayload is results with the event's stdin payload already
 // in hand, so a caller that dispatches the same event to in-process
 // handlers does not marshal it a second time.
-func (r *Runner) resultsWithPayload(ctx context.Context, ec EventContext, payload []byte) ([]HookResult, []HookInfo) {
+func (r *Runner) resultsWithPayload(ctx context.Context, ec EventContext, payload []byte) []DispatchResult {
 	if ec.CWD == "" {
 		ec.CWD = r.cwd
 	}
 	matching := r.matchingHooks(ec.Subject())
 	if len(matching) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	// Deduplicate by command string.
@@ -157,11 +156,11 @@ func (r *Runner) resultsWithPayload(ctx context.Context, ec EventContext, payloa
 	}
 	wg.Wait()
 
-	infos := make([]HookInfo, len(deduped))
+	dispatched := make([]DispatchResult, len(deduped))
 	for i, h := range deduped {
-		infos[i] = DispatchResult{Name: h.DisplayName(), Matcher: h.Matcher, Result: results[i]}.info()
+		dispatched[i] = DispatchResult{Name: h.DisplayName(), Matcher: h.Matcher, Result: results[i]}
 	}
-	return results, infos
+	return dispatched
 }
 
 // matchingHooks returns hooks whose matcher matches the subject (or has
@@ -282,7 +281,11 @@ func (r *Runner) runOne(parentCtx context.Context, hook config.HookConfig, envVa
 	}
 
 	// Exit code 0 — parse stdout JSON.
-	result := parseStdout(stdout.String())
+	result, err := parseStdout(stdout.String())
+	if err != nil {
+		slog.Warn("Hook output unusable", "command", hook.Command, "error", err)
+		return InvalidResult(err)
+	}
 	slog.Debug(
 		"Hook executed",
 		"command", hook.Command,

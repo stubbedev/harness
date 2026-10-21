@@ -2,6 +2,7 @@ package extensions
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/stubbedev/harness/internal/hooks"
@@ -83,33 +84,49 @@ func (in *instance) runHook(ctx context.Context, handler *hookHandler, payload [
 		)
 		return hooks.HookResult{Decision: hooks.DecisionNone}
 	}
-	return hookResult(value)
+	result, err := hookResult(value)
+	if err != nil {
+		slog.Warn(
+			"Extension hook handler returned an unusable verdict",
+			"extension", in.ext.Name,
+			"event", handler.event,
+			"error", err,
+		)
+		return hooks.InvalidResult(err)
+	}
+	return result
 }
 
 // hookResult renders a handler's return value as a hook decision. A
 // handler that returns nothing expresses no opinion; a string is added
 // to the model's context; a table is the full verdict.
-func hookResult(value lua.LValue) hooks.HookResult {
+func hookResult(value lua.LValue) (hooks.HookResult, error) {
 	switch typed := value.(type) {
 	case *lua.LNilType:
-		return hooks.HookResult{Decision: hooks.DecisionNone}
+		return hooks.HookResult{Decision: hooks.DecisionNone}, nil
 	case lua.LString:
-		return hooks.HookResult{Decision: hooks.DecisionNone, Context: string(typed)}
+		return hooks.HookResult{Decision: hooks.DecisionNone, Context: string(typed)}, nil
 	case *lua.LTable:
+		decision, err := hooks.ParseDecision(tableString(typed, "decision", ""))
+		if err != nil {
+			return hooks.HookResult{}, err
+		}
 		result := hooks.HookResult{
-			Decision:      hooks.ParseDecision(tableString(typed, "decision", "")),
+			Decision:      decision,
 			Halt:          tableBool(typed, "halt"),
 			Reason:        tableString(typed, "reason", ""),
 			Context:       tableString(typed, "context", ""),
 			UpdatedPrompt: tableString(typed, "updated_prompt", ""),
 		}
 		if patch, ok := typed.RawGetString("updated_input").(*lua.LTable); ok {
-			if data, err := marshalLuaValue(patch); err == nil {
-				result.UpdatedInput = string(data)
+			data, err := marshalLuaValue(patch)
+			if err != nil {
+				return hooks.HookResult{}, fmt.Errorf("hook updated_input: %w", err)
 			}
+			result.UpdatedInput = string(data)
 		}
-		return result
+		return result, nil
 	default:
-		return hooks.HookResult{Decision: hooks.DecisionNone}
+		return hooks.HookResult{}, fmt.Errorf("hook handler returned unsupported %s", value.Type())
 	}
 }

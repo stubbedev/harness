@@ -418,12 +418,21 @@ to block, so `decision: "allow"` and silence (no `decision`, or
 accepted so existing hooks keep parsing, and it remains meaningful in
 aggregation — it does not override another hook.s `deny`.
 
+Output Harness cannot use (stdout that is not a JSON object, a field of the
+wrong type, or an unknown `decision` such as `"reject"` or `"ask"`) is logged
+as a warning with the hook command and shown in the hook indicator with
+decision `invalid` and the cause. The hook then counts as having no opinion.
+
 `updated_input` is a shallow-merge patch. Keys you include overwrite matching
 keys in `tool_input`; keys you don't include are preserved. If the model called
 `bash` with `{"command": "npm test", "timeout": 60000}` and your hook returns
 `{"updated_input": {"command": "bun test"}}`, the tool runs with
 `{"command": "bun test", "timeout": 60000}` — the timeout isn't dropped. The
-merge is shallow: nested objects are replaced wholesale, not deep-merged.
+merge is shallow: nested objects are replaced wholesale, not deep-merged. Keys
+are matched literally, so a key like `a.b` replaces `a.b`, never `a` → `b`. A
+patch that is not a JSON object (or a `tool_input` that is not one) denies the
+tool call with the reason `hook input rewrite rejected: ...` rather than
+running the original input.
 
 `halt: true` stops the turn entirely. The agent doesn't get to respond further;
 the user takes over. The exit-code shorthand is `exit 49` with stderr as the
@@ -877,7 +886,8 @@ PreToolUse-specific rules:
    `deny` lets the tool run.
 5. `updated_input` patches shallow-merge sequentially against the original
    `tool_input`. Later patches override earlier ones on colliding keys. Patches
-   are **ignored** if the final decision is deny or halt.
+   are **ignored** if the final decision is deny or halt. A patch that cannot
+   be applied denies the call.
 
 UserPromptSubmit-specific rules:
 

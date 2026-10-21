@@ -6,10 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"strings"
 
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/tidwall/sjson"
 )
 
 // Hook event name constants, re-exported from config, which owns the one
@@ -63,6 +63,7 @@ const (
 	DecisionAllow
 	// DecisionDeny means the hook blocked the action.
 	DecisionDeny
+	DecisionInvalid
 )
 
 func (d Decision) String() string {
@@ -71,9 +72,15 @@ func (d Decision) String() string {
 		return "allow"
 	case DecisionDeny:
 		return "deny"
+	case DecisionInvalid:
+		return "invalid"
 	default:
 		return "none"
 	}
+}
+
+func InvalidResult(err error) HookResult {
+	return HookResult{Decision: DecisionInvalid, Reason: err.Error()}
 }
 
 // HookResult holds the parsed output of a single hook execution.
@@ -104,7 +111,7 @@ type AggregateResult struct {
 // context concatenate in order. updated_input patches shallow-merge in
 // order against the original tool input; later patches override earlier
 // ones on colliding keys.
-func aggregate(results []HookResult, origToolInput string) AggregateResult {
+func aggregate(event string, dispatched []DispatchResult, origToolInput string) AggregateResult {
 	var (
 		decision      Decision
 		halt          bool
@@ -114,7 +121,26 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 		anyPatch      = false
 		updatedPrompt string
 	)
-	for _, r := range results {
+	infos := make([]HookInfo, len(dispatched))
+	for i, d := range dispatched {
+		r := d.Result
+		if event == EventPreToolUse && r.UpdatedInput != "" {
+			next, err := shallowMerge(merged, r.UpdatedInput)
+			if err != nil {
+				slog.Warn(
+					"Hook updated_input patch rejected; denying tool call",
+					"hook", d.Name,
+					"error", err,
+				)
+				r.Decision = DecisionDeny
+				r.Reason = "hook input rewrite rejected: " + err.Error()
+				r.UpdatedInput = ""
+			} else {
+				merged = next
+				anyPatch = true
+			}
+		}
+		infos[i] = DispatchResult{Name: d.Name, Matcher: d.Matcher, Result: r}.info()
 		switch r.Decision {
 		case DecisionDeny:
 			decision = DecisionDeny
@@ -125,7 +151,7 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 			if decision != DecisionDeny {
 				decision = DecisionAllow
 			}
-		case DecisionNone:
+		case DecisionNone, DecisionInvalid:
 			// No change.
 		}
 		if r.Halt {
@@ -139,19 +165,6 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 		if r.Context != "" {
 			contexts = append(contexts, r.Context)
 		}
-		if r.UpdatedInput != "" {
-			next, err := shallowMerge(merged, r.UpdatedInput)
-			if err != nil {
-				slog.Warn(
-					"Hook updated_input patch rejected; ignoring",
-					"error", err,
-					"patch", r.UpdatedInput,
-				)
-				continue
-			}
-			merged = next
-			anyPatch = true
-		}
 		// A prompt is a single string with no key structure to merge
 		// against, so updated_prompt is a full replacement: later hooks
 		// in config order win.
@@ -159,11 +172,12 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 			updatedPrompt = r.UpdatedPrompt
 		}
 	}
-
 	agg := AggregateResult{
-		Decision:  decision,
-		Halt:      halt,
-		HookCount: len(results),
+		Decision:      decision,
+		Halt:          halt,
+		HookCount:     len(dispatched),
+		Hooks:         infos,
+		UpdatedPrompt: updatedPrompt,
 	}
 	if anyPatch {
 		agg.UpdatedInput = merged
@@ -174,7 +188,6 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 	if len(contexts) > 0 {
 		agg.Context = strings.Join(contexts, "\n")
 	}
-	agg.UpdatedPrompt = updatedPrompt
 	return agg
 }
 
@@ -182,17 +195,16 @@ func aggregate(results []HookResult, origToolInput string) AggregateResult {
 // AggregateResult every entry point returns and logs the completion
 // line. It returns the decision-none aggregate when no hook ran, so
 // neither the aggregation nor the log line fires for an empty run.
-func finalizeAggregation(ec EventContext, results []HookResult, infos []HookInfo) (AggregateResult, error) {
-	if len(results) == 0 {
+func finalizeAggregation(ec EventContext, dispatched []DispatchResult) (AggregateResult, error) {
+	if len(dispatched) == 0 {
 		return AggregateResult{Decision: DecisionNone}, nil
 	}
-	agg := aggregate(results, ec.ToolInput)
-	agg.Hooks = infos
+	agg := aggregate(ec.Event, dispatched, ec.ToolInput)
 	slog.Info(
 		"Hook completed",
 		"event", ec.Event,
 		"tool", ec.ToolName,
-		"hooks", len(results),
+		"hooks", len(dispatched),
 		"decision", agg.Decision.String(),
 	)
 	return agg, nil
@@ -206,27 +218,28 @@ func shallowMerge(base, patch string) (string, error) {
 	if base == "" {
 		base = "{}"
 	}
-	// Ensure base is an object so sjson has somewhere to write.
-	var baseAny any
-	if err := json.Unmarshal([]byte(base), &baseAny); err != nil {
+	baseMap, err := decodeObject(base, "tool_input")
+	if err != nil {
 		return "", err
 	}
-	if _, ok := baseAny.(map[string]any); !ok {
-		return "", errNotObject("tool_input")
+	patchMap, err := decodeObject(patch, "updated_input")
+	if err != nil {
+		return "", err
 	}
-	var patchMap map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(patch), &patchMap); err != nil {
-		return "", errNotObject("updated_input")
+	maps.Copy(baseMap, patchMap)
+	out, err := json.Marshal(baseMap)
+	if err != nil {
+		return "", err
 	}
-	out := base
-	for k, v := range patchMap {
-		next, err := sjson.SetRawBytes([]byte(out), k, v)
-		if err != nil {
-			return "", err
-		}
-		out = string(next)
+	return string(out), nil
+}
+
+func decodeObject(data, name string) (map[string]json.RawMessage, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(data), &m); err != nil || m == nil {
+		return nil, errNotObject(name)
 	}
-	return out, nil
+	return m, nil
 }
 
 type errNotObject string
