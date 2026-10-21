@@ -222,9 +222,9 @@ type coordinator struct {
 	// dispatchSem bounds how many sub-agents run at once across the whole
 	// workspace. The agent tool is Parallel and the prompt now actively asks
 	// for fan-out, so without a cap one turn can open an unbounded number of
-	// concurrent provider streams. Dispatches over the limit block until a
-	// slot frees rather than failing, so a wide fan-out still completes — it
-	// just runs in waves.
+	// concurrent provider streams. A blocking dispatch over the limit waits
+	// for a slot; a background one returns its handle at once and its run
+	// queues for the slot, so the dispatching turn is never held up.
 	dispatchSem chan struct{}
 
 	// subagentPromptXML is the <available_subagents> XML currently baked
@@ -2337,11 +2337,6 @@ type subAgentParams struct {
 	// dispatch tool call returns a handle immediately while the child runs
 	// to completion on its own goroutine (see runSubAgentBackground).
 	Background bool
-	// ReleaseSlot, when set, releases the dispatch concurrency slot. The
-	// dispatch closure owns the slot for a blocking run (via defer); a
-	// background run takes ownership and releases it when the child
-	// finishes, so its slot spans the run, not the tool call.
-	ReleaseSlot func()
 	// SessionSetup is an optional callback invoked after session creation
 	// but before agent execution, for custom session configuration.
 	SessionSetup func(sessionID string)
@@ -2368,9 +2363,6 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 	agentToolSessionID := session.AgentToolSessionID(params.AgentMessageID, params.ToolCallID)
 	session, err := c.sessions.CreateTaskSession(ctx, agentToolSessionID, params.SessionID, params.SessionTitle)
 	if err != nil {
-		if params.ReleaseSlot != nil {
-			params.ReleaseSlot()
-		}
 		// A tool-error response, not a bare error: dispatches run in
 		// parallel batches, and a bare error from any one of them aborts
 		// the whole step in fantasy, discarding the sibling dispatches'
@@ -2513,14 +2505,6 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 	run, unregister := c.subagentRuns.registerBackground(params.SessionID, session.ID, params.AgentName, cancelRun)
 	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
 
-	// The slot transfers to the run: released when the child finishes, not
-	// when the dispatch tool call returns. Every failure path below the
-	// goroutine spawn hands it back.
-	releaseSlot := func() {
-		if params.ReleaseSlot != nil {
-			params.ReleaseSlot()
-		}
-	}
 	go func() {
 		// finalStatus defaults to failed so the deferred runtime cleanup
 		// below still clears the entry when the run never reaches its own
@@ -2530,7 +2514,6 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 		defer func() {
 			unregister()
 			cancelRun()
-			releaseSlot()
 			c.runtime.Finish(session.ID, finalStatus)
 		}()
 		// A panic in the run or the hooks below must not kill the process
@@ -2540,7 +2523,7 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 			run.finish(subagents.StatusFailed, fantasy.NewTextErrorResponse(
 				fmt.Sprintf("Background subagent %s panicked; see the panic log", params.AgentName)))
 		})
-		resp, status := c.executeSubAgentRun(runCtx, context.WithoutCancel(ctx), session, params)
+		resp, status := c.runQueuedSubAgent(runCtx, context.WithoutCancel(ctx), session, params, run)
 		finalStatus = status
 		c.closeSubagentSteering(session.ID, &resp)
 
@@ -2559,8 +2542,22 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 	}()
 
 	return withBackgroundMetadata(fantasy.NewTextResponse(fmt.Sprintf(
-		"Started background agent %q with handle %s. It runs independently of this tool call: messages it sends you arrive as new user messages between your steps, and its result is collected by calling %s with no prompt (handles: [%s]).",
+		"Started background agent %q with handle %s. It runs independently of this tool call (queued until a concurrency slot frees): messages it sends you arrive as new user messages between your steps, and its result is collected by calling %s with no prompt, which returns as soon as any waited agent finishes (handles: [%s]).",
 		params.AgentName, run.handle, AgentToolName, run.handle)), []*backgroundRun{run}), nil
+}
+
+func (c *coordinator) runQueuedSubAgent(runCtx, parentCtx context.Context, session session.Session, params subAgentParams, run *backgroundRun) (fantasy.ToolResponse, subagents.RunStatus) {
+	release, err := c.acquireDispatchSlot(runCtx)
+	if err != nil {
+		resp := fantasy.NewTextErrorResponse("Subagent cancelled while queued for a concurrency slot")
+		if params.FinishWorkspace != nil {
+			params.FinishWorkspace(&resp)
+		}
+		return resp, subagents.StatusCancelled
+	}
+	defer release()
+	run.markStarted()
+	return c.executeSubAgentRun(runCtx, parentCtx, session, params)
 }
 
 // recordLiveSubagentMessage appends a message from a background child to its

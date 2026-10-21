@@ -19,19 +19,25 @@ const (
 	maxWaitTimeoutSeconds = 3600
 )
 
-// waitForSubagents is the `agent` tool with no prompt: it blocks until the
-// named background handles finish (or a message arrives from one of them,
-// or the timeout expires) and hands back their results. With no handles
-// named it waits on every background agent this session has dispatched.
-// Results are kept, so waiting again on a finished handle returns its
-// result again.
+// waitForSubagents is the `agent` tool with no prompt: it blocks until any
+// of the named background handles finishes (or a message arrives from one
+// of them, or the timeout expires) and hands back the results of every
+// waited handle that finished since it was last collected, with the state
+// of the rest, so the caller can dispatch more work at once and wait again
+// for the others. Each result is returned exactly once. With no handles
+// named it waits on every background agent this session has dispatched
+// whose result has not been collected yet.
 func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string, requested []string, timeoutSeconds *int) (response fantasy.ToolResponse) {
 	handles := uniqueHandles(requested)
 	if len(handles) == 0 {
-		handles = c.subagentRuns.handles(parentSession)
-	}
-	if len(handles) == 0 {
-		return fantasy.NewTextErrorResponse("nothing to wait for: this session has no background agents; give a prompt to dispatch one")
+		known := c.subagentRuns.handles(parentSession)
+		if len(known) == 0 {
+			return fantasy.NewTextErrorResponse("nothing to wait for: this session has no background agents; give a prompt to dispatch one")
+		}
+		handles = c.uncollectedBackgroundHandles(parentSession, known)
+		if len(handles) == 0 {
+			return fantasy.NewTextErrorResponse("nothing to wait for: every background agent's result was already returned by an earlier wait; give a prompt to dispatch one")
+		}
 	}
 
 	runs, errResp := c.resolveBackgroundRuns(parentSession, handles)
@@ -66,32 +72,41 @@ func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string
 		qsig := c.queueArrivalChan(parentSession)
 
 		msgs := c.drainLiveInboxFrom(parentSession, handleSet)
-		allFinished := true
+		collected := make(map[*backgroundRun]bool)
+		running := 0
 		for _, r := range runs {
-			if !r.isFinished() {
-				allFinished = false
-				break
+			if r.collect() {
+				collected[r] = true
+			} else if !r.isFinished() {
+				running++
 			}
 		}
 		queuedArrivals := c.queueArrivalEpoch(parentSession) - queueBaseline
+		render := func(outcome string) fantasy.ToolResponse {
+			return fantasy.NewTextResponse(renderWaitResult(runs, collected, msgs, outcome))
+		}
 
 		switch {
-		case allFinished:
-			return fantasy.NewTextResponse(renderWaitResult(runs, msgs, "All waited agents finished."))
+		case len(collected) > 0 && running > 0:
+			return render(fmt.Sprintf("%d agent(s) finished; %d still running. Dispatch further work now if you have it, then wait again to collect the rest.", len(collected), running))
+		case len(collected) > 0:
+			return render("All waited agents finished.")
+		case running == 0:
+			return render("Every waited agent had already finished; its result was returned by an earlier wait.")
 		case len(msgs) > 0:
-			return fantasy.NewTextResponse(renderWaitResult(runs, msgs, "Returned early: new message(s) arrived; some agents are still running."))
+			return render("Returned early: new message(s) arrived; the agents are still running.")
 		case queuedArrivals > 0:
 			// The queued prompt stays queued: the next PrepareStep folds it
 			// into the next provider request, exactly as it would between
 			// steps. Ending the wait here only hurries the model to it.
-			return fantasy.NewTextResponse(renderWaitResult(runs, msgs, fmt.Sprintf(
-				"Returned early: %d user prompt(s) were queued while waiting; they will be delivered as the next user message, before your next request.", queuedArrivals)))
+			return render(fmt.Sprintf(
+				"Returned early: %d user prompt(s) were queued while waiting; they will be delivered as the next user message, before your next request.", queuedArrivals))
 		case timeout == 0:
-			return fantasy.NewTextResponse(renderWaitResult(runs, msgs, "Snapshot (timeout 0): not all agents have finished yet."))
+			return render("Snapshot (timeout 0): no waited agent has finished yet.")
 		case ctx.Err() != nil:
-			return fantasy.NewTextResponse(renderWaitResult(runs, msgs, "Interrupted: wait cancelled before all agents finished."))
+			return render("Interrupted: wait cancelled before any agent finished.")
 		case !time.Now().Before(deadline):
-			return fantasy.NewTextResponse(renderWaitResult(runs, msgs, fmt.Sprintf("Timed out after %s: some agents are still running.", time.Duration(timeout)*time.Second)))
+			return render(fmt.Sprintf("Timed out after %s: the agents are still running.", time.Duration(timeout)*time.Second))
 		}
 
 		select {
@@ -103,15 +118,33 @@ func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string
 	}
 }
 
-// renderWaitResult reports each handle's state, the collected results of
-// finished runs, and any messages drained by this call.
-func renderWaitResult(runs []*backgroundRun, msgs []SubagentInboxMessage, outcome string) string {
+func (c *coordinator) uncollectedBackgroundHandles(parentSession string, handles []string) []string {
+	var uncollected []string
+	for _, h := range handles {
+		if run, ok := c.subagentRuns.lookupByHandle(parentSession, h); ok && !run.isCollected() {
+			uncollected = append(uncollected, h)
+		}
+	}
+	return uncollected
+}
+
+// renderWaitResult reports each handle's state, the results this call
+// collected, and any messages drained by this call. A result an earlier
+// wait already returned is not repeated.
+func renderWaitResult(runs []*backgroundRun, collected map[*backgroundRun]bool, msgs []SubagentInboxMessage, outcome string) string {
 	var b strings.Builder
 	b.WriteString(outcome)
 	for _, r := range runs {
 		finished, status, result, resultErr := r.snapshot()
-		if !finished {
+		switch {
+		case !finished && r.isQueued():
+			fmt.Fprintf(&b, "\n\n%s (%s): queued for a concurrency slot", r.agentName, r.handle)
+			continue
+		case !finished:
 			fmt.Fprintf(&b, "\n\n%s (%s): still running", r.agentName, r.handle)
+			continue
+		case !collected[r]:
+			fmt.Fprintf(&b, "\n\n%s (%s): %s; result already returned by an earlier wait", r.agentName, r.handle, status)
 			continue
 		}
 		fmt.Fprintf(&b, "\n\n%s (%s): %s", r.agentName, r.handle, status)

@@ -38,6 +38,7 @@ func (r *subagentRegistry) registerBackground(parentSession, childSession, agent
 		childSession:  childSession,
 		parentSession: parentSession,
 		agentName:     agentName,
+		queued:        true,
 	}
 	r.runs[run.handle] = run
 	r.byChild[childSession] = run.handle

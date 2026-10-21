@@ -229,7 +229,7 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			"handles": map[string]any{
 				"type":        "array",
 				"items":       map[string]any{"type": "string"},
-				"description": "Handles returned by earlier calls, for waiting, `message` or `cancel`. Empty waits for every background agent this session dispatched and messages every running one; `cancel` requires them.",
+				"description": "Handles returned by earlier calls, for waiting, `message` or `cancel`. A wait returns when any of them finishes; empty waits on every background agent whose result has not been returned yet and messages every running one; `cancel` requires them.",
 			},
 			"message": map[string]any{
 				"type":        "string",
@@ -237,7 +237,7 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			},
 			"cancel": map[string]any{
 				"type":        "boolean",
-				"description": "Instead of dispatching, cancel the running background agents in `handles`. Their results are still collected by waiting.",
+				"description": "Instead of dispatching, cancel the running or queued background agents in `handles`. Their results are still collected by waiting.",
 			},
 			"timeout_seconds": map[string]any{
 				"type":        "integer",
@@ -377,22 +377,14 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				return fantasy.NewTextErrorResponse("isolation must be worktree or omitted"), nil
 			}
 
-			// Every dispatch below runs a whole child session, so the
-			// concurrency slot is taken here — before any build work — and
-			// held for the run. Over the limit this blocks rather than
-			// failing, so a wide fan-out completes in waves. A background
-			// dispatch (the default) transfers the slot to the run instead of
-			// holding it for the tool call: the child holds it until it
-			// finishes.
-			release, slotErr := c.acquireDispatchSlot(ctx)
-			if slotErr != nil {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("acquire dispatch slot: %v", slotErr)), nil
+			if params.Blocking {
+				release, slotErr := c.acquireDispatchSlot(ctx)
+				if slotErr != nil {
+					return fantasy.NewTextErrorResponse(fmt.Sprintf("acquire dispatch slot: %v", slotErr)), nil
+				}
+				defer release()
 			}
 
-			// dispatchRun runs the resolved agent as this call's dispatch.
-			// Blocking and background forms share it; only the slot ownership
-			// differs.
-			handedOff := false
 			var isolated *isolatedDispatch
 			workspaceTransferred := false
 			defer func() {
@@ -420,24 +412,8 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				}
 				if !params.Blocking {
 					runParams.Background = true
-					runParams.ReleaseSlot = release
-					handedOff = true
 				}
 				return c.runSubAgent(ctx, runParams)
-			}
-			if !params.Blocking {
-				defer func() {
-					// Once dispatchRun hands the slot to the run, the
-					// background goroutine owns releasing it. If dispatch
-					// never got that far — unknown type, build failure —
-					// give it back here. release is once-wrapped, so this
-					// is a no-op when a failure path already released.
-					if !handedOff {
-						release()
-					}
-				}()
-			} else {
-				defer release()
 			}
 
 			subagentType := params.SubagentType

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 // background dispatch would, without running a child.
 func registerTestRun(coord *coordinator, parentSession, name string) *backgroundRun {
 	run, _ := coord.subagentRuns.registerBackground(parentSession, "child-"+parentSession+"-"+name, name, func() {})
+	run.markStarted()
 	return run
 }
 
@@ -60,9 +62,79 @@ func TestWaitTool_FinishedRunReturnsResult(t *testing.T) {
 	assert.Contains(t, resp.Content, "fast ("+run.handle+"): completed")
 	assert.Contains(t, resp.Content, "the answer")
 
-	// Results stay collectable in later turns.
 	resp2 := runWait(t, coord, t.Context(), "parent-1", waitInput(t, []string{run.handle}, nil))
-	assert.Contains(t, resp2.Content, "the answer")
+	require.False(t, resp2.IsError, resp2.Content)
+	assert.Contains(t, resp2.Content, "result already returned by an earlier wait")
+	assert.NotContains(t, resp2.Content, "the answer", "a collected result must not be returned twice")
+
+	resp3 := runWait(t, coord, t.Context(), "parent-1", waitInput(t, nil, nil))
+	require.True(t, resp3.IsError)
+	assert.Contains(t, resp3.Content, "already returned")
+}
+
+func TestWaitTool_ReturnsWhenAnyWaitedAgentFinishes(t *testing.T) {
+	coord := newTestCoordinator(t, testEnv(t), "p", providerCfgP)
+	first := registerTestRun(coord, "parent-1", "fast")
+	slow := registerTestRun(coord, "parent-1", "task")
+
+	done := make(chan fantasy.ToolResponse, 1)
+	sixty := 60
+	go func() {
+		done <- runWait(t, coord, context.Background(), "parent-1", waitInput(t, nil, &sixty))
+	}()
+	time.Sleep(50 * time.Millisecond)
+	first.finish(subagents.StatusCompleted, fantasy.NewTextResponse("first answer"))
+	coord.notifySubagentInbox("parent-1")
+
+	select {
+	case resp := <-done:
+		require.False(t, resp.IsError, resp.Content)
+		assert.Contains(t, resp.Content, "1 agent(s) finished; 1 still running")
+		assert.Contains(t, resp.Content, "first answer")
+		assert.Contains(t, resp.Content, "task ("+slow.handle+"): still running")
+	case <-time.After(5 * time.Second):
+		t.Fatal("wait must return when one of the waited agents finishes")
+	}
+
+	go func() {
+		done <- runWait(t, coord, context.Background(), "parent-1", waitInput(t, nil, &sixty))
+	}()
+	time.Sleep(50 * time.Millisecond)
+	slow.finish(subagents.StatusCompleted, fantasy.NewTextResponse("slow answer"))
+	coord.notifySubagentInbox("parent-1")
+
+	select {
+	case resp := <-done:
+		require.False(t, resp.IsError, resp.Content)
+		assert.Contains(t, resp.Content, "All waited agents finished.")
+		assert.Contains(t, resp.Content, "slow answer")
+		assert.NotContains(t, resp.Content, "first answer", "the earlier result must not be returned again")
+		assert.NotContains(t, resp.Content, first.handle, "an empty wait covers only uncollected agents")
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiting again must collect the remaining agent")
+	}
+}
+
+func TestWaitTool_ConcurrentWaitsCollectOnce(t *testing.T) {
+	coord := newTestCoordinator(t, testEnv(t), "p", providerCfgP)
+	run := registerTestRun(coord, "parent-1", "fast")
+	run.finish(subagents.StatusCompleted, fantasy.NewTextResponse("only once"))
+
+	results := make(chan fantasy.ToolResponse, 4)
+	for range 4 {
+		go func() {
+			results <- runWait(t, coord, context.Background(), "parent-1", waitInput(t, []string{run.handle}, nil))
+		}()
+	}
+	delivered := 0
+	for range 4 {
+		resp := <-results
+		require.False(t, resp.IsError, resp.Content)
+		if strings.Contains(resp.Content, "only once") {
+			delivered++
+		}
+	}
+	assert.Equal(t, 1, delivered)
 }
 
 func TestWaitTool_FailedRunReportsError(t *testing.T) {
@@ -247,7 +319,7 @@ func TestWaitTool_MixedHandles(t *testing.T) {
 	zero := 0
 	resp := runWait(t, coord, t.Context(), "parent-1", waitInput(t, []string{running.handle, done.handle}, &zero))
 	require.False(t, resp.IsError, resp.Content)
-	assert.Contains(t, resp.Content, "Snapshot")
+	assert.Contains(t, resp.Content, "1 agent(s) finished; 1 still running")
 	assert.Contains(t, resp.Content, "still running")
 	assert.Contains(t, resp.Content, "partial answer")
 }

@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stubbedev/harness/internal/session"
-
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,8 +56,7 @@ func TestRunSubAgentBackground_ReturnsImmediately(t *testing.T) {
 	parentSession, err := env.sessions.Create(t.Context(), "Parent")
 	require.NoError(t, err)
 
-	released := make(chan struct{}, 1)
-	releaseSlot := func() { released <- struct{}{} }
+	coord.dispatchSem = make(chan struct{}, 1)
 
 	childRunning := make(chan string, 1)
 	agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
@@ -77,7 +74,6 @@ func TestRunSubAgentBackground_ReturnsImmediately(t *testing.T) {
 		SessionTitle:   "Test",
 		AgentName:      "fast",
 		Background:     true,
-		ReleaseSlot:    releaseSlot,
 	})
 	require.NoError(t, err)
 	require.False(t, resp.IsError, resp.Content)
@@ -104,11 +100,8 @@ func TestRunSubAgentBackground_ReturnsImmediately(t *testing.T) {
 	assert.True(t, isErr)
 	assert.Contains(t, result, "cancelled")
 
-	select {
-	case <-released:
-	case <-time.After(5 * time.Second):
-		t.Fatal("dispatch slot was not released when the run finished")
-	}
+	require.Eventually(t, func() bool { return len(coord.dispatchSem) == 0 }, 5*time.Second, 5*time.Millisecond,
+		"dispatch slot was not released when the run finished")
 
 	// The child's cancel-map entry is cleaned up once the run finishes.
 	require.Eventually(t, func() bool {
@@ -418,42 +411,75 @@ func TestPrepareStepFoldsLiveInboxMessages(t *testing.T) {
 	require.Equal(t, 1, inbox.drain)
 }
 
-// TestRunSubAgentBackground_SessionCreateFailureReleasesSlot pins the slot
-// ownership rules: a background dispatch that fails before the run starts
-// must give the slot back.
-func TestRunSubAgentBackground_SessionCreateFailureReleasesSlot(t *testing.T) {
+func TestRunSubAgentBackground_QueuesBeyondTheCapWithoutBlockingDispatch(t *testing.T) {
 	const providerID = "test-provider"
 	env := testEnv(t)
 	coord := newTestCoordinator(t, env, providerID, config.ProviderConfig{ID: providerID})
 	coord.runtime = subagents.NewRuntime()
 	t.Cleanup(coord.runtime.Shutdown)
+	coord.dispatchSem = make(chan struct{}, 1)
 
 	parentSession, err := env.sessions.Create(t.Context(), "Parent")
 	require.NoError(t, err)
 
-	// Pre-create the child session ID runSubAgent will try to use so
-	// CreateTaskSession fails on the duplicate primary key.
-	agentToolSessionID := session.AgentToolSessionID("msg-dup", "call-dup")
-	_, err = env.sessions.CreateTaskSession(t.Context(), agentToolSessionID, parentSession.ID, "Dup")
+	holdSlot, err := coord.acquireDispatchSlot(t.Context())
 	require.NoError(t, err)
 
-	released := make(chan struct{}, 1)
-	_, err = coord.runSubAgent(t.Context(), subAgentParams{
-		Agent:          newMockAgent(providerID, 4096, nil),
-		SessionID:      parentSession.ID,
-		AgentMessageID: "msg-dup",
-		ToolCallID:     "call-dup",
-		Prompt:         "test",
-		SessionTitle:   "Test",
-		Background:     true,
-		ReleaseSlot:    func() { released <- struct{}{} },
+	started := make(chan struct{}, 2)
+	agent := newMockAgent(providerID, 4096, func(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
+		started <- struct{}{}
+		return agentResultWithText("queued done"), nil
 	})
-	require.NoError(t, err)
-	select {
-	case <-released:
-	case <-time.After(5 * time.Second):
-		t.Fatal("slot was not released when session creation failed")
+	finished := make(chan fantasy.ToolResponse, 1)
+	dispatch := func(id string, finish func(*fantasy.ToolResponse)) string {
+		resp, err := coord.runSubAgent(t.Context(), subAgentParams{
+			Agent:           agent,
+			SessionID:       parentSession.ID,
+			AgentMessageID:  "msg-" + id,
+			ToolCallID:      "call-" + id,
+			Prompt:          "test",
+			SessionTitle:    "Test",
+			AgentName:       "fast",
+			Background:      true,
+			FinishWorkspace: finish,
+		})
+		require.NoError(t, err)
+		return backgroundHandleFromResponse(t, resp)
 	}
+
+	queued := dispatch("queued", nil)
+	cancelled := dispatch("cancelled", func(resp *fantasy.ToolResponse) { finished <- *resp })
+
+	zero := 0
+	snapshot := runWait(t, coord, t.Context(), parentSession.ID, waitInput(t, []string{queued, cancelled}, &zero))
+	require.Contains(t, snapshot.Content, "fast ("+queued+"): queued for a concurrency slot")
+	select {
+	case <-started:
+		t.Fatal("a queued run must not start while the cap is reached")
+	default:
+	}
+
+	cancelledRun, ok := coord.subagentRuns.lookupByHandle(parentSession.ID, cancelled)
+	require.True(t, ok)
+	require.True(t, coord.subagentRuns.cancel(cancelledRun.childSession))
+	select {
+	case resp := <-finished:
+		require.True(t, resp.IsError)
+		require.Contains(t, resp.Content, "queued")
+	case <-time.After(5 * time.Second):
+		t.Fatal("a run cancelled while queued must still finish its workspace")
+	}
+	_, status, _, _ := waitForRunFinished(t, coord, parentSession.ID, cancelled).snapshot()
+	require.Equal(t, subagents.StatusCancelled, status)
+
+	holdSlot()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the queued run did not start when the slot freed")
+	}
+	waitForRunFinished(t, coord, parentSession.ID, queued)
+	require.Eventually(t, func() bool { return len(coord.dispatchSem) == 0 }, 5*time.Second, 5*time.Millisecond)
 }
 
 // TestBackgroundRun_FinishIsIdempotent guards the record against duplicate

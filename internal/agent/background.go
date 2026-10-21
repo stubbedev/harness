@@ -209,8 +209,9 @@ func (in *liveInbox) drainFrom(parentSessionID string, handles map[string]bool) 
 // tool returned a handle immediately, and the child runs on its own goroutine
 // until it completes, fails, or is cancelled. Its final response (including
 // any SubagentStop hook context) is kept here until the dispatcher collects
-// it with the wait tool; records are never evicted, so a result survives the
-// turn that started it and remains collectable in later turns.
+// it with the wait tool, which hands it back exactly once; records are
+// never evicted, so a result survives the turn that started it and remains
+// collectable in later turns.
 type backgroundRun struct {
 	handle        string
 	childSession  string
@@ -224,6 +225,8 @@ type backgroundRun struct {
 	result    string
 	resultErr bool
 	worktree  *WorktreeResult
+	queued    bool
+	collected bool
 }
 
 // finish records the terminal state exactly once. Later calls are no-ops so
@@ -261,6 +264,34 @@ func (r *backgroundRun) snapshot() (finished bool, status subagents.RunStatus, r
 func (r *backgroundRun) isFinished() bool {
 	finished, _, _, _ := r.snapshot()
 	return finished
+}
+
+func (r *backgroundRun) markStarted() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.queued = false
+}
+
+func (r *backgroundRun) isQueued() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.queued
+}
+
+func (r *backgroundRun) collect() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.status.IsTerminal() || r.collected {
+		return false
+	}
+	r.collected = true
+	return true
+}
+
+func (r *backgroundRun) isCollected() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.collected
 }
 
 // newSubagentHandle mints a short, model-friendly handle for a background
