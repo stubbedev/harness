@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,4 +75,20 @@ func TestThemeFromConfig_FallsBackOnUnknown(t *testing.T) {
 func colorHex(c color.Color) string {
 	r, g, b, _ := c.RGBA()
 	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+}
+
+func TestScrollbarGlyphsMatchStyledRender(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range BuiltinThemeNames() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s, err := LoadTheme(name)
+			require.NoError(t, err)
+			opts := builtinThemes[name]()
+			base := lipgloss.NewStyle().Foreground(opts.fgBase)
+			require.Equal(t, base.Foreground(opts.secondary).Render(ScrollbarThumb), s.Dialog.ScrollbarThumb)
+			require.Equal(t, base.Foreground(opts.separator).Render(ScrollbarTrack), s.Dialog.ScrollbarTrack)
+		})
+	}
 }

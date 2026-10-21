@@ -277,11 +277,10 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 		// to the uncached path so behavior matches upstream exactly.
 		uv.NewStyledString(rendered).Draw(scr, listArea)
 	} else {
-		if m.drawCache == nil ||
-			m.drawCache.rendered != rendered ||
-			m.drawCache.method != method {
-			m.drawCache = newChatDrawCache(rendered, method)
+		if m.drawCache == nil {
+			m.drawCache = &chatDrawCache{}
 		}
+		m.drawCache.decode(rendered, method)
 		drawCachedBuffer(scr, listArea, m.drawCache.buf)
 	}
 
@@ -300,11 +299,12 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 	}
 }
 
-// newChatDrawCache builds a chatDrawCache for the given rendered string by
-// running uv.StyledString.Draw into a fresh buffer sized to the text's
-// natural bounds under the active width method. This is the only place
-// ANSI decoding happens for cached frames — subsequent draws reuse buf
-// via drawCachedBuffer.
+// decode makes c hold the decoded form of rendered under method. A hit
+// (same string and method) is a no-op. On a miss the buffer is resized in
+// place to the text's natural bounds and repopulated by
+// uv.StyledString.Draw, which clears the whole area first, so no cells from
+// the previous decode survive. This is the only place ANSI decoding happens
+// for cached frames; subsequent draws reuse buf via drawCachedBuffer.
 //
 // We can't use uv.StyledString.Bounds() here: it is hard-coded to
 // ansi.GraphemeWidth, while StyledString.Draw lays cells using the
@@ -316,22 +316,16 @@ func (m *Chat) Draw(scr uv.Screen, area uv.Rectangle) {
 // with `method.StringWidth` per line matches what printString tallies
 // cell-by-cell, since both decode ANSI sequences and use the same width
 // method.
-func newChatDrawCache(rendered string, method ansi.Method) *chatDrawCache {
+func (c *chatDrawCache) decode(rendered string, method ansi.Method) {
+	if c.buf.RenderBuffer != nil && c.rendered == rendered && c.method == method {
+		return
+	}
 	w, h := renderedBounds(rendered, method)
-	if w <= 0 {
-		w = 1
-	}
-	if h <= 0 {
-		h = 1
-	}
-	buf := uv.NewScreenBuffer(w, h)
-	buf.Method = method
-	uv.NewStyledString(rendered).Draw(buf, buf.Bounds())
-	return &chatDrawCache{
-		rendered: rendered,
-		method:   method,
-		buf:      buf,
-	}
+	resizeScreenBuffer(&c.buf, max(w, 1), max(h, 1))
+	c.buf.Method = method
+	uv.NewStyledString(rendered).Draw(c.buf, c.buf.Bounds())
+	c.rendered = rendered
+	c.method = method
 }
 
 // renderedBounds returns the (width, height) cell extent of rendered

@@ -2,6 +2,7 @@ package model
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	uv "github.com/charmbracelet/ultraviolet"
@@ -68,7 +69,8 @@ func TestChatDrawCache_MissOnDifferentRender(t *testing.T) {
 	w, h := 80, 20
 	_ = renderToBuffer(t, u.chat, w, h)
 	require.NotNil(t, u.chat.drawCache)
-	firstCache := u.chat.drawCache
+	firstRendered := u.chat.drawCache.rendered
+	firstBuf := u.chat.drawCache.buf.RenderBuffer
 
 	// Replace the items so the rendered string differs.
 	u.chat.SetMessages("",
@@ -77,8 +79,10 @@ func TestChatDrawCache_MissOnDifferentRender(t *testing.T) {
 	u.updateLayoutAndSize()
 
 	got := renderToBuffer(t, u.chat, w, h)
-	require.NotSame(t, firstCache, u.chat.drawCache,
+	require.NotEqual(t, firstRendered, u.chat.drawCache.rendered,
 		"changed rendered string must replace the cache entry")
+	require.Same(t, firstBuf, u.chat.drawCache.buf.RenderBuffer,
+		"a cache miss must decode into the existing buffer")
 
 	// Output must match a fresh uv.NewStyledString render of the current
 	// list output for the same area. This is the byte-equivalence guard
@@ -157,9 +161,41 @@ func TestChatDrawCache_BoundedSize(t *testing.T) {
 // a fresh ScreenBuffer of the given size. It's the reference implementation
 // used by the cache tests to detect blit drift.
 func freshStyledRender(s string, w, h int) string {
+	return freshStyledRenderWith(s, w, h, ansi.WcWidth)
+}
+
+func freshStyledRenderWith(s string, w, h int, method ansi.Method) string {
 	scr := uv.NewScreenBuffer(w, h)
+	scr.Method = method
 	uv.NewStyledString(s).Draw(scr, uv.Rect(0, 0, w, h))
 	return scr.Render()
+}
+
+func TestChatDrawCache_MissAfterShrinkLeavesNoStaleCells(t *testing.T) {
+	t.Parallel()
+
+	u := newTestUI()
+	u.chat.SetMessages("",
+		testMessageItem{id: "a", text: strings.Repeat("wide line ", 6)},
+		testMessageItem{id: "b", text: "second"},
+		testMessageItem{id: "c", text: "third"},
+	)
+	u.updateLayoutAndSize()
+
+	w, h := 80, 20
+	_ = renderToBuffer(t, u.chat, w, h)
+	firstBuf := u.chat.drawCache.buf.RenderBuffer
+
+	u.chat.SetMessages("",
+		testMessageItem{id: "d", text: "x"},
+	)
+	u.updateLayoutAndSize()
+
+	got := renderToBuffer(t, u.chat, w, h)
+	require.Same(t, firstBuf, u.chat.drawCache.buf.RenderBuffer)
+	wantW, wantH := renderedBounds(u.chat.list.Render(), ansi.WcWidth)
+	require.Equal(t, uv.Rect(0, 0, max(wantW, 1), max(wantH, 1)), u.chat.drawCache.buf.Bounds())
+	require.Equal(t, freshStyledRender(u.chat.list.Render(), w, h), got)
 }
 
 // TestChatDrawCache_InvalidatedByWidthMethodSwap asserts the cache rebuilds
@@ -190,7 +226,6 @@ func TestChatDrawCache_InvalidatedByWidthMethodSwap(t *testing.T) {
 	u.chat.Draw(scrA, uv.Rect(0, 0, w, h))
 	require.NotNil(t, u.chat.drawCache)
 	require.Equal(t, ansi.GraphemeWidth, u.chat.drawCache.method)
-	firstCache := u.chat.drawCache
 
 	// Same string, swap the method. The cache key includes method, so
 	// this must rebuild even though `rendered` is byte-identical.
@@ -199,9 +234,10 @@ func TestChatDrawCache_InvalidatedByWidthMethodSwap(t *testing.T) {
 		Method:       ansi.WcWidth,
 	}
 	u.chat.Draw(scrB, uv.Rect(0, 0, w, h))
-	require.NotSame(t, firstCache, u.chat.drawCache,
+	require.Equal(t, ansi.WcWidth, u.chat.drawCache.method,
 		"width method change must invalidate the cache")
-	require.Equal(t, ansi.WcWidth, u.chat.drawCache.method)
+	require.Equal(t, ansi.WcWidth, u.chat.drawCache.buf.Method)
+	require.Equal(t, freshStyledRenderWith(u.chat.list.Render(), w, h, ansi.WcWidth), scrB.Render())
 }
 
 // fixedMethodScreen wraps a uv.ScreenBuffer but reports a custom (non

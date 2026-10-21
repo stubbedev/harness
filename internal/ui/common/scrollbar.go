@@ -31,14 +31,15 @@ func Scrollbar(s *styles.Styles, height, contentSize, viewportSize, offset int) 
 
 	// Build the scrollbar.
 	var sb strings.Builder
+	sb.Grow(height * (max(len(s.Dialog.ScrollbarThumb), len(s.Dialog.ScrollbarTrack)) + 1))
 	for i := range height {
 		if i > 0 {
 			sb.WriteString("\n")
 		}
 		if i >= thumbPos && i < thumbPos+thumbSize {
-			sb.WriteString(s.Dialog.ScrollbarThumb.Render(styles.ScrollbarThumb))
+			sb.WriteString(s.Dialog.ScrollbarThumb)
 		} else {
-			sb.WriteString(s.Dialog.ScrollbarTrack.Render(styles.ScrollbarTrack))
+			sb.WriteString(s.Dialog.ScrollbarTrack)
 		}
 	}
 

@@ -930,8 +930,8 @@ func quickStyle(o quickStyleOpts) Styles {
 
 	s.Dialog.List = base.Margin(0, 0, 1, 0)
 	s.Dialog.Spinner = base.Foreground(o.secondary)
-	s.Dialog.ScrollbarThumb = base.Foreground(o.secondary)
-	s.Dialog.ScrollbarTrack = base.Foreground(o.separator)
+	s.Dialog.ScrollbarThumb = base.Foreground(o.secondary).Render(ScrollbarThumb)
+	s.Dialog.ScrollbarTrack = base.Foreground(o.separator).Render(ScrollbarTrack)
 
 	// API key input dialog
 	s.Dialog.APIKey.Spinner = base.Foreground(o.success)

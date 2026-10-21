@@ -259,6 +259,7 @@ type UI struct {
 	// handlers that change nothing but the chat scroll position; frameDirty
 	// overrides it when a layout change happens in the same update.
 	frames           *frameCache
+	canvas           uv.ScreenBuffer
 	scrollOnlyUpdate bool
 	frameDirty       bool
 	frameSkipPut     bool
@@ -2920,19 +2921,21 @@ func (m *UI) View() tea.View {
 		}
 	}
 
-	canvas := uv.NewScreenBuffer(m.width, m.height)
-	v.Cursor = m.Draw(canvas, canvas.Bounds())
+	resizeScreenBuffer(&m.canvas, m.width, m.height)
+	v.Cursor = m.Draw(m.canvas, m.canvas.Bounds())
 
 	// Normalize newlines and trim trailing spaces in one pass: splitting
 	// first makes the global "\r\n" -> "\n" rewrite a per-line suffix
 	// trim, which saves two full-frame copies per uncached frame.
-	rendered := canvas.Render()
+	rendered := m.canvas.Render()
 	var out strings.Builder
 	out.Grow(len(rendered))
-	for i, line := range strings.Split(rendered, "\n") {
-		if i > 0 {
+	first := true
+	for line := range strings.SplitSeq(rendered, "\n") {
+		if !first {
 			out.WriteByte('\n')
 		}
+		first = false
 		out.WriteString(strings.TrimRight(strings.TrimSuffix(line, "\r"), " "))
 	}
 	content := out.String()

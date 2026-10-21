@@ -431,9 +431,9 @@ type Styles struct {
 
 		Spinner lipgloss.Style
 
-		// Scrollbar styles for scrollable content.
-		ScrollbarThumb lipgloss.Style
-		ScrollbarTrack lipgloss.Style
+		// Pre-rendered scrollbar glyphs for scrollable content.
+		ScrollbarThumb string
+		ScrollbarTrack string
 
 		// Arguments
 		Arguments struct {
