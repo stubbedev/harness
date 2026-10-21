@@ -1,6 +1,7 @@
 package dialog
 
 import (
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -35,6 +36,7 @@ type CommandItem struct {
 	// slashNames are the names the command is invoked by from the editor
 	// ("/compact"), the preferred one first.
 	slashNames []string
+	tag        string
 }
 
 var (
@@ -91,6 +93,11 @@ func (c *CommandItem) WithFilterTitle(filterTitle string) *CommandItem {
 	return c
 }
 
+func (c *CommandItem) WithTag(tag string) *CommandItem {
+	c.tag = tag
+	return c
+}
+
 // Filter implements ListItem.
 func (c *CommandItem) Filter() string {
 	primary, rest := c.FilterFields()
@@ -104,18 +111,28 @@ func (c *CommandItem) Filter() string {
 	}
 }
 
-// FilterFields implements list.TieredFilterItem: the title and aliases
-// are the name tier; the description only matches, it never outranks a
-// title match.
+// FilterFields implements list.TieredFilterItem: the title, aliases and
+// slash names are the name tier; the description only matches, it never
+// outranks a name match.
 func (c *CommandItem) FilterFields() (primary, rest string) {
-	title := c.title
+	return strings.Join(c.searchNames(), " "), c.description
+}
+
+func (c *CommandItem) searchNames() []string {
+	name := c.title
 	if c.filterTitle != "" {
-		title = c.filterTitle
+		name = c.filterTitle
 	}
-	if len(c.aliases) == 0 {
-		return title, c.description
+	names := []string{name}
+	for _, n := range slices.Concat(c.aliases, c.SlashNames()) {
+		if c.filterTitle != "" && n == c.title {
+			continue
+		}
+		if !slices.ContainsFunc(names, func(m string) bool { return strings.EqualFold(m, n) }) {
+			names = append(names, n)
+		}
 	}
-	return title + " " + strings.Join(c.aliases, " "), c.description
+	return names
 }
 
 // ID implements ListItem.
@@ -137,9 +154,9 @@ func (c *CommandItem) Value() any { return c.action }
 // Label implements PickerItem; the title is the row's main text.
 func (c *CommandItem) Label() string { return c.title }
 
-// RightLabel implements PickerItem; the shortcut hint is the row's
+// RightLabel implements PickerItem; the info text is the row's
 // right-aligned info column.
-func (c *CommandItem) RightLabel() string { return c.shortcut.Help().Key }
+func (c *CommandItem) RightLabel() string { return c.InfoText() }
 
 // SetFocused implements ListItem.
 func (c *CommandItem) SetFocused(focused bool) {
@@ -175,9 +192,16 @@ func (c *CommandItem) Shortcut() key.Binding {
 	return c.shortcut
 }
 
-// InfoText implements infoColumnItem; the command shortcut is its info.
+// InfoText implements infoColumnItem; the tag and the command shortcut
+// are its info.
 func (c *CommandItem) InfoText() string {
-	return c.shortcut.Help().Key
+	parts := make([]string, 0, 2)
+	for _, part := range []string{c.tag, c.shortcut.Help().Key} {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 // SetHideInfo controls whether the shortcut hint column is shown. The

@@ -1,9 +1,11 @@
 package dialog
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/stubbedev/harness/internal/commands"
+	"github.com/stubbedev/harness/internal/ui/list"
 )
 
 // Commands are invoked from the editor by name ("/compact keep the API
@@ -34,6 +36,35 @@ func FindInvocable(items []*CommandItem, name string) *CommandItem {
 		}
 	}
 	return nil
+}
+
+func RankCommands(items []*CommandItem, query string) []*CommandItem {
+	return list.Rank(query, items, commandOrder)
+}
+
+const (
+	tierPreferredName = iota
+	tierAnyName
+	tierFuzzy
+)
+
+func commandOrder(query string, a, b list.FilterableItem) int {
+	q := strings.ToLower(query)
+	return commandTier(a, q) - commandTier(b, q)
+}
+
+func commandTier(item list.FilterableItem, q string) int {
+	c, ok := item.(*CommandItem)
+	switch {
+	case !ok:
+		return tierFuzzy
+	case strings.HasPrefix(strings.ToLower(c.SlashName()), q):
+		return tierPreferredName
+	case slices.ContainsFunc(c.searchNames(), func(n string) bool { return strings.HasPrefix(strings.ToLower(n), q) }):
+		return tierAnyName
+	default:
+		return tierFuzzy
+	}
 }
 
 // argSpecOf returns the ArgSpec of an action that takes arguments.

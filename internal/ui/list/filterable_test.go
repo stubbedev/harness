@@ -83,3 +83,54 @@ func TestFilterableListSetItemsDroppedSelectionKeepsPosition(t *testing.T) {
 	l.SetItems(idItems("a")...)
 	require.Equal(t, "a", selectedID(t, l))
 }
+
+func itemIDs(items []Item) []string {
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.(*idItem).id
+	}
+	return ids
+}
+
+func TestFilterOrderTiesKeepFuzzyOrder(t *testing.T) {
+	t.Parallel()
+
+	l := NewFilterableList(idItems("xaxxbxxc", "abc")...)
+	l.SetFilterOrder(func(string, FilterableItem, FilterableItem) int { return 0 })
+	l.SetFilter("abc")
+	require.Equal(t, []string{"abc", "xaxxbxxc"}, itemIDs(l.FilteredItems()))
+}
+
+func TestFilterOrderSeesQuery(t *testing.T) {
+	t.Parallel()
+
+	var seen []string
+	l := NewFilterableList(idItems("ab", "abc")...)
+	l.SetFilterOrder(func(query string, _, _ FilterableItem) int {
+		seen = append(seen, query)
+		return 0
+	})
+	l.SetFilter("ab")
+	require.NotEmpty(t, seen)
+	for _, q := range seen {
+		require.Equal(t, "ab", q)
+	}
+}
+
+func TestRankMatchesFilteredItems(t *testing.T) {
+	t.Parallel()
+
+	items := idItems("newest", "middle", "oldest", "model", "nodes")
+	order := func(_ string, a, b FilterableItem) int { return len(b.Filter()) - len(a.Filter()) }
+	l := NewFilterableList(items...)
+	l.SetFilterOrder(order)
+	for _, q := range []string{"", "e", "de", "old", "zz"} {
+		l.SetFilter(q)
+		ranked := Rank(q, items, order)
+		got := make([]Item, len(ranked))
+		for i, item := range ranked {
+			got[i] = item
+		}
+		require.Equal(t, itemIDs(l.FilteredItems()), itemIDs(got), q)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/ui/dialog"
 )
 
 // TestPickerDrawsAboveEditor pins what the picker shows: each command
@@ -68,4 +69,28 @@ func TestPickerRanksPrefixFirst(t *testing.T) {
 	first := m.commandPicker.matches[0]
 	require.True(t, slices.ContainsFunc(first.SlashNames(), func(n string) bool { return strings.HasPrefix(n, "cl") }),
 		"got %v first", first.SlashNames())
+}
+
+func TestPickerMatchesTitle(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newCompactUI(t)
+	typeText(m, "/project")
+	require.True(t, m.commandPicker.visible())
+	require.Equal(t, "init", m.commandPicker.matches[0].ID())
+}
+
+func TestPickerRanksLikePalette(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newCompactUI(t)
+	typeText(m, "/se")
+	ids := func(items []*dialog.CommandItem) []string {
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			out = append(out, item.ID())
+		}
+		return out
+	}
+	require.Equal(t, ids(dialog.RankCommands(m.commandCatalog().Invocables(), "se")), ids(m.commandPicker.matches))
 }

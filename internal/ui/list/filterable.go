@@ -81,6 +81,8 @@ type TieredFilterItem interface {
 	FilterFields() (primary, rest string)
 }
 
+type FilterOrder func(query string, a, b FilterableItem) int
+
 // FilterableList is a list that takes filterable items that can be filtered
 // via a settable query.
 type FilterableList struct {
@@ -90,7 +92,7 @@ type FilterableList struct {
 	// order re-ranks the filtered items after matching (stable),
 	// so what renders and what selection walks are the same order. A
 	// nil order keeps the tiered fuzzy score order.
-	order func(a, b FilterableItem) int
+	order FilterOrder
 }
 
 // NewFilterableList creates a new filterable list.
@@ -129,7 +131,7 @@ func (f *FilterableList) PrependItems(items ...FilterableItem) {
 // SetFilterOrder sets an optional stable re-ranking applied to the
 // matched items on every filter; nil keeps the tiered fuzzy score order.
 // Match highlighting is unaffected.
-func (f *FilterableList) SetFilterOrder(cmp func(a, b FilterableItem) int) {
+func (f *FilterableList) SetFilterOrder(cmp FilterOrder) {
 	f.order = cmp
 	f.refilter()
 }
@@ -183,59 +185,66 @@ func (f *FilterableList) FilteredItems() []Item {
 		return items
 	}
 
-	type matched struct {
-		item    FilterableItem
-		score   int
-		primary int
-	}
-	var matches []matched
-	for i, item := range f.items {
-		fields, tiered := item.(TieredFilterItem)
-		filter := item.Filter()
-		rankFields := fuzzyrank.Fields{Primary: filter}
-		if tiered {
-			rankFields.Primary, rankFields.Rest = fields.FilterFields()
-		}
-		res, ok := fuzzyrank.Match(f.query, rankFields)
-		if !ok {
-			continue
-		}
-		if ms, ok := item.(MatchSettable); ok {
+	ranked := rank(f.query, f.items, f.order)
+	items := make([]Item, len(ranked))
+	for i, r := range ranked {
+		if ms, ok := r.item.(MatchSettable); ok {
 			// Only the primary field's offsets reach the highlighter:
 			// rows highlight their label, and offsets into the rest of
 			// the filter text point past it.
-			ms.SetMatch(fuzzy.Match{Str: filter, Index: i, MatchedIndexes: res.Primary, Score: res.Score})
+			ms.SetMatch(fuzzy.Match{Str: r.filter, Index: r.index, MatchedIndexes: r.result.Primary, Score: r.result.Score})
 		}
-		matches = append(matches, matched{item: item, score: res.Score, primary: len(rankFields.Primary)})
+		items[i] = r.item
 	}
+	return items
+}
 
-	// A set filter order re-ranks the matched items after matching;
-	// Render and every consumer below see the same order. Without one,
-	// the tiered score ranks, with equal scores breaking toward the
-	// shorter name tier, then the original order.
-	if f.order != nil {
-		filterable := make([]FilterableItem, len(matches))
-		for i, m := range matches {
-			filterable[i] = m.item
-		}
-		slices.SortStableFunc(filterable, f.order)
-		items := make([]Item, len(filterable))
-		for i, item := range filterable {
-			items[i] = item
-		}
+func Rank[T FilterableItem](query string, items []T, order FilterOrder) []T {
+	if query == "" {
 		return items
 	}
-	slices.SortStableFunc(matches, func(a, b matched) int {
-		if a.score != b.score {
-			return b.score - a.score
+	ranked := rank(query, items, order)
+	out := make([]T, len(ranked))
+	for i, r := range ranked {
+		out[i] = r.item
+	}
+	return out
+}
+
+type rankedItem[T FilterableItem] struct {
+	item    T
+	index   int
+	filter  string
+	result  fuzzyrank.Result
+	primary int
+}
+
+func rank[T FilterableItem](query string, items []T, order FilterOrder) []rankedItem[T] {
+	var matches []rankedItem[T]
+	for i, item := range items {
+		filter := item.Filter()
+		fields := fuzzyrank.Fields{Primary: filter}
+		if tiered, ok := FilterableItem(item).(TieredFilterItem); ok {
+			fields.Primary, fields.Rest = tiered.FilterFields()
+		}
+		res, ok := fuzzyrank.Match(query, fields)
+		if !ok {
+			continue
+		}
+		matches = append(matches, rankedItem[T]{item: item, index: i, filter: filter, result: res, primary: len(fields.Primary)})
+	}
+	slices.SortStableFunc(matches, func(a, b rankedItem[T]) int {
+		if a.result.Score != b.result.Score {
+			return b.result.Score - a.result.Score
 		}
 		return a.primary - b.primary
 	})
-	items := make([]Item, len(matches))
-	for i, m := range matches {
-		items[i] = m.item
+	if order != nil {
+		slices.SortStableFunc(matches, func(a, b rankedItem[T]) int {
+			return order(query, a.item, b.item)
+		})
 	}
-	return items
+	return matches
 }
 
 // Render renders the filterable list.

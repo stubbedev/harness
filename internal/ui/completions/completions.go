@@ -60,18 +60,16 @@ func LoadItems(depth, limit int, subagents []SubagentCompletionValue) tea.Cmd {
 // hits render above deeper path matches - render order and selection
 // order are the same by construction. all holds the unfiltered items.
 func FilterMentionItems(l *list.FilterableList, all []list.FilterableItem, query string) {
-	l.SetFilterOrder(MentionOrder(query))
+	l.SetFilterOrder(MentionOrder)
 	l.SetItems(all...)
 	l.SetFilter(query)
 }
 
 // MentionOrder returns the name-priority comparator for a query: a
 // stable re-ranking by tier, so equal tiers keep their fuzzy order.
-func MentionOrder(query string) func(a, b list.FilterableItem) int {
+func MentionOrder(query string, a, b list.FilterableItem) int {
 	queryLower := strings.ToLower(strings.TrimSpace(query))
-	return func(a, b list.FilterableItem) int {
-		return namePriorityTier(a.Filter(), queryLower) - namePriorityTier(b.Filter(), queryLower)
-	}
+	return namePriorityTier(a.Filter(), queryLower) - namePriorityTier(b.Filter(), queryLower)
 }
 
 type namePriorityRule struct {

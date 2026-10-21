@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/sahilm/fuzzy"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/ui/dialog"
 	"github.com/stubbedev/harness/internal/ui/keys"
@@ -212,43 +211,15 @@ func (m *UI) refreshCommandPicker() {
 		p.open = true
 		p.items = m.commandCatalog().Invocables()
 		p.query = query
-		p.matches = rankCommands(p.items, query)
+		p.matches = dialog.RankCommands(p.items, query)
 		p.selected = 0
 		return
 	}
 	if query != p.query {
 		p.query = query
-		p.matches = rankCommands(p.items, query)
+		p.matches = dialog.RankCommands(p.items, query)
 		p.selected = 0
 	}
-}
-
-// rankCommands orders the commands a partial name could become: those
-// whose preferred name starts with it, then those with any name that
-// does, then fuzzy matches. An empty name lists everything.
-func rankCommands(items []*dialog.CommandItem, query string) []*dialog.CommandItem {
-	if query == "" {
-		return items
-	}
-	q := strings.ToLower(query)
-	var primary, alias, rest []*dialog.CommandItem
-	names := make([]string, 0, len(items))
-	for _, item := range items {
-		switch {
-		case strings.HasPrefix(strings.ToLower(item.SlashName()), q):
-			primary = append(primary, item)
-		case slices.ContainsFunc(item.SlashNames(), func(n string) bool { return strings.HasPrefix(strings.ToLower(n), q) }):
-			alias = append(alias, item)
-		default:
-			rest = append(rest, item)
-			names = append(names, strings.Join(item.SlashNames(), " "))
-		}
-	}
-	out := append(primary, alias...)
-	for _, match := range fuzzy.Find(query, names) {
-		out = append(out, rest[match.Index])
-	}
-	return out
 }
 
 // handleCommandPickerKey gives the picker the keys it owns while it is

@@ -45,13 +45,12 @@ type Commands struct {
 		Close key.Binding
 	}
 
-	catalog  *Catalog
-	selected CommandType
+	catalog   *Catalog
+	selected  CommandType
+	searching bool
 
 	input textinput.Model
 	list  *list.FilterableList
-
-	windowWidth int
 }
 
 var _ Dialog = (*Commands)(nil)
@@ -65,6 +64,7 @@ func NewCommands(com *common.Common, catalog *Catalog) (*Commands, error) {
 	}
 
 	c.list = list.NewFilterableList()
+	c.list.SetFilterOrder(commandOrder)
 	c.list.Focus()
 	c.list.SetSelected(0)
 
@@ -84,7 +84,6 @@ func NewCommands(com *common.Common, catalog *Catalog) (*Commands, error) {
 	c.keyMap.ShiftTab = km.Commands.ShiftTab
 	c.keyMap.Close = keys.WithDesc(km.Close, "cancel")
 
-	// Set initial commands
 	c.setCommandItems(c.selected)
 
 	return c, nil
@@ -126,7 +125,7 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 					}
 				}
 			}
-			cmd, _ := filterInput(&c.input, msg, applyListFilter(c.list))
+			cmd, _ := filterInput(&c.input, msg, c.applyFilter)
 			return ActionCmd{cmd}
 		}
 	}
@@ -160,13 +159,6 @@ func commandsRadioView(sty *styles.Styles, tabs []commandMenu, selected CommandT
 // Draw implements [Dialog].
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
-	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
-		c.windowWidth = area.Dx()
-		// since some items in the list depend on width (e.g. toggle sidebar command),
-		// we need to reset the command items when width changes
-		c.setCommandItems(c.selected)
-	}
-
 	applyInfoColumnVisibility(c.list.FilteredItems(), DialogInnerWidth(t, DialogWidth(t, area)), commandInfoMaxPercent)
 
 	return drawPicker(scr, area, t, &c.input, c.list, pickerLayout{
@@ -211,8 +203,7 @@ func (c *Commands) cycleTab(step int) {
 	}
 	for i, m := range tabs {
 		if m.tab() == c.selected {
-			c.selected = tabs[(i+step+len(tabs))%len(tabs)].tab()
-			c.setCommandItems(c.selected)
+			c.setCommandItems(tabs[(i+step+len(tabs))%len(tabs)].tab())
 			return
 		}
 	}
@@ -246,38 +237,53 @@ func (c *Commands) ownKeys() []key.Binding {
 	}
 }
 
-// setCommandItems sets the command items based on the specified command type.
+// setCommandItems selects the tab the empty query lists. A query in the
+// input keeps searching every tab.
 func (c *Commands) setCommandItems(commandType CommandType) {
 	c.selected = commandType
-
-	var commandItems []list.FilterableItem
-	for _, m := range c.catalog.menus() {
-		if m.tab() == commandType {
-			for _, item := range m.items() {
-				commandItems = append(commandItems, item.WithShortcut(keys.Without(item.Shortcut(), c.ownKeys()...)))
-			}
-			break
-		}
+	if c.searching {
+		return
 	}
-
-	c.list.SetItems(commandItems...)
-	clearListFilter(&c.input, c.list)
+	c.loadItems()
 	c.list.ScrollToTop()
 	c.list.SetSelected(0)
 }
 
-// SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.
-func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
-	c.catalog.customCommands = customCommands
-	if c.selected == UserCommands {
-		c.setCommandItems(c.selected)
+func (c *Commands) applyFilter(query string) {
+	if (query != "") != c.searching {
+		c.searching = query != ""
+		c.loadItems()
 	}
+	applyListFilter(c.list)(query)
 }
 
-// SetMCPPrompts sets the MCP prompts and refreshes the view if MCP prompts are currently displayed.
+func (c *Commands) loadItems() {
+	tag := c.searching && c.hasTabs()
+	var commandItems []list.FilterableItem
+	for _, m := range c.catalog.menus() {
+		if !c.searching && m.tab() != c.selected {
+			continue
+		}
+		for _, item := range m.items() {
+			item = item.WithShortcut(keys.Without(item.Shortcut(), c.ownKeys()...))
+			if tag {
+				item = item.WithTag(m.tab().String())
+			}
+			commandItems = append(commandItems, item)
+		}
+	}
+	c.list.SetItems(commandItems...)
+}
+
+// SetCustomCommands sets the custom commands and refreshes the listed
+// items.
+func (c *Commands) SetCustomCommands(customCommands []commands.CustomCommand) {
+	c.catalog.customCommands = customCommands
+	c.loadItems()
+}
+
+// SetMCPPrompts sets the MCP prompts and refreshes the listed items.
 func (c *Commands) SetMCPPrompts(mcpPrompts []commands.MCPPrompt) {
 	c.catalog.mcpPrompts = mcpPrompts
-	if c.selected == MCPPrompts {
-		c.setCommandItems(c.selected)
-	}
+	c.loadItems()
 }
