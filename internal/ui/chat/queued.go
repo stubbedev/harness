@@ -122,11 +122,7 @@ func (q *QueuedMessageItem) Render(width int) string {
 	} else {
 		prefix = q.sty.Messages.UserBlurred.Render()
 	}
-	lines := strings.Split(q.RawRender(width), "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	out := strings.Join(lines, "\n")
+	out := prefixLines(q.RawRender(width), prefix)
 	q.setCachedPrefixedRender(out, width, key)
 	return out
 }

@@ -292,7 +292,7 @@ type sectionKey struct {
 	extra   uint64
 }
 
-func keyOf(s assistantSection) sectionKey {
+func keyOf[T any](s assistantSection[T]) sectionKey {
 	return sectionKey{width: s.width, srcHash: s.srcHash, extra: s.extra}
 }
 

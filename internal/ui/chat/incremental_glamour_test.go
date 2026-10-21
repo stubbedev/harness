@@ -422,7 +422,7 @@ func TestStreamingMarkdown_FinalVisuallyEquivalent(t *testing.T) {
 
 			var lastOut string
 			for _, p := range prefixes {
-				lastOut = sm.Render(p, width, renderer)
+				lastOut = sm.Render(p, width, renderer).String()
 			}
 
 			fresh := freshRender(t, sc.doc, width)
@@ -452,7 +452,7 @@ func TestStreamingMarkdown_IntermediateOutputsPlausible(t *testing.T) {
 				if p == "" {
 					continue
 				}
-				out := sm.Render(p, width, renderer)
+				out := sm.Render(p, width, renderer).String()
 				require.NotEmptyf(t, out, "step %d: empty render for prefix len %d", i, len(p))
 				require.Falsef(t, containsRawMarkdownSource(out),
 					"step %d: render leaked raw markdown source.\nprefix=%q\nout=%s",
@@ -481,11 +481,11 @@ func TestStreamingMarkdown_WidthChangeInvalidates(t *testing.T) {
 	r40 := newTestRenderer(t, 40)
 	var sm streamingMarkdown
 
-	out80 := sm.Render(doc, 80, r80)
+	out80 := sm.Render(doc, 80, r80).String()
 	require.Equal(t, 80, sm.width, "width must be cached after first render")
 	cachedPrefix := sm.stablePrefix
 
-	out40 := sm.Render(doc, 40, r40)
+	out40 := sm.Render(doc, 40, r40).String()
 	require.Equal(t, 40, sm.width, "width change must update cached width")
 	require.NotEqual(t, out80, out40,
 		"different widths must produce different rendered output")
@@ -521,7 +521,7 @@ func TestStreamingMarkdown_NonPrefixContentInvalidates(t *testing.T) {
 
 	// Now switch to entirely different content (user retried).
 	other := "Completely different opening paragraph.\n\nAnd a second."
-	out := sm.Render(other, width, r)
+	out := sm.Render(other, width, r).String()
 	require.NotEmpty(t, out)
 	// stablePrefix must be a prefix of `other`, i.e. cache was
 	// reset off the OLD content.
@@ -553,11 +553,11 @@ func TestStreamingMarkdown_ResetClearsCache(t *testing.T) {
 	sm.Reset()
 	require.Equal(t, 0, sm.width)
 	require.Equal(t, "", sm.stablePrefix)
-	require.Equal(t, "", sm.stablePrefixRender)
+	require.Equal(t, "", sm.stablePrefixRender.String())
 
 	// Next render must be a full render path. Drive one step
 	// and verify the output matches a fresh full render.
-	out := sm.Render(doc, width, r)
+	out := sm.Render(doc, width, r).String()
 	fresh := freshRender(t, doc, width)
 	require.Equal(t, normalizeRender(fresh), normalizeRender(out))
 }
@@ -606,7 +606,7 @@ func TestStreamingMarkdown_NoSafeBoundaryAlwaysFullRenders(t *testing.T) {
 		if p == "" {
 			continue
 		}
-		out := sm.Render(p, width, r)
+		out := sm.Render(p, width, r).String()
 		fresh := freshRender(t, p, width)
 		require.Equalf(t, fresh, out,
 			"step %d (len=%d): streaming output must byte-equal a fresh render when boundary detection fails",
@@ -634,7 +634,7 @@ func TestStreamingMarkdown_NoSafeBoundaryDoesNotCrash(t *testing.T) {
 	// separator so the cache is never advanced.
 	src := "The quick brown fox jumps over the lazy dog."
 	for i := 1; i <= len(src); i++ {
-		out := sm.Render(src[:i], width, r)
+		out := sm.Render(src[:i], width, r).String()
 		require.NotEmpty(t, out, "streaming output must not be empty for non-empty input")
 	}
 }
@@ -709,7 +709,7 @@ func runProgressiveBoundaryRespectTest(t *testing.T, doc string, hazardLineOffse
 		if p == "" {
 			continue
 		}
-		lastOut = sm.Render(p, width, renderer)
+		lastOut = sm.Render(p, width, renderer).String()
 		require.NotEmptyf(t, lastOut, "step %d: empty render", i)
 		require.LessOrEqualf(t, len(sm.stablePrefix), hazardLineOffset,
 			"step %d: cached stable prefix advanced past the hazard line\n"+
@@ -849,7 +849,7 @@ func TestAssistantStreamingContent_ResetOnClearCache(t *testing.T) {
 
 	require.Equal(t, "", item.streamingContent.stablePrefix,
 		"clearCache must Reset the streaming-markdown cache")
-	require.Equal(t, "", item.streamingContent.stablePrefixRender)
+	require.Equal(t, "", item.streamingContent.stablePrefixRender.String())
 	require.Equal(t, 0, item.streamingContent.width)
 }
 
@@ -889,7 +889,7 @@ func TestStreamingMarkdown_RelaxedBoundaryAdvancesOnLongProse(t *testing.T) {
 		if p == "" {
 			continue
 		}
-		lastOut = sm.Render(p, width, r)
+		lastOut = sm.Render(p, width, r).String()
 		require.NotEmpty(t, lastOut)
 		require.True(t, strings.HasPrefix(p, sm.stablePrefix),
 			"stable prefix must stay a literal prefix of the content")
@@ -944,7 +944,7 @@ func TestStreamingMarkdown_RelaxedBoundaryRespectsHazards(t *testing.T) {
 				if p == "" {
 					continue
 				}
-				require.NotEmpty(t, sm.Render(p, width, r))
+				require.NotEmpty(t, sm.Render(p, width, r).String())
 			}
 			require.Equal(t, "", sm.stablePrefix,
 				"cache must not advance across an unsafe construct")
@@ -955,7 +955,7 @@ func TestStreamingMarkdown_RelaxedBoundaryRespectsHazards(t *testing.T) {
 // TestStreamingMarkdown_LastLinesMatchesOutput pins the incrementally
 // tracked line count to the value a fresh countLines would produce.
 // renderThinking sizes its "N lines hidden" truncation hint from
-// LastLines, so any drift here shows up as a wrong number on screen.
+// streamedRender.lines, so any drift here shows up as a wrong number on screen.
 func TestStreamingMarkdown_LastLinesMatchesOutput(t *testing.T) {
 	t.Parallel()
 
@@ -978,8 +978,8 @@ func TestStreamingMarkdown_LastLinesMatchesOutput(t *testing.T) {
 				if p == "" {
 					continue
 				}
-				out := sm.Render(p, width, r)
-				require.Equalf(t, countLines(strings.TrimSpace(out)), sm.LastLines(),
+				got := sm.Render(p, width, r)
+				require.Equalf(t, countLines(strings.TrimSpace(got.String())), got.lines,
 					"step %d (len=%d): tracked line count must match the output", i, len(p))
 			}
 		})

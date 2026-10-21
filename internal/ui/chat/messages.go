@@ -366,6 +366,21 @@ func (c *cachedMessageItem) setCachedPrefixedRender(rendered string, width int, 
 
 // newCachedMessageItem returns an empty cache owned by the item whose
 // version counter is ver.
+func prefixLines(s, prefix string) string {
+	var b strings.Builder
+	b.Grow(len(s) + (strings.Count(s, "\n")+1)*len(prefix))
+	for {
+		b.WriteString(prefix)
+		i := strings.IndexByte(s, '\n')
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:i+1])
+		s = s[i+1:]
+	}
+}
+
 func newCachedMessageItem(ver *list.Versioned) *cachedMessageItem {
 	return &cachedMessageItem{ver: ver}
 }
@@ -489,12 +504,7 @@ func (a *AssistantInfoItem) Render(width int) string {
 	if cached, ok := a.getCachedPrefixedRender(width, 0); ok {
 		return cached
 	}
-	prefix := a.sty.Messages.SectionHeader.Render()
-	lines := strings.Split(a.RawRender(width), "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	out := strings.Join(lines, "\n")
+	out := prefixLines(a.RawRender(width), a.sty.Messages.SectionHeader.Render())
 	a.setCachedPrefixedRender(out, width, 0)
 	return out
 }

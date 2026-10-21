@@ -75,7 +75,7 @@ type sectionSnapshot struct {
 func snapshot(a *AssistantMessageItem) sectionSnapshot {
 	return sectionSnapshot{
 		thinking: a.thinkingSec.out,
-		content:  a.contentSec.out,
+		content:  a.contentSec.out.String(),
 		errSec:   a.errorSec.out,
 	}
 }

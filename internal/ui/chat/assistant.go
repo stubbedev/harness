@@ -84,35 +84,33 @@ const (
 // when both source text and extras hash to zero. aux carries any
 // per-section side data that the caller needs to recover on a hit
 // (e.g. the thinking box height for click detection).
-type assistantSection struct {
+type assistantSection[T any] struct {
 	width   int
 	srcHash uint64
 	extra   uint64
-	out     string
-	h       int
+	out     T
 	aux     int
 	valid   bool
 }
 
 // hit reports whether the cache entry matches the requested key.
-func (s *assistantSection) hit(width int, srcHash, extra uint64) bool {
+func (s *assistantSection[T]) hit(width int, srcHash, extra uint64) bool {
 	return s.valid && s.width == width && s.srcHash == srcHash && s.extra == extra
 }
 
 // store records the rendered output under the given key.
-func (s *assistantSection) store(width int, srcHash, extra uint64, out string, aux int) {
+func (s *assistantSection[T]) store(width int, srcHash, extra uint64, out T, aux int) {
 	s.width = width
 	s.srcHash = srcHash
 	s.extra = extra
 	s.out = out
-	s.h = lipgloss.Height(out)
 	s.aux = aux
 	s.valid = true
 }
 
 // reset drops the cached output.
-func (s *assistantSection) reset() {
-	*s = assistantSection{}
+func (s *assistantSection[T]) reset() {
+	*s = assistantSection[T]{}
 }
 
 // fnv64 hashes a single string with FNV-64.
@@ -176,16 +174,7 @@ func (h *incrementalHash) reset() {
 // newline-separated segments). Equivalent to len(strings.Split(s,
 // "\n")) but allocates nothing. See CHARM-1785.
 func countLines(s string) int {
-	if s == "" {
-		return 1
-	}
-	n := 1
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			n++
-		}
-	}
-	return n
+	return strings.Count(s, "\n") + 1
 }
 
 // tailLines returns the last n lines of s and the count of hidden
@@ -200,17 +189,22 @@ func tailLines(s string, n, totalLines int) (tail string, hidden int) {
 	if totalLines <= n {
 		return s, 0
 	}
-	// Find the nth newline from the end. The tail starts after it.
-	count := 0
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '\n' {
-			count++
-			if count == n {
-				return s[i+1:], totalLines - n
-			}
-		}
+	if cut, _ := lastNewlines(s, n); cut >= 0 {
+		return s[cut+1:], totalLines - n
 	}
 	return s, 0
+}
+
+func lastNewlines(s string, n int) (cut, seen int) {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] != '\n' {
+			continue
+		}
+		if seen++; seen == n {
+			return i, seen
+		}
+	}
+	return -1, seen
 }
 
 // fnvFields hashes a list of byte fields with length-prefix framing
@@ -254,9 +248,9 @@ type AssistantMessageItem struct {
 	// Per-section render caches. Splitting these out means content
 	// streaming does not invalidate the (often expensive) thinking
 	// render, and vice versa.
-	thinkingSec assistantSection
-	contentSec  assistantSection
-	errorSec    assistantSection
+	thinkingSec assistantSection[string]
+	contentSec  assistantSection[streamedRender]
+	errorSec    assistantSection[string]
 
 	// streamingContent caches a "stable prefix" glamour render of
 	// the assistant content body so each streaming flush only
@@ -408,15 +402,14 @@ func (a *AssistantMessageItem) prefixedRender(width int) string {
 	if rendered == "" {
 		return ""
 	}
-	style := a.sty.Messages.AssistantBlurred.Render()
+	return prefixLines(rendered, a.focusStyle())
+}
+
+func (a *AssistantMessageItem) focusStyle() string {
 	if a.focused {
-		style = a.sty.Messages.AssistantFocused.Render()
+		return a.sty.Messages.AssistantFocused.Render()
 	}
-	lines := strings.Split(rendered, "\n")
-	for i, line := range lines {
-		lines[i] = style + line
-	}
-	return strings.Join(lines, "\n")
+	return a.sty.Messages.AssistantBlurred.Render()
 }
 
 // spinnerSuffix returns the focus-prefixed spinner lines to append
@@ -433,15 +426,7 @@ func (a *AssistantMessageItem) spinnerSuffix(hasBody bool) string {
 	if hasBody {
 		spinner = "\n\n" + spinner
 	}
-	style := a.sty.Messages.AssistantBlurred.Render()
-	if a.focused {
-		style = a.sty.Messages.AssistantFocused.Render()
-	}
-	lines := strings.Split(spinner, "\n")
-	for i, line := range lines {
-		lines[i] = style + line
-	}
-	return strings.Join(lines, "\n")
+	return prefixLines(spinner, a.focusStyle())
 }
 
 // prefixCacheKey builds the F3 prefixed-render cache key. We pack the
@@ -503,7 +488,7 @@ func (a *AssistantMessageItem) compositionKey() uint64 {
 // only the section whose source text or extras changed since the last
 // render is recomputed.
 func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
-	var messageParts []string
+	var parts []streamedRender
 	thinking := strings.TrimSpace(a.message.ReasoningContent().Thinking)
 	if HideThinking {
 		thinking = ""
@@ -511,27 +496,39 @@ func (a *AssistantMessageItem) renderMessageContent(width int) (string, int) {
 	content := strings.TrimSpace(a.message.Content().Text)
 
 	if thinking != "" {
-		messageParts = append(messageParts, a.cachedThinking(width))
+		parts = append(parts, streamedRender{trail: a.cachedThinking(width)})
 	}
 
 	if content != "" {
 		if thinking != "" {
-			messageParts = append(messageParts, "")
+			parts = append(parts, streamedRender{})
 		}
-		messageParts = append(messageParts, a.cachedContent(width))
+		parts = append(parts, a.cachedContent(width))
 	}
 
 	if a.message.IsFinished() {
 		switch {
 		case a.message.FinishReason() == message.FinishReasonCanceled:
-			messageParts = append(messageParts, a.sty.Messages.AssistantCanceled.Render("Canceled"))
+			parts = append(parts, streamedRender{trail: a.sty.Messages.AssistantCanceled.Render("Canceled")})
 		case a.message.IsErrorLike():
-			messageParts = append(messageParts, a.cachedError(width))
+			parts = append(parts, streamedRender{trail: a.cachedError(width)})
 		}
 	}
 
-	out := strings.Join(messageParts, "\n")
-	return out, lipgloss.Height(out)
+	size := max(len(parts)-1, 0)
+	for _, p := range parts {
+		size += p.Len()
+	}
+	var b strings.Builder
+	b.Grow(size)
+	for i, p := range parts {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		p.appendTo(&b)
+	}
+	out := b.String()
+	return out, countLines(out)
 }
 
 // thinkingKey returns the (srcHash, extra) cache key components for the
@@ -608,7 +605,7 @@ func (a *AssistantMessageItem) cachedThinking(width int) string {
 }
 
 // cachedContent returns the rendered content section.
-func (a *AssistantMessageItem) cachedContent(width int) string {
+func (a *AssistantMessageItem) cachedContent(width int) streamedRender {
 	srcHash, extra := a.contentKey()
 	if a.contentSec.hit(width, srcHash, extra) {
 		return a.contentSec.out
@@ -638,48 +635,20 @@ func (a *AssistantMessageItem) cachedError(width int) string {
 // lines so the visual box matches what the user sees today.
 func (a *AssistantMessageItem) renderThinking(thinking string, width int) string {
 	renderer := common.QuietMarkdownRenderer(a.sty, width)
-	rendered := a.streamingThinking.Render(thinking, width, renderer)
-	rendered = strings.TrimSpace(rendered)
-	// The renderer already knows this count from its cached prefix, so
-	// take it rather than rescanning a document that only grows.
-	renderedLines := a.streamingThinking.LastLines()
+	rendered := a.streamingThinking.Render(thinking, width, renderer).trimSpace()
 
-	// Count lines and, for the windowed view modes, slice the tail
-	// WITHOUT splitting the entire rendered document. Splitting a
-	// 1200-line render just to keep the last 10 lines is O(n) per
-	// tick; tailLines finds the cut point with a bounded backward
-	// scan. See CHARM-1785.
-	var lines []string
-	var totalLines int
+	var body string
 	switch a.thinkingViewMode {
 	case thinkingCollapsed:
-		totalLines = renderedLines
-		if totalLines > maxCollapsedThinkingHeight {
-			tail, hidden := tailLines(rendered, maxCollapsedThinkingHeight, totalLines)
-			hint := a.sty.Messages.ThinkingTruncationHint.Render(
-				truncationHint(hidden),
-			)
-			lines = append([]string{hint, ""}, strings.Split(tail, "\n")...)
-		} else {
-			lines = strings.Split(rendered, "\n")
-		}
+		body = a.thinkingWindow(rendered, maxCollapsedThinkingHeight, truncationHint)
 	case thinkingTailWindow:
-		totalLines = renderedLines
-		if totalLines > maxExpandedThinkingTailLines {
-			tail, hidden := tailLines(rendered, maxExpandedThinkingTailLines, totalLines)
-			hint := a.sty.Messages.ThinkingTruncationHint.Render(
-				tailWindowHint(hidden),
-			)
-			lines = append([]string{hint, ""}, strings.Split(tail, "\n")...)
-		} else {
-			lines = strings.Split(rendered, "\n")
-		}
+		body = a.thinkingWindow(rendered, maxExpandedThinkingTailLines, tailWindowHint)
 	default:
-		lines = strings.Split(rendered, "\n")
+		body = rendered.String()
 	}
 
 	thinkingStyle := a.sty.Messages.ThinkingBox.Width(width)
-	result := thinkingStyle.Render(strings.Join(lines, "\n"))
+	result := thinkingStyle.Render(body)
 	a.thinkingBoxHeight = lipgloss.Height(result)
 
 	var footer string
@@ -699,6 +668,14 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 	return result
 }
 
+func (a *AssistantMessageItem) thinkingWindow(rendered streamedRender, limit int, hintText func(hidden int) string) string {
+	if rendered.lines <= limit {
+		return rendered.String()
+	}
+	tail, hidden := rendered.tail(limit)
+	return a.sty.Messages.ThinkingTruncationHint.Render(hintText(hidden)) + "\n\n" + tail
+}
+
 // renderMarkdown renders content as markdown. F8 routes the call
 // through streamingContent, which caches the glamour render of a
 // "stable prefix" so each streaming flush only re-renders the
@@ -708,7 +685,7 @@ func (a *AssistantMessageItem) renderThinking(thinking string, width int) string
 // turn), and falls back to a full render whenever boundary
 // detection has the slightest doubt — see
 // findSafeMarkdownBoundary.
-func (a *AssistantMessageItem) renderMarkdown(content string, width int) string {
+func (a *AssistantMessageItem) renderMarkdown(content string, width int) streamedRender {
 	renderer := common.MarkdownRenderer(a.sty, width)
 	return a.streamingContent.Render(content, width, renderer)
 }
