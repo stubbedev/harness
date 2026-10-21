@@ -29,7 +29,7 @@ var getRg = sync.OnceValue(func() string {
 
 func getRgSearchCmd(ctx context.Context, rg, pattern, root, include string) *exec.Cmd {
 	// Use -n to show line numbers, -0 for null separation to handle Windows paths
-	args := []string{"--json", "-H", "-n", "-0", "--no-require-git", "--no-ignore-dot"}
+	args := []string{"--json", "-H", "-n", "-0", "--no-require-git", "--no-ignore-dot", "--sortr=modified"}
 	for _, name := range fsext.IgnoreFileNames {
 		if _, err := os.Stat(filepath.Join(root, name)); err == nil {
 			args = append(args, "--ignore-file", name)

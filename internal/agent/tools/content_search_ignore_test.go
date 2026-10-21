@@ -64,7 +64,7 @@ func TestRipgrepSearchRespectsNestedHarnessignore(t *testing.T) {
 		t.Skip("ripgrep is not installed")
 	}
 	root := nestedIgnoreFixture(t)
-	matches, err := searchWithRipgrep(t.Context(), rg, "needle", root, "")
+	matches, err := searchWithRipgrep(t.Context(), rg, "needle", root, "", 100)
 	require.NoError(t, err)
 	require.Equal(t, nestedIgnoreWant, matchedRelPaths(t, root, matches))
 	for _, m := range matches {
@@ -75,6 +75,6 @@ func TestRipgrepSearchRespectsNestedHarnessignore(t *testing.T) {
 
 func TestRipgrepUnavailableIsReported(t *testing.T) {
 	t.Parallel()
-	_, err := searchWithRipgrep(t.Context(), "", "needle", t.TempDir(), "")
+	_, err := searchWithRipgrep(t.Context(), "", "needle", t.TempDir(), "", 100)
 	require.ErrorIs(t, err, errRipgrepUnavailable)
 }

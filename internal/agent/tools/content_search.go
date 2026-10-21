@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,18 +75,19 @@ type grepMatch struct {
 	rawLine string
 }
 
-func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
-	matches, err := searchWithRipgrep(ctx, getRg(), pattern, rootPath, include)
+func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, error) {
+	matches, err := searchWithRipgrep(ctx, getRg(), pattern, rootPath, include, limit)
+	if err == nil {
+		return matches, nil
+	}
+	if errors.Is(err, errRipgrepUnavailable) {
+		slog.Debug("Searching with the Go walker", "reason", err)
+	} else {
+		slog.Warn("Ripgrep search failed, falling back to the Go walker", "path", rootPath, "error", err)
+	}
+	matches, err = searchFilesWithRegex(pattern, rootPath, include)
 	if err != nil {
-		if errors.Is(err, errRipgrepUnavailable) {
-			slog.Debug("Searching with the Go walker", "reason", err)
-		} else {
-			slog.Warn("Ripgrep search failed, falling back to the Go walker", "path", rootPath, "error", err)
-		}
-		matches, err = searchFilesWithRegex(pattern, rootPath, include)
-		if err != nil {
-			return nil, false, err
-		}
+		return nil, err
 	}
 
 	// Use a stable sort so that the multiple matches a single file can
@@ -94,45 +96,62 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 	sort.SliceStable(matches, func(i, j int) bool {
 		return matches[i].modTime.After(matches[j].modTime)
 	})
-
-	truncated := len(matches) > limit
-	if truncated {
-		matches = matches[:limit]
-	}
-
-	return matches, truncated, nil
+	return matches[:min(len(matches), limit)], nil
 }
 
 var errRipgrepUnavailable = errors.New("ripgrep not found in $PATH")
 
-func searchWithRipgrep(ctx context.Context, rg, pattern, path, include string) ([]grepMatch, error) {
+func searchWithRipgrep(ctx context.Context, rg, pattern, path, include string, limit int) ([]grepMatch, error) {
 	if rg == "" {
 		return nil, errRipgrepUnavailable
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	cmd := getRgSearchCmd(ctx, rg, pattern, path, include)
-	walker := fsext.NewFastGlobWalker(path)
-
-	output, err := cmd.Output()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
-			return []grepMatch{}, nil
-		}
 		return nil, err
 	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	matches, readErr := readRipgrepMatches(stdout, path, limit)
+	full := len(matches) >= limit
+	if full {
+		cancel()
+	}
+	waitErr := cmd.Wait()
+	switch {
+	case readErr != nil:
+		return nil, readErr
+	case full:
+		return matches, nil
+	case waitErr != nil:
+		if exitErr, ok := errors.AsType[*exec.ExitError](waitErr); ok && exitErr.ExitCode() == 1 {
+			return []grepMatch{}, nil
+		}
+		return nil, waitErr
+	}
+	return matches, nil
+}
 
+var ripgrepMatchPrefix = []byte(`{"type":"match"`)
+
+func readRipgrepMatches(r io.Reader, path string, limit int) ([]grepMatch, error) {
+	walker := fsext.NewFastGlobWalker(path)
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), math.MaxInt)
 	var matches []grepMatch
 	lastPath, lastFile := "", ""
 	var lastModTime time.Time
 	lastOK := false
-	for line := range bytes.SplitSeq(bytes.TrimSpace(output), []byte{'\n'}) {
-		if len(line) == 0 {
+	for len(matches) < limit && scanner.Scan() {
+		line := scanner.Bytes()
+		if !bytes.HasPrefix(line, ripgrepMatchPrefix) {
 			continue
 		}
 		var match ripgrepMatch
-		if err := json.Unmarshal(line, &match); err != nil {
-			continue
-		}
-		if match.Type != "match" {
+		if err := json.Unmarshal(line, &match); err != nil || len(match.Data.Submatches) == 0 {
 			continue
 		}
 		// rg groups its matches per file, so one stat per distinct path
@@ -152,24 +171,19 @@ func searchWithRipgrep(ctx context.Context, rg, pattern, path, include string) (
 		if !lastOK {
 			continue // Skip files we can't access
 		}
-		for _, m := range match.Data.Submatches {
-			matches = append(matches, grepMatch{
-				path:     lastFile,
-				modTime:  lastModTime,
-				lineNum:  match.Data.LineNumber,
-				charNum:  m.Start + 1, // ensure 1-based
-				lineText: strings.TrimSpace(match.Data.Lines.Text),
-				rawLine:  strings.TrimRight(match.Data.Lines.Text, "\r\n"),
-			})
-			// only get the first match of each line
-			break
-		}
+		matches = append(matches, grepMatch{
+			path:     lastFile,
+			modTime:  lastModTime,
+			lineNum:  match.Data.LineNumber,
+			charNum:  match.Data.Submatches[0].Start + 1, // ensure 1-based
+			lineText: strings.TrimSpace(match.Data.Lines.Text),
+			rawLine:  strings.TrimRight(match.Data.Lines.Text, "\r\n"),
+		})
 	}
-	return matches, nil
+	return matches, scanner.Err()
 }
 
 type ripgrepMatch struct {
-	Type string `json:"type"`
 	Data struct {
 		Path struct {
 			Text string `json:"text"`
