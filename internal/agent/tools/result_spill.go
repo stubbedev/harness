@@ -3,14 +3,14 @@ package tools
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 
 	"charm.land/fantasy"
 )
 
 const MaxToolResultBytes = 100_000
+
+const toolResultScratchKind = "tool-results"
 
 // MaxToolPreviewBytes bounds what a spilled result still shows inline. The
 // full result rides the file path, so a large preview only re-spends the
@@ -22,7 +22,7 @@ func CapToolResponse(ctx context.Context, response fantasy.ToolResponse) fantasy
 		return response
 	}
 
-	path, err := spillToolResult(GetSessionFromContext(ctx), response.Content)
+	path, err := writeScratchFile(GetSessionFromContext(ctx), toolResultScratchKind, "result-*.txt", response.Content)
 	var notice string
 	if err != nil {
 		notice = fmt.Sprintf("Tool result exceeds %d bytes. WARNING: full result could not be saved: %s. Omitted output is lost; retry with a narrower request.\n\nPreview:\n", MaxToolResultBytes, toolResultPrefix(err.Error(), 512))
@@ -38,33 +38,4 @@ func toolResultPrefix(content string, limit int) string {
 		return ""
 	}
 	return strings.ToValidUTF8(content[:min(len(content), limit)], "")
-}
-
-// spillToolResult writes an oversized tool result into the session's
-// scratch directory and returns the file's path. The directory is
-// ScratchDir output: sanitized segments, verified to stay inside the
-// scratch root.
-func spillToolResult(sessionID, content string) (string, error) {
-	dir, err := ScratchDir(sessionID, "tool-results")
-	if err != nil {
-		return "", err
-	}
-	// codeql[go/path-injection] dir is ScratchDir output, verified inside root.
-	file, err := os.CreateTemp(dir, "result-*.txt")
-	if err != nil {
-		return "", err
-	}
-	n, writeErr := file.WriteString(content)
-	closeErr := file.Close()
-	if writeErr == nil && n != len(content) {
-		writeErr = io.ErrShortWrite
-	}
-	if writeErr != nil || closeErr != nil {
-		_ = os.Remove(file.Name())
-		if writeErr != nil {
-			return "", writeErr
-		}
-		return "", closeErr
-	}
-	return file.Name(), nil
 }

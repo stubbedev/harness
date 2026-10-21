@@ -7,7 +7,6 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"regexp"
 	"strings"
@@ -253,22 +252,7 @@ func findLines(lines []string, base int, pattern string) (string, error) {
 // directory so the model can view and grep it instead of carrying it in
 // context. It is a working file, so it does not belong in the repository.
 func spillFetchedContent(sessionID, content string, format FetchFormat) (string, error) {
-	dir, err := ScratchDir(sessionID, fetchScratchKind)
-	if err != nil {
-		return "", err
-	}
-	file, err := os.CreateTemp(dir, "page-*"+fetchFileExtension(format))
-	if err != nil {
-		return "", err
-	}
-	if _, err := file.WriteString(content); err != nil {
-		_ = file.Close()
-		return "", err
-	}
-	if err := file.Close(); err != nil {
-		return "", err
-	}
-	return file.Name(), nil
+	return writeScratchFile(sessionID, fetchScratchKind, "page-*"+fetchFileExtension(format), content)
 }
 
 func fetchFileExtension(format FetchFormat) string {

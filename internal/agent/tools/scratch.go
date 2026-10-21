@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"cmp"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -73,6 +75,34 @@ func ScratchDir(sessionID, kind string) (string, error) {
 		}
 	}
 	return dir, nil
+}
+
+func writeScratchFile(sessionID, kind, pattern, content string) (string, error) {
+	dir, err := ScratchDir(sessionID, kind)
+	if err != nil {
+		return "", err
+	}
+	return writeTempFile(dir, pattern, strings.NewReader(content), int64(len(content)))
+}
+
+func writeTempFile(dir, pattern string, src io.Reader, size int64) (string, error) {
+	// codeql[go/path-injection] dir is ScratchDir output, verified inside root.
+	file, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return "", err
+	}
+	n, writeErr := io.Copy(file, src)
+	closeErr := file.Close()
+	if writeErr == nil && n != size {
+		writeErr = io.ErrShortWrite
+	}
+	if err := cmp.Or(writeErr, closeErr); err != nil {
+		if removeErr := os.Remove(file.Name()); removeErr != nil {
+			return "", fmt.Errorf("%w (and failed to remove partial file %s: %w)", err, file.Name(), removeErr)
+		}
+		return "", err
+	}
+	return file.Name(), nil
 }
 
 func privateScratchMode(perm os.FileMode, isRoot bool) bool {
