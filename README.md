@@ -60,7 +60,7 @@ against your own nixpkgs may need `allowUnfree`.
 
 ### Homebrew
 
-On macOS or Linux (Homebrew on Linux x86_64/arm64):
+On macOS (Apple silicon) or Linux (x86_64/arm64):
 
 ```bash
 brew install stubbedev/tap/harness

@@ -5,10 +5,7 @@ class Harness < Formula
   license "FSL-1.1-MIT"
 
   on_macos do
-    if Hardware::CPU.intel?
-      url "@@BASE_URL@@/harness_darwin_amd64"
-      sha256 "@@SHA_DARWIN_AMD64@@"
-    else
+    on_arm do
       url "@@BASE_URL@@/harness_darwin_arm64"
       sha256 "@@SHA_DARWIN_ARM64@@"
     end
