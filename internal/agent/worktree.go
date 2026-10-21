@@ -38,15 +38,22 @@ type AgentWorktree struct {
 	removed      bool
 }
 
+type WorktreeCommit struct {
+	Hash    string `json:"hash"`
+	Subject string `json:"subject"`
+}
+
 type WorktreeResult struct {
-	Path           string   `json:"path"`
-	Branch         string   `json:"branch"`
-	PatchPath      string   `json:"patch_path,omitempty"`
-	IndexPatchPath string   `json:"index_patch_path,omitempty"`
-	Changed        bool     `json:"changed"`
-	Preserved      bool     `json:"preserved"`
-	Removed        bool     `json:"removed"`
-	Excluded       []string `json:"excluded,omitempty"`
+	Path           string           `json:"path"`
+	Branch         string           `json:"branch"`
+	Base           string           `json:"base"`
+	Commits        []WorktreeCommit `json:"commits,omitempty"`
+	PatchPath      string           `json:"patch_path,omitempty"`
+	IndexPatchPath string           `json:"index_patch_path,omitempty"`
+	Changed        bool             `json:"changed"`
+	Preserved      bool             `json:"preserved"`
+	Removed        bool             `json:"removed"`
+	Excluded       []string         `json:"excluded,omitempty"`
 }
 
 func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *AgentWorktree, err error) {
@@ -170,7 +177,7 @@ func NewWorktree(ctx context.Context, sourceRoot, parentDir string) (result *Age
 func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	result := WorktreeResult{Path: w.Path, Branch: w.Branch, Excluded: w.excluded, Preserved: !w.removed, Removed: w.removed}
+	result := WorktreeResult{Path: w.Path, Branch: w.Branch, Base: w.head, Excluded: w.excluded, Preserved: !w.removed, Removed: w.removed}
 	if w.removed {
 		return result, nil
 	}
@@ -212,6 +219,11 @@ func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 	}
 	result.Changed = !equalWorktreeEntries(baseline, current) || state != w.baselineGit
 	if result.Changed {
+		commits, commitsErr := w.commits(ctx)
+		if commitsErr != nil {
+			return result, commitsErr
+		}
+		result.Commits = commits
 		tree, treeErr := w.snapshotTree(ctx, currentPath)
 		if treeErr != nil {
 			return result, treeErr
@@ -271,6 +283,22 @@ func (w *AgentWorktree) Finish(ctx context.Context) (WorktreeResult, error) {
 		return result, fmt.Errorf("remove unchanged branch: %w", err)
 	}
 	return result, fsext.RemoveAllWritable(w.scratch)
+}
+
+func (w *AgentWorktree) commits(ctx context.Context) ([]WorktreeCommit, error) {
+	out, err := w.git(ctx, "log", "-z", "--reverse", "--format=%H %s", w.head+"..HEAD", "--")
+	if err != nil {
+		return nil, err
+	}
+	var commits []WorktreeCommit
+	for entry := range strings.SplitSeq(string(out), "\x00") {
+		if entry == "" {
+			continue
+		}
+		hash, subject, _ := strings.Cut(entry, " ")
+		commits = append(commits, WorktreeCommit{Hash: hash, Subject: subject})
+	}
+	return commits, nil
 }
 
 func (w *AgentWorktree) gitPin() []string {

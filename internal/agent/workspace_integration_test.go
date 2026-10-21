@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -74,23 +75,79 @@ func TestWorkspaceBuildToolsUseChildRoot(t *testing.T) {
 	require.Equal(t, env.workingDir, coord.cfg.WorkingDir())
 }
 
-func TestIsolatedDispatchFinishRetainsPatchAndMetadata(t *testing.T) {
-	t.Parallel()
-	root := worktreeTestRepo(t)
+func testIsolatedDispatch(t *testing.T, root string) *isolatedDispatch {
+	t.Helper()
 	worktree, err := NewWorktree(t.Context(), root, t.TempDir())
 	require.NoError(t, err)
 	store := config.NewTestStoreWithWorkingDir(&config.Config{Options: &config.Options{}}, worktree.Path)
-	dispatch := &isolatedDispatch{worktree: worktree, workspace: &agentWorkspace{store: store, manager: lsp.NewManager(store)}}
-	worktreeTestWrite(t, worktree.Path, "tracked", "changed by child\n")
+	return &isolatedDispatch{worktree: worktree, workspace: &agentWorkspace{store: store, manager: lsp.NewManager(store)}}
+}
+
+func finishIsolatedDispatch(t *testing.T, dispatch *isolatedDispatch) (fantasy.ToolResponse, WorktreeResult) {
+	t.Helper()
 	response := fantasy.NewTextResponse("finished")
 	dispatch.finish(&response)
-	require.Contains(t, response.Content, "have not been merged")
 	var meta struct {
 		Worktree WorktreeResult `json:"worktree"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(response.Metadata), &meta))
-	require.True(t, meta.Worktree.Preserved)
-	require.FileExists(t, meta.Worktree.PatchPath)
+	return response, meta.Worktree
+}
+
+func TestIsolatedDispatchPromptAllowsCommitsOnTheWorktreeBranch(t *testing.T) {
+	t.Parallel()
+	root := worktreeTestRepo(t)
+	dispatch := testIsolatedDispatch(t, root)
+	t.Cleanup(func() { dispatch.finish(nil) })
+	prompt := dispatch.prompt(root, "fix it and commit")
+	require.True(t, strings.HasSuffix(prompt, "\n\nfix it and commit"))
+	require.Contains(t, prompt, dispatch.worktree.Path)
+	require.Contains(t, prompt, "parent checkout "+root)
+	require.Contains(t, prompt, "retained on branch "+dispatch.worktree.Branch)
+	require.NotContains(t, strings.ToLower(prompt), "committing")
+	require.NotContains(t, strings.ToLower(prompt), "not commit")
+}
+
+func TestIsolatedDispatchFinishReportsCommitsForCherryPick(t *testing.T) {
+	t.Parallel()
+	root := worktreeTestRepo(t)
+	base := strings.TrimSpace(worktreeTestGit(t, root, "rev-parse", "HEAD"))
+	dispatch := testIsolatedDispatch(t, root)
+	child := dispatch.worktree.Path
+	worktreeTestWrite(t, child, "tracked", "first\n")
+	worktreeTestGit(t, child, "commit", "-am", "fix: first")
+	first := strings.TrimSpace(worktreeTestGit(t, child, "rev-parse", "HEAD"))
+	worktreeTestWrite(t, child, "tracked", "second\n")
+	worktreeTestGit(t, child, "commit", "-am", "fix: second")
+	second := strings.TrimSpace(worktreeTestGit(t, child, "rev-parse", "HEAD"))
+	worktreeTestWrite(t, child, "untracked", "pending\n")
+
+	response, result := finishIsolatedDispatch(t, dispatch)
+	require.Contains(t, response.Content, "branch "+dispatch.worktree.Branch)
+	require.Contains(t, response.Content, "- "+first+" fix: first\n- "+second+" fix: second")
+	require.Contains(t, response.Content, "git cherry-pick "+first+" "+second)
+	require.Equal(t, base, result.Base)
+	require.Equal(t, []WorktreeCommit{{Hash: first, Subject: "fix: first"}, {Hash: second, Subject: "fix: second"}}, result.Commits)
+	require.FileExists(t, result.PatchPath)
+	require.Equal(t, base, strings.TrimSpace(worktreeTestGit(t, root, "rev-parse", "HEAD")))
+
+	worktreeTestGit(t, root, "cherry-pick", first, second)
+	picked, err := os.ReadFile(filepath.Join(root, "tracked"))
+	require.NoError(t, err)
+	require.Equal(t, "second\n", string(picked))
+}
+
+func TestIsolatedDispatchFinishRetainsPatchAndMetadata(t *testing.T) {
+	t.Parallel()
+	root := worktreeTestRepo(t)
+	dispatch := testIsolatedDispatch(t, root)
+	worktreeTestWrite(t, dispatch.worktree.Path, "tracked", "changed by child\n")
+	response, result := finishIsolatedDispatch(t, dispatch)
+	require.Contains(t, response.Content, "Nothing has been merged")
+	require.NotContains(t, response.Content, "cherry-pick")
+	require.Empty(t, result.Commits)
+	require.True(t, result.Preserved)
+	require.FileExists(t, result.PatchPath)
 	original, err := os.ReadFile(filepath.Join(root, "tracked"))
 	require.NoError(t, err)
 	require.Equal(t, "committed\n", string(original))

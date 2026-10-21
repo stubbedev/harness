@@ -405,7 +405,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 					AgentModel:     model,
 				}
 				if isolated != nil {
-					runParams.Prompt = fmt.Sprintf("Isolated workspace: %s. Perform this task in that checkout; report changes without merging or committing. Do not run commands in, or change, the source checkout %s.\n\n%s", isolated.workspace.store.WorkingDir(), c.cfg.WorkingDir(), params.Prompt)
+					runParams.Prompt = isolated.prompt(c.cfg.WorkingDir(), params.Prompt)
 					runParams.WorkspaceRoot = isolated.workspace.store.WorkingDir()
 					runParams.FinishWorkspace = isolated.finish
 					workspaceTransferred = true

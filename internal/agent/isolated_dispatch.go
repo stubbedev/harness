@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +33,30 @@ func (c *coordinator) prepareIsolatedDispatch(ctx context.Context) (*isolatedDis
 	return &isolatedDispatch{worktree: worktree, workspace: c.newAgentWorkspace(root)}, nil
 }
 
+func (d *isolatedDispatch) prompt(parentDir, task string) string {
+	return fmt.Sprintf("Isolated workspace: %s, a Git worktree on branch %s. Work in that checkout; do not run commands in, or change, the parent checkout %s. Changes and commits made in the isolated checkout are retained on branch %s and reported to the caller.\n\n%s", d.workspace.store.WorkingDir(), d.worktree.Branch, parentDir, d.worktree.Branch, task)
+}
+
+func worktreeReport(result WorktreeResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nIsolated changes retained at %s on branch %s (based on %s).", result.Path, result.Branch, result.Base)
+	if len(result.Commits) > 0 {
+		b.WriteString("\nCommits on the branch, oldest first:")
+		hashes := make([]string, 0, len(result.Commits))
+		for _, commit := range result.Commits {
+			fmt.Fprintf(&b, "\n- %s %s", commit.Hash, commit.Subject)
+			hashes = append(hashes, commit.Hash)
+		}
+		b.WriteString("\nApply them in the parent checkout with: git cherry-pick " + strings.Join(hashes, " "))
+	}
+	fmt.Fprintf(&b, "\nPatch of the final checkout against the dispatch snapshot, committed and uncommitted changes together: %s", result.PatchPath)
+	if result.IndexPatchPath != "" {
+		b.WriteString("\nStaged changes patch: " + result.IndexPatchPath)
+	}
+	b.WriteString("\nNothing has been merged into the parent checkout.")
+	return b.String()
+}
+
 func (d *isolatedDispatch) finish(response *fantasy.ToolResponse) {
 	d.once.Do(func() {
 		d.workspace.Close()
@@ -49,10 +74,7 @@ func (d *isolatedDispatch) finish(response *fantasy.ToolResponse) {
 		} else if result.Removed {
 			response.Content += "\nIsolated worktree unchanged and removed."
 		} else {
-			response.Content += fmt.Sprintf("\nIsolated changes retained at %s (branch %s). Patch: %s. Changes have not been merged into the parent checkout.", result.Path, result.Branch, result.PatchPath)
-			if result.IndexPatchPath != "" {
-				response.Content += "\nStaged changes patch: " + result.IndexPatchPath
-			}
+			response.Content += worktreeReport(result)
 		}
 		metadata := response.Metadata
 		if metadata == "" {

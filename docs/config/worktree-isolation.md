@@ -68,9 +68,13 @@ unique branch are removed. Changes in ignored or untracked files also prevent
 cleanup. Any uncertainty, inspection failure, or canceled completion preserves
 storage instead of attempting destructive cleanup.
 
-A changed worktree is retained. Results report its absolute path, branch, a
+A changed worktree is retained. Results report its absolute path, branch, the
+`base` commit it was created from, the `commits` the child made on top of it
+(oldest first, ready for `git cherry-pick` in the parent checkout), a
 binary-capable `changes-*.patch` artifact, and the excluded regenerated
-directories. That patch compares the child's final
+directories. Committing in the isolated checkout is expected: the commits land
+on the retained branch and never touch the parent checkout. That patch
+compares the child's final
 filesystem to the initial dirty snapshot, not to HEAD. A separate `index-*.patch`
 is reported when the index differs from the original HEAD, so staged-only edits
 are not hidden by an unchanged working file. Neither patch is automatically
