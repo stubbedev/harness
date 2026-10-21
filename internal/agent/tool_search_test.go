@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/csync"
 )
 
 type noArgs struct{}
@@ -44,7 +43,7 @@ func findTool(t *testing.T, list []fantasy.AgentTool, name string) fantasy.Agent
 // each hidden tool; a sub-agent gets everything inline.
 func TestDeferredBuiltinToolsHideBehindToolSearch(t *testing.T) {
 	t.Parallel()
-	c := &coordinator{expandedBuiltins: csync.NewMap[string, bool]()}
+	c := newCoordinatorForTest(&coordinator{})
 	built := []fantasy.AgentTool{
 		namedTool(tools.ShellToolName, "Run commands."),
 		namedTool(tools.LSPToolName, "Ask the language server about code by symbol name rather than by text. Set action."),
@@ -68,7 +67,7 @@ func TestDeferredBuiltinToolsHideBehindToolSearch(t *testing.T) {
 // inline nor offered by tool_search.
 func TestDeferredBuiltinToolsRespectTheAllowList(t *testing.T) {
 	t.Parallel()
-	c := &coordinator{expandedBuiltins: csync.NewMap[string, bool]()}
+	c := newCoordinatorForTest(&coordinator{})
 	// The allow-list filter already dropped lsp.
 	built := []fantasy.AgentTool{
 		namedTool(tools.ShellToolName, "Run commands."),
@@ -88,7 +87,7 @@ func TestDeferredBuiltinToolsRespectTheAllowList(t *testing.T) {
 // it there; once nothing is left to load the search tool itself goes.
 func TestToolSearchLoadsForTheSession(t *testing.T) {
 	t.Parallel()
-	c := &coordinator{expandedBuiltins: csync.NewMap[string, bool]()}
+	c := newCoordinatorForTest(&coordinator{})
 	built := []fantasy.AgentTool{
 		namedTool(tools.LSPToolName, "Ask the language server."),
 		namedTool(tools.HarnessToolName, "Inspect Harness itself."),

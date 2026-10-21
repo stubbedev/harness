@@ -427,17 +427,15 @@ func TestAgentTool_DefaultDispatchRunsInBackground(t *testing.T) {
 	require.Contains(t, resp.Content, AgentToolName)
 
 	handle := backgroundHandleFromResponse(t, resp)
-	run, ok := coord.backgroundRunFor(parentSession.ID, handle)
+	run, ok := coord.subagentRuns.lookupByHandle(parentSession.ID, handle)
 	require.True(t, ok, "a default dispatch must register a background run")
 	require.False(t, run.isFinished(), "the handle must arrive while the child is still running")
 
 	// Cancel the child through the registry, as Cancel would: the offline
 	// provider retries with backoff, so without this the run lingers past
 	// the test.
-	if cancel, ok := coord.subagentCancels.Get(run.childSession); ok {
-		cancel()
-	}
-	finished := waitForRunFinished(t, coord, handle)
+	coord.subagentRuns.cancel(run.childSession)
+	finished := waitForRunFinished(t, coord, parentSession.ID, handle)
 	_, status, _, _ := finished.snapshot()
 	require.Equal(t, subagents.StatusCancelled, status)
 }

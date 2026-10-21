@@ -8,7 +8,6 @@ import (
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
-	"github.com/stubbedev/harness/internal/csync"
 )
 
 // The search tools only read, or serialise their one write, so they run in
@@ -16,7 +15,7 @@ import (
 func TestSearchToolsAreParallel(t *testing.T) {
 	t.Parallel()
 
-	coord := &coordinator{}
+	coord := newCoordinatorForTest(&coordinator{})
 	require.True(t, (&skillSearchTool{coord: coord}).Info().Parallel, "skill_search")
 	require.True(t, (&toolSearchTool{coord: coord}).Info().Parallel, "tool_search")
 	require.True(t, (&mcpSearchTool{server: "parallel-flag-server", coord: coord}).Info().Parallel, "mcp search")
@@ -38,7 +37,7 @@ func TestConcurrentMCPLoadsAllLand(t *testing.T) {
 	t.Cleanup(mcp.RegisterToolsForTest(server, registry))
 	tool := &mcpSearchTool{
 		server: server,
-		coord:  &coordinator{expandedMCPTools: csync.NewMap[string, map[string]bool]()},
+		coord:  newCoordinatorForTest(&coordinator{}),
 	}
 
 	var wg sync.WaitGroup

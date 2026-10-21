@@ -167,23 +167,13 @@ type coordinator struct {
 	// result when the run ends.
 	subagentMessages *csync.Map[string, []string]
 
-	// liveInbox is the inbox for messages from running background
-	// sub-agents, keyed by the dispatching session and drained per step by
-	// that session's SessionAgent (see PrepareStep) so a message lands in
-	// its dispatcher's next step while the child is still running.
-	liveInbox *liveInbox
+	subagentRuns *subagentRegistry
 
 	// queueArrivals records prompts queued for a busy session: its
 	// epoch feeds the tool-result note and its signals wake the wait
 	// tool (see queue_signals.go).
 	queueArrivals *queueArrivalSignals
 
-	// backgroundRuns tracks background dispatches by handle, and
-	// backgroundByChild maps a background child session ID to its handle so
-	// send_message can route live. Runs are kept after they finish: their
-	// result stays collectable through the wait tool in later turns.
-	backgroundRuns    *csync.Map[string, *backgroundRun]
-	backgroundByChild *csync.Map[string, string]
 	// rootWorkspace is the coordinator's own working directory as an
 	// agentWorkspace, built on first use; agents without an isolated
 	// workspace run in it.
@@ -228,12 +218,6 @@ type coordinator struct {
 	rebuildGen      modelToolGen
 	rebuildLarge    Model
 	rebuildGenMu    sync.Mutex
-
-	// subagentCancels maps a running subagent's child session ID to the cancel
-	// func for its run. Dispatched subagents run on ad-hoc SessionAgents whose
-	// activeRequests are invisible to currentAgent, so Cancel consults this
-	// registry to reach them.
-	subagentCancels *csync.Map[string, context.CancelFunc]
 
 	// dispatchSem bounds how many sub-agents run at once across the whole
 	// workspace. The agent tool is Parallel and the prompt now actively asks
@@ -324,37 +308,29 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	skillTracker := skills.NewTracker(activeSkills)
 
 	c := &coordinator{
-		cfg:                opts.Config,
-		sessions:           opts.Sessions,
-		messages:           opts.Messages,
-		checkpoints:        opts.Checkpoints,
-		questions:          opts.Questions,
-		history:            opts.History,
-		filetracker:        opts.FileTracker,
-		lspManager:         opts.LSPManager,
-		notify:             opts.Notify,
-		runComplete:        opts.RunComplete,
-		agents:             make(map[string]SessionAgent),
-		skillsMgr:          opts.Skills,
-		allSkills:          allSkills,
-		activeSkills:       activeSkills,
-		skillTracker:       skillTracker,
-		interactive:        opts.Interactive,
-		presence:           opts.Presence,
-		hooks:              hooks.NewRegistry(opts.Config, opts.Config.WorkingDir(), opts.Config.WorkingDir(), opts.Extensions),
-		extensions:         opts.Extensions,
-		expandedMCPTools:   csync.NewMap[string, map[string]bool](),
-		expandedBuiltins:   csync.NewMap[string, bool](),
-		subagentMessages:   newSubagentInbox(),
-		liveInbox:          newLiveInbox(),
-		queueArrivals:      newQueueArrivalSignals(),
-		backgroundRuns:     csync.NewMap[string, *backgroundRun](),
-		backgroundByChild:  csync.NewMap[string, string](),
-		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
-		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
-		dispatchSem:        make(chan struct{}, maxConcurrentSubagents(opts.Config)),
-		memory:             opts.Memory,
+		cfg:          opts.Config,
+		sessions:     opts.Sessions,
+		messages:     opts.Messages,
+		checkpoints:  opts.Checkpoints,
+		questions:    opts.Questions,
+		history:      opts.History,
+		filetracker:  opts.FileTracker,
+		lspManager:   opts.LSPManager,
+		notify:       opts.Notify,
+		runComplete:  opts.RunComplete,
+		agents:       make(map[string]SessionAgent),
+		skillsMgr:    opts.Skills,
+		allSkills:    allSkills,
+		activeSkills: activeSkills,
+		skillTracker: skillTracker,
+		interactive:  opts.Interactive,
+		presence:     opts.Presence,
+		hooks:        hooks.NewRegistry(opts.Config, opts.Config.WorkingDir(), opts.Config.WorkingDir(), opts.Extensions),
+		extensions:   opts.Extensions,
+		dispatchSem:  make(chan struct{}, maxConcurrentSubagents(opts.Config)),
+		memory:       opts.Memory,
 	}
+	c.initRegistries()
 
 	c.subagentsMgr = opts.SubagentsMgr
 	if opts.SubagentsMgr != nil {
@@ -398,6 +374,15 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
 	return c, nil
+}
+
+func (c *coordinator) initRegistries() {
+	c.subagentRuns = newSubagentRegistry()
+	c.subagentMessages = newSubagentInbox()
+	c.queueArrivals = newQueueArrivalSignals()
+	c.expandedMCPTools = csync.NewMap[string, map[string]bool]()
+	c.expandedBuiltins = csync.NewMap[string, bool]()
+	c.subagentModelCache = csync.NewMap[subagentModelKey, Model]()
 }
 
 // mcpInitWait blocks until MCP initialization completes: via the waitForInit
@@ -1016,10 +1001,8 @@ func (c *coordinator) buildModel(ctx context.Context, providerCfg config.Provide
 func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOverride string, isSubAgent bool) (Model, error) {
 	key := subagentModelKey{modelID: modelID, provider: providerOverride, isSubAgent: isSubAgent}
 
-	if c.subagentModelCache != nil {
-		if m, ok := c.subagentModelCache.Get(key); ok {
-			return m, nil
-		}
+	if m, ok := c.subagentModelCache.Get(key); ok {
+		return m, nil
 	}
 
 	providerCfg, catalogModel, ok := c.findModelProvider(modelID, providerOverride)
@@ -1032,9 +1015,7 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOve
 		return Model{}, err
 	}
 
-	if c.subagentModelCache != nil {
-		c.subagentModelCache.Set(key, m)
-	}
+	c.subagentModelCache.Set(key, m)
 	return m, nil
 }
 
@@ -1701,11 +1682,8 @@ func (c *coordinator) Cancel(sessionID string) {
 	// currentAgent's activeRequests — cancel them via the registry keyed by
 	// child session ID. A child session has no queued or accepted state on
 	// the coder agent, so there is nothing further to do for it.
-	if c.subagentCancels != nil {
-		if cancel, ok := c.subagentCancels.Get(sessionID); ok && cancel != nil {
-			cancel()
-			return
-		}
+	if c.subagentRuns.cancel(sessionID) {
+		return
 	}
 	c.currentAgent.Cancel(sessionID)
 }
@@ -1719,13 +1697,7 @@ func (c *coordinator) CancelAll() {
 	// currentAgent's activeRequests — cancel each one via the registry (a
 	// snapshot, so this is safe against concurrent Del calls from finishing
 	// runs) before falling through to the coder agent's own bookkeeping.
-	if c.subagentCancels != nil {
-		for cancel := range c.subagentCancels.Seq() {
-			if cancel != nil {
-				cancel()
-			}
-		}
-	}
+	c.subagentRuns.cancelAll()
 	c.currentAgent.CancelAll()
 }
 
@@ -1743,10 +1715,8 @@ func (c *coordinator) IsSessionBusy(sessionID string) bool {
 	// mirroring Cancel's per-session lookup, so a caller polling a child
 	// session's busy state (e.g. Backend.GetAgentSession) doesn't see it
 	// reported idle while the subagent is still running.
-	if c.subagentCancels != nil {
-		if _, ok := c.subagentCancels.Get(sessionID); ok {
-			return true
-		}
+	if c.subagentRuns.isRunning(sessionID) {
+		return true
 	}
 	return c.currentAgent.IsSessionBusy(sessionID)
 }
@@ -1915,11 +1885,9 @@ func (c *coordinator) fingerprintExpandedTools(f fingerprint) fingerprint {
 		tools []string
 	}
 	var servers []expandedServer
-	if c.expandedMCPTools != nil {
-		for server, loaded := range c.expandedMCPTools.Seq2() {
-			names := slices.Sorted(maps.Keys(loaded))
-			servers = append(servers, expandedServer{name: server, tools: names})
-		}
+	for server, loaded := range c.expandedMCPTools.Seq2() {
+		names := slices.Sorted(maps.Keys(loaded))
+		servers = append(servers, expandedServer{name: server, tools: names})
 	}
 	slices.SortFunc(servers, func(a, b expandedServer) int {
 		return strings.Compare(a.name, b.name)
@@ -1933,10 +1901,8 @@ func (c *coordinator) fingerprintExpandedTools(f fingerprint) fingerprint {
 	}
 
 	var builtins []string
-	if c.expandedBuiltins != nil {
-		for name := range c.expandedBuiltins.Seq2() {
-			builtins = append(builtins, name)
-		}
+	for name := range c.expandedBuiltins.Seq2() {
+		builtins = append(builtins, name)
 	}
 	slices.Sort(builtins)
 	for _, name := range builtins {
@@ -1999,9 +1965,7 @@ func (f fingerprint) addProviderBuildInputs(p config.ProviderConfig) fingerprint
 func (c *coordinator) UpdateModels(ctx context.Context) error {
 	// Clear the subagent model cache so that any stale LanguageModel instances
 	// (built against the old config) are not reused after a config reload.
-	if c.subagentModelCache != nil {
-		c.subagentModelCache.Reset(make(map[subagentModelKey]Model))
-	}
+	c.subagentModelCache.Reset(make(map[subagentModelKey]Model))
 
 	// The two builds below are memoized per generation: a turn whose
 	// config, provider credentials, MCP registry, subagent set and
@@ -2433,11 +2397,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 	// the child session so anyone who learns the ID can cancel immediately.
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	if c.subagentCancels != nil {
-		c.subagentCancels.Set(session.ID, cancelRun)
-		defer c.subagentCancels.Del(session.ID)
-	}
-	c.openSubagentSteering(session.ID)
+	defer c.subagentRuns.register(session.ID, cancelRun)()
 
 	// Register with the runtime tracker and finish on return. finalStatus is
 	// captured by the deferred call and updated below based on the outcome;
@@ -2548,23 +2508,7 @@ func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, sess
 // context, is stored on the run record for the wait tool to hand back.
 func (c *coordinator) runSubAgentBackground(ctx context.Context, session session.Session, params subAgentParams) (fantasy.ToolResponse, error) {
 	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(ctx))
-	handle := c.newBackgroundHandle()
-	run := &backgroundRun{
-		handle:        handle,
-		childSession:  session.ID,
-		parentSession: params.SessionID,
-		agentName:     params.AgentName,
-	}
-	if c.backgroundRuns != nil {
-		c.backgroundRuns.Set(handle, run)
-	}
-	if c.backgroundByChild != nil {
-		c.backgroundByChild.Set(session.ID, handle)
-	}
-	if c.subagentCancels != nil {
-		c.subagentCancels.Set(session.ID, cancelRun)
-	}
-	c.openSubagentSteering(session.ID)
+	run, unregister := c.subagentRuns.registerBackground(params.SessionID, session.ID, params.AgentName, cancelRun)
 	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
 
 	// The slot transfers to the run: released when the child finishes, not
@@ -2582,15 +2526,7 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 		// running in the TUI forever.
 		finalStatus := subagents.StatusFailed
 		defer func() {
-			if c.backgroundByChild != nil {
-				c.backgroundByChild.Del(session.ID)
-			}
-			if c.subagentCancels != nil {
-				c.subagentCancels.Del(session.ID)
-			}
-			if c.liveInbox != nil {
-				c.liveInbox.closeSteering(session.ID)
-			}
+			unregister()
 			cancelRun()
 			releaseSlot()
 			c.runtime.Finish(session.ID, finalStatus)
@@ -2622,46 +2558,13 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 
 	return withBackgroundMetadata(fantasy.NewTextResponse(fmt.Sprintf(
 		"Started background agent %q with handle %s. It runs independently of this tool call: messages it sends you arrive as new user messages between your steps, and its result is collected by calling %s with no prompt (handles: [%s]).",
-		params.AgentName, handle, AgentToolName, handle)), []*backgroundRun{run}), nil
-}
-
-// newBackgroundHandle mints a handle unused by any tracked run.
-func (c *coordinator) newBackgroundHandle() string {
-	if c.backgroundRuns == nil {
-		return newSubagentHandle()
-	}
-	for {
-		handle := newSubagentHandle()
-		if _, exists := c.backgroundRuns.Get(handle); !exists {
-			return handle
-		}
-	}
-}
-
-// liveRouteForChild resolves the background run a child session belongs to,
-// if it was dispatched in the background.
-func (c *coordinator) liveRouteForChild(childSessionID string) (*backgroundRun, bool) {
-	if c.backgroundByChild == nil || c.backgroundRuns == nil {
-		return nil, false
-	}
-	handle, ok := c.backgroundByChild.Get(childSessionID)
-	if !ok {
-		return nil, false
-	}
-	run, ok := c.backgroundRuns.Get(handle)
-	if !ok {
-		return nil, false
-	}
-	return run, true
+		params.AgentName, run.handle, AgentToolName, run.handle)), []*backgroundRun{run}), nil
 }
 
 // recordLiveSubagentMessage appends a message from a background child to its
 // dispatcher's live inbox and wakes anyone waiting on that inbox.
 func (c *coordinator) recordLiveSubagentMessage(run *backgroundRun, text string) error {
-	if c.liveInbox == nil {
-		return nil
-	}
-	if err := c.liveInbox.record(run.parentSession, SubagentInboxMessage{
+	if err := c.subagentRuns.inbox.record(run.parentSession, SubagentInboxMessage{
 		AgentName:      run.agentName,
 		Handle:         run.handle,
 		ChildSessionID: run.childSession,
@@ -2669,16 +2572,14 @@ func (c *coordinator) recordLiveSubagentMessage(run *backgroundRun, text string)
 	}); err != nil {
 		return err
 	}
-	c.liveInbox.notify(run.parentSession)
+	c.subagentRuns.inbox.notify(run.parentSession)
 	return nil
 }
 
 // notifySubagentInbox wakes waiters on a session's live inbox (a background
 // run just finished).
 func (c *coordinator) notifySubagentInbox(parentSessionID string) {
-	if c.liveInbox != nil {
-		c.liveInbox.notify(parentSessionID)
-	}
+	c.subagentRuns.inbox.notify(parentSessionID)
 }
 
 // SteerSubagent implements Coordinator: it delivers a user message to a
@@ -2691,7 +2592,7 @@ func (c *coordinator) notifySubagentInbox(parentSessionID string) {
 // finished run never takes another step, so the message could not be
 // delivered.
 func (c *coordinator) SteerSubagent(ctx context.Context, childSessionID, text string) error {
-	if c.liveInbox == nil || !c.liveInbox.isSteerable(childSessionID) {
+	if !c.subagentRuns.inbox.isSteerable(childSessionID) {
 		return errSubagentNotRunning
 	}
 	msg, err := c.messages.Create(ctx, childSessionID, message.CreateMessageParams{
@@ -2701,7 +2602,7 @@ func (c *coordinator) SteerSubagent(ctx context.Context, childSessionID, text st
 	if err != nil {
 		return fmt.Errorf("persist steering message: %w", err)
 	}
-	if err := c.liveInbox.recordSteering(childSessionID, SubagentInboxMessage{
+	if err := c.subagentRuns.inbox.recordSteering(childSessionID, SubagentInboxMessage{
 		ChildSessionID: childSessionID,
 		Text:           text,
 		Steering:       &msg,
@@ -2714,22 +2615,11 @@ func (c *coordinator) SteerSubagent(ctx context.Context, childSessionID, text st
 	return nil
 }
 
-// openSubagentSteering marks a child run as accepting steering; see
-// liveInbox.openSteering.
-func (c *coordinator) openSubagentSteering(childSessionID string) {
-	if c.liveInbox != nil {
-		c.liveInbox.openSteering(childSessionID)
-	}
-}
-
 // closeSubagentSteering stops a finished child run from accepting
 // steering and reports any steering it never read on resp, so a message
 // that arrived after the run's last step is not silently dropped.
 func (c *coordinator) closeSubagentSteering(childSessionID string, resp *fantasy.ToolResponse) {
-	if c.liveInbox == nil {
-		return
-	}
-	unread := c.liveInbox.closeSteering(childSessionID)
+	unread := c.subagentRuns.inbox.closeSteering(childSessionID)
 	if len(unread) == 0 {
 		return
 	}
@@ -2746,17 +2636,12 @@ func (c *coordinator) closeSubagentSteering(childSessionID string, resp *fantasy
 // epoch tool results compare) and wakes any wait parked on the session
 // so the user's prompt is surfaced instead of sleeping to its timeout.
 func (c *coordinator) NotifyQueueArrival(sessionID string) {
-	if c.queueArrivals != nil {
-		c.queueArrivals.notify(sessionID)
-	}
+	c.queueArrivals.notify(sessionID)
 }
 
 // queueArrivalChan returns the session's queued-prompt wakeup channel
 // for the wait tool's select loop.
 func (c *coordinator) queueArrivalChan(sessionID string) chan struct{} {
-	if c.queueArrivals == nil {
-		return nil
-	}
 	return c.queueArrivals.chanFor(sessionID)
 }
 
@@ -2764,67 +2649,26 @@ func (c *coordinator) queueArrivalChan(sessionID string) chan struct{} {
 // session: hookedTool snapshots it around a run to report arrivals in
 // the tool result.
 func (c *coordinator) queueArrivalEpoch(sessionID string) uint64 {
-	if c.queueArrivals == nil {
-		return 0
-	}
 	return c.queueArrivals.epoch(sessionID)
 }
 
 // liveInboxSignalChan returns the session's live-inbox wakeup channel for
 // the wait tool's select loop.
 func (c *coordinator) liveInboxSignalChan(parentSessionID string) chan struct{} {
-	if c.liveInbox == nil {
-		return nil
-	}
-	return c.liveInbox.signalChan(parentSessionID)
+	return c.subagentRuns.inbox.signalChan(parentSessionID)
 }
 
 // drainLiveInboxFrom takes the session's pending messages sent via the given
 // handles, leaving messages from other handles for the step drain.
 func (c *coordinator) drainLiveInboxFrom(parentSessionID string, handles map[string]bool) []SubagentInboxMessage {
-	if c.liveInbox == nil {
-		return nil
-	}
-	return c.liveInbox.drainFrom(parentSessionID, handles)
+	return c.subagentRuns.inbox.drainFrom(parentSessionID, handles)
 }
 
 // DrainSubagentInbox implements SubagentInboxSource for the dispatcher's
 // SessionAgent: it takes every message background children have sent the
 // session so PrepareStep can fold it into the next step.
 func (c *coordinator) DrainSubagentInbox(sessionID string) []SubagentInboxMessage {
-	if c.liveInbox == nil {
-		return nil
-	}
-	return c.liveInbox.drain(sessionID)
-}
-
-// backgroundRunFor resolves a handle to its run, but only for the session
-// that dispatched it — one orchestrator's handles are never another's.
-func (c *coordinator) backgroundRunFor(parentSessionID, handle string) (*backgroundRun, bool) {
-	if c.backgroundRuns == nil {
-		return nil, false
-	}
-	run, ok := c.backgroundRuns.Get(handle)
-	if !ok || run.parentSession != parentSessionID {
-		return nil, false
-	}
-	return run, true
-}
-
-// knownBackgroundHandles lists the handles a session may wait on, for error
-// messages that must not leak another session's handles.
-func (c *coordinator) knownBackgroundHandles(parentSessionID string) []string {
-	if c.backgroundRuns == nil {
-		return nil
-	}
-	var handles []string
-	for run := range c.backgroundRuns.Seq() {
-		if run.parentSession == parentSessionID {
-			handles = append(handles, run.handle)
-		}
-	}
-	slices.Sort(handles)
-	return handles
+	return c.subagentRuns.inbox.drain(sessionID)
 }
 
 // fireSubagentStopHooks fires SubagentStop after a dispatched sub-agent

@@ -28,7 +28,7 @@ const (
 func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string, requested []string, timeoutSeconds *int) (response fantasy.ToolResponse) {
 	handles := uniqueHandles(requested)
 	if len(handles) == 0 {
-		handles = c.knownBackgroundHandles(parentSession)
+		handles = c.subagentRuns.handles(parentSession)
 	}
 	if len(handles) == 0 {
 		return fantasy.NewTextErrorResponse("nothing to wait for: this session has no background agents; give a prompt to dispatch one")

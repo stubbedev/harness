@@ -30,11 +30,11 @@ func backgroundHandleFromResponse(t *testing.T, resp fantasy.ToolResponse) strin
 	return handle
 }
 
-func waitForRunFinished(t *testing.T, coord *coordinator, handle string) *backgroundRun {
+func waitForRunFinished(t *testing.T, coord *coordinator, parentSession, handle string) *backgroundRun {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if run, ok := coord.backgroundRuns.Get(handle); ok && run.isFinished() {
+		if run, ok := coord.subagentRuns.lookupByHandle(parentSession, handle); ok && run.isFinished() {
 			return run
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -88,18 +88,16 @@ func TestRunSubAgentBackground_ReturnsImmediately(t *testing.T) {
 	childSession := <-childRunning
 
 	// The run is registered and routed live while the child is still running.
-	run, ok := coord.backgroundRunFor(parentSession.ID, handle)
+	run, ok := coord.subagentRuns.lookupByHandle(parentSession.ID, handle)
 	require.True(t, ok, "handle must resolve for its dispatching session")
 	assert.Equal(t, childSession, run.childSession)
 	assert.False(t, run.isFinished())
 	assert.Len(t, rt.List(parentSession.ID), 1, "runtime must track the running child")
 
 	// End the child run: cancel through the registry, as Cancel would.
-	if cancel, ok := coord.subagentCancels.Get(childSession); ok {
-		cancel()
-	}
+	coord.subagentRuns.cancel(childSession)
 
-	finishedRun := waitForRunFinished(t, coord, handle)
+	finishedRun := waitForRunFinished(t, coord, parentSession.ID, handle)
 	fin, status, result, isErr := finishedRun.snapshot()
 	require.True(t, fin)
 	assert.Equal(t, subagents.StatusCancelled, status)
@@ -114,8 +112,7 @@ func TestRunSubAgentBackground_ReturnsImmediately(t *testing.T) {
 
 	// The child's cancel-map entry is cleaned up once the run finishes.
 	require.Eventually(t, func() bool {
-		_, ok := coord.subagentCancels.Get(childSession)
-		return !ok
+		return !coord.subagentRuns.isRunning(childSession)
 	}, 5*time.Second, 5*time.Millisecond)
 }
 
@@ -165,17 +162,15 @@ func TestRunSubAgentBackground_DetachedFromDispatchContext(t *testing.T) {
 	}
 
 	// Now end it through its own registered cancel.
-	if run, ok := coord.backgroundRuns.Get(handle); ok {
-		if cancel, ok := coord.subagentCancels.Get(run.childSession); ok {
-			cancel()
-		}
-	}
+	run, ok := coord.subagentRuns.lookupByHandle(parentSession.ID, handle)
+	require.True(t, ok)
+	require.True(t, coord.subagentRuns.cancel(run.childSession))
 	select {
 	case <-childDone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("child was not cancelled by its own cancel func")
 	}
-	finished := waitForRunFinished(t, coord, handle)
+	finished := waitForRunFinished(t, coord, parentSession.ID, handle)
 	_, _, result, _ := finished.snapshot()
 	assert.Contains(t, result, "late result")
 }
@@ -228,10 +223,8 @@ func TestSendMessage_BackgroundChildDeliversLive(t *testing.T) {
 	assert.Equal(t, "fast", msgs[0].AgentName)
 	assert.Empty(t, coord.drainSubagentMessages(childSession), "nothing may remain in the completion inbox")
 
-	if cancel, ok := coord.subagentCancels.Get(childSession); ok {
-		cancel()
-	}
-	waitForRunFinished(t, coord, handle)
+	coord.subagentRuns.cancel(childSession)
+	waitForRunFinished(t, coord, parentSession.ID, handle)
 }
 
 // TestSendMessage_BlockingChildKeepsCompletionDelivery pins the existing
@@ -343,7 +336,7 @@ func TestRunSubAgentBackground_ForwardsStrandedMessages(t *testing.T) {
 	handle := backgroundHandleFromResponse(t, resp)
 	<-childSession
 
-	waitForRunFinished(t, coord, handle)
+	waitForRunFinished(t, coord, parentSession.ID, handle)
 	msgs := coord.DrainSubagentInbox(parentSession.ID)
 	require.Len(t, msgs, 1)
 	assert.Equal(t, "straggler", msgs[0].Text)

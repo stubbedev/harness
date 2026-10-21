@@ -36,7 +36,7 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 	require.NoError(t, err)
 	cfg.SetupAgents()
 
-	coord := &coordinator{
+	coord := newCoordinatorForTest(&coordinator{
 		cfg:         cfg,
 		sessions:    env.sessions,
 		messages:    env.messages,
@@ -44,7 +44,7 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 		filetracker: *env.filetracker,
 		agents:      make(map[string]SessionAgent),
 		interactive: interactive,
-	}
+	})
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)

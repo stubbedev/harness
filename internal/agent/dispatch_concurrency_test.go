@@ -28,7 +28,7 @@ func TestAcquireDispatchSlot_NilSemaphoreIsUncapped(t *testing.T) {
 
 	// Coordinators built directly in tests have no semaphore; dispatch must
 	// still work rather than blocking on a nil channel forever.
-	c := &coordinator{}
+	c := newCoordinatorForTest(&coordinator{})
 	for range 3 {
 		release, err := c.acquireDispatchSlot(t.Context())
 		require.NoError(t, err)
@@ -41,7 +41,7 @@ func TestAcquireDispatchSlot_BoundsConcurrency(t *testing.T) {
 	t.Parallel()
 
 	const limit = 2
-	c := &coordinator{dispatchSem: make(chan struct{}, limit)}
+	c := newCoordinatorForTest(&coordinator{dispatchSem: make(chan struct{}, limit)})
 
 	var (
 		inFlight atomic.Int64
@@ -74,7 +74,7 @@ func TestAcquireDispatchSlot_BoundsConcurrency(t *testing.T) {
 func TestAcquireDispatchSlot_HonoursContext(t *testing.T) {
 	t.Parallel()
 
-	c := &coordinator{dispatchSem: make(chan struct{}, 1)}
+	c := newCoordinatorForTest(&coordinator{dispatchSem: make(chan struct{}, 1)})
 	release, err := c.acquireDispatchSlot(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(release)
@@ -90,7 +90,7 @@ func TestAcquireDispatchSlot_HonoursContext(t *testing.T) {
 func TestAcquireDispatchSlot_ReleaseIsIdempotent(t *testing.T) {
 	t.Parallel()
 
-	c := &coordinator{dispatchSem: make(chan struct{}, 1)}
+	c := newCoordinatorForTest(&coordinator{dispatchSem: make(chan struct{}, 1)})
 	release, err := c.acquireDispatchSlot(t.Context())
 	require.NoError(t, err)
 

@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
-	"github.com/stubbedev/harness/internal/csync"
 )
 
 // searchToolWithRegistry wires a search tool over a server whose registry
@@ -19,7 +18,7 @@ func searchToolWithRegistry(t *testing.T, server string, tools []*mcp.Tool) *mcp
 	t.Cleanup(mcp.RegisterToolsForTest(server, tools))
 	return &mcpSearchTool{
 		server: server,
-		coord:  &coordinator{expandedMCPTools: csync.NewMap[string, map[string]bool]()},
+		coord:  newCoordinatorForTest(&coordinator{}),
 	}
 }
 
@@ -164,7 +163,7 @@ func TestMCPSearchToolRun(t *testing.T) {
 
 func TestExpandMCPServerTools(t *testing.T) {
 	t.Run("unknown names are ignored and known ones stick", func(t *testing.T) {
-		c := &coordinator{expandedMCPTools: csync.NewMap[string, map[string]bool]()}
+		c := newCoordinatorForTest(&coordinator{})
 		t.Cleanup(mcp.RegisterToolsForTest("forge", []*mcp.Tool{{Name: "issue_create"}, {Name: "pr_merge"}}))
 
 		// No known name among them: nothing to add, so no tool rebuild is
@@ -181,7 +180,7 @@ func TestExpandMCPServerTools(t *testing.T) {
 }
 
 func TestMCPServerToolNames(t *testing.T) {
-	c := &coordinator{}
+	c := newCoordinatorForTest(&coordinator{})
 	t.Cleanup(mcp.RegisterToolsForTest("forge", []*mcp.Tool{
 		{Name: "pr_merge", Description: "Merge a pull request"},
 		{Name: "issue_create"},

@@ -90,14 +90,8 @@ func (t *sendMessageTool) Run(ctx context.Context, call fantasy.ToolCall) (fanta
 // completion-delivery guarantee: the message is appended to the dispatch
 // tool's result when the run ends. It returns whether delivery was live.
 func (c *coordinator) recordSubagentMessage(childSessionID, message string) (bool, error) {
-	if run, ok := c.liveRouteForChild(childSessionID); ok {
+	if run, ok := c.subagentRuns.lookupByChild(childSessionID); ok {
 		return true, c.recordLiveSubagentMessage(run, message)
-	}
-	if c.subagentMessages == nil {
-		// The completion inbox is optional: a coordinator built without
-		// one (tests that exercise a single dispatch path) just drops the
-		// message.
-		return false, nil
 	}
 	existing, _ := c.subagentMessages.Get(childSessionID)
 	c.subagentMessages.Set(childSessionID, append(existing, message))
@@ -106,9 +100,6 @@ func (c *coordinator) recordSubagentMessage(childSessionID, message string) (boo
 
 // drainSubagentMessages returns and clears the inbox of a child session.
 func (c *coordinator) drainSubagentMessages(childSessionID string) []string {
-	if c.subagentMessages == nil {
-		return nil
-	}
 	msgs, ok := c.subagentMessages.Get(childSessionID)
 	if ok {
 		c.subagentMessages.Del(childSessionID)

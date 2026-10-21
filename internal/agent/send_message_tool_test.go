@@ -20,7 +20,7 @@ func TestSendMessageTool_Run(t *testing.T) {
 	t.Parallel()
 
 	newTool := func() *sendMessageTool {
-		return &sendMessageTool{coord: &coordinator{subagentMessages: newSubagentInbox()}}
+		return &sendMessageTool{coord: newCoordinatorForTest(&coordinator{})}
 	}
 
 	t.Run("records the message on the child session inbox", func(t *testing.T) {
@@ -207,14 +207,4 @@ func TestAppendSubagentMessages(t *testing.T) {
 		// path, including ones that never assigned a response.
 		appendSubagentMessages(nil, []string{"dropped"})
 	})
-}
-
-// A coordinator with no inbox (a test that never wired one) drops messages
-// rather than panicking, since the dispatch defer drains unconditionally.
-func TestSubagentInboxOptional(t *testing.T) {
-	t.Parallel()
-
-	c := &coordinator{}
-	c.recordSubagentMessage("child-1", "dropped")
-	assert.Nil(t, c.drainSubagentMessages("child-1"))
 }

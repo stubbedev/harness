@@ -9,7 +9,6 @@ import (
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
-	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/subagents"
 )
 
@@ -65,8 +64,6 @@ func newUpdateModelsCoordinator(t *testing.T, env fakeEnv, providerCfg config.Pr
 	t.Helper()
 	coord := newTestCoordinator(t, env, providerCfg.ID, providerCfg)
 	coord.cfg.SetupAgents()
-	coord.expandedMCPTools = csync.NewMap[string, map[string]bool]()
-	coord.expandedBuiltins = csync.NewMap[string, bool]()
 	agent := &recordingAgent{}
 	coord.currentAgent = agent
 	return coord, agent

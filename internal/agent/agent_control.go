@@ -29,7 +29,7 @@ func (c *coordinator) resolveBackgroundRuns(parentSession string, handles []stri
 	runs := make([]*backgroundRun, 0, len(handles))
 	var unknown []string
 	for _, h := range handles {
-		run, ok := c.backgroundRunFor(parentSession, h)
+		run, ok := c.subagentRuns.lookupByHandle(parentSession, h)
 		if !ok {
 			unknown = append(unknown, h)
 			continue
@@ -40,7 +40,7 @@ func (c *coordinator) resolveBackgroundRuns(parentSession string, handles []stri
 		resp := fantasy.NewTextErrorResponse(fmt.Sprintf(
 			"unknown background agent handle(s): %s. Handles started by this session: %s",
 			strings.Join(unknown, ", "),
-			strings.Join(c.knownBackgroundHandles(parentSession), ", "),
+			strings.Join(c.subagentRuns.handles(parentSession), ", "),
 		))
 		return nil, &resp
 	}
@@ -51,8 +51,8 @@ func (c *coordinator) resolveBackgroundRuns(parentSession string, handles []stri
 // not finished, in handle order.
 func (c *coordinator) runningBackgroundRuns(parentSession string) []*backgroundRun {
 	var running []*backgroundRun
-	for _, h := range c.knownBackgroundHandles(parentSession) {
-		if run, ok := c.backgroundRunFor(parentSession, h); ok && !run.isFinished() {
+	for _, h := range c.subagentRuns.handles(parentSession) {
+		if run, ok := c.subagentRuns.lookupByHandle(parentSession, h); ok && !run.isFinished() {
 			running = append(running, run)
 		}
 	}
@@ -99,16 +99,7 @@ func describeRuns(runs []*backgroundRun) string {
 // The model never saw its handle. A blocking dispatch needs nothing here:
 // its run ended with the early call's context.
 func (c *coordinator) DiscardSubagentDispatch(childSessionID string) {
-	if c.backgroundByChild != nil && c.backgroundRuns != nil {
-		if handle, ok := c.backgroundByChild.Get(childSessionID); ok {
-			c.backgroundRuns.Del(handle)
-		}
-	}
-	if c.subagentCancels != nil {
-		if cancel, ok := c.subagentCancels.Get(childSessionID); ok && cancel != nil {
-			cancel()
-		}
-	}
+	c.subagentRuns.discard(childSessionID)
 }
 
 // messageSubagents is the `agent` tool with a message: it delivers text
@@ -176,15 +167,10 @@ func (c *coordinator) cancelSubagents(parentSession string, requested []string) 
 	var cancelled []*backgroundRun
 	var gone []string
 	for _, run := range runs {
-		var cancel context.CancelFunc
-		if c.subagentCancels != nil {
-			cancel, _ = c.subagentCancels.Get(run.childSession)
-		}
-		if cancel == nil {
+		if !c.subagentRuns.cancel(run.childSession) {
 			gone = append(gone, fmt.Sprintf("%s (%s)", run.agentName, run.handle))
 			continue
 		}
-		cancel()
 		cancelled = append(cancelled, run)
 	}
 	var lines []string

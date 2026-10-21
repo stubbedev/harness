@@ -54,7 +54,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 	require.NoError(t, err)
 	cfg.SetupAgents()
 
-	coord := &coordinator{
+	coord := newCoordinatorForTest(&coordinator{
 		cfg:         cfg,
 		sessions:    env.sessions,
 		messages:    env.messages,
@@ -74,7 +74,7 @@ func TestBuildAgentReadinessSurvivesCallerCancellation(t *testing.T) {
 			<-ctx.Done()
 			return ctx.Err()
 		},
-	}
+	})
 
 	p, err := coderPrompt(prompt.WithWorkingDir(env.workingDir))
 	require.NoError(t, err)

@@ -28,11 +28,11 @@ func newSkillSearchTool(t *testing.T, defs map[string]string) *skillSearchTool {
 		active = append(active, skill)
 	}
 
-	return &skillSearchTool{coord: &coordinator{
+	return &skillSearchTool{coord: newCoordinatorForTest(&coordinator{
 		cfg:          config.NewTestStore(&config.Config{}),
 		activeSkills: active,
 		skillTracker: skills.NewTracker(active),
-	}}
+	})}
 }
 
 func runSkillSearch(t *testing.T, tool *skillSearchTool, input map[string]any) fantasy.ToolResponse {

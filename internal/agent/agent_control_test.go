@@ -64,9 +64,7 @@ func (f controlFixture) startChild(t *testing.T, name string) backgroundChild {
 	require.NoError(t, err)
 	child := backgroundChild{handle: backgroundHandleFromResponse(t, resp), session: <-running, finish: finish}
 	t.Cleanup(func() {
-		if cancel, ok := f.coord.subagentCancels.Get(child.session); ok {
-			cancel()
-		}
+		f.coord.subagentRuns.cancel(child.session)
 	})
 	return child
 }
@@ -74,7 +72,7 @@ func (f controlFixture) startChild(t *testing.T, name string) backgroundChild {
 func (f controlFixture) finishChild(t *testing.T, child backgroundChild) *backgroundRun {
 	t.Helper()
 	close(child.finish)
-	return waitForRunFinished(t, f.coord, child.handle)
+	return waitForRunFinished(t, f.coord, f.parent, child.handle)
 }
 
 func steeringTexts(msgs []SubagentInboxMessage) []string {
@@ -212,9 +210,9 @@ func TestCancelSubagentsCancelsNamedRunningAgent(t *testing.T) {
 	require.False(t, resp.IsError, resp.Content)
 	assert.Contains(t, resp.Content, "Cancelled 1 agent(s): target ("+target.handle+")")
 
-	_, status, _, _ := waitForRunFinished(t, f.coord, target.handle).snapshot()
+	_, status, _, _ := waitForRunFinished(t, f.coord, f.parent, target.handle).snapshot()
 	assert.Equal(t, subagents.StatusCancelled, status)
-	run, ok := f.coord.backgroundRunFor(f.parent, bystander.handle)
+	run, ok := f.coord.subagentRuns.lookupByHandle(f.parent, bystander.handle)
 	require.True(t, ok)
 	assert.False(t, run.isFinished(), "only the named agent is cancelled")
 }
@@ -241,17 +239,17 @@ func TestDiscardSubagentDispatchCancelsAndForgetsRun(t *testing.T) {
 	f := newControlFixture(t)
 	discarded := f.startChild(t, "discarded")
 	kept := f.startChild(t, "kept")
-	run, ok := f.coord.backgroundRunFor(f.parent, discarded.handle)
+	run, ok := f.coord.subagentRuns.lookupByHandle(f.parent, discarded.handle)
 	require.True(t, ok)
 
 	f.coord.DiscardSubagentDispatch(discarded.session)
 
-	assert.NotContains(t, f.coord.knownBackgroundHandles(f.parent), discarded.handle)
-	assert.Contains(t, f.coord.knownBackgroundHandles(f.parent), kept.handle)
+	assert.NotContains(t, f.coord.subagentRuns.handles(f.parent), discarded.handle)
+	assert.Contains(t, f.coord.subagentRuns.handles(f.parent), kept.handle)
 	require.Eventually(t, run.isFinished, 5*time.Second, 10*time.Millisecond, "the discarded run is cancelled")
 	_, status, _, _ := run.snapshot()
 	assert.Equal(t, subagents.StatusCancelled, status)
-	keptRun, ok := f.coord.backgroundRunFor(f.parent, kept.handle)
+	keptRun, ok := f.coord.subagentRuns.lookupByHandle(f.parent, kept.handle)
 	require.True(t, ok)
 	assert.False(t, keptRun.isFinished())
 }

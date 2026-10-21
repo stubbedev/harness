@@ -18,9 +18,9 @@ import (
 // in-memory config, without reaching any of them.
 func wireTestCoordinator(t *testing.T) *coordinator {
 	t.Helper()
-	return &coordinator{
+	return newCoordinatorForTest(&coordinator{
 		cfg: config.NewTestStoreWithWorkingDir(&config.Config{Options: &config.Options{}}, t.TempDir()),
-	}
+	})
 }
 
 // reasoningModel returns a reasoning model with id, configured at high

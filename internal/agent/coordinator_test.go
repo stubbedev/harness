@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/subagents"
 
 	"charm.land/fantasy"
@@ -62,6 +61,11 @@ func (m *mockSessionAgent) Summarize(context.Context, string, fantasy.ProviderOp
 }
 func (m *mockSessionAgent) GenerateTitle(context.Context, string, string) {}
 
+func newCoordinatorForTest(c *coordinator) *coordinator {
+	c.initRegistries()
+	return c
+}
+
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
 func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {
 	cfg, err := config.Init(env.workingDir, "", false)
@@ -70,18 +74,11 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 		providerCfg.ResolvedAPIKey, providerCfg.APIKeyResolutionError = cfg.Resolve(providerCfg.APIKey)
 	}
 	cfg.Config().Providers.Set(providerID, providerCfg)
-	return &coordinator{
-		cfg:                cfg,
-		sessions:           env.sessions,
-		messages:           env.messages,
-		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
-		subagentMessages:   newSubagentInbox(),
-		liveInbox:          newLiveInbox(),
-		queueArrivals:      newQueueArrivalSignals(),
-		backgroundRuns:     csync.NewMap[string, *backgroundRun](),
-		backgroundByChild:  csync.NewMap[string, string](),
-		subagentCancels:    csync.NewMap[string, context.CancelFunc](),
-	}
+	return newCoordinatorForTest(&coordinator{
+		cfg:      cfg,
+		sessions: env.sessions,
+		messages: env.messages,
+	})
 }
 
 // newMockAgent creates a mockSessionAgent with the given provider and run function.
@@ -338,7 +335,7 @@ func TestRunSubAgent(t *testing.T) {
 
 		rt := subagents.NewRuntime()
 		t.Cleanup(rt.Shutdown)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions, runtime: rt}
+		coord := newCoordinatorForTest(&coordinator{cfg: cfg, sessions: env.sessions, runtime: rt})
 
 		parentSession, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
@@ -467,7 +464,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		env := testEnv(t)
 		cfg, err := config.Init(env.workingDir, "", false)
 		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
+		coord := newCoordinatorForTest(&coordinator{cfg: cfg, sessions: env.sessions})
 
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
@@ -492,7 +489,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		env := testEnv(t)
 		cfg, err := config.Init(env.workingDir, "", false)
 		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
+		coord := newCoordinatorForTest(&coordinator{cfg: cfg, sessions: env.sessions})
 
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
@@ -523,7 +520,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		env := testEnv(t)
 		cfg, err := config.Init(env.workingDir, "", false)
 		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
+		coord := newCoordinatorForTest(&coordinator{cfg: cfg, sessions: env.sessions})
 
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
@@ -537,7 +534,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		env := testEnv(t)
 		cfg, err := config.Init(env.workingDir, "", false)
 		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
+		coord := newCoordinatorForTest(&coordinator{cfg: cfg, sessions: env.sessions})
 
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
@@ -553,7 +550,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		env := testEnv(t)
 		cfg, err := config.Init(env.workingDir, "", false)
 		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
+		coord := newCoordinatorForTest(&coordinator{cfg: cfg, sessions: env.sessions})
 
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
@@ -572,7 +569,7 @@ func TestUpdateParentSessionCost(t *testing.T) {
 		env := testEnv(t)
 		cfg, err := config.Init(env.workingDir, "", false)
 		require.NoError(t, err)
-		coord := &coordinator{cfg: cfg, sessions: env.sessions}
+		coord := newCoordinatorForTest(&coordinator{cfg: cfg, sessions: env.sessions})
 
 		parent, err := env.sessions.Create(t.Context(), "Parent")
 		require.NoError(t, err)
@@ -619,9 +616,9 @@ func TestCoordinator_ActiveSubagentsFromManager(t *testing.T) {
 
 	// Construct the coordinator directly (mirrors newTestCoordinator style).
 	// This fails to compile if activeSubagents field does not exist on coordinator.
-	c := &coordinator{
+	c := newCoordinatorForTest(&coordinator{
 		activeSubagents: mgr.ActiveSubagents(),
-	}
+	})
 
 	require.Len(t, c.activeSubagents, 2)
 	require.Equal(t, "test-agent", c.activeSubagents[0].Name)
@@ -636,7 +633,7 @@ func TestCoordinator_ActiveSubagentsNilManager(t *testing.T) {
 
 	// Construct coordinator without setting activeSubagents — mirrors the
 	// nil-manager branch of NewCoordinator (no subagents wired).
-	c := &coordinator{}
+	c := newCoordinatorForTest(&coordinator{})
 
 	require.Nil(t, c.activeSubagents)
 }
@@ -648,11 +645,11 @@ func TestCoordinator_ActiveSubagentsFieldType(t *testing.T) {
 	t.Parallel()
 
 	// This literal fails to compile if the field type is not []*subagents.Subagent.
-	c := &coordinator{
+	c := newCoordinatorForTest(&coordinator{
 		activeSubagents: []*subagents.Subagent{
 			{Name: "compile-check"},
 		},
-	}
+	})
 
 	require.Len(t, c.activeSubagents, 1)
 	assert.Equal(t, "compile-check", c.activeSubagents[0].Name)
@@ -691,11 +688,11 @@ func TestRunSubAgent_RegistersAndFinishesRuntime(t *testing.T) {
 		return agentResultWithText("done"), nil
 	})
 
-	coord := &coordinator{
+	coord := newCoordinatorForTest(&coordinator{
 		cfg:      cfg,
 		sessions: env.sessions,
 		runtime:  rt,
-	}
+	})
 
 	_, err = coord.runSubAgent(t.Context(), subAgentParams{
 		Agent:          agent,
@@ -833,7 +830,7 @@ func TestFindModelProvider_TwoProvidersSameModelID(t *testing.T) {
 		Models: []catalog.Model{{ID: "shared-model"}},
 	})
 
-	coord := &coordinator{cfg: cfg, sessions: env.sessions}
+	coord := newCoordinatorForTest(&coordinator{cfg: cfg, sessions: env.sessions})
 
 	t.Run("no_override_deterministically_picks_lowest_id", func(t *testing.T) {
 		t.Parallel()
@@ -870,10 +867,10 @@ func TestBuildAgent_SubagentModel(t *testing.T) {
 		t.Parallel()
 
 		env := testEnv(t)
-		coord := &coordinator{
+		coord := newCoordinatorForTest(&coordinator{
 			cfg:      config.NewTestStoreWithWorkingDir(&config.Config{}, env.workingDir),
 			sessions: env.sessions,
-		}
+		})
 
 		agentCfg := config.Agent{
 			ID:           "test",
@@ -915,7 +912,7 @@ func TestRunSubAgent_CancelledMapsToCancelled(t *testing.T) {
 		return nil, context.Canceled
 	})
 
-	coord := &coordinator{cfg: cfg, sessions: env.sessions, runtime: rt}
+	coord := newCoordinatorForTest(&coordinator{cfg: cfg, sessions: env.sessions, runtime: rt})
 
 	resp, err := coord.runSubAgent(t.Context(), subAgentParams{
 		Agent:          agent,
@@ -938,7 +935,7 @@ func TestRunSubAgent_CancelledMapsToCancelled(t *testing.T) {
 // TestCancel_StopsRunningSubagent verifies the full targeted-cancel path: a
 // dispatched subagent runs on its own SessionAgent (invisible to
 // currentAgent's activeRequests), so Cancel(childSessionID) must reach it via
-// the subagentCancels registry — stopping only that run while the parent
+// the subagentRuns registry — stopping only that run while the parent
 // turn's context stays alive — and must not fall through to currentAgent.
 func TestCancel_StopsRunningSubagent(t *testing.T) {
 	t.Parallel()
@@ -962,13 +959,12 @@ func TestCancel_StopsRunningSubagent(t *testing.T) {
 	})
 	coderMock := newMockAgent(providerID, 4096, nil)
 
-	coord := &coordinator{
-		cfg:             cfg,
-		sessions:        env.sessions,
-		runtime:         rt,
-		currentAgent:    coderMock,
-		subagentCancels: csync.NewMap[string, context.CancelFunc](),
-	}
+	coord := newCoordinatorForTest(&coordinator{
+		cfg:          cfg,
+		sessions:     env.sessions,
+		runtime:      rt,
+		currentAgent: coderMock,
+	})
 
 	done := make(chan fantasy.ToolResponse, 1)
 	go func() {
@@ -1008,13 +1004,13 @@ func TestCancel_StopsRunningSubagent(t *testing.T) {
 	}
 
 	require.Empty(t, coderMock.cancelled, "targeted subagent cancel must not fall through to the coder agent")
-	_, stillRegistered := coord.subagentCancels.Get(childID)
+	stillRegistered := coord.subagentRuns.isRunning(childID)
 	require.False(t, stillRegistered, "cancel registry entry must be cleaned up after the run")
 	require.Empty(t, rt.List(parentSession.ID))
 }
 
 // TestCancelAll_StopsRunningSubagents verifies that CancelAll reaches
-// dispatched subagents through the subagentCancels registry, not just the
+// dispatched subagents through the subagentRuns registry, not just the
 // coder agent's own activeRequests — subagents run on ad-hoc SessionAgents
 // invisible to currentAgent, so App.Shutdown calling CancelAll must not leave
 // them running past shutdown.
@@ -1040,13 +1036,12 @@ func TestCancelAll_StopsRunningSubagents(t *testing.T) {
 	})
 	coderMock := newMockAgent(providerID, 4096, nil)
 
-	coord := &coordinator{
-		cfg:             cfg,
-		sessions:        env.sessions,
-		runtime:         rt,
-		currentAgent:    coderMock,
-		subagentCancels: csync.NewMap[string, context.CancelFunc](),
-	}
+	coord := newCoordinatorForTest(&coordinator{
+		cfg:          cfg,
+		sessions:     env.sessions,
+		runtime:      rt,
+		currentAgent: coderMock,
+	})
 
 	done := make(chan fantasy.ToolResponse, 1)
 	go func() {
@@ -1107,13 +1102,12 @@ func TestIsSessionBusy_TrueForRunningSubagent(t *testing.T) {
 	})
 	coderMock := newMockAgent(providerID, 4096, nil)
 
-	coord := &coordinator{
-		cfg:             cfg,
-		sessions:        env.sessions,
-		runtime:         rt,
-		currentAgent:    coderMock,
-		subagentCancels: csync.NewMap[string, context.CancelFunc](),
-	}
+	coord := newCoordinatorForTest(&coordinator{
+		cfg:          cfg,
+		sessions:     env.sessions,
+		runtime:      rt,
+		currentAgent: coderMock,
+	})
 
 	done := make(chan fantasy.ToolResponse, 1)
 	go func() {
@@ -1156,10 +1150,9 @@ func TestCancel_UnknownSessionFallsThroughToCoder(t *testing.T) {
 	t.Parallel()
 
 	coderMock := newMockAgent("p", 4096, nil)
-	coord := &coordinator{
-		currentAgent:    coderMock,
-		subagentCancels: csync.NewMap[string, context.CancelFunc](),
-	}
+	coord := newCoordinatorForTest(&coordinator{
+		currentAgent: coderMock,
+	})
 
 	coord.Cancel("some-parent-session")
 
@@ -1177,7 +1170,7 @@ func TestActiveSubagentsList(t *testing.T) {
 		initial := []*subagents.Subagent{{Name: "x"}, {Name: "y"}}
 		mgr := subagents.NewManager(initial, initial, nil)
 		t.Cleanup(mgr.Shutdown)
-		c := &coordinator{subagentsMgr: mgr}
+		c := newCoordinatorForTest(&coordinator{subagentsMgr: mgr})
 
 		require.Len(t, c.activeSubagentsList(), 2)
 
@@ -1191,7 +1184,7 @@ func TestActiveSubagentsList(t *testing.T) {
 
 	t.Run("fallback when nil manager", func(t *testing.T) {
 		t.Parallel()
-		c := &coordinator{activeSubagents: []*subagents.Subagent{{Name: "z"}}}
+		c := newCoordinatorForTest(&coordinator{activeSubagents: []*subagents.Subagent{{Name: "z"}}})
 		got := c.activeSubagentsList()
 		require.Len(t, got, 1)
 		require.Equal(t, "z", got[0].Name)
@@ -1498,11 +1491,10 @@ func TestUpdateModels_ClearsSubagentModelCache(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
-	coord := &coordinator{
-		cfg:                config.NewTestStoreWithWorkingDir(&config.Config{}, env.workingDir),
-		sessions:           env.sessions,
-		subagentModelCache: csync.NewMap[subagentModelKey, Model](),
-	}
+	coord := newCoordinatorForTest(&coordinator{
+		cfg:      config.NewTestStoreWithWorkingDir(&config.Config{}, env.workingDir),
+		sessions: env.sessions,
+	})
 
 	// Manually populate the cache with a dummy entry.
 	coord.subagentModelCache.Set(subagentModelKey{modelID: "some-model", provider: "", isSubAgent: true}, Model{})

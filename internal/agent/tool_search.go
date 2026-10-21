@@ -112,9 +112,6 @@ func firstSentence(s string, limit int) string {
 // builtinToolExpanded reports whether a deferred built-in tool has been
 // loaded into the coder agent's tool set this session.
 func (c *coordinator) builtinToolExpanded(name string) bool {
-	if c.expandedBuiltins == nil {
-		return false
-	}
 	_, ok := c.expandedBuiltins.Get(name)
 	return ok
 }

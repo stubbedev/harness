@@ -16,14 +16,7 @@ import (
 // registerTestRun puts a background run on the coordinator the way a real
 // background dispatch would, without running a child.
 func registerTestRun(coord *coordinator, parentSession, name string) *backgroundRun {
-	run := &backgroundRun{
-		handle:        coord.newBackgroundHandle(),
-		childSession:  "child-" + parentSession,
-		parentSession: parentSession,
-		agentName:     name,
-	}
-	coord.backgroundRuns.Set(run.handle, run)
-	coord.backgroundByChild.Set(run.childSession, run.handle)
+	run, _ := coord.subagentRuns.registerBackground(parentSession, "child-"+parentSession+"-"+name, name, func() {})
 	return run
 }
 
