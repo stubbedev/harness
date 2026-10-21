@@ -233,60 +233,6 @@ func TestAppWorkspace_AllSubagents_NilManager(t *testing.T) {
 	require.Nil(t, got)
 }
 
-// TestAppWorkspace_AllSubagents_ScopeDetection verifies that the Scope field on
-// returned SubagentDefInfo is set to "project" for agents whose file path is
-// under the workspace working directory, "user" for agents outside, and
-// "builtin" for agents with an empty FilePath.
-func TestAppWorkspace_AllSubagents_ScopeDetection(t *testing.T) {
-	t.Parallel()
-
-	workDir := t.TempDir()
-
-	projectFile := filepath.Join(workDir, ".harness", "subagents", "proj-agent.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(projectFile), 0o755))
-	require.NoError(t, os.WriteFile(
-		projectFile,
-		[]byte("---\nname: proj-agent\ndescription: Project agent.\n---\n\nBody.\n"),
-		0o644,
-	))
-
-	userDir := t.TempDir()
-	userFile := filepath.Join(userDir, "user-agent.md")
-	require.NoError(t, os.WriteFile(
-		userFile,
-		[]byte("---\nname: user-agent\ndescription: User agent.\n---\n\nBody.\n"),
-		0o644,
-	))
-
-	projAgent := &subagents.Subagent{Name: "proj-agent", Description: "Project agent.", FilePath: projectFile}
-	userAgent := &subagents.Subagent{Name: "user-agent", Description: "User agent.", FilePath: userFile}
-	builtinAgent := &subagents.Subagent{Name: "builtin-agent", Description: "Built-in agent.", FilePath: ""}
-
-	mgr := subagents.NewManager(
-		[]*subagents.Subagent{projAgent, userAgent, builtinAgent},
-		[]*subagents.Subagent{projAgent, userAgent, builtinAgent},
-		nil,
-	)
-	t.Cleanup(mgr.Shutdown)
-
-	w := &AppWorkspace{
-		app:   &app.App{Subagents: mgr},
-		store: newStoreForWorkDir(workDir),
-	}
-
-	got := w.AllSubagents()
-	require.Len(t, got, 3)
-
-	byName := map[string]SubagentDefInfo{}
-	for _, info := range got {
-		byName[info.Name] = info
-	}
-
-	require.Equal(t, "project", byName["proj-agent"].Scope)
-	require.Equal(t, "user", byName["user-agent"].Scope)
-	require.Equal(t, "builtin", byName["builtin-agent"].Scope)
-}
-
 // TestAppWorkspace_AllSubagents_IncludesErrorEntries verifies that definition
 // files which failed to parse or validate are still surfaced (with Error set),
 // so the Library can show the diagnostic instead of silently dropping them.
@@ -572,11 +518,10 @@ func TestAppWorkspace_DeleteUserSubagent_OutsideGlobalDirsRefused(t *testing.T) 
 	require.NoError(t, statErr, "the file must not have been deleted")
 }
 
-// TestAppWorkspace_AllSubagents_MonorepoRootIsProjectScope verifies that a
-// subagent discovered at the git worktree root — outside the working
-// directory — is labeled project scope, not user scope (a user-scope label
-// previously made repo-tracked files deletable).
-func TestAppWorkspace_AllSubagents_MonorepoRootIsProjectScope(t *testing.T) {
+// TestAppWorkspace_AllSubagents_MonorepoRootIsNotDeletable verifies that a
+// subagent discovered at the git worktree root, outside the working
+// directory, is never offered for deletion.
+func TestAppWorkspace_AllSubagents_MonorepoRootIsNotDeletable(t *testing.T) {
 	t.Parallel()
 
 	// Resolve symlinks up front: macOS temp dirs live behind /private
@@ -613,7 +558,7 @@ func TestAppWorkspace_AllSubagents_MonorepoRootIsProjectScope(t *testing.T) {
 
 	got := w.AllSubagents()
 	require.Len(t, got, 1)
-	require.Equal(t, "project", got[0].Scope, "a worktree-root subagent must be project scope")
+	require.False(t, got[0].Deletable, "a worktree-root subagent must not be offered for deletion")
 	require.Error(t, w.DeleteUserSubagent("root-agent"), "a worktree-root subagent must not be deletable")
 }
 

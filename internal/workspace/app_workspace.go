@@ -19,7 +19,6 @@ import (
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/extensions"
-	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
@@ -502,8 +501,7 @@ func (w *AppWorkspace) SteerAgent(ctx context.Context, childSessionID, text stri
 }
 
 // AllSubagents returns all discovered subagent definitions projected to the
-// frontend-facing SubagentDefInfo shape, with scope detection relative to the
-// workspace working directory. Definitions that failed to parse or validate
+// frontend-facing SubagentDefInfo shape. Definitions that failed to parse or validate
 // are included with Error set, so the Library can surface the diagnostic
 // instead of silently dropping the file. Returns nil when the Subagents
 // manager is nil.
@@ -519,8 +517,6 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 	}
 	all := mgr.AllSubagents()
 	cfg := w.store.Config()
-	workingDir := w.store.WorkingDir()
-
 	var disabledSubagents []string
 	if cfg.Options != nil {
 		disabledSubagents = cfg.Options.DisabledSubagents
@@ -530,7 +526,6 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 		disabledSet[name] = true
 	}
 
-	projectDirs := config.ProjectSubagentsDir(workingDir)
 	result := make([]SubagentDefInfo, 0, len(all))
 	for _, s := range all {
 		result = append(result, SubagentDefInfo{
@@ -538,7 +533,6 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 			Description: s.Description,
 			Color:       s.ResolvedColor(),
 			FilePath:    s.FilePath,
-			Scope:       subagentScope(s.FilePath, workingDir, projectDirs),
 			Disabled:    disabledSet[s.Name],
 			// Deletion is gated by the same trust rule DeleteUserSubagent
 			// enforces, so the dialog only offers to delete what the
@@ -562,7 +556,6 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 			Name:     name,
 			Color:    subagents.AutoColor(name),
 			FilePath: st.Path,
-			Scope:    subagentScope(st.Path, workingDir, projectDirs),
 			Error:    errMsg,
 		})
 	}
@@ -576,26 +569,6 @@ func (w *AppWorkspace) AllSubagents() []SubagentDefInfo {
 		return strings.Compare(strings.ToLower(a.FilePath), strings.ToLower(b.FilePath))
 	})
 	return result
-}
-
-// subagentScope classifies a subagent definition path: "builtin" (no file),
-// "project" for files under the working directory or any project discovery
-// dir (which includes the git worktree root for monorepo-level subagents),
-// and "user" otherwise. Comparison uses filepathext.Within (filepath.Rel-based)
-// so it works with either path separator.
-func subagentScope(filePath, workingDir string, projectDirs []string) string {
-	if filePath == "" {
-		return "builtin"
-	}
-	if workingDir != "" && filepathext.Within(workingDir, filePath) {
-		return "project"
-	}
-	for _, dir := range projectDirs {
-		if filepathext.Within(dir, filePath) {
-			return "project"
-		}
-	}
-	return "user"
 }
 
 // DeleteUserSubagent removes a user-scoped subagent by name. It returns an
