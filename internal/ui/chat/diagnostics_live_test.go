@@ -8,6 +8,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/toolname"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -142,4 +143,13 @@ func TestLSPItemPicksRendererAfterInputArrives(t *testing.T) {
 	require.True(t, ok)
 	setter.SetLiveDiagnostics(map[string]lsp.DiagnosticCounts{})
 	require.NotContains(t, item.Render(100), "resolved")
+}
+
+func TestLegacyDiagnosticsCallRendersAsLSPItem(t *testing.T) {
+	t.Parallel()
+	sty := styles.CharmtonePantera()
+	for _, name := range []string{toolname.LegacyDiagnostics, toolname.LSP} {
+		item := NewToolMessageItem(&sty, "m1", message.ToolCall{ID: "tc1", Name: name}, nil, false)
+		require.IsType(t, &LSPToolMessageItem{}, item, name)
+	}
 }

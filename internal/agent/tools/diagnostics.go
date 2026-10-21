@@ -17,8 +17,6 @@ type diagnosticsParams struct {
 	File absPath
 }
 
-const DiagnosticsToolName = "lsp_diagnostics"
-
 // maxReportedDiagnostics caps each section of a report. A project that is
 // badly broken has hundreds of diagnostics, and spending the context window on
 // all of them buys nothing the count does not already say.

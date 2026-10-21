@@ -36,6 +36,8 @@ const (
 	ExtensionJobs = "extension_jobs"
 )
 
+const LegacyDiagnostics = "lsp_diagnostics"
+
 // allowlistable is every name in the first const block, in the order
 // config has always listed them.
 var allowlistable = []string{
@@ -59,7 +61,8 @@ func SubagentDefaults() []string { return slices.Clone(subagentDefaults) }
 // what separates the two.
 func IsBuiltin(name string) bool {
 	return slices.Contains(allowlistable, name) ||
-		name == SkillSearch || name == ToolSearch || name == ExtensionJobs
+		name == SkillSearch || name == ToolSearch || name == ExtensionJobs ||
+		name == LegacyDiagnostics
 }
 
 const (

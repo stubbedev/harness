@@ -234,7 +234,7 @@ func NewToolMessageItem(
 ) ToolMessageItem {
 	var item ToolMessageItem
 	switch toolCall.Name {
-	case tools.DiagnosticsToolName, tools.LSPToolName:
+	case toolname.LegacyDiagnostics, tools.LSPToolName:
 		item = newLSPToolMessageItem(sty, toolCall, result, canceled)
 	default:
 		item = newBaseToolMessageItem(sty, toolCall, result, toolRendererFor(toolCall), canceled, firstEnv(env))

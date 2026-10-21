@@ -15,7 +15,7 @@ import (
 func TestEveryBuiltinToolHasASpec(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range append(toolname.Allowlistable(), toolname.SkillSearch, toolname.ToolSearch, toolname.ExtensionJobs) {
+	for _, name := range append(toolname.Allowlistable(), toolname.SkillSearch, toolname.ToolSearch, toolname.ExtensionJobs, toolname.LegacyDiagnostics) {
 		if name == tools.LSPToolName {
 			continue
 		}

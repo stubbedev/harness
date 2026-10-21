@@ -78,7 +78,7 @@ var toolSpecs = map[string]toolSpec{
 	},
 	// lsp_diagnostics is no longer registered; sessions recorded before
 	// it folded into the lsp tool still hold calls to it.
-	tools.DiagnosticsToolName: {
+	toolname.LegacyDiagnostics: {
 		label:      "Diagnostics",
 		copyParams: copyDiagnosticsParams,
 		copyResult: func(t *baseToolMessageItem) string { return copyFence("", t.result.Content) },

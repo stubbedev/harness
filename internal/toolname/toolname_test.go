@@ -51,3 +51,14 @@ func TestBuiltinsAreNotMCP(t *testing.T) {
 		require.True(t, IsBuiltin(name), name)
 	}
 }
+
+func TestLegacyDiagnosticsIsBuiltinButNotAllowlistable(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "lsp_diagnostics", LegacyDiagnostics)
+	require.True(t, IsBuiltin(LegacyDiagnostics))
+	require.NotContains(t, Allowlistable(), LegacyDiagnostics)
+	require.NotContains(t, SubagentDefaults(), LegacyDiagnostics)
+	_, _, ok := SplitMCP(LegacyDiagnostics, "")
+	require.False(t, ok)
+}
