@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,8 +75,13 @@ type grepMatch struct {
 }
 
 func searchFiles(ctx context.Context, pattern, rootPath, include string, limit int) ([]grepMatch, bool, error) {
-	matches, err := searchWithRipgrep(ctx, pattern, rootPath, include)
+	matches, err := searchWithRipgrep(ctx, getRg(), pattern, rootPath, include)
 	if err != nil {
+		if errors.Is(err, errRipgrepUnavailable) {
+			slog.Debug("Searching with the Go walker", "reason", err)
+		} else {
+			slog.Warn("Ripgrep search failed, falling back to the Go walker", "path", rootPath, "error", err)
+		}
 		matches, err = searchFilesWithRegex(pattern, rootPath, include)
 		if err != nil {
 			return nil, false, err
@@ -97,19 +103,14 @@ func searchFiles(ctx context.Context, pattern, rootPath, include string, limit i
 	return matches, truncated, nil
 }
 
-func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]grepMatch, error) {
-	cmd := getRgSearchCmd(ctx, pattern, path, include)
-	if cmd == nil {
-		return nil, fmt.Errorf("ripgrep not found in $PATH")
-	}
+var errRipgrepUnavailable = errors.New("ripgrep not found in $PATH")
 
-	// Only add ignore files if they exist
-	for _, ignoreFile := range []string{".gitignore", ".harnessignore"} {
-		ignorePath := filepath.Join(path, ignoreFile)
-		if _, err := os.Stat(ignorePath); err == nil {
-			cmd.Args = append(cmd.Args, "--ignore-file", ignorePath)
-		}
+func searchWithRipgrep(ctx context.Context, rg, pattern, path, include string) ([]grepMatch, error) {
+	if rg == "" {
+		return nil, errRipgrepUnavailable
 	}
+	cmd := getRgSearchCmd(ctx, rg, pattern, path, include)
+	walker := fsext.NewFastGlobWalker(path)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -120,7 +121,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 	}
 
 	var matches []grepMatch
-	lastPath := ""
+	lastPath, lastFile := "", ""
 	var lastModTime time.Time
 	lastOK := false
 	for line := range bytes.SplitSeq(bytes.TrimSpace(output), []byte{'\n'}) {
@@ -138,10 +139,14 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 		// covers the whole run instead of one per match line.
 		if match.Data.Path.Text != lastPath {
 			lastPath = match.Data.Path.Text
-			fi, err := os.Stat(lastPath)
-			lastOK = err == nil
+			lastFile = filepath.Join(path, lastPath)
+			lastOK = !walker.ShouldSkipTree(lastFile)
 			if lastOK {
-				lastModTime = fi.ModTime()
+				fi, err := os.Stat(lastFile)
+				lastOK = err == nil
+				if lastOK {
+					lastModTime = fi.ModTime()
+				}
 			}
 		}
 		if !lastOK {
@@ -149,7 +154,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
 		}
 		for _, m := range match.Data.Submatches {
 			matches = append(matches, grepMatch{
-				path:     match.Data.Path.Text,
+				path:     lastFile,
 				modTime:  lastModTime,
 				lineNum:  match.Data.LineNumber,
 				charNum:  m.Start + 1, // ensure 1-based

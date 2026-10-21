@@ -137,6 +137,8 @@ func parsePatterns(lines []string, domain []string) []gitignore.Pattern {
 	return patterns
 }
 
+var IgnoreFileNames = []string{".gitignore", ".harnessignore"}
+
 type directoryLister struct {
 	// dirPatterns caches parsed patterns from .gitignore/.harnessignore for each directory.
 	// This avoids re-reading files when building combined matchers.
@@ -176,7 +178,7 @@ func (dl *directoryLister) getDirPatterns(dir string) []gitignore.Pattern {
 			domain = pathToComponents(relPath)
 		}
 
-		for _, ignoreFile := range []string{".gitignore", ".harnessignore"} {
+		for _, ignoreFile := range IgnoreFileNames {
 			ignPath := filepath.Join(dir, ignoreFile)
 			if content, err := os.ReadFile(ignPath); err == nil {
 				lines := strings.Split(string(content), "\n")

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/stubbedev/harness/internal/filepathext"
 )
 
 // commonIgnoredDirs are the directory names every crawling walker
@@ -61,6 +62,22 @@ func NewFastGlobWalker(searchPath string) *FastGlobWalker {
 // directory names (.git, node_modules) only match directories.
 func (w *FastGlobWalker) ShouldSkip(path string, isDir bool) bool {
 	return w.directoryLister.shouldIgnore(path, nil, isDir)
+}
+
+func (w *FastGlobWalker) ShouldSkipTree(path string) bool {
+	root := w.directoryLister.rootPath
+	rel, ok := filepathext.RelWithin(root, path)
+	if !ok {
+		return true
+	}
+	dir := root
+	for _, part := range pathToComponents(filepath.Dir(rel)) {
+		dir = filepath.Join(dir, part)
+		if w.ShouldSkip(dir, true) {
+			return true
+		}
+	}
+	return w.ShouldSkip(path, false)
 }
 
 func DirTrim(pwd string, lim int) string {
