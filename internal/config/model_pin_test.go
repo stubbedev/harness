@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/db"
 )
 
@@ -69,7 +70,7 @@ func TestModelSelectionSurvivesPeerWrite(t *testing.T) {
 	require.NoError(t, store.ReloadFromDisk(context.Background()))
 
 	large := store.Config().Models[SelectedModelTypeLarge]
-	require.Equal(t, "anthropic", large.Provider)
+	require.Equal(t, catalog.InferenceProvider("anthropic"), large.Provider)
 	require.Equal(t, "claude-3", large.Model)
 }
 
@@ -97,6 +98,6 @@ func TestModelSelectionYieldsToDiskWhenUnchosen(t *testing.T) {
 	require.NoError(t, store.ReloadFromDisk(context.Background()))
 
 	large := store.Config().Models[SelectedModelTypeLarge]
-	require.Equal(t, "anthropic", large.Provider)
+	require.Equal(t, catalog.InferenceProvider("anthropic"), large.Provider)
 	require.Equal(t, "claude-3", large.Model)
 }

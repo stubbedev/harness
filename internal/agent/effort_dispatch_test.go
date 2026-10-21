@@ -69,7 +69,7 @@ func TestApplyEffortToModel_PreservesOtherFields(t *testing.T) {
 	got := subagents.ApplyEffortToModel("high", cfg, cat)
 
 	assert.Equal(t, "o4-mini", got.Model)
-	assert.Equal(t, "openai", got.Provider)
+	assert.Equal(t, catalog.InferenceProvider("openai"), got.Provider)
 	assert.Equal(t, int64(4096), got.MaxTokens)
 	assert.Equal(t, "high", got.ReasoningEffort)
 }

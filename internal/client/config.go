@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/proto"
@@ -38,7 +39,7 @@ func (c *Client) SetCompactMode(ctx context.Context, id string, scope config.Sco
 // format tags the credential with an explicit Kind so the server can
 // decode it back into the right Go type — JSON's `any` loses that
 // information across the socket.
-func (c *Client) SetProviderAPIKey(ctx context.Context, id string, scope config.Scope, providerID string, apiKey any) error {
+func (c *Client) SetProviderAPIKey(ctx context.Context, id string, scope config.Scope, providerID catalog.InferenceProvider, apiKey any) error {
 	var (
 		kind proto.APIKeyKind
 		raw  json.RawMessage
@@ -82,7 +83,7 @@ func (c *Client) ImportCopilot(ctx context.Context, id string) (*oauth.Token, bo
 
 // RefreshOAuthToken refreshes an OAuth token for a provider on the
 // server.
-func (c *Client) RefreshOAuthToken(ctx context.Context, id string, scope config.Scope, providerID string) error {
+func (c *Client) RefreshOAuthToken(ctx context.Context, id string, scope config.Scope, providerID catalog.InferenceProvider) error {
 	return c.do(ctx, "refresh OAuth token", post(wsPath(id, "config", "refresh-oauth"), proto.ConfigRefreshOAuthRequest{
 		Scope:      scope,
 		ProviderID: providerID,

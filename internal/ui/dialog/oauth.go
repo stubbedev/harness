@@ -424,7 +424,7 @@ func (m *OAuth) saveCredential() tea.Cmd {
 		token    = m.token
 	)
 	return func() tea.Msg {
-		if err := com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(provider.ID), token); err != nil {
+		if err := com.Workspace.SetProviderAPIKey(config.ScopeGlobal, provider.ID, token); err != nil {
 			return oauthSaveErrMsg{err: fmt.Errorf("failed to save API key: %w", err)}
 		}
 		return oauthSaveDoneMsg{}

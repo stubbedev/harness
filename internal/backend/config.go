@@ -4,6 +4,7 @@ import (
 	"context"
 
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/oauth"
@@ -80,14 +81,14 @@ func (b *Backend) SetCompactMode(workspaceID string, scope config.Scope, enabled
 }
 
 // SetProviderAPIKey sets the API key for a provider and persists it.
-func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, providerID string, apiKey any) error {
+func (b *Backend) SetProviderAPIKey(workspaceID string, scope config.Scope, providerID catalog.InferenceProvider, apiKey any) error {
 	return b.mutateConfig(workspaceID, func(ops *workspace.AppWorkspace) error {
 		return ops.SetProviderAPIKey(scope, providerID, apiKey)
 	})
 }
 
 // RefreshOAuthToken refreshes the OAuth token for a provider.
-func (b *Backend) RefreshOAuthToken(ctx context.Context, workspaceID string, scope config.Scope, providerID string) error {
+func (b *Backend) RefreshOAuthToken(ctx context.Context, workspaceID string, scope config.Scope, providerID catalog.InferenceProvider) error {
 	return b.mutateConfig(workspaceID, func(ops *workspace.AppWorkspace) error {
 		return ops.RefreshOAuthToken(ctx, scope, providerID)
 	})

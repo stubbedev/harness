@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/message"
@@ -20,7 +21,7 @@ func liveFlowUI() *UI {
 	u := newTestUI()
 	u.state = uiChat
 	u.com.Workspace = &testWorkspace{cfg: &config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	}}
 	return u
 }

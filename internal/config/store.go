@@ -119,14 +119,14 @@ type ConfigStore struct {
 	// It is a field so tests can substitute a fake exchange without making
 	// real network calls. Production code leaves it nil, and exchange falls
 	// back to the real provider clients.
-	exchangeToken func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)
+	exchangeToken func(ctx context.Context, providerID catalog.InferenceProvider, refreshToken string) (*oauth.Token, error)
 
 	// authSignalMu guards authSignals, which maps provider IDs to
 	// channels that WaitForTokenChange blocks on. SignalAuthComplete
 	// closes the channel to unblock waiters; a new channel is created
 	// on the next wait.
 	authSignalMu sync.Mutex
-	authSignals  map[string]chan struct{}
+	authSignals  map[catalog.InferenceProvider]chan struct{}
 }
 
 // Config returns the pure-data config struct (read-only after load).
@@ -568,7 +568,7 @@ func (s *ConfigStore) SetCompactMode(scope Scope, enabled bool) error {
 // or an *oauth.Token from an interactive login. Any other value is an
 // error. It dispatches to SetProviderKey or SetProviderOAuthToken, which
 // callers holding a concrete type should use directly.
-func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey any) error {
+func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID catalog.InferenceProvider, apiKey any) error {
 	switch v := apiKey.(type) {
 	case string:
 		return s.SetProviderKey(scope, providerID, v)
@@ -580,7 +580,7 @@ func (s *ConfigStore) SetProviderAPIKey(scope Scope, providerID string, apiKey a
 }
 
 // SetProviderKey sets the API key for a provider and persists it.
-func (s *ConfigStore) SetProviderKey(scope Scope, providerID, apiKey string) error {
+func (s *ConfigStore) SetProviderKey(scope Scope, providerID catalog.InferenceProvider, apiKey string) error {
 	providerConfig, err := s.providerConfigFor(providerID)
 	if err != nil {
 		return err
@@ -600,7 +600,7 @@ func (s *ConfigStore) SetProviderKey(scope Scope, providerID, apiKey string) err
 }
 
 // SetProviderOAuthToken sets the OAuth token for a provider and persists it.
-func (s *ConfigStore) SetProviderOAuthToken(scope Scope, providerID string, token *oauth.Token) error {
+func (s *ConfigStore) SetProviderOAuthToken(scope Scope, providerID catalog.InferenceProvider, token *oauth.Token) error {
 	if token == nil {
 		return fmt.Errorf("no OAuth token for provider %s", providerID)
 	}
@@ -624,7 +624,7 @@ func (s *ConfigStore) SetProviderOAuthToken(scope Scope, providerID string, toke
 // providerConfigFor returns the configured provider, or a fresh config
 // built from the catalog entry when the provider is known but not yet
 // configured.
-func (s *ConfigStore) providerConfigFor(providerID string) (ProviderConfig, error) {
+func (s *ConfigStore) providerConfigFor(providerID catalog.InferenceProvider) (ProviderConfig, error) {
 	if providerConfig, ok := s.Config().Providers.Get(providerID); ok {
 		return providerConfig, nil
 	}
@@ -661,7 +661,7 @@ func (s *ConfigStore) providerConfigFor(providerID string) (ProviderConfig, erro
 //     read-decide-exchange-write cycle, so only one process exchanges at a
 //     time. A process that acquires the lock after a peer rotated finds the
 //     peer's fresh token on disk and adopts it instead of exchanging.
-func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, providerID string) error {
+func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, providerID catalog.InferenceProvider) error {
 	key := fmt.Sprintf("%d\x00%s", scope, providerID)
 	_, err, _ := s.refreshSF.Do(key, func() (any, error) {
 		return nil, s.refreshOAuthTokenLocked(ctx, scope, providerID)
@@ -672,7 +672,7 @@ func (s *ConfigStore) RefreshOAuthToken(ctx context.Context, scope Scope, provid
 // refreshOAuthTokenLocked performs the cross-process single-flighted
 // refresh. It is invoked through refreshSF, so at most one goroutine per
 // provider runs it at a time within this process.
-func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, providerID string) error {
+func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, providerID catalog.InferenceProvider) error {
 	cfg := s.Config()
 	providerConfig, exists := cfg.Providers.Get(providerID)
 	if !exists {
@@ -759,13 +759,13 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 // callbacks to wait for interactive re-authentication to complete before
 // retrying a failed request. The channel is created atomically with the
 // wait registration so a concurrent SignalAuthComplete cannot miss it.
-func (s *ConfigStore) WaitForTokenChange(ctx context.Context, providerID string) error {
+func (s *ConfigStore) WaitForTokenChange(ctx context.Context, providerID catalog.InferenceProvider) error {
 	s.authSignalMu.Lock()
 	ch, ok := s.authSignals[providerID]
 	if !ok {
 		ch = make(chan struct{})
 		if s.authSignals == nil {
-			s.authSignals = make(map[string]chan struct{})
+			s.authSignals = make(map[catalog.InferenceProvider]chan struct{})
 		}
 		s.authSignals[providerID] = ch
 	}
@@ -792,7 +792,7 @@ func (s *ConfigStore) WaitForTokenChange(ctx context.Context, providerID string)
 // immediately closes the channel so a subsequent WaitForTokenChange
 // returns without blocking. This eliminates the race where the signal
 // fires before the waiter registers.
-func (s *ConfigStore) SignalAuthComplete(providerID string) {
+func (s *ConfigStore) SignalAuthComplete(providerID catalog.InferenceProvider) {
 	s.authSignalMu.Lock()
 	defer s.authSignalMu.Unlock()
 	if ch, ok := s.authSignals[providerID]; ok {
@@ -807,7 +807,7 @@ func (s *ConfigStore) SignalAuthComplete(providerID string) {
 		// No waiter yet. Pre-create a closed channel so the next
 		// WaitForTokenChange returns immediately.
 		if s.authSignals == nil {
-			s.authSignals = make(map[string]chan struct{})
+			s.authSignals = make(map[catalog.InferenceProvider]chan struct{})
 		}
 		ch := make(chan struct{})
 		close(ch)
@@ -827,7 +827,7 @@ func (s *ConfigStore) SignalAuthComplete(providerID string) {
 // the provider will still accept even after its access token ages out.
 // Callers decide whether to adopt the token wholesale or merely borrow its
 // refresh token.
-func (s *ConfigStore) newerDiskToken(scope Scope, providerID string, entryToken *oauth.Token) *oauth.Token {
+func (s *ConfigStore) newerDiskToken(scope Scope, providerID catalog.InferenceProvider, entryToken *oauth.Token) *oauth.Token {
 	diskToken, err := s.loadTokenFromDisk(scope, providerID)
 	if err != nil {
 		slog.Warn("Failed to read token from config file", "provider", providerID, "error", err)
@@ -855,7 +855,7 @@ func (s *ConfigStore) newerDiskToken(scope Scope, providerID string, entryToken 
 // usableDiskToken returns the on-disk token only when it is both newer
 // than entryToken and still valid, meaning it can be adopted as-is with
 // no exchange at all.
-func (s *ConfigStore) usableDiskToken(scope Scope, providerID string, entryToken *oauth.Token) *oauth.Token {
+func (s *ConfigStore) usableDiskToken(scope Scope, providerID catalog.InferenceProvider, entryToken *oauth.Token) *oauth.Token {
 	diskToken := s.newerDiskToken(scope, providerID, entryToken)
 	if diskToken == nil || diskToken.IsExpired() {
 		return nil
@@ -866,12 +866,12 @@ func (s *ConfigStore) usableDiskToken(scope Scope, providerID string, entryToken
 // exchange performs the provider-specific OAuth token exchange. Tests may
 // override it via the exchangeToken field; production uses the real
 // provider clients.
-func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+func (s *ConfigStore) exchange(ctx context.Context, providerID catalog.InferenceProvider, refreshToken string) (*oauth.Token, error) {
 	if s.exchangeToken != nil {
 		return s.exchangeToken(ctx, providerID, refreshToken)
 	}
 	switch providerID {
-	case string(catalog.InferenceProviderCopilot):
+	case catalog.InferenceProviderCopilot:
 		return copilot.RefreshToken(ctx, refreshToken)
 	default:
 		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
@@ -883,7 +883,7 @@ func (s *ConfigStore) exchange(ctx context.Context, providerID, refreshToken str
 // token exchange. Acquisition is best effort: when the lock cannot be
 // taken in time, fn runs anyway rather than blocking a write the user is
 // waiting on.
-func (s *ConfigStore) withRefreshLock(providerID string, fn func() error) error {
+func (s *ConfigStore) withRefreshLock(providerID catalog.InferenceProvider, fn func() error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), credentialWriteLockDeadline)
 	defer cancel()
 	release, err := lock.File(ctx, s.refreshLockPath(providerID))
@@ -900,18 +900,18 @@ func (s *ConfigStore) withRefreshLock(providerID string, fn func() error) error 
 // data dir so they do not clutter the config directory. The file is created
 // on demand by lock.File and is never removed (flock keys on inode, not
 // path).
-func (s *ConfigStore) refreshLockPath(providerID string) string {
+func (s *ConfigStore) refreshLockPath(providerID catalog.InferenceProvider) string {
 	dir := filepath.Join(filepath.Dir(s.globalDataPath), "locks")
 	_ = os.MkdirAll(dir, 0o755)
 	return filepath.Join(dir, fmt.Sprintf("%s.refresh.lock", providerID))
 }
 
 // applyToken updates the in-memory provider config with the given token.
-func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID string) {
+func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID catalog.InferenceProvider) {
 	providerConfig.OAuthToken = token
 	providerConfig.ResolvedAPIKey = token.AccessToken
 	providerConfig.APIKeyResolutionError = nil
-	if providerID == string(catalog.InferenceProviderCopilot) {
+	if providerID == catalog.InferenceProviderCopilot {
 		providerConfig.SetupGitHubCopilot()
 	}
 	s.Config().Providers.Set(providerID, providerConfig)
@@ -920,7 +920,7 @@ func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Tok
 // loadTokenFromDisk reads the OAuth token for the given provider from the
 // config file on disk. Returns nil if the token is not found or matches the
 // current in-memory token.
-func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID string) (*oauth.Token, error) {
+func (s *ConfigStore) loadTokenFromDisk(scope Scope, providerID catalog.InferenceProvider) (*oauth.Token, error) {
 	path, err := s.configPath(scope)
 	if err != nil {
 		return nil, err
@@ -1027,7 +1027,7 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 		return nil, false
 	}
 
-	if err := s.SetProviderOAuthToken(ScopeGlobal, string(catalog.InferenceProviderCopilot), token); err != nil {
+	if err := s.SetProviderOAuthToken(ScopeGlobal, catalog.InferenceProviderCopilot, token); err != nil {
 		slog.Error("Unable to save GitHub Copilot token", "error", err)
 		return token, false
 	}

@@ -534,7 +534,7 @@ func (a *AssistantInfoItem) renderContent(width int) string {
 	if !isFinalTurn {
 		return fmt.Sprintf("%s %s", icon, modelFormatted)
 	}
-	providerName := a.message.Provider
+	providerName := string(a.message.Provider)
 	if providerConfig, ok := a.cfg.Providers.Get(a.message.Provider); ok {
 		providerName = providerConfig.Name
 	}

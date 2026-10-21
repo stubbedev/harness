@@ -28,7 +28,7 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 		t.Parallel()
 
 		cfg := &config.Config{
-			Providers: csync.NewMap[string, config.ProviderConfig](),
+			Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 			Agents:    map[string]config.Agent{},
 		}
 		ui := newTestUIWithConfig(t, cfg)
@@ -39,7 +39,7 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 		t.Parallel()
 
 		cfg := &config.Config{
-			Providers: csync.NewMap[string, config.ProviderConfig](),
+			Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 			Agents: map[string]config.Agent{
 				config.AgentCoder: {Model: config.SelectedModelTypeLarge},
 			},
@@ -51,7 +51,7 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 	t.Run("returns true when current model supports images", func(t *testing.T) {
 		t.Parallel()
 
-		providers := csync.NewMap[string, config.ProviderConfig]()
+		providers := csync.NewMap[catalog.InferenceProvider, config.ProviderConfig]()
 		providers.Set("test-provider", config.ProviderConfig{
 			ID: "test-provider",
 			Models: []catalog.Model{

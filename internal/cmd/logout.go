@@ -46,7 +46,7 @@ harness logout copilot
 			defer func() { _, _ = fmt.Fprintf(os.Stderr, ansi.ResetProgressBar) }()
 		}
 
-		var provider string
+		var provider catalog.InferenceProvider
 		if len(args) == 0 {
 			provider, err = pickLoggedInProvider(c, ws.ID)
 			if err != nil {
@@ -56,7 +56,7 @@ harness logout copilot
 				return nil
 			}
 		} else {
-			provider = args[0]
+			provider = catalog.InferenceProvider(args[0])
 		}
 
 		force, _ := cmd.Flags().GetBool("force")
@@ -76,8 +76,8 @@ func logoutCopilot(c *client.Client, wsID string) error {
 	ctx := interactiveContext()
 
 	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, config.ProviderFieldPath(string(catalog.InferenceProviderCopilot), "api_key")),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, config.ProviderFieldPath(string(catalog.InferenceProviderCopilot), "oauth")),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, config.ProviderFieldPath(catalog.InferenceProviderCopilot, "api_key")),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, config.ProviderFieldPath(catalog.InferenceProviderCopilot, "oauth")),
 	); err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func logoutCopilot(c *client.Client, wsID string) error {
 	return nil
 }
 
-func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
+func pickLoggedInProvider(c *client.Client, wsID string) (catalog.InferenceProvider, error) {
 	ctx := interactiveContext()
 
 	cfg, err := c.GetConfig(ctx, wsID)
@@ -95,14 +95,14 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
 	}
 
 	type loggedInProvider struct {
-		id   string
+		id   catalog.InferenceProvider
 		name string
 	}
 
 	// Only OAuth-based providers support login/logout; this map is the
 	// display name.
-	oauthProviders := map[string]string{
-		string(catalog.InferenceProviderCopilot): "GitHub Copilot",
+	oauthProviders := map[catalog.InferenceProvider]string{
+		catalog.InferenceProviderCopilot: "GitHub Copilot",
 	}
 
 	var loggedIn []loggedInProvider

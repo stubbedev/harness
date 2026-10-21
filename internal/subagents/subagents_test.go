@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 )
 
 func TestParseContent(t *testing.T) {
@@ -415,7 +416,7 @@ func TestValidateAgainst(t *testing.T) {
 	t.Parallel()
 
 	knownModels := map[string]bool{"gpt-4o": true, "claude-opus-4-7": true}
-	isKnown := func(provider, id string) bool { return knownModels[id] }
+	isKnown := func(provider catalog.InferenceProvider, id string) bool { return knownModels[id] }
 
 	tests := []struct {
 		name    string
@@ -482,8 +483,9 @@ func TestValidateAgainst_NilResolver_AcceptsAnyNonEmptyModel(t *testing.T) {
 func TestValidateAgainst_ProviderPropagated(t *testing.T) {
 	t.Parallel()
 
-	var capturedProvider, capturedModel string
-	isKnown := func(provider, model string) bool {
+	var capturedProvider catalog.InferenceProvider
+	var capturedModel string
+	isKnown := func(provider catalog.InferenceProvider, model string) bool {
 		capturedProvider = provider
 		capturedModel = model
 		return true
@@ -491,7 +493,7 @@ func TestValidateAgainst_ProviderPropagated(t *testing.T) {
 
 	s := Subagent{Name: "a", Description: "d", Provider: "openai", Model: "gpt-4o"}
 	require.NoError(t, s.ValidateAgainst(isKnown, nil))
-	require.Equal(t, "openai", capturedProvider)
+	require.Equal(t, catalog.InferenceProvider("openai"), capturedProvider)
 	require.Equal(t, "gpt-4o", capturedModel)
 }
 
@@ -501,15 +503,15 @@ func TestValidateAgainst_ProviderPropagated(t *testing.T) {
 func TestValidateAgainst_EmptyProviderPropagated(t *testing.T) {
 	t.Parallel()
 
-	var capturedProvider string
-	isKnown := func(provider, model string) bool {
+	var capturedProvider catalog.InferenceProvider
+	isKnown := func(provider catalog.InferenceProvider, model string) bool {
 		capturedProvider = provider
 		return true
 	}
 
 	s := Subagent{Name: "a", Description: "d", Provider: "", Model: "gpt-4o"}
 	require.NoError(t, s.ValidateAgainst(isKnown, nil))
-	require.Equal(t, "", capturedProvider)
+	require.Empty(t, capturedProvider)
 }
 
 // TestParseContent_ProviderField verifies that the provider field round-trips
@@ -520,7 +522,7 @@ func TestParseContent_ProviderField(t *testing.T) {
 	tests := []struct {
 		name         string
 		content      string
-		wantProvider string
+		wantProvider catalog.InferenceProvider
 	}{
 		{
 			name: "provider_set",
@@ -1010,7 +1012,7 @@ func TestDiscoverWithStates(t *testing.T) {
 					0o644,
 				))
 
-				noModels := func(provider, model string) bool { return false }
+				noModels := func(provider catalog.InferenceProvider, model string) bool { return false }
 				all, active, states := DiscoverFromConfig(DiscoveryConfig{
 					SubagentsPaths: []string{tmp},
 					IsKnownModel:   noModels,
@@ -1093,8 +1095,9 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		var capturedProvider, capturedModel string
-		isKnown := func(provider, model string) bool {
+		var capturedProvider catalog.InferenceProvider
+		var capturedModel string
+		isKnown := func(provider catalog.InferenceProvider, model string) bool {
 			capturedProvider = provider
 			capturedModel = model
 			return true
@@ -1105,7 +1108,7 @@ func TestDiscoverWithStates(t *testing.T) {
 		require.Len(t, agents, 1)
 		require.Len(t, states, 1)
 		require.Equal(t, StateNormal, states[0].State)
-		require.Equal(t, "openai", capturedProvider)
+		require.Equal(t, catalog.InferenceProvider("openai"), capturedProvider)
 		require.Equal(t, "gpt-4o", capturedModel)
 	})
 
@@ -1119,7 +1122,7 @@ func TestDiscoverWithStates(t *testing.T) {
 			0o644,
 		))
 
-		isKnown := func(provider, model string) bool { return false }
+		isKnown := func(provider catalog.InferenceProvider, model string) bool { return false }
 
 		agents, states := DiscoverWithStates([]string{tmp}, isKnown, nil)
 

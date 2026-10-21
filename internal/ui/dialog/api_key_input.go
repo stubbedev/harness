@@ -272,7 +272,7 @@ func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 	start := time.Now()
 
 	providerConfig := config.ProviderConfig{
-		ID:      string(m.provider.ID),
+		ID:      m.provider.ID,
 		Name:    m.provider.Name,
 		APIKey:  m.input.Value(),
 		Type:    m.provider.Type,
@@ -294,7 +294,7 @@ func (m *APIKeyInput) verifyAPIKey() tea.Msg {
 }
 
 func (m *APIKeyInput) saveKeyAndContinue() Action {
-	err := m.com.Workspace.SetProviderAPIKey(config.ScopeGlobal, string(m.provider.ID), m.input.Value())
+	err := m.com.Workspace.SetProviderAPIKey(config.ScopeGlobal, m.provider.ID, m.input.Value())
 	if err != nil {
 		return ActionCmd{util.ReportError(fmt.Errorf("failed to save API key: %w", err))}
 	}

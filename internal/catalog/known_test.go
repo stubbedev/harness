@@ -72,7 +72,7 @@ func TestKnownHeadersAreCopied(t *testing.T) {
 func TestLegacyProviderID(t *testing.T) {
 	t.Parallel()
 
-	for old, want := range map[string]string{
+	for old, want := range map[InferenceProvider]InferenceProvider{
 		"gemini":            "google",
 		"copilot":           "github-copilot",
 		"bedrock":           "amazon-bedrock",

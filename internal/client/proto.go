@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/crash"
@@ -393,9 +394,9 @@ func (c *Client) GetAgentSessionQueuedPromptsList(ctx context.Context, id string
 }
 
 // GetDefaultSmallModel retrieves the default small model for a provider.
-func (c *Client) GetDefaultSmallModel(ctx context.Context, id string, providerID string) (*config.SelectedModel, error) {
+func (c *Client) GetDefaultSmallModel(ctx context.Context, id string, providerID catalog.InferenceProvider) (*config.SelectedModel, error) {
 	model, err := call[config.SelectedModel](ctx, c, "get default small model",
-		get(wsPath(id, "agent", "default-small-model"), url.Values{"provider_id": []string{providerID}}))
+		get(wsPath(id, "agent", "default-small-model"), url.Values{"provider_id": []string{string(providerID)}}))
 	if err != nil {
 		return nil, err
 	}

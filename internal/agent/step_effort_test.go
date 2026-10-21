@@ -23,7 +23,7 @@ func glmModel(effort string) Model {
 	}
 }
 
-var zaiProvider = config.ProviderConfig{ID: string(catalog.InferenceProviderZAICoding), Type: openaicompat.Name}
+var zaiProvider = config.ProviderConfig{ID: catalog.InferenceProviderZAICoding, Type: openaicompat.Name}
 
 func TestToolStepEffort(t *testing.T) {
 	t.Parallel()

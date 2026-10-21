@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/lsp"
@@ -94,7 +95,7 @@ func writeModels(b *strings.Builder, cfg *config.ConfigStore) {
 func writeProviders(b *strings.Builder, cfg *config.ConfigStore) {
 	c := cfg.Config()
 	type pv struct {
-		name  string
+		name  catalog.InferenceProvider
 		count int
 	}
 	var providers []pv
@@ -107,7 +108,7 @@ func writeProviders(b *strings.Builder, cfg *config.ConfigStore) {
 	if len(providers) == 0 {
 		return
 	}
-	slices.SortFunc(providers, func(a, b pv) int { return strings.Compare(a.name, b.name) })
+	slices.SortFunc(providers, func(a, b pv) int { return cmp.Compare(a.name, b.name) })
 	b.WriteString("[providers]\n")
 	for _, p := range providers {
 		fmt.Fprintf(b, "%s = enabled (%d models)\n", p.name, p.count)
@@ -132,7 +133,7 @@ func writeLSP(b *strings.Builder, lspManager *lsp.Manager, cfg *config.ConfigSto
 			})
 		}
 		if len(entries) > 0 {
-			slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.name, b.name) })
+			slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.name, b.name) })
 			b.WriteString("[lsp]\n")
 			for _, e := range entries {
 				stateStr := lspStateString(e.state)
@@ -176,7 +177,7 @@ func writeLSP(b *strings.Builder, lspManager *lsp.Manager, cfg *config.ConfigSto
 		}
 
 		if len(entries) > 0 {
-			slices.SortFunc(entries, func(a, b configuredEntry) int { return strings.Compare(a.name, b.name) })
+			slices.SortFunc(entries, func(a, b configuredEntry) int { return cmp.Compare(a.name, b.name) })
 			b.WriteString("[lsp_configured]\n")
 			for _, e := range entries {
 				fmt.Fprintf(b, "%s = %s\n", e.name, e.status)
@@ -213,7 +214,7 @@ func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg *config.
 			}
 			entries = append(entries, e)
 		}
-		slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.name, b.name) })
+		slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.name, b.name) })
 		b.WriteString("[mcp]\n")
 		for _, e := range entries {
 			switch e.state {
@@ -262,7 +263,7 @@ func writeMCP(b *strings.Builder, states map[string]mcp.ClientInfo, cfg *config.
 		}
 
 		if len(entries) > 0 {
-			slices.SortFunc(entries, func(a, b configuredEntry) int { return strings.Compare(a.name, b.name) })
+			slices.SortFunc(entries, func(a, b configuredEntry) int { return cmp.Compare(a.name, b.name) })
 			b.WriteString("[mcp_configured]\n")
 			for _, e := range entries {
 				fmt.Fprintf(b, "%s = %s\n", e.name, e.status)
@@ -317,7 +318,7 @@ func writeSkills(b *strings.Builder, allSkills []*skills.Skill, activeSkills []*
 		entries = append(entries, entry{name: name, origin: origin, state: "disabled"})
 	}
 
-	slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.name, b.name) })
+	slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.name, b.name) })
 	b.WriteString("[skills]\n")
 	fmt.Fprintf(b, "loaded_this_session = %d/%d\n", tracker.LoadedCount(), len(activeSkills))
 	for _, e := range entries {

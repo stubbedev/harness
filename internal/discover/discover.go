@@ -100,7 +100,7 @@ func indexBy[T any](items []T, key func(T) string) map[string]T {
 
 // Config holds the provider configuration needed for model discovery.
 type Config struct {
-	ID           string
+	ID           catalog.InferenceProvider
 	BaseURL      string
 	APIKey       string
 	ExtraHeaders map[string]string

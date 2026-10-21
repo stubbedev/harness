@@ -125,15 +125,15 @@ var meaningChanged = map[InferenceProvider]string{
 
 // LegacyProviderID returns the current id for a provider id that was
 // renamed when the catalog moved off catwalk.
-func LegacyProviderID(id string) (string, bool) {
-	current, ok := legacyProviderIDs[InferenceProvider(id)]
-	return string(current), ok
+func LegacyProviderID(id InferenceProvider) (InferenceProvider, bool) {
+	current, ok := legacyProviderIDs[id]
+	return current, ok
 }
 
 // ProviderMeaningChanged returns an explanation when a provider id
 // still exists but no longer refers to what it used to.
-func ProviderMeaningChanged(id string) (string, bool) {
-	note, ok := meaningChanged[InferenceProvider(id)]
+func ProviderMeaningChanged(id InferenceProvider) (string, bool) {
+	note, ok := meaningChanged[id]
 	return note, ok
 }
 
@@ -141,8 +141,8 @@ func ProviderMeaningChanged(id string) (string, bool) {
 // pay-per-token API and the coding subscription are the same service
 // behind two base URLs and share its request quirks, so the
 // GLM-specific request fields apply to both.
-func IsZAI(id string) bool {
-	return id == string(InferenceProviderZAI) || id == string(InferenceProviderZAICoding)
+func IsZAI(id InferenceProvider) bool {
+	return id == InferenceProviderZAI || id == InferenceProviderZAICoding
 }
 
 // IsAlibabaDashScope reports whether id is one of Alibaba's DashScope
@@ -150,9 +150,9 @@ func IsZAI(id string) bool {
 // entry per region and plan ("alibaba", "alibaba-cn",
 // "alibaba-coding-plan", ...), so the family is matched by prefix
 // rather than enumerated.
-func IsAlibabaDashScope(id string) bool {
-	return id == string(InferenceProviderAlibabaSingapore) ||
-		strings.HasPrefix(id, string(InferenceProviderAlibabaSingapore)+"-")
+func IsAlibabaDashScope(id InferenceProvider) bool {
+	return id == InferenceProviderAlibabaSingapore ||
+		strings.HasPrefix(string(id), string(InferenceProviderAlibabaSingapore)+"-")
 }
 
 // knownHeaders returns a copy of the headers a known provider expects,

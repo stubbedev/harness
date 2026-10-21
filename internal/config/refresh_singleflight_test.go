@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/oauth"
 )
@@ -43,7 +44,7 @@ func writeTokenToDisk(t *testing.T, path string, token *oauth.Token) {
 // which lets a single test process faithfully simulate two harness instances:
 // lock.File opens a fresh descriptor per call, so two stores block each
 // other on the same lock file exactly as two processes would.
-func newRefreshTestStore(t *testing.T, configPath string, exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error)) *ConfigStore {
+func newRefreshTestStore(t *testing.T, configPath string, exchange func(ctx context.Context, providerID catalog.InferenceProvider, refreshToken string) (*oauth.Token, error)) *ConfigStore {
 	t.Helper()
 
 	// Keep provider reloads offline: these tests exercise token
@@ -58,7 +59,7 @@ func newRefreshTestStore(t *testing.T, configPath string, exchange func(ctx cont
 	}
 	writeTokenToDisk(t, configPath, expired)
 
-	providers := csync.NewMap[string, ProviderConfig]()
+	providers := csync.NewMap[catalog.InferenceProvider, ProviderConfig]()
 	providers.Set("rotator", ProviderConfig{
 		ID:             "rotator",
 		Name:           "Hyper",
@@ -82,7 +83,7 @@ func TestRefreshOAuthToken_InProcessSingleFlight(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "harness.yaml")
 
 	var exchanges atomic.Int64
-	store := newRefreshTestStore(t, configPath, func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	store := newRefreshTestStore(t, configPath, func(ctx context.Context, providerID catalog.InferenceProvider, refreshToken string) (*oauth.Token, error) {
 		exchanges.Add(1)
 		time.Sleep(50 * time.Millisecond) // hold the flight open so peers join
 		return &oauth.Token{
@@ -133,7 +134,7 @@ func TestRefreshOAuthToken_CrossProcessAdopt(t *testing.T) {
 		exchanges   atomic.Int64
 		reuseErrors atomic.Int64
 	)
-	exchange := func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	exchange := func(ctx context.Context, providerID catalog.InferenceProvider, refreshToken string) (*oauth.Token, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if refreshToken != current {
@@ -190,13 +191,13 @@ func TestRefreshOAuthToken_CrossProcessAdopt(t *testing.T) {
 // live refresh token fails the way a real reuse-detecting server would.
 // Tokens are handed out as at<n>/rt<n> starting at next. The returned
 // counters report successful exchanges and reuse attempts.
-func rotatingExchange(live string, next int) (exchange func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error), exchanges, reuse *atomic.Int64) {
+func rotatingExchange(live string, next int) (exchange func(ctx context.Context, providerID catalog.InferenceProvider, refreshToken string) (*oauth.Token, error), exchanges, reuse *atomic.Int64) {
 	var (
 		mu        sync.Mutex
 		exchanged atomic.Int64
 		reused    atomic.Int64
 	)
-	return func(ctx context.Context, providerID, refreshToken string) (*oauth.Token, error) {
+	return func(ctx context.Context, providerID catalog.InferenceProvider, refreshToken string) (*oauth.Token, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if refreshToken != live {

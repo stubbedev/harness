@@ -25,7 +25,7 @@ func wireTestCoordinator(t *testing.T) *coordinator {
 
 // reasoningModel returns a reasoning model with id, configured at high
 // effort.
-func reasoningModel(providerID, id string) Model {
+func reasoningModel(providerID catalog.InferenceProvider, id string) Model {
 	return Model{
 		CatalogCfg: catalog.Model{ID: id, CanReason: true, ReasoningLevels: []string{"low", "medium", "high"}},
 		ModelCfg:   config.SelectedModel{Provider: providerID, Model: id, ReasoningEffort: "high"},
@@ -58,17 +58,17 @@ func TestProviderOptionsKeyedForBuiltProvider(t *testing.T) {
 		{"anthropic", config.ProviderConfig{ID: "anthropic", Type: catalog.TypeAnthropic}, "claude-sonnet-4-5"},
 		{"custom anthropic", config.ProviderConfig{ID: "my-proxy", Type: catalog.TypeAnthropic}, "claude-sonnet-4-5"},
 		{"openai", config.ProviderConfig{ID: "openai", Type: catalog.TypeOpenAI}, "gpt-5"},
-		{"openai-compat", config.ProviderConfig{ID: string(catalog.InferenceProviderZAICoding), Type: catalog.TypeOpenAICompat}, "glm-5.3"},
-		{"opencode-go on chat completions", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "kimi-k3"},
-		{"opencode-go on the responses api", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "gpt-5.6-luna"},
-		{"opencode-go on the responses api (grok)", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "grok-4.5"},
-		{"opencode-go on the responses api (muse spark)", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "muse-spark-pro"},
-		{"opencode-go on the messages api", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "minimax-m3"},
-		{"opencode-zen on the messages api", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeZen), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "claude-sonnet-4-5"},
-		{"opencode-zen on the responses api", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeZen), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "gpt-5.5"},
-		{"opencode-zen on the responses api (grok)", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeZen), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "grok-4.5"},
-		{"opencode-zen on the responses api (muse spark)", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeZen), Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "muse-spark-pro"},
-		{"copilot on the responses api", config.ProviderConfig{ID: string(catalog.InferenceProviderCopilot), Type: catalog.TypeOpenAICompat}, "gpt-6-astra"},
+		{"openai-compat", config.ProviderConfig{ID: catalog.InferenceProviderZAICoding, Type: catalog.TypeOpenAICompat}, "glm-5.3"},
+		{"opencode-go on chat completions", config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeGo, Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "kimi-k3"},
+		{"opencode-go on the responses api", config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeGo, Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "gpt-5.6-luna"},
+		{"opencode-go on the responses api (grok)", config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeGo, Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "grok-4.5"},
+		{"opencode-go on the responses api (muse spark)", config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeGo, Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "muse-spark-pro"},
+		{"opencode-go on the messages api", config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeGo, Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/go/v1"}, "minimax-m3"},
+		{"opencode-zen on the messages api", config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeZen, Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "claude-sonnet-4-5"},
+		{"opencode-zen on the responses api", config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeZen, Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "gpt-5.5"},
+		{"opencode-zen on the responses api (grok)", config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeZen, Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "grok-4.5"},
+		{"opencode-zen on the responses api (muse spark)", config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeZen, Type: catalog.TypeOpenAICompat, BaseURL: "https://opencode.ai/zen/v1"}, "muse-spark-pro"},
+		{"copilot on the responses api", config.ProviderConfig{ID: catalog.InferenceProviderCopilot, Type: catalog.TypeOpenAICompat}, "gpt-6-astra"},
 		{"vertex claude", config.ProviderConfig{ID: "vertexai", Type: catalog.TypeVertexAI, ExtraParams: map[string]string{"project": "p", "location": "us-east5"}}, "claude-sonnet-4@20250514"},
 		{"vertex gemini", config.ProviderConfig{ID: "vertexai", Type: catalog.TypeVertexAI, ExtraParams: map[string]string{"project": "p", "location": "us-east5"}}, "gemini-3-pro"},
 		{"bedrock", config.ProviderConfig{ID: "bedrock", Type: catalog.TypeBedrock}, "anthropic.claude-sonnet-4-5"},
@@ -105,11 +105,14 @@ func TestProviderOptionsKeyedForBuiltProvider(t *testing.T) {
 func TestProviderOptionsForMessagesAPIModels(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct{ providerID, modelID string }{
-		{string(catalog.InferenceProviderOpenCodeGo), "minimax-m3"},
-		{string(catalog.InferenceProviderOpenCodeZen), "claude-sonnet-4-5"},
+	for _, tc := range []struct {
+		providerID catalog.InferenceProvider
+		modelID    string
+	}{
+		{catalog.InferenceProviderOpenCodeGo, "minimax-m3"},
+		{catalog.InferenceProviderOpenCodeZen, "claude-sonnet-4-5"},
 	} {
-		t.Run(tc.providerID, func(t *testing.T) {
+		t.Run(string(tc.providerID), func(t *testing.T) {
 			t.Parallel()
 
 			providerCfg := config.ProviderConfig{ID: tc.providerID, Type: catalog.TypeOpenAICompat}
@@ -134,7 +137,7 @@ func TestBuildProviderInterleavedThinkingForMessagesAPIModels(t *testing.T) {
 		modelID     string
 	}{
 		{"anthropic", config.ProviderConfig{ID: "anthropic", Type: catalog.TypeAnthropic, APIKey: "k"}, "claude-sonnet-4-5"},
-		{"opencode-go on the messages api", config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat, APIKey: "k"}, "minimax-m3"},
+		{"opencode-go on the messages api", config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeGo, Type: catalog.TypeOpenAICompat, APIKey: "k"}, "minimax-m3"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -174,7 +177,7 @@ func TestWorkaroundProviderMediaLimitationsFollowsWire(t *testing.T) {
 	for _, providerCfg := range []config.ProviderConfig{
 		{ID: "my-proxy", Type: catalog.TypeAnthropic},
 		{ID: "vertexai", Type: catalog.TypeVertexAI},
-		{ID: string(catalog.InferenceProviderOpenCodeZen), Type: catalog.TypeOpenAICompat},
+		{ID: catalog.InferenceProviderOpenCodeZen, Type: catalog.TypeOpenAICompat},
 	} {
 		model := Model{
 			ModelCfg:   config.SelectedModel{Provider: providerCfg.ID},
@@ -191,7 +194,7 @@ func TestWorkaroundProviderMediaLimitationsFollowsWire(t *testing.T) {
 func TestBuildModelRecordsWire(t *testing.T) {
 	t.Parallel()
 
-	providerCfg := config.ProviderConfig{ID: string(catalog.InferenceProviderOpenCodeGo), Type: catalog.TypeOpenAICompat}
+	providerCfg := config.ProviderConfig{ID: catalog.InferenceProviderOpenCodeGo, Type: catalog.TypeOpenAICompat}
 	m, err := wireTestCoordinator(t).buildModel(t.Context(), providerCfg,
 		config.SelectedModel{Provider: providerCfg.ID, Model: "minimax-m3"},
 		catalog.Model{ID: "minimax-m3"}, false)

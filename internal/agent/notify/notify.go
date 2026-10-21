@@ -3,6 +3,8 @@
 // events without importing UI packages.
 package notify
 
+import "github.com/stubbedev/harness/internal/catalog"
+
 // Type identifies the kind of agent notification.
 type Type string
 
@@ -37,7 +39,7 @@ type Notification struct {
 	SessionID    string
 	SessionTitle string
 	Type         Type
-	ProviderID   string
+	ProviderID   catalog.InferenceProvider
 	// RunID, when non-empty, is the caller-supplied correlator
 	// (proto.AgentMessage.RunID) for the run that produced this
 	// notification. It lets observers attribute a TypeAgentError to a

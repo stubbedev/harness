@@ -627,7 +627,7 @@ func (app *App) overrideModelsForNonInteractive(ctx context.Context, largeModel,
 		return err
 	}
 
-	var largeProviderID string
+	var largeProviderID catalog.InferenceProvider
 
 	// Override large model.
 	if largeModel != "" {
@@ -689,7 +689,7 @@ func (app *App) overrideReasoningEffort(ctx context.Context, reasoningEffort str
 
 // GetDefaultSmallModel returns the default small model for the given
 // provider. Falls back to the large model if no default is found.
-func (app *App) GetDefaultSmallModel(providerID string) config.SelectedModel {
+func (app *App) GetDefaultSmallModel(providerID catalog.InferenceProvider) config.SelectedModel {
 	cfg := app.config.Config()
 	largeModelCfg := cfg.Models[config.SelectedModelTypeLarge]
 

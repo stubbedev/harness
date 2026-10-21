@@ -3863,7 +3863,7 @@ func (m *UI) drawEditorArea(scr uv.Screen, editorRect uv.Rectangle) {
 // model from the same theme family would otherwise pay the full cost of
 // invalidating the markdown renderer cache and re-rendering the entire
 // transcript for no visible change.
-func (m *UI) applyThemeForProvider(providerID string) {
+func (m *UI) applyThemeForProvider(providerID catalog.InferenceProvider) {
 	// A theme configured via options.tui.theme wins over the
 	// provider-based mapping; switching providers must not swap it.
 	if name := common.ThemeNameFromConfig(m.com.Config()); name != "" {
@@ -4457,7 +4457,7 @@ func (m *UI) handleAgentNotification(n notify.Notification) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *UI) handleReAuthenticate(providerID string) tea.Cmd {
+func (m *UI) handleReAuthenticate(providerID catalog.InferenceProvider) tea.Cmd {
 	cfg := m.com.Config()
 	if cfg == nil {
 		return nil

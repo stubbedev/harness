@@ -117,7 +117,7 @@ func translateModelsDev(md modelsDev) []Provider {
 	// models.dev is a JSON object, so iteration order is random; sort
 	// the catalog by ID for deterministic output.
 	slices.SortStableFunc(providers, func(a, b Provider) int {
-		return strings.Compare(string(a.ID), string(b.ID))
+		return cmp.Compare(a.ID, b.ID)
 	})
 	return providers
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/browser"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/agentstate"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/commands"
@@ -299,7 +300,7 @@ func (w *ClientWorkspace) InitCoderAgentNonInteractive(ctx context.Context) erro
 	return w.client.InitiateAgentProcessing(ctx, w.workspaceID(), false)
 }
 
-func (w *ClientWorkspace) GetDefaultSmallModel(providerID string) (config.SelectedModel, error) {
+func (w *ClientWorkspace) GetDefaultSmallModel(providerID catalog.InferenceProvider) (config.SelectedModel, error) {
 	model, err := w.client.GetDefaultSmallModel(context.Background(), w.workspaceID(), providerID)
 	if err != nil {
 		return config.SelectedModel{}, err
@@ -452,7 +453,7 @@ func (w *ClientWorkspace) SetCompactMode(scope config.Scope, enabled bool) error
 	return err
 }
 
-func (w *ClientWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
+func (w *ClientWorkspace) SetProviderAPIKey(scope config.Scope, providerID catalog.InferenceProvider, apiKey any) error {
 	err := w.client.SetProviderAPIKey(context.Background(), w.workspaceID(), scope, providerID, apiKey)
 	if err == nil {
 		w.refreshWorkspace()
@@ -488,7 +489,7 @@ func (w *ClientWorkspace) ImportCopilot() (*oauth.Token, bool) {
 	return token, ok
 }
 
-func (w *ClientWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {
+func (w *ClientWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID catalog.InferenceProvider) error {
 	err := w.client.RefreshOAuthToken(ctx, w.workspaceID(), scope, providerID)
 	if err == nil {
 		w.refreshWorkspace()

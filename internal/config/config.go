@@ -75,7 +75,7 @@ type SelectedModel struct {
 	Model string `json:"model" jsonschema:"required,description=The model ID as used by the provider API,example=gpt-4o"`
 	// The model provider, same as the key/id used in the providers config.
 	// Required.
-	Provider string `json:"provider" jsonschema:"required,description=The model provider ID that matches a key in the providers config,example=openai"`
+	Provider catalog.InferenceProvider `json:"provider" jsonschema:"required,description=The model provider ID that matches a key in the providers config,example=openai"`
 
 	// Only used by models that use the openai provider and need this set.
 	ReasoningEffort string `json:"reasoning_effort,omitempty" jsonschema:"description=Reasoning effort level for OpenAI models that support it,enum=low,enum=medium,enum=high"`
@@ -103,7 +103,7 @@ func (m SelectedModel) Equal(other SelectedModel) bool {
 
 type ProviderConfig struct {
 	// The provider's id.
-	ID string `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`
+	ID catalog.InferenceProvider `json:"id,omitempty" jsonschema:"description=Unique identifier for the provider,example=openai"`
 	// The provider's name, used for display purposes.
 	Name string `json:"name,omitempty" jsonschema:"description=Human-readable name for the provider,example=OpenAI"`
 	// The provider's API endpoint.
@@ -174,7 +174,7 @@ type ProviderConfig struct {
 func (c *ProviderConfig) ToProvider() catalog.Provider {
 	return catalog.Provider{
 		Name:   c.Name,
-		ID:     catalog.InferenceProvider(c.ID),
+		ID:     c.ID,
 		Models: slices.Clone(c.Models),
 	}
 }
@@ -877,7 +877,7 @@ type Config struct {
 	ReasoningEfforts map[string]string `json:"reasoning_efforts,omitempty" jsonschema:"-"`
 
 	// The providers that are configured
-	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
+	Providers *csync.Map[catalog.InferenceProvider, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
 
 	MCP MCPs `json:"mcp,omitempty" jsonschema:"description=Model Context Protocol server configurations"`
 
@@ -904,8 +904,8 @@ type Config struct {
 }
 
 // ModelReasoningKey builds the ReasoningEfforts map key for a model.
-func ModelReasoningKey(provider, model string) string {
-	return provider + "/" + model
+func ModelReasoningKey(provider catalog.InferenceProvider, model string) string {
+	return string(provider) + "/" + model
 }
 
 // cloneForWrite returns a copy of c that the store's typed field mutators
@@ -973,7 +973,7 @@ func (c *Config) IsConfigured() bool {
 	return len(c.EnabledProviders()) > 0
 }
 
-func (c *Config) GetModel(provider, model string) *catalog.Model {
+func (c *Config) GetModel(provider catalog.InferenceProvider, model string) *catalog.Model {
 	if providerConfig, ok := c.Providers.Get(provider); ok {
 		for _, m := range providerConfig.Models {
 			if m.ID == model {
@@ -987,7 +987,7 @@ func (c *Config) GetModel(provider, model string) *catalog.Model {
 // ValidateReasoningEffort checks that effort is a reasoning level the
 // given provider/model supports. It returns an error listing the accepted
 // levels when the model cannot use it.
-func (c *Config) ValidateReasoningEffort(provider, modelID, effort string) error {
+func (c *Config) ValidateReasoningEffort(provider catalog.InferenceProvider, modelID, effort string) error {
 	model := c.GetModel(provider, modelID)
 	if model == nil {
 		return fmt.Errorf("model %q not found for provider %q", modelID, provider)
@@ -1006,7 +1006,7 @@ func (c *Config) ValidateReasoningEffort(provider, modelID, effort string) error
 
 // IsModelAvailable returns true if the provider is enabled and the model
 // exists in its catalog. Unlike GetModel, it rejects disabled providers.
-func (c *Config) IsModelAvailable(provider, model string) bool {
+func (c *Config) IsModelAvailable(provider catalog.InferenceProvider, model string) bool {
 	providerConfig, ok := c.Providers.Get(provider)
 	return ok && !providerConfig.Disable && c.GetModel(provider, model) != nil
 }
@@ -1032,7 +1032,7 @@ func (c *Config) IsKnownModelID(modelID string) bool {
 // IsKnownModel reports whether the given model is offered by the given
 // provider. When provider is empty, it scans all providers (equivalent to
 // IsKnownModelID).
-func (c *Config) IsKnownModel(provider, modelID string) bool {
+func (c *Config) IsKnownModel(provider catalog.InferenceProvider, modelID string) bool {
 	if provider == "" {
 		return c.IsKnownModelID(modelID)
 	}
@@ -1155,7 +1155,6 @@ func (c *Config) SetupAgents() {
 }
 
 func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
-	providerID := catalog.InferenceProvider(c.ID)
 	apiKey, err := resolver.ResolveValue(c.APIKey)
 	if err != nil {
 		return fmt.Errorf("resolving API key for provider %s: %w", c.ID, err)
@@ -1167,7 +1166,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	var testURL string
 	headers := make(map[string]string)
 
-	switch providerID {
+	switch c.ID {
 	case catalog.InferenceProviderMiniMax, catalog.InferenceProviderMiniMaxChina:
 		// NOTE: MiniMax has no good endpoint we can use to validate the API key.
 		return nil
@@ -1185,7 +1184,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	case catalog.TypeOpenAI, catalog.TypeOpenAICompat, catalog.TypeOpenRouter:
 		baseURL = cmp.Or(baseURL, "https://api.openai.com/v1")
 
-		switch providerID {
+		switch c.ID {
 		case catalog.InferenceProviderOpenRouter:
 			testURL = baseURL + "/credits"
 		case catalog.InferenceProviderOpenCodeGo:
@@ -1198,7 +1197,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	case catalog.TypeAnthropic:
 		baseURL = cmp.Or(baseURL, "https://api.anthropic.com/v1")
 
-		switch providerID {
+		switch c.ID {
 		case catalog.InferenceKimiCoding:
 			testURL = baseURL + "/v1/models"
 		default:
@@ -1248,7 +1247,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 	}
 	defer resp.Body.Close()
 
-	switch providerID {
+	switch c.ID {
 	case catalog.InferenceProviderZAI:
 		if resp.StatusCode == http.StatusUnauthorized {
 			return fmt.Errorf("failed to connect to provider %s: %s", c.ID, resp.Status)

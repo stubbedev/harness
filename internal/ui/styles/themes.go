@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/exp/charmtone"
+	"github.com/stubbedev/harness/internal/catalog"
 )
 
 // ThemeKeyForProvider returns a stable identifier for the theme
@@ -16,7 +17,7 @@ import (
 // providers would not actually change the active theme and skip the
 // expensive style rebuild. This is the single source of truth for the
 // provider-to-theme mapping; [ThemeForProvider] builds on it.
-func ThemeKeyForProvider(providerID string) string {
+func ThemeKeyForProvider(providerID catalog.InferenceProvider) string {
 	return "default"
 }
 
@@ -24,7 +25,7 @@ func ThemeKeyForProvider(providerID string) string {
 // ID. Unknown or empty provider IDs yield the default Charmtone Pantera
 // theme. A theme configured via options.tui.theme always takes
 // precedence over this provider mapping; see [ThemeFromConfig].
-func ThemeForProvider(providerID string) Styles {
+func ThemeForProvider(providerID catalog.InferenceProvider) Styles {
 	return CharmtonePantera()
 }
 

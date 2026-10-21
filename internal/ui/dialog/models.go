@@ -281,8 +281,7 @@ func (m *Models) isSelectedConfigured() bool {
 	if !ok {
 		return false
 	}
-	providerID := string(modelItem.prov.ID)
-	_, isConfigured := m.com.Config().Providers.Get(providerID)
+	_, isConfigured := m.com.Config().Providers.Get(modelItem.prov.ID)
 	return isConfigured
 }
 
@@ -297,7 +296,7 @@ func (m *Models) setProviderItems() error {
 	recentItems := cfg.RecentModels[selectedType]
 
 	// Track providers already added to avoid duplicates
-	addedProviders := make(map[string]bool)
+	addedProviders := make(map[catalog.InferenceProvider]bool)
 
 	// A provider with no credentials cannot serve a request, so the list
 	// only shows connected ones. Connecting a new provider is the Connect
@@ -310,9 +309,9 @@ func (m *Models) setProviderItems() error {
 		return fmt.Errorf("failed to get providers: %w", err)
 	}
 
-	containsProviderFunc := func(id string) func(p catalog.Provider) bool {
+	containsProviderFunc := func(id catalog.InferenceProvider) func(p catalog.Provider) bool {
 		return func(p catalog.Provider) bool {
-			return p.ID == catalog.InferenceProvider(id)
+			return p.ID == id
 		}
 	}
 
@@ -330,7 +329,7 @@ func (m *Models) setProviderItems() error {
 			provider := p.ToProvider()
 
 			// Add this unknown provider to the list
-			name := cmp.Or(p.Name, id)
+			name := cmp.Or(p.Name, string(id))
 
 			addedProviders[id] = true
 
@@ -339,7 +338,7 @@ func (m *Models) setProviderItems() error {
 				item := NewModelItem(t, provider, model, m.modelType, false)
 				group.AppendItems(item)
 				itemsMap[item.ID()] = item
-				if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+				if model.ID == currentModel.Model && provider.ID == currentModel.Provider {
 					selectedItemID = item.ID()
 				}
 			}
@@ -351,12 +350,11 @@ func (m *Models) setProviderItems() error {
 
 	// Now add known providers from the predefined list.
 	for _, provider := range m.providers {
-		providerID := string(provider.ID)
-		if addedProviders[providerID] {
+		if addedProviders[provider.ID] {
 			continue
 		}
 
-		providerConfig, providerConfigured := cfg.Providers.Get(providerID)
+		providerConfig, providerConfigured := cfg.Providers.Get(provider.ID)
 		if !providerConfigured || providerConfig.Disable {
 			continue
 		}
@@ -382,14 +380,14 @@ func (m *Models) setProviderItems() error {
 			modelIndex[model.ID] = len(displayProvider.Models) - 1
 		}
 
-		name := cmp.Or(displayProvider.Name, providerID)
+		name := cmp.Or(displayProvider.Name, string(provider.ID))
 
 		group := NewModelGroup(t, name)
 		for _, model := range displayProvider.Models {
 			item := NewModelItem(t, provider, model, m.modelType, false)
 			group.AppendItems(item)
 			itemsMap[item.ID()] = item
-			if model.ID == currentModel.Model && string(provider.ID) == currentModel.Provider {
+			if model.ID == currentModel.Model && provider.ID == currentModel.Provider {
 				selectedItemID = item.ID()
 			}
 		}
@@ -478,9 +476,9 @@ func showProviderForAmbiguousModels(groups []ModelGroup) {
 	}
 }
 
-func modelKey(providerID, modelID string) string {
+func modelKey(providerID catalog.InferenceProvider, modelID string) string {
 	if providerID == "" || modelID == "" {
 		return ""
 	}
-	return providerID + ":" + modelID
+	return string(providerID) + ":" + modelID
 }

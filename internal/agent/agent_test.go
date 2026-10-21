@@ -1147,7 +1147,7 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 	// Anthropic provider — should return messages unchanged regardless of
 	// SupportsImages, since Anthropic handles media in tool results natively.
 	largeModel := Model{
-		ModelCfg: config.SelectedModel{Provider: string(catalog.InferenceProviderAnthropic)},
+		ModelCfg: config.SelectedModel{Provider: catalog.InferenceProviderAnthropic},
 		CatalogCfg: catalog.Model{
 			SupportsImages: true,
 		},

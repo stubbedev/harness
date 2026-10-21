@@ -8,10 +8,10 @@ import (
 	"github.com/stubbedev/harness/internal/csync"
 )
 
-func newConfigWithProviders(t *testing.T, providers map[string][]string) *Config {
+func newConfigWithProviders(t *testing.T, providers map[catalog.InferenceProvider][]string) *Config {
 	t.Helper()
 
-	pMap := csync.NewMap[string, ProviderConfig]()
+	pMap := csync.NewMap[catalog.InferenceProvider, ProviderConfig]()
 	for id, modelIDs := range providers {
 		models := make([]catalog.Model, 0, len(modelIDs))
 		for _, mid := range modelIDs {
@@ -25,7 +25,7 @@ func newConfigWithProviders(t *testing.T, providers map[string][]string) *Config
 func TestConfig_IsKnownModelID(t *testing.T) {
 	t.Parallel()
 
-	cfg := newConfigWithProviders(t, map[string][]string{
+	cfg := newConfigWithProviders(t, map[catalog.InferenceProvider][]string{
 		"openai":    {"gpt-4o", "gpt-4o-mini"},
 		"anthropic": {"claude-opus-4-7", "claude-sonnet-4-6"},
 	})
@@ -62,14 +62,14 @@ func TestConfig_IsKnownModelID_NoProviders(t *testing.T) {
 func TestConfig_IsKnownModel(t *testing.T) {
 	t.Parallel()
 
-	cfg := newConfigWithProviders(t, map[string][]string{
+	cfg := newConfigWithProviders(t, map[catalog.InferenceProvider][]string{
 		"openai":    {"gpt-4o", "gpt-4o-mini"},
 		"anthropic": {"claude-opus-4-7", "claude-sonnet-4-6"},
 	})
 
 	tests := []struct {
 		name     string
-		provider string
+		provider catalog.InferenceProvider
 		modelID  string
 		want     bool
 	}{

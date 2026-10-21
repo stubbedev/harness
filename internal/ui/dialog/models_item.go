@@ -69,7 +69,7 @@ func (m *ModelItem) Finished() bool {
 func (m *ModelItem) SelectedModel() config.SelectedModel {
 	return config.SelectedModel{
 		Model:           m.model.ID,
-		Provider:        string(m.prov.ID),
+		Provider:        m.prov.ID,
 		ReasoningEffort: catalog.DefaultReasoningLevel(m.model.ReasoningLevels),
 		MaxTokens:       m.model.DefaultMaxTokens,
 	}
@@ -121,7 +121,7 @@ func (m *ModelItem) RightLabel() string {
 
 // ID implements ListItem.
 func (m *ModelItem) ID() string {
-	return modelKey(string(m.prov.ID), m.model.ID)
+	return modelKey(m.prov.ID, m.model.ID)
 }
 
 // Render implements ListItem, flowing through the one shared row

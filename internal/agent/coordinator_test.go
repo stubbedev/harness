@@ -64,7 +64,7 @@ func newCoordinatorForTest(c *coordinator) *coordinator {
 }
 
 // newTestCoordinator creates a minimal coordinator for unit testing runSubAgent.
-func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCfg config.ProviderConfig) *coordinator {
+func newTestCoordinator(t *testing.T, env fakeEnv, providerID catalog.InferenceProvider, providerCfg config.ProviderConfig) *coordinator {
 	cfg, err := config.Init(env.workingDir, "", false)
 	require.NoError(t, err)
 	if providerCfg.ResolvedAPIKey == "" && providerCfg.APIKey != "" && providerCfg.APIKeyResolutionError == nil {
@@ -79,7 +79,7 @@ func newTestCoordinator(t *testing.T, env fakeEnv, providerID string, providerCf
 }
 
 // newMockAgent creates a mockSessionAgent with the given provider and run function.
-func newMockAgent(providerID string, maxTokens int64, runFunc func(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)) *mockSessionAgent {
+func newMockAgent(providerID catalog.InferenceProvider, maxTokens int64, runFunc func(context.Context, SessionAgentCall) (*fantasy.AgentResult, error)) *mockSessionAgent {
 	return &mockSessionAgent{
 		model: Model{
 			CatalogCfg: catalog.Model{
@@ -774,7 +774,7 @@ func TestFindModelProvider(t *testing.T) {
 
 		pc, m, ok := coord.findModelProvider("model-b", "")
 		require.True(t, ok)
-		require.Equal(t, "test-provider", pc.ID)
+		require.Equal(t, catalog.InferenceProvider("test-provider"), pc.ID)
 		require.Equal(t, "model-b", m.ID)
 	})
 
@@ -790,7 +790,7 @@ func TestFindModelProvider(t *testing.T) {
 
 		pc, m, ok := coord.findModelProvider("model-a", "test-provider")
 		require.True(t, ok)
-		require.Equal(t, "test-provider", pc.ID)
+		require.Equal(t, catalog.InferenceProvider("test-provider"), pc.ID)
 		require.Equal(t, "model-a", m.ID)
 	})
 
@@ -841,7 +841,7 @@ func TestFindModelProvider_TwoProvidersSameModelID(t *testing.T) {
 			pc, m, ok := coord.findModelProvider("shared-model", "")
 			require.True(t, ok, "must find shared-model in at least one provider")
 			require.Equal(t, "shared-model", m.ID)
-			require.Equal(t, "provider-a", pc.ID, "must deterministically pick the lowest-ID provider")
+			require.Equal(t, catalog.InferenceProvider("provider-a"), pc.ID, "must deterministically pick the lowest-ID provider")
 		}
 	})
 
@@ -850,7 +850,7 @@ func TestFindModelProvider_TwoProvidersSameModelID(t *testing.T) {
 
 		pc, m, ok := coord.findModelProvider("shared-model", "provider-b")
 		require.True(t, ok)
-		require.Equal(t, "provider-b", pc.ID)
+		require.Equal(t, catalog.InferenceProvider("provider-b"), pc.ID)
 		require.Equal(t, "shared-model", m.ID)
 	})
 }
@@ -1295,7 +1295,7 @@ func TestGetProviderOptionsReasoningEffortFallback(t *testing.T) {
 		},
 	}
 	providerCfg := config.ProviderConfig{
-		ID:   string(catalog.InferenceProviderZAI),
+		ID:   catalog.InferenceProviderZAI,
 		Type: openaicompat.Name,
 	}
 
@@ -1399,7 +1399,7 @@ func TestGetProviderOptionsTopKExtraBody(t *testing.T) {
 			CatalogCfg: catalog.Model{ID: "glm-5.2"},
 			ModelCfg:   config.SelectedModel{Provider: "zai", TopK: new(int64(40))},
 		}
-		providerCfg := config.ProviderConfig{ID: string(catalog.InferenceProviderZAI), Type: openaicompat.Name}
+		providerCfg := config.ProviderConfig{ID: catalog.InferenceProviderZAI, Type: openaicompat.Name}
 
 		opts := getProviderOptions(model, providerCfg)
 
@@ -1573,12 +1573,12 @@ func TestBearerAnthropicProviderOmitsEnvironmentAPIKey(t *testing.T) {
 
 	for _, tc := range []struct {
 		name       string
-		providerID string
+		providerID catalog.InferenceProvider
 		apiKey     string
 		wantAuth   string
 	}{
 		{name: "bearer key", providerID: "custom", apiKey: "Bearer token", wantAuth: "Bearer token"},
-		{name: "minimax", providerID: string(catalog.InferenceProviderMiniMax), apiKey: "mm-key", wantAuth: "Bearer mm-key"},
+		{name: "minimax", providerID: catalog.InferenceProviderMiniMax, apiKey: "mm-key", wantAuth: "Bearer mm-key"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			coord := newTestCoordinator(t, testEnv(t), tc.providerID, config.ProviderConfig{ID: tc.providerID})

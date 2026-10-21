@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/clipboard"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/keys"
@@ -69,7 +70,7 @@ func DefaultCommon(ws workspace.Workspace) *Common {
 
 // largeModelProviderID returns the provider ID of the currently selected
 // large model, or the empty string if none is set or the workspace is nil.
-func largeModelProviderID(ws workspace.Workspace) string {
+func largeModelProviderID(ws workspace.Workspace) catalog.InferenceProvider {
 	if ws == nil {
 		return ""
 	}
@@ -104,7 +105,7 @@ func ThemeStylesForWorkspace(ws workspace.Workspace) styles.Styles {
 // ThemeStylesForConfig resolves the theme for a config plus a fallback
 // provider ID: a theme configured via options.tui.theme wins, otherwise
 // the provider mapping decides.
-func ThemeStylesForConfig(cfg *config.Config, providerID string) styles.Styles {
+func ThemeStylesForConfig(cfg *config.Config, providerID catalog.InferenceProvider) styles.Styles {
 	if name := ThemeNameFromConfig(cfg); name != "" {
 		return styles.ThemeFromConfig(name)
 	}

@@ -13,7 +13,7 @@ func TestConfig_ValidateReasoningEffort(t *testing.T) {
 
 	newConfig := func(models ...catalog.Model) *Config {
 		return &Config{
-			Providers: csync.NewMapFrom(map[string]ProviderConfig{
+			Providers: csync.NewMapFrom(map[catalog.InferenceProvider]ProviderConfig{
 				"openai": {
 					ID:     "openai",
 					Models: models,

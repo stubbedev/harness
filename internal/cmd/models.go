@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2/tree"
 	"github.com/spf13/cobra"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 )
 
@@ -43,7 +44,7 @@ harness models gpt5`,
 			configured bool
 		}
 
-		entries := make(map[string]*providerEntry)
+		entries := make(map[catalog.InferenceProvider]*providerEntry)
 
 		// Add configured providers first.
 		for providerID, provider := range cfg.Config().Providers.Seq2() {
@@ -57,7 +58,7 @@ harness models gpt5`,
 			for _, model := range provider.Models {
 				if term != "" {
 					matched := false
-					for _, s := range []string{provider.ID, provider.Name, model.ID, model.Name} {
+					for _, s := range []string{string(provider.ID), provider.Name, model.ID, model.Name} {
 						if strings.Contains(strings.ToLower(s), term) {
 							matched = true
 							break
@@ -77,8 +78,7 @@ harness models gpt5`,
 
 		// Add known but unconfigured providers from the catalog.
 		for _, kp := range cfg.KnownProviders() {
-			providerID := string(kp.ID)
-			if _, exists := entries[providerID]; exists {
+			if _, exists := entries[kp.ID]; exists {
 				continue
 			}
 			entry := &providerEntry{
@@ -88,7 +88,7 @@ harness models gpt5`,
 			for _, model := range kp.Models {
 				if term != "" {
 					matched := false
-					for _, s := range []string{providerID, kp.Name, model.ID, model.Name} {
+					for _, s := range []string{string(kp.ID), kp.Name, model.ID, model.Name} {
 						if strings.Contains(strings.ToLower(s), term) {
 							matched = true
 							break
@@ -102,11 +102,11 @@ harness models gpt5`,
 			}
 			if len(entry.models) > 0 {
 				slices.Sort(entry.models)
-				entries[providerID] = entry
+				entries[kp.ID] = entry
 			}
 		}
 
-		var providerIDs []string
+		var providerIDs []catalog.InferenceProvider
 		for id := range entries {
 			providerIDs = append(providerIDs, id)
 		}
@@ -130,7 +130,7 @@ harness models gpt5`,
 			for _, providerID := range providerIDs {
 				entry := entries[providerID]
 				for _, modelID := range entry.models {
-					fmt.Println(providerID + "/" + modelID)
+					fmt.Println(string(providerID) + "/" + modelID)
 				}
 			}
 			return nil
@@ -139,7 +139,7 @@ harness models gpt5`,
 		t := tree.New()
 		for _, providerID := range providerIDs {
 			entry := entries[providerID]
-			label := providerID
+			label := string(providerID)
 			if !entry.configured {
 				label += " (not configured)"
 			}

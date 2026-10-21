@@ -323,7 +323,7 @@ type Message struct {
 	SessionID        string
 	Parts            []ContentPart
 	Model            string
-	Provider         string
+	Provider         catalog.InferenceProvider
 	CreatedAt        int64
 	UpdatedAt        int64
 	IsSummaryMessage bool

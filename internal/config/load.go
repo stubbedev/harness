@@ -293,7 +293,7 @@ func pushHarnessEnv() func() {
 }
 
 func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env env.Env, resolver VariableResolver, knownProviders []catalog.Provider) error {
-	knownProviderNames := make(map[string]bool)
+	knownProviderNames := make(map[catalog.InferenceProvider]bool)
 	restore := pushHarnessEnv()
 	defer restore()
 
@@ -308,8 +308,8 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 	c.migrateLegacyProviderIDs(knownProviders)
 
 	for _, p := range knownProviders {
-		knownProviderNames[string(p.ID)] = true
-		config, configExists := c.Providers.Get(string(p.ID))
+		knownProviderNames[p.ID] = true
+		config, configExists := c.Providers.Get(p.ID)
 		// if the user configured a known provider we need to allow it to override a couple of parameters
 		if configExists {
 			if config.BaseURL != "" {
@@ -353,7 +353,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		// explicit copying. Overlay catwalk identity/endpoint fields
 		// (already merged with user overrides above).
 		prepared := config
-		prepared.ID = string(p.ID)
+		prepared.ID = p.ID
 		prepared.Name = p.Name
 		prepared.BaseURL = p.APIEndpoint
 		prepared.APIKey = p.APIKey
@@ -379,7 +379,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			// concurrent reload that races with this write will also see the
 			// removal because it re-reads from disk.
 			store.RemoveConfigField(ScopeGlobal, "providers.anthropic")
-			c.Providers.Del(string(p.ID))
+			c.Providers.Del(p.ID)
 			continue
 		case p.ID == catalog.InferenceProviderCopilot && config.OAuthToken != nil:
 			prepared.SetupGitHubCopilot()
@@ -391,7 +391,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		skip := func(msg string, args ...any) {
 			if configExists {
 				slog.Warn(msg, append([]any{"provider", p.ID}, args...)...)
-				c.Providers.Del(string(p.ID))
+				c.Providers.Del(p.ID)
 			}
 		}
 
@@ -435,7 +435,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 				continue
 			}
 		}
-		c.Providers.Set(string(p.ID), prepared)
+		c.Providers.Set(p.ID, prepared)
 	}
 
 	// Discover models concurrently for custom providers that need it.
@@ -446,7 +446,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		err    error
 	}
 
-	discoveryResults := make(map[string]discoveryResult)
+	discoveryResults := make(map[catalog.InferenceProvider]discoveryResult)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -495,7 +495,7 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 
 		// Make sure the provider ID is set.
 		providerConfig.ID = id
-		providerConfig.Name = cmp.Or(providerConfig.Name, id) // Use ID as name if not set
+		providerConfig.Name = cmp.Or(providerConfig.Name, string(id)) // Use ID as name if not set
 		// Default to OpenAI if not set.
 		providerConfig.Type = cmp.Or(providerConfig.Type, catalog.TypeOpenAICompat)
 		if !slices.Contains(catalog.KnownProviderTypes(), providerConfig.Type) &&
@@ -581,9 +581,9 @@ func (c *Config) migrateLegacyProviderIDs(knownProviders []catalog.Provider) {
 		return
 	}
 
-	known := make(map[string]bool, len(knownProviders))
+	known := make(map[catalog.InferenceProvider]bool, len(knownProviders))
 	for _, p := range knownProviders {
-		known[string(p.ID)] = true
+		known[p.ID] = true
 	}
 
 	configured := slices.Sorted(maps.Keys(c.Providers.Copy()))
@@ -715,7 +715,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 	c.Options.DataDirectory = filepath.Clean(filepathext.SmartJoin(workingDir, c.Options.DataDirectory))
 	if c.Providers == nil {
-		c.Providers = csync.NewMap[string, ProviderConfig]()
+		c.Providers = csync.NewMap[catalog.InferenceProvider, ProviderConfig]()
 	}
 	if c.Models == nil {
 		c.Models = make(map[SelectedModelType]SelectedModel)
@@ -851,7 +851,7 @@ func (c *Config) defaultModelSelection(knownProviders []catalog.Provider) (large
 
 	// Use the first provider enabled based on the known providers order
 	// if no provider found that is known use the first provider configured
-	defaultSelection := func(providerID, modelID, label string) (SelectedModel, error) {
+	defaultSelection := func(providerID catalog.InferenceProvider, modelID, label string) (SelectedModel, error) {
 		model := c.GetModel(providerID, modelID)
 		if model == nil {
 			slog.Warn(fmt.Sprintf("Default %s model %s not found for provider %s", label, modelID, providerID))
@@ -869,14 +869,14 @@ func (c *Config) defaultModelSelection(knownProviders []catalog.Provider) (large
 		}, nil
 	}
 	for _, p := range knownProviders {
-		providerConfig, ok := c.Providers.Get(string(p.ID))
+		providerConfig, ok := c.Providers.Get(p.ID)
 		if !ok || providerConfig.Disable {
 			continue
 		}
-		if largeModel, err = defaultSelection(string(p.ID), p.DefaultLargeModelID, "large"); err != nil {
+		if largeModel, err = defaultSelection(p.ID, p.DefaultLargeModelID, "large"); err != nil {
 			return largeModel, smallModel, err
 		}
-		if smallModel, err = defaultSelection(string(p.ID), p.DefaultSmallModelID, "small"); err != nil {
+		if smallModel, err = defaultSelection(p.ID, p.DefaultSmallModelID, "small"); err != nil {
 			return largeModel, smallModel, err
 		}
 		return largeModel, smallModel, nil
@@ -884,7 +884,7 @@ func (c *Config) defaultModelSelection(knownProviders []catalog.Provider) (large
 
 	enabledProviders := c.EnabledProviders()
 	slices.SortFunc(enabledProviders, func(a, b ProviderConfig) int {
-		return strings.Compare(a.ID, b.ID)
+		return cmp.Compare(a.ID, b.ID)
 	})
 
 	if len(enabledProviders) == 0 {

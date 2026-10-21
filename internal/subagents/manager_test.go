@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
 
@@ -192,7 +193,7 @@ func TestDiscoverFromConfig_RejectsUnknownModelViaResolver(t *testing.T) {
 	knownModels := map[string]bool{"gpt-4o": true}
 	all, active, states := DiscoverFromConfig(DiscoveryConfig{
 		SubagentsPaths: []string{tmp},
-		IsKnownModel:   func(provider, id string) bool { return knownModels[id] },
+		IsKnownModel:   func(_ catalog.InferenceProvider, id string) bool { return knownModels[id] },
 	})
 
 	activeNames := make(map[string]bool, len(active))

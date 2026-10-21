@@ -24,9 +24,9 @@ var catalogSyncer = &catalogSync{}
 
 // KnownProviderByID returns the catalog provider with the given ID, or
 // nil when it is not a built-in catalog provider.
-func KnownProviderByID(knownProviders []catalog.Provider, id string) *catalog.Provider {
+func KnownProviderByID(knownProviders []catalog.Provider, id catalog.InferenceProvider) *catalog.Provider {
 	for i, p := range knownProviders {
-		if string(p.ID) == id {
+		if p.ID == id {
 			return &knownProviders[i]
 		}
 	}

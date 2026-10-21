@@ -11,11 +11,11 @@ import (
 func TestBuildProviderOpenCodeRouting(t *testing.T) {
 	t.Parallel()
 
-	for _, providerID := range []string{
-		string(catalog.InferenceProviderOpenCodeZen),
-		string(catalog.InferenceProviderOpenCodeGo),
+	for _, providerID := range []catalog.InferenceProvider{
+		catalog.InferenceProviderOpenCodeZen,
+		catalog.InferenceProviderOpenCodeGo,
 	} {
-		t.Run(providerID, func(t *testing.T) {
+		t.Run(string(providerID), func(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
 			providerCfg := config.ProviderConfig{

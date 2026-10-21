@@ -112,7 +112,7 @@ func newReasoningForFitTest(t *testing.T) Dialog {
 		Models: map[config.SelectedModelType]config.SelectedModel{
 			config.SelectedModelTypeLarge: {Provider: "p", Model: "m"},
 		},
-		Providers: csync.NewMapFrom(map[string]config.ProviderConfig{"p": {
+		Providers: csync.NewMapFrom(map[catalog.InferenceProvider]config.ProviderConfig{"p": {
 			ID:     "p",
 			Models: []catalog.Model{{ID: "m", ReasoningLevels: []string{"minimal", "low", "medium", "high", "xhigh", "max"}}},
 		}}),

@@ -1,6 +1,10 @@
 package config
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/stubbedev/harness/internal/catalog"
+)
 
 // Config fields are written through sjson paths, where '.' separates keys
 // and '*' and '?' are wildcards. A provider or MCP server ID is a map key
@@ -22,8 +26,8 @@ func pathKey(key string) string {
 }
 
 // ProviderFieldPath is the config path of field on the provider with id.
-func ProviderFieldPath(providerID, field string) string {
-	return "providers." + pathKey(providerID) + "." + field
+func ProviderFieldPath(providerID catalog.InferenceProvider, field string) string {
+	return "providers." + pathKey(string(providerID)) + "." + field
 }
 
 // MCPFieldPath is the config path of field on the MCP server name.

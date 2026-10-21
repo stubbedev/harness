@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/stubbedev/harness/internal/backend"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/session"
 )
@@ -883,7 +884,7 @@ func (c *controllerV1) handleGetWorkspaceAgentSessionPromptList(w http.ResponseW
 //	@Router			/workspaces/{id}/agent/default-small-model [get]
 func (c *controllerV1) handleGetWorkspaceAgentDefaultSmallModel(w http.ResponseWriter, r *http.Request) {
 	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return ws.Ops().GetDefaultSmallModel(r.URL.Query().Get("provider_id"))
+		return ws.Ops().GetDefaultSmallModel(catalog.InferenceProvider(r.URL.Query().Get("provider_id")))
 	})
 }
 

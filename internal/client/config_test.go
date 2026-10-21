@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/proto"
@@ -42,7 +43,7 @@ func TestSetProviderAPIKeyStringSendsKind(t *testing.T) {
 	require.NoError(t, c.SetProviderAPIKey(context.Background(), "ws1", config.ScopeGlobal, "openai", "sk-xyz"))
 
 	require.Equal(t, proto.APIKeyKindString, got.Kind)
-	require.Equal(t, "openai", got.ProviderID)
+	require.Equal(t, catalog.InferenceProvider("openai"), got.ProviderID)
 	require.Equal(t, config.ScopeGlobal, got.Scope)
 	decoded, err := got.DecodeAPIKey()
 	require.NoError(t, err)

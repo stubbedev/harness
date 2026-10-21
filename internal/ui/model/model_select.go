@@ -67,7 +67,7 @@ func syncAgentModel(ws workspace.Workspace) error {
 	return ws.InitCoderAgent(context.Background())
 }
 
-func defaultSmallModelStep(ws workspace.Workspace, cfg *config.Config, providerID string) func() error {
+func defaultSmallModelStep(ws workspace.Workspace, cfg *config.Config, providerID catalog.InferenceProvider) func() error {
 	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; ok {
 		return nil
 	}
@@ -224,7 +224,7 @@ func (m *UI) selectModel(msg dialog.ActionSelectModel, importCopilot bool) tea.C
 	providerID := msg.Model.Provider
 	_, configured := cfg.Providers.Get(providerID)
 
-	if importCopilot && !configured && !msg.ReAuthenticate && providerID == string(catalog.InferenceProviderCopilot) {
+	if importCopilot && !configured && !msg.ReAuthenticate && providerID == catalog.InferenceProviderCopilot {
 		return m.importCopilotCmd(msg)
 	}
 

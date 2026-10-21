@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/pubsub"
@@ -666,7 +667,7 @@ func TestAppWorkspace_DeleteUserSubagent_ReloadValidatesModel(t *testing.T) {
 	// drives rediscovery.
 	cfg := &config.Config{
 		Options:   &config.Options{SubagentsPaths: []string{userDir}},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	}
 	w := &AppWorkspace{
 		app:   &app.App{Subagents: mgr},

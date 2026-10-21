@@ -156,7 +156,7 @@ type Workspace interface {
 	UpdateAgentModel(ctx context.Context) error
 	InitCoderAgent(ctx context.Context) error
 	InitCoderAgentNonInteractive(ctx context.Context) error
-	GetDefaultSmallModel(providerID string) (config.SelectedModel, error)
+	GetDefaultSmallModel(providerID catalog.InferenceProvider) (config.SelectedModel, error)
 
 	// Questions
 	//
@@ -195,11 +195,11 @@ type Workspace interface {
 	// Config mutations (proxied to server in client mode)
 	UpdatePreferredModel(scope config.Scope, modelType config.SelectedModelType, model config.SelectedModel) error
 	SetCompactMode(scope config.Scope, enabled bool) error
-	SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error
+	SetProviderAPIKey(scope config.Scope, providerID catalog.InferenceProvider, apiKey any) error
 	SetConfigField(scope config.Scope, key string, value any) error
 	RemoveConfigField(scope config.Scope, key string) error
 	ImportCopilot() (*oauth.Token, bool)
-	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error
+	RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID catalog.InferenceProvider) error
 
 	// Project lifecycle
 	InitializePrompt() (string, error)

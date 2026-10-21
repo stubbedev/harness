@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stubbedev/harness/internal/agentstate"
 	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/herdr"
@@ -528,7 +529,7 @@ func refuseUnresolvedLarge(cliLarge string, cfg *config.Config) error {
 	requested := cfg.LargeConfigured
 	id := requested.Model
 	if requested.Provider != "" && requested.Model != "" {
-		id = requested.Provider + "/" + requested.Model
+		id = string(requested.Provider) + "/" + requested.Model
 	}
 	return fmt.Errorf("models.large %s does not resolve; harness run refusing to start (pass -m provider/model to override)", id)
 }
@@ -560,7 +561,7 @@ func overrideModels(
 		return err
 	}
 
-	var largeProviderID string
+	var largeProviderID catalog.InferenceProvider
 
 	if largeModel != "" {
 		found, err := app.ValidateModels(largeMatches, largeModel, "large")

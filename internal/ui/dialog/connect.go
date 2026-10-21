@@ -109,7 +109,7 @@ func connectable(cfg *config.Config, provider catalog.Provider) bool {
 	if cfg == nil {
 		return true
 	}
-	_, configured := cfg.Providers.Get(string(provider.ID))
+	_, configured := cfg.Providers.Get(provider.ID)
 	return !configured
 }
 
@@ -124,7 +124,7 @@ func defaultSelectedModel(provider catalog.Provider) config.SelectedModel {
 	}
 	return config.SelectedModel{
 		Model:           model.ID,
-		Provider:        string(provider.ID),
+		Provider:        provider.ID,
 		ReasoningEffort: catalog.DefaultReasoningLevel(model.ReasoningLevels),
 		MaxTokens:       model.DefaultMaxTokens,
 	}

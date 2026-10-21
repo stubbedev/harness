@@ -12,9 +12,9 @@ func TestParseModelStr(t *testing.T) {
 	tests := []struct {
 		name            string
 		modelStr        string
-		expectedFilter  string
+		expectedFilter  catalog.InferenceProvider
 		expectedModelID string
-		setupProviders  func() map[string]config.ProviderConfig
+		setupProviders  func() map[catalog.InferenceProvider]config.ProviderConfig
 	}{
 		{
 			name:            "simple model with no slashes",
@@ -71,8 +71,8 @@ func TestParseModelStr(t *testing.T) {
 	}
 }
 
-func setupMockProviders() map[string]config.ProviderConfig {
-	return map[string]config.ProviderConfig{
+func setupMockProviders() map[catalog.InferenceProvider]config.ProviderConfig {
+	return map[catalog.InferenceProvider]config.ProviderConfig{
 		"openai": {
 			ID:     "openai",
 			Name:   "OpenAI",
@@ -86,8 +86,8 @@ func setupMockProviders() map[string]config.ProviderConfig {
 	}
 }
 
-func setupMockProvidersWithSlashes() map[string]config.ProviderConfig {
-	return map[string]config.ProviderConfig{
+func setupMockProvidersWithSlashes() map[catalog.InferenceProvider]config.ProviderConfig {
+	return map[catalog.InferenceProvider]config.ProviderConfig{
 		"synthetic": {
 			ID:   "synthetic",
 			Name: "Synthetic",
@@ -108,11 +108,11 @@ func TestFindModels(t *testing.T) {
 	tests := []struct {
 		name             string
 		modelStr         string
-		expectedProvider string
+		expectedProvider catalog.InferenceProvider
 		expectedModelID  string
 		expectError      bool
 		errorContains    string
-		setupProviders   func() map[string]config.ProviderConfig
+		setupProviders   func() map[catalog.InferenceProvider]config.ProviderConfig
 	}{
 		{
 			name:             "simple model found in one provider",
@@ -157,8 +157,8 @@ func TestFindModels(t *testing.T) {
 			modelStr:      "shared-model",
 			expectError:   true,
 			errorContains: "multiple providers",
-			setupProviders: func() map[string]config.ProviderConfig {
-				return map[string]config.ProviderConfig{
+			setupProviders: func() map[catalog.InferenceProvider]config.ProviderConfig {
+				return map[catalog.InferenceProvider]config.ProviderConfig{
 					"openai": {
 						ID:     "openai",
 						Models: []catalog.Model{{ID: "shared-model"}},

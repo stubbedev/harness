@@ -21,7 +21,7 @@ func TestHarnessInfo_MinimalConfig(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	})
 	output := buildHarnessInfo(cfg, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[providers]")
@@ -34,7 +34,7 @@ func TestHarnessInfo_ConfigFiles(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(
-		&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()},
+		&config.Config{Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig]()},
 		"/home/user/.config/harness/harness.yaml",
 		"/project/.harness/harness.yaml",
 	)
@@ -52,7 +52,7 @@ func TestHarnessInfo_Models(t *testing.T) {
 			config.SelectedModelTypeLarge: {Model: "claude-sonnet-4-20250514", Provider: "anthropic"},
 			config.SelectedModelTypeSmall: {Model: "claude-haiku-3-20250307", Provider: "anthropic"},
 		},
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	})
 	output := buildHarnessInfo(cfg, nil, nil, nil, nil, nil)
 	require.Contains(t, output, "[model]")
@@ -63,7 +63,7 @@ func TestHarnessInfo_Models(t *testing.T) {
 func TestHarnessInfo_Providers(t *testing.T) {
 	t.Parallel()
 
-	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers := csync.NewMap[catalog.InferenceProvider, config.ProviderConfig]()
 	providers.Set("openai", config.ProviderConfig{Models: make([]catalog.Model, 8)})
 	providers.Set("anthropic", config.ProviderConfig{Models: make([]catalog.Model, 12)})
 
@@ -82,7 +82,7 @@ func TestHarnessInfo_Providers(t *testing.T) {
 func TestHarnessInfo_DisabledProvidersOmitted(t *testing.T) {
 	t.Parallel()
 
-	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers := csync.NewMap[catalog.InferenceProvider, config.ProviderConfig]()
 	providers.Set("openai", config.ProviderConfig{Disable: true, Models: make([]catalog.Model, 8)})
 	providers.Set("anthropic", config.ProviderConfig{Models: make([]catalog.Model, 12)})
 
@@ -96,7 +96,7 @@ func TestHarnessInfo_LSPStates(t *testing.T) {
 	t.Parallel()
 
 	mgr := lsp.NewManager(config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	}))
 	readyClient := &lsp.Client{}
 	readyClient.SetServerState(lsp.StateReady)
@@ -106,7 +106,7 @@ func TestHarnessInfo_LSPStates(t *testing.T) {
 	errorClient.SetServerState(lsp.StateError)
 	mgr.Clients().Set("pyright", errorClient)
 
-	cfg := config.NewTestStore(&config.Config{Providers: csync.NewMap[string, config.ProviderConfig]()})
+	cfg := config.NewTestStore(&config.Config{Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig]()})
 	output := buildHarnessInfo(cfg, mgr, nil, nil, nil, nil)
 	require.Contains(t, output, "[lsp]")
 	require.Contains(t, output, "gopls = ready")
@@ -135,7 +135,7 @@ func TestHarnessInfo_MCPStates(t *testing.T) {
 	}
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	})
 
 	var b strings.Builder
@@ -153,7 +153,7 @@ func TestHarnessInfo_DisabledTools(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 		Options:   &config.Options{DisabledTools: []string{"web_search", "research"}},
 	})
 
@@ -166,7 +166,7 @@ func TestHarnessInfo_Options(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 		Options: &config.Options{
 			DataDirectory:        "/Users/user/project/.harness",
 			Debug:                true,
@@ -187,7 +187,7 @@ func TestHarnessInfo_TUIOptions(t *testing.T) {
 
 	depth, items := 3, 42
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 		Options: &config.Options{
 			TUI: &config.TUIOptions{
 				CompactMode: true,
@@ -212,7 +212,7 @@ func TestHarnessInfo_TUIOptionsUnpinnedCompletionsOmitted(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 		Options:   &config.Options{TUI: &config.TUIOptions{}},
 	})
 
@@ -225,14 +225,14 @@ func TestHarnessInfo_AutoSummarizeInversion(t *testing.T) {
 	t.Parallel()
 
 	cfgFalse := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 		Options:   &config.Options{DisableAutoSummarize: true},
 	})
 	outputFalse := buildHarnessInfo(cfgFalse, nil, nil, nil, nil, nil)
 	require.Contains(t, outputFalse, "auto_summarize = false")
 
 	cfgTrue := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 		Options:   &config.Options{DisableAutoSummarize: false},
 	})
 	outputTrue := buildHarnessInfo(cfgTrue, nil, nil, nil, nil, nil)
@@ -242,7 +242,7 @@ func TestHarnessInfo_AutoSummarizeInversion(t *testing.T) {
 func TestHarnessInfo_NoSecrets(t *testing.T) {
 	t.Parallel()
 
-	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers := csync.NewMap[catalog.InferenceProvider, config.ProviderConfig]()
 	providers.Set("openai", config.ProviderConfig{
 		APIKey: "sk-super-secret-key-12345",
 		Models: make([]catalog.Model, 8),
@@ -258,7 +258,7 @@ func TestHarnessInfo_NoSecrets(t *testing.T) {
 func TestHarnessInfo_DeterministicOrdering(t *testing.T) {
 	t.Parallel()
 
-	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers := csync.NewMap[catalog.InferenceProvider, config.ProviderConfig]()
 	providers.Set("zebra", config.ProviderConfig{Models: make([]catalog.Model, 1)})
 	providers.Set("alpha", config.ProviderConfig{Models: make([]catalog.Model, 2)})
 	providers.Set("middle", config.ProviderConfig{Models: make([]catalog.Model, 3)})
@@ -296,7 +296,7 @@ func TestHarnessInfo_EmptySectionsOmitted(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 		Options:   &config.Options{},
 	})
 
@@ -315,7 +315,7 @@ func TestHarnessInfo_ConfigStaleness_Clean(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
 
 	store := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	}, configPath)
 
 	// Capture snapshot (normally done in Load)
@@ -336,7 +336,7 @@ func TestHarnessInfo_ConfigStaleness_Dirty(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"debug": false}`), 0o600))
 
 	store := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	}, configPath)
 
 	// Capture initial snapshot
@@ -361,7 +361,7 @@ func TestHarnessInfo_ConfigStaleness_MissingPath(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte(`{}`), 0o600))
 
 	store := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	}, configPath)
 
 	// Capture initial snapshot
@@ -381,7 +381,7 @@ func TestHarnessInfo_Skills_NoSkills(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	})
 	output := buildHarnessInfo(cfg, nil, nil, nil, nil, nil)
 	require.NotContains(t, output, "[skills]")
@@ -402,7 +402,7 @@ func TestHarnessInfo_Skills_MixedLoadedUnloaded(t *testing.T) {
 	tracker.MarkLoaded("harness-config")
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	})
 	output := buildHarnessInfo(cfg, nil, allSkills, activeSkills, tracker, nil)
 	require.Contains(t, output, "[skills]")
@@ -427,7 +427,7 @@ func TestHarnessInfo_Skills_DisabledSkills(t *testing.T) {
 	tracker := skills.NewTracker(activeSkills)
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 		Options:   &config.Options{DisabledSkills: []string{"image-convert"}},
 	})
 	output := buildHarnessInfo(cfg, nil, allSkills, activeSkills, tracker, nil)
@@ -449,7 +449,7 @@ func TestHarnessInfo_Skills_Ordering(t *testing.T) {
 	tracker := skills.NewTracker(activeSkills)
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	})
 	output := buildHarnessInfo(cfg, nil, allSkills, activeSkills, tracker, nil)
 
@@ -471,7 +471,7 @@ func TestHarnessInfo_Skills_BuiltinOrigin(t *testing.T) {
 	tracker := skills.NewTracker(activeSkills)
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	})
 	output := buildHarnessInfo(cfg, nil, allSkills, activeSkills, tracker, nil)
 	require.Contains(t, output, "harness-config = builtin, unloaded")
@@ -482,7 +482,7 @@ func TestHarnessInfo_Hooks(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 		Hooks: map[string][]config.HookConfig{
 			"PreToolUse": {
 				{Command: "check-privates.sh", Matcher: "edit|write"},
@@ -501,7 +501,7 @@ func TestHarnessInfo_Hooks_NoHooks(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.NewTestStore(&config.Config{
-		Providers: csync.NewMap[string, config.ProviderConfig](),
+		Providers: csync.NewMap[catalog.InferenceProvider, config.ProviderConfig](),
 	})
 
 	output := buildHarnessInfo(cfg, nil, nil, nil, nil, nil)

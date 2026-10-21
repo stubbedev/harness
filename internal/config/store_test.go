@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/env"
 	"github.com/stubbedev/harness/internal/oauth"
@@ -357,7 +358,7 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	store.CaptureStalenessSnapshot([]string{configPath})
 
 	// Verify initial model
-	require.Equal(t, "openai", store.config.Models[SelectedModelTypeLarge].Provider)
+	require.Equal(t, catalog.InferenceProvider("openai"), store.config.Models[SelectedModelTypeLarge].Provider)
 	require.Equal(t, "gpt-4", store.config.Models[SelectedModelTypeLarge].Model)
 
 	// Modify config on disk to change model
@@ -385,7 +386,7 @@ func TestReloadFromDisk_UsesNewConfigValues(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the NEW config values are now in effect (regression check)
-	require.Equal(t, "anthropic", store.config.Models[SelectedModelTypeLarge].Provider)
+	require.Equal(t, catalog.InferenceProvider("anthropic"), store.config.Models[SelectedModelTypeLarge].Provider)
 	require.Equal(t, "claude-3", store.config.Models[SelectedModelTypeLarge].Model)
 }
 
@@ -703,7 +704,7 @@ func TestRefreshOAuthToken_UsesDiskTokenWhenDifferent(t *testing.T) {
 		ExpiresAt:    time.Now().Add(-time.Hour).Unix(), // Expired
 	}
 
-	providers := csync.NewMap[string, ProviderConfig]()
+	providers := csync.NewMap[catalog.InferenceProvider, ProviderConfig]()
 	providers.Set("hyper", ProviderConfig{
 		ID:             "hyper",
 		Name:           "Hyper",
@@ -738,7 +739,7 @@ func TestConfigStore_SetProviderKeyKeepsTemplateAndResolvedValuesSeparate(t *tes
 	configPath := filepath.Join(t.TempDir(), "harness.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"providers":{"custom":{"api_key":"old"}}}`), 0o600))
 	provider := ProviderConfig{ID: "custom", APIKey: "old", ResolvedAPIKey: "old-resolved"}
-	store := NewTestStore(&Config{Providers: csync.NewMapFrom(map[string]ProviderConfig{"custom": provider})})
+	store := NewTestStore(&Config{Providers: csync.NewMapFrom(map[catalog.InferenceProvider]ProviderConfig{"custom": provider})})
 	store.globalDataPath = configPath
 	store.resolver = NewShellVariableResolver(env.NewFromMap(map[string]string{
 		"CUSTOM_API_KEY": "resolved$secret",
@@ -764,7 +765,7 @@ func TestConfigStore_SetProviderOAuthTokenDoesNotOverwriteAPIKeyTemplate(t *test
 	configPath := filepath.Join(t.TempDir(), "harness.json")
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"providers":{"custom":{"api_key":"$CUSTOM_API_KEY"}}}`), 0o600))
 	provider := ProviderConfig{ID: "custom", APIKey: apiKeyTemplate, ResolvedAPIKey: "old-key"}
-	store := NewTestStore(&Config{Providers: csync.NewMapFrom(map[string]ProviderConfig{"custom": provider})})
+	store := NewTestStore(&Config{Providers: csync.NewMapFrom(map[catalog.InferenceProvider]ProviderConfig{"custom": provider})})
 	store.globalDataPath = configPath
 	token := &oauth.Token{AccessToken: "oauth$token'\\path", RefreshToken: "refresh"}
 
@@ -808,7 +809,7 @@ func TestConfigStore_SetConfigFields_concurrentInProcess(t *testing.T) {
 
 	store := &ConfigStore{
 		config: &Config{
-			Providers: csync.NewMap[string, ProviderConfig](),
+			Providers: csync.NewMap[catalog.InferenceProvider, ProviderConfig](),
 			Models:    make(map[SelectedModelType]SelectedModel),
 		},
 		globalDataPath: configPath,

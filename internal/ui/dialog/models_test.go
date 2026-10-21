@@ -59,14 +59,14 @@ func newModelsDialogForTest(t *testing.T, cfg *config.Config, providers []catalo
 	return m
 }
 
-func configuredTestConfig(t *testing.T, providerIDs ...string) *config.Config {
+func configuredTestConfig(t *testing.T, providerIDs ...catalog.InferenceProvider) *config.Config {
 	t.Helper()
-	providers := map[string]config.ProviderConfig{}
+	providers := map[catalog.InferenceProvider]config.ProviderConfig{}
 	for _, id := range providerIDs {
 		providers[id] = config.ProviderConfig{
 			ID:     id,
 			APIKey: "test-key",
-			Models: []catalog.Model{{ID: id + "-model", Name: id + " model"}},
+			Models: []catalog.Model{{ID: string(id) + "-model", Name: string(id) + " model"}},
 		}
 	}
 	return &config.Config{

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/db"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
@@ -31,7 +32,7 @@ type CreateMessageParams struct {
 	Role             MessageRole
 	Parts            []ContentPart
 	Model            string
-	Provider         string
+	Provider         catalog.InferenceProvider
 	IsSummaryMessage bool
 }
 
@@ -313,7 +314,7 @@ func (s *service) Create(ctx context.Context, sessionID string, params CreateMes
 		Role:             string(params.Role),
 		Parts:            string(partsJSON),
 		Model:            sql.NullString{String: params.Model, Valid: true},
-		Provider:         sql.NullString{String: params.Provider, Valid: params.Provider != ""},
+		Provider:         sql.NullString{String: string(params.Provider), Valid: params.Provider != ""},
 		IsSummaryMessage: isSummary,
 		Visible:          boolInt((&Message{Parts: params.Parts, IsSummaryMessage: params.IsSummaryMessage}).CountsInTranscript()),
 	})
@@ -771,7 +772,7 @@ func (s *service) GetLastAssistantMessage(ctx context.Context, sessionID string)
 	}
 	return Message{
 		Model:    row.Model.String,
-		Provider: row.Provider.String,
+		Provider: catalog.InferenceProvider(row.Provider.String),
 	}, nil
 }
 
@@ -800,7 +801,7 @@ func (s *service) fromDBItem(item db.Message) (Message, error) {
 		Role:                    MessageRole(item.Role),
 		Parts:                   parts,
 		Model:                   item.Model.String,
-		Provider:                item.Provider.String,
+		Provider:                catalog.InferenceProvider(item.Provider.String),
 		CreatedAt:               item.CreatedAt,
 		UpdatedAt:               item.UpdatedAt,
 		IsSummaryMessage:        item.IsSummaryMessage != 0,

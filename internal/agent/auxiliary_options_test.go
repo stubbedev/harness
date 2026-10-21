@@ -17,7 +17,7 @@ func TestAuxiliaryProviderOptionsUseTheLowestEffort(t *testing.T) {
 		CatalogCfg: catalog.Model{ID: "glm-5.3", CanReason: true, ReasoningLevels: []string{"low", "high", "max"}},
 		ModelCfg:   config.SelectedModel{Provider: "zai-coding-plan", ReasoningEffort: "max"},
 	}
-	providerCfg := config.ProviderConfig{ID: string(catalog.InferenceProviderZAICoding), Type: openaicompat.Name}
+	providerCfg := config.ProviderConfig{ID: catalog.InferenceProviderZAICoding, Type: openaicompat.Name}
 
 	parsed, ok := auxiliaryProviderOptions(model, providerCfg)[openaicompat.Name].(*openaicompat.ProviderOptions)
 	require.True(t, ok)

@@ -13,6 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/discovery"
 	"github.com/stubbedev/harness/internal/stringext"
@@ -135,20 +136,20 @@ func yamlKindName(k yaml.Kind) string {
 
 // Subagent is a parsed subagent definition file.
 type Subagent struct {
-	Name            string   `yaml:"name"`
-	Description     string   `yaml:"description"`
-	Tools           ToolList `yaml:"tools"`
-	DisallowedTools ToolList `yaml:"disallowedTools"`
-	Model           string   `yaml:"model"`
-	Effort          string   `yaml:"effort"`
-	Skills          []string `yaml:"skills"`
-	MCPServers      []string `yaml:"mcp_servers"`
-	PermissionMode  string   `yaml:"permissionMode"`
-	Isolation       string   `yaml:"isolation"`
-	Color           string   `yaml:"color"`
-	Provider        string   `yaml:"provider"`
-	Body            string   // set from markdown body after frontmatter
-	FilePath        string   // set from the file path passed to Parse
+	Name            string                    `yaml:"name"`
+	Description     string                    `yaml:"description"`
+	Tools           ToolList                  `yaml:"tools"`
+	DisallowedTools ToolList                  `yaml:"disallowedTools"`
+	Model           string                    `yaml:"model"`
+	Effort          string                    `yaml:"effort"`
+	Skills          []string                  `yaml:"skills"`
+	MCPServers      []string                  `yaml:"mcp_servers"`
+	PermissionMode  string                    `yaml:"permissionMode"`
+	Isolation       string                    `yaml:"isolation"`
+	Color           string                    `yaml:"color"`
+	Provider        catalog.InferenceProvider `yaml:"provider"`
+	Body            string                    // set from markdown body after frontmatter
+	FilePath        string                    // set from the file path passed to Parse
 }
 
 // ResolvedColor returns the subagent's explicit Color if set, or falls back to
@@ -298,7 +299,7 @@ func Parse(path string) (*Subagent, error) {
 // When isKnownSkill is non-nil, every name in Skills must resolve to a known
 // skill. A nil resolver skips the corresponding check (used when the caller
 // has no config or skills context).
-func (s *Subagent) ValidateAgainst(isKnownModel func(provider, model string) bool, isKnownSkill func(name string) bool) error {
+func (s *Subagent) ValidateAgainst(isKnownModel func(provider catalog.InferenceProvider, model string) bool, isKnownSkill func(name string) bool) error {
 	errs := []error{s.Validate()}
 	if isKnownModel != nil && s.Model != "" && s.Model != ModelAliasLarge && s.Model != ModelAliasSmall && !isKnownModel(s.Provider, s.Model) {
 		errs = append(errs, fmt.Errorf("model %q is not a known model id; use %q, %q, or a valid provider model id", s.Model, ModelAliasLarge, ModelAliasSmall))
@@ -485,7 +486,7 @@ func DeduplicateStates(all []*SubagentState) []*SubagentState {
 // the last occurrence of a name, so this ordering is what makes later paths —
 // the working directory, per ProjectSubagentsDir — override earlier ones
 // (monorepo root, global dirs) on a name collision.
-func DiscoverWithStates(paths []string, isKnownModel func(provider, model string) bool, isKnownSkill func(name string) bool) ([]*Subagent, []*SubagentState) {
+func DiscoverWithStates(paths []string, isKnownModel func(provider catalog.InferenceProvider, model string) bool, isKnownSkill func(name string) bool) ([]*Subagent, []*SubagentState) {
 	return discovery.Walk("subagent", paths,
 		func(name string) bool { return strings.HasSuffix(name, ".md") },
 		func(path string) (*Subagent, string, error) {

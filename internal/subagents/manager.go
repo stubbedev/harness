@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/discovery"
 	"github.com/stubbedev/harness/internal/fsext"
@@ -107,7 +108,7 @@ type DiscoveryConfig struct {
 	// "large"/"small" aliases) resolves to a real provider model. May be nil
 	// during discovery in contexts where the config is not yet loaded; in that
 	// case model-id validation is skipped.
-	IsKnownModel func(provider, model string) bool
+	IsKnownModel func(provider catalog.InferenceProvider, model string) bool
 	// IsKnownSkill validates that a `skills:` frontmatter reference resolves
 	// to an active skill, so a broken reference surfaces in the Library UI
 	// instead of being silently dropped at dispatch time. May be nil when no

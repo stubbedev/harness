@@ -66,7 +66,7 @@ func TestConnectSelectsDefaultLargeModel(t *testing.T) {
 
 	selected := defaultSelectedModel(provider)
 	require.Equal(t, "big", selected.Model)
-	assert.Equal(t, "anthropic", selected.Provider)
+	assert.Equal(t, catalog.InferenceProvider("anthropic"), selected.Provider)
 	assert.Equal(t, int64(4096), selected.MaxTokens)
 }
 

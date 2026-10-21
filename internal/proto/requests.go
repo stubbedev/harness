@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/oauth"
 )
@@ -51,10 +52,10 @@ const (
 // key. APIKey is the raw JSON for the credential; Kind selects the
 // concrete Go type APIKey should be decoded into via DecodeAPIKey.
 type ConfigProviderKeyRequest struct {
-	Scope      config.Scope    `json:"scope"`
-	ProviderID string          `json:"provider_id"`
-	Kind       APIKeyKind      `json:"kind"`
-	APIKey     json.RawMessage `json:"api_key"`
+	Scope      config.Scope              `json:"scope"`
+	ProviderID catalog.InferenceProvider `json:"provider_id"`
+	Kind       APIKeyKind                `json:"kind"`
+	APIKey     json.RawMessage           `json:"api_key"`
 }
 
 // DecodeAPIKey decodes APIKey into the Go type indicated by Kind. It
@@ -82,8 +83,8 @@ func (r ConfigProviderKeyRequest) DecodeAPIKey() (any, error) {
 
 // ConfigRefreshOAuthRequest represents a request to refresh an OAuth token.
 type ConfigRefreshOAuthRequest struct {
-	Scope      config.Scope `json:"scope"`
-	ProviderID string       `json:"provider_id"`
+	Scope      config.Scope              `json:"scope"`
+	ProviderID catalog.InferenceProvider `json:"provider_id"`
 }
 
 // ImportCopilotResponse represents the response from importing Copilot credentials.

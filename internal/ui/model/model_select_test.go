@@ -59,7 +59,7 @@ func (w *blockingWorkspace) SetConfigField(_ config.Scope, key string, _ any) er
 	return nil
 }
 
-func (w *blockingWorkspace) GetDefaultSmallModel(providerID string) (config.SelectedModel, error) {
+func (w *blockingWorkspace) GetDefaultSmallModel(providerID catalog.InferenceProvider) (config.SelectedModel, error) {
 	return config.SelectedModel{Provider: providerID, Model: "small"}, nil
 }
 
@@ -90,7 +90,7 @@ func (w *blockingWorkspace) AgentSetGoal(_ context.Context, sessionID, _ string)
 
 func newModelSelectUI(t *testing.T, ready bool) (*UI, *blockingWorkspace) {
 	t.Helper()
-	providers := csync.NewMap[string, config.ProviderConfig]()
+	providers := csync.NewMap[catalog.InferenceProvider, config.ProviderConfig]()
 	providers.Set("p", config.ProviderConfig{
 		ID:     "p",
 		Models: []catalog.Model{{ID: "m1", Name: "Model One"}, {ID: "m2", Name: "Model Two"}},
@@ -186,7 +186,7 @@ func TestModelSelectionDoesNotBlockUpdate(t *testing.T) {
 func TestCopilotImportDoesNotBlockUpdate(t *testing.T) {
 	t.Parallel()
 	m, ws := newModelSelectUI(t, true)
-	copilot := string(catalog.InferenceProviderCopilot)
+	copilot := catalog.InferenceProviderCopilot
 
 	cmd := returnsPromptly(t, func() tea.Cmd {
 		return m.handleAction(dialog.ActionSelectModel{

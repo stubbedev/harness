@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/db"
@@ -396,7 +397,7 @@ func outputSessionJSON(w io.Writer, sess session.Session, msgs []*message.Messag
 }
 
 func outputSessionHuman(ctx context.Context, cfg *config.ConfigStore, sess session.Session, msgs []*message.Message) error {
-	var providerID string
+	var providerID catalog.InferenceProvider
 	var cfgPtr *config.Config
 	if cfg != nil {
 		cfgPtr = cfg.Config()
@@ -548,12 +549,12 @@ type sessionShowSkill struct {
 }
 
 type sessionShowMessage struct {
-	ID       string            `json:"id"`
-	Role     string            `json:"role"`
-	Created  string            `json:"created"`
-	Model    string            `json:"model,omitempty"`
-	Provider string            `json:"provider,omitempty"`
-	Parts    []sessionShowPart `json:"parts"`
+	ID       string                    `json:"id"`
+	Role     string                    `json:"role"`
+	Created  string                    `json:"created"`
+	Model    string                    `json:"model,omitempty"`
+	Provider catalog.InferenceProvider `json:"provider,omitempty"`
+	Parts    []sessionShowPart         `json:"parts"`
 }
 
 type sessionShowPart struct {

@@ -528,7 +528,7 @@ func effectiveReasoningEffort(model Model) string {
 }
 
 func isResponsesAPIModel(providerCfg config.ProviderConfig, modelID string) bool {
-	if router := catalog.ResponsesAPIRouter(catalog.InferenceProvider(providerCfg.ID)); router != nil {
+	if router := catalog.ResponsesAPIRouter(providerCfg.ID); router != nil {
 		return router(modelID)
 	}
 	return openai.IsResponsesModel(modelID)
@@ -703,9 +703,9 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && shouldSetEffort {
 			switch providerCfg.ID {
-			case string(catalog.InferenceProviderIoNet):
+			case catalog.InferenceProviderIoNet:
 				extraBody["reasoning"] = map[string]string{"effort": reasoningEffort}
-			case string(catalog.InferenceProviderOpenCodeGo), string(catalog.InferenceProviderOpenCodeZen):
+			case catalog.InferenceProviderOpenCodeGo, catalog.InferenceProviderOpenCodeZen:
 				// MiniMax models use the "thinking" parameter instead of
 				// "reasoning_effort". Other models on these providers still
 				// use the standard field.
@@ -722,7 +722,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		// TODO: Abstract this in Fantasy somehow?
 		// TODO: Allow custom providers to specify how to set this?
 		switch id := providerCfg.ID; {
-		case id == string(catalog.InferenceProviderIoNet):
+		case id == catalog.InferenceProviderIoNet:
 			if _, ok := extraBody["reasoning"]; !ok && model.CatalogCfg.CanReason {
 				if model.ModelCfg.Think {
 					extraBody["reasoning"] = map[string]string{"effort": "medium"}
@@ -731,14 +731,14 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				}
 			}
 
-		case catalog.IsZAI(id), id == string(catalog.InferenceProviderDeepSeek):
+		case catalog.IsZAI(id), id == catalog.InferenceProviderDeepSeek:
 			if model.ModelCfg.Think || reasoningEffort != "" {
 				extraBody["thinking"] = map[string]any{"type": "enabled"}
 			} else {
 				extraBody["thinking"] = map[string]any{"type": "disabled"}
 			}
 
-		case id == string(catalog.InferenceProviderFireworks):
+		case id == catalog.InferenceProviderFireworks:
 			// NOTE: Fireworks break if we set both `reasoning_effort` and `thinking`.
 			if reasoningEffort == "" {
 				if model.ModelCfg.Think {
@@ -748,12 +748,12 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 				}
 			}
 
-		case id == string(catalog.InferenceProviderBaseten):
+		case id == catalog.InferenceProviderBaseten:
 			extraBody["chat_template_args"] = map[string]any{
 				"enable_thinking": model.ModelCfg.Think || reasoningEffort != "" && reasoningEffort != "none",
 			}
 
-		case id == string(catalog.InferenceProviderOpenCodeGo), id == string(catalog.InferenceProviderOpenCodeZen):
+		case id == catalog.InferenceProviderOpenCodeGo, id == catalog.InferenceProviderOpenCodeZen:
 			// MiniMax M3 uses the "thinking" parameter to control reasoning.
 			// "reasoning_split" must be true so thinking content is returned
 			// in the "reasoning_content" field instead of inline in "content".
@@ -872,7 +872,7 @@ func newModelCall(model Model, providerCfg config.ProviderConfig, toolStepEffort
 // failed as unauthorized after OnAuthRefresh had its chance. A successful
 // retry means there is nothing to ask; AWS SSO is refreshed inside
 // OnAuthRefresh and needs no notice.
-func (c *coordinator) notifyIfUnauthorized(err error, providerID string) {
+func (c *coordinator) notifyIfUnauthorized(err error, providerID catalog.InferenceProvider) {
 	if err != nil && isUnauthorized(err) && c.notify != nil {
 		c.notify.Publish(pubsub.CreatedEvent, notify.Notification{
 			Type:       notify.TypeReAuthenticate,
@@ -930,7 +930,7 @@ func (c *coordinator) modelInvocableSkillCount() int {
 // findModelProvider returns the provider config and catalog model for the
 // provider that offers modelID. When providerOverride is non-empty only that
 // provider is searched. ok is false when no matching provider/model is found.
-func (c *coordinator) findModelProvider(modelID, providerOverride string) (config.ProviderConfig, catalog.Model, bool) {
+func (c *coordinator) findModelProvider(modelID string, providerOverride catalog.InferenceProvider) (config.ProviderConfig, catalog.Model, bool) {
 	if providerOverride != "" {
 		p, ok := c.cfg.Config().Providers.Get(providerOverride)
 		if !ok {
@@ -948,7 +948,7 @@ func (c *coordinator) findModelProvider(modelID, providerOverride string) (confi
 	// deterministic across dispatches instead of varying run to run.
 	providers := slices.Collect(c.cfg.Config().Providers.Seq())
 	slices.SortFunc(providers, func(a, b config.ProviderConfig) int {
-		return strings.Compare(a.ID, b.ID)
+		return cmp.Compare(a.ID, b.ID)
 	})
 	for _, p := range providers {
 		if m, ok := findCatalogModel(p, modelID); ok {
@@ -994,7 +994,7 @@ func (c *coordinator) buildModel(ctx context.Context, providerCfg config.Provide
 //
 // Results are memoized in subagentModelCache for the lifetime of the current
 // config generation. UpdateModels clears the cache on config reload.
-func (c *coordinator) resolveModelByID(ctx context.Context, modelID, providerOverride string, isSubAgent bool) (Model, error) {
+func (c *coordinator) resolveModelByID(ctx context.Context, modelID string, providerOverride catalog.InferenceProvider, isSubAgent bool) (Model, error) {
 	key := subagentModelKey{modelID: modelID, provider: providerOverride, isSubAgent: isSubAgent}
 
 	if m, ok := c.subagentModelCache.Get(key); ok {
@@ -1335,13 +1335,13 @@ func (c *coordinator) buildAgentModels(ctx context.Context, isSubAgent bool) (Mo
 	return large, small, nil
 }
 
-func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID string, disableHTTP2 bool) (fantasy.Provider, error) {
+func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map[string]string, providerID catalog.InferenceProvider, disableHTTP2 bool) (fantasy.Provider, error) {
 	var opts []anthropic.Option
 
 	switch {
 	case strings.HasPrefix(apiKey, "Bearer "):
 		headers["Authorization"] = apiKey
-	case providerID == string(catalog.InferenceProviderMiniMax) || providerID == string(catalog.InferenceProviderMiniMaxChina):
+	case providerID == catalog.InferenceProviderMiniMax || providerID == catalog.InferenceProviderMiniMaxChina:
 		headers["Authorization"] = "Bearer " + apiKey
 	case apiKey != "":
 		// X-Api-Key header
@@ -1397,7 +1397,7 @@ func (c *coordinator) buildVercelProvider(_, apiKey string, headers map[string]s
 	return vercel.New(opts...)
 }
 
-func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID string, wire catalog.Type, isSubAgent, disableHTTP2 bool) (fantasy.Provider, error) {
+func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers map[string]string, extraBody map[string]any, providerID catalog.InferenceProvider, wire catalog.Type, isSubAgent, disableHTTP2 bool) (fantasy.Provider, error) {
 	opts := []openaicompat.Option{
 		openaicompat.WithBaseURL(baseURL),
 		openaicompat.WithAPIKey(apiKey),
@@ -1409,7 +1409,7 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
 	switch providerID {
-	case string(catalog.InferenceProviderCopilot):
+	case catalog.InferenceProviderCopilot:
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
@@ -1417,14 +1417,15 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 
-	case string(catalog.InferenceProviderOpenCodeGo), string(catalog.InferenceProviderOpenCodeZen):
+	case catalog.InferenceProviderOpenCodeGo, catalog.InferenceProviderOpenCodeZen:
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
-			openaicompat.WithResponsesAPIFunc(catalog.ResponsesAPIRouter(catalog.InferenceProvider(providerID))),
+			openaicompat.WithResponsesAPIFunc(catalog.ResponsesAPIRouter(providerID)),
 		)
-	}
-	if httpClient == nil {
+		fallthrough
+
+	default:
 		httpClient = log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)
 	}
 	opts = append(opts, openaicompat.WithHTTPClient(httpClient))
@@ -1534,12 +1535,12 @@ func (c *coordinator) buildAnthropicVertexProvider(headers map[string]string, op
 // providers (litellm, llamacpp, lmstudio, ollama, omlx) speak
 // OpenAI-compat.
 func wireFamily(providerCfg config.ProviderConfig, modelID string) catalog.Type {
-	if router := catalog.ResponsesAPIRouter(catalog.InferenceProvider(providerCfg.ID)); router != nil && router(modelID) {
+	if router := catalog.ResponsesAPIRouter(providerCfg.ID); router != nil && router(modelID) {
 		return catalog.TypeOpenAI
 	}
 
 	switch t := providerCfg.Type; {
-	case catalog.UsesMessagesAPI(catalog.InferenceProvider(providerCfg.ID), modelID):
+	case catalog.UsesMessagesAPI(providerCfg.ID, modelID):
 		return catalog.TypeAnthropic
 	case t == catalog.TypeVertexAI:
 		if strings.Contains(modelID, "anthropic") || strings.Contains(modelID, "claude") {
@@ -1909,7 +1910,7 @@ func (f fingerprint) addSelectedModel(sel config.SelectedModel, ok bool) fingerp
 	if !ok {
 		return f
 	}
-	f = f.addString(sel.Provider)
+	f = f.addString(string(sel.Provider))
 	f = f.addString(sel.Model)
 	f = f.addString(sel.ReasoningEffort)
 	f = f.addBool(sel.Think)
@@ -1924,7 +1925,7 @@ func (f fingerprint) addSelectedModel(sel config.SelectedModel, ok bool) fingerp
 // addProviderBuildInputs mixes the provider fields the provider build
 // consumes into f.
 func (f fingerprint) addProviderBuildInputs(p config.ProviderConfig) fingerprint {
-	f = f.addString(p.ID)
+	f = f.addString(string(p.ID))
 	f = f.addString(string(p.Type))
 	f = f.addString(p.APIKey)
 	f = f.addString(p.ResolvedAPIKey)
@@ -2172,7 +2173,7 @@ var errNoInteractiveAuth = errors.New("interactive authentication unavailable")
 // provider completes (signalled via SignalAuthComplete) or the context is
 // cancelled, then rebuilds models so the next attempt picks up fresh
 // credentials. Returns nil when the caller should retry.
-func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID string) error {
+func (c *coordinator) waitForInteractiveReauth(ctx context.Context, providerID catalog.InferenceProvider) error {
 	// Use a detached context with a generous timeout so the wait survives
 	// agent run cancellation. The user needs time to complete browser-based
 	// authentication.
@@ -2302,13 +2303,13 @@ func (c *coordinator) acquireDispatchSlot(ctx context.Context) (release func(), 
 type subagentModel struct {
 	Effort   string
 	Model    string
-	Provider string
+	Provider catalog.InferenceProvider
 }
 
 // subagentModelKey is the cache key for resolveModelByID results.
 type subagentModelKey struct {
 	modelID    string
-	provider   string
+	provider   catalog.InferenceProvider
 	isSubAgent bool
 }
 

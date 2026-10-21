@@ -14,6 +14,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/app"
+	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
@@ -264,7 +265,7 @@ func (w *AppWorkspace) InitCoderAgentNonInteractive(ctx context.Context) error {
 	return w.app.InitCoderAgentNonInteractive(ctx)
 }
 
-func (w *AppWorkspace) GetDefaultSmallModel(providerID string) (config.SelectedModel, error) {
+func (w *AppWorkspace) GetDefaultSmallModel(providerID catalog.InferenceProvider) (config.SelectedModel, error) {
 	return w.app.GetDefaultSmallModel(providerID), nil
 }
 
@@ -367,7 +368,7 @@ func (w *AppWorkspace) SetCompactMode(scope config.Scope, enabled bool) error {
 	return w.store.SetCompactMode(scope, enabled)
 }
 
-func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID string, apiKey any) error {
+func (w *AppWorkspace) SetProviderAPIKey(scope config.Scope, providerID catalog.InferenceProvider, apiKey any) error {
 	if err := w.store.SetProviderAPIKey(scope, providerID, apiKey); err != nil {
 		return err
 	}
@@ -387,7 +388,7 @@ func (w *AppWorkspace) ImportCopilot() (*oauth.Token, bool) {
 	return w.store.ImportCopilot()
 }
 
-func (w *AppWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID string) error {
+func (w *AppWorkspace) RefreshOAuthToken(ctx context.Context, scope config.Scope, providerID catalog.InferenceProvider) error {
 	return w.store.RefreshOAuthToken(ctx, scope, providerID)
 }
 
