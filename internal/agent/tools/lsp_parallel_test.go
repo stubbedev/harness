@@ -17,7 +17,7 @@ import (
 // reports failure as an error response rather than through a testing.T, so
 // it can run on a goroutine of its own.
 func callLSP(ctx context.Context, tool fantasy.AgentTool, action LSPAction) fantasy.ToolResponse {
-	input, err := json.Marshal(LSPParams{Action: string(action)})
+	input, err := json.Marshal(LSPParams{Action: action})
 	if err != nil {
 		return fantasy.NewTextErrorResponse(err.Error())
 	}

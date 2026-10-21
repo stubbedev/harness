@@ -13,7 +13,7 @@ func TestReplaceSymbolOpsSpans(t *testing.T) {
 	t.Parallel()
 	lines := []string{"a", "b", "c", "d"}
 	// The symbol spans lines 1..2 ("b", "c").
-	tests := map[string]string{
+	tests := map[ReplaceSymbolMode]string{
 		"replace":    "a|X|d",
 		"add_before": "a|X|b|c|d",
 		"add_after":  "a|b|c|X|d",
@@ -27,7 +27,7 @@ func TestReplaceSymbolOpsSpans(t *testing.T) {
 			inserted = []string{"X"}
 		}
 		got := strings.Join(slices.Concat(lines[:from], inserted, lines[to:]), "|")
-		require.Equal(t, want, got, action)
+		require.Equal(t, want, got, string(action))
 	}
 }
 

@@ -146,7 +146,7 @@ func TestMemoryToolValidation(t *testing.T) {
 	tool := newMemoryToolForTest(t)
 
 	cases := map[string]string{
-		`{"action":"flurb"}`:                                             "invalid action",
+		`{"action":"flurb"}`:                                             `unknown action "flurb"; available: delete, edit, list, read, save, search`,
 		`{"action":"save","content":"no title"}`:                         "title is required",
 		`{"action":"save","title":"  ","content":"c"}`:                   "title is required",
 		`{"action":"save","title":"t"}`:                                  "content is required",

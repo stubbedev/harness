@@ -5,9 +5,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"maps"
-	"slices"
-	"strings"
 	"sync"
 
 	"github.com/stubbedev/harness/internal/presence"
@@ -18,6 +15,7 @@ import (
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
+	"github.com/stubbedev/harness/internal/toolaction"
 )
 
 const LSPToolName = toolname.LSP
@@ -30,22 +28,21 @@ var lspDescription string
 // most of their parameters in common anyway: nearly all of them name a
 // symbol and a place to look for it.
 type LSPParams struct {
-	Action      string `json:"action" enum:"diagnostics,symbols,definition,references,call_hierarchy,rename,replace_symbol,restart"`
-	Symbol      string `json:"symbol,omitempty" description:"Symbol name, for definition, references, call_hierarchy, rename and replace_symbol"`
-	Path        string `json:"path,omitempty" description:"File or directory, relative to the working directory or absolute. symbols and replace_symbol need a file; diagnostics takes a file or covers the whole project when omitted; definition, references, call_hierarchy and rename search under it, defaulting to the working directory"`
-	Direction   string `json:"direction,omitempty" enum:"incoming,outgoing" description:"call_hierarchy only: who calls this, or what this calls"`
-	NewName     string `json:"new_name,omitempty" description:"rename only: the new name"`
-	Replacement string `json:"replacement,omitempty" description:"replace_symbol only: the text to write, ignored when mode is delete"`
-	Mode        string `json:"mode,omitempty" enum:"replace,add_before,add_after,delete" description:"replace_symbol only; replace is the default"`
-	Name        string `json:"name,omitempty" description:"restart only: one client to restart; all of them when omitted"`
+	Action      LSPAction         `json:"action"`
+	Symbol      string            `json:"symbol,omitempty" description:"Symbol name, for definition, references, call_hierarchy, rename and replace_symbol"`
+	Path        string            `json:"path,omitempty" description:"File or directory, relative to the working directory or absolute. symbols and replace_symbol need a file; diagnostics takes a file or covers the whole project when omitted; definition, references, call_hierarchy and rename search under it, defaulting to the working directory"`
+	Direction   string            `json:"direction,omitempty" enum:"incoming,outgoing" description:"call_hierarchy only: who calls this, or what this calls"`
+	NewName     string            `json:"new_name,omitempty" description:"rename only: the new name"`
+	Replacement string            `json:"replacement,omitempty" description:"replace_symbol only: the text to write, ignored when mode is delete"`
+	Mode        ReplaceSymbolMode `json:"mode,omitempty" description:"replace_symbol only; replace is the default"`
+	Name        string            `json:"name,omitempty" description:"restart only: one client to restart; all of them when omitted"`
 }
 
 // LSPAction names one of the actions the lsp tool dispatches. The UI labels
 // and renders an lsp call by it, so both sides spell it one way.
 type LSPAction string
 
-// The lsp tool's actions. The enum tag on LSPParams.Action must list these;
-// TestLSPActionEnumMatchesDispatch holds it to that.
+// The lsp tool's actions.
 const (
 	LSPActionDiagnostics   LSPAction = "diagnostics"
 	LSPActionSymbols       LSPAction = "symbols"
@@ -175,21 +172,16 @@ func NewLSPTool(lspManager *lsp.Manager, files history.Service, filetracker file
 // sequential tool holds every other call of its step behind it. The
 // actions that change files serialise among themselves instead (see
 // [lockLSPMutation]).
-func newLSPTool(lspManager *lsp.Manager, filetracker filetracker.Service, actions map[LSPAction]lspActionFunc) fantasy.AgentTool {
-	var known []string
-	for _, action := range slices.Sorted(maps.Keys(actions)) {
-		known = append(known, string(action))
-	}
-
-	return fantasy.NewParallelAgentTool(
+func newLSPTool(lspManager *lsp.Manager, filetracker filetracker.Service, handlers map[LSPAction]lspActionFunc) fantasy.AgentTool {
+	actions := toolaction.New("action", handlers)
+	return toolaction.Advertise(fantasy.NewParallelAgentTool(
 		LSPToolName,
 		lspDescription,
 		func(ctx context.Context, params LSPParams, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			name := LSPAction(params.Action)
-			action, ok := actions[name]
-			if !ok {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf(
-					"unknown action %q. Available: %s", params.Action, strings.Join(known, ", "))), nil
+			name := params.Action
+			action, err := actions.Lookup(name)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			if lspMutatingActions[name] {
 				unlock, err := lockLSPMutation(ctx, lspManager)
@@ -202,5 +194,5 @@ func newLSPTool(lspManager *lsp.Manager, filetracker filetracker.Service, action
 			ctx = context.WithValue(ctx, sourceEvidenceKey{}, filetracker)
 			return action(ctx, params)
 		},
-	)
+	), actions.Enum(), replaceSymbolModes.Enum())
 }

@@ -56,7 +56,7 @@ func TestLSPToolResolvesRelativePathAgainstWorkingDirNotProcessCwd(t *testing.T)
 	client.PublishTestDiagnostics(filepath.Join(dir, "main.go"), []protocol.Diagnostic{diag(2, protocol.SeverityError, "undefined: x")})
 
 	tool := NewLSPTool(manager, nil, nil, nil, dir)
-	resp := runLSP(t, tool, LSPParams{Action: string(LSPActionDiagnostics), Path: "main.go"})
+	resp := runLSP(t, tool, LSPParams{Action: LSPActionDiagnostics, Path: "main.go"})
 
 	require.False(t, resp.IsError, resp.Content)
 	require.Contains(t, resp.Content, "<file_diagnostics>")
@@ -70,13 +70,13 @@ func TestLSPFileActionsTakePathAndNameWhatNeedsAFile(t *testing.T) {
 	tool := NewLSPTool(manager, nil, nil, nil, dir)
 
 	for _, action := range lspFileActions {
-		resp := runLSP(t, tool, LSPParams{Action: string(action), Symbol: "f", Replacement: "x"})
+		resp := runLSP(t, tool, LSPParams{Action: action, Symbol: "f", Replacement: "x"})
 		require.True(t, resp.IsError)
 		require.Contains(t, resp.Content, string(action)+" needs path to name a file")
 		require.Contains(t, resp.Content, "symbols and replace_symbol act on one file")
 		require.NotContains(t, resp.Content, "file_path")
 
-		resp = runLSP(t, tool, LSPParams{Action: string(action), Symbol: "f", Replacement: "x", Path: "."})
+		resp = runLSP(t, tool, LSPParams{Action: action, Symbol: "f", Replacement: "x", Path: "."})
 		require.True(t, resp.IsError)
 		require.Contains(t, resp.Content, dir+" is a directory")
 	}
@@ -88,7 +88,7 @@ func TestLSPSymbolsReadsPath(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o600))
 	tool := NewLSPTool(manager, nil, nil, nil, dir)
 
-	resp := runLSP(t, tool, LSPParams{Action: string(LSPActionSymbols), Path: "main.go"})
+	resp := runLSP(t, tool, LSPParams{Action: LSPActionSymbols, Path: "main.go"})
 
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "no LSP client handles "+filepath.Join(dir, "main.go"))
@@ -103,7 +103,7 @@ func TestLSPResolveReportsMissingClientWithNextStep(t *testing.T) {
 	tool := NewLSPTool(manager, nil, nil, nil, dir)
 
 	for _, action := range []LSPAction{LSPActionDefinition, LSPActionReferences, LSPActionRename} {
-		resp := runLSP(t, tool, LSPParams{Action: string(action), Symbol: "Target", NewName: "Other"})
+		resp := runLSP(t, tool, LSPParams{Action: action, Symbol: "Target", NewName: "Other"})
 		require.True(t, resp.IsError, action)
 		require.Contains(t, resp.Content, "cannot resolve symbol 'Target'", action)
 		require.Contains(t, resp.Content, "no LSP client handles any file under "+dir, action)
@@ -118,7 +118,7 @@ func TestLSPResolveReportsSymbolMentionedNowhere(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o600))
 	tool := NewLSPTool(manager, nil, nil, nil, dir)
 
-	resp := runLSP(t, tool, LSPParams{Action: string(LSPActionDefinition), Symbol: "Missing", Path: "."})
+	resp := runLSP(t, tool, LSPParams{Action: LSPActionDefinition, Symbol: "Missing", Path: "."})
 
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "cannot resolve symbol 'Missing'")
@@ -131,7 +131,7 @@ func TestLSPResolveReportsSearchFailure(t *testing.T) {
 	tool := NewLSPTool(manager, nil, nil, nil, dir)
 	missing := filepath.Join(dir, "missing")
 
-	resp := runLSP(t, tool, LSPParams{Action: string(LSPActionDefinition), Symbol: "Target", Path: "missing"})
+	resp := runLSP(t, tool, LSPParams{Action: LSPActionDefinition, Symbol: "Target", Path: "missing"})
 
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "cannot resolve symbol 'Target'")

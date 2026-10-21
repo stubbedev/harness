@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	_ "embed"
-	"fmt"
 
 	"github.com/stubbedev/harness/internal/toolname"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/stubbedev/harness/internal/extensions"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/skills"
+	"github.com/stubbedev/harness/internal/toolaction"
 )
 
 const HarnessToolName = toolname.Harness
@@ -22,9 +22,18 @@ var harnessDescription string
 // HarnessParams selects between the two ways of asking Harness about
 // itself: its current state, or what it has been logging.
 type HarnessParams struct {
-	Action string `json:"action" description:"state (the current configuration and service health) or logs (recent internal log entries)"`
-	Lines  int    `json:"lines,omitempty" description:"logs only: how many recent entries to return"`
+	Action HarnessAction `json:"action" description:"state (the current configuration and service health) or logs (recent internal log entries)"`
+	Lines  int           `json:"lines,omitempty" description:"logs only: how many recent entries to return"`
 }
+
+type HarnessAction string
+
+const (
+	HarnessActionState HarnessAction = "state"
+	HarnessActionLogs  HarnessAction = "logs"
+)
+
+type harnessActionFunc func(HarnessParams) fantasy.ToolResponse
 
 // NewHarnessTool folds the two self-inspection tools into one. They are
 // asked the same question from the same place -- something is not working,
@@ -38,20 +47,24 @@ func NewHarnessTool(
 	host *extensions.Host,
 	logFile string,
 ) fantasy.AgentTool {
-	return fantasy.NewParallelAgentTool(
+	actions := toolaction.New("action", map[HarnessAction]harnessActionFunc{
+		HarnessActionState: func(HarnessParams) fantasy.ToolResponse {
+			allSkills, activeSkills := skillLists()
+			return fantasy.NewTextResponse(buildHarnessInfo(cfg, lspManager, allSkills, activeSkills, skillTracker, host))
+		},
+		HarnessActionLogs: func(params HarnessParams) fantasy.ToolResponse {
+			return fantasy.NewTextResponse(runHarnessLogs(logFile, HarnessLogsParams{Lines: params.Lines}))
+		},
+	})
+	return toolaction.Advertise(fantasy.NewParallelAgentTool(
 		HarnessToolName,
 		harnessDescription,
 		func(ctx context.Context, params HarnessParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			switch params.Action {
-			case "state":
-				allSkills, activeSkills := skillLists()
-				return fantasy.NewTextResponse(buildHarnessInfo(cfg, lspManager, allSkills, activeSkills, skillTracker, host)), nil
-			case "logs":
-				return fantasy.NewTextResponse(runHarnessLogs(logFile, HarnessLogsParams{Lines: params.Lines})), nil
-			default:
-				return fantasy.NewTextErrorResponse(fmt.Sprintf(
-					"unknown action %q. Available: state, logs", params.Action)), nil
+			action, err := actions.Lookup(params.Action)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
+			return action(params), nil
 		},
-	)
+	), actions.Enum())
 }

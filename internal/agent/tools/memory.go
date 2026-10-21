@@ -13,6 +13,7 @@ import (
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/memory"
+	"github.com/stubbedev/harness/internal/toolaction"
 )
 
 //go:embed memory.md
@@ -35,15 +36,37 @@ const (
 )
 
 type MemoryParams struct {
-	Action   string `json:"action" enum:"save,edit,read,search,list,delete"`
-	ID       string `json:"id,omitempty" description:"Memory id (required for delete; optional for save, edit and read)"`
-	Title    string `json:"title,omitempty" description:"Short title (required for save; for edit identifies the memory when id is omitted)"`
-	Content  string `json:"content,omitempty" description:"Full note content (required for save and edit; replaces existing content on update)"`
-	Category string `json:"category,omitempty" enum:"user,feedback,project,reference" description:"user: stable facts about them; feedback: corrections that shape how you work; project: non-obvious codebase facts; reference: pointers to external material. Default project"`
-	Scope    string `json:"scope,omitempty" enum:"global,repo" description:"global: every repository; repo: this repository, in every clone. A new memory defaults to global for user and feedback, repo otherwise. Elsewhere it picks between same-titled memories in both (default repo) or narrows list and search"`
-	Pinned   *bool  `json:"pinned,omitempty" description:"Pin to protect from reaping (save and edit; omit to keep the current value)"`
-	Query    string `json:"query,omitempty" description:"Search query (for search; read falls back to it without an id)"`
+	Action   MemoryAction `json:"action"`
+	ID       string       `json:"id,omitempty" description:"Memory id (required for delete; optional for save, edit and read)"`
+	Title    string       `json:"title,omitempty" description:"Short title (required for save; for edit identifies the memory when id is omitted)"`
+	Content  string       `json:"content,omitempty" description:"Full note content (required for save and edit; replaces existing content on update)"`
+	Category string       `json:"category,omitempty" enum:"user,feedback,project,reference" description:"user: stable facts about them; feedback: corrections that shape how you work; project: non-obvious codebase facts; reference: pointers to external material. Default project"`
+	Scope    string       `json:"scope,omitempty" enum:"global,repo" description:"global: every repository; repo: this repository, in every clone. A new memory defaults to global for user and feedback, repo otherwise. Elsewhere it picks between same-titled memories in both (default repo) or narrows list and search"`
+	Pinned   *bool        `json:"pinned,omitempty" description:"Pin to protect from reaping (save and edit; omit to keep the current value)"`
+	Query    string       `json:"query,omitempty" description:"Search query (for search; read falls back to it without an id)"`
 }
+
+type MemoryAction string
+
+const (
+	MemoryActionSave   MemoryAction = "save"
+	MemoryActionEdit   MemoryAction = "edit"
+	MemoryActionRead   MemoryAction = "read"
+	MemoryActionSearch MemoryAction = "search"
+	MemoryActionList   MemoryAction = "list"
+	MemoryActionDelete MemoryAction = "delete"
+)
+
+type memoryActionFunc func(context.Context, memory.Service, MemoryParams, memory.Scope) (fantasy.ToolResponse, error)
+
+var memoryActions = toolaction.New("action", map[MemoryAction]memoryActionFunc{
+	MemoryActionSave:   memorySave,
+	MemoryActionEdit:   memoryEdit,
+	MemoryActionRead:   memoryRead,
+	MemoryActionSearch: memorySearch,
+	MemoryActionList:   memoryList,
+	MemoryActionDelete: memoryDelete,
+})
 
 // NewMemoryTool builds the tool that lets the agent maintain durable
 // notes across sessions. Memories are global or scoped to the
@@ -55,7 +78,7 @@ type MemoryParams struct {
 // shared by every session, sub-agent and harness process, not just this
 // tool's calls).
 func NewMemoryTool(svc memory.Service) fantasy.AgentTool {
-	return fantasy.NewParallelAgentTool(
+	return toolaction.Advertise(fantasy.NewParallelAgentTool(
 		MemoryToolName,
 		memoryDescription,
 		func(ctx context.Context, params MemoryParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
@@ -63,24 +86,13 @@ func NewMemoryTool(svc memory.Service) fantasy.AgentTool {
 			if err != nil {
 				return fantasy.NewTextErrorResponse(err.Error() + "; omit scope or pass global or repo"), nil
 			}
-			switch params.Action {
-			case "save":
-				return memorySave(ctx, svc, params, scope)
-			case "edit":
-				return memoryEdit(ctx, svc, params, scope)
-			case "read":
-				return memoryRead(ctx, svc, params, scope)
-			case "search":
-				return memorySearch(ctx, svc, params, scope)
-			case "list":
-				return memoryList(ctx, svc, scope)
-			case "delete":
-				return memoryDelete(ctx, svc, params, scope)
-			default:
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("invalid action %q: must be one of save, edit, read, search, list, delete", params.Action)), nil
+			action, err := memoryActions.Lookup(params.Action)
+			if err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
+			return action(ctx, svc, params, scope)
 		},
-	)
+	), memoryActions.Enum())
 }
 
 // parseCategory validates an optional category, keeping it empty when
@@ -351,7 +363,7 @@ func memorySearch(ctx context.Context, svc memory.Service, params MemoryParams, 
 	return fantasy.NewTextResponse(renderIndex(items)), nil
 }
 
-func memoryList(ctx context.Context, svc memory.Service, scope memory.Scope) (fantasy.ToolResponse, error) {
+func memoryList(ctx context.Context, svc memory.Service, _ MemoryParams, scope memory.Scope) (fantasy.ToolResponse, error) {
 	items, err := svc.List(ctx)
 	if err != nil {
 		return fantasy.ToolResponse{}, err

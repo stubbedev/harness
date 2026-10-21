@@ -231,6 +231,26 @@ harness.register_tool({ name = "plain", handler = function() return "" end })
 	}
 }
 
+func TestJobToolAdvertisesAndDispatchesOneActionSet(t *testing.T) {
+	t.Parallel()
+
+	root := writeExtension(t, "actions", `
+harness.register_job({ name = "noop", handler = function() return "" end })
+`)
+	host := newHost(t, []string{root})
+
+	action := findTool(t, host, extensions.JobToolName).Info().Parameters["action"].(map[string]any)
+	require.Equal(t, []string{"cancel", "list", "result"}, action["enum"])
+
+	unknown := runJobTool(t, host, extensions.JobToolParams{Action: "flurb"})
+	require.True(t, unknown.IsError)
+	require.Equal(t, `unknown action "flurb"; available: cancel, list, result`, unknown.Content)
+
+	list := runJobTool(t, host, extensions.JobToolParams{Action: extensions.JobActionList})
+	require.False(t, list.IsError)
+	require.Equal(t, "No extension jobs have been started.", list.Content)
+}
+
 func TestJobStartRejectsUnknownName(t *testing.T) {
 	t.Parallel()
 

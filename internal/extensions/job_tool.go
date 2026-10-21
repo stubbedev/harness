@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stubbedev/harness/internal/toolaction"
 	"github.com/stubbedev/harness/internal/toolname"
 
 	"charm.land/fantasy"
@@ -32,10 +33,26 @@ type jobTool struct {
 
 // JobToolParams is the tool's input.
 type JobToolParams struct {
-	Action string `json:"action" description:"list (every job and its state), result (collect finished results), or cancel"`
-	ID     string `json:"id,omitempty" description:"result/cancel: the job ID. result without an ID collects every finished result"`
-	Wait   int    `json:"wait,omitempty" description:"result with an ID: seconds to wait for a job that is still running (default 0)"`
+	Action JobAction `json:"action" description:"list (every job and its state), result (collect finished results), or cancel"`
+	ID     string    `json:"id,omitempty" description:"result/cancel: the job ID. result without an ID collects every finished result"`
+	Wait   int       `json:"wait,omitempty" description:"result with an ID: seconds to wait for a job that is still running (default 0)"`
 }
+
+type JobAction string
+
+const (
+	JobActionList   JobAction = "list"
+	JobActionResult JobAction = "result"
+	JobActionCancel JobAction = "cancel"
+)
+
+type jobActionFunc func(*jobTool, context.Context, JobToolParams) (fantasy.ToolResponse, error)
+
+var jobActions = toolaction.New("action", map[JobAction]jobActionFunc{
+	JobActionList:   (*jobTool).list,
+	JobActionResult: (*jobTool).result,
+	JobActionCancel: (*jobTool).cancel,
+})
 
 func (t *jobTool) Info() fantasy.ToolInfo {
 	return fantasy.ToolInfo{
@@ -44,7 +61,7 @@ func (t *jobTool) Info() fantasy.ToolInfo {
 		Parameters: map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"enum":        []string{"list", "result", "cancel"},
+				"enum":        jobActions.Names(),
 				"description": "list, result, or cancel",
 			},
 			"id": map[string]any{
@@ -71,23 +88,25 @@ func (t *jobTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolR
 		return fantasy.NewTextErrorResponse("invalid arguments: " + err.Error()), nil
 	}
 
-	switch params.Action {
-	case "list":
-		return fantasy.NewTextResponse(renderJobList(t.host.Jobs())), nil
-	case "result":
-		return t.result(ctx, params)
-	case "cancel":
-		if params.ID == "" {
-			return fantasy.NewTextErrorResponse("cancel needs an id"), nil
-		}
-		if !t.host.jobs.cancel(params.ID) {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("job %q is not running", params.ID)), nil
-		}
-		return fantasy.NewTextResponse("Canceled " + params.ID + "."), nil
-	default:
-		return fantasy.NewTextErrorResponse(fmt.Sprintf(
-			"unknown action %q. Available: list, result, cancel", params.Action)), nil
+	action, err := jobActions.Lookup(params.Action)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
+	return action(t, ctx, params)
+}
+
+func (t *jobTool) list(context.Context, JobToolParams) (fantasy.ToolResponse, error) {
+	return fantasy.NewTextResponse(renderJobList(t.host.Jobs())), nil
+}
+
+func (t *jobTool) cancel(_ context.Context, params JobToolParams) (fantasy.ToolResponse, error) {
+	if params.ID == "" {
+		return fantasy.NewTextErrorResponse("cancel needs an id"), nil
+	}
+	if !t.host.jobs.cancel(params.ID) {
+		return fantasy.NewTextErrorResponse(fmt.Sprintf("job %q is not running", params.ID)), nil
+	}
+	return fantasy.NewTextResponse("Canceled " + params.ID + "."), nil
 }
 
 // result collects one job, or drains every finished one.

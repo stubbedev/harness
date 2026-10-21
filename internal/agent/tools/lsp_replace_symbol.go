@@ -15,14 +15,24 @@ import (
 	"github.com/stubbedev/harness/internal/filetracker"
 	"github.com/stubbedev/harness/internal/history"
 	"github.com/stubbedev/harness/internal/lsp"
+	"github.com/stubbedev/harness/internal/toolaction"
 )
 
 type replaceSymbolParams struct {
 	Symbol      string
 	File        absPath
 	Replacement string
-	Action      string
+	Action      ReplaceSymbolMode
 }
+
+type ReplaceSymbolMode string
+
+const (
+	ReplaceSymbolReplace   ReplaceSymbolMode = "replace"
+	ReplaceSymbolAddBefore ReplaceSymbolMode = "add_before"
+	ReplaceSymbolAddAfter  ReplaceSymbolMode = "add_after"
+	ReplaceSymbolDelete    ReplaceSymbolMode = "delete"
+)
 
 // ReplaceSymbolResponseMetadata carries diff data for the renderer.
 type ReplaceSymbolResponseMetadata struct {
@@ -45,35 +55,37 @@ type replaceSymbolOp struct {
 	summary func(symbol, path string, start, end int) string
 }
 
-var replaceSymbolOps = map[string]replaceSymbolOp{
-	"replace": {
+var replaceSymbolOps = map[ReplaceSymbolMode]replaceSymbolOp{
+	ReplaceSymbolReplace: {
 		span:   func(start, end int) (int, int) { return start, end + 1 },
 		insert: true,
 		summary: func(symbol, path string, start, end int) string {
 			return fmt.Sprintf("Replaced symbol '%s' in %s (lines %d-%d)", symbol, path, start, end)
 		},
 	},
-	"add_before": {
+	ReplaceSymbolAddBefore: {
 		span:   func(start, _ int) (int, int) { return start, start },
 		insert: true,
 		summary: func(symbol, path string, start, _ int) string {
 			return fmt.Sprintf("Inserted before symbol '%s' in %s (before line %d)", symbol, path, start)
 		},
 	},
-	"add_after": {
+	ReplaceSymbolAddAfter: {
 		span:   func(_, end int) (int, int) { return end + 1, end + 1 },
 		insert: true,
 		summary: func(symbol, path string, _, end int) string {
 			return fmt.Sprintf("Inserted after symbol '%s' in %s (after line %d)", symbol, path, end)
 		},
 	},
-	"delete": {
+	ReplaceSymbolDelete: {
 		span: func(start, end int) (int, int) { return start, end + 1 },
 		summary: func(symbol, path string, start, end int) string {
 			return fmt.Sprintf("Deleted symbol '%s' from %s (lines %d-%d)", symbol, path, start, end)
 		},
 	},
 }
+
+var replaceSymbolModes = toolaction.New("mode", replaceSymbolOps)
 
 func replaceSymbolAction(
 	lspManager *lsp.Manager,
@@ -89,14 +101,14 @@ func replaceSymbolAction(
 
 		action := params.Action
 		if action == "" {
-			action = "replace"
+			action = ReplaceSymbolReplace
 		}
-		op, ok := replaceSymbolOps[action]
-		if !ok {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("invalid action %q: must be replace, add_before, add_after, or delete", action)), nil
+		op, err := replaceSymbolModes.Lookup(action)
+		if err != nil {
+			return fantasy.NewTextErrorResponse(err.Error()), nil
 		}
 		if op.insert && params.Replacement == "" {
-			return fantasy.NewTextErrorResponse(fmt.Sprintf("replacement is required for action %q", action)), nil
+			return fantasy.NewTextErrorResponse(fmt.Sprintf("replacement is required for mode %q", action)), nil
 		}
 
 		file := string(params.File)
@@ -132,7 +144,7 @@ func spliceSymbol(
 	reg *presence.Registry,
 	workingDir string,
 	params replaceSymbolParams,
-	action string,
+	action ReplaceSymbolMode,
 	op replaceSymbolOp,
 	rng protocol.Range,
 ) (fantasy.ToolResponse, error) {
@@ -187,7 +199,7 @@ func spliceSymbol(
 		Diff:       changes.Diff,
 		OldContent: changes.OldContent,
 		NewContent: changes.NewContent,
-		Action:     action,
+		Action:     string(action),
 	}
 	resp := fantasy.NewTextResponse(summary + "\n" + finishFileChange(ctx, lspManager, reg, path))
 	resp = fantasy.WithResponseMetadata(resp, meta)
