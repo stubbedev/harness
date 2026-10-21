@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"charm.land/fantasy"
 	"github.com/stubbedev/harness/internal/agent/tools"
@@ -17,6 +19,10 @@ import (
 // would only bloat the orchestrator's context.
 const fabricatedPathLimit = 10
 
+const citationDelimiters = "`\"',;()[]{}<>|\u201c\u201d\u2018\u2019\u2014\u2013"
+
+var citationAnchor = regexp.MustCompile(`(?::\d+(?:[-,]\d+)*)+$|#L\d+(?:-L?\d+)?$`)
+
 // warnOnFabricatedPaths scans a sub-agent's final report for cited
 // workspace paths that do not exist and appends a warning to the response
 // the orchestrating agent receives. Small models occasionally invent
@@ -24,12 +30,17 @@ const fabricatedPathLimit = 10
 // the last line of defense before an orchestrator treats the report as
 // fact or edits against an invented path. Fetch research (the research
 // tool) is exempt: it runs in a temporary directory and cites URLs and
-// saved-page paths, not workspace files.
+// saved-page paths, not workspace files. An isolated agent's checkout is
+// searched alongside the workspace.
 func (c *coordinator) warnOnFabricatedPaths(params subAgentParams, resp *fantasy.ToolResponse) {
 	if resp == nil || resp.IsError || params.AgentName == tools.ResearchToolName {
 		return
 	}
-	missing := missingCitedPaths(resp.Content, c.cfg.WorkingDir())
+	roots := []string{c.cfg.WorkingDir()}
+	if params.WorkspaceRoot != "" {
+		roots = append(roots, params.WorkspaceRoot)
+	}
+	missing := missingCitedPaths(resp.Content, roots)
 	if len(missing) == 0 {
 		return
 	}
@@ -48,44 +59,38 @@ func (c *coordinator) warnOnFabricatedPaths(params subAgentParams, resp *fantasy
 }
 
 // missingCitedPaths extracts file-path-shaped tokens from report and
-// returns the ones that resolve to nothing under workdir. A token counts
-// as a citation when it contains a slash and looks like a file (an
-// extension such as .go) or an explicit directory (trailing slash) or a
-// glob; bare prose like "read/write" or "fast/task" never matches.
-func missingCitedPaths(report, workdir string) []string {
+// returns the ones that resolve to nothing under any of roots. A token
+// counts as a citation when it contains a slash and looks like a file (an
+// extension such as .go), an explicit directory (trailing slash) or a
+// glob; bare prose like "read/write" or "fast/task" never matches. Only
+// checkable citations are flagged: an absolute path inside a root, or a
+// relative path whose first element exists in a root. Paths relative to
+// a package directory, fixture names mentioned as data and paths outside
+// every root are never reported: a missed warning costs less than a
+// false one, and nothing outside the roots is ever probed.
+func missingCitedPaths(report string, roots []string) []string {
 	var missing []string
 	seen := make(map[string]bool)
-	for _, raw := range strings.FieldsFunc(report, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '\n' || r == '\r'
-	}) {
-		token := strings.Trim(raw, "`\"'")
-		token = strings.TrimLeft(token, "([{<")
-		token = strings.TrimRight(token, ")]}>,.;:!?")
-		token = strings.TrimRight(token, "'\"`")
-		// file:line and file:line:col references keep only the file.
-		if i := strings.LastIndexByte(token, ':'); i > 0 {
-			if suffix := token[i+1:]; suffix != "" && isAllDigits(suffix) {
-				token = token[:i]
-			}
-		}
+	for _, raw := range strings.FieldsFunc(report, isCitationDelimiter) {
+		token := trimCitation(raw)
 		if token == "" || strings.Contains(token, "://") || !strings.Contains(token, "/") {
 			continue
 		}
 		dirCited := strings.HasSuffix(token, "/")
 		token = strings.TrimRight(token, "/")
 		segment := token[strings.LastIndexByte(token, '/')+1:]
-		glob := strings.ContainsAny(token, "*?[")
+		glob := strings.ContainsAny(token, "*?")
 		if !glob && !dirCited && !hasFileExtension(segment) {
 			continue
 		}
 		if seen[token] {
 			continue
 		}
-		if pathExists(workdir, token, glob) {
-			seen[token] = true
+		seen[token] = true
+		rel, checkable := citationPath(roots, token)
+		if !checkable || existsInAnyRoot(roots, rel, glob) {
 			continue
 		}
-		seen[token] = true
 		missing = append(missing, token)
 		if len(missing) >= fabricatedPathLimit {
 			break
@@ -94,26 +99,62 @@ func missingCitedPaths(report, workdir string) []string {
 	return missing
 }
 
-// pathExists reports whether token resolves under workdir. The token
-// comes from a sub-agent's free-text report, so the probe stays inside
-// the workspace: relative tokens are joined onto workdir, absolute
-// tokens are honored only when they already name something under it,
-// and anything that resolves outside - via .. or an unrelated absolute
-// path - counts as missing rather than being statted. Nothing outside
-// the workspace is ever probed; an existence oracle over arbitrary
-// paths would itself be a disclosure. Globs match when at least one
-// file or directory matches.
-func pathExists(workdir, token string, glob bool) bool {
-	target := filepath.Clean(filepathext.SmartJoin(workdir, token))
-	if _, ok := filepathext.RelWithin(workdir, target); !ok {
-		return false
+func isCitationDelimiter(r rune) bool {
+	return unicode.IsSpace(r) || strings.ContainsRune(citationDelimiters, r)
+}
+
+func trimCitation(token string) string {
+	for {
+		before := token
+		token = strings.Trim(token, "*~")
+		if len(token) > 1 && token[0] == '_' && token[len(token)-1] == '_' {
+			token = token[1 : len(token)-1]
+		}
+		token = strings.TrimRight(token, ".:!?")
+		token = citationAnchor.ReplaceAllString(token, "")
+		if token == before {
+			return token
+		}
 	}
-	if glob {
-		matches, err := filepath.Glob(target)
-		return err == nil && len(matches) > 0
+}
+
+func citationPath(roots []string, token string) (string, bool) {
+	if filepath.IsAbs(token) {
+		target := filepath.Clean(token)
+		for _, root := range roots {
+			if rel, ok := filepathext.RelWithin(root, target); ok {
+				return rel, true
+			}
+		}
+		return "", false
 	}
-	_, err := os.Stat(target)
-	return err == nil
+	rel := filepath.Clean(filepath.FromSlash(token))
+	if !filepath.IsLocal(rel) {
+		return "", false
+	}
+	first, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
+	for _, root := range roots {
+		if _, err := os.Lstat(filepath.Join(root, first)); err == nil {
+			return rel, true
+		}
+	}
+	return "", false
+}
+
+func existsInAnyRoot(roots []string, rel string, glob bool) bool {
+	for _, root := range roots {
+		target := filepath.Join(root, rel)
+		if glob {
+			if matches, err := filepath.Glob(target); err == nil && len(matches) > 0 {
+				return true
+			}
+			continue
+		}
+		if _, err := os.Stat(target); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // hasFileExtension reports whether name carries a short alphanumeric
@@ -134,14 +175,4 @@ func hasFileExtension(name string) bool {
 		}
 	}
 	return true
-}
-
-// isAllDigits reports whether s consists only of ASCII digits.
-func isAllDigits(s string) bool {
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return s != ""
 }

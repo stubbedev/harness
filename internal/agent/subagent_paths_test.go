@@ -10,17 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func writeCitedFiles(t *testing.T, root string, rels ...string) {
+	t.Helper()
+	for _, rel := range rels {
+		target := filepath.Join(root, filepath.FromSlash(rel))
+		require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+		require.NoError(t, os.WriteFile(target, []byte("x"), 0o644))
+	}
+}
+
 func TestMissingCitedPaths(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "internal/ui/chat"), 0o755))
-	writeFile := func(rel string) {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, rel), []byte("x"), 0o644))
-	}
-	writeFile("internal/ui/chat/messages.go")
-	writeFile("internal/ui/chat/tools.go")
-	writeFile("go.mod")
+	writeCitedFiles(t, dir, "internal/ui/chat/messages.go", "internal/ui/chat/tools.go", "go.mod")
 
 	report := strings.Join([]string{
 		"Found it in internal/ui/chat/messages.go:45 and `internal/ui/chat/tools.go:281`.",
@@ -29,7 +32,7 @@ func TestMissingCitedPaths(t *testing.T) {
 		"fast/task, read/write, Pre/PostToolUse for prose that must never match.",
 	}, " ")
 
-	missing := missingCitedPaths(report, dir)
+	missing := missingCitedPaths(report, []string{dir})
 
 	require.Equal(t, []string{
 		"internal/coach/ui.go",
@@ -37,27 +40,66 @@ func TestMissingCitedPaths(t *testing.T) {
 	}, missing)
 }
 
-// TestMissingCitedPathsStaysInsideTheWorkspace pins the containment the
-// existence probe promises: absolute citations under the workspace
-// count (the fast agent is told to cite absolute paths), while anything
-// resolving outside - an unrelated absolute path or a .. escape - is a
-// fabricated citation, never an existence probe of foreign ground.
-func TestMissingCitedPathsStaysInsideTheWorkspace(t *testing.T) {
+func TestMissingCitedPathsNeverProbesOutsideTheRoots(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "real.go"), []byte("x"), 0o644))
+	writeCitedFiles(t, dir, "real.go")
 
 	report := strings.Join([]string{
 		filepath.Join(dir, "real.go"),
+		filepath.Join(dir, "ghost.go"),
 		"/usr/share/dict/words.txt",
 		"../../outside/x.go",
 	}, " ")
 
-	missing := missingCitedPaths(report, dir)
+	require.Equal(t, []string{filepath.Join(dir, "ghost.go")}, missingCitedPaths(report, []string{dir}))
+}
 
-	require.Equal(t, []string{"/usr/share/dict/words.txt", "../../outside/x.go"}, missing,
-		"the workspace file must be grounded; foreign paths must be flagged as fabricated")
+func TestMissingCitedPathsReportShapes(t *testing.T) {
+	t.Parallel()
+
+	main := t.TempDir()
+	worktree := filepath.Join(t.TempDir(), "harness-worktree-123", "worktree")
+	writeCitedFiles(t, main,
+		"internal/workspace/workspace.go",
+		"internal/client/errors.go",
+		"internal/server/proto.go",
+		"internal/server/config.go",
+		"internal/ui/chat/assistant.go",
+		"internal/ui/model/shell_prefix_test.go",
+	)
+	writeCitedFiles(t, worktree, "internal/agent/created_in_worktree.go")
+	roots := []string{main, worktree}
+
+	cases := []struct {
+		name   string
+		report string
+		want   []string
+	}{
+		{"backticks with trailing text", "The type lives in `" + main + "/internal/workspace/workspace.go` and is exported.", nil},
+		{"backticks inside parentheses", "(`" + main + "/internal/workspace/workspace.go`).", nil},
+		{"backticks with possessive", "`" + main + "/internal/workspace/workspace.go`'s constructor", nil},
+		{"backticks with line range", "`" + main + "/internal/workspace/workspace.go:12-40`", nil},
+		{"anchor", main + "/internal/workspace/workspace.go#L12-L40", nil},
+		{"bold and backticks", "**`" + main + "/internal/client/errors.go`**", nil},
+		{"bold and backticks with colon", "**`" + main + "/internal/client/errors.go`**:", nil},
+		{"comma list inside code span", "`internal/server/proto.go, internal/server/config.go`**", nil},
+		{"comma list without space", "`internal/server/proto.go,internal/server/config.go`**", nil},
+		{"relative to a package dir", "Edited chat/assistant.go and model/shell_prefix_test.go.", nil},
+		{"own worktree", "Added `" + worktree + "/internal/agent/created_in_worktree.go`.", nil},
+		{"worktree path of a main checkout file", worktree + "/internal/server/proto.go", nil},
+		{"fixture name as data", "The test writes `\"sub/secret.txt\"` and checks sub/secret.txt is skipped.", nil},
+		{"missing repo path in emphasis", "**`internal/ghost/x.go`**,", []string{"internal/ghost/x.go"}},
+		{"missing absolute path in main", "`" + main + "/internal/ghost.go:3`", []string{main + "/internal/ghost.go"}},
+		{"missing absolute path in worktree", worktree + "/internal/ghost.go", []string{worktree + "/internal/ghost.go"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, missingCitedPaths(tc.report, roots))
+		})
+	}
 }
 
 func TestWarnOnFabricatedPaths(t *testing.T) {
@@ -67,6 +109,9 @@ func TestWarnOnFabricatedPaths(t *testing.T) {
 	root := c.cfg.WorkingDir()
 	require.NotEmpty(t, root)
 	require.NoError(t, os.WriteFile(filepath.Join(root, "real.go"), []byte("x"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "internal"), 0o755))
+	worktree := t.TempDir()
+	writeCitedFiles(t, worktree, "internal/new.go")
 
 	t.Run("appends a warning listing the missing paths", func(t *testing.T) {
 		t.Parallel()
@@ -84,6 +129,14 @@ func TestWarnOnFabricatedPaths(t *testing.T) {
 		resp := fantasy.NewTextResponse("Map done: real.go.")
 		c.warnOnFabricatedPaths(subAgentParams{AgentName: "fast"}, &resp)
 		require.NotContains(t, resp.Content, "## Warning")
+	})
+
+	t.Run("resolves against the isolated checkout", func(t *testing.T) {
+		t.Parallel()
+		report := "Created internal/new.go and " + filepath.Join(worktree, "internal", "new.go") + "."
+		resp := fantasy.NewTextResponse(report)
+		c.warnOnFabricatedPaths(subAgentParams{AgentName: "fast", WorkspaceRoot: worktree}, &resp)
+		require.Equal(t, report, resp.Content)
 	})
 
 	t.Run("skips research dispatches and error responses", func(t *testing.T) {

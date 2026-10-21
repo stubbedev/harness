@@ -2331,6 +2331,7 @@ type subAgentParams struct {
 	AgentName       string
 	AgentColor      string
 	AgentModel      string
+	WorkspaceRoot   string
 	FinishWorkspace func(*fantasy.ToolResponse)
 	// Background runs the child detached from the dispatching turn: the
 	// dispatch tool call returns a handle immediately while the child runs
