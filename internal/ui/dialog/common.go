@@ -74,7 +74,7 @@ func dialogInputHeight(t *styles.Styles) int {
 // sizeDialogList computes the list dimensions within a dialog and calls
 // l.SetSize. It accounts for the title, the input row and its rule
 // (withInput, exactly what RenderContext renders for dialogs with a
-// filter input), and the view frame, so callers don't have to repeat
+// filter input), the view frame and the list margin, so callers don't have to repeat
 // the arithmetic. The scrollbar column is reserved only when content
 // overflows the viewport.
 //
@@ -90,7 +90,7 @@ func dialogInputHeight(t *styles.Styles) int {
 // Every list dialog renders an input row, so its height is always part
 // of the chrome.
 func sizeDialogList(t *styles.Styles, l sizer, innerWidth, dialogHeight int) (listHeight, listTotalHeight, listWidth int) {
-	chrome := dialogTitleHeight(t) + ActiveFrame(t).GetVerticalFrameSize() + dialogInputHeight(t)
+	chrome := dialogChromeHeight(t, t.Dialog.List)
 	listHeight = max(0, dialogHeight-chrome)
 	listTotalHeight = l.TotalHeight()
 	// Hug the content: a short list shrinks its viewport — and with it the
@@ -228,6 +228,11 @@ func DialogHeightCeiling(t *styles.Styles, area uv.Rectangle, maxHeight int) int
 		return max(0, min(maxHeight, area.Dy()-t.Dialog.View.GetVerticalBorderSize()))
 	}
 	return max(0, min(maxHeight, area.Dy()-t.Dialog.ViewBottom.GetVerticalBorderSize()))
+}
+
+func pickerHeight(t *styles.Styles, area uv.Rectangle, minHeight, maxHeight, contentHeight int) int {
+	desired := dialogChromeHeight(t, t.Dialog.List) + contentHeight
+	return min(max(minHeight, min(maxHeight, desired)), DialogHeightCeiling(t, area, maxHeight))
 }
 
 // closesWithRule reports whether a rendered dialog view closes with a

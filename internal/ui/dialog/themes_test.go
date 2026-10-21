@@ -62,7 +62,7 @@ func TestThemesStartsOnConfiguredTheme(t *testing.T) {
 	t.Parallel()
 
 	d := newTestThemes(t, "gruvbox-dark")
-	name, ok := d.selectedTheme()
+	name, ok := d.selected()
 	require.True(t, ok)
 	require.Equal(t, "gruvbox-dark", name)
 }

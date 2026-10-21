@@ -18,7 +18,7 @@ func TestNotificationsPreselectsConfiguredStyle(t *testing.T) {
 	cfg := &config.Config{Options: &config.Options{Notifications: "bell"}}
 	com := &common.Common{Workspace: &stubWorkspace{cfg: cfg}, Styles: &s}
 
-	p, ok := NewNotifications(com).(*simplePicker)
+	p, ok := NewNotifications(com).(*simplePicker[string])
 	require.True(t, ok)
 	item, ok := p.list.SelectedItem().(PickerItem)
 	require.True(t, ok)

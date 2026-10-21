@@ -88,7 +88,7 @@ func TestRewindFilterSelectsThroughValue(t *testing.T) {
 	require.Len(t, r.list.FilteredItems(), 1, "the filter narrows the list")
 
 	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Equal(t, rewindPhaseMode, r.phase)
+	require.Equal(t, pickerPhaseDetail, r.phase)
 	require.Equal(t, "m2", r.selected.MessageID, "selection resolves through the row's value, not the pre-filter index")
 }
 
@@ -105,7 +105,7 @@ func TestRewindModeConfirmEmitsAction(t *testing.T) {
 
 	// The newest turn has a snapshot, so all three modes are offered.
 	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Equal(t, rewindPhaseMode, r.phase)
+	require.Equal(t, pickerPhaseDetail, r.phase)
 
 	rows := r.list.FilteredItems()
 	require.Len(t, rows, 3)
@@ -132,7 +132,7 @@ func TestRewindModePhaseWithoutSnapshot(t *testing.T) {
 	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyDown})
 	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyDown})
 	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Equal(t, rewindPhaseMode, r.phase)
+	require.Equal(t, pickerPhaseDetail, r.phase)
 
 	rows := r.list.FilteredItems()
 	require.Len(t, rows, 1)
@@ -152,10 +152,10 @@ func TestRewindModePhaseBackRestoresTurns(t *testing.T) {
 	r := newRewindForTest(t)
 	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyDown})
 	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Equal(t, rewindPhaseMode, r.phase)
+	require.Equal(t, pickerPhaseDetail, r.phase)
 
 	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
-	require.Equal(t, rewindPhaseTurns, r.phase)
+	require.Equal(t, pickerPhaseList, r.phase)
 	require.Len(t, r.list.FilteredItems(), 3)
 	require.Equal(t, "fix the lexer", r.list.FilteredItems()[0].(PickerItem).Label())
 }
@@ -169,12 +169,12 @@ func TestRewindModePhaseClearsFilter(t *testing.T) {
 	r := newRewindForTest(t)
 	typeKeys(r, "add")
 	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Equal(t, rewindPhaseMode, r.phase)
+	require.Equal(t, pickerPhaseDetail, r.phase)
 	require.Empty(t, r.input.Value())
 	require.Len(t, r.list.FilteredItems(), 1, "the unsnapshotted turn offers its one mode, unfiltered")
 
 	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
-	require.Equal(t, rewindPhaseTurns, r.phase)
+	require.Equal(t, pickerPhaseList, r.phase)
 	require.Empty(t, r.input.Value())
 	require.Len(t, r.list.FilteredItems(), 3)
 }

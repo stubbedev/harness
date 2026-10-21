@@ -7,10 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
-	tea "charm.land/bubbletea/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -31,42 +27,13 @@ const (
 // so adding a new one is a separate step: pick a provider here and the
 // authentication dialog takes over.
 type Connect struct {
-	com   *common.Common
-	list  *list.FilterableList
-	input textinput.Model
-
-	keyMap struct {
-		Select   key.Binding
-		Next     key.Binding
-		Previous key.Binding
-		UpDown   key.Binding
-		Close    key.Binding
-	}
+	*simplePicker[catalog.Provider]
 }
 
 var _ Dialog = (*Connect)(nil)
 
 // NewConnect creates the provider connection dialog.
 func NewConnect(com *common.Common) (*Connect, error) {
-	c := &Connect{com: com}
-
-	c.list = list.NewFilterableList()
-	c.list.Focus()
-
-	c.input = textinput.New()
-	c.input.SetVirtualCursor(false)
-	c.input.Prompt = "❯ "
-	c.input.Placeholder = "Find a provider to connect"
-	c.input.SetStyles(com.Styles.TextInput)
-	c.input.Focus()
-
-	km := dialogKeys()
-	c.keyMap.Select = keys.WithDesc(km.Select, "connect")
-	c.keyMap.Next = km.Next
-	c.keyMap.Previous = km.Previous
-	c.keyMap.UpDown = km.UpDown
-	c.keyMap.Close = km.Close
-
 	// A stale catalog must not keep the dialog from opening: whatever
 	// providers were known last still let the user connect one.
 	providers, err := config.Providers(com.Config())
@@ -76,109 +43,25 @@ func NewConnect(com *common.Common) (*Connect, error) {
 		}
 		slog.Warn("Listing the previously known providers", "error", err)
 	}
+	return newConnect(com, providers), nil
+}
 
+func newConnect(com *common.Common, providers []catalog.Provider) *Connect {
+	c := &Connect{simplePicker: newSimplePicker(com, ConnectID, "Connect Provider", connectDialogMinHeight, connectDialogMaxHeight,
+		selectConnectProvider, carryCmd)}
+	c.input.Prompt = "❯ "
+	c.input.Placeholder = "Find a provider to connect"
+	c.keyMap.Select = keys.WithDesc(c.keyMap.Select, "connect")
 	c.setItems(providers)
-	return c, nil
+	return c
 }
 
-// ID implements Dialog.
-func (c *Connect) ID() ID {
-	return ConnectID
-}
-
-// HandleMsg implements Dialog.
-func (c *Connect) HandleMsg(msg tea.Msg) Action {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch {
-		case key.Matches(msg, c.keyMap.Close):
-			return ActionClose{}
-		case key.Matches(msg, c.keyMap.Previous):
-			c.list.Focus()
-			selectPrevWrap(c.list)
-		case key.Matches(msg, c.keyMap.Next):
-			c.list.Focus()
-			selectNextWrap(c.list)
-		case key.Matches(msg, c.keyMap.Select):
-			provider, ok := c.selectedItem()
-			if !ok {
-				break
-			}
-			// The provider has no credentials, so this selection lands
-			// in the authentication dialog rather than switching the
-			// model outright. It carries the provider's default large
-			// model, which is what gets selected once the key verifies.
-			return ActionSelectModel{
-				Provider:  provider,
-				Model:     defaultSelectedModel(provider),
-				ModelType: config.SelectedModelTypeLarge,
-			}
-		default:
-			cmd, _ := filterInput(&c.input, msg, applyListFilter(c.list))
-			return ActionCmd{cmd}
-		}
+func selectConnectProvider(provider catalog.Provider) Action {
+	return ActionSelectModel{
+		Provider:  provider,
+		Model:     defaultSelectedModel(provider),
+		ModelType: config.SelectedModelTypeLarge,
 	}
-	return nil
-}
-
-// Draw implements [Dialog].
-func (c *Connect) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	st := c.com.Styles
-	width := DialogWidth(st, area)
-	innerWidth := DialogInnerWidth(st, width)
-
-	c.input.SetWidth(dialogInputTextWidth(st, c.input, innerWidth))
-
-	heightOffset := dialogChromeHeight(st, st.Dialog.HelpView)
-	desiredHeight := heightOffset + c.list.TotalHeight()
-	maxAvailable := DialogHeightCeiling(st, area, connectDialogMaxHeight)
-	height := max(connectDialogMinHeight, min(connectDialogMaxHeight, desiredHeight, maxAvailable))
-
-	listHeight, listTotalHeight, _ := sizeDialogList(st, c.list, innerWidth, height)
-
-	rc := NewRenderContext(st, width)
-	rc.Title = "Connect Provider"
-	rc.AddInput(c.input.View())
-
-	listView := st.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
-	listView = joinScrollbar(st, listView, listHeight, listTotalHeight, listHeight, c.list.Offset())
-	rc.AddPart(listView)
-
-	view := rc.Render()
-
-	cur := DialogCursor(st, view, c.input.Cursor())
-	DrawCenterCursor(scr, area, view, cur)
-	return cur
-}
-
-// ShortHelp implements [help.KeyMap].
-func (c *Connect) ShortHelp() []key.Binding {
-	return []key.Binding{
-		c.keyMap.UpDown,
-		c.keyMap.Select,
-		c.keyMap.Close,
-	}
-}
-
-// FullHelp implements [help.KeyMap].
-func (c *Connect) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{
-		c.keyMap.Select,
-		c.keyMap.Next,
-		c.keyMap.Previous,
-		c.keyMap.Close,
-	}}
-}
-
-// selectedItem resolves the selected row to its provider through the
-// shared picker item, or reports false when the list is empty.
-func (c *Connect) selectedItem() (catalog.Provider, bool) {
-	item, ok := c.list.SelectedItem().(PickerItem)
-	if !ok || item == nil {
-		return catalog.Provider{}, false
-	}
-	provider, ok := item.Value().(catalog.Provider)
-	return provider, ok
 }
 
 // setItems fills the list with the providers that are still unconnected.

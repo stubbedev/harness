@@ -5,7 +5,6 @@ import (
 	"slices"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -19,18 +18,6 @@ import (
 // another kind of server is a serversSource implementation plus the
 // palette plumbing; nothing here learns the kind.
 
-// serversDialogMaxHeight caps the server manager dialogs.
-const serversDialogMaxHeight = 24
-
-type serversPhase uint8
-
-const (
-	serversPhaseList serversPhase = iota
-	serversPhaseDetail
-)
-
-// serversSource supplies everything kind-specific about one server
-// manager dialog.
 type serversSource interface {
 	// dialogID identifies the dialog in the overlay.
 	dialogID() ID
@@ -56,53 +43,22 @@ type serversSource interface {
 // zero value until the assignment completes. Callers therefore call
 // [serversDialog.refresh] themselves after embedding.
 func newServersDialog(com *common.Common, src serversSource, selectKey, backKey key.Binding) serversDialog {
-	km := dialogKeys()
-	d := serversDialog{
-		com:    com,
-		source: src,
-		phase:  serversPhaseList,
+	return serversDialog{
+		twoPhasePicker: newTwoPhasePicker(com, "Filter servers", selectKey, backKey, keys.WithDesc(dialogKeys().Close, "close")),
+		source:         src,
 	}
-	d.keyMap.Select = selectKey
-	d.keyMap.Back = backKey
-	d.keyMap.Next = keys.WithDesc(km.Next, "next")
-	d.keyMap.Previous = keys.WithDesc(km.Previous, "previous")
-	d.keyMap.UpDown = km.UpDown
-	d.keyMap.Close = keys.WithDesc(km.Close, "close")
-
-	d.list = list.NewFilterableList()
-	d.list.Focus()
-
-	d.input = textinput.New()
-	d.input.SetVirtualCursor(false)
-	d.input.Prompt = "❯ "
-	d.input.Placeholder = "Filter servers"
-	d.input.SetStyles(com.Styles.TextInput)
-	d.input.Focus()
-	return d
 }
 
 // serversDialog is the shared state machine of a server manager. The
 // concrete dialog embeds it and implements [serversSource].
 type serversDialog struct {
-	com    *common.Common
+	twoPhasePicker
 	source serversSource
-	list   *list.FilterableList
-	input  textinput.Model
-	phase  serversPhase
 	// current is the server the detail phase shows.
 	current string
 	// listNames parallels the unfiltered list-phase items, so a selected
 	// row resolves to a server name.
 	listNames []string
-
-	keyMap struct {
-		Select   key.Binding
-		Back     key.Binding
-		Next     key.Binding
-		Previous key.Binding
-		UpDown   key.Binding
-		Close    key.Binding
-	}
 }
 
 // ID implements Dialog.
@@ -112,30 +68,7 @@ func (d *serversDialog) ID() ID {
 
 // HandleMsg implements [Dialog].
 func (d *serversDialog) HandleMsg(msg tea.Msg) Action {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch {
-		case key.Matches(msg, d.keyMap.Close):
-			if d.phase == serversPhaseDetail {
-				d.enterListPhase()
-				return nil
-			}
-			return ActionClose{}
-		case key.Matches(msg, d.keyMap.Back) && d.phase == serversPhaseDetail:
-			d.enterListPhase()
-			return nil
-		case key.Matches(msg, d.keyMap.Previous):
-			selectPrevWrap(d.list)
-		case key.Matches(msg, d.keyMap.Next):
-			selectNextWrap(d.list)
-		case key.Matches(msg, d.keyMap.Select):
-			return d.confirmSelection()
-		default:
-			cmd, _ := filterInput(&d.input, msg, applyListFilter(d.list))
-			return ActionCmd{cmd}
-		}
-	}
-	return nil
+	return d.handleMsg(msg, d)
 }
 
 // confirmSelection opens the selected server's detail view, or runs
@@ -143,7 +76,7 @@ func (d *serversDialog) HandleMsg(msg tea.Msg) Action {
 // through the selected item's title, not its position: filtering
 // reorders the list under the selection.
 func (d *serversDialog) confirmSelection() Action {
-	if d.phase == serversPhaseList {
+	if d.phase == pickerPhaseList {
 		if ci, ok := d.list.SelectedItem().(*CommandItem); ok && ci != nil && slices.Contains(d.listNames, ci.Title()) {
 			d.current = ci.Title()
 			d.enterDetailPhase()
@@ -165,7 +98,7 @@ func (d *serversDialog) confirmSelection() Action {
 // enterDetailPhase opens the detail view of the current server with an
 // empty filter and the first row selected.
 func (d *serversDialog) enterDetailPhase() {
-	d.phase = serversPhaseDetail
+	d.phase = pickerPhaseDetail
 	clearListFilter(&d.input, d.list)
 	d.refreshDetail()
 	d.list.SetSelected(0)
@@ -175,7 +108,7 @@ func (d *serversDialog) enterDetailPhase() {
 // enterListPhase returns from a detail view to the server list with an
 // empty filter and the server the detail view showed selected.
 func (d *serversDialog) enterListPhase() {
-	d.phase = serversPhaseList
+	d.phase = pickerPhaseList
 	clearListFilter(&d.input, d.list)
 	d.refreshServers()
 	if idx := slices.Index(d.listNames, d.current); idx >= 0 {
@@ -186,7 +119,7 @@ func (d *serversDialog) enterListPhase() {
 // refresh rebuilds whichever view is showing, for when fresh live
 // state arrived.
 func (d *serversDialog) refresh() {
-	if d.phase == serversPhaseDetail {
+	if d.phase == pickerPhaseDetail {
 		d.refreshDetail()
 		return
 	}
@@ -217,47 +150,14 @@ func (d *serversDialog) refreshDetail() {
 
 // Draw implements [Dialog].
 func (d *serversDialog) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
-	st := d.com.Styles
-	width := DialogWidth(st, area)
-	innerWidth := DialogInnerWidth(st, width)
-
-	listHeight, listTotalHeight, _ := sizeDialogList(st, d.list, innerWidth, serversDialogMaxHeight)
-
-	rc := NewRenderContext(st, width)
-	if d.phase == serversPhaseList {
-		rc.Title = d.source.title()
-		if len(d.listNames) == 0 {
-			rc.AddPart(st.Dialog.NormalItem.Render(d.source.emptyText()))
-		}
-	} else {
-		rc.Title = d.source.detailTitle(d.current)
+	if d.phase == pickerPhaseDetail {
+		return d.draw(scr, area, d.source.detailTitle(d.current), "")
 	}
-
-	d.list.ScrollToSelected()
-	listView := st.Dialog.List.Height(d.list.Height()).Render(d.list.Render())
-	listView = joinScrollbar(st, listView, listHeight, listTotalHeight, listHeight, d.list.Offset())
-	rc.AddPart(listView)
-	rc.AddInput(d.input.View())
-
-	view := rc.Render()
-	cur := DialogCursor(st, view, d.input.Cursor())
-	DrawCenterCursor(scr, area, view, cur)
-	return cur
-}
-
-// ShortHelp implements help.KeyMap.
-func (d *serversDialog) ShortHelp() []key.Binding {
-	return []key.Binding{
-		d.keyMap.UpDown,
-		d.keyMap.Select,
-		d.keyMap.Back,
-		d.keyMap.Close,
+	header := ""
+	if len(d.listNames) == 0 {
+		header = d.com.Styles.Dialog.NormalItem.Render(d.source.emptyText())
 	}
-}
-
-// FullHelp implements help.KeyMap.
-func (d *serversDialog) FullHelp() [][]key.Binding {
-	return [][]key.Binding{d.ShortHelp()}
+	return d.draw(scr, area, d.source.title(), header)
 }
 
 // detailBuilder assembles one server's detail view: fact rows

@@ -5,8 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -14,15 +12,12 @@ import (
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/common"
-	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
 // RewindID is the identifier for the rewind (checkpoint) picker dialog.
 const RewindID ID = "rewind"
-
-const rewindDialogMaxHeight = 24
 
 // RewindTurn is one rewound-to candidate: a user prompt, when it was
 // sent, and whether a working-tree snapshot backs it.
@@ -41,13 +36,6 @@ type ActionRewindConfirmed struct {
 	Prompt    string
 	Mode      checkpoints.Mode
 }
-
-type rewindPhase uint8
-
-const (
-	rewindPhaseTurns rewindPhase = iota
-	rewindPhaseMode
-)
 
 type rewindModeChoice struct {
 	mode  checkpoints.Mode
@@ -74,22 +62,10 @@ func rewindModeChoices(hasFiles bool) []rewindModeChoice {
 // Rewind is a picker over a session's user turns; selecting one offers
 // what to restore: the transcript, the files on disk, or both.
 type Rewind struct {
-	com       *common.Common
-	list      *list.FilterableList
-	input     textinput.Model
+	twoPhasePicker
 	sessionID string
 	turns     []RewindTurn
 	selected  RewindTurn
-	phase     rewindPhase
-
-	keyMap struct {
-		Select   key.Binding
-		Back     key.Binding
-		Next     key.Binding
-		Previous key.Binding
-		UpDown   key.Binding
-		Close    key.Binding
-	}
 }
 
 var _ Dialog = (*Rewind)(nil)
@@ -97,7 +73,11 @@ var _ Dialog = (*Rewind)(nil)
 // NewRewind creates a rewind dialog for a session, listing its user
 // turns newest first.
 func NewRewind(com *common.Common, sessionID string) (*Rewind, error) {
-	r := &Rewind{com: com, sessionID: sessionID}
+	km := dialogKeys()
+	r := &Rewind{
+		twoPhasePicker: newTwoPhasePicker(com, "Filter turns", km.Rewind.Select, km.Rewind.Back, km.Close),
+		sessionID:      sessionID,
+	}
 
 	messages, err := com.Workspace.ListUserMessages(context.TODO(), sessionID)
 	if err != nil {
@@ -128,24 +108,7 @@ func NewRewind(com *common.Common, sessionID string) (*Rewind, error) {
 		})
 	}
 
-	r.list = list.NewFilterableList(rewindTurnItems(com.Styles, r.turns)...)
-	r.list.Focus()
-
-	r.input = textinput.New()
-	r.input.SetVirtualCursor(false)
-	r.input.Prompt = "❯ "
-	r.input.Placeholder = "Filter turns"
-	r.input.SetStyles(com.Styles.TextInput)
-	r.input.Focus()
-
-	km := dialogKeys()
-	r.keyMap.Select = km.Rewind.Select
-	r.keyMap.Back = km.Rewind.Back
-	r.keyMap.Next = keys.WithDesc(km.Next, "next")
-	r.keyMap.Previous = keys.WithDesc(km.Previous, "previous")
-	r.keyMap.UpDown = km.UpDown
-	r.keyMap.Close = km.Close
-
+	r.list.SetItems(rewindTurnItems(com.Styles, r.turns)...)
 	return r, nil
 }
 
@@ -166,32 +129,7 @@ func (r *Rewind) ID() ID {
 
 // HandleMsg implements Dialog.
 func (r *Rewind) HandleMsg(msg tea.Msg) Action {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch {
-		case key.Matches(msg, r.keyMap.Close):
-			if r.phase == rewindPhaseMode {
-				r.enterTurnsPhase()
-				return nil
-			}
-			return ActionClose{}
-		case key.Matches(msg, r.keyMap.Back) && r.phase == rewindPhaseMode:
-			r.enterTurnsPhase()
-			return nil
-		case key.Matches(msg, r.keyMap.Previous):
-			selectPrevWrap(r.list)
-		case key.Matches(msg, r.keyMap.Next):
-			selectNextWrap(r.list)
-		case key.Matches(msg, r.keyMap.Select):
-			return r.confirmSelection()
-		default:
-			// The typing path flows through the shared input helper and
-			// the standard list filter.
-			cmd, _ := filterInput(&r.input, msg, applyListFilter(r.list))
-			return ActionCmd{cmd}
-		}
-	}
-	return nil
+	return r.handleMsg(msg, r)
 }
 
 // confirmSelection advances the phases: picking a turn opens the
@@ -204,10 +142,10 @@ func (r *Rewind) confirmSelection() Action {
 	if !ok || item == nil {
 		return nil
 	}
-	if r.phase == rewindPhaseTurns {
+	if r.phase == pickerPhaseList {
 		if turn, ok := item.Value().(RewindTurn); ok {
 			r.selected = turn
-			r.enterModePhase()
+			r.enterDetailPhase()
 		}
 		return nil
 	}
@@ -223,16 +161,16 @@ func (r *Rewind) confirmSelection() Action {
 	}
 }
 
-func (r *Rewind) enterTurnsPhase() {
-	r.phase = rewindPhaseTurns
+func (r *Rewind) enterListPhase() {
+	r.phase = pickerPhaseList
 	clearListFilter(&r.input, r.list)
 	r.list.SetItems(rewindTurnItems(r.com.Styles, r.turns)...)
 	r.list.SetSelected(0)
 	r.list.ScrollToTop()
 }
 
-func (r *Rewind) enterModePhase() {
-	r.phase = rewindPhaseMode
+func (r *Rewind) enterDetailPhase() {
+	r.phase = pickerPhaseDetail
 	choices := rewindModeChoices(r.selected.HasFiles)
 	clearListFilter(&r.input, r.list)
 	r.list.SetItems(rewindModeItems(r.com.Styles, choices)...)
@@ -243,49 +181,16 @@ func (r *Rewind) enterModePhase() {
 // Draw implements Dialog.
 func (r *Rewind) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	st := r.com.Styles
-	width := DialogWidth(st, area)
-	innerWidth := DialogInnerWidth(st, width)
-
-	r.input.SetWidth(dialogInputTextWidth(st, r.input, innerWidth))
-	listHeight, listTotalHeight, _ := sizeDialogList(st, r.list, innerWidth, rewindDialogMaxHeight)
-
-	rc := NewRenderContext(st, width)
-	if r.phase == rewindPhaseTurns {
-		rc.Title = "Rewind"
+	if r.phase == pickerPhaseList {
+		header := ""
 		if len(r.turns) == 0 {
-			rc.AddPart(st.Dialog.NormalItem.Render("No user turns to rewind to yet."))
+			header = st.Dialog.NormalItem.Render("No user turns to rewind to yet.")
 		}
-	} else {
-		rc.Title = "Rewind: restore what?"
-		prompt := ansi.Truncate(strings.ReplaceAll(r.selected.Prompt, "\n", " "), max(0, innerWidth-st.Dialog.NormalItem.GetHorizontalFrameSize()), "…")
-		rc.AddPart(st.Dialog.NormalItem.Render(prompt))
+		return r.draw(scr, area, "Rewind", header)
 	}
-
-	r.list.ScrollToSelected()
-	listView := st.Dialog.List.Height(r.list.Height()).Render(r.list.Render())
-	listView = joinScrollbar(st, listView, listHeight, listTotalHeight, listHeight, r.list.Offset())
-	rc.AddPart(listView)
-	rc.AddInput(r.input.View())
-
-	view := rc.Render()
-	cur := DialogCursor(st, view, r.input.Cursor())
-	DrawCenterCursor(scr, area, view, cur)
-	return cur
-}
-
-// ShortHelp implements help.KeyMap.
-func (r *Rewind) ShortHelp() []key.Binding {
-	return []key.Binding{
-		r.keyMap.UpDown,
-		r.keyMap.Select,
-		r.keyMap.Back,
-		r.keyMap.Close,
-	}
-}
-
-// FullHelp implements help.KeyMap.
-func (r *Rewind) FullHelp() [][]key.Binding {
-	return [][]key.Binding{r.ShortHelp()}
+	innerWidth := DialogInnerWidth(st, DialogWidth(st, area))
+	prompt := ansi.Truncate(strings.ReplaceAll(r.selected.Prompt, "\n", " "), max(0, innerWidth-st.Dialog.NormalItem.GetHorizontalFrameSize()), "…")
+	return r.draw(scr, area, "Rewind: restore what?", st.Dialog.NormalItem.Render(prompt))
 }
 
 // rewindTurnRightLabel is the right-hand info a turn row shows: when

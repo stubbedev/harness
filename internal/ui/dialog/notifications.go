@@ -46,7 +46,7 @@ func NewNotifications(com *common.Common) Dialog {
 		options = append(options, pickerOption{value: style.ID, title: style.Title})
 	}
 
-	return newSimplePicker(com, NotificationsID, "Notification Style", 0, notificationsDialogMaxHeight,
+	return newOptionPicker(com, NotificationsID, "Notification Style", 0, notificationsDialogMaxHeight,
 		options, current, func(style string) Action {
 			return ActionSelectNotificationStyle{Style: style}
 		})

@@ -8,7 +8,6 @@ import (
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
-	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
@@ -16,12 +15,7 @@ func newConnectDialogForTest(t *testing.T, cfg *config.Config, providers []catal
 	t.Helper()
 
 	s := styles.CharmtonePantera()
-	c := &Connect{
-		com:  &common.Common{Workspace: &stubWorkspace{cfg: cfg}, Styles: &s},
-		list: list.NewFilterableList(),
-	}
-	c.setItems(providers)
-	return c
+	return newConnect(&common.Common{Workspace: &stubWorkspace{cfg: cfg}, Styles: &s}, providers)
 }
 
 func connectTestProviders() []catalog.Provider {

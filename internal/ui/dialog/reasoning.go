@@ -45,7 +45,7 @@ func NewReasoning(com *common.Common) (Dialog, error) {
 		options = append(options, pickerOption{value: effort, title: common.FormatReasoningEffort(effort)})
 	}
 
-	return newSimplePicker(com, ReasoningID, "Select Reasoning Effort", reasoningDialogMinHeight, reasoningDialogMaxHeight,
+	return newOptionPicker(com, ReasoningID, "Select Reasoning Effort", reasoningDialogMinHeight, reasoningDialogMaxHeight,
 		options, current, func(effort string) Action {
 			return ActionSelectReasoningEffort{Effort: effort}
 		}), nil

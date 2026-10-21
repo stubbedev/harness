@@ -160,8 +160,6 @@ func commandsRadioView(sty *styles.Styles, tabs []commandMenu, selected CommandT
 // Draw implements [Dialog].
 func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := c.com.Styles
-	width := DialogWidth(t, area)
-	height := DialogHeightCeiling(t, area, defaultDialogHeight)
 	if area.Dx() != c.windowWidth && c.selected == SystemCommands {
 		c.windowWidth = area.Dx()
 		// since some items in the list depend on width (e.g. toggle sidebar command),
@@ -169,32 +167,13 @@ func (c *Commands) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 		c.setCommandItems(c.selected)
 	}
 
-	innerWidth := DialogInnerWidth(t, width)
-	heightOffset := dialogChromeHeight(t, t.Dialog.HelpView)
-	// Hug the content: the list viewport never exceeds its item count, so
-	// a short list shrinks the panel instead of padding blank rows.
-	listHeight := min(max(0, height-heightOffset), c.list.TotalHeight())
+	applyInfoColumnVisibility(c.list.FilteredItems(), DialogInnerWidth(t, DialogWidth(t, area)), commandInfoMaxPercent)
 
-	c.input.SetWidth(dialogInputTextWidth(t, c.input, innerWidth))
-
-	c.list.SetSize(innerWidth, listHeight)
-
-	// Hide the shortcut hints uniformly when the widest would crowd names.
-	applyInfoColumnVisibility(c.list.FilteredItems(), innerWidth, commandInfoMaxPercent)
-
-	rc := NewRenderContext(t, width)
-	rc.Title = "Commands"
-	tabs := c.tabs()
-	rc.TitleInfo = commandsRadioView(t, tabs, c.selected)
-	rc.AddInput(c.input.View())
-	listView := t.Dialog.List.Height(c.list.Height()).Render(c.list.Render())
-	rc.AddPart(listView)
-
-	view := rc.Render()
-
-	cur := DialogCursor(t, view, c.input.Cursor())
-	DrawCenterCursor(scr, area, view, cur)
-	return cur
+	return drawPicker(scr, area, t, &c.input, c.list, pickerLayout{
+		title:     "Commands",
+		titleInfo: commandsRadioView(t, c.tabs(), c.selected),
+		maxHeight: defaultDialogHeight,
+	})
 }
 
 // ShortHelp implements [help.KeyMap].
