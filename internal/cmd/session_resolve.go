@@ -9,6 +9,8 @@ import (
 	"github.com/stubbedev/harness/internal/session"
 )
 
+var errEmptySessionID = errors.New("session ID must not be empty")
+
 // resolveSessionPrefix resolves id to a single session, accepting either
 // a full session ID or a prefix of the hash `harness session list`
 // prints. get and list reach whichever session source the caller has (a
@@ -27,6 +29,9 @@ func resolveSessionPrefix[T any](
 	describe func(T) string,
 ) (T, error) {
 	var zero T
+	if id == "" {
+		return zero, errEmptySessionID
+	}
 	if s, err := get(ctx, id); err == nil {
 		return s, nil
 	}

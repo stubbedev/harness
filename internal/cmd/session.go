@@ -38,11 +38,12 @@ var sessionCmd = &cobra.Command{
 }
 
 var (
-	sessionListJSON   bool
-	sessionShowJSON   bool
-	sessionLastJSON   bool
-	sessionDeleteJSON bool
-	sessionRenameJSON bool
+	sessionListJSON    bool
+	sessionShowJSON    bool
+	sessionLastJSON    bool
+	sessionDeleteJSON  bool
+	sessionDeleteForce bool
+	sessionRenameJSON  bool
 )
 
 var sessionListCmd = &cobra.Command{
@@ -72,7 +73,7 @@ var sessionDeleteCmd = &cobra.Command{
 	Use:     "delete <id>",
 	Aliases: []string{"rm"},
 	Short:   "Delete a session",
-	Long:    "Delete a session by ID. Use --json for machine-readable output. ID can be a UUID, full hash, or hash prefix.",
+	Long:    "Delete a session by ID. Asks for confirmation on a terminal unless --force or --json is set. Use --json for machine-readable output. ID can be a UUID, full hash, or hash prefix.",
 	Args:    cobra.ExactArgs(1),
 	RunE:    runSessionDelete,
 }
@@ -90,6 +91,7 @@ func init() {
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "output in JSON format")
 	sessionLastCmd.Flags().BoolVar(&sessionLastJSON, "json", false, "output in JSON format")
 	sessionDeleteCmd.Flags().BoolVar(&sessionDeleteJSON, "json", false, "output in JSON format")
+	sessionDeleteCmd.Flags().BoolVarP(&sessionDeleteForce, "force", "f", false, "skip the confirmation prompt")
 	sessionRenameCmd.Flags().BoolVar(&sessionRenameJSON, "json", false, "output in JSON format")
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
@@ -257,12 +259,17 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	out := cmd.OutOrStdout()
+	if !sessionDeleteForce && !sessionDeleteJSON && stdinIsTTY() && !confirmSessionDelete(cmd.InOrStdin(), out, sess) {
+		fmt.Fprintln(out, "Delete cancelled.")
+		return nil
+	}
+
 	if err := svc.sessions.Delete(ctx, sess.ID); err != nil {
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
 	svc.checkpoints.DeleteSession(sess.ID)
 
-	out := cmd.OutOrStdout()
 	if sessionDeleteJSON {
 		return newJSONEncoder(out).Encode(sessionMutationResult{
 			ID:      session.HashID(sess.ID),
@@ -274,6 +281,10 @@ func runSessionDelete(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(out, "Deleted session %s\n", session.HashID(sess.ID)[:12])
 	return nil
+}
+
+func confirmSessionDelete(in io.Reader, out io.Writer, sess session.Session) bool {
+	return confirmPrompt(in, out, fmt.Sprintf("Delete session %s? (y/N) ", describeSessionMatch(sess)))
 }
 
 func runSessionRename(cmd *cobra.Command, args []string) error {

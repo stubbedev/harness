@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/x/term"
 )
@@ -31,4 +34,21 @@ func newJSONEncoder(w io.Writer) *json.Encoder {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	return enc
+}
+
+func stdinIsTTY() bool {
+	return term.IsTerminal(os.Stdin.Fd())
+}
+
+func confirmPrompt(in io.Reader, out io.Writer, prompt string) bool {
+	_, _ = fmt.Fprint(out, prompt)
+	line, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && line == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	}
+	return false
 }

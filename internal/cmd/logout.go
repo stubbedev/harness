@@ -31,12 +31,8 @@ Available platforms are: copilot.`,
 # Sign out from GitHub Copilot
 harness logout copilot
   `,
-	ValidArgs: []cobra.Completion{
-		"copilot",
-		"github",
-		"github-copilot",
-	},
-	Args: cobra.MaximumNArgs(1),
+	ValidArgs: copilotAliases,
+	Args:      platformArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, ws, cleanup, err := connectToServer(cmd)
 		if err != nil {
@@ -65,19 +61,14 @@ harness logout copilot
 
 		force, _ := cmd.Flags().GetBool("force")
 		if !force {
-			fmt.Print(logoutPromptStyle.Render(fmt.Sprintf("Are you sure you want to logout %s? (y/N) ", provider)))
-			var response string
-			_, err := fmt.Scanln(&response)
-			if err != nil || (response != "y" && response != "Y" && response != "yes" && response != "Yes" && response != "YES") {
+			prompt := logoutPromptStyle.Render(fmt.Sprintf("Are you sure you want to logout %s? (y/N) ", provider))
+			if !confirmPrompt(cmd.InOrStdin(), cmd.OutOrStdout(), prompt) {
 				fmt.Println(logoutHeaderStyle.Render("Logout cancelled."))
 				return nil
 			}
 		}
 
-		if copilotPlatform(provider) {
-			return logoutCopilot(c, ws.ID)
-		}
-		return fmt.Errorf("unknown platform: %s", provider)
+		return logoutCopilot(c, ws.ID)
 	},
 }
 
@@ -108,8 +99,8 @@ func pickLoggedInProvider(c *client.Client, wsID string) (string, error) {
 		name string
 	}
 
-	// Only OAuth-based providers support login/logout. Platform
-	// aliases live in copilotPlatform; this map is the display name.
+	// Only OAuth-based providers support login/logout; this map is the
+	// display name.
 	oauthProviders := map[string]string{
 		string(catalog.InferenceProviderCopilot): "GitHub Copilot",
 	}

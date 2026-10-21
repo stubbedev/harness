@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/pkg/browser"
@@ -32,28 +34,17 @@ harness login copilot
 # Force re-authentication even if already logged in
 harness login -f copilot
   `,
-	ValidArgs: []cobra.Completion{
-		"copilot",
-		"github",
-		"github-copilot",
-	},
-	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
+	ValidArgs: copilotAliases,
+	Args:      platformArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
 			return err
 		}
 		defer cleanup()
 
-		provider := "copilot"
-		if len(args) > 0 {
-			provider = args[0]
-		}
 		force, _ := cmd.Flags().GetBool("force")
-		if copilotPlatform(provider) {
-			return loginCopilot(ws, force)
-		}
-		return fmt.Errorf("unknown platform: %s", args[0])
+		return loginCopilot(ws, force)
 	},
 }
 
@@ -61,16 +52,17 @@ func init() {
 	loginCmd.Flags().BoolP("force", "f", false, "Force re-authentication even if already logged in")
 }
 
-// copilotPlatform reports whether the platform argument names GitHub
-// Copilot, in any of its accepted spellings. Single source for the
-// login and logout switches and the logged-in provider picker, so the
-// alias list cannot drift between them.
-func copilotPlatform(provider string) bool {
-	switch provider {
-	case "copilot", "github", "github-copilot":
-		return true
+var copilotAliases = []cobra.Completion{"copilot", "github", "github-copilot"}
+
+var platformArgs = cobra.MatchAll(cobra.MaximumNArgs(1), validPlatformArg)
+
+func validPlatformArg(cmd *cobra.Command, args []string) error {
+	for _, arg := range args {
+		if !slices.Contains(cmd.ValidArgs, arg) {
+			return fmt.Errorf("unknown platform %q, valid platforms: %s", arg, strings.Join(cmd.ValidArgs, ", "))
+		}
 	}
-	return false
+	return nil
 }
 
 func loginCopilot(ws workspace.Workspace, force bool) error {

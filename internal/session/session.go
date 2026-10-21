@@ -36,10 +36,12 @@ func HashID(id string) string {
 // typically a full or partial hash. Single-source for the CLI's
 // session-resolution paths (sessions, run, workspace).
 func FilterHashPrefix[T any](sessions []T, id string, idOf func(T) string) []T {
+	if id == "" {
+		return nil
+	}
 	var matches []T
 	for _, s := range sessions {
-		hash := HashID(idOf(s))
-		if hash == id || strings.HasPrefix(hash, id) {
+		if strings.HasPrefix(HashID(idOf(s)), id) {
 			matches = append(matches, s)
 		}
 	}
