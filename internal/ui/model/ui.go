@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
-	"maps"
 	"math/rand"
 	"net/http"
 	"os"
@@ -34,7 +33,6 @@ import (
 	"github.com/charmbracelet/ultraviolet/screen"
 	"github.com/charmbracelet/x/editor"
 	xstrings "github.com/charmbracelet/x/exp/strings"
-	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	agenttools "github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
@@ -53,7 +51,6 @@ import (
 	"github.com/stubbedev/harness/internal/question"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/skills"
-	"github.com/stubbedev/harness/internal/stringext"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -909,7 +906,15 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case goalSetMsg:
-		cmds = append(cmds, m.sendMessage(agent.GoalPrompt(msg.condition)))
+		cmds = append(cmds, m.applyGoalSet(msg))
+	case modelSelectedMsg:
+		cmds = append(cmds, m.applyModelSelected(msg))
+	case copilotImportedMsg:
+		cmds = append(cmds, m.selectModel(msg.action, false))
+	case reasoningEffortSavedMsg:
+		cmds = append(cmds, m.applyReasoningEffortSaved(msg))
+	case sessionModelRestoredMsg:
+		cmds = append(cmds, m.applySessionModelRestored(msg))
 	case agentRunSubmittedMsg:
 		// A prompt was just accepted (run started or enqueued): fetch the
 		// authoritative busy/queue state to confirm the optimistic values
@@ -2246,121 +2251,6 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// restoreModelFromSession checks the last assistant message in the
-// loaded session and, if it used a different provider/model than the
-// current config, restores that model/provider provided it is still
-// available. Returns a tea.Cmd that rebuilds the agent models if a
-// switch was made, or nil if no switch was needed.
-func (m *UI) restoreModelFromSession(msgs []message.Message) tea.Cmd {
-	var lastAssistant *message.Message
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == message.Assistant && !msgs[i].IsSummaryMessage {
-			lastAssistant = &msgs[i]
-			break
-		}
-	}
-	if lastAssistant == nil || lastAssistant.Provider == "" || lastAssistant.Model == "" {
-		return nil
-	}
-
-	cfg := m.com.Config()
-	if cfg == nil {
-		return nil
-	}
-
-	currentLarge := cfg.Models[config.SelectedModelTypeLarge]
-	if currentLarge.Provider == lastAssistant.Provider && currentLarge.Model == lastAssistant.Model {
-		return nil
-	}
-
-	if !cfg.IsModelAvailable(lastAssistant.Provider, lastAssistant.Model) {
-		slog.Debug("Skipping model restoration: provider/model not available",
-			"provider", lastAssistant.Provider,
-			"model", lastAssistant.Model)
-		return nil
-	}
-
-	selectedModel := config.SelectedModel{
-		Provider: lastAssistant.Provider,
-		Model:    lastAssistant.Model,
-	}
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeLarge, selectedModel); err != nil {
-		slog.Error("Failed to restore model from session", "error", err)
-		return nil
-	}
-
-	m.applyThemeForProvider(lastAssistant.Provider)
-
-	if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-		smallModel, err := m.com.Workspace.GetDefaultSmallModel(lastAssistant.Provider)
-		if err != nil {
-			slog.Error("Failed to resolve small model during session restore", "error", err)
-		} else if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
-			slog.Error("Failed to set small model during session restore", "error", err)
-		}
-	}
-
-	return m.updateAgentModelCmd(func() tea.Msg {
-		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-			return util.ReportError(err)
-		}
-		slog.Info("Restored model from session",
-			"provider", lastAssistant.Provider,
-			"model", lastAssistant.Model)
-		return nil
-	})
-}
-
-// handleSelectReasoningEffort applies a reasoning effort selection.
-// While the agent is mid-turn the choice is queued and applied when
-// the turn finishes, so the in-flight request is untouched.
-func (m *UI) handleSelectReasoningEffort(msg dialog.ActionSelectReasoningEffort) tea.Cmd {
-	if m.isAgentBusy() {
-		m.pendingModelAction = msg
-		m.dialog.CloseDialog(dialog.ReasoningID)
-		return func() tea.Msg {
-			return util.NewInfoMsg("Reasoning effort applies after the current turn")
-		}
-	}
-
-	cfg := m.com.Config()
-	if cfg == nil {
-		return util.ReportError(errors.New("configuration not found"))
-	}
-
-	agentCfg, ok := cfg.Agents[config.AgentCoder]
-	if !ok {
-		return util.ReportError(errors.New("agent configuration not found"))
-	}
-
-	currentModel := cfg.Models[agentCfg.Model]
-	currentModel.ReasoningEffort = msg.Effort
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, agentCfg.Model, currentModel); err != nil {
-		return util.ReportError(err)
-	}
-
-	// Remember the choice per model so switching models and back
-	// restores it instead of leaking the current model's effort. The
-	// whole map is written in one field: model IDs contain dots, which
-	// the dot-separated field paths cannot express.
-	if currentModel.Provider != "" && currentModel.Model != "" {
-		efforts := maps.Clone(cfg.ReasoningEfforts)
-		if efforts == nil {
-			efforts = make(map[string]string)
-		}
-		efforts[config.ModelReasoningKey(currentModel.Provider, currentModel.Model)] = msg.Effort
-		if err := m.com.Workspace.SetConfigField(config.ScopeGlobal, "reasoning_efforts", efforts); err != nil {
-			return util.ReportError(err)
-		}
-	}
-
-	m.dialog.CloseDialog(dialog.ReasoningID)
-	return m.updateAgentModelCmd(func() tea.Msg {
-		m.com.Workspace.UpdateAgentModel(context.TODO())
-		return util.NewInfoMsg("Reasoning effort set to " + msg.Effort)
-	})
-}
-
 // applyPendingModelAction applies a model or effort selection queued
 // while the agent was mid-turn. Called on the busy-to-idle edge so the
 // choice lands between turns.
@@ -2374,115 +2264,6 @@ func (m *UI) applyPendingModelAction() tea.Cmd {
 		return m.handleSelectReasoningEffort(action)
 	}
 	return nil
-}
-
-// handleSelectModel performs the model selection after any provider
-// pre-checks have completed.
-func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
-	var cmds []tea.Cmd
-
-	// we ignore dialogs with the oauth id as they need to be able to be dismissed
-	if m.isAgentBusy() && !m.dialog.ContainsDialog(dialog.OAuthID) {
-		// The in-flight turn keeps the model it started with; the
-		// choice is queued and applied when the turn finishes.
-		m.pendingModelAction = msg
-		m.dialog.CloseDialog(dialog.ModelsID)
-		return func() tea.Msg {
-			return util.NewInfoMsg("Model change applies after the current turn")
-		}
-	}
-
-	cfg := m.com.Config()
-	if cfg == nil {
-		return util.ReportError(errors.New("configuration not found"))
-	}
-
-	var (
-		providerID   = msg.Model.Provider
-		isCopilot    = providerID == string(catalog.InferenceProviderCopilot)
-		isConfigured = func() bool { _, ok := cfg.Providers.Get(providerID); return ok }
-	)
-
-	// Attempt to import GitHub Copilot tokens from VSCode if available.
-	if isCopilot && !isConfigured() && !msg.ReAuthenticate {
-		m.com.Workspace.ImportCopilot()
-	}
-
-	if !isConfigured() || msg.ReAuthenticate {
-		m.dialog.CloseDialog(dialog.ModelsID)
-		m.dialog.CloseDialog(dialog.ConnectID)
-		if cmd := m.openAuthenticationDialog(msg.Provider, msg.Model, msg.ModelType); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-		return tea.Batch(cmds...)
-	}
-
-	// Restore a remembered per-model reasoning effort so manual choices
-	// survive model switches; without one the selection defaults to the
-	// model's highest supported level.
-	if effort, ok := cfg.ReasoningEfforts[config.ModelReasoningKey(msg.Model.Provider, msg.Model.Model)]; ok {
-		msg.Model.ReasoningEffort = effort
-	}
-
-	if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, msg.ModelType, msg.Model); err != nil {
-		cmds = append(cmds, util.ReportError(err))
-	} else {
-		if msg.ModelType == config.SelectedModelTypeLarge {
-			// Swap the theme live based on the newly selected large
-			// model's provider. Skipped when the provider resolves to
-			// the already-active theme, which avoids a full markdown
-			// re-render of the transcript on every selection.
-			m.applyThemeForProvider(providerID)
-		}
-		if _, ok := cfg.Models[config.SelectedModelTypeSmall]; !ok {
-			// Ensure small model is set is unset.
-			smallModel, err := m.com.Workspace.GetDefaultSmallModel(providerID)
-			if err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			} else if err := m.com.Workspace.UpdatePreferredModel(config.ScopeGlobal, config.SelectedModelTypeSmall, smallModel); err != nil {
-				cmds = append(cmds, util.ReportError(err))
-			}
-		}
-	}
-
-	cmds = append(cmds, m.updateAgentModelCmd(func() tea.Msg {
-		if err := m.com.Workspace.UpdateAgentModel(context.TODO()); err != nil {
-			return util.ReportError(err)
-		}
-
-		var (
-			modelType = stringext.Capitalize(string(msg.ModelType))
-			modelName = msg.Model.Model
-		)
-		if catwalkModel := cfg.GetModel(msg.Model.Provider, msg.Model.Model); catwalkModel != nil && catwalkModel.Name != "" {
-			modelName = catwalkModel.Name
-		}
-		modelMsg := fmt.Sprintf("%s model changed to %s", modelType, modelName)
-
-		return util.NewInfoMsg(modelMsg)
-	}))
-
-	m.dialog.CloseDialog(dialog.APIKeyInputID)
-	m.dialog.CloseDialog(dialog.OAuthID)
-	m.dialog.CloseDialog(dialog.ModelsID)
-	m.dialog.CloseDialog(dialog.ConnectID)
-
-	// Connecting the first provider mid-session is the one path where the
-	// agent is not up yet (app startup skips it on an unconfigured
-	// install): bring it up now, then re-fetch the memoized ready/model
-	// state so the landing view shows the selected model without waiting
-	// for the TTL backstop.
-	if !m.com.Workspace.AgentIsReady() {
-		if err := m.com.Workspace.InitCoderAgent(context.TODO()); err != nil {
-			cmds = append(cmds, util.ReportError(err))
-		}
-		m.invalidateBusyCaches()
-		if cmd := m.dispatchBusyRefresh(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	}
-
-	return tea.Batch(cmds...)
 }
 
 func (m *UI) openAuthenticationDialog(provider catalog.Provider, model config.SelectedModel, modelType config.SelectedModelType) tea.Cmd {

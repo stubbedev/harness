@@ -6,15 +6,19 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/ui/util"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // goalSetMsg reports that a goal was stored on the session; the turn
 // that starts working toward it is sent on receipt, so the goal is in
 // place before that turn can end and be judged.
 type goalSetMsg struct {
+	sessionID string
 	condition string
+	created   *session.Session
 }
 
 // setGoal stores condition as the session's goal and then starts
@@ -24,26 +28,44 @@ func (m *UI) setGoal(condition string) tea.Cmd {
 	if err != nil {
 		return util.ReportError(err)
 	}
-	if err := m.com.Workspace.AgentReadyErr(); err != nil {
-		return util.ReportError(err)
+	ws := m.com.Workspace
+	sessionID := m.currentSessionID()
+	return func() tea.Msg {
+		return storeGoal(ws, sessionID, goal.Condition)
 	}
-	var cmds []tea.Cmd
-	if !m.hasSession() {
-		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
+}
+
+func storeGoal(ws workspace.Workspace, sessionID, condition string) tea.Msg {
+	if err := ws.AgentReadyErr(); err != nil {
+		return util.NewErrorMsg(err)
+	}
+	ctx := context.Background()
+	msg := goalSetMsg{sessionID: sessionID, condition: condition}
+	if sessionID == "" {
+		created, err := ws.CreateSession(ctx, "New Session")
 		if err != nil {
-			return util.ReportError(err)
+			return util.NewErrorMsg(err)
 		}
-		m.session = &newSession
-		cmds = append(cmds, m.loadSession(newSession.ID))
+		msg.sessionID = created.ID
+		msg.created = &created
+	}
+	if err := ws.AgentSetGoal(ctx, msg.sessionID, condition); err != nil {
+		return util.NewErrorMsg(err)
+	}
+	return msg
+}
+
+func (m *UI) applyGoalSet(msg goalSetMsg) tea.Cmd {
+	var cmds []tea.Cmd
+	if msg.created != nil && !m.hasSession() {
+		m.session = msg.created
+		cmds = append(cmds, m.loadSession(msg.created.ID))
 		m.setState(uiChat, m.focus)
 	}
-	sessionID := m.session.ID
-	cmds = append(cmds, func() tea.Msg {
-		if err := m.com.Workspace.AgentSetGoal(context.Background(), sessionID, goal.Condition); err != nil {
-			return util.ReportError(err)()
-		}
-		return goalSetMsg{condition: goal.Condition}
-	})
+	if msg.sessionID != m.currentSessionID() {
+		return util.ReportWarn("Goal was set on a session that is no longer open")
+	}
+	cmds = append(cmds, m.sendReadyMessage(agent.GoalPrompt(msg.condition)))
 	return tea.Batch(cmds...)
 }
 
