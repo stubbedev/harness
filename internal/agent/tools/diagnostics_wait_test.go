@@ -78,12 +78,12 @@ func TestDiagnosticsActionDoesNotWaitForAColdStart(t *testing.T) {
 func TestFinishFileChangeDoesNotWaitForASettle(t *testing.T) {
 	t.Parallel()
 
-	manager, _, dir := newDiagnosticsManager(t)
+	manager, _, _ := newDiagnosticsManager(t)
 	release := manager.HoldTestSettle()
 	t.Cleanup(release)
 
 	start := time.Now()
-	notes := finishFileChange(sessionContext(t, "s1"), manager, nil, filepath.Join(dir, "main.go"))
+	notes := finishFileChange(sessionContext(t, "s1"), manager, nil, lsp.FileChange{Path: filepath.Join(t.TempDir(), "main.go"), Content: "package main\n"})
 	require.Less(t, time.Since(start), promptly, "an edit waited on a settle")
 	require.Empty(t, notes, "a report taken mid-answer would be wrong")
 }

@@ -101,7 +101,7 @@ func NewWriteTool(
 			filetracker.Observe(ctx, tracker, sessionID, filePath, written, []filetracker.Range{{Start: 0, End: len(params.Content)}})
 
 			result := fmt.Sprintf("<result>\nFile successfully written: %s\n</result>\n", filePath) +
-				finishFileChange(ctx, lspManager, presence, filePath)
+				finishFileChange(ctx, lspManager, presence, lsp.FileChange{Path: filePath, Content: params.Content})
 			return fantasy.WithResponseMetadata(
 				fantasy.NewTextResponse(result),
 				WriteResponseMetadata{

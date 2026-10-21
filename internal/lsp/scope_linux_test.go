@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,8 @@ import (
 // fakeServerEnv makes the test binary a language server instead of
 // running the tests: see TestMain.
 const fakeServerEnv = "LSP_TEST_FAKE_SERVER"
+
+const fakeServerLogEnv = "LSP_TEST_FAKE_SERVER_LOG"
 
 func TestMain(m *testing.M) {
 	if os.Getenv(fakeServerEnv) == "1" {
@@ -61,6 +64,7 @@ func fakeServer(in io.Reader, out io.Writer) {
 		var msg struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
 		}
 		_ = json.Unmarshal(body, &msg)
 		switch msg.Method {
@@ -68,6 +72,8 @@ func fakeServer(in io.Reader, out io.Writer) {
 			return
 		case "workspace/didChangeWatchedFiles":
 			hog()
+		case "textDocument/didOpen", "textDocument/didChange":
+			logDocumentSync(msg.Method, msg.Params)
 		}
 		if len(msg.ID) == 0 {
 			continue
@@ -83,6 +89,40 @@ func fakeServer(in io.Reader, out io.Writer) {
 
 // hogHeld keeps what hog allocates reachable.
 var hogHeld [][]byte
+
+type documentSync struct {
+	Method  string `json:"method"`
+	Version int32  `json:"version"`
+	Text    string `json:"text"`
+}
+
+func logDocumentSync(method string, raw json.RawMessage) {
+	path := os.Getenv(fakeServerLogEnv)
+	if path == "" {
+		return
+	}
+	var params struct {
+		TextDocument struct {
+			Version int32  `json:"version"`
+			Text    string `json:"text"`
+		} `json:"textDocument"`
+		ContentChanges []struct {
+			Text string `json:"text"`
+		} `json:"contentChanges"`
+	}
+	_ = json.Unmarshal(raw, &params)
+	entry := documentSync{Method: method, Version: params.TextDocument.Version, Text: params.TextDocument.Text}
+	for _, change := range params.ContentChanges {
+		entry.Text = change.Text
+	}
+	line, _ := json.Marshal(entry)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write(append(line, '\n'))
+}
 
 // hog starts a child that sleeps, so the scope outlives the server and
 // what happened in it can still be read, then allocates and touches
@@ -102,6 +142,15 @@ func hog() {
 // test where servers cannot be put in scopes of their own.
 func startFakeClient(t *testing.T) *Client {
 	t.Helper()
+	c := newFakeClient(t, nil)
+	if c.scope.Load() == nil {
+		t.Skip("no systemd user manager to put the server in a scope")
+	}
+	return c
+}
+
+func newFakeClient(t *testing.T, env map[string]string) *Client {
+	t.Helper()
 	exe, err := os.Executable()
 	require.NoError(t, err)
 	cfg := config.LSPConfig{
@@ -109,12 +158,10 @@ func startFakeClient(t *testing.T) *Client {
 		Args:    []string{"-test.run=^$"},
 		Env:     map[string]string{fakeServerEnv: "1"},
 	}
+	maps.Copy(cfg.Env, env)
 	c, err := New("fake server", cfg, config.IdentityResolver(), t.TempDir(), false)
 	require.NoError(t, err)
 	t.Cleanup(c.Shutdown)
-	if c.scope.Load() == nil {
-		t.Skip("no systemd user manager to put the server in a scope")
-	}
 	_, err = c.Initialize(t.Context(), c.cwd)
 	require.NoError(t, err, "the server never answered over its pipes")
 	c.SetServerState(StateReady)

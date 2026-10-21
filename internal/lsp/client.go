@@ -547,61 +547,51 @@ func (c *Client) OpenFile(ctx context.Context, filepath string) error {
 	uri := string(protocol.URIFromPath(filepath))
 
 	if _, exists := c.openFiles.Get(uri); exists {
-		return nil // Already open
+		return nil
 	}
 
-	// Skip files that do not exist or cannot be read
 	content, err := os.ReadFile(filepath)
 	if err != nil {
 		return fmt.Errorf("error reading file: %w", err)
 	}
-
-	// Notify the server about the opened document
-	if err = c.notify(func(pn *powernap.Client) error {
-		return pn.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, string(content))
-	}); err != nil {
-		return err
-	}
-
-	c.openFiles.Set(uri, &OpenFileInfo{
-		Version: 1,
-		URI:     protocol.DocumentURI(uri),
-	})
-
-	return nil
+	return c.didOpen(ctx, filepath, uri, string(content))
 }
 
-// NotifyChange notifies the server about a file change.
-func (c *Client) NotifyChange(ctx context.Context, filepath string) error {
+func (c *Client) SyncContent(ctx context.Context, filepath, text string) error {
 	if c == nil {
 		return nil
 	}
 	uri := string(protocol.URIFromPath(filepath))
-
-	content, err := os.ReadFile(filepath)
-	if err != nil {
-		return fmt.Errorf("error reading file: %w", err)
+	if info, open := c.openFiles.Get(uri); open {
+		return c.didChange(ctx, uri, info, text)
 	}
+	return c.didOpen(ctx, filepath, uri, text)
+}
 
-	fileInfo, isOpen := c.openFiles.Get(uri)
-	if !isOpen {
-		return fmt.Errorf("cannot notify change for unopened file: %s", filepath)
+func (c *Client) didOpen(ctx context.Context, filepath, uri, text string) error {
+	if err := c.notify(func(pn *powernap.Client) error {
+		return pn.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, text)
+	}); err != nil {
+		return err
 	}
+	c.openFiles.Set(uri, &OpenFileInfo{
+		Version: 1,
+		URI:     protocol.DocumentURI(uri),
+	})
+	return nil
+}
 
-	// Increment version
-	fileInfo.Version++
-
-	// Create change event
+func (c *Client) didChange(ctx context.Context, uri string, info *OpenFileInfo, text string) error {
+	info.Version++
 	changes := []protocol.TextDocumentContentChangeEvent{
 		{
 			Value: protocol.TextDocumentContentChangeWholeDocument{
-				Text: string(content),
+				Text: text,
 			},
 		},
 	}
-
 	return c.notify(func(pn *powernap.Client) error {
-		return pn.NotifyDidChangeTextDocument(ctx, uri, int(fileInfo.Version), changes)
+		return pn.NotifyDidChangeTextDocument(ctx, uri, int(info.Version), changes)
 	})
 }
 
@@ -758,17 +748,7 @@ func (c *Client) RefreshOpenFiles(ctx context.Context) {
 			slog.Warn("Failed to read file for refresh", "path", path, "error", err)
 			continue
 		}
-		info.Version++
-		changes := []protocol.TextDocumentContentChangeEvent{
-			{
-				Value: protocol.TextDocumentContentChangeWholeDocument{
-					Text: string(content),
-				},
-			},
-		}
-		if err := c.notify(func(pn *powernap.Client) error {
-			return pn.NotifyDidChangeTextDocument(ctx, uri, int(info.Version), changes)
-		}); err != nil {
+		if err := c.didChange(ctx, uri, info, string(content)); err != nil {
 			slog.Warn("Failed to notify file change", "uri", uri, "error", err)
 		}
 	}

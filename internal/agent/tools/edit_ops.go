@@ -24,6 +24,8 @@ type editContext struct {
 	files       history.Service
 	filetracker filetracker.Service
 	workingDir  string
+	lspManager  *lsp.Manager
+	presence    *presence.Registry
 }
 
 // findAndReplace performs a find-and-replace on content. When replaceAll is
@@ -176,16 +178,22 @@ func commitFileChange(edit editContext, sessionID, filePath, oldContent, newCont
 // the tool's result: a warning for each file another instance wrote
 // recently (a soft note, not a refusal; the evidence layer is the hard
 // line), then the diagnostics.
-func finishFileChange(ctx context.Context, lspManager *lsp.Manager, reg *presence.Registry, paths ...string) string {
-	lspManager.NotifyChangesAsync(ctx, paths...)
+func finishFileChange(ctx context.Context, lspManager *lsp.Manager, reg *presence.Registry, changes ...lsp.FileChange) string {
+	lspManager.NotifyChangesAsync(ctx, changes...)
+	paths := make([]string, len(changes))
 	var notes strings.Builder
-	for _, path := range paths {
-		if warn := reg.Report(path); warn != "" {
+	for i, change := range changes {
+		paths[i] = change.Path
+		if warn := reg.Report(change.Path); warn != "" {
 			notes.WriteString(warn + "\n")
 		}
 	}
 	notes.WriteString(reportDiagnosticsNow(ctx, lspManager, paths...))
 	return notes.String()
+}
+
+func (edit editContext) finish(message string, change lsp.FileChange) string {
+	return fmt.Sprintf("<result>\n%s\n</result>\n", message) + finishFileChange(edit.ctx, edit.lspManager, edit.presence, change)
 }
 
 // recordFileVersion stores filePath in the session's file history: the

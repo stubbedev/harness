@@ -77,10 +77,16 @@ func renameAction(
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("failed to apply rename edits: %s", err)), nil
 		}
 
-		for path, old := range before {
+		changes := make([]lsp.FileChange, 0, len(affectedFiles))
+		for _, path := range affectedFiles {
 			after, err := os.ReadFile(path)
 			if err != nil {
-				slog.Warn("Failed to read renamed file for version tracking", "path", path, "error", err)
+				slog.Warn("Failed to read renamed file", "path", path, "error", err)
+				continue
+			}
+			changes = append(changes, lsp.FileChange{Path: path, Content: string(after)})
+			old, tracked := before[path]
+			if !tracked {
 				continue
 			}
 			if err := recordFileVersion(ctx, files, sessionID, path, old, string(after)); err != nil {
@@ -107,7 +113,7 @@ func renameAction(
 		// them counts as the file in hand: a rename that breaks a caller
 		// breaks it in one of these, and burying that under "project
 		// diagnostics" reads as unrelated.
-		text := b.String() + "\n" + finishFileChange(ctx, lspManager, reg, affectedFiles...)
+		text := b.String() + "\n" + finishFileChange(ctx, lspManager, reg, changes...)
 
 		return withFileMutations(fantasy.NewTextResponse(text), affectedFiles...), nil
 	}

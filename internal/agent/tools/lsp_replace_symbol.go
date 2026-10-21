@@ -201,7 +201,7 @@ func spliceSymbol(
 		NewContent: changes.NewContent,
 		Action:     string(action),
 	}
-	resp := fantasy.NewTextResponse(summary + "\n" + finishFileChange(ctx, lspManager, reg, path))
+	resp := fantasy.NewTextResponse(summary + "\n" + finishFileChange(ctx, lspManager, reg, lsp.FileChange{Path: path, Content: newContent}))
 	resp = fantasy.WithResponseMetadata(resp, meta)
 	return withFileMutations(resp, path), nil
 }

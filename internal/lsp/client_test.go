@@ -106,7 +106,7 @@ func TestNilClient(t *testing.T) {
 	require.Equal(t, DiagnosticCounts{}, c.GetDiagnosticCounts())
 	require.Nil(t, c.GetDiagnostics())
 	require.Nil(t, c.OpenFileOnDemand(context.Background(), "/some/file.go"))
-	require.Nil(t, c.NotifyChange(context.Background(), "/some/file.go"))
+	require.Nil(t, c.SyncContent(context.Background(), "/some/file.go", "package a\n"))
 	c.WaitForDiagnostics(context.Background(), time.Second)
 }
 

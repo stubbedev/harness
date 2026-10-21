@@ -120,30 +120,13 @@ func NewEditTool(
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 
-			var response fantasy.ToolResponse
-			var err error
-
 			unlock := lockFile(params.FilePath)
 			defer unlock()
-			editCtx := editContext{ctx, files, filetracker, workingDir}
-			// Handle file creation case (first edit has empty old_string)
+			editCtx := editContext{ctx: ctx, files: files, filetracker: filetracker, workingDir: workingDir, lspManager: lspManager, presence: presence}
 			if params.Edits[0].OldString == "" {
-				response, err = processEditWithCreation(editCtx, params)
-			} else {
-				response, err = processEditExistingFile(editCtx, params)
+				return processEditWithCreation(editCtx, params)
 			}
-
-			if err != nil {
-				return response, err
-			}
-
-			if response.IsError {
-				return response, nil
-			}
-
-			response.Content = fmt.Sprintf("<result>\n%s\n</result>\n", response.Content) +
-				finishFileChange(ctx, lspManager, presence, params.FilePath)
-			return response, nil
+			return processEditExistingFile(editCtx, params)
 		},
 	)
 }
@@ -252,7 +235,7 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 	message = withWhitespaceNote(message, whitespaceCorrected)
 
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(message),
+		fantasy.NewTextResponse(edit.finish(message, lsp.FileChange{Path: params.FilePath, Content: currentContent})),
 		meta,
 	), nil
 }
@@ -324,7 +307,7 @@ func processEditExistingFile(edit editContext, params EditParams) (fantasy.ToolR
 	meta.EditsFailed = failedEdits
 	meta.FileMutations = []FileMutation{mutation}
 	return fantasy.WithResponseMetadata(
-		fantasy.NewTextResponse(message),
+		fantasy.NewTextResponse(edit.finish(message, lsp.FileChange{Path: params.FilePath, Content: writeContent})),
 		meta,
 	), nil
 }

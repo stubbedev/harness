@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 )
@@ -14,7 +15,24 @@ import (
 // shorter first-change window inside [Client.WaitForDiagnostics].
 const SettleTimeout = 5 * time.Second
 
-// NotifyChangeAsync tells every running server that handles path that the file
+type FileChange struct {
+	Path    string
+	Content string
+}
+
+func (s *Manager) NotifyChangeAsync(ctx context.Context, path string) {
+	if s == nil || path == "" {
+		return
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		slog.Debug("Failed to read file for LSP notification", "path", path, "error", err)
+		return
+	}
+	s.NotifyChangesAsync(ctx, FileChange{Path: path, Content: string(content)})
+}
+
+// NotifyChangesAsync tells every running server that handles path that the file
 // changed, and returns as soon as those one-way notifications are written.
 //
 // Waiting for the servers to answer happens in the background. An edit that
@@ -26,41 +44,32 @@ const SettleTimeout = 5 * time.Second
 //
 // Servers that are not running yet are started in the background and not
 // waited for either.
-func (s *Manager) NotifyChangeAsync(ctx context.Context, path string) {
-	s.NotifyChangesAsync(ctx, path)
-}
-
-// NotifyChangesAsync is [Manager.NotifyChangeAsync] for a change that spans
-// several files, such as a rename. The whole set is announced under a single
-// background wait: a rename across fifty files has one answer to wait for, not
-// fifty, and each server is waited on once however many of its files were
-// touched.
-func (s *Manager) NotifyChangesAsync(ctx context.Context, paths ...string) {
+//
+// The whole set is announced under a single background wait: a rename across
+// fifty files has one answer to wait for, not fifty, and each server is
+// waited on once however many of its files were touched.
+func (s *Manager) NotifyChangesAsync(ctx context.Context, changes ...FileChange) {
 	if s == nil {
 		return
 	}
 
 	var notified []*Client
 	seen := make(map[*Client]struct{})
-	for _, path := range paths {
-		if path == "" {
+	for _, change := range changes {
+		if change.Path == "" {
 			continue
 		}
 		// Detached from the tool call's context: the call returns long
 		// before a cold server finishes starting, and cancelling it then
 		// would leave the server half-initialized.
-		s.StartAsync(context.WithoutCancel(ctx), path)
+		s.StartAsync(context.WithoutCancel(ctx), change.Path)
 
 		for client := range s.Clients().Seq() {
-			if !client.HandlesFile(path) {
+			if !client.HandlesFile(change.Path) {
 				continue
 			}
-			if err := client.OpenFileOnDemand(ctx, path); err != nil {
-				slog.Debug("Failed to open file for LSP notification", "path", path, "error", err)
-				continue
-			}
-			if err := client.NotifyChange(ctx, path); err != nil {
-				slog.Debug("Failed to notify LSP of file change", "path", path, "error", err)
+			if err := client.SyncContent(ctx, change.Path, change.Content); err != nil {
+				slog.Debug("Failed to notify LSP of file change", "path", change.Path, "error", err)
 				continue
 			}
 			if _, already := seen[client]; !already {
