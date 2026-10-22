@@ -30,8 +30,11 @@ func TestSession_OOMKillStaysInScope(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "memory.max"), []byte("64M"), 0o644))
 
 	// tail holds the current line in memory, and /dev/zero has no line
-	// breaks: it grows until it is killed.
-	require.NoError(t, s.Send([]byte("head -c 1000000000 /dev/zero | tail -n 1; printf '__status:%s__\\n' \"$?\"\n")))
+	// breaks: it grows until it is killed. It reads /dev/zero itself
+	// rather than through a pipe, so it is the only process allocating:
+	// a writer feeding it can hit the limit again before the kernel has
+	// reclaimed tail's memory and be killed as well.
+	require.NoError(t, s.Send([]byte("tail -n 1 /dev/zero; printf '__status:%s__\\n' \"$?\"\n")))
 	require.True(t, waitOutput(t, s, regexp.MustCompile(`__status:137__`), testTimeout(30*time.Second)),
 		"the hog was not killed: %q", s.Pending())
 
