@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os/exec"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -530,7 +529,7 @@ func (t *testTransportWrapper) unwrapTransport() mcp.Transport { return t.inner 
 // both that the unwrap reaches the command (the error is no longer bare EOF)
 // and that the re-executed child's output surfaces in the joined error.
 func TestMaybeStdioErr_UnwrapsChannelTransport(t *testing.T) {
-	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo 'startup failed: bad config'; exit 3")
+	cmd := failingStdioCommand(t, "startup failed: bad config")
 	inner := &mcp.CommandTransport{Command: cmd}
 	wrapped := &channelTransport{inner: inner, name: "t", gate: newChannelGate()}
 
@@ -544,7 +543,7 @@ func TestMaybeStdioErr_UnwrapsChannelTransport(t *testing.T) {
 // TestMaybeStdioErr_UnwrapsEveryWrapper pins the unwrap against future
 // decorators: it must peel the whole stack, not a fixed number of layers.
 func TestMaybeStdioErr_UnwrapsEveryWrapper(t *testing.T) {
-	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo boom-diagnostic >&2; exit 3")
+	cmd := failingStdioCommand(t, "boom-diagnostic")
 	var transport mcp.Transport = &mcp.CommandTransport{Command: cmd}
 	transport = &channelTransport{inner: transport, name: "t", gate: newChannelGate()}
 	transport = &testTransportWrapper{inner: transport}
@@ -557,17 +556,17 @@ func TestMaybeStdioErr_UnwrapsEveryWrapper(t *testing.T) {
 // TestStdioCheck_DoesNotDuplicateArgv0 pins the argv0 handling in the
 // diagnostic re-run. exec.Cmd.Args carries argv0 as its first element and
 // exec.CommandContext prepends Path as argv0 itself, so passing Args through
-// whole re-ran "sh sh -c ..." — and the error reported that malformed
+// whole re-ran the server with its own path as an extra argument — and the error reported that malformed
 // command's failure instead of the child's real startup output.
 func TestStdioCheck_DoesNotDuplicateArgv0(t *testing.T) {
-	cmd := exec.CommandContext(t.Context(), "sh", "-c", "echo 'real startup error'; exit 3")
+	cmd := failingStdioCommand(t, "real startup error")
 
 	err := stdioCheck(cmd)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "real startup error",
 		"the re-run must execute the original command, not a duplicated argv0")
-	require.NotContains(t, err.Error(), "cannot execute binary file",
-		"a duplicated argv0 makes the shell try to exec itself as a script")
+	require.NotContains(t, err.Error(), "unexpected argv",
+		"a duplicated argv0 reaches the server as an extra argument")
 }
 
 // A failed connect owns no session, so its StateError must leave a healthy
