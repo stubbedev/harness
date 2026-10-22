@@ -60,25 +60,26 @@ func (c *coordinator) warnOnFabricatedPaths(params subAgentParams, resp *fantasy
 
 // missingCitedPaths extracts file-path-shaped tokens from report and
 // returns the ones that resolve to nothing under any of roots. A token
-// counts as a citation when it contains a slash and looks like a file (an
-// extension such as .go), an explicit directory (trailing slash) or a
-// glob; bare prose like "read/write" or "fast/task" never matches. Only
-// checkable citations are flagged: an absolute path inside a root, or a
-// relative path whose first element exists in a root. Paths relative to
-// a package directory, fixture names mentioned as data and paths outside
-// every root are never reported: a missed warning costs less than a
-// false one, and nothing outside the roots is ever probed.
+// counts as a citation when it contains a path separator and looks like a
+// file (an extension such as .go), an explicit directory (trailing
+// separator) or a glob; bare prose like "read/write" or "fast/task" never
+// matches. Only checkable citations are flagged: an absolute path inside
+// a root, or a relative path whose first element exists in a root. Paths
+// relative to a package directory, fixture names mentioned as data and
+// paths outside every root are never reported: a missed warning costs
+// less than a false one, and nothing outside the roots is ever probed.
 func missingCitedPaths(report string, roots []string) []string {
 	var missing []string
 	seen := make(map[string]bool)
 	for _, raw := range strings.FieldsFunc(report, isCitationDelimiter) {
 		token := trimCitation(raw)
-		if token == "" || strings.Contains(token, "://") || !strings.Contains(token, "/") {
+		if token == "" || strings.Contains(token, "://") || !strings.ContainsFunc(token, isCitationSeparator) {
 			continue
 		}
-		dirCited := strings.HasSuffix(token, "/")
-		token = strings.TrimRight(token, "/")
-		segment := token[strings.LastIndexByte(token, '/')+1:]
+		trimmed := strings.TrimRightFunc(token, isCitationSeparator)
+		dirCited := trimmed != token
+		token = trimmed
+		segment := token[strings.LastIndexFunc(token, isCitationSeparator)+1:]
 		glob := strings.ContainsAny(token, "*?")
 		if !glob && !dirCited && !hasFileExtension(segment) {
 			continue
@@ -101,6 +102,13 @@ func missingCitedPaths(report string, roots []string) []string {
 
 func isCitationDelimiter(r rune) bool {
 	return unicode.IsSpace(r) || strings.ContainsRune(citationDelimiters, r)
+}
+
+// isCitationSeparator reports whether r separates path elements in a
+// citation: the slash every report writes, or the platform's own
+// separator, which absolute paths carry on Windows.
+func isCitationSeparator(r rune) bool {
+	return r == '/' || r == filepath.Separator
 }
 
 func trimCitation(token string) string {
