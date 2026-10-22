@@ -189,6 +189,7 @@ func TestAssistantRenderMatchesPerLinePrefix(t *testing.T) {
 	msg := &message.Message{ID: "c", Role: message.Assistant}
 	item := NewAssistantMessageItem(&sty, msg).(*AssistantMessageItem)
 	msg.AppendReasoningContent(buildThinkingBlock(3))
+	msg.FinishThinking()
 	for i := range 40 {
 		msg.AppendContent(fmt.Sprintf("Paragraph %d of the answer.\n\n", i))
 		item.SetMessage(msg)
