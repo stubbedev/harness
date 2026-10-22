@@ -151,10 +151,12 @@ func TestClientWorkspace_LSPDiagnosticsSkipStoppedServers(t *testing.T) {
 		}
 	})
 
+	path, err := uri.Path()
+	require.NoError(t, err)
 	counts, err := ws.LSPFileDiagnostics()
 	require.NoError(t, err)
 	require.Equal(t, map[string]lsp.DiagnosticCounts{
-		"/tmp/a.go": {Error: 1, Warning: 1},
+		path: {Error: 1, Warning: 1},
 	}, counts)
 
 	stopped, err := ws.LSPGetDiagnosticCounts("stopped")
