@@ -13,10 +13,10 @@ func TestActivationPathJoinsRelativePathsOnly(t *testing.T) {
 	root := t.TempDir()
 	rel, ok := activationPath(root, filepath.Join("sub", "a.go"))
 	require.True(t, ok)
-	require.Equal(t, filepath.Join("sub", "a.go"), rel)
+	require.Equal(t, "sub/a.go", rel)
 	rel, ok = activationPath(root, filepath.Join(root, "sub", "a.go"))
 	require.True(t, ok)
-	require.Equal(t, filepath.Join("sub", "a.go"), rel)
+	require.Equal(t, "sub/a.go", rel)
 	_, ok = activationPath(root, filepath.Join(t.TempDir(), "a.go"))
 	require.False(t, ok)
 	if runtime.GOOS == "windows" {
