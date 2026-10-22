@@ -38,7 +38,7 @@ func fakeClipboard(t *testing.T, content string) {
 
 	dir := t.TempDir()
 	script := "#!/bin/sh\nprintf '%s' '" + content + "'\n"
-	for _, name := range []string{"xclip", "xsel", "wl-paste", "termux-clipboard-get", "powershell.exe"} {
+	for _, name := range []string{"xclip", "xsel", "wl-paste", "termux-clipboard-get", "pbpaste", "powershell.exe"} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755))
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
