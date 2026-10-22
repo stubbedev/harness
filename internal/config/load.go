@@ -30,6 +30,7 @@ import (
 	"github.com/stubbedev/harness/internal/filepathext"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/home"
+	"github.com/stubbedev/harness/internal/lspcatalog"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -787,11 +788,11 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	}
 }
 
-// powernapDefaults caches the powernap default LSP server catalog. The
-// catalog is static and immutable for the life of the process, but
-// building it (NewManager + LoadDefaults) is expensive and was previously
-// repeated on every config reload. We load it once and only ever read from
-// it via GetServer, so a shared instance is safe.
+// powernapDefaults caches the bundled LSP server catalog. The catalog is
+// static and immutable for the life of the process, but building it is
+// expensive and was previously repeated on every config reload. We load it
+// once and only ever read from it via GetServer, so a shared instance is
+// safe.
 var (
 	powernapDefaultsOnce sync.Once
 	powernapDefaults     *powernapConfig.Manager
@@ -799,12 +800,7 @@ var (
 
 func lspDefaultsManager() *powernapConfig.Manager {
 	powernapDefaultsOnce.Do(func() {
-		m := powernapConfig.NewManager()
-		// LoadDefaults only fails on malformed embedded defaults, which
-		// would be a build-time bug; treat the manager as usable either
-		// way so a transient error never wedges config loading.
-		_ = m.LoadDefaults()
-		powernapDefaults = m
+		powernapDefaults = lspcatalog.New()
 	})
 	return powernapDefaults
 }

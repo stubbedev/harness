@@ -22,6 +22,7 @@ import (
 	"github.com/stubbedev/harness/internal/crash"
 	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/filepathext"
+	"github.com/stubbedev/harness/internal/lspcatalog"
 )
 
 const (
@@ -77,8 +78,7 @@ func (s *Manager) lockStart(name string) func() {
 
 // NewManager creates a new LSP manager service.
 func NewManager(cfg *config.ConfigStore) *Manager {
-	manager := powernapconfig.NewManager()
-	manager.LoadDefaults()
+	manager := lspcatalog.New()
 
 	// Merge user-configured LSPs into the manager.
 	configNames := make(map[string]string)
@@ -237,12 +237,21 @@ func (s *Manager) shouldFanout(path string) bool {
 	if s.recentFanout == nil {
 		return true
 	}
-	key := filepath.Ext(path) + "\x00" + filepath.Dir(path)
+	key := fileKind(path) + "\x00" + filepath.Dir(path)
 	if at, ok := s.recentFanout.Get(key); ok && s.now().Sub(at) < fanoutRetryDelay {
 		return false
 	}
 	s.recentFanout.Set(key, s.now())
 	return true
+}
+
+// fileKind is what decides which servers handle a file: its extension, or
+// for a file without one (Makefile, justfile, Dockerfile) its name.
+func fileKind(path string) string {
+	if ext := filepath.Ext(path); ext != "" {
+		return ext
+	}
+	return strings.ToLower(filepath.Base(path))
 }
 
 // skipAutoStartCommands contains commands that are too generic or ambiguous to
@@ -386,6 +395,20 @@ func (s *Manager) canAutoStart(
 		return false
 	}
 
+	if !s.installed(name, server) {
+		return false
+	}
+
+	if successor, ok := s.supersededFor(name, filePath, workDir); ok {
+		slog.Debug("LSP superseded for this file, skipping", "name", name, "successor", successor)
+		return false
+	}
+	return true
+}
+
+// installed reports whether a server's command is on PATH, remembering a
+// miss for unavailableRetryDelay.
+func (s *Manager) installed(name string, server *powernapconfig.ServerConfig) bool {
 	if s.recentlyUnavailable(name) {
 		return false
 	}
@@ -396,6 +419,24 @@ func (s *Manager) canAutoStart(
 	}
 	s.clearUnavailable(name)
 	return true
+}
+
+// supersededFor returns the server that replaces name for filePath: one
+// the catalog names as its successor, which handles the file and is
+// available to start in its place.
+func (s *Manager) supersededFor(name, filePath, workDir string) (string, bool) {
+	successor, ok := lspcatalog.SupersededBy(name)
+	if !ok {
+		return "", false
+	}
+	server, ok := s.manager.GetServer(successor)
+	if !ok || !handles(server, filePath, workDir) {
+		return "", false
+	}
+	if _, disabled := s.sessionDisabled.Get(successor); disabled {
+		return "", false
+	}
+	return successor, s.isUserConfigured(successor) || s.installed(successor, server)
 }
 
 func (s *Manager) isUserConfigured(name string) bool {
@@ -484,11 +525,8 @@ func handlesFiletype(sname string, fileTypes []string, filePath string) bool {
 	kind := powernap.DetectLanguage(filePath)
 	name := strings.ToLower(filepath.Base(filePath))
 	for _, filetype := range fileTypes {
-		suffix := strings.ToLower(filetype)
-		if !strings.HasPrefix(suffix, ".") {
-			suffix = "." + suffix
-		}
-		if strings.HasSuffix(name, suffix) || filetype == string(kind) {
+		bare := strings.TrimPrefix(strings.ToLower(filetype), ".")
+		if name == bare || strings.HasSuffix(name, "."+bare) || filetype == string(kind) {
 			slog.Debug("Handles file", "name", sname, "file", name, "filetype", filetype, "kind", kind)
 			return true
 		}

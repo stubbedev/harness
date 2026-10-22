@@ -310,6 +310,14 @@ Fields: `command`, `args`, `env`, `filetypes`, `root_markers`, `init_options`
 and `disabled`. Harness fills in defaults for servers it recognizes, so a bare
 `command` is usually enough.
 
+A `filetypes` entry matches a file whose name ends in `.<entry>` or is the
+entry itself, so `justfile` and `makefile` cover files without an extension.
+
+When [shell-lsp](https://github.com/stubbedev/shell-lsp) is on `PATH` (or
+configured as `shell_lsp`), it handles shell scripts, Makefiles, justfiles and
+Dockerfiles, and `bashls`, `shuck`, `just`, `dockerls` and
+`docker_language_server` are not auto-started for the files it covers.
+
 ## Tools
 
 ```yaml

@@ -2,12 +2,16 @@ package lsp
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
+	"github.com/stubbedev/harness/internal/lspcatalog"
 )
 
 func TestUnavailableBackoff(t *testing.T) {
@@ -146,4 +150,87 @@ func TestStartAsyncFanoutWithoutCache(t *testing.T) {
 	manager := &Manager{now: time.Now}
 	require.True(t, manager.shouldFanout("/repo/a.go"))
 	require.True(t, manager.shouldFanout("/repo/a.go"))
+}
+
+func TestHandlesFiletypeMatchesFilesWithoutExtension(t *testing.T) {
+	t.Parallel()
+
+	fileTypes := []string{"justfile", "makefile", "containerfile", "sh"}
+	for _, path := range []string{"/repo/justfile", "/repo/Justfile", "/repo/.justfile", "/repo/Makefile", "/repo/Containerfile", "/repo/run.sh"} {
+		require.True(t, handlesFiletype("test", fileTypes, path), path)
+	}
+	for _, path := range []string{"/repo/notjustfile", "/repo/README", "/repo/run.bash"} {
+		require.False(t, handlesFiletype("test", fileTypes, path), path)
+	}
+}
+
+func newCatalogManager(t *testing.T, installed func(command string) bool) *Manager {
+	t.Helper()
+	manager := NewManager(config.NewTestStoreWithWorkingDir(&config.Config{}, t.TempDir()))
+	manager.lookPath = func(command string) (string, error) {
+		if installed(command) {
+			return "/usr/bin/" + command, nil
+		}
+		return "", errors.New("not found")
+	}
+	return manager
+}
+
+// scriptWorkDir is a directory every shell, make, just and Docker server's
+// root markers accept.
+func scriptWorkDir(t *testing.T) string {
+	t.Helper()
+	workDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(workDir, ".git"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "Dockerfile"), nil, 0o644))
+	return workDir
+}
+
+var supersededScripts = map[string]string{
+	"bashls":                 "run.sh",
+	"shuck":                  "run.zsh",
+	"just":                   "tasks.just",
+	"dockerls":               "Dockerfile",
+	"docker_language_server": "Dockerfile",
+}
+
+func TestCanAutoStartSkipsServersShellLSPSupersedes(t *testing.T) {
+	t.Parallel()
+
+	manager := newCatalogManager(t, func(string) bool { return true })
+	workDir := scriptWorkDir(t)
+	shellLSP, ok := manager.manager.GetServer(lspcatalog.ShellLSP)
+	require.True(t, ok)
+	for name, file := range supersededScripts {
+		path := filepath.Join(workDir, file)
+		server, ok := manager.manager.GetServer(name)
+		require.True(t, ok, name)
+		require.False(t, manager.canAutoStart(name, path, workDir, server), name)
+		require.True(t, manager.canAutoStart(lspcatalog.ShellLSP, path, workDir, shellLSP), path)
+	}
+}
+
+func TestCanAutoStartKeepsSupersededServersWithoutShellLSP(t *testing.T) {
+	t.Parallel()
+
+	manager := newCatalogManager(t, func(command string) bool { return command != "shell-lsp" })
+	workDir := scriptWorkDir(t)
+	for name, file := range supersededScripts {
+		server, ok := manager.manager.GetServer(name)
+		require.True(t, ok, name)
+		require.True(t, manager.canAutoStart(name, filepath.Join(workDir, file), workDir, server), name)
+	}
+}
+
+func TestStartAsyncFanoutTellsExtensionlessFilesApart(t *testing.T) {
+	t.Parallel()
+
+	manager := &Manager{
+		recentFanout: csync.NewMap[string, time.Time](),
+		now:          time.Now,
+	}
+	require.True(t, manager.shouldFanout("/repo/Makefile"))
+	require.True(t, manager.shouldFanout("/repo/justfile"))
+	require.True(t, manager.shouldFanout("/repo/Dockerfile"))
+	require.False(t, manager.shouldFanout("/repo/justfile"))
 }
