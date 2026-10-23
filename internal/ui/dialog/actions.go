@@ -270,11 +270,7 @@ type (
 	// ActionInitiateOAuth is sent when the device auth is initiated
 	// successfully.
 	ActionInitiateOAuth struct {
-		DeviceCode      string
-		UserCode        string
-		ExpiresIn       int
-		VerificationURL string
-		Interval        int
+		Code *oauth.DeviceCode
 	}
 
 	// ActionCompleteOAuth is sent when the device flow completes successfully.

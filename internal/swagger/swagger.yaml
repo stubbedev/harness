@@ -830,6 +830,13 @@ definitions:
         type: integer
       expires_in:
         type: integer
+      headers:
+        additionalProperties:
+          type: string
+        description: |-
+          Headers are sent alongside the access token on every request the
+          credential authorizes.
+        type: object
       refresh_token:
         type: string
     type: object

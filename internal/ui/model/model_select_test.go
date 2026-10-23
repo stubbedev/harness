@@ -334,3 +334,15 @@ func TestGoalSetMsgForDepartedSessionWarns(t *testing.T) {
 	require.Equal(t, util.InfoTypeWarn, info.Type)
 	require.Equal(t, "s1", m.session.ID)
 }
+
+func TestConfigureOpenCodeGoOpensSignIn(t *testing.T) {
+	t.Parallel()
+	m, ws := newModelSelectUI(t, true)
+	close(ws.release)
+
+	cmd := m.handleAction(dialog.ActionConfigureProvider{ProviderID: catalog.InferenceProviderOpenCodeGo})
+	require.NotNil(t, cmd)
+	require.True(t, m.dialog.ContainsDialog(dialog.OAuthID), "OpenCode Go connects through the console sign-in, not an API key form")
+	require.False(t, m.dialog.ContainsDialog(dialog.ProviderFormID))
+	require.Empty(t, ws.recorded(), "only Copilot imports a credential from disk first")
+}

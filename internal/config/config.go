@@ -180,15 +180,23 @@ func (c *ProviderConfig) ToProvider() catalog.Provider {
 	}
 }
 
-// SetupGitHubCopilot adds the headers Copilot requires. It writes into a
-// copy: ProviderConfig is copied by value, so the map may be shared with a
+// UseOAuthToken makes token the provider's credential: its access token
+// is the key and its headers, and Copilot's when the provider is Copilot,
+// join the extra headers. The headers are written into a copy:
+// ProviderConfig is copied by value, so the map may be shared with a
 // published Config that request code is reading concurrently.
-func (c *ProviderConfig) SetupGitHubCopilot() {
+func (c *ProviderConfig) UseOAuthToken(token *oauth.Token) {
+	c.OAuthToken = token
+	c.ResolvedAPIKey = token.AccessToken
+	c.APIKeyResolutionError = nil
 	headers := maps.Clone(c.ExtraHeaders)
 	if headers == nil {
 		headers = make(map[string]string)
 	}
-	maps.Copy(headers, copilot.Headers())
+	if c.ID == catalog.InferenceProviderCopilot {
+		maps.Copy(headers, copilot.Headers())
+	}
+	maps.Copy(headers, token.Headers)
 	c.ExtraHeaders = headers
 }
 

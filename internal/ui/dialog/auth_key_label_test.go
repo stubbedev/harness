@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/catalog"
+	"github.com/stubbedev/harness/internal/oauth/copilot"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
 )
@@ -14,7 +15,7 @@ import (
 func TestAuthDialogsRenderSelectKeyFromKeymap(t *testing.T) {
 	com := common.DefaultCommon(nil)
 	render := func() map[string]string {
-		oauth, _ := NewOAuthCopilot(com, catalog.Provider{})
+		oauth, _ := NewOAuth(com, catalog.Provider{}, copilot.DeviceFlow{})
 		oauth.State = OAuthStateDisplay
 		oauth.width = 80
 

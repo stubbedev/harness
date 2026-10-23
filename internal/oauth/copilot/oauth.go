@@ -24,16 +24,13 @@ const (
 
 var ErrNotAvailable = errors.New("github copilot not available")
 
-type DeviceCode struct {
-	DeviceCode      string `json:"device_code"`
-	UserCode        string `json:"user_code"`
-	VerificationURI string `json:"verification_uri"`
-	ExpiresIn       int    `json:"expires_in"`
-	Interval        int    `json:"interval"`
-}
+// DeviceFlow is GitHub's device authorization grant for Copilot.
+type DeviceFlow struct{}
+
+var _ oauth.DeviceFlow = DeviceFlow{}
 
 // RequestDeviceCode initiates the device code flow with GitHub.
-func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
+func (DeviceFlow) RequestDeviceCode(ctx context.Context) (*oauth.DeviceCode, error) {
 	data := url.Values{}
 	data.Set("client_id", clientID)
 	data.Set("scope", "read:user")
@@ -58,7 +55,7 @@ func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
 		return nil, fmt.Errorf("device code request failed: %s - %s", resp.Status, string(body))
 	}
 
-	var dc DeviceCode
+	var dc oauth.DeviceCode
 	if err := json.NewDecoder(resp.Body).Decode(&dc); err != nil {
 		return nil, err
 	}
@@ -66,41 +63,11 @@ func RequestDeviceCode(ctx context.Context) (*DeviceCode, error) {
 }
 
 // PollForToken polls GitHub for the access token after user authorization.
-func PollForToken(ctx context.Context, dc *DeviceCode) (*oauth.Token, error) {
-	interval := max(dc.Interval, 5)
-	deadline := time.Now().Add(time.Duration(dc.ExpiresIn) * time.Second)
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
-	defer ticker.Stop()
-
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-ticker.C:
-		}
-
-		token, err := tryGetToken(ctx, dc.DeviceCode)
-		if errors.Is(err, errPending) {
-			continue
-		}
-		if errors.Is(err, errSlowDown) {
-			interval += 5
-			ticker.Reset(time.Duration(interval) * time.Second)
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		return token, nil
-	}
-
-	return nil, fmt.Errorf("authorization timed out")
+func (DeviceFlow) PollForToken(ctx context.Context, dc *oauth.DeviceCode) (*oauth.Token, error) {
+	return oauth.PollDeviceToken(ctx, dc, func(ctx context.Context) (*oauth.Token, error) {
+		return tryGetToken(ctx, dc.DeviceCode)
+	})
 }
-
-var (
-	errPending  = fmt.Errorf("pending")
-	errSlowDown = fmt.Errorf("slow_down")
-)
 
 func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
 	data := url.Values{}
@@ -134,13 +101,13 @@ func tryGetToken(ctx context.Context, deviceCode string) (*oauth.Token, error) {
 	switch result.Error {
 	case "":
 		if result.AccessToken == "" {
-			return nil, errPending
+			return nil, oauth.ErrAuthorizationPending
 		}
 		return getCopilotToken(ctx, result.AccessToken)
 	case "authorization_pending":
-		return nil, errPending
+		return nil, oauth.ErrAuthorizationPending
 	case "slow_down":
-		return nil, errSlowDown
+		return nil, oauth.ErrSlowDown
 	default:
 		return nil, fmt.Errorf("authorization failed: %s", result.Error)
 	}
@@ -194,7 +161,7 @@ func getCopilotToken(ctx context.Context, githubToken string) (*oauth.Token, err
 	return copilotToken, nil
 }
 
-// RefreshToken refreshes the Copilot token using the GitHub token.
-func RefreshToken(ctx context.Context, githubToken string) (*oauth.Token, error) {
+// Refresh refreshes the Copilot token using the GitHub token.
+func (DeviceFlow) Refresh(ctx context.Context, githubToken string) (*oauth.Token, error) {
 	return getCopilotToken(ctx, githubToken)
 }

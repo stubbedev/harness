@@ -156,6 +156,14 @@ selected models, and shows secrets masked to their last four characters;
 values that are `$VAR` or `$(command)` references are shown and written as
 typed.
 
+GitHub Copilot, OpenCode Go and OpenCode Zen connect by signing in instead
+of with an API key: picking one opens a device-code sign-in (the OpenCode
+gateways sign in to your OpenCode Console account, the same login as
+`opencode auth login opencode`). `harness login copilot`, `harness login
+opencode-go` and `harness login opencode` run the same sign-in from the
+shell, and `harness logout <platform>` removes it. Harness refreshes the
+token on its own and asks you to sign in again only when it is revoked.
+
 ### Custom models
 
 ```yaml

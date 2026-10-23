@@ -358,21 +358,19 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 		prepared.Name = p.Name
 		prepared.BaseURL = p.APIEndpoint
 		prepared.APIKey = p.APIKey
-		if prepared.OAuthToken != nil {
-			prepared.ResolvedAPIKey = prepared.OAuthToken.AccessToken
-			prepared.APIKeyResolutionError = nil
-		} else {
-			prepared.ResolvedAPIKey, prepared.APIKeyResolutionError = resolver.ResolveValue(p.APIKey)
-		}
 		prepared.Type = p.Type
 		prepared.Models = p.Models
 		prepared.ExtraHeaders = headers
+		if prepared.OAuthToken != nil {
+			prepared.UseOAuthToken(prepared.OAuthToken)
+		} else {
+			prepared.ResolvedAPIKey, prepared.APIKeyResolutionError = resolver.ResolveValue(p.APIKey)
+		}
 		if prepared.ExtraParams == nil {
 			prepared.ExtraParams = make(map[string]string)
 		}
 
-		switch {
-		case p.ID == catalog.InferenceProviderAnthropic && config.OAuthToken != nil:
+		if p.ID == catalog.InferenceProviderAnthropic && config.OAuthToken != nil {
 			// Claude Code subscription is not supported anymore. Remove it
 			// so the provider connects fresh with an API key.
 			if err := store.RemoveConfigField(ScopeGlobal, ProviderPath(p.ID)); err != nil {
@@ -380,8 +378,6 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			}
 			c.Providers.Del(p.ID)
 			continue
-		case p.ID == catalog.InferenceProviderCopilot && config.OAuthToken != nil:
-			prepared.SetupGitHubCopilot()
 		}
 
 		// skip leaves a provider unconfigured. Only one the user configured
@@ -517,16 +513,12 @@ func (c *Config) configureProviders(ctx context.Context, store *ConfigStore, env
 			c.Providers.Del(id)
 			continue
 		}
-		var apiKey string
-		var err error
 		if providerConfig.OAuthToken != nil {
-			apiKey = providerConfig.OAuthToken.AccessToken
+			providerConfig.UseOAuthToken(providerConfig.OAuthToken)
 		} else {
-			apiKey, err = resolver.ResolveValue(providerConfig.APIKey)
+			providerConfig.ResolvedAPIKey, providerConfig.APIKeyResolutionError = resolver.ResolveValue(providerConfig.APIKey)
 		}
-		providerConfig.ResolvedAPIKey = apiKey
-		providerConfig.APIKeyResolutionError = err
-		if apiKey == "" || err != nil {
+		if providerConfig.ResolvedAPIKey == "" || providerConfig.APIKeyResolutionError != nil {
 			slog.Warn("Provider is missing API key, this might be OK for local providers", "provider", id)
 		}
 		baseURL, err := resolver.ResolveValue(providerConfig.BaseURL)

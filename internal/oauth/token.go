@@ -33,6 +33,9 @@ type Token struct {
 	ExpiresIn    int          `json:"expires_in"`
 	ExpiresAt    int64        `json:"expires_at"`
 	Client       *OAuthClient `json:"client,omitempty"`
+	// Headers are sent alongside the access token on every request the
+	// credential authorizes.
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // SetExpiresAt calculates and sets the ExpiresAt field based on the

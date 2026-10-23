@@ -742,6 +742,9 @@ func (s *ConfigStore) refreshOAuthTokenLocked(ctx context.Context, scope Scope, 
 	if refreshErr != nil {
 		return fmt.Errorf("failed to refresh OAuth token for provider %s: %w", providerID, refreshErr)
 	}
+	if refreshedToken.Headers == nil {
+		refreshedToken.Headers = entryToken.Headers
+	}
 
 	slog.Info("Successfully refreshed OAuth token", "provider", providerID)
 	s.applyToken(providerConfig, refreshedToken, providerID)
@@ -870,12 +873,11 @@ func (s *ConfigStore) exchange(ctx context.Context, providerID catalog.Inference
 	if s.exchangeToken != nil {
 		return s.exchangeToken(ctx, providerID, refreshToken)
 	}
-	switch providerID {
-	case catalog.InferenceProviderCopilot:
-		return copilot.RefreshToken(ctx, refreshToken)
-	default:
+	flow, ok := SignInFlow(providerID)
+	if !ok {
 		return nil, fmt.Errorf("OAuth refresh not supported for provider %s", providerID)
 	}
+	return flow.Refresh(ctx, refreshToken)
 }
 
 // withRefreshLock runs fn while holding the per-provider cross-process
@@ -908,12 +910,7 @@ func (s *ConfigStore) refreshLockPath(providerID catalog.InferenceProvider) stri
 
 // applyToken updates the in-memory provider config with the given token.
 func (s *ConfigStore) applyToken(providerConfig ProviderConfig, token *oauth.Token, providerID catalog.InferenceProvider) {
-	providerConfig.OAuthToken = token
-	providerConfig.ResolvedAPIKey = token.AccessToken
-	providerConfig.APIKeyResolutionError = nil
-	if providerID == catalog.InferenceProviderCopilot {
-		providerConfig.SetupGitHubCopilot()
-	}
+	providerConfig.UseOAuthToken(token)
 	s.Config().Providers.Set(providerID, providerConfig)
 }
 
@@ -1021,7 +1018,7 @@ func (s *ConfigStore) ImportCopilot() (*oauth.Token, bool) {
 	}
 
 	slog.Info("Found existing GitHub Copilot token on disk. Authenticating...")
-	token, err := copilot.RefreshToken(context.TODO(), diskToken)
+	token, err := copilot.DeviceFlow{}.Refresh(context.TODO(), diskToken)
 	if err != nil {
 		slog.Error("Unable to import GitHub Copilot token", "error", err)
 		return nil, false

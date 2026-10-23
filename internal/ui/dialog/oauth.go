@@ -1,8 +1,11 @@
 package dialog
 
 import (
+	"cmp"
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -17,13 +20,6 @@ import (
 	"github.com/stubbedev/harness/internal/ui/keys"
 	"github.com/stubbedev/harness/internal/ui/util"
 )
-
-type OAuthProvider interface {
-	name() string
-	initiateAuth() tea.Msg
-	startPolling(deviceCode string, expiresIn int) tea.Cmd
-	stopPolling() tea.Msg
-}
 
 // OAuthState represents the current state of the device flow.
 type OAuthState int
@@ -43,8 +39,9 @@ const OAuthID ID = "oauth"
 type OAuth struct {
 	com *common.Common
 
-	provider      catalog.Provider
-	oAuthProvider OAuthProvider
+	provider   catalog.Provider
+	flow       oauth.DeviceFlow
+	cancelPoll context.CancelFunc
 
 	State OAuthState
 
@@ -57,28 +54,21 @@ type OAuth struct {
 	}
 
 	width           int
-	deviceCode      string
 	userCode        string
 	verificationURL string
-	expiresIn       int
-	interval        int
 	token           *oauth.Token
 }
 
 var _ Dialog = (*OAuth)(nil)
 
-// newOAuth creates a new device flow component.
-func newOAuth(
-	com *common.Common,
-	provider catalog.Provider,
-	oAuthProvider OAuthProvider,
-) (*OAuth, tea.Cmd) {
+// NewOAuth creates the dialog that signs in to provider through flow.
+func NewOAuth(com *common.Common, provider catalog.Provider, flow oauth.DeviceFlow) (*OAuth, tea.Cmd) {
 	t := com.Styles
 
 	m := OAuth{}
 	m.com = com
 	m.provider = provider
-	m.oAuthProvider = oAuthProvider
+	m.flow = flow
 	m.width = 0 // Set dynamically in Draw().
 	m.State = OAuthStateInitializing
 
@@ -93,7 +83,7 @@ func newOAuth(
 	m.keyMap.Submit = keys.WithDesc(km.Select, "copy & open")
 	m.keyMap.Close = km.Close
 
-	return &m, tea.Batch(m.spinner.Tick, m.oAuthProvider.initiateAuth)
+	return &m, tea.Batch(m.spinner.Tick, requestDeviceCode(flow))
 }
 
 // ID implements Dialog.
@@ -154,13 +144,12 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		}
 
 	case ActionInitiateOAuth:
-		m.deviceCode = msg.DeviceCode
-		m.userCode = msg.UserCode
-		m.expiresIn = msg.ExpiresIn
-		m.verificationURL = msg.VerificationURL
-		m.interval = msg.Interval
+		m.userCode = msg.Code.UserCode
+		m.verificationURL = msg.Code.VerificationURI
 		m.State = OAuthStateDisplay
-		return ActionCmd{m.oAuthProvider.startPolling(msg.DeviceCode, msg.ExpiresIn)}
+		ctx, cancel := context.WithCancel(context.Background())
+		m.cancelPoll = cancel
+		return ActionCmd{pollForToken(ctx, m.flow, msg.Code)}
 
 	case ActionCompleteOAuth:
 		// The device flow finished and we have a token. Immediately
@@ -171,16 +160,16 @@ func (m *OAuth) HandleMsg(msg tea.Msg) Action {
 		// work behind a keypress.
 		m.State = OAuthStateSaving
 		m.token = msg.Token
+		m.stopPolling()
 		return ActionCmd{tea.Batch(
-			m.oAuthProvider.stopPolling,
 			m.spinner.Tick,
 			m.saveCredential(),
 		)}
 
 	case ActionOAuthErrored:
 		m.State = OAuthStateError
-		cmd := tea.Batch(m.oAuthProvider.stopPolling, util.ReportError(msg.Error))
-		return ActionCmd{cmd}
+		m.stopPolling()
+		return ActionCmd{util.ReportError(msg.Error)}
 
 	case oauthSaveDoneMsg:
 		m.State = OAuthStateSuccess
@@ -236,7 +225,7 @@ func (m *OAuth) headerContent() string {
 		titleStyle   = t.Dialog.Title
 		dialogStyle  = ActiveFrame(t).Width(m.width)
 		headerOffset = titleStyle.GetHorizontalFrameSize() + dialogStyle.GetHorizontalFrameSize()
-		dialogTitle  = fmt.Sprintf("Let’s authenticate with %s", m.oAuthProvider.name())
+		dialogTitle  = fmt.Sprintf("Let’s authenticate with %s", cmp.Or(m.provider.Name, string(m.provider.ID)))
 	)
 	return common.DialogTitle(t, titleStyle.Render(dialogTitle), m.width-headerOffset, t.Dialog.TitleGradFromColor, t.Dialog.TitleGradToColor)
 }
@@ -421,4 +410,36 @@ func (m *OAuth) saveCredential() tea.Cmd {
 
 func (m *OAuth) confirm() Action {
 	return ActionProviderConfigured{ProviderID: m.provider.ID}
+}
+
+func (m *OAuth) stopPolling() {
+	if m.cancelPoll != nil {
+		m.cancelPoll()
+		m.cancelPoll = nil
+	}
+}
+
+func requestDeviceCode(flow oauth.DeviceFlow) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		code, err := flow.RequestDeviceCode(ctx)
+		if err != nil {
+			return ActionOAuthErrored{Error: fmt.Errorf("failed to initiate device auth: %w", err)}
+		}
+		return ActionInitiateOAuth{Code: code}
+	}
+}
+
+func pollForToken(ctx context.Context, flow oauth.DeviceFlow, code *oauth.DeviceCode) tea.Cmd {
+	return func() tea.Msg {
+		token, err := flow.PollForToken(ctx, code)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return ActionOAuthErrored{Error: err}
+		}
+		return ActionCompleteOAuth{Token: token}
+	}
 }

@@ -4558,6 +4558,13 @@ const docTemplate = `{
                 "expires_in": {
                     "type": "integer"
                 },
+                "headers": {
+                    "description": "Headers are sent alongside the access token on every request the\ncredential authorizes.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "refresh_token": {
                     "type": "string"
                 }

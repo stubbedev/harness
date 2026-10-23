@@ -26,17 +26,20 @@ var loginCmd = &cobra.Command{
 	Short:   "Login Harness to a platform",
 	Long: `Login Harness to a specified platform.
 The platform should be provided as an argument.
-Available platforms are: copilot.`,
+Available platforms are: copilot, opencode-go and opencode.`,
 	Example: `
 # Authenticate with GitHub Copilot
 harness login copilot
 
+# Sign in to OpenCode Go with your OpenCode Console account
+harness login opencode-go
+
 # Force re-authentication even if already logged in
 harness login -f copilot
   `,
-	ValidArgs: copilotAliases,
+	ValidArgs: loginPlatforms,
 	Args:      platformArgs,
-	RunE: func(cmd *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ws, cleanup, err := setupWorkspaceWithProgressBar(cmd)
 		if err != nil {
 			return err
@@ -44,7 +47,14 @@ harness login -f copilot
 		defer cleanup()
 
 		force, _ := cmd.Flags().GetBool("force")
-		return loginCopilot(ws, force)
+		providerID := catalog.InferenceProviderCopilot
+		if len(args) > 0 {
+			providerID = loginProviderID(args[0])
+		}
+		if providerID == catalog.InferenceProviderCopilot {
+			return loginCopilot(ws, force)
+		}
+		return loginWithDeviceFlow(ws, providerID, force)
 	},
 }
 
@@ -53,6 +63,11 @@ func init() {
 }
 
 var copilotAliases = []cobra.Completion{"copilot", "github", "github-copilot"}
+
+var loginPlatforms = append(slices.Clone(copilotAliases),
+	cobra.Completion(catalog.InferenceProviderOpenCodeGo),
+	cobra.Completion(catalog.InferenceProviderOpenCodeZen),
+)
 
 var platformArgs = cobra.MatchAll(cobra.MaximumNArgs(1), validPlatformArg)
 
@@ -86,36 +101,13 @@ func loginCopilot(ws workspace.Workspace, force bool) error {
 	case hasDiskToken:
 		fmt.Println("Found existing GitHub Copilot token on disk. Using it to authenticate...")
 
-		t, err := copilot.RefreshToken(loginCtx, diskToken)
+		t, err := copilot.DeviceFlow{}.Refresh(loginCtx, diskToken)
 		if err != nil {
 			return fmt.Errorf("unable to refresh token from disk: %w", err)
 		}
 		token = t
 	default:
-		fmt.Println("Requesting device code from GitHub...")
-		dc, err := copilot.RequestDeviceCode(loginCtx)
-		if err != nil {
-			return err
-		}
-
-		clipboard.WriteText(dc.UserCode)
-		fmt.Println()
-		fmt.Println("The following code should be on clipboard already:")
-		fmt.Println()
-		lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
-		fmt.Println()
-		fmt.Println("Press enter to open this URL and authenticate with GitHub Copilot:")
-		fmt.Println()
-		lipgloss.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=copilot").Render(dc.VerificationURI))
-		fmt.Println()
-		waitEnter()
-		if err := browser.OpenURL(dc.VerificationURI); err != nil {
-			fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
-		}
-
-		fmt.Println("Waiting for authorization...")
-
-		t, err := copilot.PollForToken(loginCtx, dc)
+		t, err := runDeviceFlow(loginCtx, "GitHub Copilot", copilot.DeviceFlow{})
 		if errors.Is(err, copilot.ErrNotAvailable) {
 			fmt.Println()
 			fmt.Println("GitHub Copilot is unavailable for this account. To signup, go to the following page:")
@@ -158,4 +150,70 @@ func interactiveContext() context.Context {
 
 func waitEnter() {
 	_, _ = fmt.Scanln()
+}
+
+func loginWithDeviceFlow(ws workspace.Workspace, providerID catalog.InferenceProvider, force bool) error {
+	flow, ok := config.SignInFlow(providerID)
+	if !ok {
+		return fmt.Errorf("provider %s has no sign-in", providerID)
+	}
+	name := string(providerID)
+	providers, _ := config.Providers(ws.Config())
+	if known := config.KnownProviderByID(providers, providerID); known != nil {
+		name = known.Name
+	}
+	if !force {
+		if pc, ok := ws.Config().Providers.Get(providerID); ok && pc.OAuthToken != nil {
+			fmt.Printf("You are already logged in to %s.\n", name)
+			fmt.Println("Use --force to re-authenticate.")
+			return nil
+		}
+	}
+	token, err := runDeviceFlow(interactiveContext(), name, flow)
+	if err != nil {
+		return err
+	}
+	if err := ws.SetProviderAPIKey(config.ScopeGlobal, providerID, token); err != nil {
+		return err
+	}
+	fmt.Println()
+	fmt.Printf("You're now authenticated with %s!\n", name)
+	return nil
+}
+
+// runDeviceFlow walks the user through a device authorization grant on
+// the terminal: the code goes to the clipboard, enter opens the
+// verification page, and the token is returned once the user approves.
+func runDeviceFlow(ctx context.Context, name string, flow oauth.DeviceFlow) (*oauth.Token, error) {
+	fmt.Printf("Requesting a device code for %s...\n", name)
+	dc, err := flow.RequestDeviceCode(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	clipboard.WriteText(dc.UserCode)
+	fmt.Println()
+	fmt.Println("The following code should be on clipboard already:")
+	fmt.Println()
+	lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
+	fmt.Println()
+	fmt.Printf("Press enter to open this URL and authenticate with %s:\n", name)
+	fmt.Println()
+	lipgloss.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=device-login").Render(dc.VerificationURI))
+	fmt.Println()
+	waitEnter()
+	if err := browser.OpenURL(dc.VerificationURI); err != nil {
+		fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
+	}
+
+	fmt.Println("Waiting for authorization...")
+	return flow.PollForToken(ctx, dc)
+}
+
+// loginProviderID maps a login platform argument to its provider.
+func loginProviderID(platform string) catalog.InferenceProvider {
+	if slices.Contains(copilotAliases, platform) {
+		return catalog.InferenceProviderCopilot
+	}
+	return catalog.InferenceProvider(platform)
 }

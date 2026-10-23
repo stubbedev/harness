@@ -100,3 +100,12 @@ func TestProvidersDisconnectIgnoresUnconfigured(t *testing.T) {
 		require.NotEqual(t, p.remove.Remove.Help(), b.Help(), "the disconnect hint is gated on a configured provider")
 	}
 }
+
+func TestProvidersOfferSignInForOpenCodeGateways(t *testing.T) {
+	t.Parallel()
+
+	for _, id := range []catalog.InferenceProvider{catalog.InferenceProviderOpenCodeGo, catalog.InferenceProviderOpenCodeZen, catalog.InferenceProviderCopilot} {
+		require.Equal(t, "sign in", providerCredentialKind(catalog.Provider{ID: id, Type: catalog.TypeOpenAICompat}), id)
+	}
+	require.Equal(t, "api key", providerCredentialKind(catalog.Provider{ID: "deepseek", Type: catalog.TypeOpenAICompat}))
+}

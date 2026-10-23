@@ -12,6 +12,8 @@ import (
 
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/oauth"
+	"github.com/stubbedev/harness/internal/oauth/copilot"
 	"github.com/stubbedev/harness/internal/ui/dialog"
 	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/workspace"
@@ -50,17 +52,18 @@ func (m *UI) openProvidersDialog() tea.Cmd {
 }
 
 func (m *UI) configureProvider(id catalog.InferenceProvider) tea.Cmd {
-	if id != catalog.InferenceProviderCopilot {
+	flow, signsIn := config.SignInFlow(id)
+	if !signsIn {
 		return loadProviderTargetCmd(m.com.Workspace, id)
 	}
-	if _, configured := m.com.Config().Providers.Get(id); !configured {
+	if _, configured := m.com.Config().Providers.Get(id); !configured && id == catalog.InferenceProviderCopilot {
 		return importCopilotCmd(m.com.Workspace)
 	}
-	return m.openCopilotSignIn()
+	return m.openSignIn(id, flow)
 }
 
-func (m *UI) openCopilotSignIn() tea.Cmd {
-	provider := catalog.Provider{ID: catalog.InferenceProviderCopilot, Name: "GitHub Copilot"}
+func (m *UI) openSignIn(id catalog.InferenceProvider, flow oauth.DeviceFlow) tea.Cmd {
+	provider := catalog.Provider{ID: id, Name: string(id)}
 	providers, _ := config.Providers(m.com.Config())
 	if idx := slices.IndexFunc(providers, func(p catalog.Provider) bool { return p.ID == provider.ID }); idx >= 0 {
 		provider = providers[idx]
@@ -68,7 +71,7 @@ func (m *UI) openCopilotSignIn() tea.Cmd {
 	if m.dialog.FocusIfOpen(dialog.OAuthID) {
 		return nil
 	}
-	dlg, cmd := dialog.NewOAuthCopilot(m.com, provider)
+	dlg, cmd := dialog.NewOAuth(m.com, provider, flow)
 	m.dialog.OpenDialogWithGrace(dlg)
 	return cmd
 }
@@ -113,7 +116,7 @@ func (m *UI) applyCopilotImported(msg copilotImportedMsg) tea.Cmd {
 	if msg.imported {
 		return m.providerConfigured(catalog.InferenceProviderCopilot)
 	}
-	return m.openCopilotSignIn()
+	return m.openSignIn(catalog.InferenceProviderCopilot, copilot.DeviceFlow{})
 }
 
 func (m *UI) saveProvider(msg dialog.ActionSaveProvider) tea.Cmd {

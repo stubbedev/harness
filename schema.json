@@ -1196,6 +1196,12 @@
         },
         "client": {
           "$ref": "#/$defs/OAuthClient"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
         }
       },
       "additionalProperties": false,

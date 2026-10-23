@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"os"
+	"slices"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -26,12 +27,12 @@ var logoutCmd = &cobra.Command{
 	Long: `Logout Harness from a specified platform, removing stored credentials.
 The platform should be provided as an argument.
 If no argument is given, a list of logged-in platforms will be shown.
-Available platforms are: copilot.`,
+Available platforms are: copilot, opencode-go and opencode.`,
 	Example: `
 # Sign out from GitHub Copilot
 harness logout copilot
   `,
-	ValidArgs: copilotAliases,
+	ValidArgs: loginPlatforms,
 	Args:      platformArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, ws, cleanup, err := connectToServer(cmd)
@@ -56,7 +57,7 @@ harness logout copilot
 				return nil
 			}
 		} else {
-			provider = catalog.InferenceProvider(args[0])
+			provider = loginProviderID(args[0])
 		}
 
 		force, _ := cmd.Flags().GetBool("force")
@@ -68,21 +69,21 @@ harness logout copilot
 			}
 		}
 
-		return logoutCopilot(c, ws.ID)
+		return logout(c, ws.ID, provider)
 	},
 }
 
-func logoutCopilot(c *client.Client, wsID string) error {
+func logout(c *client.Client, wsID string, provider catalog.InferenceProvider) error {
 	ctx := interactiveContext()
 
 	if err := cmp.Or(
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, config.ProviderFieldPath(catalog.InferenceProviderCopilot, "api_key")),
-		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, config.ProviderFieldPath(catalog.InferenceProviderCopilot, "oauth")),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, config.ProviderFieldPath(provider, "api_key")),
+		c.RemoveConfigField(ctx, wsID, config.ScopeGlobal, config.ProviderFieldPath(provider, "oauth")),
 	); err != nil {
 		return err
 	}
 
-	fmt.Println(logoutHeaderStyle.Render("Successfully logged out of GitHub Copilot."))
+	fmt.Println(logoutHeaderStyle.Render(fmt.Sprintf("Successfully logged out of %s.", provider)))
 	return nil
 }
 
@@ -99,18 +100,13 @@ func pickLoggedInProvider(c *client.Client, wsID string) (catalog.InferenceProvi
 		name string
 	}
 
-	// Only OAuth-based providers support login/logout; this map is the
-	// display name.
-	oauthProviders := map[catalog.InferenceProvider]string{
-		catalog.InferenceProviderCopilot: "GitHub Copilot",
-	}
-
 	var loggedIn []loggedInProvider
-	for id, name := range oauthProviders {
-		if p, ok := cfg.Providers.Get(id); ok && p.OAuthToken != nil {
-			loggedIn = append(loggedIn, loggedInProvider{id: id, name: name})
+	for p := range cfg.Providers.Seq() {
+		if _, signsIn := config.SignInFlow(p.ID); signsIn && p.OAuthToken != nil {
+			loggedIn = append(loggedIn, loggedInProvider{id: p.ID, name: cmp.Or(p.Name, string(p.ID))})
 		}
 	}
+	slices.SortFunc(loggedIn, func(a, b loggedInProvider) int { return cmp.Compare(a.id, b.id) })
 
 	if len(loggedIn) == 0 {
 		fmt.Println(logoutPromptStyle.Render("You are not logged in to any platform."))

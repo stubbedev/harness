@@ -33,10 +33,10 @@ func TestLogoutCmd_ValidArgs(t *testing.T) {
 	require.True(t, validPlatforms["github-copilot"])
 }
 
-func TestLogoutCmd_SharesCopilotAliases(t *testing.T) {
+func TestLogoutCmd_SharesLoginPlatforms(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, copilotAliases, logoutCmd.ValidArgs)
+	require.Equal(t, loginPlatforms, logoutCmd.ValidArgs)
 	require.NoError(t, logoutCmd.Args(logoutCmd, []string{"github"}))
 }
 
@@ -44,7 +44,7 @@ func TestLogoutCmd_RejectsUnknownPlatformBeforePrompt(t *testing.T) {
 	t.Parallel()
 
 	err := logoutCmd.Args(logoutCmd, []string{"foo"})
-	require.EqualError(t, err, `unknown platform "foo", valid platforms: copilot, github, github-copilot`)
+	require.EqualError(t, err, `unknown platform "foo", valid platforms: copilot, github, github-copilot, opencode-go, opencode`)
 }
 
 func TestLogoutContext_CreatesValidContext(t *testing.T) {

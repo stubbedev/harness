@@ -147,14 +147,15 @@ func providerEntryInfo(entry providerEntry) string {
 }
 
 func providerCredentialKind(provider catalog.Provider) string {
-	switch {
-	case provider.ID == catalog.InferenceProviderCopilot:
+	if _, signsIn := config.SignInFlow(provider.ID); signsIn {
 		return "sign in"
-	case provider.Type == catalog.TypeVertexAI:
+	}
+	switch provider.Type {
+	case catalog.TypeVertexAI:
 		return "google cloud"
-	case provider.Type == catalog.TypeBedrock:
+	case catalog.TypeBedrock:
 		return "aws"
-	case provider.Type == catalog.TypeAzure:
+	case catalog.TypeAzure:
 		return "endpoint & key"
 	default:
 		return "api key"
