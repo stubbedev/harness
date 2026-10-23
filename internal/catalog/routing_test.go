@@ -1,81 +1,11 @@
 package catalog
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
-
-func TestUsesMessagesAPI(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		provider string
-		model    string
-		expected bool
-	}{
-		{"opencode", "qwen3.7-max", true},
-		{"opencode", "qwen3.5-plus", true},
-		{"opencode", "qwen3.6-plus", true},
-		{"opencode", "qwen3.7-plus", true},
-		{"opencode", "claude-opus-4-5", true},
-		{"opencode", "claude-sonnet-5", true},
-		{"opencode", "muse-spark-1.3-contributor-free", false},
-		{"opencode", "gpt-5.6-luna", false},
-		{"opencode", "grok-4.5", false},
-		{"opencode", "minimax-m3", false},
-		{"opencode", "kimi-k3", false},
-		{"opencode", "big-pickle", false},
-		{"opencode-go", "minimax-m2.7", true},
-		{"opencode-go", "minimax-m3", true},
-		{"opencode-go", "qwen3.7-max", true},
-		{"opencode-go", "qwen3.7-plus", true},
-		{"opencode-go", "qwen3.6-plus", true},
-		{"opencode-go", "qwen3.8-flash", true},
-		{"opencode-go", "qwen3.8-max", true},
-		{"opencode-go", "muse-spark-1.3-contributor", false},
-		{"opencode-go", "gpt-5.6-luna", false},
-		{"opencode-go", "glm-5.3", false},
-		{"opencode-go", "kimi-k3", false},
-		{"opencode-go", "longcat-2.0", false},
-		{"opencode-go", "ox-alpha-free", false},
-		{"opencode-go", "minimax", false},
-		{"other", "claude-opus-4-5", false},
-		{"other", "qwen3.7-max", false},
-	}
-	for _, tt := range tests {
-		require.Equal(t, tt.expected, UsesMessagesAPI(InferenceProvider(tt.provider), tt.model), "%s/%s", tt.provider, tt.model)
-	}
-}
-
-func TestOpenCodeResponsesAPIRouter(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		model    string
-		expected bool
-	}{
-		{"muse-spark-1.3-contributor-free", true},
-		{"muse-spark-1.2", true},
-		{"grok-4.5", true},
-		{"grok-4.6", true},
-		{"grok-build-0.1", true},
-		{"gpt-5.6-luna", true},
-		{"gpt-5.5", true},
-		{"gpt-5.3-codex", true},
-		{"minimax-m3", false},
-		{"qwen3.7-max", false},
-		{"kimi-k3", false},
-		{"glm-5.3", false},
-		{"big-pickle", false},
-		{"ox-alpha-free", false},
-		{"hy3", false},
-		{"longcat-2.0", false},
-	}
-	for _, tt := range tests {
-		require.Equal(t, tt.expected, ResponsesAPIRouter(InferenceProviderOpenCodeZen)(tt.model), tt.model)
-	}
-}
 
 func TestCopilotResponsesModels(t *testing.T) {
 	t.Parallel()
@@ -103,5 +33,71 @@ func TestSeedAgreesWithKnownProviders(t *testing.T) {
 			require.Equal(t, known.Type, p.Type, "seed type of %s", p.ID)
 		}
 		require.Equal(t, knownHeaders(p.ID), p.DefaultHeaders, "seed headers of %s", p.ID)
+		if known.RoutesPerModel {
+			require.True(t, slices.ContainsFunc(p.Models, func(m Model) bool { return m.Wire != "" }),
+				"seed of %s carries no per-model routes", p.ID)
+		}
 	}
+}
+
+func openCodeGoFixture() modelsDev {
+	const base = "https://opencode.ai/inference/go"
+	model := func(id string, route modelsDevModelRoute) modelsDevModel {
+		return modelsDevModel{ID: id, Name: id, ToolCall: true, Limit: modelsDevLimit{Context: 1000, Output: 100}, Provider: route}
+	}
+	return modelsDev{
+		"opencode-go": {
+			ID:  "opencode-go",
+			NPM: "@ai-sdk/openai-compatible",
+			API: base + "/openai/v1",
+			Env: []string{"OPENCODE_API_KEY"},
+			Models: map[string]modelsDevModel{
+				"kimi-k3":                    model("kimi-k3", modelsDevModelRoute{API: base + "/openai/v1"}),
+				"gpt-6-luna":                 model("gpt-6-luna", modelsDevModelRoute{NPM: "@ai-sdk/openai", API: base + "/openai/v1"}),
+				"minimax-m3":                 model("minimax-m3", modelsDevModelRoute{NPM: "@ai-sdk/anthropic", API: base + "/anthropic/v1"}),
+				"claude-haiku-5-5":           model("claude-haiku-5-5", modelsDevModelRoute{NPM: "@ai-sdk/anthropic", API: base + "/anthropic/v1"}),
+				"gemini-4-argon-contributor": model("gemini-4-argon-contributor", modelsDevModelRoute{NPM: "@ai-sdk/google", API: base + "/google/v1beta"}),
+				"no-route":                   model("no-route", modelsDevModelRoute{}),
+			},
+		},
+		"plain-gateway": {
+			ID:  "plain-gateway",
+			NPM: "@ai-sdk/openai-compatible",
+			API: "https://gw.example/v1",
+			Models: map[string]modelsDevModel{
+				"claude": model("claude", modelsDevModelRoute{NPM: "@ai-sdk/anthropic", API: "https://gw.example/anthropic/v1"}),
+			},
+		},
+	}
+}
+
+func TestTranslateModelsDevRoutesOpenCodeModelsPerModel(t *testing.T) {
+	t.Parallel()
+
+	p, ok := findProvider(translateModelsDev(openCodeGoFixture()), InferenceProviderOpenCodeGo)
+	require.True(t, ok)
+	require.Equal(t, TypeOpenAICompat, p.Type)
+
+	routes := make(map[string][2]string, len(p.Models))
+	for _, m := range p.Models {
+		routes[m.ID] = [2]string{string(m.Wire), m.APIEndpoint}
+	}
+	require.Equal(t, map[string][2]string{
+		"kimi-k3":                    {"", ""},
+		"no-route":                   {"", ""},
+		"gpt-6-luna":                 {"openai", ""},
+		"minimax-m3":                 {"anthropic", "https://opencode.ai/inference/go/anthropic/v1"},
+		"claude-haiku-5-5":           {"anthropic", "https://opencode.ai/inference/go/anthropic/v1"},
+		"gemini-4-argon-contributor": {"google", "https://opencode.ai/inference/go/google/v1beta"},
+	}, routes)
+}
+
+func TestTranslateModelsDevIgnoresModelRoutesOfOtherProviders(t *testing.T) {
+	t.Parallel()
+
+	p, ok := findProvider(translateModelsDev(openCodeGoFixture()), "plain-gateway")
+	require.True(t, ok)
+	require.Len(t, p.Models, 1)
+	require.Empty(t, p.Models[0].Wire)
+	require.Empty(t, p.Models[0].APIEndpoint)
 }

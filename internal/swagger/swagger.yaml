@@ -26,7 +26,7 @@ definitions:
     - perplexity
     - togetherai
     - aihubmix
-    - kimi-for-coding
+    - kimi-code-plan-global
     - github-copilot
     - cortecs
     - vercel
@@ -86,6 +86,8 @@ definitions:
     - InferenceProviderMoonshot
   catalog.Model:
     properties:
+      api_endpoint:
+        type: string
       can_reason:
         type: boolean
       context_window:
@@ -114,6 +116,8 @@ definitions:
         type: string
       supports_attachments:
         type: boolean
+      wire:
+        $ref: '#/definitions/catalog.Type'
     type: object
   catalog.ModelOptions:
     properties:

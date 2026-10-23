@@ -531,6 +531,9 @@ func isResponsesAPIModel(providerCfg config.ProviderConfig, modelID string) bool
 	if router := catalog.ResponsesAPIRouter(providerCfg.ID); router != nil {
 		return router(modelID)
 	}
+	if m, ok := findCatalogModel(providerCfg, modelID); ok && m.Wire != "" {
+		return m.Wire == catalog.TypeOpenAI
+	}
 	return openai.IsResponsesModel(modelID)
 }
 
@@ -1408,8 +1411,8 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 
 	// Set HTTP client based on provider and debug mode.
 	var httpClient *http.Client
-	switch providerID {
-	case catalog.InferenceProviderCopilot:
+	switch {
+	case providerID == catalog.InferenceProviderCopilot:
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
@@ -1417,11 +1420,11 @@ func (c *coordinator) buildOpenaiCompatProvider(baseURL, apiKey string, headers 
 		)
 		httpClient = copilot.NewClient(isSubAgent, c.cfg.Config().Options.Debug)
 
-	case catalog.InferenceProviderOpenCodeGo, catalog.InferenceProviderOpenCodeZen:
+	case wire == catalog.TypeOpenAI:
 		opts = append(
 			opts,
 			openaicompat.WithUseResponsesAPI(),
-			openaicompat.WithResponsesAPIFunc(catalog.ResponsesAPIRouter(providerID)),
+			openaicompat.WithResponsesAPIFunc(func(string) bool { return true }),
 		)
 		fallthrough
 
@@ -1531,8 +1534,8 @@ func (c *coordinator) buildAnthropicVertexProvider(headers map[string]string, op
 // in. buildProvider builds the fantasy provider for it and
 // getProviderOptions writes the option format it reads, so the two always
 // agree. It is the provider's type except where the provider serves the
-// model over another protocol: models catalog.UsesMessagesAPI names go
-// over the Anthropic Messages API, Vertex AI serves Claude models in the
+// model over another protocol: a catalog model carrying its own Wire is
+// served over that protocol, Vertex AI serves Claude models in the
 // Anthropic format and the rest in Google's, and the known custom
 // providers (litellm, llamacpp, lmstudio, ollama, omlx) speak
 // OpenAI-compat.
@@ -1541,9 +1544,11 @@ func wireFamily(providerCfg config.ProviderConfig, modelID string) catalog.Type 
 		return catalog.TypeOpenAI
 	}
 
+	if m, ok := findCatalogModel(providerCfg, modelID); ok && m.Wire != "" {
+		return m.Wire
+	}
+
 	switch t := providerCfg.Type; {
-	case catalog.UsesMessagesAPI(providerCfg.ID, modelID):
-		return catalog.TypeAnthropic
 	case t == catalog.TypeVertexAI:
 		if strings.Contains(modelID, "anthropic") || strings.Contains(modelID, "claude") {
 			return catalog.TypeAnthropic
@@ -1613,7 +1618,11 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		return nil, fmt.Errorf("failed to resolve API key for provider %s", providerCfg.ID)
 	}
 	apiKey := providerCfg.ResolvedAPIKey
-	baseURL, err := c.cfg.Resolve(providerCfg.BaseURL)
+	endpoint := providerCfg.BaseURL
+	if m, ok := findCatalogModel(providerCfg, model.Model); ok && m.APIEndpoint != "" {
+		endpoint = m.APIEndpoint
+	}
+	baseURL, err := c.cfg.Resolve(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve base URL for provider %s: %w", providerCfg.ID, err)
 	}
@@ -1630,8 +1639,6 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		case catalog.TypeVertexAI:
 			return c.buildAnthropicVertexProvider(headers, providerCfg.ExtraParams, providerCfg.DisableHTTP2)
 		default:
-			// A base URL configured for Chat Completions ends in /v1,
-			// which the Messages API path already carries.
 			baseURL = strings.TrimSuffix(baseURL, "/v1")
 		}
 		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.DisableHTTP2)
@@ -1647,7 +1654,7 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		if providerCfg.Type == catalog.TypeVertexAI {
 			return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams, providerCfg.DisableHTTP2)
 		}
-		return c.buildGoogleProvider(baseURL, apiKey, headers, providerCfg.DisableHTTP2)
+		return c.buildGoogleProvider(strings.TrimSuffix(baseURL, "/v1beta"), apiKey, headers, providerCfg.DisableHTTP2)
 	case openaicompat.Name:
 		if catalog.IsZAI(providerCfg.ID) {
 			// Clone before adding: providerCfg is a copy, but its map is

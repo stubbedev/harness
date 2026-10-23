@@ -3579,7 +3579,7 @@ const docTemplate = `{
                 "perplexity",
                 "togetherai",
                 "aihubmix",
-                "kimi-for-coding",
+                "kimi-code-plan-global",
                 "github-copilot",
                 "cortecs",
                 "vercel",
@@ -3642,6 +3642,9 @@ const docTemplate = `{
         "catalog.Model": {
             "type": "object",
             "properties": {
+                "api_endpoint": {
+                    "type": "string"
+                },
                 "can_reason": {
                     "type": "boolean"
                 },
@@ -3683,6 +3686,9 @@ const docTemplate = `{
                 },
                 "supports_attachments": {
                     "type": "boolean"
+                },
+                "wire": {
+                    "$ref": "#/definitions/catalog.Type"
                 }
             }
         },

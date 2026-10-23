@@ -87,6 +87,22 @@ func TestConnectionSendsResolvedHeadersAndKey(t *testing.T) {
 	require.Equal(t, "acme", rec.headers.Get("X-Org"), "header references are resolved, not sent verbatim")
 }
 
+func TestConnectionOpenCodeProbesGatewayModels(t *testing.T) {
+	t.Parallel()
+
+	for id, base := range map[catalog.InferenceProvider]string{
+		catalog.InferenceProviderOpenCodeGo:  "/inference/go",
+		catalog.InferenceProviderOpenCodeZen: "/inference",
+	} {
+		srv, rec := providerServer(t, http.StatusOK, `{}`)
+		pc := ProviderConfig{ID: id, Type: catalog.TypeOpenAICompat, APIKey: "sk-1", BaseURL: srv.URL + base + "/openai/v1"}
+
+		require.NoError(t, pc.TestConnection(context.Background(), testResolver(nil)), id)
+		require.Equal(t, base+"/v1/models", rec.path, id)
+		require.Equal(t, "Bearer sk-1", rec.headers.Get("Authorization"), id)
+	}
+}
+
 func TestConnectionAzure(t *testing.T) {
 	t.Parallel()
 

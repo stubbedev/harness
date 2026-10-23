@@ -146,8 +146,8 @@ func (c *ProviderConfig) TestConnection(ctx context.Context, resolver VariableRe
 		switch c.ID {
 		case catalog.InferenceProviderOpenRouter:
 			testURL = baseURL + "/credits"
-		case catalog.InferenceProviderOpenCodeGo:
-			testURL = strings.Replace(baseURL, "/go", "", 1) + "/models"
+		case catalog.InferenceProviderOpenCodeGo, catalog.InferenceProviderOpenCodeZen:
+			testURL = strings.TrimSuffix(baseURL, "/openai/v1") + "/v1/models"
 		default:
 			testURL = baseURL + "/models"
 		}

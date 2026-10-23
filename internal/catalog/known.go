@@ -40,14 +40,18 @@ var gatewayAttribution = map[string]string{
 //     before the catalog moved off catwalk; the rest get the documented
 //     base URL, without which the entry would be unusable and skipped.
 //   - Headers the service expects on every request.
+//   - RoutesPerModel when the service is a gateway that serves each
+//     model over the protocol and endpoint models.dev publishes for
+//     that model, rather than over the provider's own.
 //
 // This is the whole hand-maintained surface of the catalog. Everything
 // else -- which providers exist, which models they serve, context
 // windows, prices, reasoning levels -- comes from models.dev.
 type knownProvider struct {
-	Type     Type
-	Endpoint string
-	Headers  map[string]string
+	Type           Type
+	Endpoint       string
+	Headers        map[string]string
+	RoutesPerModel bool
 }
 
 var knownProviders = map[InferenceProvider]knownProvider{
@@ -67,6 +71,9 @@ var knownProviders = map[InferenceProvider]knownProvider{
 	InferenceProviderOpenRouter:  {Type: TypeOpenRouter, Headers: gatewayAttribution},
 	InferenceProviderVercel:      {Type: TypeVercel, Endpoint: "https://ai-gateway.vercel.sh/v1", Headers: gatewayAttribution},
 	InferenceProviderHuggingFace: {Headers: gatewayAttribution},
+
+	InferenceProviderOpenCodeZen: {RoutesPerModel: true},
+	InferenceProviderOpenCodeGo:  {RoutesPerModel: true},
 
 	// OpenAI-compatible services whose models.dev entry names a
 	// vendor-specific SDK package and therefore carries no base URL.
@@ -113,6 +120,7 @@ var legacyProviderIDs = map[InferenceProvider]InferenceProvider{
 	"minimax-china":     InferenceProviderMiniMaxChina,
 	"alibaba-singapore": InferenceProviderAlibabaSingapore,
 	"kimi-coding":       InferenceKimiCoding,
+	"kimi-for-coding":   InferenceKimiCoding,
 	"ionet":             InferenceProviderIoNet,
 }
 
@@ -189,46 +197,19 @@ var copilotResponsesModels = map[string]bool{
 
 // ResponsesAPIRouter returns the predicate naming the models provider
 // serves over the OpenAI Responses API instead of Chat Completions, or nil
-// when it routes no model there. See https://opencode.ai/docs/zen and
-// https://opencode.ai/docs/go for OpenCode's split.
+// when it routes no model there.
 func ResponsesAPIRouter(provider InferenceProvider) func(modelID string) bool {
 	switch provider {
 	case InferenceProviderCopilot:
 		return func(modelID string) bool { return copilotResponsesModels[modelID] }
-	case InferenceProviderOpenCodeGo, InferenceProviderOpenCodeZen:
-		return func(modelID string) bool {
-			return strings.HasPrefix(modelID, "gpt-") ||
-				strings.HasPrefix(modelID, "grok-") ||
-				strings.HasPrefix(modelID, "muse-spark-")
-		}
 	default:
 		return nil
 	}
 }
 
-// UsesMessagesAPI reports whether provider serves modelID over the
-// Anthropic Messages API instead of Chat Completions.
-func UsesMessagesAPI(provider InferenceProvider, modelID string) bool {
-	switch provider {
-	case InferenceProviderOpenCodeGo:
-		return strings.HasPrefix(modelID, "minimax-") ||
-			strings.HasPrefix(modelID, "qwen3.6-") ||
-			strings.HasPrefix(modelID, "qwen3.7-") ||
-			strings.HasPrefix(modelID, "qwen3.8-")
-	case InferenceProviderOpenCodeZen:
-		return strings.HasPrefix(modelID, "claude-") ||
-			strings.HasPrefix(modelID, "qwen3.5-") ||
-			strings.HasPrefix(modelID, "qwen3.6-") ||
-			strings.HasPrefix(modelID, "qwen3.7-") ||
-			strings.HasPrefix(modelID, "qwen3.8-")
-	default:
-		return false
-	}
-}
-
 // translationRevision is bumped whenever the models.dev translation itself
 // changes in a way the known-provider table does not capture.
-const translationRevision = 1
+const translationRevision = 2
 
 // TranslationVersion identifies the translation this build applies to
 // models.dev: the translator's revision and the known-provider table. A

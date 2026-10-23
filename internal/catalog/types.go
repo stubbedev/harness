@@ -55,7 +55,7 @@ const (
 	InferenceProviderPerplexity       InferenceProvider = "perplexity"
 	InferenceProviderTogetherAI       InferenceProvider = "togetherai"
 	InferenceAIHubMix                 InferenceProvider = "aihubmix"
-	InferenceKimiCoding               InferenceProvider = "kimi-for-coding"
+	InferenceKimiCoding               InferenceProvider = "kimi-code-plan-global"
 	InferenceProviderCopilot          InferenceProvider = "github-copilot"
 	InferenceProviderCortecs          InferenceProvider = "cortecs"
 	InferenceProviderVercel           InferenceProvider = "vercel"
@@ -111,6 +111,8 @@ type Model struct {
 	ReasoningLevels    []string     `json:"reasoning_levels,omitempty"`
 	SupportsImages     bool         `json:"supports_attachments"`
 	Options            ModelOptions `json:"options,omitzero"`
+	Wire               Type         `json:"wire,omitempty"`
+	APIEndpoint        string       `json:"api_endpoint,omitempty"`
 }
 
 // KnownProviderTypes returns all the known inference providers types.

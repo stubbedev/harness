@@ -49,6 +49,12 @@ type modelsDevModel struct {
 	Cost             modelsDevCost       `json:"cost"`
 	Limit            modelsDevLimit      `json:"limit"`
 	Modalities       modelsDevModalities `json:"modalities"`
+	Provider         modelsDevModelRoute `json:"provider"`
+}
+
+type modelsDevModelRoute struct {
+	NPM string `json:"npm"`
+	API string `json:"api"`
 }
 
 type modelsDevEffort struct {
@@ -104,7 +110,7 @@ func translateModelsDev(md modelsDev) []Provider {
 		if !ok {
 			continue
 		}
-		models := translateModelsDevModels(src)
+		models := translateModelsDevModels(src, adopted)
 		if len(models) == 0 {
 			continue
 		}
@@ -299,14 +305,38 @@ func npmToType(npm string) (Type, bool) {
 
 // translateModelsDevModels translates a models.dev model map, keeping
 // only the models harness can actually hold a conversation with.
-func translateModelsDevModels(src modelsDevProvider) []Model {
+func translateModelsDevModels(src modelsDevProvider, provider Provider) []Model {
+	routesPerModel := knownProviders[provider.ID].RoutesPerModel
 	models := make([]Model, 0, len(src.Models))
 	for _, m := range src.Models {
-		if usableModel(m) {
-			models = append(models, translateModelsDevModel(m))
+		if !usableModel(m) {
+			continue
 		}
+		model := translateModelsDevModel(m)
+		if routesPerModel {
+			model.Wire, model.APIEndpoint = modelRoute(provider, m.Provider)
+		}
+		models = append(models, model)
 	}
 	return models
+}
+
+func modelRoute(provider Provider, route modelsDevModelRoute) (Type, string) {
+	wire := provider.Type
+	if route.NPM != "" {
+		var native bool
+		if wire, native = npmToType(route.NPM); !native {
+			wire = TypeOpenAICompat
+		}
+	}
+	if wire == provider.Type {
+		wire = ""
+	}
+	endpoint := route.API
+	if endpoint == provider.APIEndpoint {
+		endpoint = ""
+	}
+	return wire, endpoint
 }
 
 // usableModel reports whether a models.dev entry is a model the agent
