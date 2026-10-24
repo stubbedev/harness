@@ -14,12 +14,14 @@ import (
 )
 
 type fakeConsole struct {
-	mu         sync.Mutex
-	pending    int
-	tokenBody  string
-	orgs       string
-	requests   []map[string]string
-	orgsBearer string
+	mu           sync.Mutex
+	pending      int
+	tokenBody    string
+	orgs         string
+	config       string
+	requests     []map[string]string
+	orgsBearer   string
+	configOrgIDs []string
 }
 
 func (c *fakeConsole) handler(t *testing.T) http.Handler {
@@ -51,6 +53,12 @@ func (c *fakeConsole) handler(t *testing.T) http.Handler {
 		c.mu.Unlock()
 		_, _ = w.Write([]byte(c.orgs))
 	})
+	mux.HandleFunc("GET /console/api/config", func(w http.ResponseWriter, r *http.Request) {
+		c.mu.Lock()
+		c.configOrgIDs = append(c.configOrgIDs, r.Header.Get("x-org-id"))
+		c.mu.Unlock()
+		_, _ = w.Write([]byte(c.config))
+	})
 	return mux
 }
 
@@ -58,7 +66,7 @@ func newFakeConsole(t *testing.T, console *fakeConsole) DeviceFlow {
 	t.Helper()
 	srv := httptest.NewServer(console.handler(t))
 	t.Cleanup(srv.Close)
-	return DeviceFlow{Server: srv.URL + "/console"}
+	return DeviceFlow{Provider: "opencode-go", Server: srv.URL + "/console"}
 }
 
 func TestDeviceFlowSignsInAndPicksTheFirstOrganization(t *testing.T) {
@@ -68,6 +76,7 @@ func TestDeviceFlowSignsInAndPicksTheFirstOrganization(t *testing.T) {
 		pending:   1,
 		tokenBody: `{"access_token":"st_access","refresh_token":"rt_1","token_type":"Bearer","expires_in":3600}`,
 		orgs:      `[{"id":"org_z","name":"Zeta"},{"id":"org_b","name":"Acme"},{"id":"org_a","name":"Acme"}]`,
+		config:    `{"config":{"provider":{"opencode":{"options":{"headers":{"x-opencode-org-id":"wrong-gateway"}}},"opencode-go":{"api":"https://opencode.ai/inference/go/openai/v1","options":{"apiKey":"{env:OPENCODE_CONSOLE_TOKEN}","headers":{"x-opencode-org-id":"org_a"}}}}}}`,
 	}
 	flow := newFakeConsole(t, console)
 
@@ -82,7 +91,8 @@ func TestDeviceFlowSignsInAndPicksTheFirstOrganization(t *testing.T) {
 	require.Equal(t, "st_access", token.AccessToken)
 	require.Equal(t, "rt_1", token.RefreshToken)
 	require.False(t, token.IsExpired())
-	require.Equal(t, map[string]string{OrgHeader: "org_a"}, token.Headers, "ties on name break on id, as the OpenCode CLI does")
+	require.Equal(t, map[string]string{"x-opencode-org-id": "org_a"}, token.Headers, "the token carries the headers the console configures for its gateway")
+	require.Equal(t, []string{"org_a"}, console.configOrgIDs, "ties on name break on id, as the OpenCode CLI does")
 	require.Equal(t, "Bearer st_access", console.orgsBearer)
 
 	require.Len(t, console.requests, 2, "a pending answer is polled again")
@@ -112,6 +122,32 @@ func TestDeviceFlowReportsARevokedRefreshToken(t *testing.T) {
 	var exchangeErr *oauth.TokenExchangeError
 	require.True(t, errors.As(err, &exchangeErr), "%v", err)
 	require.True(t, exchangeErr.IsRefreshTokenRevoked(), "a revoked token sends the user back to sign in")
+}
+
+func TestDeviceFlowRejectsAWorkspaceWithoutTheGateway(t *testing.T) {
+	t.Parallel()
+
+	flow := newFakeConsole(t, &fakeConsole{
+		tokenBody: `{"access_token":"st_access","refresh_token":"rt_1","expires_in":3600}`,
+		orgs:      `[{"id":"org_a","name":"Acme"}]`,
+		config:    `{"config":{"provider":{"opencode":{"options":{"headers":{"x-opencode-org-id":"org_a"}}}}}}`,
+	})
+
+	_, err := flow.PollForToken(t.Context(), &oauth.DeviceCode{DeviceCode: "dev-1", ExpiresIn: 60, Interval: 1})
+	require.ErrorContains(t, err, "has no access to opencode-go")
+}
+
+func TestDeviceFlowRejectsHeadersItCannotResolve(t *testing.T) {
+	t.Parallel()
+
+	flow := newFakeConsole(t, &fakeConsole{
+		tokenBody: `{"access_token":"st_access","refresh_token":"rt_1","expires_in":3600}`,
+		orgs:      `[{"id":"org_a","name":"Acme"}]`,
+		config:    `{"config":{"provider":{"opencode-go":{"options":{"headers":{"x-opencode-org-id":"{env:ORG}"}}}}}}`,
+	})
+
+	_, err := flow.PollForToken(t.Context(), &oauth.DeviceCode{DeviceCode: "dev-1", ExpiresIn: 60, Interval: 1})
+	require.ErrorContains(t, err, "does not resolve")
 }
 
 func TestDeviceFlowRejectsAnAccountWithoutOrganizations(t *testing.T) {

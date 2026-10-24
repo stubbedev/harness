@@ -27,19 +27,22 @@ const (
 	deviceCodeGrant   = "urn:ietf:params:oauth:grant-type:device_code"
 	refreshTokenGrant = "refresh_token"
 
-	// OrgHeader names the console organization (workspace) a request is
-	// billed to. An account token spans every organization the account
-	// belongs to, so the gateway needs it to pick one.
-	OrgHeader = "x-org-id"
+	// orgHeader selects the organization (workspace) a console API call
+	// acts in. An account token spans every organization the account
+	// belongs to.
+	orgHeader = "x-org-id"
 
 	requestTimeout = 30 * time.Second
 	errorBodyLimit = 4096
 )
 
-// DeviceFlow is the OpenCode Console device authorization grant. Server
-// is the console base URL; empty means https://opencode.ai/console.
+// DeviceFlow is the OpenCode Console device authorization grant for one
+// of the console's gateways. Provider is the gateway's id in the console
+// config (opencode or opencode-go). Server is the console base URL; empty
+// means https://opencode.ai/console.
 type DeviceFlow struct {
-	Server string
+	Provider string
+	Server   string
 }
 
 var _ oauth.DeviceFlow = DeviceFlow{}
@@ -94,7 +97,8 @@ func (f DeviceFlow) absoluteURL(ref string) (string, error) {
 }
 
 // PollForToken waits for the user to approve the sign-in, then returns
-// the account token carrying the organization header its requests need.
+// the account token carrying the headers the console configures for the
+// gateway, which select the workspace requests are billed to.
 func (f DeviceFlow) PollForToken(ctx context.Context, dc *oauth.DeviceCode) (*oauth.Token, error) {
 	token, err := oauth.PollDeviceToken(ctx, dc, func(ctx context.Context) (*oauth.Token, error) {
 		return f.exchange(ctx, map[string]string{
@@ -110,7 +114,9 @@ func (f DeviceFlow) PollForToken(ctx context.Context, dc *oauth.DeviceCode) (*oa
 	if err != nil {
 		return nil, err
 	}
-	token.Headers = map[string]string{OrgHeader: org}
+	if token.Headers, err = f.gatewayHeaders(ctx, token.AccessToken, org); err != nil {
+		return nil, err
+	}
 	return token, nil
 }
 
@@ -173,18 +179,8 @@ type org struct {
 // defaultOrg picks the organization requests are billed to the way the
 // OpenCode CLI does: the first by name, then by id.
 func (f DeviceFlow) defaultOrg(ctx context.Context, accessToken string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.server()+"/api/orgs", nil)
-	if err != nil {
-		return "", fmt.Errorf("building the OpenCode organizations request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := do(req)
-	if err != nil {
-		return "", err
-	}
 	var orgs []org
-	if err := decodeOK(resp, &orgs); err != nil {
+	if err := f.get(ctx, "/api/orgs", accessToken, nil, &orgs); err != nil {
 		return "", fmt.Errorf("listing OpenCode organizations: %w", err)
 	}
 	if len(orgs) == 0 {
@@ -193,6 +189,51 @@ func (f DeviceFlow) defaultOrg(ctx context.Context, accessToken string) (string,
 	return slices.MinFunc(orgs, func(a, b org) int {
 		return cmp.Or(strings.Compare(a.Name, b.Name), strings.Compare(a.ID, b.ID))
 	}).ID, nil
+}
+
+// gatewayHeaders returns the headers the console configures for the
+// gateway in org: the console's provider config is the authority on how
+// the gateway learns which workspace a request is billed to.
+func (f DeviceFlow) gatewayHeaders(ctx context.Context, accessToken, org string) (map[string]string, error) {
+	var remote struct {
+		Config struct {
+			Provider map[string]struct {
+				Options struct {
+					Headers map[string]string `json:"headers"`
+				} `json:"options"`
+			} `json:"provider"`
+		} `json:"config"`
+	}
+	if err := f.get(ctx, "/api/config", accessToken, map[string]string{orgHeader: org}, &remote); err != nil {
+		return nil, fmt.Errorf("reading the OpenCode console config: %w", err)
+	}
+	gateway, ok := remote.Config.Provider[f.Provider]
+	if !ok {
+		return nil, fmt.Errorf("the OpenCode workspace %s has no access to %s", org, f.Provider)
+	}
+	for name, value := range gateway.Options.Headers {
+		if strings.Contains(value, "{env:") {
+			return nil, fmt.Errorf("the OpenCode console config sets header %s of %s from the environment (%s), which Harness does not resolve", name, f.Provider, value)
+		}
+	}
+	return gateway.Options.Headers, nil
+}
+
+func (f DeviceFlow) get(ctx context.Context, path, accessToken string, headers map[string]string, into any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.server()+path, nil)
+	if err != nil {
+		return fmt.Errorf("building the OpenCode request to %s: %w", path, err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	for name, value := range headers {
+		req.Header.Set(name, value)
+	}
+	resp, err := do(req)
+	if err != nil {
+		return err
+	}
+	return decodeOK(resp, into)
 }
 
 func (f DeviceFlow) post(ctx context.Context, path string, body map[string]string) (*http.Response, error) {

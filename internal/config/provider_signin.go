@@ -15,7 +15,7 @@ func SignInFlow(id catalog.InferenceProvider) (oauth.DeviceFlow, bool) {
 	case catalog.InferenceProviderCopilot:
 		return copilot.DeviceFlow{}, true
 	case catalog.InferenceProviderOpenCodeGo, catalog.InferenceProviderOpenCodeZen:
-		return opencode.DeviceFlow{}, true
+		return opencode.DeviceFlow{Provider: string(id)}, true
 	default:
 		return nil, false
 	}

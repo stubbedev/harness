@@ -21,7 +21,7 @@ func TestSignInFlowCoversTheOpenCodeGateways(t *testing.T) {
 	for _, id := range []catalog.InferenceProvider{catalog.InferenceProviderOpenCodeGo, catalog.InferenceProviderOpenCodeZen} {
 		flow, ok := SignInFlow(id)
 		require.True(t, ok, id)
-		require.IsType(t, opencode.DeviceFlow{}, flow, id)
+		require.Equal(t, opencode.DeviceFlow{Provider: string(id)}, flow, "the sign-in reads the headers of its own gateway")
 	}
 	flow, ok := SignInFlow(catalog.InferenceProviderCopilot)
 	require.True(t, ok)
@@ -36,11 +36,11 @@ func TestUseOAuthTokenSendsTheTokenHeaders(t *testing.T) {
 
 	shared := map[string]string{"X-Custom": "kept"}
 	pc := ProviderConfig{ID: catalog.InferenceProviderOpenCodeGo, ExtraHeaders: shared}
-	pc.UseOAuthToken(&oauth.Token{AccessToken: "st_access", Headers: map[string]string{opencode.OrgHeader: "org_a"}})
+	pc.UseOAuthToken(&oauth.Token{AccessToken: "st_access", Headers: map[string]string{"x-opencode-org-id": "org_a"}})
 
 	require.Equal(t, "st_access", pc.ResolvedAPIKey)
 	require.NoError(t, pc.APIKeyResolutionError)
-	require.Equal(t, map[string]string{"X-Custom": "kept", opencode.OrgHeader: "org_a"}, pc.ExtraHeaders)
+	require.Equal(t, map[string]string{"X-Custom": "kept", "x-opencode-org-id": "org_a"}, pc.ExtraHeaders)
 	require.Equal(t, map[string]string{"X-Custom": "kept"}, shared, "the shared header map is not written to")
 }
 
@@ -60,16 +60,16 @@ func TestRefreshKeepsTheHeadersOfTheReplacedToken(t *testing.T) {
 		return &oauth.Token{AccessToken: "at1", RefreshToken: "rt1", ExpiresIn: 3600, ExpiresAt: time.Now().Add(time.Hour).Unix()}, nil
 	})
 	pc, _ := store.config.Providers.Get("rotator")
-	pc.OAuthToken.Headers = map[string]string{opencode.OrgHeader: "org_a"}
+	pc.OAuthToken.Headers = map[string]string{"x-opencode-org-id": "org_a"}
 	store.config.Providers.Set("rotator", pc)
 
 	require.NoError(t, store.RefreshOAuthToken(t.Context(), ScopeGlobal, "rotator"))
 
 	pc, _ = store.config.Providers.Get("rotator")
 	require.Equal(t, "at1", pc.ResolvedAPIKey)
-	require.Equal(t, map[string]string{opencode.OrgHeader: "org_a"}, pc.OAuthToken.Headers)
-	require.Equal(t, "org_a", pc.ExtraHeaders[opencode.OrgHeader], "a refreshed token is still billed to the signed-in organization")
+	require.Equal(t, map[string]string{"x-opencode-org-id": "org_a"}, pc.OAuthToken.Headers)
+	require.Equal(t, "org_a", pc.ExtraHeaders["x-opencode-org-id"], "a refreshed token is still billed to the signed-in organization")
 	persisted, err := readConfigJSON(configPath)
 	require.NoError(t, err)
-	require.Equal(t, "org_a", gjson.GetBytes(persisted, "providers.rotator.oauth.headers.x-org-id").String(), "the persisted token keeps its headers")
+	require.Equal(t, "org_a", gjson.GetBytes(persisted, "providers.rotator.oauth.headers.x-opencode-org-id").String(), "the persisted token keeps its headers")
 }
