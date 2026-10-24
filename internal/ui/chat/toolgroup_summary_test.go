@@ -220,7 +220,7 @@ func TestToolCallSummaryShortensHomePaths(t *testing.T) {
 	require.NoError(t, err)
 
 	got := ToolCallSummary(message.ToolCall{Name: "view", Input: string(input)}, "")
-	assert.Equal(t, "~/proj/main.go", got)
+	assert.Equal(t, filepath.Join("~", "proj", "main.go"), got)
 }
 
 func TestTerminalOutputHighlightsDiffs(t *testing.T) {
