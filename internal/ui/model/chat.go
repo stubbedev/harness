@@ -344,10 +344,14 @@ func renderedBounds(rendered string, method ansi.Method) (w, h int) {
 
 // drawCachedBuffer blits a previously-decoded buffer into scr at area,
 // mirroring uv.StyledString.Draw's screen-mode behavior for the default
-// Wrap=false, Tail="" case. The clear loop matches StyledString.Draw line
-// 51-56; the buf.Draw call replaces the per-cell ANSI decode that
-// printString does on every uncached frame with a pure cell copy.
+// Wrap=false, Tail="" case. It is the per-frame copy of an already
+// decoded buffer, so the frame's cost is a row copy rather than a cell
+// loop: see blitBuffer for the fast path and the fallback that keeps a
+// screen implementation other than uv's working unchanged.
 func drawCachedBuffer(scr uv.Screen, area uv.Rectangle, buf uv.ScreenBuffer) {
+	if blitBuffer(scr, area, &buf) {
+		return
+	}
 	// Clear the area first to match StyledString.Draw — leftover cells
 	// from a previous frame outside the new content must be zeroed,
 	// because Buffer.Draw skips empty cells (it doesn't clear).
@@ -357,6 +361,78 @@ func drawCachedBuffer(scr uv.Screen, area uv.Rectangle, buf uv.ScreenBuffer) {
 		}
 	}
 	buf.Draw(scr, area)
+}
+
+// blitBuffer writes buf's cells into the screen buffer at area one row at
+// a time, and reports whether it could. It replaces the clear-then-draw
+// pair with a single row copy: the destination row is rebuilt as the
+// source row clipped to the area and padded with blank cells, exactly what
+// the clear followed by Buffer.Draw leaves behind, but written with one
+// slice copy and one line touch instead of two cell-by-cell passes.
+//
+// The touch preserves ultraviolet's frame diffing: a row whose cells are
+// already what they are about to become is left alone, so an unchanged
+// frame still produces no output. Only uv's own ScreenBuffer can be
+// written this way, so any other screen reports false and takes the
+// generic path.
+func blitBuffer(scr uv.Screen, area uv.Rectangle, buf *uv.ScreenBuffer) bool {
+	dst, ok := screenBufferOf(scr)
+	if !ok || buf.RenderBuffer == nil {
+		return false
+	}
+	if area.Min.X < 0 || area.Min.Y < 0 || area.Max.Y > len(dst.Lines) {
+		return false
+	}
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		line := dst.Lines[y]
+		if area.Max.X > len(line) {
+			return false
+		}
+		target := line[area.Min.X:area.Max.X]
+		var source uv.Line
+		if row := y - area.Min.Y; row < len(buf.Lines) {
+			source = buf.Lines[row]
+		}
+		if sameCells(target, source) {
+			continue
+		}
+		dst.TouchLine(area.Min.X, y, len(target))
+		n := copy(target, source)
+		for i := n; i < len(target); i++ {
+			target[i] = uv.EmptyCell
+		}
+	}
+	return true
+}
+
+// screenBufferOf returns the uv screen buffer behind scr, if scr is one.
+// Both the value and the pointer form are accepted: the value shares its
+// buffer with the caller, so writes through the returned pointer are the
+// caller's writes.
+func screenBufferOf(scr uv.Screen) (*uv.ScreenBuffer, bool) {
+	switch s := scr.(type) {
+	case uv.ScreenBuffer:
+		return &s, true
+	case *uv.ScreenBuffer:
+		return s, true
+	default:
+		return nil, false
+	}
+}
+
+// sameCells reports whether target already holds source's cells, with the
+// blank padding blitBuffer would write past the source's end.
+func sameCells(target uv.Line, source uv.Line) bool {
+	for i := range target {
+		want := &uv.EmptyCell
+		if i < len(source) {
+			want = &source[i]
+		}
+		if !target[i].Equal(want) {
+			return false
+		}
+	}
+	return true
 }
 
 // BeginResize marks the chat as actively resizing so the next draws skip
