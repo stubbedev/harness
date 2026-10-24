@@ -1308,22 +1308,17 @@ func (a *agent) canDispatchEarly(toolCall ToolCallContent, toolMap map[string]Ag
 }
 
 func (a *agent) createPrompt(system, prompt string, messages []Message, files ...FilePart) (Prompt, error) {
-	// Validation: empty prompt is only allowed when there are messages,
-	// no files to attach, and the last message is a user or tool message.
-	if prompt == "" {
+	// Validation: an empty prompt is only allowed when there is something
+	// else to send. Files are a user turn of their own, so a prompt-less call
+	// carrying files is valid; without them the call must extend an existing
+	// user or tool message.
+	if prompt == "" && len(files) == 0 {
 		lastMessage, hasMessages := slice.Last(messages)
 
 		if !hasMessages {
 			return nil, &Error{
 				Title:   "invalid argument",
-				Message: "prompt can't be empty when there are no messages",
-			}
-		}
-
-		if len(files) > 0 {
-			return nil, &Error{
-				Title:   "invalid argument",
-				Message: "prompt can't be empty when there are files",
+				Message: "prompt can't be empty when there are no messages and no files",
 			}
 		}
 
@@ -1343,7 +1338,7 @@ func (a *agent) createPrompt(system, prompt string, messages []Message, files ..
 		preparedPrompt = append(preparedPrompt, NewSystemMessage(system))
 	}
 	preparedPrompt = append(preparedPrompt, messages...)
-	if prompt != "" {
+	if prompt != "" || len(files) > 0 {
 		preparedPrompt = append(preparedPrompt, NewUserMessage(prompt, files...))
 	}
 	return preparedPrompt, nil

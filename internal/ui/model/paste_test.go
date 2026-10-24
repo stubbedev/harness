@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/ui/common"
 )
 
 // insertPastes is the shared harness for the inline-paste tests: paste
@@ -38,6 +40,35 @@ func textPaste(name, content string, lines int) inlineAttachmentMsg {
 		},
 		lines: lines,
 	}
+}
+
+// sentPrompt is one AgentRun the UI dispatched.
+type sentPrompt struct {
+	prompt      string
+	attachments []message.Attachment
+}
+
+// runRecordingWorkspace records every prompt dispatched to the agent, so
+// a test can assert what a keystroke actually sent.
+type runRecordingWorkspace struct {
+	*countingWorkspace
+	runs []sentPrompt
+}
+
+func (w *runRecordingWorkspace) AgentRun(_ context.Context, _ string, prompt string, attachments ...message.Attachment) error {
+	w.runs = append(w.runs, sentPrompt{prompt: prompt, attachments: attachments})
+	return nil
+}
+
+// newRecordingUI wires an idle, ready agent to a workspace that records
+// the prompts it receives.
+func newRecordingUI(t *testing.T) (*UI, *runRecordingWorkspace) {
+	t.Helper()
+	ws := &runRecordingWorkspace{countingWorkspace: &countingWorkspace{ready: true}}
+	m := newBusyUI(ws.countingWorkspace)
+	m.com = common.DefaultCommon(ws)
+	m.textarea.Focus()
+	return m, ws
 }
 
 // setEditorText replaces the editor text and parks the cursor at the
@@ -351,4 +382,44 @@ func TestPasteTokenKinds(t *testing.T) {
 		}},
 	)
 	require.Equal(t, "[Pasted text #1 +3 lines] [File #1] ", m.textarea.Value())
+}
+
+// TestEnterSendsImageOnlyPaste pins the submit path for a prompt that is
+// nothing but an image: the token resolves to no text at all, and the
+// paste must still go out instead of being dropped on the floor.
+func TestEnterSendsImageOnlyPaste(t *testing.T) {
+	t.Parallel()
+
+	m, ws := newRecordingUI(t)
+	m.insertInlineAttachment(imagePaste("cat.png"))
+	require.Equal(t, "[Image #1] ", m.textarea.Value())
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.NotNil(t, cmd, "enter dispatches the image-only prompt")
+	runCmds(m, cmd)
+
+	require.Len(t, ws.runs, 1, "the image-only prompt reaches the agent")
+	require.Empty(t, ws.runs[0].prompt, "the token is stripped, leaving no prompt text")
+	require.Len(t, ws.runs[0].attachments, 1)
+	require.Equal(t, "cat.png", ws.runs[0].attachments[0].FileName)
+	require.Empty(t, m.textarea.Value())
+	require.Empty(t, m.inlineAttachments, "the send consumes the token store")
+}
+
+// TestEnterWithAttachmentWhileViewingAgentKeepsDraft pins the steering
+// channel's limit: a subagent's prompt carries text only, so an image is
+// refused with the draft left in the editor instead of vanishing.
+func TestEnterWithAttachmentWhileViewingAgentKeepsDraft(t *testing.T) {
+	t.Parallel()
+
+	m, ws := newRecordingUI(t)
+	m.agentView.shown = "child"
+	m.insertInlineAttachment(imagePaste("cat.png"))
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	runCmds(m, cmd)
+
+	require.Empty(t, ws.runs, "nothing is sent without its attachment")
+	require.Equal(t, "[Image #1] ", m.textarea.Value(), "the draft survives")
+	require.Len(t, m.inlineAttachments, 1, "the payload survives")
 }

@@ -597,10 +597,14 @@ func NewExecutableProviderTool(
 	return ExecutableProviderTool{pdt: pdt, run: run}
 }
 
-// NewUserMessage creates a new user message with the given prompt and optional files.
+// NewUserMessage creates a new user message with the given prompt and optional
+// files. An empty prompt contributes no text part: a message that is only
+// files must not reach a provider as an empty text block.
 func NewUserMessage(prompt string, files ...FilePart) Message {
 	content := make([]MessagePart, 0, len(files)+1)
-	content = append(content, TextPart{Text: prompt})
+	if prompt != "" {
+		content = append(content, TextPart{Text: prompt})
+	}
 
 	for _, f := range files {
 		content = append(content, f)

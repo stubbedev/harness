@@ -887,12 +887,12 @@ func (a *sessionAgent) fireStopHooks(ctx context.Context, sessionID string) {
 
 // ValidateCall performs the cheap structural validation that
 // sessionAgent.Run requires before a call can be dispatched: a call must
-// carry either a non-empty prompt or a text attachment, and it must name a
-// session. It is exported so callers that accept a run before dispatching it
-// (e.g. backend.SendMessage) can apply the same checks and keep the error
-// contract consistent.
+// carry either a non-empty prompt or an attachment to send on its own, and
+// it must name a session. It is exported so callers that accept a run
+// before dispatching it (e.g. backend.SendMessage) can apply the same
+// checks and keep the error contract consistent.
 func ValidateCall(call SessionAgentCall) error {
-	if call.Prompt == "" && !message.ContainsTextAttachment(call.Attachments) {
+	if call.Prompt == "" && len(call.Attachments) == 0 {
 		return ErrEmptyPrompt
 	}
 	if call.SessionID == "" {
@@ -2462,6 +2462,9 @@ func (a *sessionAgent) preparePrompt(msgs []message.Message, supportsImages bool
 					aiMsgs[i].Content = filterFileParts(aiMsgs[i].Content)
 				}
 			}
+			// A user turn that was nothing but images has nothing left to
+			// say to a model that cannot read them.
+			aiMsgs = slices.DeleteFunc(aiMsgs, func(msg fantasy.Message) bool { return len(msg.Content) == 0 })
 		}
 		history = append(history, aiMsgs...)
 

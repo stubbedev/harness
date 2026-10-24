@@ -73,6 +73,28 @@ func (m *UI) mintPasteToken(kind string, lines int) string {
 	}
 }
 
+// presentReferences returns the stored references the text still carries,
+// in the order they appear in it, so the attachments array follows the
+// prompt's own order and the output is stable.
+func (m *UI) presentReferences(text string) []string {
+	present := make([]string, 0, len(m.inlineAttachments))
+	for reference := range m.inlineAttachments {
+		if strings.Contains(text, reference) {
+			present = append(present, reference)
+		}
+	}
+	sort.Slice(present, func(i, j int) bool {
+		return strings.Index(text, present[i]) < strings.Index(text, present[j])
+	})
+	return present
+}
+
+// hasInlineAttachments reports whether the text still references an
+// attachment, without consuming the store.
+func (m *UI) hasInlineAttachments(text string) bool {
+	return len(m.presentReferences(text)) > 0
+}
+
 // resolveInlineAttachments splits the editor text into its clean prompt
 // and the attachments its references still carry, consuming the store:
 // a reference the user deleted takes its attachment with it, and a sent
@@ -84,17 +106,7 @@ func (m *UI) resolveInlineAttachments(text string) (string, []message.Attachment
 		return text, nil
 	}
 
-	present := make([]string, 0, len(m.inlineAttachments))
-	for reference := range m.inlineAttachments {
-		if strings.Contains(text, reference) {
-			present = append(present, reference)
-		}
-	}
-	// Order by where the references sit in the text, so the attachments
-	// array follows the prompt's own order and the output is stable.
-	sort.Slice(present, func(i, j int) bool {
-		return strings.Index(text, present[i]) < strings.Index(text, present[j])
-	})
+	present := m.presentReferences(text)
 
 	attachments := make([]message.Attachment, 0, len(present))
 	for _, reference := range present {

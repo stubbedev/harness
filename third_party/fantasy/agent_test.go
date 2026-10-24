@@ -531,26 +531,45 @@ func TestAgent_Generate_EmptyPrompt(t *testing.T) {
 	model := &mockLanguageModel{}
 	agent := NewAgent(model)
 
-	t.Run("fails without messages", func(t *testing.T) {
+	t.Run("fails without messages or files", func(t *testing.T) {
 		result, err := agent.Generate(context.Background(), AgentCall{
 			Prompt: "",
 		})
 		require.Error(t, err)
 		require.Nil(t, result)
-		require.Contains(t, err.Error(), "prompt can't be empty when there are no messages")
+		require.Contains(t, err.Error(), "prompt can't be empty when there are no messages and no files")
 	})
 
-	t.Run("fails with files even if messages exist", func(t *testing.T) {
+	t.Run("sends files as a user turn of their own", func(t *testing.T) {
+		var got Call
+		model := &mockLanguageModel{
+			generateFunc: func(_ context.Context, call Call) (*Response, error) {
+				got = call
+				return &Response{
+					Content:      []Content{TextContent{Text: "response"}},
+					FinishReason: FinishReasonStop,
+				}, nil
+			},
+		}
+		agent := NewAgent(model)
+
 		result, err := agent.Generate(context.Background(), AgentCall{
 			Prompt: "",
 			Messages: []Message{
 				{Role: MessageRoleUser, Content: []MessagePart{TextPart{Text: "hello"}}},
+				{Role: MessageRoleAssistant, Content: []MessagePart{TextPart{Text: "hi there"}}},
 			},
-			Files: []FilePart{{Filename: "test.txt", Data: []byte("test"), MediaType: "text/plain"}},
+			Files: []FilePart{{Filename: "cat.png", Data: []byte("png"), MediaType: "image/png"}},
 		})
-		require.Error(t, err)
-		require.Nil(t, result)
-		require.Contains(t, err.Error(), "prompt can't be empty when there are files")
+		require.NoError(t, err)
+		require.NotNil(t, result)
+
+		last := got.Prompt[len(got.Prompt)-1]
+		require.Equal(t, MessageRoleUser, last.Role)
+		require.Len(t, last.Content, 1, "the file rides alone, with no empty text part")
+		file, ok := AsMessagePart[FilePart](last.Content[0])
+		require.True(t, ok)
+		require.Equal(t, "cat.png", file.Filename)
 	})
 
 	t.Run("fails when last message is assistant", func(t *testing.T) {

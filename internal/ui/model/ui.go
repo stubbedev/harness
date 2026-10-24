@@ -2451,6 +2451,13 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					}
 				}
 
+				// An agent's steering channel carries text only, so a prompt
+				// with an attachment would lose it. Say so and leave the draft
+				// in the editor rather than dropping what the user attached.
+				if m.agentView.shown != "" && m.hasInlineAttachments(draft) {
+					return util.ReportWarn("Attachments can't be sent to a subagent; switch back to the main agent first")
+				}
+
 				// Otherwise, send the message
 				m.textarea.Reset()
 				if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
@@ -2459,9 +2466,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 
 				// Inline attachments ride references in the text; swap them
 				// for the payloads. Paste tokens are stripped, mention text
-				// stays.
+				// stays. An attachment with nothing left to say is a prompt
+				// of its own: the model reads an image just as well as text.
 				value, attachments := m.resolveInlineAttachments(draft)
-				if len(value) == 0 && !message.ContainsTextAttachment(attachments) {
+				if len(value) == 0 && len(attachments) == 0 {
 					return nil
 				}
 
