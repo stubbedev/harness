@@ -3,8 +3,6 @@ package chat
 import (
 	"encoding/json"
 
-	"github.com/stubbedev/harness/internal/home"
-
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -21,7 +19,7 @@ func (r *ReplaceSymbolToolRenderContext) RenderTool(sty *styles.Styles, width in
 	var params tools.LSPParams
 	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
 
-	file := home.Short(params.Path)
+	file := opts.ShortPath(params.Path)
 	header := toolHeader(sty, opts.Name, width, opts, params.Symbol, file)
 	if opts.Compact {
 		return header

@@ -61,6 +61,9 @@ type ToolMessageItem interface {
 	// the start time is unknown, as for a transcript rebuilt from
 	// history.
 	Elapsed() time.Duration
+	// WorkingDir is the workspace root the call's paths are displayed
+	// relative to. Empty means only home-shortening applies.
+	WorkingDir() string
 	// DisplayName is the call's label as every view shows it: the full
 	// render's header, a collapsed one-liner and the clipboard heading.
 	DisplayName() string
@@ -91,6 +94,11 @@ type ItemEnv struct {
 	// session an agent-wait call belongs to. It is read at render time,
 	// so the count tracks agents finishing while the call is pending.
 	WaitingAgents func() int
+	// WorkingDir is the workspace root tool paths are displayed
+	// relative to, so a transcript row shows `internal/foo.go` rather
+	// than the absolute path it was called with. Empty for a transcript
+	// without a workspace, which falls back to home-shortening.
+	WorkingDir string
 }
 
 // ToolRenderOpts contains the data needed to render a tool call.
@@ -117,6 +125,17 @@ type ToolRenderOpts struct {
 	// the line itself per animation tick (see bodySuffix), so the body
 	// is rendered once per content change instead of once per frame.
 	OmitWaitingLine bool
+	// WorkingDir is the workspace root [ToolRenderOpts.ShortPath]
+	// resolves paths against. Empty applies home-shortening only.
+	WorkingDir string
+}
+
+// ShortPath renders a path from the call's input or result for display,
+// relative to the workspace where possible. Renderers must use it
+// instead of shortening paths themselves, so every tool labels the same
+// file the same way.
+func (o *ToolRenderOpts) ShortPath(p string) string {
+	return common.ShortPath(o.WorkingDir, p)
 }
 
 // IsPending returns true if the tool call is still pending (not finished and
@@ -162,6 +181,9 @@ type baseToolMessageItem struct {
 	// waitingAgents resolves the live subagent count for an agent-wait
 	// call's header; nil for history rebuilds.
 	waitingAgents func() int
+	// workingDir is the workspace root paths are displayed relative to;
+	// empty applies home-shortening only.
+	workingDir string
 
 	sty             *styles.Styles
 	anim            *anim.Anim
@@ -217,6 +239,7 @@ func newBaseToolMessageItem(
 
 	if env != nil {
 		t.waitingAgents = env.WaitingAgents
+		t.workingDir = env.WorkingDir
 	}
 	t.anim = anim.New(anim.Settings{
 		ID: toolCall.ID,
@@ -248,7 +271,7 @@ func NewToolMessageItem(
 	var item ToolMessageItem
 	switch toolCall.Name {
 	case toolname.LegacyDiagnostics, tools.LSPToolName:
-		item = newLSPToolMessageItem(sty, toolCall, result, canceled)
+		item = newLSPToolMessageItem(sty, toolCall, result, canceled, firstEnv(env))
 	default:
 		item = newBaseToolMessageItem(sty, toolCall, result, toolRendererFor(toolCall), canceled, firstEnv(env))
 	}
@@ -411,6 +434,7 @@ func (t *baseToolMessageItem) cachedBody(bodyWidth int) (string, int) {
 		Status:          t.EffectiveStatus(),
 		StartedAt:       t.startedAt,
 		Elapsed:         t.Elapsed(),
+		WorkingDir:      t.workingDir,
 		// Suppress exactly the waiting line the renderer would draw
 		// while running; bodySuffix appends it per tick.
 		OmitWaitingLine: t.showsWaitingLine(),
@@ -569,6 +593,12 @@ func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
 	}
 	t.toolCall = tc
 	t.invalidate()
+}
+
+// WorkingDir returns the workspace root this item's paths are
+// displayed relative to.
+func (t *baseToolMessageItem) WorkingDir() string {
+	return t.workingDir
 }
 
 // Elapsed returns how long the tool call has been (or was) running. Zero

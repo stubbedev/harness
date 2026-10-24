@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/stubbedev/harness/internal/home"
-
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -30,7 +28,7 @@ func (v *ViewToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
-	file := home.Short(params.FilePath)
+	file := opts.ShortPath(params.FilePath)
 	toolParams := []string{file}
 	if params.Limit != 0 {
 		toolParams = append(toolParams, "limit", fmt.Sprintf("%d", params.Limit))
@@ -91,7 +89,7 @@ type WriteToolRenderContext struct{}
 func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	if opts.IsPending() {
 		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
-			return pendingToolView(sty, opts, opts.Name, home.Short(path), width)
+			return pendingToolView(sty, opts, opts.Name, opts.ShortPath(path), width)
 		}
 		return pendingToolView(sty, opts, opts.Name, "", width)
 	}
@@ -101,7 +99,7 @@ func (w *WriteToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
-	file := home.Short(params.FilePath)
+	file := opts.ShortPath(params.FilePath)
 	header := toolHeader(sty, opts.Name, width, opts, file)
 	if opts.Compact {
 		return header
@@ -146,7 +144,7 @@ func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	// Edit tool uses full width for diffs.
 	if opts.IsPending() {
 		if path, ok := partialStringField(opts.ToolCall.Input, "file_path"); ok && path != "" {
-			return pendingToolView(sty, opts, opts.Name, home.Short(path), width)
+			return pendingToolView(sty, opts, opts.Name, opts.ShortPath(path), width)
 		}
 		return pendingToolView(sty, opts, opts.Name, "", width)
 	}
@@ -156,7 +154,7 @@ func (m *EditToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 		return toolErrorContent(sty, &message.ToolResult{Content: "Invalid parameters"}, width)
 	}
 
-	file := home.Short(params.FilePath)
+	file := opts.ShortPath(params.FilePath)
 	toolParams := []string{file}
 	if len(params.Edits) > 0 {
 		toolParams = append(toolParams, "edits", fmt.Sprintf("%d", len(params.Edits)))

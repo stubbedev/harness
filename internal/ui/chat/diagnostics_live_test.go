@@ -20,7 +20,7 @@ func diagnosticsRenderItem(t *testing.T, input, result string) *LSPToolMessageIt
 		Name:     tools.LSPToolName,
 		Input:    input,
 		Finished: true,
-	}, &message.ToolResult{Content: result}, false)
+	}, &message.ToolResult{Content: result}, false, nil)
 	di, ok := item.(*LSPToolMessageItem)
 	require.True(t, ok)
 	return di

@@ -77,6 +77,19 @@ func TestCurrentModelSupportsImages(t *testing.T) {
 	})
 }
 
+// TestItemEnvCarriesWorkingDir pins the source of the paths a
+// transcript row shows: the workspace the session belongs to, not the
+// process directory, so client/server mode labels the server's files
+// correctly. A UI without a workspace falls back to home-shortening.
+func TestItemEnvCarriesWorkingDir(t *testing.T) {
+	t.Parallel()
+
+	u := newFrameTestUI(t)
+	require.Equal(t, u.com.Workspace.WorkingDir(), u.itemEnv().WorkingDir)
+
+	require.Empty(t, newTestUI().itemEnv().WorkingDir)
+}
+
 func TestMouseMode(t *testing.T) {
 	t.Parallel()
 

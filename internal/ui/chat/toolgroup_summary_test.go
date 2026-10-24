@@ -80,6 +80,25 @@ func TestGroupHeaderSumsSettledDurations(t *testing.T) {
 	assert.Contains(t, header, "5s")
 }
 
+// TestGroupHeaderHidesRunningTotal pins that the run's duration appears
+// only once every call has settled: a ticking total during the run both
+// understates it and changes on every frame.
+func TestGroupHeaderHidesRunningTotal(t *testing.T) {
+	t.Parallel()
+
+	sty := groupStyles()
+	g := NewToolGroupMessageItem(sty, took(settledTool(sty, "t1", "shell", shellRunInput("ls")), 2*time.Second))
+	running := NewToolMessageItem(sty, "msg", message.ToolCall{
+		ID: "t2", Name: "shell", Input: shellRunInput("sleep 10"), Finished: false,
+	}, nil, false)
+	running.(*baseToolMessageItem).startedAt = time.Now().Add(-3 * time.Second)
+	g.AddTool(running)
+
+	header := ansi.Strip(strings.Split(g.Render(120), "\n")[0])
+	assert.NotContains(t, header, "5s")
+	assert.NotContains(t, header, "3s")
+}
+
 func TestGroupHeaderHidesUnknownDurations(t *testing.T) {
 	t.Parallel()
 
@@ -200,7 +219,7 @@ func TestToolCallSummaryShortensHomePaths(t *testing.T) {
 	input, err := json.Marshal(map[string]string{"file_path": path})
 	require.NoError(t, err)
 
-	got := ToolCallSummary(message.ToolCall{Name: "view", Input: string(input)})
+	got := ToolCallSummary(message.ToolCall{Name: "view", Input: string(input)}, "")
 	assert.Equal(t, "~/proj/main.go", got)
 }
 

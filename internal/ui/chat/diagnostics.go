@@ -5,8 +5,6 @@ import (
 	"maps"
 	"strconv"
 
-	"github.com/stubbedev/harness/internal/home"
-
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
@@ -35,10 +33,11 @@ func newLSPToolMessageItem(
 	toolCall message.ToolCall,
 	result *message.ToolResult,
 	canceled bool,
+	env *ItemEnv,
 ) ToolMessageItem {
 	r := &lspToolRenderer{}
 	return &LSPToolMessageItem{
-		baseToolMessageItem: newBaseToolMessageItem(sty, toolCall, result, r, canceled, nil),
+		baseToolMessageItem: newBaseToolMessageItem(sty, toolCall, result, r, canceled, env),
 		renderer:            r,
 	}
 }
@@ -114,10 +113,10 @@ func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int,
 		if params.Path == "" {
 			return []string{"project"}, true
 		}
-		return []string{home.Short(params.Path)}, true
+		return []string{opts.ShortPath(params.Path)}, true
 	}, func() string {
 		body := toolPlainBody(sty, opts, width)
-		if note := d.liveNote(params.Path); note != "" {
+		if note := d.liveNote(opts, params.Path); note != "" {
 			body = joinToolParts(body, sty.Tool.TodoStatusNote.Render(note))
 		}
 		return body
@@ -129,7 +128,7 @@ func (d *DiagnosticsToolRenderContext) RenderTool(sty *styles.Styles, width int,
 // covered the whole project, so the totals are summed across every file. A
 // file the servers are not tracking is skipped: their silence about it is not
 // evidence it is clean.
-func (d *DiagnosticsToolRenderContext) liveNote(path string) string {
+func (d *DiagnosticsToolRenderContext) liveNote(opts *ToolRenderOpts, path string) string {
 	if d.live == nil {
 		return ""
 	}
@@ -145,9 +144,9 @@ func (d *DiagnosticsToolRenderContext) liveNote(path string) string {
 		return ""
 	}
 	if note := liveCountNote(counts); note != "" {
-		return note + " still open in " + home.Short(path)
+		return note + " still open in " + opts.ShortPath(path)
 	}
-	return "resolved — no diagnostics remain for " + home.Short(path)
+	return "resolved — no diagnostics remain for " + opts.ShortPath(path)
 }
 
 // totalsFor sums the per-file counts, either for one path or across the whole

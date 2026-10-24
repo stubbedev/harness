@@ -12,7 +12,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/agent/tools"
-	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
@@ -604,12 +603,16 @@ func (g *ToolGroupMessageItem) runDetails() []headerDetail {
 }
 
 // elapsed is how long the run took: the sum of its calls' durations.
-// Zero as soon as any call's start time is unknown (a transcript
-// rebuilt from history), where the partial sum would understate the
-// run rather than merely rounding it.
+// Zero until every call has settled, and zero as soon as any call's
+// start time is unknown (a transcript rebuilt from history). A partial
+// sum would understate the run and would tick while calls finish, so
+// the header says nothing rather than something wrong.
 func (g *ToolGroupMessageItem) elapsed() time.Duration {
 	var total time.Duration
 	for _, t := range g.tools {
+		if t.EffectiveStatus() == ToolStatusRunning {
+			return 0
+		}
 		elapsed := t.Elapsed()
 		if elapsed <= 0 {
 			return 0
@@ -707,7 +710,7 @@ func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int, selected boo
 	if glyph := statusGlyph(status); glyph != "" {
 		line = nameStyle.Render(glyph) + " " + line
 	}
-	if summary := ToolCallSummary(t.ToolCall()); summary != "" {
+	if summary := ToolCallSummary(t.ToolCall(), t.WorkingDir()); summary != "" {
 		line += " " + sty.Tool.Body.Render(summary)
 	}
 	if stat := toolDiffStat(sty, t); stat != "" {
@@ -790,8 +793,9 @@ func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int, selected b
 }
 
 // ToolCallSummary extracts a one-line argument summary from a tool call
-// for display inside a collapsed group.
-func ToolCallSummary(tc message.ToolCall) string {
+// for display inside a collapsed group. workingDir is the workspace root
+// paths are displayed relative to; empty applies home-shortening only.
+func ToolCallSummary(tc message.ToolCall, workingDir string) string {
 	var params map[string]any
 	if err := json.Unmarshal([]byte(tc.Input), &params); err != nil || len(params) == 0 {
 		return ""
@@ -799,12 +803,12 @@ func ToolCallSummary(tc message.ToolCall) string {
 	preferred := []string{"command", "file_path", "path", "pattern", "url", "query", "symbol", "name"}
 	for _, key := range preferred {
 		if v, ok := params[key].(string); ok && strings.TrimSpace(v) != "" {
-			return summaryValue(key, v)
+			return summaryValue(workingDir, key, v)
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(params)) {
 		if s, ok := params[key].(string); ok && strings.TrimSpace(s) != "" {
-			return summaryValue(key, s)
+			return summaryValue(workingDir, key, s)
 		}
 	}
 	return ""
@@ -812,10 +816,10 @@ func ToolCallSummary(tc message.ToolCall) string {
 
 // summaryValue flattens one argument to a display line, shortening file
 // paths the way the call's own header does so the two agree.
-func summaryValue(key, value string) string {
+func summaryValue(workingDir, key, value string) string {
 	value = FirstLine(value)
 	if key == "file_path" || key == "path" {
-		return home.Short(value)
+		return common.ShortPath(workingDir, value)
 	}
 	return value
 }

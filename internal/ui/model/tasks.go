@@ -424,7 +424,11 @@ func (m *UI) buildTranscriptItems(msgs []*message.Message, toolResultMap map[str
 // itemEnv carries the live bindings message items render from: the
 // still-running subagent count behind an agent-wait call's header.
 func (m *UI) itemEnv() *chat.ItemEnv {
-	return &chat.ItemEnv{WaitingAgents: m.runningAgentCount}
+	env := &chat.ItemEnv{WaitingAgents: m.runningAgentCount}
+	if m.com != nil && m.com.Workspace != nil {
+		env.WorkingDir = m.com.Workspace.WorkingDir()
+	}
+	return env
 }
 
 // focusTranscript moves focus onto the transcript after a view switch:

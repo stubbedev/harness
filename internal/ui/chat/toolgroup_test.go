@@ -105,7 +105,7 @@ func TestToolCallSummary(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			for range 100 {
-				require.Equal(t, tt.want, ToolCallSummary(tt.tc))
+				require.Equal(t, tt.want, ToolCallSummary(tt.tc, ""))
 			}
 		})
 	}

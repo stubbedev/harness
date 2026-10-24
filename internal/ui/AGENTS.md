@@ -129,7 +129,12 @@ RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string
 ```
 
 `NewToolMessageItem` in `chat/tools.go` is the central factory that routes
-tool names to specific types:
+tool names to specific types. Renderers label a file through
+`ToolRenderOpts.ShortPath`, never by shortening it themselves: the path
+then reads relative to the workspace (`common.ShortPath`) and falls back
+to home-shortening outside it. The workspace root reaches items through
+`ItemEnv.WorkingDir`, so a live row and a transcript rebuilt from
+history label the same file identically.
 
 | File                  | Tools rendered                                 |
 | --------------------- | ---------------------------------------------- |
