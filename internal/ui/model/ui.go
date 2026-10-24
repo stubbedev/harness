@@ -392,6 +392,11 @@ type UI struct {
 	taskRows    []taskRow
 	taskSpinner spinner.Model
 	tasksView   string
+	// taskHoverY is the strip line under the pointer, or -1. It is
+	// derived from the pointer on every motion and resolved against the
+	// rows the current frame renders, so reaping agents cannot leave the
+	// hover on a different row.
+	taskHoverY int
 	// reapedAgentTasks records dispatches whose task was already reaped
 	// (result landed or terminal runtime status). Assistant-message
 	// updates keep arriving after that — the step-finish update publishes
@@ -546,6 +551,7 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 		mcpStates:           make(map[string]mcp.ClientInfo),
 		notifyBackend:       notification.NoopBackend{},
 		notifyWindowFocused: true,
+		taskHoverY:          -1,
 		initialSessionID:    initialSessionID,
 		continueLastSession: continueLast,
 		skillStates:         skills.GetLatestStates(),
@@ -1387,6 +1393,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMotionMsg:
 		// Pass mouse events to dialogs first if any are open.
 		if m.dialog.HasDialogs() {
+			m.clearHover()
 			m.dialog.Update(msg)
 			return m, tea.Batch(cmds...)
 		}
@@ -1411,6 +1418,11 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch m.state {
 		case uiChat:
+			if changed := m.updateHover(msg); m.activeInline == nil && !changed {
+				// A pointer that moved without changing a hover mark has
+				// changed nothing on screen; the memoized frame still fits.
+				m.markScrollOnly()
+			}
 			// Skip chat edge-scrolling when an inline editor is
 			// active to prevent accidental scrolling while hovering
 			// over question forms or other inline components.
@@ -1437,6 +1449,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			y -= m.layout.main.Min.Y
 			m.chat.HandleMouseDrag(x, y)
 		default:
+			m.clearHover()
 		}
 
 	case tea.MouseReleaseMsg:
@@ -2876,22 +2889,18 @@ func (m *UI) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	return nil
 }
 
-// mouseMode determines the Bubble Tea mouse reporting mode to request for
-// the current frame. When mouse support is disabled via configuration, no
-// mouse mode is requested so the terminal emulator (or tmux) can handle
-// text selection, copy/paste, and scrolling natively. Inline editors need
-// motion events even without a button pressed (e.g. for hover/drag), so
-// they use MouseModeAllMotion; everything else only needs click/drag
-// tracking via MouseModeCellMotion.
-func mouseMode(enabled, inlineActive bool) tea.MouseMode {
-	switch {
-	case !enabled:
+// mouseMode determines the Bubble Tea mouse reporting mode to request
+// for the current frame. When mouse support is disabled via
+// configuration, no mouse mode is requested so the terminal emulator
+// (or tmux) can handle text selection, copy/paste, and scrolling
+// natively. Otherwise all motion is reported: both the hover
+// affordances on clickable transcript items and the inline editors'
+// hover/drag need motion events with no button pressed.
+func mouseMode(enabled bool) tea.MouseMode {
+	if !enabled {
 		return tea.MouseModeNone
-	case inlineActive:
-		return tea.MouseModeAllMotion
-	default:
-		return tea.MouseModeCellMotion
 	}
+	return tea.MouseModeAllMotion
 }
 
 // View renders the UI model's view.
@@ -2900,7 +2909,7 @@ func (m *UI) View() tea.View {
 	v.AltScreen = true
 	// The background is always transparent: the terminal's own
 	// background shows through.
-	v.MouseMode = mouseMode(m.mouseEnabled, m.activeInline != nil)
+	v.MouseMode = mouseMode(m.mouseEnabled)
 	v.ReportFocus = m.caps.ReportFocusEvents
 	v.WindowTitle = home.Short(m.com.Workspace.WorkingDir())
 

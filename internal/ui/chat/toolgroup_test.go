@@ -134,7 +134,7 @@ func TestToolLabelsStableAcrossRenders(t *testing.T) {
 			group.AddTool(bashTool("t2", "go test", true))
 			require.True(t, group.ToggleExpanded())
 			require.True(t, group.Spinning())
-			wantGroup := "Running (2 tool calls)\n " + tt.want + "\n Shell go test"
+			wantGroup := "Running (2 tool calls · " + callLabel(call) + ", Shell)\n " + tt.want + "\n Shell go test"
 
 			for range 100 {
 				require.Equal(t, tt.want, ansi.Strip(ToolOneLiner(sty, item, 120, false)))
@@ -214,7 +214,7 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		g.AddTool(done("t2"))
 		out := ansi.Strip(g.Render(80))
 		assert.Contains(t, out, "Ran")
-		assert.Contains(t, out, "(2 tool calls)")
+		assert.Contains(t, out, "2 tool calls")
 		assert.Equal(t, 1, strings.Count(out, "\n")+1)
 	})
 
@@ -226,14 +226,14 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		// Space opens the one-liner level: one line per call.
 		require.True(t, g.ToggleExpanded())
 		out := ansi.Strip(g.Render(80))
-		assert.Contains(t, out, "(2 tool calls)")
+		assert.Contains(t, out, "2 tool calls")
 		assert.Equal(t, 2, strings.Count(out, "gh issue close 16"))
 		assert.Equal(t, 3, strings.Count(out, "\n")+1)
 
 		// Space again collapses back to the single row.
 		require.False(t, g.ToggleExpanded())
 		out = ansi.Strip(g.Render(80))
-		assert.Contains(t, out, "(2 tool calls)")
+		assert.Contains(t, out, "2 tool calls")
 		assert.Equal(t, 1, strings.Count(out, "\n")+1)
 	})
 
@@ -290,7 +290,7 @@ func TestToolGroupRenderLevels(t *testing.T) {
 		g := NewToolGroupMessageItem(sty, done("t1"))
 		g.AddTool(bashTool("t2", "npm test", false))
 		out := ansi.Strip(g.Render(80))
-		assert.Contains(t, out, "Running (2 tool calls)")
+		assert.Contains(t, out, "Running (2 tool calls · Shell ×2)")
 		assert.NotContains(t, out, "npm test")
 		// The color says the run is in flight.
 		assert.Contains(t, g.Render(80), sty.Tool.NamePending.Render("Running"))
@@ -516,7 +516,7 @@ func TestCollapsedGroupHidesItsChildren(t *testing.T) {
 	require.Equal(t, -1, selStart)
 	require.Equal(t, -1, selEnd)
 	stripped := ansi.Strip(lines[0])
-	require.Contains(t, stripped, "Running (3 tool calls)")
+	require.Contains(t, stripped, "Running (3 tool calls · Shell ×3)")
 	require.NotContains(t, stripped, "first")
 	require.NotContains(t, stripped, "third")
 }

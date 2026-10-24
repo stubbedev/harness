@@ -113,6 +113,11 @@ type Chat struct {
 	mouseDragX    int // Current X in item content
 	mouseDragY    int // Current Y in item
 
+	// hoveredIdx is the clickable item under the pointer, or -1. It is
+	// cleared whenever the pointer leaves the transcript or the list is
+	// rebuilt, so a stale index can never mark a different item.
+	hoveredIdx int
+
 	// Click tracking for double/triple clicks
 	lastClickTime time.Time
 	lastClickX    int
@@ -203,6 +208,7 @@ func NewChat(com *common.Common, scrollbarMode string) *Chat {
 	c.list = l
 	c.mouseDownItem = -1
 	c.mouseDragItem = -1
+	c.hoveredIdx = -1
 	return c
 }
 
@@ -512,6 +518,7 @@ func (m *Chat) InvalidateRenderCaches() {
 // never shown opens on its newest item at the bottom.
 func (m *Chat) SetMessages(transcriptID string, msgs ...chat.MessageItem) tea.Cmd {
 	m.saveViewState()
+	m.ClearHover()
 	m.scrollbarVisible = false // Reset scrollbar visibility on new session load
 
 	items := m.foldToolGroups(msgs)
@@ -1240,6 +1247,7 @@ func (m *Chat) SelectNearestInView(scrolledUp bool) {
 // ClearMessages removes all messages from the chat list.
 func (m *Chat) ClearMessages() {
 	m.saveViewState()
+	m.ClearHover()
 	m.transcriptID = ""
 	m.idInxMap = make(map[string]int)
 	m.scrollbarVisible = false
@@ -1254,6 +1262,7 @@ func (m *Chat) RemoveMessage(id string) {
 	if !ok {
 		return
 	}
+	m.ClearHover()
 
 	// Remove from list
 	m.list.RemoveItem(idx)
@@ -1402,6 +1411,44 @@ func (m *Chat) HandleKeyMsg(key tea.KeyMsg) (bool, tea.Cmd) {
 		}
 	}
 	return false, nil
+}
+
+// HandleMouseMove marks the clickable item under the pointer as
+// hovered, so it can show the affordance a click would act on. Motion
+// during a drag belongs to selection and leaves the mark alone.
+// Reports whether the hovered item changed.
+func (m *Chat) HandleMouseMove(x, y int) bool {
+	if m.mouseDown {
+		return false
+	}
+	idx := -1
+	if itemIdx, _ := m.list.ItemIndexAtPosition(x, y); itemIdx >= 0 && m.isSelectable(itemIdx) {
+		if _, ok := m.list.ItemAt(itemIdx).(list.Hoverable); ok {
+			idx = itemIdx
+		}
+	}
+	return m.setHoveredItem(idx)
+}
+
+// ClearHover drops the hover mark, e.g. when the pointer leaves the
+// transcript or a dialog takes the screen.
+func (m *Chat) ClearHover() bool {
+	return m.setHoveredItem(-1)
+}
+
+// setHoveredItem moves the hover mark and reports whether it changed.
+func (m *Chat) setHoveredItem(idx int) bool {
+	if idx == m.hoveredIdx {
+		return false
+	}
+	if prev, ok := m.list.ItemAt(m.hoveredIdx).(list.Hoverable); ok {
+		prev.SetHovered(false)
+	}
+	m.hoveredIdx = idx
+	if next, ok := m.list.ItemAt(idx).(list.Hoverable); ok {
+		next.SetHovered(true)
+	}
+	return true
 }
 
 // HandleMouseDown handles mouse down events for the chat component.

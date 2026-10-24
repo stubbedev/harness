@@ -40,6 +40,18 @@ func looksLikeMarkdown(content string) bool {
 	return false
 }
 
+// toolOutputTerminalContent renders command output: highlighted as a
+// unified diff when it is one (a `git diff`, a patch), plain text
+// otherwise. Command output names no language, so a diff is the one
+// shape worth recognizing; guessing a lexer from content would recolor
+// ordinary logs.
+func toolOutputTerminalContent(sty *styles.Styles, content string, width int, expanded bool) string {
+	if diffdetect.IsUnifiedDiff(content) {
+		return toolOutputDiffContentFromUnified(sty, content, width, expanded)
+	}
+	return sty.Tool.Body.Render(toolOutputPlainContent(sty, content, width, expanded))
+}
+
 func renderToolResultTextContent(sty *styles.Styles, content string, widths toolResultContentWidths, expanded bool) string {
 	var result json.RawMessage
 	if err := json.Unmarshal([]byte(content), &result); err == nil {

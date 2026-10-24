@@ -47,6 +47,11 @@ const (
 
 	ToolSuccess string = "✓"
 
+	// ToolFailure and ToolCancelled mark a failed or canceled call in
+	// a one-liner, where the color alone would be the only cue.
+	ToolFailure   string = "✗"
+	ToolCancelled string = "⊘"
+
 	// QueuedIcon marks a prompt queued behind the running turn:
 	// nf-md-clock_outline. It is private-use area, rendered one cell
 	// wide by nerd fonts (uax29 treats PUA as neutral, so width math
@@ -276,6 +281,7 @@ type Styles struct {
 		UserFocused      lipgloss.Style
 		AssistantBlurred lipgloss.Style
 		AssistantFocused lipgloss.Style
+		AssistantHovered lipgloss.Style
 		NoContent        lipgloss.Style
 		ErrorTag         lipgloss.Style
 		ErrorTitle       lipgloss.Style
@@ -286,6 +292,7 @@ type Styles struct {
 		AttachmentTag   lipgloss.Style
 		PasteRule       lipgloss.Style
 		ToolCallFocused lipgloss.Style
+		ToolCallHovered lipgloss.Style
 		ToolCallCompact lipgloss.Style
 		ToolCallBlurred lipgloss.Style
 
@@ -335,6 +342,11 @@ type Styles struct {
 
 		// Parameter list styles
 		ParamMain lipgloss.Style
+
+		// Diff stat styles: the "+A -R" change counts a one-liner
+		// shows for a call that changed a file.
+		DiffAdded   lipgloss.Style
+		DiffRemoved lipgloss.Style
 
 		// Content rendering styles
 		ContentLine           lipgloss.Style // Individual content line with background and width

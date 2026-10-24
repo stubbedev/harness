@@ -631,6 +631,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Tool.NameCancelled = muted
 
 	s.Tool.ParamMain = subtle
+	s.Tool.DiffAdded = base.Foreground(o.success)
+	s.Tool.DiffRemoved = base.Foreground(o.error)
 
 	// Content rendering - prepared styles that accept width parameter
 	s.Tool.ContentLine = muted.Background(o.bgLeastVisible)
@@ -823,6 +825,8 @@ func quickStyle(o quickStyleOpts) Styles {
 	s.Messages.UserFocused = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
 		BorderForeground(o.primary).BorderStyle(messageFocussedBorder)
 	s.Messages.AssistantBlurred = s.Messages.NoContent.PaddingLeft(2)
+	s.Messages.AssistantHovered = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
+		BorderForeground(o.fgMoreSubtle).BorderStyle(messageFocussedBorder)
 	s.Messages.AssistantFocused = s.Messages.NoContent.PaddingLeft(1).BorderLeft(true).
 		BorderForeground(o.successMostSubtle).BorderStyle(messageFocussedBorder)
 	s.Messages.ErrorTag = lipgloss.NewStyle().Padding(0, 1).
@@ -841,6 +845,13 @@ func quickStyle(o quickStyleOpts) Styles {
 		BorderStyle(messageFocussedBorder).
 		BorderLeft(true).
 		BorderForeground(o.successMostSubtle)
+	// Hovering a clickable call shows the same bar in a quieter grey than
+	// focus, so the affordance appears without competing with the
+	// selection.
+	s.Messages.ToolCallHovered = muted.PaddingLeft(1).
+		BorderStyle(messageFocussedBorder).
+		BorderLeft(true).
+		BorderForeground(o.fgMoreSubtle)
 	s.Messages.ToolCallBlurred = muted.PaddingLeft(2)
 	// No padding or border for compact tool calls within messages
 	s.Messages.ToolCallCompact = muted

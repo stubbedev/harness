@@ -49,8 +49,8 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// Show how long the command ran (or has been running) beside the
 	// command: bash calls can take minutes and the bare header gives no
 	// sense of it.
-	if opts.Elapsed > 0 {
-		toolParams = append(toolParams, "took", common.FormatDuration(opts.Elapsed))
+	if badge := toolDurationBadge(opts.Elapsed); badge != "" {
+		toolParams = append(toolParams, "took", badge)
 	}
 
 	header := toolHeader(sty, opts.Name, width, opts, toolParams...)
@@ -74,7 +74,7 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 		return header
 	}
 
-	body := sty.Tool.Body.Render(toolOutputPlainContent(sty, output, width, opts.ExpandedContent))
+	body := toolOutputTerminalContent(sty, output, width, opts.ExpandedContent)
 	return joinToolParts(header, body)
 }
 

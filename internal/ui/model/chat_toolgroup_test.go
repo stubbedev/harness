@@ -358,8 +358,8 @@ func TestSubCursorStaysInView(t *testing.T) {
 
 	// Parking on the group row keeps the header line visible.
 	require.True(t, u.chat.SubCursorUp())
-	shown, _ = viewShows(u, "Ran (15 tool calls)")
-	require.Contains(t, shown, "Ran (15 tool calls)")
+	shown, _ = viewShows(u, "Ran (15 tool calls")
+	require.Contains(t, shown, "Ran (15 tool calls")
 
 	// Arriving from below lands on the bottommost call, on screen.
 	text := chat.NewAssistantMessageItem(u.com.Styles, &message.Message{

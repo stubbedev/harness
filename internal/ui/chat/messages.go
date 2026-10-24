@@ -428,6 +428,32 @@ func (f *focusableMessageItem) SetFocused(focused bool) {
 	}
 }
 
+// hoverableMessageItem is the mouse-hover counterpart of
+// focusableMessageItem: it records whether the pointer is over the item
+// and bumps the shared version so the list memo redraws the item's
+// per-line bar.
+type hoverableMessageItem struct {
+	version *list.Versioned
+	hovered bool
+}
+
+// newHoverableMessageItem returns a hoverableMessageItem wired to the
+// shared version counter.
+func newHoverableMessageItem(v *list.Versioned) *hoverableMessageItem {
+	return &hoverableMessageItem{version: v}
+}
+
+// SetHovered implements [list.Hoverable].
+func (h *hoverableMessageItem) SetHovered(hovered bool) {
+	if h.hovered == hovered {
+		return
+	}
+	h.hovered = hovered
+	if h.version != nil {
+		h.version.Bump()
+	}
+}
+
 // AssistantInfoID returns a stable ID for assistant info items.
 func AssistantInfoID(messageID string) string {
 	return fmt.Sprintf("%s:assistant-info", messageID)

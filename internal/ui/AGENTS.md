@@ -135,20 +135,25 @@ tool names to specific types:
 | --------------------- | ---------------------------------------------- |
 | `chat/shell_tool.go`  | Shell                                          |
 | `chat/file.go`        | View, Write, Edit                              |
-| `chat/search.go`      | Glob, Grep, LS, Web Search                     |
-| `chat/fetch.go`       | Fetch, WebFetch, WebSearch                     |
+| `chat/fetch.go`       | Fetch, Web Search                              |
+| `chat/question.go`    | Question                                       |
 | `chat/toolgroup.go`   | Collapsed groups of consecutive tool calls     |
-| `chat/diagnostics.go` | Diagnostics                                    |
-| `chat/references.go`  | References                                     |
-| `chat/lsp_restart.go` | LSPRestart                                     |
+| `chat/diagnostics.go` | The lsp tool and its diagnostics action        |
+| `chat/references.go`, `definition.go`, `symbols.go` | Find References, Find Definition, List Symbols |
+| `chat/rename.go`, `replace_symbol.go`, `call_hierarchy.go`, `lsp_restart.go` | The remaining lsp actions |
+| `chat/wait_tool.go`   | The dispatcher's waiting state                 |
+| `chat/agent_control_tool.go` | Subagent message and cancel             |
 | `chat/mcp.go`         | MCP tools (`mcp_` prefix)                      |
 | `chat/generic.go`     | Fallback for unrecognized tools                |
 | `chat/assistant.go`   | Assistant messages (thinking, content, errors) |
 | `chat/user.go`        | User messages (input + attachments)            |
 
 Consecutive tool calls are folded into one `ToolGroupMessageItem`
-(`chat/toolgroup.go`): a collapsed "Ran (N tool calls)" row that expands
-first to one-liners and then to the calls' full renderers. Children are
+(`chat/toolgroup.go`): a collapsed header that names the run and, as
+width allows, its failures, duration and kinds of call (`Ran (4 tool
+calls, 1 failed · 12s · Shell ×3, View)`), expanding first to one-liners
+- status glyph, tool name, argument summary, diff stat, settled duration
+- and then to the calls' full renderers. Children are
 never list items of their own — `Chat.ToolItem` resolves through groups.
 Subagent dispatches (`agent`, `research`) never render in the
 transcript; they live in the background tasks strip (`model/tasks.go`)
@@ -172,6 +177,17 @@ it is the turn's visible "Waiting for N agents" state (`chat/
 wait_tool.go`, live count via `chat.ItemEnv`). What renders on screen
 is decided once by `chat.RendersInTranscript`, shared by extraction
 and export so the two cannot drift.
+
+Clickable transcript items (tool calls, groups and assistant messages
+with thinking) implement `list.Hoverable`: the transcript marks the
+item under the pointer and it draws its bar with
+`Messages.ToolCallHovered` / `Messages.AssistantHovered`, so a click
+target is visible before it is clicked. Mouse reporting therefore
+requests `MouseModeAllMotion` whenever mouse support is enabled; a
+pointer move that changes no mark is marked scroll-only so the
+memoized frame is reused. The background tasks strip does the same,
+resolving its hover from the pointer's strip-relative line so reaped
+agents cannot leave the mark on another row.
 
 ### Styling
 

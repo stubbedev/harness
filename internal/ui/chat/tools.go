@@ -57,6 +57,10 @@ type ToolMessageItem interface {
 	// result decides once there is one, otherwise it is canceled or
 	// still running.
 	EffectiveStatus() ToolStatus
+	// Elapsed is how long the call ran (or has been running). Zero when
+	// the start time is unknown, as for a transcript rebuilt from
+	// history.
+	Elapsed() time.Duration
 	// DisplayName is the call's label as every view shows it: the full
 	// render's header, a collapsed one-liner and the clipboard heading.
 	DisplayName() string
@@ -147,6 +151,7 @@ type baseToolMessageItem struct {
 	*highlightableMessageItem
 	*cachedMessageItem
 	*focusableMessageItem
+	*hoverableMessageItem
 
 	toolRenderer ToolRenderer
 	toolCall     message.ToolCall
@@ -195,6 +200,7 @@ func newBaseToolMessageItem(
 		highlightableMessageItem: defaultHighlighter(sty, v),
 		cachedMessageItem:        newCachedMessageItem(v),
 		focusableMessageItem:     newFocusableMessageItem(v),
+		hoverableMessageItem:     newHoverableMessageItem(v),
 		sty:                      sty,
 		toolRenderer:             toolRenderer,
 		toolCall:                 toolCall,
@@ -202,6 +208,13 @@ func newBaseToolMessageItem(
 		canceled:                 canceled,
 		startedAt:                time.Now(),
 	}
+	if canceled {
+		// A call canceled before it was ever observed running has no
+		// measurable duration; freezing at construction keeps its
+		// rendered one-liner from growing under a cached render.
+		t.finishedAt = t.startedAt
+	}
+
 	if env != nil {
 		t.waitingAgents = env.WaitingAgents
 	}
@@ -397,7 +410,7 @@ func (t *baseToolMessageItem) cachedBody(bodyWidth int) (string, int) {
 		Compact:         t.isCompact,
 		Status:          t.EffectiveStatus(),
 		StartedAt:       t.startedAt,
-		Elapsed:         t.elapsed(),
+		Elapsed:         t.Elapsed(),
 		// Suppress exactly the waiting line the renderer would draw
 		// while running; bodySuffix appends it per tick.
 		OmitWaitingLine: t.showsWaitingLine(),
@@ -492,6 +505,8 @@ func (t *baseToolMessageItem) prefixKey() uint64 {
 		variant = 2
 	case t.focused:
 		variant = 1
+	case t.hovered:
+		variant = 3
 	}
 	return t.bodyKeyToken()<<2 | variant
 }
@@ -499,10 +514,13 @@ func (t *baseToolMessageItem) prefixKey() uint64 {
 // focusPrefix returns the per-line bar prefix for the item's current
 // compact/focus state.
 func (t *baseToolMessageItem) focusPrefix() string {
-	if t.isCompact {
+	switch {
+	case t.isCompact:
 		return t.sty.Messages.ToolCallCompact.Render()
-	} else if t.focused {
+	case t.focused:
 		return t.sty.Messages.ToolCallFocused.Render()
+	case t.hovered:
+		return t.sty.Messages.ToolCallHovered.Render()
 	}
 	return t.sty.Messages.ToolCallBlurred.Render()
 }
@@ -553,9 +571,9 @@ func (t *baseToolMessageItem) SetToolCall(tc message.ToolCall) {
 	t.invalidate()
 }
 
-// elapsed returns how long the tool call has been (or was) running. Zero
+// Elapsed returns how long the tool call has been (or was) running. Zero
 // when the start time is unknown (restored items).
-func (t *baseToolMessageItem) elapsed() time.Duration {
+func (t *baseToolMessageItem) Elapsed() time.Duration {
 	if t.startedAt.IsZero() {
 		return 0
 	}
@@ -566,9 +584,14 @@ func (t *baseToolMessageItem) elapsed() time.Duration {
 	return end.Sub(t.startedAt)
 }
 
-// SetResult sets the tool result associated with this message item.
+// SetResult sets the tool result associated with this call. The result
+// settles the call in practice, so it also freezes the elapsed time for
+// a call whose finish transition was never observed.
 func (t *baseToolMessageItem) SetResult(res *message.ToolResult) {
 	t.result = res
+	if res != nil && t.finishedAt.IsZero() && !t.startedAt.IsZero() {
+		t.finishedAt = time.Now()
+	}
 	t.invalidate()
 }
 
@@ -707,6 +730,17 @@ func renderStandardTool(
 		return joinToolParts(header, toolPlainBody(sty, opts, width))
 	}
 	return joinToolParts(header, body())
+}
+
+// toolDurationBadge formats how long a call took, or "" when it is too
+// short to be worth the space. Shared by the shell header, the group
+// header and the group one-liners, so a duration appears at one
+// threshold everywhere instead of as a "0s" badge on every fast call.
+func toolDurationBadge(elapsed time.Duration) string {
+	if elapsed < time.Second {
+		return ""
+	}
+	return common.FormatDuration(elapsed)
 }
 
 // toolPlainBody renders the result content as plain text.

@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"image"
 	"strings"
 	"time"
 
@@ -801,6 +802,7 @@ func (m *UI) renderTasks(width int) string {
 	focused := m.focus == uiFocusTasks
 	focusedPrefix := t.Messages.ToolCallFocused.Render()
 	blurredPrefix := t.Messages.ToolCallBlurred.Render()
+	hoveredPrefix := t.Messages.ToolCallHovered.Render()
 	prefixWidth := lipgloss.Width(focusedPrefix)
 
 	const windowSize = 3
@@ -814,7 +816,11 @@ func (m *UI) renderTasks(width int) string {
 	for row := start; row < end; row++ {
 		task, isMain := m.taskRowAt(row)
 		onCursor := focused && row == m.taskCursor
+		onHover := m.taskHoverY == row-start
 		prefix := blurredPrefix
+		if onHover {
+			prefix = hoveredPrefix
+		}
 		if onCursor {
 			prefix = focusedPrefix
 		}
@@ -867,6 +873,44 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// updateHover tracks the pointer over the two clickable regions: the
+// background tasks strip and the transcript's clickable items. Leaving
+// both clears the marks, so no affordance outlives the pointer. It
+// reports whether a mark changed, which lets an update that only moved
+// the pointer over the same item reuse the memoized frame.
+func (m *UI) updateHover(msg tea.MouseMotionMsg) bool {
+	p := image.Pt(msg.X, msg.Y)
+	if p.In(m.layout.tasks) {
+		changed := m.chat.ClearHover()
+		if hoverY := msg.Y - m.layout.tasks.Min.Y; hoverY != m.taskHoverY {
+			m.taskHoverY = hoverY
+			changed = true
+		}
+		return changed
+	}
+	changed := false
+	if m.taskHoverY != -1 {
+		m.taskHoverY = -1
+		changed = true
+	}
+	if p.In(m.layout.main) {
+		if m.chat.HandleMouseMove(msg.X-m.layout.main.Min.X, msg.Y-m.layout.main.Min.Y) {
+			changed = true
+		}
+		return changed
+	}
+	if m.chat.ClearHover() {
+		changed = true
+	}
+	return changed
+}
+
+// clearHover drops both hover marks.
+func (m *UI) clearHover() {
+	m.taskHoverY = -1
+	m.chat.ClearHover()
 }
 
 // handleTaskClick moves the cursor onto the clicked row and activates

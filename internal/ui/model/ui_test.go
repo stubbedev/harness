@@ -83,20 +83,15 @@ func TestMouseMode(t *testing.T) {
 	t.Run("returns no mouse mode when disabled", func(t *testing.T) {
 		t.Parallel()
 
-		require.Equal(t, tea.MouseModeNone, mouseMode(false, false))
-		require.Equal(t, tea.MouseModeNone, mouseMode(false, true))
+		require.Equal(t, tea.MouseModeNone, mouseMode(false))
 	})
 
-	t.Run("returns cell motion when enabled and no inline editor is active", func(t *testing.T) {
+	t.Run("returns all motion when enabled", func(t *testing.T) {
 		t.Parallel()
 
-		require.Equal(t, tea.MouseModeCellMotion, mouseMode(true, false))
-	})
-
-	t.Run("returns all motion when enabled and an inline editor is active", func(t *testing.T) {
-		t.Parallel()
-
-		require.Equal(t, tea.MouseModeAllMotion, mouseMode(true, true))
+		// Hover affordances need motion with no button pressed, so the
+		// cell-motion mode is not enough.
+		require.Equal(t, tea.MouseModeAllMotion, mouseMode(true))
 	})
 }
 

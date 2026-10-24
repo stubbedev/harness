@@ -91,6 +91,15 @@ type Focusable interface {
 	SetFocused(focused bool)
 }
 
+// Hoverable represents an item that can react to the mouse pointer
+// being over it. It is implemented by clickable items so the transcript
+// can show the affordance a click would act on; an item that cannot act
+// on a click stays unhovered.
+type Hoverable interface {
+	// SetHovered reports whether the pointer is over the item.
+	SetHovered(hovered bool)
+}
+
 // SelectionAware represents an item that must know whether it is the
 // list's selected item, independent of whether the list has focus. An
 // item keeping a sub-selection resets it here, when the selection moves

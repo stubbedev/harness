@@ -6,10 +6,13 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/stubbedev/harness/internal/agent/tools"
+	"github.com/stubbedev/harness/internal/home"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
@@ -19,11 +22,14 @@ import (
 // ToolGroupMessageItem groups the consecutive tool calls of a turn into
 // one collapsed row - "Running (N tool calls)" while calls are in
 // flight, "Ran (N tool calls)" once the run has settled - so the
-// transcript is not dominated by tool bodies nobody asked for.
-// Expansion has two levels:
-// the first shows one line per call (status glyph, tool name, argument
-// summary), the second renders the calls' full output. A singleton group
-// renders as the bare one-liner; expanding it shows the full render.
+// transcript is not dominated by tool bodies nobody asked for. The
+// header carries what fits of the run's story: failures, how long it
+// took, and which kinds of call it made.
+//
+// Expansion has two levels: the first shows one line per call (status
+// glyph, tool name, argument summary, diff stat, duration), the second
+// renders the calls' full output. A singleton group renders as the bare
+// one-liner; expanding it shows the full render.
 //
 // Children are never list items of their own: their IDs are aliased to
 // the group's index in the chat idInxMap and Chat.ToolItem resolves
@@ -32,6 +38,7 @@ type ToolGroupMessageItem struct {
 	*list.Versioned
 	*cachedMessageItem
 	*focusableMessageItem
+	*hoverableMessageItem
 
 	sty      *styles.Styles
 	id       string
@@ -83,6 +90,7 @@ func NewToolGroupMessageItem(sty *styles.Styles, first ToolMessageItem) *ToolGro
 		Versioned:            v,
 		cachedMessageItem:    newCachedMessageItem(v),
 		focusableMessageItem: newFocusableMessageItem(v),
+		hoverableMessageItem: newHoverableMessageItem(v),
 		sty:                  sty,
 		id:                   "toolgroup-" + first.ID(),
 		tools:                []ToolMessageItem{first},
@@ -437,39 +445,7 @@ func (g *ToolGroupMessageItem) renderLines(width int) (lines []string, selStart,
 		return []string{g.oneLiner(g.tools[0], ToolBodyWidth(width, 0), g.focused)}, -1, -1
 	}
 
-	running := false
-	cancelled := false
-	failed := 0
-	succeeded := 0
-	for _, t := range g.tools {
-		switch t.EffectiveStatus() {
-		case ToolStatusRunning:
-			running = true
-		case ToolStatusError:
-			failed++
-		case ToolStatusCanceled:
-			cancelled = true
-		case ToolStatusSuccess:
-			succeeded++
-		}
-	}
-	// A single call returned above, so the count is always plural.
-	calls := fmt.Sprintf("%d tool calls", len(g.tools))
-	if failed > 0 {
-		// The verb color already signals a partial failure; the count
-		// says how much of the run to distrust without expanding it.
-		calls += fmt.Sprintf(", %d failed", failed)
-	}
-	// The verb color alone says how the run went: pending for a live
-	// run, normal once it has settled, error when it did not survive.
-	// While the cursor sits on the group row the verb says it in color;
-	// once it descends to a call the grey returns and the selected
-	// call's own name takes the color instead.
-	header := fmt.Sprintf("%s %s",
-		GroupVerbStyle(g.sty, running, cancelled, failed, succeeded, g.focused && g.selectedChild < 0).Render(g.groupVerb()),
-		g.sty.Tool.Body.Render("("+calls+")"))
-
-	lines = append(lines, header)
+	lines = append(lines, g.header(ToolBodyWidth(width, 0)))
 
 	if g.expanded {
 		// Children live one indent column inside the group's bar.
@@ -510,6 +486,11 @@ func (g *ToolGroupMessageItem) Render(width int) string {
 		if g.selectedChild < 0 {
 			prefix = selectedPrefix
 		}
+	} else if g.hovered {
+		// Hovering a collapsed or expanded group marks every one of its
+		// lines, unlike the sub-cursor's child-only bar: the whole run is
+		// the click target.
+		prefix = g.sty.Messages.ToolCallHovered.Render()
 	}
 	lines, selStart, selEnd := g.renderLines(width)
 	for i, ln := range lines {
@@ -527,10 +508,138 @@ func (g *ToolGroupMessageItem) Render(width int) string {
 }
 
 func (g *ToolGroupMessageItem) prefixKey() uint64 {
-	if g.focused {
+	switch {
+	case g.focused:
 		return 1
+	case g.hovered:
+		return 2
 	}
 	return 0
+}
+
+// runOutcome is how a run went, as the group header and verb color read
+// it.
+type runOutcome struct {
+	running   bool
+	cancelled bool
+	failed    int
+	succeeded int
+}
+
+// summarizeRun counts the calls' statuses.
+func summarizeRun(tools []ToolMessageItem) runOutcome {
+	var out runOutcome
+	for _, t := range tools {
+		switch t.EffectiveStatus() {
+		case ToolStatusRunning:
+			out.running = true
+		case ToolStatusError:
+			out.failed++
+		case ToolStatusCanceled:
+			out.cancelled = true
+		case ToolStatusSuccess:
+			out.succeeded++
+		}
+	}
+	return out
+}
+
+// header renders the run's collapsed line: the verb, the call count,
+// and as much of the run's story as the width allows - failures, how
+// long it took, and what kinds of call it made.
+func (g *ToolGroupMessageItem) header(width int) string {
+	out := summarizeRun(g.tools)
+	// The verb color alone says how the run went: pending while live,
+	// normal once settled, error when it did not survive. While the
+	// cursor sits on the group row the verb says it in color; once it
+	// descends to a call the grey returns and the selected call's own
+	// name takes the color instead.
+	verb := GroupVerbStyle(g.sty, out.running, out.cancelled, out.failed, out.succeeded, g.focused && g.selectedChild < 0).
+		Render(g.groupVerb())
+
+	// A single call never reaches here, so the count is always plural.
+	// The failure count rides with it: it is the one detail the header
+	// must never drop.
+	text := fmt.Sprintf("%d tool calls", len(g.tools))
+	if out.failed > 0 {
+		text += fmt.Sprintf(", %d failed", out.failed)
+	}
+	budget := width - lipgloss.Width(verb) - len(" ()")
+	for _, detail := range g.runDetails() {
+		candidate := text + detail.sep + detail.text
+		if ansi.StringWidth(candidate) > budget {
+			break
+		}
+		text = candidate
+	}
+	return ansi.Truncate(verb+" "+g.sty.Tool.Body.Render("("+text+")"), max(width, 1), "…")
+}
+
+// headerDetail is one clause of the collapsed header beyond the call
+// count, with the separator joining it to the text before it.
+type headerDetail struct {
+	text string
+	sep  string
+}
+
+// runDetails lists what the collapsed header can say beyond the count,
+// most important first: how long the run took, then one entry per kind
+// of call it made. Each entry is budgeted on its own, so a wide run
+// keeps the kinds that fit instead of dropping all of them.
+func (g *ToolGroupMessageItem) runDetails() []headerDetail {
+	var details []headerDetail
+	if badge := toolDurationBadge(g.elapsed()); badge != "" {
+		details = append(details, headerDetail{text: badge, sep: " · "})
+	}
+	for i, kind := range g.kindParts() {
+		sep := ", "
+		if i == 0 {
+			sep = " · "
+		}
+		details = append(details, headerDetail{text: kind, sep: sep})
+	}
+	return details
+}
+
+// elapsed is how long the run took: the sum of its calls' durations.
+// Zero as soon as any call's start time is unknown (a transcript
+// rebuilt from history), where the partial sum would understate the
+// run rather than merely rounding it.
+func (g *ToolGroupMessageItem) elapsed() time.Duration {
+	var total time.Duration
+	for _, t := range g.tools {
+		elapsed := t.Elapsed()
+		if elapsed <= 0 {
+			return 0
+		}
+		total += elapsed
+	}
+	return total
+}
+
+// kindParts names the kinds of call in the run, in first-seen order,
+// counting the ones that repeat: ["Shell ×3", "View"]. The collapsed
+// header shows them so a run of four commands reads as what it did
+// instead of a bare count.
+func (g *ToolGroupMessageItem) kindParts() []string {
+	counts := make(map[string]int, len(g.tools))
+	order := make([]string, 0, len(g.tools))
+	for _, t := range g.tools {
+		name := t.DisplayName()
+		if _, seen := counts[name]; !seen {
+			order = append(order, name)
+		}
+		counts[name]++
+	}
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		if n := counts[name]; n > 1 {
+			parts = append(parts, fmt.Sprintf("%s ×%d", name, n))
+		} else {
+			parts = append(parts, name)
+		}
+	}
+	return parts
 }
 
 // groupVerb names the run in the collapsed header and the copy header:
@@ -572,19 +681,91 @@ func GroupVerbStyle(sty *styles.Styles, running, cancelled bool, failed, succeed
 	return style
 }
 
-// ToolOneLiner renders one tool call as a single line: tool name,
-// colored by status when selected and understated grey otherwise, and
-// an argument summary, truncated to width. A running call uses the
-// running color, matching the call's full render, which carries no
-// spinner either. Shared by the transcript's expanded groups and the
-// background task strip's nested lines.
+// ToolOneLiner renders one tool call as a single line: an error or
+// canceled call's status glyph, the tool name, colored by status when
+// selected and understated grey otherwise, an argument summary, a diff
+// stat when the call changed a file, and the settled call's duration at
+// the right edge. A running call uses the running color and carries no
+// duration, matching the call's full render, which carries no spinner
+// either. The line is truncated to width. Shared by the transcript's
+// expanded groups and the background task strip's nested lines.
 func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int, selected bool) string {
-	name := toolNameStyle(sty, t.EffectiveStatus(), false, selected).Render(t.DisplayName())
-	line := name
+	status := t.EffectiveStatus()
+	nameStyle := toolNameStyle(sty, status, false, selected)
+	line := nameStyle.Render(t.DisplayName())
+	// A failed or canceled call says so with a glyph as well as color,
+	// so the one line that needs attention is legible without it.
+	if glyph := statusGlyph(status); glyph != "" {
+		line = nameStyle.Render(glyph) + " " + line
+	}
 	if summary := ToolCallSummary(t.ToolCall()); summary != "" {
 		line += " " + sty.Tool.Body.Render(summary)
 	}
+	if stat := toolDiffStat(sty, t); stat != "" {
+		line += " " + stat
+	}
+	if elapsed := t.Elapsed(); elapsed > 0 && status != ToolStatusRunning {
+		if badge := toolDurationBadge(elapsed); badge != "" {
+			return rightAlignSuffix(line, sty.Tool.StateWaiting.Render(badge), width)
+		}
+	}
 	return ansi.Truncate(line, max(width, 1), "…")
+}
+
+// statusGlyph is the one-liner mark for a status that color alone would
+// have to carry, or empty for the ordinary ones.
+func statusGlyph(status ToolStatus) string {
+	switch status {
+	case ToolStatusError:
+		return styles.ToolFailure
+	case ToolStatusCanceled:
+		return styles.ToolCancelled
+	default:
+		return ""
+	}
+}
+
+// rightAlignSuffix puts suffix at the line's right edge when the line
+// leaves room for it plus a gap, and otherwise drops it: a duration is
+// a detail, and a truncated summary is more useful than a truncated
+// one followed by a squeezed duration.
+func rightAlignSuffix(line, suffix string, width int) string {
+	width = max(width, 1)
+	const minGap = 2
+	if gap := width - lipgloss.Width(line) - lipgloss.Width(suffix); gap >= minGap {
+		return line + strings.Repeat(" ", gap) + suffix
+	}
+	return ansi.Truncate(line, width, "…")
+}
+
+// toolDiffStat renders the "+A -R" change counts of a call that changed
+// a file, or "" for any other call. The counts ride in the result
+// metadata the tool recorded, the same numbers its own view reports.
+func toolDiffStat(sty *styles.Styles, t ToolMessageItem) string {
+	result := t.Result()
+	if result == nil || result.Metadata == "" {
+		return ""
+	}
+	switch t.ToolCall().Name {
+	case tools.EditToolName, tools.WriteToolName:
+	default:
+		return ""
+	}
+	var meta struct {
+		Additions int `json:"additions"`
+		Removals  int `json:"removals"`
+	}
+	if err := json.Unmarshal([]byte(result.Metadata), &meta); err != nil {
+		return ""
+	}
+	var parts []string
+	if meta.Additions > 0 {
+		parts = append(parts, sty.Tool.DiffAdded.Render(fmt.Sprintf("+%d", meta.Additions)))
+	}
+	if meta.Removals > 0 {
+		parts = append(parts, sty.Tool.DiffRemoved.Render(fmt.Sprintf("-%d", meta.Removals)))
+	}
+	return strings.Join(parts, " ")
 }
 
 // oneLiner renders one tool call as a single line.
@@ -602,15 +783,25 @@ func ToolCallSummary(tc message.ToolCall) string {
 	preferred := []string{"command", "file_path", "path", "pattern", "url", "query", "symbol", "name"}
 	for _, key := range preferred {
 		if v, ok := params[key].(string); ok && strings.TrimSpace(v) != "" {
-			return FirstLine(v)
+			return summaryValue(key, v)
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(params)) {
 		if s, ok := params[key].(string); ok && strings.TrimSpace(s) != "" {
-			return FirstLine(s)
+			return summaryValue(key, s)
 		}
 	}
 	return ""
+}
+
+// summaryValue flattens one argument to a display line, shortening file
+// paths the way the call's own header does so the two agree.
+func summaryValue(key, value string) string {
+	value = FirstLine(value)
+	if key == "file_path" || key == "path" {
+		return home.Short(value)
+	}
+	return value
 }
 
 // FirstLine returns the first line of s, collapsed to one

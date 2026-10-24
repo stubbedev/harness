@@ -231,6 +231,7 @@ type AssistantMessageItem struct {
 	*highlightableMessageItem
 	*cachedMessageItem
 	*focusableMessageItem
+	*hoverableMessageItem
 
 	message           *message.Message
 	sty               *styles.Styles
@@ -285,6 +286,7 @@ func NewAssistantMessageItem(sty *styles.Styles, message *message.Message) Messa
 		highlightableMessageItem: defaultHighlighter(sty, v),
 		cachedMessageItem:        newCachedMessageItem(v),
 		focusableMessageItem:     newFocusableMessageItem(v),
+		hoverableMessageItem:     newHoverableMessageItem(v),
 		message:                  message,
 		sty:                      sty,
 	}
@@ -406,8 +408,11 @@ func (a *AssistantMessageItem) prefixedRender(width int) string {
 }
 
 func (a *AssistantMessageItem) focusStyle() string {
-	if a.focused {
+	switch {
+	case a.focused:
 		return a.sty.Messages.AssistantFocused.Render()
+	case a.hovered:
+		return a.sty.Messages.AssistantHovered.Render()
 	}
 	return a.sty.Messages.AssistantBlurred.Render()
 }
@@ -459,11 +464,14 @@ func (a *AssistantMessageItem) prefixCacheKey(contentWidth int) uint64 {
 	writeU64(errExtra)
 	writeU64(a.compositionKey())
 	fingerprint := h.Sum64()
-	var focusBit uint64
-	if a.focused {
-		focusBit = 1
+	var stateBit uint64
+	switch {
+	case a.focused:
+		stateBit = 1
+	case a.hovered:
+		stateBit = 2
 	}
-	return (fingerprint &^ 1) | focusBit
+	return (fingerprint &^ 3) | stateBit
 }
 
 // compositionKey hashes the inputs to renderMessageContent's structural
