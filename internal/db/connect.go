@@ -85,15 +85,21 @@ type connEntry struct {
 	reader *sql.DB
 	// unlock releases the data-dir lock, or is nil when none is held.
 	unlock func()
+	// stmts caches the statements the routed DBTX runs; see [routedDB].
+	stmts *stmtCache
 }
 
 // close closes the connection and drops the data-dir lock, if held. The
 // readers close first, so the writer is the last connection to the file
-// and the one that checkpoints the WAL on its way out.
+// and the one that checkpoints the WAL on its way out. Cached statements
+// close before either pool.
 func (e *connEntry) close() error {
 	var err error
+	if e.stmts != nil {
+		err = e.stmts.close()
+	}
 	if e.reader != nil {
-		err = e.reader.Close()
+		err = errors.Join(err, e.reader.Close())
 	}
 	err = errors.Join(err, e.db.Close())
 	if e.unlock != nil {
@@ -219,7 +225,7 @@ func connect(ctx context.Context, dbPath, lockDir string, migrate func(context.C
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create data directory %q: %w", dir, err)
 	}
-	entry := &connEntry{refCount: 1}
+	entry := &connEntry{refCount: 1, stmts: newStmtCache()}
 	if lockDir != "" {
 		unlock, err := acquireDataDirLock(lockDir)
 		if err != nil {
@@ -279,16 +285,26 @@ func connect(ctx context.Context, dbPath, lockDir string, migrate func(context.C
 
 // Routed returns the DBTX for conn that [New] should be given: read-only
 // statements go to the reader pool Connect opened alongside conn, and
-// everything else to conn itself. A conn without a reader pool, or one
-// Connect did not open, is returned as is. Transactions are unaffected:
-// they are begun on conn and bound with [Queries.WithTx].
+// everything else to conn itself. A conn without a reader pool sends
+// every statement to conn. A conn Connect did not open is returned as is,
+// so it keeps whatever behavior it was given. Transactions are
+// unaffected: they are begun on conn and bound with [Queries.WithTx].
+//
+// The returned DBTX prepares each statement once and reuses it, which is
+// why the query text is parsed by SQLite a single time rather than once
+// per call; see [stmtCache].
 func Routed(conn *sql.DB) DBTX {
 	poolMu.Lock()
 	defer poolMu.Unlock()
 	for _, entry := range pool {
-		if entry.db == conn && entry.reader != nil {
-			return routedDB{writer: conn, reader: entry.reader}
+		if entry.db != conn {
+			continue
 		}
+		reader := conn
+		if entry.reader != nil {
+			reader = entry.reader
+		}
+		return routedDB{writer: conn, reader: reader, stmts: entry.stmts}
 	}
 	return conn
 }
