@@ -48,7 +48,9 @@ func TestToolHeaderWithoutWorkspaceStaysAbsolute(t *testing.T) {
 		ID: "t1", Name: "view", Input: string(input), Finished: true,
 	}, &message.ToolResult{Content: "package main"}, false)
 
-	header, _, _ := strings.Cut(ansi.Strip(item.RawRender(120)), "\n")
+	// Wide enough that no CI runner's temp path is truncated: the point
+	// is what the header says, not how it clips.
+	header, _, _ := strings.Cut(ansi.Strip(item.RawRender(400)), "\n")
 	assert.Contains(t, header, file)
 }
 
