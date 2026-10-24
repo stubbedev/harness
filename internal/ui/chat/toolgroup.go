@@ -20,11 +20,11 @@ import (
 )
 
 // ToolGroupMessageItem groups the consecutive tool calls of a turn into
-// one collapsed row - "Running (N tool calls)" while calls are in
-// flight, "Ran (N tool calls)" once the run has settled - so the
-// transcript is not dominated by tool bodies nobody asked for. The
-// header carries what fits of the run's story: failures, how long it
-// took, and which kinds of call it made.
+// one collapsed row - "Running (N calls)" while calls are in flight,
+// "Ran (N calls)" once the run has settled - so the transcript is not
+// dominated by tool bodies nobody asked for. The header carries what
+// fits of the run's story: failures, which kinds of call it made, and
+// how long it took.
 //
 // Expansion has two levels: the first shows one line per call (status
 // glyph, tool name, argument summary, diff stat, duration), the second
@@ -559,8 +559,10 @@ func (g *ToolGroupMessageItem) header(width int) string {
 
 	// A single call never reaches here, so the count is always plural.
 	// The failure count rides with it: it is the one detail the header
-	// must never drop.
-	text := fmt.Sprintf("%d tool calls", len(g.tools))
+	// must never drop. "calls" rather than "tool calls": the row is a
+	// tool run already, and the saved columns let the kinds fit on
+	// narrower terminals.
+	text := fmt.Sprintf("%d calls", len(g.tools))
 	if out.failed > 0 {
 		text += fmt.Sprintf(", %d failed", out.failed)
 	}
@@ -583,20 +585,20 @@ type headerDetail struct {
 }
 
 // runDetails lists what the collapsed header can say beyond the count,
-// most important first: how long the run took, then one entry per kind
-// of call it made. Each entry is budgeted on its own, so a wide run
-// keeps the kinds that fit instead of dropping all of them.
+// most important first: which kinds of call the run made, then how long
+// it took. Each entry is budgeted on its own, so a narrow header keeps
+// the kinds that fit instead of falling back to a bare count.
 func (g *ToolGroupMessageItem) runDetails() []headerDetail {
 	var details []headerDetail
-	if badge := toolDurationBadge(g.elapsed()); badge != "" {
-		details = append(details, headerDetail{text: badge, sep: " · "})
-	}
 	for i, kind := range g.kindParts() {
 		sep := ", "
 		if i == 0 {
 			sep = " · "
 		}
 		details = append(details, headerDetail{text: kind, sep: sep})
+	}
+	if badge := toolDurationBadge(g.elapsed()); badge != "" {
+		details = append(details, headerDetail{text: badge, sep: " · "})
 	}
 	return details
 }
@@ -618,11 +620,12 @@ func (g *ToolGroupMessageItem) elapsed() time.Duration {
 }
 
 // kindParts names the kinds of call in the run, in first-seen order,
-// counting the ones that repeat: ["Shell ×3", "View"]. The collapsed
-// header shows them so a run of four commands reads as what it did
-// instead of a bare count.
+// counting the ones that repeat: ["Shell ×3", "View"]. A kind that had
+// a failure carries the failure glyph, so the collapsed header says
+// which calls went wrong without expanding the run.
 func (g *ToolGroupMessageItem) kindParts() []string {
 	counts := make(map[string]int, len(g.tools))
+	failed := make(map[string]int, len(g.tools))
 	order := make([]string, 0, len(g.tools))
 	for _, t := range g.tools {
 		name := t.DisplayName()
@@ -630,14 +633,20 @@ func (g *ToolGroupMessageItem) kindParts() []string {
 			order = append(order, name)
 		}
 		counts[name]++
+		if t.EffectiveStatus() == ToolStatusError {
+			failed[name]++
+		}
 	}
 	parts := make([]string, 0, len(order))
 	for _, name := range order {
+		part := name
 		if n := counts[name]; n > 1 {
-			parts = append(parts, fmt.Sprintf("%s ×%d", name, n))
-		} else {
-			parts = append(parts, name)
+			part = fmt.Sprintf("%s ×%d", name, n)
 		}
+		if failed[name] > 0 {
+			part += " " + g.sty.Tool.NameError.Render(styles.ToolFailure)
+		}
+		parts = append(parts, part)
 	}
 	return parts
 }
@@ -725,17 +734,24 @@ func statusGlyph(status ToolStatus) string {
 	}
 }
 
-// rightAlignSuffix puts suffix at the line's right edge when the line
-// leaves room for it plus a gap, and otherwise drops it: a duration is
-// a detail, and a truncated summary is more useful than a truncated
-// one followed by a squeezed duration.
+// rightAlignSuffix puts suffix at the line's right edge, reserving its
+// width by truncating the line rather than dropping the suffix: a long
+// argument summary is worth a cut, not the loss of the duration. The
+// suffix is dropped only when what would remain of the line is too
+// short to say anything.
 func rightAlignSuffix(line, suffix string, width int) string {
 	width = max(width, 1)
-	const minGap = 2
-	if gap := width - lipgloss.Width(line) - lipgloss.Width(suffix); gap >= minGap {
-		return line + strings.Repeat(" ", gap) + suffix
+	const (
+		minGap  = 2
+		minLine = 20
+	)
+	room := width - lipgloss.Width(suffix) - minGap
+	if room < minLine {
+		return ansi.Truncate(line, width, "…")
 	}
-	return ansi.Truncate(line, width, "…")
+	line = ansi.Truncate(line, room, "…")
+	gap := width - lipgloss.Width(line) - lipgloss.Width(suffix)
+	return line + strings.Repeat(" ", gap) + suffix
 }
 
 // toolDiffStat renders the "+A -R" change counts of a call that changed

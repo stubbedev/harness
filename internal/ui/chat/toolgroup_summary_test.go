@@ -47,10 +47,10 @@ func TestGroupHeaderSummarizesTheRun(t *testing.T) {
 	g.AddTool(settledTool(sty, "t3", "view", `{"file_path":"cmd/main.go"}`))
 
 	header := ansi.Strip(strings.Split(g.Render(120), "\n")[0])
-	require.Contains(t, header, "3 tool calls")
+	require.Contains(t, header, "3 calls")
 	assert.Contains(t, header, "Shell ×2")
 	assert.Contains(t, header, "View")
-	assert.Contains(t, header, "3 tool calls · Shell ×2, View")
+	assert.Contains(t, header, "3 calls · Shell ×2, View")
 }
 
 func TestGroupHeaderNamesFailuresBeforeKinds(t *testing.T) {
@@ -63,8 +63,10 @@ func TestGroupHeaderNamesFailuresBeforeKinds(t *testing.T) {
 	}, &message.ToolResult{ToolCallID: "t2", Name: "shell", Content: "boom", IsError: true}, false))
 
 	header := ansi.Strip(strings.Split(g.Render(120), "\n")[0])
-	assert.Contains(t, header, "2 tool calls, 1 failed")
+	assert.Contains(t, header, "2 calls, 1 failed")
 	assert.Less(t, strings.Index(header, "1 failed"), strings.Index(header, "Shell"))
+	assert.Contains(t, header, "Shell ×2 "+styles.ToolFailure, "the failing kind must be marked")
+	assert.NotContains(t, header, "View "+styles.ToolFailure)
 }
 
 func TestGroupHeaderSumsSettledDurations(t *testing.T) {
@@ -147,6 +149,33 @@ func TestToolOneLinerRightAlignsSettledDuration(t *testing.T) {
 	assert.True(t, strings.HasSuffix(line, "2s"))
 }
 
+// TestToolOneLinerReservesRoomForDuration pins the space trade: a long
+// summary is truncated so the settled duration still fits, instead of
+// the duration being dropped and the row left without it.
+func TestToolOneLinerReservesRoomForDuration(t *testing.T) {
+	t.Parallel()
+
+	sty := groupStyles()
+	long := strings.Repeat("very-long-command-argument ", 10)
+	item := took(settledTool(sty, "t1", "shell", shellRunInput(long)), 2*time.Second)
+
+	line := ansi.Strip(ToolOneLiner(sty, item, 60, false))
+	assert.Equal(t, 60, ansi.StringWidth(line))
+	assert.Contains(t, line, "…")
+	assert.True(t, strings.HasSuffix(line, "2s"))
+}
+
+func TestToolOneLinerDropsDurationWhenTooNarrow(t *testing.T) {
+	t.Parallel()
+
+	sty := groupStyles()
+	item := took(settledTool(sty, "t1", "shell", shellRunInput("go test ./...")), 2*time.Second)
+
+	line := ansi.Strip(ToolOneLiner(sty, item, 18, false))
+	assert.LessOrEqual(t, ansi.StringWidth(line), 18)
+	assert.NotContains(t, line, "2s", "a line this short leaves no room for a duration")
+}
+
 func TestToolOneLinerHidesDurationWhileRunning(t *testing.T) {
 	t.Parallel()
 
@@ -189,6 +218,17 @@ func TestTerminalOutputHighlightsDiffs(t *testing.T) {
 		sty.Tool.Body.Render(toolOutputPlainContent(sty, "plain log line", 80, false)),
 		toolOutputTerminalContent(sty, "plain log line", 80, false),
 	)
+}
+
+func TestShellHeaderShowsBareDuration(t *testing.T) {
+	t.Parallel()
+
+	sty := groupStyles()
+	item := took(settledTool(sty, "t1", "shell", shellRunInput("go test ./...")), 2*time.Second)
+
+	header, _, _ := strings.Cut(ansi.Strip(item.RawRender(120)), "\n")
+	assert.Contains(t, header, "(2s)")
+	assert.NotContains(t, header, "took=", "the header pays for a key it does not need")
 }
 
 func TestShellCallHighlightsDiffOutput(t *testing.T) {

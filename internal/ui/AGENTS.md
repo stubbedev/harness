@@ -150,8 +150,8 @@ tool names to specific types:
 
 Consecutive tool calls are folded into one `ToolGroupMessageItem`
 (`chat/toolgroup.go`): a collapsed header that names the run and, as
-width allows, its failures, duration and kinds of call (`Ran (4 tool
-calls, 1 failed · 12s · Shell ×3, View)`), expanding first to one-liners
+width allows, its failures, kinds of call and duration (`Ran (4 calls,
+1 failed · Shell ×3, View · 12s)`), expanding first to one-liners
 - status glyph, tool name, argument summary, diff stat, settled duration
 - and then to the calls' full renderers. Children are
 never list items of their own — `Chat.ToolItem` resolves through groups.

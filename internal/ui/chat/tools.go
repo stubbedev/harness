@@ -876,12 +876,19 @@ func toolParamList(sty *styles.Styles, params []string, width int) string {
 		mainParam = lipgloss.NewStyle().Hyperlink(mainParam).Render(mainParam)
 	}
 
-	// Build key=value pairs from remaining params (consecutive key, value pairs).
+	// Build key=value pairs from remaining params (consecutive key, value
+	// pairs). A pair with an empty key renders its value bare, for a
+	// suffix such as a duration that has no natural key to name.
 	var kvPairs []string
 	for i := 1; i+1 < len(params); i += 2 {
-		if params[i+1] != "" {
-			kvPairs = append(kvPairs, fmt.Sprintf("%s=%s",
-				oneLine(params[i]), oneLine(params[i+1])))
+		key, value := oneLine(params[i]), oneLine(params[i+1])
+		switch {
+		case value == "":
+			continue
+		case key == "":
+			kvPairs = append(kvPairs, value)
+		default:
+			kvPairs = append(kvPairs, key+"="+value)
 		}
 	}
 

@@ -50,7 +50,7 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// command: bash calls can take minutes and the bare header gives no
 	// sense of it.
 	if badge := toolDurationBadge(opts.Elapsed); badge != "" {
-		toolParams = append(toolParams, "took", badge)
+		toolParams = append(toolParams, "", badge)
 	}
 
 	header := toolHeader(sty, opts.Name, width, opts, toolParams...)

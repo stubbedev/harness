@@ -863,7 +863,7 @@ func (m *UI) renderTasks(width int) string {
 	}
 
 	// The strip borrows the tool group's row style (the one behind
-	// "Ran/Running (N tool calls)"), so subagent rows read like the
+	// "Ran/Running (N calls)"), so subagent rows read like the
 	// transcript's tool-call rows they sit beside.
 	return t.Tool.Body.Render(strings.Join(rows, "\n"))
 }
