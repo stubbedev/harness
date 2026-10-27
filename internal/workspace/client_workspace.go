@@ -11,9 +11,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
-	"github.com/pkg/browser"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/agentstate"
+	"github.com/stubbedev/harness/internal/browser"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
 	"github.com/stubbedev/harness/internal/client"

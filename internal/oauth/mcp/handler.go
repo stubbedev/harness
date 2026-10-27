@@ -17,7 +17,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
-	"github.com/pkg/browser"
+	"github.com/stubbedev/harness/internal/browser"
 	"github.com/stubbedev/harness/internal/oauth"
 	"github.com/stubbedev/harness/internal/oauth/callback"
 	"golang.org/x/oauth2"

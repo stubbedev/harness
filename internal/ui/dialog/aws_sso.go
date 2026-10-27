@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/pkg/browser"
+	"github.com/stubbedev/harness/internal/browser"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
 )

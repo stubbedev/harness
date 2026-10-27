@@ -11,8 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/pkg/browser"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/browser"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/keys"
 )

@@ -12,7 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
-	"github.com/pkg/browser"
+	"github.com/stubbedev/harness/internal/browser"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/oauth"
