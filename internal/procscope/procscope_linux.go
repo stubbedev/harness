@@ -98,17 +98,27 @@ func stopUnit(unit string) {
 	}
 }
 
+// oomScore returns the process's oom_score_adj, the score the kernel
+// weighs it by in an out-of-memory kill, and whether it is known.
+func oomScore(pid int) (int, bool) {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/oom_score_adj", pid))
+	if err != nil {
+		return 0, false
+	}
+	score, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return 0, false
+	}
+	return score, true
+}
+
 // RaiseOOMScore raises the process's oom_score_adj to OOMScoreAdj.
 // Raising it needs no privilege; a value already higher is left alone.
 func RaiseOOMScore(pid int) {
+	if score, ok := oomScore(pid); ok && score >= OOMScoreAdj {
+		return
+	}
 	path := fmt.Sprintf("/proc/%d/oom_score_adj", pid)
-	current, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	if v, err := strconv.Atoi(strings.TrimSpace(string(current))); err == nil && v >= OOMScoreAdj {
-		return
-	}
 	_ = os.WriteFile(path, []byte(strconv.Itoa(OOMScoreAdj)), 0o644)
 }
 
