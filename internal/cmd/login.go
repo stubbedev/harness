@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+	"github.com/stubbedev/harness/internal/browser"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/clipboard"
 	"github.com/stubbedev/harness/internal/config"
@@ -148,10 +148,6 @@ func interactiveContext() context.Context {
 	return ctx
 }
 
-func waitEnter() {
-	_, _ = fmt.Scanln()
-}
-
 func loginWithDeviceFlow(ws workspace.Workspace, providerID catalog.InferenceProvider, force bool) error {
 	flow, ok := config.SignInFlow(providerID)
 	if !ok {
@@ -182,28 +178,36 @@ func loginWithDeviceFlow(ws workspace.Workspace, providerID catalog.InferencePro
 }
 
 // runDeviceFlow walks the user through a device authorization grant on
-// the terminal: the code goes to the clipboard, enter opens the
-// verification page, and the token is returned once the user approves.
+// the terminal: the code goes to the clipboard, the verification page
+// opens, and the token is returned once the user approves.
 func runDeviceFlow(ctx context.Context, name string, flow oauth.DeviceFlow) (*oauth.Token, error) {
+	return deviceFlow(ctx, name, flow, clipboard.WriteText, browser.OpenURL)
+}
+
+// deviceFlow runs the grant without asking the terminal for input:
+// the user approves in the browser while the flow polls, so nothing is
+// lost when they open the page themselves and approve before pressing
+// a key.
+func deviceFlow(ctx context.Context, name string, flow oauth.DeviceFlow, copyCode, openURL func(string) error) (*oauth.Token, error) {
 	fmt.Printf("Requesting a device code for %s...\n", name)
 	dc, err := flow.RequestDeviceCode(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	clipboard.WriteText(dc.UserCode)
+	copyCode(dc.UserCode)
 	fmt.Println()
 	fmt.Println("The following code should be on clipboard already:")
 	fmt.Println()
 	lipgloss.Println(lipgloss.NewStyle().Bold(true).Render(dc.UserCode))
 	fmt.Println()
-	fmt.Printf("Press enter to open this URL and authenticate with %s:\n", name)
+	fmt.Printf("Opening this URL to authenticate with %s:\n", name)
 	fmt.Println()
 	lipgloss.Println(lipgloss.NewStyle().Hyperlink(dc.VerificationURI, "id=device-login").Render(dc.VerificationURI))
 	fmt.Println()
-	waitEnter()
-	if err := browser.OpenURL(dc.VerificationURI); err != nil {
+	if err := openURL(dc.VerificationURI); err != nil {
 		fmt.Println("Could not open the URL. You'll need to manually open the URL in your browser.")
+		fmt.Println()
 	}
 
 	fmt.Println("Waiting for authorization...")
