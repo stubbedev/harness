@@ -117,14 +117,34 @@ func TestCommandRunsInOwnScope(t *testing.T) {
 	require.Positive(t, limit)
 
 	c.scope.RaiseOOMScore()
-	adj, err := os.ReadFile("/proc/" + strconv.Itoa(c.cmd.Process.Pid) + "/oom_score_adj")
+	adj, ok := oomScore(c.cmd.Process.Pid)
+	require.True(t, ok)
+	require.Equal(t, OOMScoreAdj, adj)
+}
+
+// TestOOMScoreReadsTheProcess checks the reader every oom_score_adj
+// decision goes through.
+func TestOOMScoreReadsTheProcess(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile("/proc/self/oom_score_adj")
 	require.NoError(t, err)
-	require.Equal(t, strconv.Itoa(OOMScoreAdj), strings.TrimSpace(string(adj)))
+	want, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	require.NoError(t, err)
+
+	got, ok := oomScore(os.Getpid())
+	require.True(t, ok, "the test process has a score")
+	require.Equal(t, want, got)
+
+	_, ok = oomScore(-1)
+	require.False(t, ok, "an unknown process has no score")
 }
 
 // TestOOMKillStaysInScope runs a hog inside a child's scope that outgrows
-// the scope's memory limit. The kernel kills the hog, and only the hog:
-// the child (OOMPolicy=continue) and this test process live on.
+// the scope's memory limit. The kernel kills it there and nowhere else:
+// the kill is accounted in the child's scope, never in the cgroup this
+// test - the stand-in for Harness - runs in, and the scope is created
+// with the OOMPolicy that keeps systemd from stopping it over the kill.
 func TestOOMKillStaysInScope(t *testing.T) {
 	t.Parallel()
 
@@ -134,16 +154,31 @@ func TestOOMKillStaysInScope(t *testing.T) {
 	// of the machine's memory.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "memory.max"), []byte("64M"), 0o644))
 
-	// tail holds the current line in memory, and /dev/zero has no line
-	// breaks: it grows until it is killed.
-	c.send(t, "head -c 1000000000 /dev/zero | tail -n 1")
-	require.Equal(t, "status:137", c.readLine(t))
+	policy, err := exec.CommandContext(t.Context(), "systemctl", "--user", "show", "-p", "OOMPolicy", c.scope.Unit()).Output()
+	require.NoError(t, err)
+	require.Equal(t, "OOMPolicy=continue\n", string(policy))
 
-	c.send(t, "echo still here")
-	require.Equal(t, "still here", c.readLine(t))
+	own, ok := cgroupPath("/proc/self/cgroup")
+	require.True(t, ok)
+	ownDir := filepath.Join(cgroupRoot, own)
+	beforeOwn, ok := CgroupOOMKills(ownDir)
+	require.True(t, ok)
+
+	// tail holds the current line in memory, and /dev/zero has no line
+	// breaks: it grows until it is killed. The kernel weighs the whole
+	// scope and may take more than the hog with it - that is its choice
+	// and it lands inside the scope either way - so what the test reads
+	// is the scope's accounting, not the hog's exit status.
+	c.send(t, "head -c 1000000000 /dev/zero | tail -n 1")
+	c.readLine(t)
+
 	kills, ok := c.scope.OOMKills()
 	require.True(t, ok)
-	require.Equal(t, 1, kills)
+	require.Positive(t, kills, "the scope accounts the kill")
+
+	afterOwn, ok := CgroupOOMKills(ownDir)
+	require.True(t, ok)
+	require.Equal(t, beforeOwn, afterOwn, "the kill stays out of this cgroup")
 }
 
 // TestKillEndsEscapedProcesses checks that killing a scope ends a
