@@ -77,6 +77,27 @@ func TestExecutionStateShellOutcomes(t *testing.T) {
 	}
 }
 
+// TestExecutionStateBackgroundJobLeavesSessionAlone pins that a detached
+// job is not the terminal's last command: the session keeps reporting what
+// its foreground was doing, and the job records nothing of its own.
+func TestExecutionStateBackgroundJobLeavesSessionAlone(t *testing.T) {
+	t.Parallel()
+	state := newExecutionState("")
+	state.Ingest(executionMessages("first", "shell", `{"command":"cat"}`, `{"outcome":"waiting"}`, false))
+	metadata, err := json.Marshal(tools.ShellResponseMetadata{
+		Outcome:    tools.ShellOutcomeRunning,
+		Background: true,
+		JobID:      "job-1",
+	})
+	require.NoError(t, err)
+	state.Ingest(executionMessages("bg", "shell", `{"command":"go test ./...","run_in_background":true}`, string(metadata), false))
+
+	require.Len(t, state.Sessions, 1)
+	require.Equal(t, "waiting", state.Sessions[0].Status)
+	require.Len(t, state.Commands, 1)
+	require.Equal(t, "cat", state.Commands[0].Input)
+}
+
 func TestExecutionStateBusyAndQueuedLeaveSessionAlone(t *testing.T) {
 	t.Parallel()
 	for _, outcome := range []tools.ShellOutcome{tools.ShellOutcomeBusy, tools.ShellOutcomeQueued} {

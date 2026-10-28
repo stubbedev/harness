@@ -429,6 +429,13 @@ func (s *executionState) ingestShell(call message.ToolCall, result message.ToolR
 	var meta tools.ShellResponseMetadata
 	_ = json.Unmarshal([]byte(call.Input), &params)
 	_ = json.Unmarshal([]byte(result.Metadata), &meta)
+	// A background job runs detached from every terminal, so it leaves no
+	// terminal state behind: recording it as the session's last command
+	// would describe a terminal whose state it never touched, and mask
+	// what the session was actually doing.
+	if params.RunInBackground || meta.Background {
+		return false, false, entry
+	}
 	name := meta.Session
 	if name == "" {
 		name = params.Session
