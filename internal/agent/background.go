@@ -260,6 +260,20 @@ func (r *backgroundRun) snapshot() (finished bool, status subagents.RunStatus, r
 	return r.status.IsTerminal(), r.status, r.result, r.resultErr
 }
 
+// take returns the run's state and claims its result for this caller, in
+// one lock, so two waits racing on one finished run cannot both be told
+// they collected it.
+func (r *backgroundRun) take() (finished bool, status subagents.RunStatus, result string, resultErr bool, delivered bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	finished = r.status.IsTerminal()
+	delivered = finished && !r.collected
+	if delivered {
+		r.collected = true
+	}
+	return finished, r.status, r.result, r.resultErr, delivered
+}
+
 // isFinished reports whether the run has terminated.
 func (r *backgroundRun) isFinished() bool {
 	finished, _, _, _ := r.snapshot()
@@ -276,16 +290,6 @@ func (r *backgroundRun) isQueued() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.queued
-}
-
-func (r *backgroundRun) collect() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !r.status.IsTerminal() || r.collected {
-		return false
-	}
-	r.collected = true
-	return true
 }
 
 func (r *backgroundRun) isCollected() bool {

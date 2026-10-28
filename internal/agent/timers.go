@@ -77,6 +77,26 @@ type sessionTimer struct {
 func (t *sessionTimer) info(now time.Time) TimerInfo {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.infoLocked(now)
+}
+
+// take returns the timer's current state and claims its result for this
+// caller, in one lock, so two waits racing on one fired timer cannot both
+// be told they collected it.
+func (t *sessionTimer) take(now time.Time) (info TimerInfo, delivered bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	info = t.infoLocked(now)
+	delivered = t.state != TimerArmed && !t.collected
+	if delivered {
+		t.collected = true
+		info.Collected = true
+	}
+	return info, delivered
+}
+
+// infoLocked builds the timer's snapshot. Callers hold mu.
+func (t *sessionTimer) infoLocked(now time.Time) TimerInfo {
 	info := TimerInfo{
 		ID:        t.id,
 		State:     t.state,

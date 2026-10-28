@@ -113,6 +113,29 @@ func (j *backgroundJob) attachOutput(out *jobLog) {
 func (j *backgroundJob) info() JobInfo {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	return j.infoLocked()
+}
+
+// take returns the job's current state and claims its result for this
+// caller, in one lock: a waiter reports a result as its own only when it
+// is the call that collected it, and two waits racing on one finished job
+// cannot both be told that. delivered is false for a running job, for a
+// result someone else already collected, and for the caller that finds
+// it collected.
+func (j *backgroundJob) take() (info JobInfo, delivered bool) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	info = j.infoLocked()
+	delivered = j.state != JobRunning && !j.collected
+	if delivered {
+		j.collected = true
+		info.Collected = true
+	}
+	return info, delivered
+}
+
+// infoLocked builds the job's snapshot. Callers hold mu.
+func (j *backgroundJob) infoLocked() JobInfo {
 	info := JobInfo{
 		ID:        j.id,
 		State:     j.state,

@@ -404,17 +404,72 @@ func TestWaitTool_ConcurrentWaitsCollectOnce(t *testing.T) {
 	run := registerTestRun(coord, "parent-1", "fast")
 	run.finish(subagents.StatusCompleted, fantasy.NewTextResponse("only once"))
 
-	results := make(chan fantasy.ToolResponse, 4)
-	for range 4 {
+	assertSingleCollection(t, coord, []string{run.handle})
+}
+
+// TestWaitTool_ConcurrentWaitsCollectJobOnce pins the same one-shot rule
+// for a job: a snapshot reports the result to exactly one racing wait,
+// never to two that each read the job's state before either claimed it.
+func TestWaitTool_ConcurrentWaitsCollectJobOnce(t *testing.T) {
+	coord := newTestCoordinator(t, testEnv(t), "p", providerCfgP)
+	job := startTestJob(t, coord, "parent-1", "echo only-job")
+	require.Eventually(t, func() bool {
+		return coord.jobs.lookup("parent-1", job).info().State != JobRunning
+	}, 10*time.Second, 20*time.Millisecond)
+
+	assertSingleCollection(t, coord, []string{job})
+}
+
+// TestWaitTool_ConcurrentWaitsCollectTimerOnce pins it for a timer too:
+// only the wait that took the fired timer reports it, the rest say an
+// earlier wait returned it.
+func TestWaitTool_ConcurrentWaitsCollectTimerOnce(t *testing.T) {
+	coord := newTestCoordinator(t, testEnv(t), "p", providerCfgP)
+	clock := newFakeClock()
+	coord.timers.now = clock.Now
+	timer := armTestTimer(t, coord, "parent-1", time.Second)
+	clock.Advance(2 * time.Second)
+	require.Eventually(t, func() bool {
+		return coord.timers.lookup("parent-1", timer).info(clock.Now()).State == TimerFired
+	}, 10*time.Second, 20*time.Millisecond)
+
+	zero := 0
+	const waits = 4
+	results := make(chan fantasy.ToolResponse, waits)
+	for range waits {
 		go func() {
-			results <- runWait(t, coord, context.Background(), "parent-1", waitInput(t, []string{run.handle}, nil))
+			results <- runWait(t, coord, context.Background(), "parent-1", waitInput(t, []string{timer}, &zero))
 		}()
 	}
 	delivered := 0
-	for range 4 {
+	for range waits {
 		resp := <-results
 		require.False(t, resp.IsError, resp.Content)
-		if strings.Contains(resp.Content, "only once") {
+		if !strings.Contains(resp.Content, "already returned by an earlier wait") {
+			delivered++
+		}
+	}
+	assert.Equal(t, 1, delivered)
+}
+
+// assertSingleCollection runs four waits for the same ids at once and
+// requires exactly one of them to report the result as collected by this
+// call: every other one must say an earlier wait already returned it.
+func assertSingleCollection(t *testing.T, coord *coordinator, ids []string) {
+	t.Helper()
+	zero := 0
+	const waits = 4
+	results := make(chan fantasy.ToolResponse, waits)
+	for range waits {
+		go func() {
+			results <- runWait(t, coord, context.Background(), "parent-1", waitInput(t, ids, &zero))
+		}()
+	}
+	delivered := 0
+	for range waits {
+		resp := <-results
+		require.False(t, resp.IsError, resp.Content)
+		if !strings.Contains(resp.Content, "already returned by an earlier wait") {
 			delivered++
 		}
 	}

@@ -129,11 +129,7 @@ func (c *coordinator) waitSnapshot(targets waitTargets) ([]tools.WaitItem, int) 
 	items := make([]tools.WaitItem, 0, len(targets.jobs)+len(targets.timers)+len(targets.runs))
 	outstanding := 0
 	for _, job := range targets.jobs {
-		info := job.info()
-		alreadyCollected := info.Collected
-		if job.collect() {
-			alreadyCollected = false
-		}
+		info, delivered := job.take()
 		if info.State == JobRunning {
 			outstanding++
 		}
@@ -143,7 +139,7 @@ func (c *coordinator) waitSnapshot(targets waitTargets) ([]tools.WaitItem, int) 
 			Subject:          info.Command,
 			Status:           string(info.State),
 			Finished:         info.State != JobRunning,
-			AlreadyCollected: alreadyCollected,
+			AlreadyCollected: info.State != JobRunning && !delivered,
 			Elapsed:          info.Elapsed,
 			ExitCode:         info.ExitCode,
 			Output:           info.Output,
@@ -151,11 +147,7 @@ func (c *coordinator) waitSnapshot(targets waitTargets) ([]tools.WaitItem, int) 
 	}
 	now := c.timers.now()
 	for _, timer := range targets.timers {
-		info := timer.info(now)
-		alreadyCollected := info.Collected
-		if timer.collect() {
-			alreadyCollected = false
-		}
+		info, delivered := timer.take(now)
 		if info.State == TimerArmed {
 			outstanding++
 		}
@@ -165,16 +157,12 @@ func (c *coordinator) waitSnapshot(targets waitTargets) ([]tools.WaitItem, int) 
 			Subject:          info.Duration.String(),
 			Status:           string(info.State),
 			Finished:         info.State != TimerArmed,
-			AlreadyCollected: alreadyCollected,
+			AlreadyCollected: info.State != TimerArmed && !delivered,
 			Remaining:        info.Remaining,
 		})
 	}
 	for _, run := range targets.runs {
-		finished, status, result, resultErr := run.snapshot()
-		alreadyCollected := run.isCollected()
-		if run.collect() {
-			alreadyCollected = false
-		}
+		finished, status, result, resultErr, delivered := run.take()
 		if !finished {
 			outstanding++
 		}
@@ -184,7 +172,7 @@ func (c *coordinator) waitSnapshot(targets waitTargets) ([]tools.WaitItem, int) 
 			Subject:          run.agentName,
 			Status:           string(status),
 			Finished:         finished,
-			AlreadyCollected: alreadyCollected,
+			AlreadyCollected: finished && !delivered,
 			Queued:           !finished && run.isQueued(),
 			Result:           result,
 			ResultErr:        resultErr,
