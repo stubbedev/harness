@@ -60,8 +60,11 @@ func runWait(t *testing.T, coord *coordinator, ctx context.Context, sessionID st
 
 // startTestJob starts a real background job of the session, returning its
 // id, and stops it when the test ends so a sleeping command cannot leak.
+// The commands it starts are written for a POSIX shell, so it skips
+// alongside the job tests themselves.
 func startTestJob(t *testing.T, coord *coordinator, sessionID, command string) string {
 	t.Helper()
+	requireJobShell(t)
 	job, err := coord.jobs.start(sessionID, command, t.TempDir(), t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() { coord.jobs.cancel(job.parentSession, job.id) })
@@ -315,6 +318,7 @@ func TestWaitTool_CancelledContextReturnsEarly(t *testing.T) {
 }
 
 func TestWaitTool_ReturnsWhenAnyWaitedTargetFinishes(t *testing.T) {
+	requireJobShell(t)
 	coord := newTestCoordinator(t, testEnv(t), "p", providerCfgP)
 	first, err := coord.jobs.start("parent-1", "echo first-job", t.TempDir(), t.TempDir())
 	require.NoError(t, err)
@@ -519,6 +523,7 @@ func TestWaitTool_Rejections(t *testing.T) {
 // turns - one to dispatch, one to wait, one to answer - not on the clock.
 func TestWaitTool_ScriptedTurnWaitsOnceForAJob(t *testing.T) {
 	t.Parallel()
+	requireJobShell(t)
 
 	env := testEnv(t)
 	coord := newTestCoordinator(t, env, "p", providerCfgP)
