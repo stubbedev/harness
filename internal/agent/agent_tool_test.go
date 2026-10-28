@@ -9,6 +9,7 @@ import (
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/openaicompat"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/catalog"
@@ -77,9 +78,13 @@ func TestBuildAgentDispatchInfo_NothingRequired(t *testing.T) {
 
 	info := buildAgentDispatchInfo(nil)
 
-	// A call with no prompt waits for background agents, so the schema
-	// cannot demand one.
+	// A dispatch needs a prompt, but the schema cannot demand one: a call
+	// without it is classified as a (historical) wait and answered with the
+	// wait tool's name.
 	require.NotContains(t, info.Required, "prompt")
+	promptParam := info.Parameters["prompt"].(map[string]any)
+	require.NotContains(t, promptParam["description"], "wait",
+		"the prompt no longer advertises the wait: the wait tool does that")
 
 	// subagent_type is optional — should NOT appear in Required
 	for _, r := range info.Required {
@@ -158,6 +163,23 @@ func TestDispatcherTool_Run_EmptySubagentType_PassesThrough(t *testing.T) {
 	// The dispatcher passes params through as-is; defaulting an omitted
 	// subagent_type to the fast agent happens in the dispatch closure.
 	require.Empty(t, capturedParams.SubagentType)
+}
+
+// TestAgentToolPromptlessCallPointsAtWait pins the split: the agent tool
+// no longer waits for background agents, and a promptless call says which
+// tool does.
+func TestAgentToolPromptlessCallPointsAtWait(t *testing.T) {
+	t.Parallel()
+
+	coord := newTestCoordinator(t, testEnv(t), "p", providerCfgP)
+	tool, err := coord.agentTool(t.Context())
+	require.NoError(t, err)
+
+	resp, err := tool.Run(sessionCtx(t.Context(), "s1"), fantasy.ToolCall{ID: "c1", Name: AgentToolName, Input: `{}`})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	assert.Contains(t, resp.Content, "no longer waits")
+	assert.Contains(t, resp.Content, "wait tool")
 }
 
 func TestDispatcherTool_ProviderOptions_RoundTrip(t *testing.T) {

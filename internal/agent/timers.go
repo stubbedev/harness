@@ -330,16 +330,22 @@ func (r *timerRegistry) lookup(parentSession, timerID string) *sessionTimer {
 	return nil
 }
 
+// records returns every timer the session armed so far, oldest first, so
+// a later wait can collect them without holding their records open.
+func (r *timerRegistry) records(parentSession string) []*sessionTimer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if session := r.sessions[parentSession]; session != nil {
+		return slices.Clone(session.timers)
+	}
+	return nil
+}
+
 // timers returns a snapshot of every timer the session has armed so far,
 // oldest first: what a later wait reports without holding a record open.
 func (r *timerRegistry) timers(parentSession string) []TimerInfo {
 	now := r.now()
-	r.mu.Lock()
-	var records []*sessionTimer
-	if session := r.sessions[parentSession]; session != nil {
-		records = slices.Clone(session.timers)
-	}
-	r.mu.Unlock()
+	records := r.records(parentSession)
 	infos := make([]TimerInfo, 0, len(records))
 	for _, timer := range records {
 		infos = append(infos, timer.info(now))

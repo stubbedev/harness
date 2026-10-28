@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -81,7 +82,10 @@ type JobInfo struct {
 // collect the result exactly once, and its log path names the file that
 // keeps everything the command printed.
 type backgroundJob struct {
-	id            string
+	id string
+	// seq is the job's position in its session's mint order, so a
+	// session's jobs can be listed oldest first.
+	seq           int
 	parentSession string
 	command       string
 	logPath       string
@@ -379,6 +383,7 @@ func (r *jobRegistry) reserve(parentSession, command, logDir string, cancel cont
 	id := fmt.Sprintf("job-%d", r.seq[parentSession])
 	job := &backgroundJob{
 		id:            id,
+		seq:           r.seq[parentSession],
 		parentSession: parentSession,
 		command:       command,
 		logPath:       filepath.Join(logDir, parentSession+"-"+id+".log"),
@@ -467,6 +472,19 @@ func (r *jobRegistry) cancelAll() {
 	for _, session := range sessions {
 		r.cancelSession(session)
 	}
+}
+
+// list returns every job the session started so far, oldest first: what a
+// wait with no ids watches, and what an unknown id's error names.
+func (r *jobRegistry) list(parentSession string) []*backgroundJob {
+	r.mu.Lock()
+	jobs := make([]*backgroundJob, 0, len(r.jobs[parentSession]))
+	for _, job := range r.jobs[parentSession] {
+		jobs = append(jobs, job)
+	}
+	r.mu.Unlock()
+	slices.SortFunc(jobs, func(a, b *backgroundJob) int { return a.seq - b.seq })
+	return jobs
 }
 
 // lookup returns a session's job record, or nil when that session never

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"charm.land/fantasy"
+
+	"github.com/stubbedev/harness/internal/toolname"
 )
 
 // uniqueHandles drops empty and repeated handles, keeping the order they
@@ -76,8 +78,8 @@ func (c *coordinator) resolveRunningTargets(parentSession string, requested []st
 	}
 	if len(finished) > 0 {
 		resp := fantasy.NewTextErrorResponse(fmt.Sprintf(
-			"nothing was sent: these agents already finished and take no further steps: %s. Collect their results by calling %s with no prompt.",
-			strings.Join(finished, ", "), AgentToolName,
+			"nothing was sent: these agents already finished and take no further steps: %s. Collect their results by calling the %s tool.",
+			strings.Join(finished, ", "), toolname.Wait,
 		))
 		return nil, &resp
 	}
@@ -176,8 +178,8 @@ func (c *coordinator) cancelSubagents(parentSession string, requested []string) 
 	var lines []string
 	if len(cancelled) > 0 {
 		lines = append(lines, fmt.Sprintf(
-			"Cancelled %d agent(s): %s. Collect their results by calling %s with no prompt.",
-			len(cancelled), describeRuns(cancelled), AgentToolName))
+			"Cancelled %d agent(s): %s. Collect their results by calling the %s tool.",
+			len(cancelled), describeRuns(cancelled), toolname.Wait))
 	}
 	if len(gone) > 0 {
 		lines = append(lines, "Already finished before the cancel landed: "+strings.Join(gone, ", "))

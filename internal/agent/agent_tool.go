@@ -36,8 +36,10 @@ type AgentParams struct {
 }
 
 // AgentDispatchParams is the input to the dispatcher agent tool. With a
-// prompt it dispatches; without one it waits for background agents
-// already dispatched (see coordinator.waitForSubagents).
+// prompt it dispatches; without one it used to wait for background
+// agents, which the wait tool now does (see coordinator.Wait). A
+// promptless call is still classified as AgentCallWait so historical
+// transcripts and their renderers keep decoding.
 type AgentDispatchParams struct {
 	SubagentType string `json:"subagent_type,omitempty"`
 	Prompt       string `json:"prompt,omitempty"`
@@ -47,10 +49,8 @@ type AgentDispatchParams struct {
 	// dispatches in the background — the call returns a handle immediately
 	// and the orchestrator keeps working while the child runs.
 	Blocking bool `json:"blocking,omitempty"`
-	// Handles names the background agents a wait, message or cancel
-	// applies to; TimeoutSeconds bounds a wait.
-	Handles        []string `json:"handles,omitempty"`
-	TimeoutSeconds *int     `json:"timeout_seconds,omitempty"`
+	// Handles names the background agents a message or cancel applies to.
+	Handles []string `json:"handles,omitempty"`
 	// Message is text for running background agents, delivered to each
 	// as a user message before its next step.
 	Message string `json:"message,omitempty"`
@@ -215,7 +215,7 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			},
 			"prompt": map[string]any{
 				"type":        "string",
-				"description": "The task for the agent to perform. Leave empty to wait for background agents instead of dispatching one.",
+				"description": "The task for the agent to perform.",
 			},
 			"isolation": map[string]any{
 				"type":        "string",
@@ -229,7 +229,7 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			"handles": map[string]any{
 				"type":        "array",
 				"items":       map[string]any{"type": "string"},
-				"description": "Handles returned by earlier calls, for waiting, `message` or `cancel`. A wait returns when any of them finishes; empty waits on every background agent whose result has not been returned yet and messages every running one; `cancel` requires them.",
+				"description": "Handles returned by earlier calls, for `message` or `cancel`.",
 			},
 			"message": map[string]any{
 				"type":        "string",
@@ -237,11 +237,7 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			},
 			"cancel": map[string]any{
 				"type":        "boolean",
-				"description": "Instead of dispatching, cancel the running or queued background agents in `handles`. Their results are still collected by waiting.",
-			},
-			"timeout_seconds": map[string]any{
-				"type":        "integer",
-				"description": fmt.Sprintf("Waiting only: how long to wait, in seconds. Default %d, maximum %d. 0 never blocks: it returns the current snapshot immediately.", defaultWaitTimeoutSeconds, maxWaitTimeoutSeconds),
+				"description": "Instead of dispatching, cancel the running or queued background agents in `handles`. Their results are still collected by the wait tool.",
 			},
 		},
 		// Every field is optional -- the dispatching form needs a prompt,
@@ -361,7 +357,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 			}
 			switch params.Kind() {
 			case AgentCallWait:
-				return c.waitForSubagents(ctx, sessionID, params.Handles, params.TimeoutSeconds), nil
+				return fantasy.NewTextErrorResponse("the agent tool no longer waits: call the wait tool with no wait_for to collect background jobs, timers and agents"), nil
 			case AgentCallMessage:
 				return c.messageSubagents(ctx, sessionID, params.Handles, params.Message), nil
 			case AgentCallCancel:

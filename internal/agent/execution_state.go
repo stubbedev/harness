@@ -387,7 +387,7 @@ func (s *executionState) ingestResult(call message.ToolCall, result message.Tool
 		}
 		s.put(&s.Verification, entry)
 	}
-	if call.Name == toolname.Agent {
+	if call.Name == toolname.Agent || call.Name == toolname.Wait {
 		var dispatched struct {
 			Jobs []backgroundJobMetadata `json:"jobs"`
 		}

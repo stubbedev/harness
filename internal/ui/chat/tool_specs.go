@@ -96,6 +96,8 @@ var genericTools = map[string]bool{
 	toolname.SkillSearch:   true,
 	toolname.ToolSearch:    true,
 	toolname.ExtensionJobs: true,
+	toolname.Timer:         true,
+	toolname.Wait:          true,
 }
 
 func copyMarkdownResult(t *baseToolMessageItem) string {

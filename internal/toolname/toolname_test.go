@@ -52,6 +52,22 @@ func TestBuiltinsAreNotMCP(t *testing.T) {
 	}
 }
 
+// TestPlumbingToolsAreBuiltinButNotAllowlistable pins the plumbing block:
+// every name there is a built-in the harness installs itself, and none of
+// them may be named in an allowlist.
+func TestPlumbingToolsAreBuiltinButNotAllowlistable(t *testing.T) {
+	t.Parallel()
+
+	require.Contains(t, Plumbing(), Wait)
+	for _, name := range Plumbing() {
+		require.True(t, IsBuiltin(name), name)
+		require.NotContains(t, Allowlistable(), name)
+		require.NotContains(t, SubagentDefaults(), name)
+		_, _, ok := SplitMCP(name, "")
+		require.False(t, ok, name)
+	}
+}
+
 func TestLegacyDiagnosticsIsBuiltinButNotAllowlistable(t *testing.T) {
 	t.Parallel()
 

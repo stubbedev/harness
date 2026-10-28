@@ -46,6 +46,7 @@ import (
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/subagents"
+	"github.com/stubbedev/harness/internal/toolname"
 	"golang.org/x/sync/errgroup"
 
 	"charm.land/fantasy/providers/anthropic"
@@ -1299,10 +1300,10 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// one is the opt-in.
 	filteredTools = append(filteredTools, c.extensions.Tools()...)
 
-	// The timer tool is plumbing: every agent, sub-agents included, can
-	// arm a timer whatever its allow list says, and its name is never
-	// written in one.
-	filteredTools = append(filteredTools, tools.NewTimerTool(c))
+	// The timer and wait tools are plumbing: every agent, sub-agents
+	// included, can arm a timer and wait for background work whatever its
+	// allow list says, and their names are never written in one.
+	filteredTools = append(filteredTools, tools.NewTimerTool(c), tools.NewWaitTool(c))
 
 	// Skills defer the same way: only their names ride in the context,
 	// behind a search that hands over a trigger and then the SKILL.md
@@ -2569,8 +2570,8 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 	}()
 
 	return withBackgroundMetadata(fantasy.NewTextResponse(fmt.Sprintf(
-		"Started background agent %q with handle %s. It runs independently of this tool call (queued until a concurrency slot frees): messages it sends you arrive as new user messages between your steps, and its result is collected by calling %s with no prompt, which returns as soon as any waited agent finishes (handles: [%s]).",
-		params.AgentName, run.handle, AgentToolName, run.handle)), []*backgroundRun{run}), nil
+		"Started background agent %q with handle %s. It runs independently of this tool call (queued until a concurrency slot frees): messages it sends you arrive as new user messages between your steps, and its result is collected by the %s tool, which returns as soon as any waited work finishes (wait_for: [%s]).",
+		params.AgentName, run.handle, toolname.Wait, run.handle)), []*backgroundRun{run}), nil
 }
 
 func (c *coordinator) runQueuedSubAgent(runCtx, parentCtx context.Context, session session.Session, params subAgentParams, run *backgroundRun) (fantasy.ToolResponse, subagents.RunStatus) {

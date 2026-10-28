@@ -35,7 +35,12 @@ const (
 	ToolSearch    = "tool_search"
 	ExtensionJobs = "extension_jobs"
 	Timer         = "timer"
+	Wait          = "wait"
 )
+
+// plumbing is every name in the plumbing const block, in the order they
+// were added.
+var plumbing = []string{SkillSearch, ToolSearch, ExtensionJobs, Timer, Wait}
 
 const LegacyDiagnostics = "lsp_diagnostics"
 
@@ -57,13 +62,16 @@ func Allowlistable() []string { return slices.Clone(allowlistable) }
 // SubagentDefaults returns the tools a generic dispatched agent gets.
 func SubagentDefaults() []string { return slices.Clone(subagentDefaults) }
 
+// Plumbing returns every plumbing tool name: the tools the harness
+// installs on its own terms, which no allowlist names.
+func Plumbing() []string { return slices.Clone(plumbing) }
+
 // IsBuiltin reports whether name belongs to a built-in tool, plumbing
 // included. A built-in can share the MCP prefix (mcp_resource), so this is
 // what separates the two.
 func IsBuiltin(name string) bool {
 	return slices.Contains(allowlistable, name) ||
-		name == SkillSearch || name == ToolSearch || name == ExtensionJobs ||
-		name == Timer || name == LegacyDiagnostics
+		slices.Contains(plumbing, name) || name == LegacyDiagnostics
 }
 
 const (

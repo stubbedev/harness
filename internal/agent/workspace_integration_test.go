@@ -49,9 +49,9 @@ func TestWorkspaceBuildToolsUseChildRoot(t *testing.T) {
 	require.NotSame(t, coord.lspManager, workspace.manager)
 	built, err := coord.buildTools(t.Context(), config.Agent{ID: config.AgentTask, AllowedTools: []string{"view"}}, true, workspace)
 	require.NoError(t, err)
-	// The allowlisted view tool, plus the plumbing timer tool every
-	// agent gets whatever its allow list says.
-	require.Len(t, built, 2)
+	// The allowlisted view tool, plus the plumbing timer and wait tools
+	// every agent gets whatever its allow list says.
+	require.Len(t, built, 3)
 	view := findTool(t, built, tools.ViewToolName)
 	ctx := context.WithValue(t.Context(), tools.SessionIDContextKey, "child")
 	response, err := view.Run(ctx, fantasy.ToolCall{Input: `{"file_path":"note.txt"}`})
