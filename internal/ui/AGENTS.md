@@ -146,7 +146,8 @@ history label the same file identically.
 | `chat/diagnostics.go` | The lsp tool and its diagnostics action        |
 | `chat/references.go`, `definition.go`, `symbols.go` | Find References, Find Definition, List Symbols |
 | `chat/rename.go`, `replace_symbol.go`, `call_hierarchy.go`, `lsp_restart.go` | The remaining lsp actions |
-| `chat/wait_tool.go`   | Historical dispatcher waits                   |
+| `chat/wait_tool.go`   | Wait, and historical dispatcher waits          |
+| `chat/timer_tool.go`  | Timer                                          |
 | `chat/agent_control_tool.go` | Subagent message and cancel             |
 | `chat/mcp.go`         | MCP tools (`mcp_` prefix)                      |
 | `chat/generic.go`     | Fallback for unrecognized tools                |
@@ -177,10 +178,13 @@ Expansion lives only behind `Expandable.SetExpansionLevel`, which both
 the toggles and the restore go through. In an agent's session
 the editor steers the agent via `Workspace.SteerAgent`; a pinned `Main
 Agent` row and escape switch back. Rows are removed when the run
-finishes. Background work is now collected by the `wait` tool, which
-renders generically; a historical dispatcher call with no prompt still
-renders through `chat/wait_tool.go` (live count via `chat.ItemEnv`),
-which is where the old "Waiting for N agents" state lives. What renders
+finishes. Background work is collected by the `wait` tool, which
+renders through `chat/wait_tool.go` under a progressive label
+(`Waiting everything outstanding` / `Waited job-1, timer-2`); a
+historical dispatcher call with no prompt renders through the same
+file (live count via `chat.ItemEnv`), which is where the old
+"Waiting for N agents" state lives. The `timer` tool renders through
+`chat/timer_tool.go` with its armed length. What renders
 on screen is decided once by `chat.RendersInTranscript`, shared by
 extraction and export so the two cannot drift.
 

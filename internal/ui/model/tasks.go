@@ -173,8 +173,9 @@ func (m *UI) tasksSpinning() bool {
 }
 
 // runningAgentCount is how many tracked tasks are still running. One
-// source for the wait call's "Waiting for N agents" header (via
-// itemEnv) and the strip's spinning state.
+// source for the historical dispatcher wait's "Waiting for N agents"
+// header (via itemEnv) and the strip's spinning state. A built-in wait
+// call names its own targets from its input, so it needs no count.
 func (m *UI) runningAgentCount() int {
 	n := 0
 	for _, t := range m.agentTasks {

@@ -5,6 +5,25 @@ import (
 	"strings"
 )
 
+// partialBoolField reports whether a boolean field has arrived as true
+// in a streamed JSON fragment. It is a tolerant scan like
+// [partialStringField]: it finds `"key"`, the colon, and checks for the
+// literal `true`. A false value, another kind, or a literal still
+// streaming reads as false, so a caller only acts once the value is
+// whole.
+func partialBoolField(input, key string) bool {
+	_, rest, found := strings.Cut(input, `"`+key+`"`)
+	if !found {
+		return false
+	}
+	rest = strings.TrimLeft(rest, " \t\r\n")
+	if !strings.HasPrefix(rest, ":") {
+		return false
+	}
+	rest = strings.TrimLeft(rest[1:], " \t\r\n")
+	return strings.HasPrefix(rest, "true")
+}
+
 // A tool call's input arrives as a stream of JSON fragments; the UI sees
 // the call long before the object is complete. partialStringField pulls
 // one string field out of such a fragment so the transcript can show the

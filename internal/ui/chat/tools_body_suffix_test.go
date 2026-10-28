@@ -130,7 +130,7 @@ func TestSpinningWaitToolKeepsLiveLabelAndNoWaitingLine(t *testing.T) {
 	waiting := 2
 	env := &ItemEnv{WaitingAgents: func() int { return waiting }}
 	tc := message.ToolCall{ID: "toolu_1", Name: agent.AgentToolName, Input: `{}`}
-	item := newBaseToolMessageItem(&sty, tc, nil, &WaitToolRenderContext{}, false, env)
+	item := newBaseToolMessageItem(&sty, tc, nil, &DispatcherWaitRenderContext{}, false, env)
 
 	plain := ansi.Strip(item.Render(80))
 	require.Contains(t, plain, "Waiting for 2 agents")

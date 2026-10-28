@@ -331,6 +331,27 @@ func copyFetchParams(input string) string {
 	return ""
 }
 
+func copyWaitParams(input string) string {
+	var params tools.WaitParams
+	if json.Unmarshal([]byte(input), &params) != nil {
+		return ""
+	}
+	return copyField("Waiting for", waitTarget(params))
+}
+
+// copyTimerParams copies a timer call's armed length, the one parameter
+// it carries.
+func copyTimerParams(input string) string {
+	var params tools.TimerParams
+	if json.Unmarshal([]byte(input), &params) != nil {
+		return ""
+	}
+	if duration := timerDuration(params.Seconds); duration != "" {
+		return copyField("Duration", duration)
+	}
+	return ""
+}
+
 func copyResearchParams(input string) string {
 	var params tools.ResearchParams
 	if json.Unmarshal([]byte(input), &params) == nil {

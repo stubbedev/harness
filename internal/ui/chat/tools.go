@@ -295,7 +295,7 @@ func toolRendererFor(toolCall message.ToolCall) ToolRenderer {
 	if toolCall.Name == agent.AgentToolName {
 		switch _, kind, _ := agent.DecodeAgentCall(toolCall); kind {
 		case agent.AgentCallWait:
-			return &WaitToolRenderContext{}
+			return &DispatcherWaitRenderContext{}
 		case agent.AgentCallMessage, agent.AgentCallCancel:
 			return &AgentControlToolRenderContext{kind: kind}
 		case agent.AgentCallDispatch:
@@ -478,8 +478,7 @@ func (t *baseToolMessageItem) showsWaitingLine() bool {
 	if t.isCompact || t.EffectiveStatus() != ToolStatusRunning {
 		return false
 	}
-	_, isWait := t.toolRenderer.(*WaitToolRenderContext)
-	return !isWait
+	return !isWaitRenderer(t.toolRenderer)
 }
 
 // bodyKeyToken hashes the render-time input that can change the body
@@ -488,7 +487,7 @@ func (t *baseToolMessageItem) showsWaitingLine() bool {
 // body cache key. Zero for every other renderer, whose render inputs
 // all invalidate through the item's version.
 func (t *baseToolMessageItem) bodyKeyToken() uint64 {
-	if _, ok := t.toolRenderer.(*WaitToolRenderContext); !ok {
+	if _, ok := t.toolRenderer.(*DispatcherWaitRenderContext); !ok {
 		return 0
 	}
 	return fnv64(t.DisplayName())
@@ -760,6 +759,35 @@ func renderStandardTool(
 		return joinToolParts(header, toolPlainBody(sty, opts, width))
 	}
 	return joinToolParts(header, body())
+}
+
+// renderTimedResult renders the shape of a call that watches time: one
+// header summary, the elapsed badge beside it, and the result as
+// terminal content. The wait and timer tools share it. showWaitingLine
+// says whether the running state's generic line belongs under the
+// header: a wait names its own running state, so it does not.
+func renderTimedResult(sty *styles.Styles, width int, opts *ToolRenderOpts, summary string, showWaitingLine bool) string {
+	var toolParams []string
+	if summary != "" {
+		toolParams = append(toolParams, summary)
+	}
+	if badge := toolDurationBadge(opts.Elapsed); badge != "" {
+		toolParams = append(toolParams, "", badge)
+	}
+	header := strings.TrimSuffix(toolHeader(sty, opts.Name, width, opts, toolParams...), " ")
+	if opts.Compact {
+		return header
+	}
+	if !showWaitingLine && opts.Status == ToolStatusRunning {
+		return header
+	}
+	if earlyState, ok := toolEarlyStateContent(sty, opts, width); ok {
+		return joinToolParts(header, earlyState)
+	}
+	if opts.HasEmptyResult() {
+		return header
+	}
+	return joinToolParts(header, toolOutputTerminalContent(sty, opts.Result.Content, width, opts.ExpandedContent))
 }
 
 // toolDurationBadge formats how long a call took, or "" when it is too
@@ -1388,12 +1416,15 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 // DisplayName implements [ToolMessageItem]. It is the one place a call's
 // label is decided, so a full renderer's header (through
 // [ToolRenderOpts.Name]), a collapsed group's one-liner and the
-// clipboard heading cannot drift apart. A wait call is labeled by what it
-// is doing, live agent count included: its wire name cannot tell it from
-// a dispatch, and the count is item state. Every other call is labeled
-// from its wire name by [callLabel].
+// clipboard heading cannot drift apart. Both wait forms are labelled by
+// what they are doing: the built-in wait tool by its tense, the
+// dispatcher's historical wait by its tense and live agent count. Every
+// other call is labeled from its wire name by [callLabel].
 func (t *baseToolMessageItem) DisplayName() string {
 	if _, ok := t.toolRenderer.(*WaitToolRenderContext); ok {
+		return waitToolLabel(t.EffectiveStatus() == ToolStatusRunning)
+	}
+	if _, ok := t.toolRenderer.(*DispatcherWaitRenderContext); ok {
 		waiting := 0
 		if t.waitingAgents != nil {
 			waiting = t.waitingAgents()

@@ -1,21 +1,37 @@
 package chat
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
 
-// WaitToolRenderContext renders the dispatcher tool's waiting form: the
-// call with no prompt that blocks until background subagents report
-// back. While pending it says how many agents it is still waiting on,
-// so the transcript says what the turn is doing; once settled its
-// header carries the wait's outcome and its body the collected reports.
+// WaitToolRenderContext renders the wait tool: the call that blocks
+// until named background work - jobs, timers and background agents -
+// finishes, and reports what finished and what is still outstanding.
+// Its header names what it waits on, so the transcript says what the
+// turn is doing; the report is its body.
 type WaitToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WaitToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	var params tools.WaitParams
+	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
+	return renderTimedResult(sty, width, opts, waitTarget(params), false)
+}
+
+// DispatcherWaitRenderContext renders the dispatcher tool's historical
+// waiting form: the call with no prompt that blocks until background
+// subagents report back. While pending it says how many agents it is
+// still waiting on; once settled its header carries the wait's outcome
+// and its body the collected reports.
+type DispatcherWaitRenderContext struct{}
+
+// RenderTool implements the [ToolRenderer] interface.
+func (w *DispatcherWaitRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
 	label := opts.Name
 	if opts.Status == ToolStatusRunning {
 		// The header already says the turn is waiting and on how many
@@ -43,9 +59,40 @@ func (w *WaitToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *
 	})
 }
 
-// waitLabel names a wait call: the live count while it runs, the past
-// tense once the wait returned. It is the call's
-// [ToolMessageItem.DisplayName], so every surface shows it.
+// isWaitRenderer reports whether r renders a wait call: the built-in
+// wait tool or the dispatcher's historical waiting form. Both name the
+// call by what it is doing, so the generic "Waiting for tool response"
+// line would only repeat the header.
+func isWaitRenderer(r ToolRenderer) bool {
+	switch r.(type) {
+	case *WaitToolRenderContext, *DispatcherWaitRenderContext:
+		return true
+	}
+	return false
+}
+
+// waitTarget summarises what a wait call watches: every piece of work
+// the session still has outstanding when none is named, otherwise the
+// ids it was given.
+func waitTarget(params tools.WaitParams) string {
+	if len(params.WaitFor) == 0 {
+		return "everything outstanding"
+	}
+	return strings.Join(params.WaitFor, ", ")
+}
+
+// waitToolLabel names the wait tool's call: the tense follows the run,
+// like every other progressive label.
+func waitToolLabel(running bool) string {
+	if running {
+		return "Waiting"
+	}
+	return "Waited"
+}
+
+// waitLabel names a historical dispatcher wait call: the live agent
+// count while it runs, the past tense once the wait returned. It is the
+// call's [ToolMessageItem.DisplayName], so every surface shows it.
 func waitLabel(running bool, waiting int) string {
 	if running {
 		if waiting > 0 {

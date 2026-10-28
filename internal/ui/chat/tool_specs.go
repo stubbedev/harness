@@ -72,6 +72,16 @@ var toolSpecs = map[string]toolSpec{
 		copyParams: copyResearchParams,
 		copyResult: copyMarkdownResult,
 	},
+	tools.WaitToolName: {
+		label:      "Wait",
+		renderer:   func() ToolRenderer { return &WaitToolRenderContext{} },
+		copyParams: copyWaitParams,
+	},
+	tools.TimerToolName: {
+		label:      "Timer",
+		renderer:   func() ToolRenderer { return &TimerToolRenderContext{} },
+		copyParams: copyTimerParams,
+	},
 	agent.AgentToolName: {
 		copyParams: copyAgentParams,
 		copyResult: copyMarkdownResult,
@@ -96,8 +106,6 @@ var genericTools = map[string]bool{
 	toolname.SkillSearch:   true,
 	toolname.ToolSearch:    true,
 	toolname.ExtensionJobs: true,
-	toolname.Timer:         true,
-	toolname.Wait:          true,
 }
 
 func copyMarkdownResult(t *baseToolMessageItem) string {

@@ -32,3 +32,23 @@ func TestPartialStringField(t *testing.T) {
 		assert.Equal(t, tc.want, got, tc.input)
 	}
 }
+
+func TestPartialBoolField(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		input string
+		key   string
+		want  bool
+	}{
+		{`{"run_in_background":true}`, "run_in_background", true},
+		{`{"command":"ls", "run_in_background" : true , "session":`, "run_in_background", true},
+		{`{"run_in_background":false}`, "run_in_background", false},
+		{`{"run_in_background":tru`, "run_in_background", false},
+		{`{"run_in_backgrou`, "run_in_background", false},
+		{`{"run_in_background"`, "run_in_background", false},
+		{`{"run_in_background": "true"}`, "run_in_background", false},
+	} {
+		assert.Equal(t, tc.want, partialBoolField(tc.input, tc.key), tc.input)
+	}
+}
