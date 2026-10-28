@@ -2,7 +2,9 @@ package term
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -188,24 +190,103 @@ func TestSession_SendAfterExitFails(t *testing.T) {
 	require.Error(t, s.Send([]byte("echo late\n")))
 }
 
-// Nothing is guessed: with no shell to be found, Shell says so instead
-// of naming one, and the caller drops the tool rather than opening a
-// session against a path that may not exist.
-func TestShellIdentification(t *testing.T) {
-	t.Setenv("SHELL", "/usr/bin/zsh")
-	sh, ok := Shell()
-	require.True(t, ok)
-	require.NotEmpty(t, sh)
+// fakeShell writes a file named name into dir and returns its path. The
+// name is what identification reads; the file being there and runnable
+// is what resolution checks. Windows names an executable by extension.
+func fakeShell(t *testing.T, dir, name string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755))
+	return path
+}
 
-	// $SHELL naming something that is not a shell is no answer either.
-	// ComSpec goes with it: on Windows it names cmd.exe, which is a real
-	// identification and would answer for the unrecognised $SHELL.
-	t.Setenv("SHELL", "/usr/bin/python")
-	t.Setenv("ComSpec", "")
-	sh, ok = Shell()
-	if parentShell() == "" {
-		require.False(t, ok, "an unrecognised $SHELL is not an identification")
+// A name is not an identification: every candidate is resolved before it
+// is named, and a variable pointing at a shell that is not here leaves
+// the next candidate its turn instead of opening a session against
+// nothing.
+func TestShellIdentification(t *testing.T) {
+	if sh := parentShell(); sh != "" {
+		t.Skip("the shell hosting the test process answers before any variable: " + sh)
+	}
+	dir := t.TempDir()
+	zsh := fakeShell(t, dir, "zsh")
+	cmd := fakeShell(t, dir, "cmd")
+
+	t.Run("the shell a runnable variable names", func(t *testing.T) {
+		t.Setenv("SHELL", zsh)
+		t.Setenv("ComSpec", cmd)
+
+		sh, ok := Shell()
+		require.True(t, ok)
+		require.Equal(t, zsh, sh)
+		require.Equal(t, KindPosix, KindOf(sh))
+	})
+
+	t.Run("a variable naming a shell that is not here is skipped", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		t.Setenv("SHELL", filepath.Join(dir, "gone", "sh"))
+		t.Setenv("ComSpec", cmd)
+
+		sh, ok := Shell()
+		require.True(t, ok, "the next candidate still gets its turn")
+		require.Equal(t, cmd, sh)
+		require.Equal(t, KindCmd, KindOf(sh))
+	})
+
+	t.Run("a moved shell is found by name on PATH", func(t *testing.T) {
+		t.Setenv("PATH", dir)
+		t.Setenv("SHELL", filepath.Join(dir, "gone", "zsh"))
+		t.Setenv("ComSpec", "")
+
+		sh, ok := Shell()
+		require.True(t, ok, "a shell replaced by an upgrade is still a shell")
+		require.Equal(t, zsh, sh)
+	})
+
+	t.Run("nothing runnable is no identification", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		t.Setenv("SHELL", filepath.Join(dir, "gone", "sh"))
+		t.Setenv("ComSpec", "")
+
+		sh, ok := Shell()
+		require.False(t, ok)
 		require.Empty(t, sh)
+	})
+
+	t.Run("an unknown shell is no identification even when runnable", func(t *testing.T) {
+		t.Setenv("SHELL", fakeShell(t, dir, "python"))
+		t.Setenv("ComSpec", "")
+
+		sh, ok := Shell()
+		require.False(t, ok, "an interpreter is not a shell this package can drive")
+		require.Empty(t, sh)
+	})
+}
+
+func TestResolveShell(t *testing.T) {
+	dir := t.TempDir()
+	zsh := fakeShell(t, dir, "zsh")
+
+	for _, tc := range []struct {
+		name   string
+		shell  string
+		want   string
+		wantOK bool
+	}{
+		{name: "empty"},
+		{name: "unknown kind", shell: fakeShell(t, dir, "python")},
+		{name: "present", shell: zsh, want: zsh, wantOK: true},
+		{name: "login shell", shell: "-" + zsh, want: zsh, wantOK: true},
+		{name: "surrounding space", shell: " " + zsh + " ", want: zsh, wantOK: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := resolveShell(tc.shell)
+			require.Equal(t, tc.wantOK, ok)
+			require.Equal(t, tc.want, got)
+		})
 	}
 }
 

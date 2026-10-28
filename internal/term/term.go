@@ -122,9 +122,8 @@ type Session struct {
 }
 
 // Shell returns the shell the terminal session should run and whether
-// one was identified at all: the shell Harness itself was launched from
-// when the parent process is one, otherwise $SHELL or ComSpec when that
-// names a shell this package knows how to drive.
+// one was identified at all, and reports the executable resolved on this
+// machine rather than the name it was found under.
 //
 // Nothing is guessed. A guess here is a terminal that silently fails to
 // open or, worse, one driven with a protocol it does not speak, and the
@@ -133,16 +132,57 @@ type Session struct {
 // cmd included -- the session protocol has a dialect per Kind, so the
 // model is told which shell it has and writes for that one, which is
 // the point of handing it a real shell rather than an interpreter.
+//
+// A name is not an identification: an environment variable can point at
+// a shell that does not exist here, and the common case is a POSIX
+// SHELL exported on Windows (SHELL=/bin/sh), where it names nothing and
+// a session opened against it fails at the first command. Every
+// candidate is therefore resolved to a runnable executable, and the
+// first one that resolves wins (see shellCandidates).
 func Shell() (string, bool) {
-	if sh := parentShell(); sh != "" {
-		return sh, true
-	}
-	for _, name := range []string{"SHELL", "ComSpec"} {
-		if sh := os.Getenv(name); sh != "" && KindOf(sh) != KindUnknown {
-			return sh, true
+	for _, name := range shellCandidates() {
+		if path, ok := resolveShell(name); ok {
+			return path, true
 		}
 	}
 	return "", false
+}
+
+// shellCandidates names every shell that can answer for this process, in
+// the order that decides it: the shell hosting Harness, then $SHELL,
+// then the platform's ComSpec. A missing or unfamiliar candidate stays in
+// the list; resolveShell skips it, so the next one still gets its turn.
+func shellCandidates() []string {
+	return []string{parentProcessName(), os.Getenv("SHELL"), os.Getenv("ComSpec")}
+}
+
+// resolveShell turns a shell name into the executable to run, and reports
+// whether this package can drive it: the name has to be a shell it knows,
+// and it has to resolve to a file the platform can run here. A path that
+// no longer exists falls back to the same shell found on PATH, so a shell
+// replaced or moved by an upgrade is still identified.
+func resolveShell(name string) (string, bool) {
+	name = strings.TrimPrefix(strings.TrimSpace(name), "-")
+	for ; name != ""; name = shellBasename(name) {
+		if KindOf(name) == KindUnknown {
+			return "", false
+		}
+		if path, err := exec.LookPath(name); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// shellBasename returns the file name of a name that carries a directory,
+// and the empty string for a bare name, so resolveShell's PATH fallback
+// runs at most once per candidate.
+func shellBasename(name string) string {
+	i := strings.LastIndexAny(name, `/\`)
+	if i < 0 || i == len(name)-1 {
+		return ""
+	}
+	return name[i+1:]
 }
 
 // Kind is the dialect a shell speaks, which decides how the session
@@ -186,22 +226,13 @@ func KindOf(path string) Kind {
 	return shellKinds[strings.TrimSuffix(base, ".exe")]
 }
 
-// parentShell reports the shell hosting the Harness process by looking
-// at the parent process name; empty when the parent is not a shell
-// (terminal emulator, systemd, an editor task runner, ...) or when the
-// platform offers no way to ask.
+// parentShell reports the shell hosting the Harness process, resolved,
+// or "" when the parent is not a shell this package can drive (terminal
+// emulator, systemd, an editor task runner, ...) or when the platform
+// offers no way to ask.
 func parentShell() string {
-	name := parentProcessName()
-	if name == "" {
-		return ""
-	}
-	if KindOf(name) == KindUnknown {
-		return ""
-	}
-	if path, err := exec.LookPath(name); err == nil {
-		return path
-	}
-	return ""
+	path, _ := resolveShell(parentProcessName())
+	return path
 }
 
 // Start spawns the user's shell in a new pseudo-terminal with the given

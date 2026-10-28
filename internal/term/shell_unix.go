@@ -16,14 +16,22 @@ import (
 // the platforms with no /proc, and a hung ps must not hold the launch.
 const psTimeout = 2 * time.Second
 
-// parentProcessName returns the executable name of the process that
-// launched Harness, or "" when it cannot be read. Linux answers from
-// /proc; the BSDs and macOS have no such file, so they are asked through
-// ps, which reports a login shell as "-zsh".
+// parentProcessName returns the executable of the process that launched
+// Harness - its path when the platform can name one, its file name
+// otherwise - or "" when it cannot be read. Linux answers from /proc,
+// which carries the real executable even when the shell is not on PATH;
+// the BSDs and macOS have no such file, so they are asked through ps,
+// which reports a login shell as "-zsh".
 func parentProcessName() string {
 	ppid := os.Getppid()
 	if ppid <= 1 {
 		return ""
+	}
+	if exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", ppid)); err == nil {
+		// A replaced binary reads back with the kernel's marker on it.
+		if exe = strings.TrimSuffix(exe, " (deleted)"); exe != "" {
+			return exe
+		}
 	}
 	if comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", ppid)); err == nil {
 		return strings.TrimPrefix(strings.TrimSpace(string(comm)), "-")
@@ -34,9 +42,5 @@ func parentProcessName() string {
 	if err != nil {
 		return ""
 	}
-	name := strings.TrimSpace(string(out))
-	if i := strings.LastIndexByte(name, '/'); i >= 0 {
-		name = name[i+1:]
-	}
-	return strings.TrimPrefix(name, "-")
+	return strings.TrimPrefix(strings.TrimSpace(string(out)), "-")
 }
