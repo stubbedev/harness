@@ -154,19 +154,20 @@ func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 
 	// A follow-up call in the same session observes later commands
 	// finishing normally. If it arrives while the first command still
-	// holds the session, it queues instead, and polls deliver it.
+	// holds the session, it queues instead, and polls deliver it - until
+	// it does, on a deadline: under the load of a full suite run the
+	// queued command can outlast any fixed number of calls.
 	resp = runShellTool(t, tool, ctx, ShellParams{
 		Command: "echo after",
 	})
 	require.False(t, resp.IsError)
-	for range 20 {
-		if strings.Contains(resp.Content, "after") {
-			break
-		}
+	deadline := time.Now().Add(30 * time.Second)
+	for !strings.Contains(resp.Content, "after") && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
 		resp = runShellTool(t, tool, ctx, ShellParams{})
 		require.False(t, resp.IsError)
 	}
-	require.Contains(t, resp.Content, "after")
+	require.Contains(t, resp.Content, "after", "the queued command never reported its output")
 }
 
 // newShellToolForTest builds a shell tool owned by the test, and closes
