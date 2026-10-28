@@ -34,6 +34,11 @@ func newShellSessionSpreadTool(inner fantasy.AgentTool) fantasy.AgentTool {
 
 func (s *shellSessionSpreadTool) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	if counter := shellSessionCounter(ctx); counter != nil && call.Name == tools.ShellToolName {
+		// A background job uses no terminal at all, and a session would
+		// conflict with it.
+		if background := gjson.Get(call.Input, "run_in_background"); background.Bool() {
+			return s.AgentTool.Run(ctx, call)
+		}
 		// An empty session is the default: the model left the terminal to
 		// the tool. The first such call keeps the stable default; each
 		// later one gets its own terminal so the calls run together.

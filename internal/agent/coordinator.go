@@ -165,6 +165,11 @@ type coordinator struct {
 
 	subagentRuns *subagentRegistry
 
+	// jobs owns every session's background shell jobs: commands the
+	// shell tool started detached from any terminal, each with its
+	// output log and its result waiting for a later wait (see jobs.go).
+	jobs *jobRegistry
+
 	// queueArrivals records prompts queued for a busy session: its
 	// epoch feeds the tool-result note and its signals wake the wait
 	// tool (see queue_signals.go).
@@ -374,6 +379,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 
 func (c *coordinator) initRegistries() {
 	c.subagentRuns = newSubagentRegistry()
+	c.jobs = newJobRegistry()
 	c.subagentMessages = newSubagentInbox()
 	c.queueArrivals = newQueueArrivalSignals()
 	c.expandedMCPTools = csync.NewMap[string, map[string]bool]()
@@ -1171,7 +1177,7 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// agent reach for a terminal it does not have, and its description
 	// could not name the shell to write for.
 	if tools.ShellAvailable() {
-		shellTool := tools.NewShellTool(store.WorkingDir(), agent.ID, c.questions, c.filetracker)
+		shellTool := tools.NewShellTool(store.WorkingDir(), agent.ID, c.questions, c.filetracker, c)
 		if shellTool != nil {
 			// Spread parallel shell calls across terminals: the first keeps
 			// the stable default, the rest get their own, so several shell
@@ -1684,6 +1690,9 @@ func (c *coordinator) BeginAccepted(sessionID string) *AcceptedRun {
 
 func (c *coordinator) Cancel(sessionID string) {
 	c.subagentRuns.cancelDescendants(sessionID)
+	// Background jobs belong to the session that started them: a
+	// cancelled turn leaves no job running and nothing to collect.
+	c.jobs.cancelSession(sessionID)
 	// Running subagents live on ad-hoc SessionAgents, invisible to
 	// currentAgent's activeRequests — cancel them via the registry keyed by
 	// child session ID. A child session has no queued or accepted state on
@@ -1700,6 +1709,7 @@ func (c *coordinator) CancelAll() {
 	// snapshot, so this is safe against concurrent Del calls from finishing
 	// runs) before falling through to the coder agent's own bookkeeping.
 	c.subagentRuns.cancelAll()
+	c.jobs.cancelAll()
 	c.currentAgent.CancelAll()
 }
 

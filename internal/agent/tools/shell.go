@@ -36,6 +36,7 @@ type ShellParams struct {
 	Reset               bool   `json:"reset,omitempty" description:"Kill a wedged session and start a fresh one, losing everything the old shell held"`
 	WorkingDir          string `json:"working_dir,omitempty" description:"Directory for a new session to open in; defaults to the workspace working directory. Has no effect on an existing session - use cd inside it."`
 	AutoBackgroundAfter int    `json:"auto_background_after,omitempty" description:"Seconds to hold a command that has gone completely idle before returning it as still running (default 60, ceiling 15 minutes)"`
+	RunInBackground     bool   `json:"run_in_background,omitempty" description:"Run the command as a background job detached from every terminal session, returning its job id and log path at once. Its result arrives through the wait tool, so nothing needs polling."`
 }
 
 type ShellResponseMetadata struct {
@@ -48,6 +49,25 @@ type ShellResponseMetadata struct {
 	ExitCode         *int         `json:"exit_code,omitempty"`
 	Outcome          ShellOutcome `json:"outcome"`
 	ShellExitCode    *int         `json:"shell_exit_code,omitempty"`
+	// Background marks a call that started a job instead of typing into
+	// a terminal; JobID names the job a later wait collects.
+	Background bool   `json:"background,omitempty"`
+	JobID      string `json:"job_id,omitempty"`
+}
+
+// BackgroundJob is what the shell tool reports about a job it started:
+// the id a later wait names, and the log that keeps everything the
+// command printed.
+type BackgroundJob struct {
+	ID      string
+	LogPath string
+}
+
+// BackgroundJobStarter starts a shell command as a background job that
+// outlives the call asking for it. The coordinator is the only
+// implementation; a nil starter means the tool cannot offer the option.
+type BackgroundJobStarter interface {
+	StartBackgroundJob(ctx context.Context, sessionID, command, workingDir string) (BackgroundJob, error)
 }
 
 type ShellOutcome string
@@ -136,6 +156,21 @@ var sessionNameRe = regexp.MustCompile(`^` + sessionNamePattern + `$`)
 // the caller meant. It returns the empty string when the call is
 // unambiguous.
 func conflictingShellInputs(p ShellParams) string {
+	// A background job is a call of its own: it runs a command detached
+	// from every terminal, answers at once, and never waits on anything.
+	if p.RunInBackground {
+		switch {
+		case p.Reset:
+			return "set reset and run_in_background in one call; send one per call, reset first"
+		case p.Command == "":
+			return "run_in_background needs a command: the job runs it detached from every terminal and returns its job id at once"
+		case p.Session != "":
+			return "run_in_background takes no session: the job runs detached from every terminal, so no session is involved"
+		case p.AutoBackgroundAfter != 0:
+			return "run_in_background returns at once, so auto_background_after has nothing to wait for: drop it"
+		}
+		return ""
+	}
 	var asked []string
 	if p.Command != "" {
 		asked = append(asked, "command")
@@ -196,7 +231,7 @@ func firstLine(s string) string {
 // to lie about which shell it is writing for, and the session would open
 // against a guess or not at all. ShellAvailable answers the same
 // question without building anything.
-func NewShellTool(workingDir, owner string, questions question.Service, tracker filetracker.Service) fantasy.AgentTool {
+func NewShellTool(workingDir, owner string, questions question.Service, tracker filetracker.Service, background BackgroundJobStarter) fantasy.AgentTool {
 	shellPath, ok := term.Shell()
 	if !ok {
 		return nil
@@ -240,6 +275,9 @@ func NewShellTool(workingDir, owner string, questions question.Service, tracker 
 			}
 
 			startTime := time.Now()
+			if params.RunInBackground {
+				return runBackgroundShell(ctx, background, params, execWorkingDir, startTime), nil
+			}
 			waitSeconds := clampWaitSeconds(params.AutoBackgroundAfter)
 
 			// Files the command names are stat-checked around the call: one
@@ -324,6 +362,33 @@ func NewShellTool(workingDir, owner string, questions question.Service, tracker 
 			return fantasy.WithResponseMetadata(fantasy.NewTextResponse(sb.String()), metadata), nil
 		},
 	)
+}
+
+// runBackgroundShell starts a job and answers the call at once: the job
+// outlives the call, so the response names where to find it rather than
+// carrying its output.
+func runBackgroundShell(ctx context.Context, starter BackgroundJobStarter, params ShellParams, workingDir string, startTime time.Time) fantasy.ToolResponse {
+	if starter == nil {
+		return fantasy.NewTextErrorResponse("background jobs are unavailable: this agent has no job registry")
+	}
+	job, err := starter.StartBackgroundJob(ctx, GetSessionFromContext(ctx), params.Command, workingDir)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(err.Error())
+	}
+	metadata := ShellResponseMetadata{
+		StartTime:        startTime.UnixMilli(),
+		EndTime:          time.Now().UnixMilli(),
+		Description:      shellLabel(params),
+		WorkingDirectory: workingDir,
+		Outcome:          ShellOutcomeRunning,
+		Background:       true,
+		JobID:            job.ID,
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "[background job %s started; it keeps running on its own]", job.ID)
+	sb.WriteString("\nIts output and exit code arrive through the wait tool, with no polling.")
+	fmt.Fprintf(&sb, "\nFull log: %s", job.LogPath)
+	return fantasy.WithResponseMetadata(fantasy.NewTextResponse(sb.String()), metadata)
 }
 
 func shellOutcome(params ShellParams, res PTYResult) ShellOutcome {

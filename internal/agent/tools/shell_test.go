@@ -175,7 +175,7 @@ func TestShellTool_CustomAutoBackgroundThreshold(t *testing.T) {
 func newShellToolForTest(t *testing.T, workingDir string) fantasy.AgentTool {
 	t.Helper()
 	t.Cleanup(func() { closeOwnerSessions(t.Name()) })
-	return NewShellTool(workingDir, t.Name(), nil, nil)
+	return NewShellTool(workingDir, t.Name(), nil, nil, nil)
 }
 
 // A file a shell command rewrote is one the session wrote itself: the
@@ -190,7 +190,7 @@ func TestShellCertifiesMutatedFileForEdit(t *testing.T) {
 	require.False(t, runViewTool(t, NewViewTool(nil, tracker, nil, dir), ctx, ViewParams{FilePath: path}).IsError)
 
 	t.Cleanup(func() { closeOwnerSessions(t.Name()) })
-	shell := NewShellTool(dir, t.Name(), nil, tracker)
+	shell := NewShellTool(dir, t.Name(), nil, tracker, nil)
 	require.False(t, runShellTool(t, shell, ctx, ShellParams{Command: "printf 'gamma\\n' >> " + path}).IsError)
 
 	edit := NewEditTool(nil, &mockHistoryService{}, tracker, nil, dir)
@@ -296,6 +296,24 @@ func TestConflictingShellInputs(t *testing.T) {
 	conflict := conflictingShellInputs(ShellParams{Command: "ls", Reset: true})
 	require.Contains(t, conflict, "command")
 	require.Contains(t, conflict, "reset")
+
+	// A background job is a whole call of its own: with a command it is
+	// unambiguous, and with a reset, a terminal, no command or a wait
+	// budget it is refused before anything starts.
+	require.Empty(t, conflictingShellInputs(ShellParams{Command: "ls", RunInBackground: true}))
+
+	conflict = conflictingShellInputs(ShellParams{Command: "ls", Reset: true, RunInBackground: true})
+	require.Contains(t, conflict, "run_in_background")
+	require.Contains(t, conflict, "reset")
+
+	conflict = conflictingShellInputs(ShellParams{Command: "ls", Session: "main", RunInBackground: true})
+	require.Contains(t, conflict, "takes no session")
+
+	conflict = conflictingShellInputs(ShellParams{RunInBackground: true})
+	require.Contains(t, conflict, "needs a command")
+
+	conflict = conflictingShellInputs(ShellParams{Command: "ls", RunInBackground: true, AutoBackgroundAfter: 5})
+	require.Contains(t, conflict, "auto_background_after")
 }
 
 func TestShellTool_RejectsCombinedCall(t *testing.T) {

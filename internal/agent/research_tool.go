@@ -141,7 +141,7 @@ func (c *coordinator) researchTool(client *http.Client) fantasy.AgentTool {
 			// when there is a shell to give it.
 			if tools.ShellAvailable() {
 				fetchTools = append(fetchTools,
-					tools.NewShellTool(tmpDir, "research", c.questions, c.filetracker))
+					tools.NewShellTool(tmpDir, "research", c.questions, c.filetracker, c))
 			}
 
 			// Sub-agent tool calls fire the same Pre/PostToolUse hooks as the
