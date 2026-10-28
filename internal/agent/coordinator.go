@@ -170,6 +170,11 @@ type coordinator struct {
 	// output log and its result waiting for a later wait (see jobs.go).
 	jobs *jobRegistry
 
+	// timers owns every session's primed timers: one-shot waits the
+	// timer tool armed, each with its result waiting for a later wait
+	// (see timers.go).
+	timers *timerRegistry
+
 	// queueArrivals records prompts queued for a busy session: its
 	// epoch feeds the tool-result note and its signals wake the wait
 	// tool (see queue_signals.go).
@@ -380,6 +385,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 func (c *coordinator) initRegistries() {
 	c.subagentRuns = newSubagentRegistry()
 	c.jobs = newJobRegistry()
+	c.timers = newTimerRegistry()
 	c.subagentMessages = newSubagentInbox()
 	c.queueArrivals = newQueueArrivalSignals()
 	c.expandedMCPTools = csync.NewMap[string, map[string]bool]()
@@ -1293,6 +1299,11 @@ func (c *coordinator) buildTools(ctx context.Context, agent config.Agent, isSubA
 	// one is the opt-in.
 	filteredTools = append(filteredTools, c.extensions.Tools()...)
 
+	// The timer tool is plumbing: every agent, sub-agents included, can
+	// arm a timer whatever its allow list says, and its name is never
+	// written in one.
+	filteredTools = append(filteredTools, tools.NewTimerTool(c))
+
 	// Skills defer the same way: only their names ride in the context,
 	// behind a search that hands over a trigger and then the SKILL.md
 	// itself. Sub-agents keep the inline <available_skills> list -- a
@@ -1693,6 +1704,9 @@ func (c *coordinator) Cancel(sessionID string) {
 	// Background jobs belong to the session that started them: a
 	// cancelled turn leaves no job running and nothing to collect.
 	c.jobs.cancelSession(sessionID)
+	// Primed timers belong to it too: a cancelled turn leaves none
+	// armed to fire into it, and each keeps a result to collect.
+	c.timers.cancelSession(sessionID)
 	// Running subagents live on ad-hoc SessionAgents, invisible to
 	// currentAgent's activeRequests — cancel them via the registry keyed by
 	// child session ID. A child session has no queued or accepted state on
@@ -1710,6 +1724,7 @@ func (c *coordinator) CancelAll() {
 	// runs) before falling through to the coder agent's own bookkeeping.
 	c.subagentRuns.cancelAll()
 	c.jobs.cancelAll()
+	c.timers.cancelAll()
 	c.currentAgent.CancelAll()
 }
 

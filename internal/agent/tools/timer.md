@@ -1,0 +1,3 @@
+A one-shot timer: it fires once, after `seconds`, and its result arrives through the wait tool. Arm it when the next thing you can do has to wait - a build or test run making progress, a process settling, a poll interval passing - and get on with everything else now. Arming returns at once, and nothing needs a sleep or a poll.
+
+`seconds` is 1 to 600. The result names the timer id and when it fires; the wait tool takes that id and hands back the result exactly once, waking the moment it fires. A timer is one shot: one that fired stays fired and never re-arms itself, so a wait that repeats is one timer armed per round.

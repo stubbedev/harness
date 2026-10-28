@@ -34,6 +34,7 @@ const (
 	SkillSearch   = "skill_search"
 	ToolSearch    = "tool_search"
 	ExtensionJobs = "extension_jobs"
+	Timer         = "timer"
 )
 
 const LegacyDiagnostics = "lsp_diagnostics"
@@ -62,7 +63,7 @@ func SubagentDefaults() []string { return slices.Clone(subagentDefaults) }
 func IsBuiltin(name string) bool {
 	return slices.Contains(allowlistable, name) ||
 		name == SkillSearch || name == ToolSearch || name == ExtensionJobs ||
-		name == LegacyDiagnostics
+		name == Timer || name == LegacyDiagnostics
 }
 
 const (

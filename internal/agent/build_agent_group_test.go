@@ -78,7 +78,9 @@ func TestBuildAgent_ProvidedGroupWaitMakesAgentReady(t *testing.T) {
 
 	sa := built.(*sessionAgent)
 	require.NotEmpty(t, sa.systemPrompt.Get(), "system prompt must be set once the provided group is waited on")
-	require.Equal(t, 1, sa.tools.Len(), "tool set must be set once the provided group is waited on")
+	// The allowlisted view tool, plus the plumbing timer tool every agent
+	// gets whatever its allow list says.
+	require.Equal(t, 2, sa.tools.Len(), "tool set must be set once the provided group is waited on")
 }
 
 // TestBuildAgent_AsyncBuildFailureStaysOnProvidedGroup verifies that an
