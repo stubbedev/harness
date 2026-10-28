@@ -34,6 +34,7 @@ func (m *mockCatalogClient) FetchCatalog(context.Context) ([]catalog.Provider, e
 func resetProviderState() {
 	providerOnce = sync.Once{}
 	catalogSyncer = &catalogSync{}
+	catalogSource = liveCatalogClient{}
 	// Close pooled catalog-cache connections so temp data dirs can be
 	// removed on Windows, where open files cannot be unlinked.
 	db.ResetPool()
@@ -259,11 +260,15 @@ func TestProviders_KeepsCatalogWhenDBUnavailable(t *testing.T) {
 
 	resetProviderState()
 	defer resetProviderState()
+	catalogSource = &mockCatalogClient{providers: []catalog.Provider{
+		{Name: "Fetched", ID: "f1", Models: []catalog.Model{{ID: "m1"}}},
+	}}
 
 	cfg := &Config{Options: &Options{DataDirectory: blocked + "/data"}}
 	providers, err := Providers(cfg)
 	require.NoError(t, err)
-	require.NotEmpty(t, providers, "a broken cache does not cost the user the catalog")
+	require.Len(t, providers, 1, "a broken cache does not cost the user the catalog")
+	require.Equal(t, "Fetched", providers[0].Name)
 }
 
 func TestProviders_UsesMockClientInjectedThroughSyncer(t *testing.T) {

@@ -22,6 +22,11 @@ var providerOnce sync.Once
 
 var catalogSyncer = &catalogSync{}
 
+// catalogSource is where a first run with no cached catalog comes from:
+// the live sources in the running program, and a stub under test, so no
+// test reaches models.dev.
+var catalogSource catalogClient = liveCatalogClient{}
+
 // KnownProviderByID returns the catalog provider with the given ID, or
 // nil when it is not a built-in catalog provider.
 func KnownProviderByID(knownProviders []catalog.Provider, id catalog.InferenceProvider) *catalog.Provider {
@@ -53,7 +58,7 @@ func Providers(cfg *Config) ([]catalog.Provider, error) {
 		return nil, nil
 	}
 	providerOnce.Do(func() {
-		catalogSyncer.Init(liveCatalogClient{}, GlobalCatalogDir(), true)
+		catalogSyncer.Init(catalogSource, GlobalCatalogDir(), true)
 	})
 	// A failure to refresh or cache the catalog is worth reporting to
 	// the caller, which decides whether an empty catalog is fatal or
