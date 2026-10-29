@@ -16,11 +16,18 @@ type TimerToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (t *TimerToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	return renderTimedResult(sty, width, opts, timerLengthSummary(opts.ToolCall.Input), true)
+}
+
+// timerLengthSummary is a timer call's armed length, parsed from its
+// input. The header and the collapsed group's one-liner both read it,
+// so the same call says the same thing wherever it renders.
+func timerLengthSummary(input string) string {
 	var params tools.TimerParams
-	if err := json.Unmarshal([]byte(opts.ToolCall.Input), &params); err != nil {
-		params.Seconds = 0
+	if err := json.Unmarshal([]byte(input), &params); err != nil {
+		return ""
 	}
-	return renderTimedResult(sty, width, opts, timerDuration(params.Seconds), true)
+	return timerDuration(params.Seconds)
 }
 
 // timerDuration humanises a timer's armed length. Zero renders empty:

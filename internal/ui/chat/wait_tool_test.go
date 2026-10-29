@@ -156,3 +156,34 @@ func TestPendingTimerHasNoLengthYet(t *testing.T) {
 	require.Contains(t, firstLine, "Timer")
 	require.NotContains(t, firstLine, "0s", "the armed length is unknown while the input streams")
 }
+
+// TestTimedToolOneLinerMatchesItsHeader pins that a collapsed group's
+// one-liner and the call's expanded header name the same targets and
+// armed length: the two renderings read one summary.
+func TestTimedToolOneLinerMatchesItsHeader(t *testing.T) {
+	t.Parallel()
+
+	sty := groupStyles()
+	for _, tt := range []struct {
+		name  string
+		tool  string
+		input string
+		want  string
+	}{
+		{"wait names its ids", "wait", `{"wait_for":["job-1","timer-2"]}`, "job-1, timer-2"},
+		{"wait watches everything", "wait", `{}`, "everything outstanding"},
+		{"timer gives its length", "timer", `{"seconds":300}`, "5m 0s"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			item := NewToolMessageItem(sty, "msg", message.ToolCall{
+				ID: "t1", Name: tt.tool, Input: tt.input, Finished: true,
+			}, &message.ToolResult{ToolCallID: "t1", Name: tt.tool, Content: "ok"}, false)
+
+			header, _, _ := strings.Cut(ansi.Strip(item.Render(80)), "\n")
+			oneLiner := ansi.Strip(ToolOneLiner(sty, item, 80, false))
+			require.Contains(t, header, tt.want)
+			require.Contains(t, oneLiner, tt.want)
+		})
+	}
+}

@@ -795,7 +795,12 @@ func (g *ToolGroupMessageItem) oneLiner(t ToolMessageItem, width int, selected b
 // ToolCallSummary extracts a one-line argument summary from a tool call
 // for display inside a collapsed group. workingDir is the workspace root
 // paths are displayed relative to; empty applies home-shortening only.
+// A tool whose summary does not live in a top-level string parameter
+// contributes its own, the same text its expanded header shows.
 func ToolCallSummary(tc message.ToolCall, workingDir string) string {
+	if spec, ok := toolSpecs[tc.Name]; ok && spec.summary != nil {
+		return spec.summary(tc.Input)
+	}
 	var params map[string]any
 	if err := json.Unmarshal([]byte(tc.Input), &params); err != nil || len(params) == 0 {
 		return ""

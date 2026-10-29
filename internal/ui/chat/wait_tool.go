@@ -18,9 +18,18 @@ type WaitToolRenderContext struct{}
 
 // RenderTool implements the [ToolRenderer] interface.
 func (w *WaitToolRenderContext) RenderTool(sty *styles.Styles, width int, opts *ToolRenderOpts) string {
+	return renderTimedResult(sty, width, opts, waitTargetSummary(opts.ToolCall.Input), false)
+}
+
+// waitTargetSummary is what a wait call watches, parsed from its input.
+// The header and the collapsed group's one-liner both read it, so the
+// same call says the same thing wherever it renders.
+func waitTargetSummary(input string) string {
 	var params tools.WaitParams
-	_ = json.Unmarshal([]byte(opts.ToolCall.Input), &params)
-	return renderTimedResult(sty, width, opts, waitTarget(params), false)
+	if err := json.Unmarshal([]byte(input), &params); err != nil {
+		return ""
+	}
+	return waitTarget(params)
 }
 
 // DispatcherWaitRenderContext renders the dispatcher tool's historical

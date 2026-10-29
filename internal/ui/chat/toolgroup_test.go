@@ -96,6 +96,26 @@ func TestToolCallSummary(t *testing.T) {
 			want: "",
 		},
 		{
+			name: "wait names the ids it watches",
+			tc:   message.ToolCall{Name: "wait", Input: `{"wait_for":["job-1","timer-2"]}`},
+			want: "job-1, timer-2",
+		},
+		{
+			name: "wait without ids watches everything",
+			tc:   message.ToolCall{Name: "wait", Input: `{}`},
+			want: "everything outstanding",
+		},
+		{
+			name: "timer gives its armed length",
+			tc:   message.ToolCall{Name: "timer", Input: `{"seconds":300}`},
+			want: "5m 0s",
+		},
+		{
+			name: "timer input still streaming",
+			tc:   message.ToolCall{Name: "timer", Input: `{"seconds":`},
+			want: "",
+		},
+		{
 			name: "no usable input",
 			tc:   message.ToolCall{Name: "View", Input: `{}`},
 			want: "",

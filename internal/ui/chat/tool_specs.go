@@ -18,6 +18,12 @@ type toolSpec struct {
 	label string
 	// renderer builds the call's body renderer. Nil renders generically.
 	renderer func() ToolRenderer
+	// summary formats the call's one-line argument summary for the
+	// collapsed group. Nil, or an empty result, falls back to the first
+	// string parameter. A tool whose summary lives outside top-level
+	// string parameters sets this, so the collapsed and expanded
+	// renderings of the same call cannot disagree.
+	summary func(input string) string
 	// copyParams formats the call's input for the clipboard. Nil, or an
 	// empty result, copies the raw input as JSON.
 	copyParams func(input string) string
@@ -75,11 +81,13 @@ var toolSpecs = map[string]toolSpec{
 	tools.WaitToolName: {
 		label:      "Wait",
 		renderer:   func() ToolRenderer { return &WaitToolRenderContext{} },
+		summary:    waitTargetSummary,
 		copyParams: copyWaitParams,
 	},
 	tools.TimerToolName: {
 		label:      "Timer",
 		renderer:   func() ToolRenderer { return &TimerToolRenderContext{} },
+		summary:    timerLengthSummary,
 		copyParams: copyTimerParams,
 	},
 	agent.AgentToolName: {
