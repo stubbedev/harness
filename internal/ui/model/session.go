@@ -129,6 +129,16 @@ func (m *UI) refreshRunningSubagents(sessionID string) tea.Cmd {
 	}
 }
 
+// refreshRunningJobs resolves a session's background-job list off the Update
+// path and delivers it as a runningJobsMsg. The closure captures only locals
+// (never m) so it is safe off-thread.
+func (m *UI) refreshRunningJobs(sessionID string) tea.Cmd {
+	ws := m.com.Workspace
+	return func() tea.Msg {
+		return runningJobsMsg{forSession: sessionID, list: ws.RunningJobs(sessionID)}
+	}
+}
+
 // reportCurrentSession returns a fire-and-forget tea.Cmd that
 // informs the workspace which session this client is currently
 // viewing. Errors are logged at debug only; the call is a hint

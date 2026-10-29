@@ -596,7 +596,7 @@ func (g *ToolGroupMessageItem) runDetails() []headerDetail {
 		}
 		details = append(details, headerDetail{text: kind, sep: sep})
 	}
-	if badge := toolDurationBadge(g.elapsed()); badge != "" {
+	if badge := ToolDurationBadge(g.elapsed()); badge != "" {
 		details = append(details, headerDetail{text: badge, sep: " · "})
 	}
 	return details
@@ -717,7 +717,7 @@ func ToolOneLiner(sty *styles.Styles, t ToolMessageItem, width int, selected boo
 		line += " " + stat
 	}
 	if elapsed := t.Elapsed(); elapsed > 0 && status != ToolStatusRunning {
-		if badge := toolDurationBadge(elapsed); badge != "" {
+		if badge := ToolDurationBadge(elapsed); badge != "" {
 			return rightAlignSuffix(line, sty.Tool.StateWaiting.Render(badge), width)
 		}
 	}

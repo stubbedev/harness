@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stubbedev/harness/internal/agent"
+	agenttools "github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
@@ -39,10 +41,49 @@ type agentTask struct {
 	titled bool
 }
 
+// jobTask is one background shell job in the tasks strip. A job is not
+// a session, so unlike an agent row it is a status viewer: it shows the
+// command and how long it has been running, and activating it does
+// nothing.
+type jobTask struct {
+	id      string
+	command string
+	elapsed time.Duration
+}
+
 // taskRow maps a rendered strip row to its task for click handling.
 type taskRow struct {
 	yStart, yEnd int
-	toolCallID   string
+	key          string
+}
+
+// taskRowRef is one row of the tasks strip: the pinned Main row, a
+// sub-agent dispatch, or a background job.
+type taskRowRef struct {
+	isMain bool
+	task   *agentTask
+	job    *jobTask
+}
+
+// key identifies a row across reaps and reorders, since reaping an
+// earlier row shifts every index after it. Agent tool-call ids and job
+// ids come from separate spaces, so the kind is part of the key. The
+// pinned Main row never moves and has no key.
+func (r taskRowRef) key() string {
+	switch {
+	case r.isMain:
+		return ""
+	case r.task != nil:
+		return "agent:" + r.task.toolCallID
+	case r.job != nil:
+		return "job:" + r.job.id
+	}
+	return ""
+}
+
+// spinning reports whether the run is still in flight.
+func (t *agentTask) spinning() bool {
+	return t.status == subagents.StatusRunning || t.status == subagents.StatusRetrying
 }
 
 // agentTaskByToolCall returns the task for a parent-session agent tool
@@ -167,9 +208,11 @@ func (m *UI) childSessionIDFor(msgID, toolCallID string) string {
 	return session.AgentToolSessionID(msgID, toolCallID)
 }
 
-// tasksSpinning reports whether any tracked task is still in flight.
+// tasksSpinning reports whether the strip holds work still in flight.
+// A running job counts: it keeps the spinner ticking so the backstop
+// below keeps reaping job rows whose finish nothing else announces.
 func (m *UI) tasksSpinning() bool {
-	return m.runningAgentCount() > 0
+	return m.runningAgentCount() > 0 || len(m.jobTasks) > 0
 }
 
 // runningAgentCount is how many tracked tasks are still running. One
@@ -179,17 +222,20 @@ func (m *UI) tasksSpinning() bool {
 func (m *UI) runningAgentCount() int {
 	n := 0
 	for _, t := range m.agentTasks {
-		if t.status == subagents.StatusRunning || t.status == subagents.StatusRetrying {
+		if t.spinning() {
 			n++
 		}
 	}
 	return n
 }
 
-// resetAgentTasks drops task state on session switches.
-func (m *UI) resetAgentTasks() {
+// resetTasks drops task state on session switches: the strip shows the
+// viewed session's own work, and jobs and dispatches both belong to the
+// session being left.
+func (m *UI) resetTasks() {
 	m.agentTasks = nil
-	m.lastTaskFocusID = ""
+	m.jobTasks = nil
+	m.lastTaskFocusKey = ""
 	m.taskRows = nil
 }
 
@@ -199,7 +245,7 @@ func (m *UI) resetAgentTasks() {
 // is actually busy (a session killed mid-generation would otherwise
 // leave a ghost spinner, mirroring the chat's ghost-spinner guard).
 func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]message.ToolResult) {
-	m.resetAgentTasks()
+	m.resetTasks()
 	busy := m.isAgentBusy()
 	for _, msg := range msgs {
 		if msg.Role != message.Assistant {
@@ -480,12 +526,51 @@ const tasksReconcileInterval = 2 * time.Second
 // still heals within interval plus grace.
 const tasksReconcileGrace = 10 * time.Second
 
-// maybeReconcileSpinningTasks refreshes the authoritative running list
+// applyRunningJobs reconciles the strip's job rows against the feed: a
+// running job keeps its row (or gains one), and a job that reached a
+// terminal state loses it. The strip shows ongoing work only, and a
+// finished job stays in the registry until a wait collects it, so the
+// terminal state is the reap signal rather than the row's absence.
+func (m *UI) applyRunningJobs(list []workspace.RunningJobInfo) {
+	rows := make([]jobTask, 0, len(list))
+	for _, info := range list {
+		if info.State != agent.JobRunning {
+			continue
+		}
+		rows = append(rows, jobTask{
+			id:      info.ID,
+			command: info.Command,
+			elapsed: info.Elapsed,
+		})
+	}
+	m.jobTasks = rows
+	m.clampTaskCursor()
+	if m.focus == uiFocusTasks && m.taskRowCount() == 0 {
+		m.focusEditor()
+	}
+}
+
+// jobStarted reports whether a tool result is a background job's start
+// acknowledgement: the moment a strip row has work to show, since a
+// finished job is never announced again.
+func jobStarted(tr message.ToolResult) bool {
+	if tr.Metadata == "" {
+		return false
+	}
+	var meta agenttools.ShellResponseMetadata
+	if err := json.Unmarshal([]byte(tr.Metadata), &meta); err != nil {
+		return false
+	}
+	return meta.Background && meta.JobID != ""
+}
+
+// maybeReconcileSpinningTasks refreshes the authoritative running lists
 // while tasks spin, at most once per tasksReconcileInterval. Runtime
 // events drive the normal path; this is the backstop for a terminal
-// event lost in flight — the runtime entry is already deleted, so no
-// later event would ever settle the strip row and the spinner would run
-// forever.
+// event lost in flight — for a subagent the runtime entry is already
+// deleted, and for a job nothing pushes at all — so no later event would
+// ever settle the strip row and the spinner would run forever. Each feed
+// is fetched only while its rows exist, since only one may be spinning.
 func (m *UI) maybeReconcileSpinningTasks() tea.Cmd {
 	if !m.tasksSpinning() || m.session == nil {
 		return nil
@@ -498,7 +583,17 @@ func (m *UI) maybeReconcileSpinningTasks() tea.Cmd {
 		return nil
 	}
 	m.lastTasksReconcile = time.Now()
-	return m.refreshRunningSubagents(m.session.ID)
+	// Capture the ID now: the fetch runs off the Update goroutine, where
+	// m.session may already be nil or point at another session.
+	sessionID := m.session.ID
+	var cmds []tea.Cmd
+	if m.runningAgentCount() > 0 {
+		cmds = append(cmds, m.refreshRunningSubagents(sessionID))
+	}
+	if len(m.jobTasks) > 0 {
+		cmds = append(cmds, m.refreshRunningJobs(sessionID))
+	}
+	return tea.Batch(cmds...)
 }
 
 // reconcileBackgroundTasks settles dispatches the event stream can miss
@@ -521,7 +616,7 @@ func (m *UI) reconcileBackgroundTasks(list []workspace.RunningSubagentInfo) {
 	}
 	tasks := append([]*agentTask(nil), m.agentTasks...)
 	for _, t := range tasks {
-		if t.status != subagents.StatusRunning && t.status != subagents.StatusRetrying {
+		if !t.spinning() {
 			continue
 		}
 		if !t.dispatched || t.childSessionID == "" || running[t.childSessionID] {
@@ -552,32 +647,34 @@ func (m *UI) mainRowCount() int {
 }
 
 // taskRowCount is the strip's row count. The strip is one level deep:
-// its task rows are the children of the viewed session — the main
-// session's dispatches, or none at all while an agent is viewed
-// (subagents never dispatch), where only the pinned Main row shows.
+// while an agent is viewed only the pinned Main row shows, otherwise the
+// main session's dispatches and running jobs, in that order.
 func (m *UI) taskRowCount() int {
 	if m.agentView.shown != "" {
 		return m.mainRowCount()
 	}
-	return len(m.agentTasks)
+	return len(m.agentTasks) + len(m.jobTasks)
 }
 
-// taskRowAt resolves a strip row index to its task, or to the Main row
-// (task nil, isMain true). While an agent is viewed the Main row is
-// pinned first and is the only row; from main, the tasks follow in
-// dispatch order.
-func (m *UI) taskRowAt(row int) (task *agentTask, isMain bool) {
+// taskRowAt resolves a strip row index to its row. While an agent is
+// viewed the Main row is pinned first and is the only row; from main,
+// the dispatches follow in dispatch order, then the jobs oldest first.
+func (m *UI) taskRowAt(row int) taskRowRef {
 	if row < m.mainRowCount() {
-		return nil, true
+		return taskRowRef{isMain: true}
 	}
 	if m.agentView.shown != "" {
-		return nil, false
+		return taskRowRef{}
 	}
 	row -= m.mainRowCount()
-	if row < 0 || row >= len(m.agentTasks) {
-		return nil, false
+	if row < len(m.agentTasks) {
+		return taskRowRef{task: m.agentTasks[row]}
 	}
-	return m.agentTasks[row], false
+	row -= len(m.agentTasks)
+	if row < len(m.jobTasks) {
+		return taskRowRef{job: &m.jobTasks[row]}
+	}
+	return taskRowRef{}
 }
 
 // tasksAreaHeight returns the strip height: one line per visible row.
@@ -609,24 +706,21 @@ func (m *UI) noteTaskFocus() {
 	if m.focus != uiFocusTasks {
 		return
 	}
-	if task, isMain := m.taskRowAt(m.taskCursor); isMain || task == nil {
-		m.lastTaskFocusID = ""
-	} else {
-		m.lastTaskFocusID = task.toolCallID
-	}
+	m.lastTaskFocusKey = m.taskRowAt(m.taskCursor).key()
 }
 
 // focusTasks moves focus to the strip, returning the cursor to the row
 // the user last focused when it is still tracked, and leaving it where
 // clampTaskCursor parks it otherwise.
 func (m *UI) focusTasks() {
-	if m.taskRowCount() == 0 {
+	n := m.taskRowCount()
+	if n == 0 {
 		return
 	}
-	if m.lastTaskFocusID != "" {
-		for i, t := range m.agentTasks {
-			if t.toolCallID == m.lastTaskFocusID {
-				m.taskCursor = i + m.mainRowCount()
+	if m.lastTaskFocusKey != "" {
+		for row := range n {
+			if m.taskRowAt(row).key() == m.lastTaskFocusKey {
+				m.taskCursor = row
 				break
 			}
 		}
@@ -668,21 +762,22 @@ func (m *UI) taskCursorUp() bool {
 }
 
 // activateTaskAtCursor implements the enter key and clicks: switch the
-// transcript to the cursor row's session — the agent's from a task row,
-// back to main from the Main row.
+// transcript to the cursor row's session — the agent's from an agent
+// row, back to main from the Main row. A job row has no session to show,
+// so activating it does nothing.
 func (m *UI) activateTaskAtCursor() tea.Cmd {
 	if m.taskRowCount() == 0 {
 		return nil
 	}
 	m.clampTaskCursor()
-	task, isMain := m.taskRowAt(m.taskCursor)
-	if isMain {
+	row := m.taskRowAt(m.taskCursor)
+	switch {
+	case row.isMain:
 		return m.viewMainSession()
+	case row.task != nil:
+		return m.viewAgentSession(row.task.childSessionID)
 	}
-	if task == nil {
-		return nil
-	}
-	return m.viewAgentSession(task.childSessionID)
+	return nil
 }
 
 // handleTaskKey processes a keypress while the strip is focused. Arrows
@@ -819,7 +914,7 @@ func (m *UI) renderTasks(width int) string {
 
 	var rows []string
 	for row := start; row < end; row++ {
-		task, isMain := m.taskRowAt(row)
+		ref := m.taskRowAt(row)
 		onCursor := focused && row == m.taskCursor
 		onHover := m.taskHoverY == row-start
 		prefix := blurredPrefix
@@ -829,42 +924,59 @@ func (m *UI) renderTasks(width int) string {
 		if onCursor {
 			prefix = focusedPrefix
 		}
-		// Both rows share the accent color: agent rows must pop out of
-		// the grey tool-call surroundings they sit beside, not blend
-		// into them. The glyph tells the main session from a subagent.
-		icon := t.Tool.AgentIcon.Render(styles.AgentIcon)
-		var word lipgloss.Style
-		var label string
+		// Every row shares the accent color: they must pop out of the
+		// grey tool-call surroundings they sit beside, not blend into
+		// them. The glyph tells the main session, a subagent and a
+		// background job apart.
+		var (
+			icon   string
+			word   lipgloss.Style
+			label  string
+			detail string
+		)
 		switch {
-		case isMain:
+		case ref.isMain:
 			icon = t.Tool.AgentIcon.Render(styles.MainAgentIcon)
 			word, label = t.Tool.NameNormal, "Main Agent"
 			if onCursor {
 				word = t.Tool.NameNormalSelected
 			}
-		default:
-			running := task.status == subagents.StatusRunning || task.status == subagents.StatusRetrying
-			word = chat.GroupVerbStyle(t, running,
+		case ref.task != nil:
+			task := ref.task
+			icon = t.Tool.AgentIcon.Render(styles.AgentIcon)
+			word = chat.GroupVerbStyle(t, task.spinning(),
 				task.status == subagents.StatusCancelled,
 				boolToInt(task.status == subagents.StatusFailed),
 				boolToInt(task.status == subagents.StatusCompleted),
 				onCursor)
 			label = "Agent"
+			detail = task.description
+		default:
+			// A job row only exists while the job runs; the feed reaps
+			// it when it ends, so there is no settled state to render.
+			job := ref.job
+			icon = t.Tool.AgentIcon.Render(styles.JobIcon)
+			word = chat.GroupVerbStyle(t, true, false, 0, 0, onCursor)
+			label = "Job"
+			detail = job.command
+			if badge := chat.ToolDurationBadge(job.elapsed); badge != "" {
+				detail = chat.FirstLine(detail) + " " + t.Tool.StateWaiting.Render(badge)
+			}
 		}
 		line := icon + " " + word.Render(label)
-		if !isMain && task.description != "" {
-			line += " " + t.Tool.Body.Render(task.description)
+		if detail != "" {
+			line += " " + t.Tool.Body.Render(detail)
 		}
 		rows = append(rows, prefix+ansi.Truncate(line, max(width-prefixWidth, 1), "…"))
 	}
 
 	// Record row bounds for click handling: one line per row.
 	for row := start; row < end; row++ {
-		toolCallID := ""
-		if task, isMain := m.taskRowAt(row); !isMain && task != nil {
-			toolCallID = task.toolCallID
-		}
-		m.taskRows = append(m.taskRows, taskRow{yStart: row - start, yEnd: row - start + 1, toolCallID: toolCallID})
+		m.taskRows = append(m.taskRows, taskRow{
+			yStart: row - start,
+			yEnd:   row - start + 1,
+			key:    m.taskRowAt(row).key(),
+		})
 	}
 
 	// The strip borrows the tool group's row style (the one behind
@@ -920,26 +1032,33 @@ func (m *UI) clearHover() {
 
 // handleTaskClick moves the cursor onto the clicked row and activates
 // it: the transcript switches to the clicked agent's session, or back
-// to main from the Main row. It reports whether a row was hit.
+// to main from the Main row. A job row has nothing to open. It reports
+// whether a row was hit.
 func (m *UI) handleTaskClick(_, y int) (bool, tea.Cmd) {
 	if len(m.taskRows) == 0 {
 		return false, nil
 	}
 	for _, row := range m.taskRows {
 		if y >= row.yStart && y < row.yEnd {
-			if row.toolCallID == "" {
-				m.taskCursor, m.lastTaskFocusID = 0, ""
-			} else {
-				for i, task := range m.agentTasks {
-					if task.toolCallID == row.toolCallID {
-						m.taskCursor = i + m.mainRowCount()
-						m.lastTaskFocusID = row.toolCallID
-						break
-					}
-				}
-			}
+			m.restoreTaskFocus(row.key)
 			return true, m.activateTaskAtCursor()
 		}
 	}
 	return false, nil
+}
+
+// restoreTaskFocus parks the cursor on the row with the given key, and
+// on the Main row when there is none: the cursor is an index, so the
+// key is what survives the window it scrolls within.
+func (m *UI) restoreTaskFocus(key string) {
+	m.taskCursor, m.lastTaskFocusKey = 0, key
+	if key == "" {
+		return
+	}
+	for row := range m.taskRowCount() {
+		if m.taskRowAt(row).key() == key {
+			m.taskCursor = row
+			return
+		}
+	}
 }

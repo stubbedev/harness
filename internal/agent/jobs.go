@@ -113,6 +113,19 @@ func (j *backgroundJob) attachOutput(out *jobLog) {
 func (j *backgroundJob) info() JobInfo {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	info := j.infoLocked()
+	if j.out != nil {
+		info.Output = j.out.output()
+	}
+	return info
+}
+
+// summary returns the job's state without its output: what a status
+// viewer reads, where the last 64 KiB of what the command printed is
+// neither needed nor worth copying.
+func (j *backgroundJob) summary() JobInfo {
+	j.mu.Lock()
+	defer j.mu.Unlock()
 	return j.infoLocked()
 }
 
@@ -136,7 +149,7 @@ func (j *backgroundJob) take() (info JobInfo, delivered bool) {
 
 // infoLocked builds the job's snapshot. Callers hold mu.
 func (j *backgroundJob) infoLocked() JobInfo {
-	info := JobInfo{
+	return JobInfo{
 		ID:        j.id,
 		State:     j.state,
 		Command:   j.command,
@@ -147,10 +160,6 @@ func (j *backgroundJob) infoLocked() JobInfo {
 		Elapsed:   j.elapsedLocked(),
 		Collected: j.collected,
 	}
-	if j.out != nil {
-		info.Output = j.out.output()
-	}
-	return info
 }
 
 // elapsedLocked is how long the job ran: the recorded span once finished,
@@ -529,6 +538,20 @@ func (r *jobRegistry) collect(parentSession, jobID string) bool {
 // before reading job state and select on it after.
 func (r *jobRegistry) signalChan(parentSession string) chan struct{} {
 	return r.signals.Chan(parentSession)
+}
+
+// RunningJobs reports the session's background jobs oldest first, terminal
+// ones included. A viewer keeps a row only while a job is running, but it
+// learns that the job ended from here: a finished job stays collectable
+// until a wait claims it, so its absence from the registry is not the
+// signal.
+func (c *coordinator) RunningJobs(sessionID string) []JobInfo {
+	jobs := c.jobs.list(sessionID)
+	infos := make([]JobInfo, len(jobs))
+	for i, job := range jobs {
+		infos[i] = job.summary()
+	}
+	return infos
 }
 
 // StartBackgroundJob implements tools.BackgroundJobStarter: it starts

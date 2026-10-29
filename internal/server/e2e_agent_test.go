@@ -234,6 +234,8 @@ type agentE2EHarness struct {
 	coord *scriptedCoordinator
 }
 
+func (c *scriptedCoordinator) RunningJobs(string) []agent.JobInfo { return nil }
+
 func newAgentE2EHarness(t *testing.T) *agentE2EHarness {
 	t.Helper()
 

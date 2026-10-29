@@ -66,8 +66,9 @@ imperative methods that the main model calls directly:
 - **`Completions`** has a non-standard `Update` signature (returning
   `bool` for "consumed") that acts as a guard, not as a full Bubble Tea
   model.
-- **Background tasks strip** (subagents) is not its own model: it renders
-  from `m.agentTasks` in `model/tasks.go`.
+- **Background tasks strip** (subagents and background jobs) is not its
+  own model: it renders from `m.agentTasks` and `m.jobTasks` in
+  `model/tasks.go`.
 
 When writing new components, follow this pattern:
 
@@ -178,7 +179,13 @@ Expansion lives only behind `Expandable.SetExpansionLevel`, which both
 the toggles and the restore go through. In an agent's session
 the editor steers the agent via `Workspace.SteerAgent`; a pinned `Main
 Agent` row and escape switch back. Rows are removed when the run
-finishes. Background work is collected by the `wait` tool, which
+finishes. A background shell job (`run_in_background`) gets a row of
+its own after the dispatch rows — job icon, `Job`, the command and the
+elapsed time — fed by `Workspace.RunningJobs` and reaped when the feed
+reports a terminal state; it is not a session, so activating it does
+nothing. Both feeds are reconciled on the same interval from the
+spinner tick (`maybeReconcileSpinningTasks`), since no event settles a
+job. Background work is collected by the `wait` tool, which
 renders through `chat/wait_tool.go` under a progressive label
 (`Waiting everything outstanding` / `Waited job-1, timer-2`); a
 historical dispatcher call with no prompt renders through the same

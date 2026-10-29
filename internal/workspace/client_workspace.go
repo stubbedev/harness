@@ -573,6 +573,11 @@ func (w *ClientWorkspace) RunningSubagents(_ string) []RunningSubagentInfo {
 	return nil
 }
 
+// RunningJobs returns nil in client mode.
+func (w *ClientWorkspace) RunningJobs(_ string) []RunningJobInfo {
+	return nil
+}
+
 // CancelSubagent is a no-op in client mode.
 func (w *ClientWorkspace) CancelSubagent(_ string) {}
 

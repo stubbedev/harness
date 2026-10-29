@@ -132,6 +132,8 @@ type testWorkspace struct {
 	// steeredSession/steeredText record the last SteerAgent call.
 	steeredSession string
 	steeredText    string
+	// jobs backs RunningJobs for the tasks strip's job rows.
+	jobs []workspace.RunningJobInfo
 }
 
 func (w *testWorkspace) Config() *config.Config {
@@ -162,4 +164,8 @@ func (w *testWorkspace) SteerAgent(_ context.Context, childSessionID, text strin
 	w.steeredSession = childSessionID
 	w.steeredText = text
 	return nil
+}
+
+func (w *testWorkspace) RunningJobs(string) []workspace.RunningJobInfo {
+	return w.jobs
 }

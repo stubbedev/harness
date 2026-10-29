@@ -71,6 +71,8 @@ func (c *blockingCoordinator) SteerSubagent(context.Context, string, string) err
 	return nil
 }
 
+func (c *blockingCoordinator) RunningJobs(string) []agent.JobInfo { return nil }
+
 // insertAgentWorkspace installs a synthetic workspace with the given
 // coordinator (or none) and a workspace run context, mirroring the
 // fields CreateWorkspace initializes.

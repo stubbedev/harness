@@ -61,7 +61,7 @@ func (b *ShellToolRenderContext) RenderTool(sty *styles.Styles, width int, opts 
 	// Show how long the command ran (or has been running) beside the
 	// command: bash calls can take minutes and the bare header gives no
 	// sense of it.
-	if badge := toolDurationBadge(opts.Elapsed); badge != "" {
+	if badge := ToolDurationBadge(opts.Elapsed); badge != "" {
 		toolParams = append(toolParams, "", badge)
 	}
 
@@ -101,7 +101,7 @@ func backgroundShellView(sty *styles.Styles, width int, opts *ToolRenderOpts, cm
 		label += " " + jobID
 	}
 	toolParams := []string{shellCommandDisplay(sty, cmd)}
-	if badge := toolDurationBadge(opts.Elapsed); badge != "" {
+	if badge := ToolDurationBadge(opts.Elapsed); badge != "" {
 		toolParams = append(toolParams, "", badge)
 	}
 	header := strings.TrimSuffix(toolHeader(sty, label, width, opts, toolParams...), " ")

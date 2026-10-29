@@ -771,7 +771,7 @@ func renderTimedResult(sty *styles.Styles, width int, opts *ToolRenderOpts, summ
 	if summary != "" {
 		toolParams = append(toolParams, summary)
 	}
-	if badge := toolDurationBadge(opts.Elapsed); badge != "" {
+	if badge := ToolDurationBadge(opts.Elapsed); badge != "" {
 		toolParams = append(toolParams, "", badge)
 	}
 	header := strings.TrimSuffix(toolHeader(sty, opts.Name, width, opts, toolParams...), " ")
@@ -790,11 +790,12 @@ func renderTimedResult(sty *styles.Styles, width int, opts *ToolRenderOpts, summ
 	return joinToolParts(header, toolOutputTerminalContent(sty, opts.Result.Content, width, opts.ExpandedContent))
 }
 
-// toolDurationBadge formats how long a call took, or "" when it is too
+// ToolDurationBadge formats how long a call took, or "" when it is too
 // short to be worth the space. Shared by the shell header, the group
-// header and the group one-liners, so a duration appears at one
-// threshold everywhere instead of as a "0s" badge on every fast call.
-func toolDurationBadge(elapsed time.Duration) string {
+// header, the group one-liners and the tasks strip's job rows, so a
+// duration appears at one threshold everywhere instead of as a "0s"
+// badge on every fast call.
+func ToolDurationBadge(elapsed time.Duration) string {
 	if elapsed < time.Second {
 		return ""
 	}

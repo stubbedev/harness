@@ -150,6 +150,10 @@ func (w *countingWorkspace) RunningSubagents(string) []workspace.RunningSubagent
 	return w.runningSubagent
 }
 
+func (w *countingWorkspace) RunningJobs(string) []workspace.RunningJobInfo {
+	return nil
+}
+
 func (w *countingWorkspace) Config() *config.Config { return nil }
 
 // syncProbes sums every synchronous counter; Update/View must keep this at

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/pubsub"
@@ -226,7 +227,7 @@ func TestBackgroundTasksStrip(t *testing.T) {
 	assert.Empty(t, u.agentTasks, "a finished task leaves the strip")
 
 	// Session switches drop the strip.
-	u.resetAgentTasks()
+	u.resetTasks()
 	assert.Empty(t, u.agentTasks)
 	assert.Equal(t, 0, u.tasksAreaHeight())
 }
@@ -1141,4 +1142,124 @@ func TestLoadAgentTasksKeepsReapedTasksGone(t *testing.T) {
 	u.loadAgentTasks(msgs, toolResults)
 	require.Len(t, u.agentTasks, 1)
 	assert.Equal(t, "live1", u.agentTasks[0].toolCallID)
+}
+
+// runningJob builds a feed entry for a job in the given state.
+func runningJob(id, command string, state agent.JobState, elapsed time.Duration) workspace.RunningJobInfo {
+	return workspace.RunningJobInfo{
+		ID:        id,
+		Command:   command,
+		State:     state,
+		StartedAt: time.Now().Add(-elapsed),
+		Elapsed:   elapsed,
+	}
+}
+
+// TestBackgroundJobRowTracksTheJob pins a background job's strip row:
+// the feed gives it a row while it runs, the row names the command and
+// its elapsed time, and the terminal state reaps it.
+func TestBackgroundJobRowTracksTheJob(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.session = &session.Session{ID: "s1"}
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+
+	_, _ = u.Update(runningJobsMsg{forSession: "s1", list: []workspace.RunningJobInfo{
+		runningJob("job-1", "go test ./...", agent.JobRunning, 12*time.Second),
+	}})
+
+	require.True(t, u.tasksSpinning(), "a running job keeps the strip alive")
+	u.tasksAreaHeight()
+	out := ansi.Strip(u.tasksView)
+	assert.Contains(t, out, "Job")
+	assert.Contains(t, out, "go test ./...")
+	assert.Contains(t, out, "12s")
+	assert.Contains(t, out, styles.JobIcon, "a job row carries its own glyph")
+	assert.NotContains(t, out, styles.AgentIcon)
+	require.Len(t, u.taskRows, 1)
+
+	// A job is not a session: activating its row switches nothing.
+	require.Nil(t, u.activateTaskAtCursor())
+	assert.Empty(t, u.agentView.requested)
+
+	// The job ends: the feed's terminal state reaps the row.
+	_, _ = u.Update(runningJobsMsg{forSession: "s1", list: []workspace.RunningJobInfo{
+		runningJob("job-1", "go test ./...", agent.JobExited, 90*time.Second),
+	}})
+	assert.Empty(t, u.jobTasks, "a finished job leaves the strip")
+	assert.False(t, u.tasksSpinning())
+	assert.Equal(t, 0, u.tasksAreaHeight())
+}
+
+// TestJobsAndAgentsShareTheStrip pins the row order: dispatches first,
+// then jobs, and a stale feed for another session is discarded.
+func TestJobsAndAgentsShareTheStrip(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.session = &session.Session{ID: "s1"}
+
+	msg := &message.Message{ID: "m1", Role: message.Assistant}
+	_ = u.upsertAgentTask(msg, agentToolCall("a1"))
+	u.applyRunningJobs([]workspace.RunningJobInfo{
+		runningJob("job-1", "make watch", agent.JobRunning, time.Second),
+	})
+
+	require.Equal(t, 2, u.taskRowCount())
+	require.NotNil(t, u.taskRowAt(0).task)
+	require.NotNil(t, u.taskRowAt(1).job)
+	assert.Equal(t, "job:job-1", u.taskRowAt(1).key())
+
+	_, _ = u.Update(runningJobsMsg{forSession: "other", list: nil})
+	assert.Len(t, u.jobTasks, 1, "a fetch scoped to another session is discarded")
+}
+
+// TestJobRowReconcileBackstop pins that a running job is polled until it
+// ends: nothing pushes a job's terminal state, so the spinner tick's
+// reconcile is the only thing that reaps the row.
+func TestJobRowReconcileBackstop(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.session = &session.Session{ID: "s1"}
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}, jobs: []workspace.RunningJobInfo{
+		runningJob("job-1", "make watch", agent.JobRunning, time.Second),
+	}}
+	u.applyRunningJobs(u.com.Workspace.RunningJobs("s1"))
+
+	require.Nil(t, u.maybeReconcileSpinningTasks(), "the first tick only arms the clock")
+
+	u.lastTasksReconcile = time.Now().Add(-tasksReconcileInterval)
+	cmd := u.maybeReconcileSpinningTasks()
+	require.NotNil(t, cmd)
+	msg, ok := cmd().(runningJobsMsg)
+	require.True(t, ok, "the backstop refreshes the job feed")
+	assert.Equal(t, "s1", msg.forSession)
+	assert.Len(t, msg.list, 1)
+}
+
+// TestJobStartedRecognizesOnlyJobStarts pins the row trigger: the shell
+// result that starts a job, and no other tool result, asks for a feed
+// refresh.
+func TestJobStartedRecognizesOnlyJobStarts(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		tr   message.ToolResult
+		want bool
+	}{
+		{"job start", message.ToolResult{Metadata: `{"background":true,"job_id":"job-1"}`}, true},
+		{"foreground shell", message.ToolResult{Metadata: `{"background":false,"job_id":""}`}, false},
+		{"background without a job id", message.ToolResult{Metadata: `{"background":true}`}, false},
+		{"other tool", message.ToolResult{Metadata: `{"additions":1}`}, false},
+		{"no metadata", message.ToolResult{}, false},
+		{"broken metadata", message.ToolResult{Metadata: `{"background":`}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, jobStarted(tt.tr))
+		})
+	}
 }

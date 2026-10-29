@@ -94,6 +94,8 @@ func (s *runCoordinator) capturedCtx() context.Context {
 	return s.gotCtx
 }
 
+func (s *runCoordinator) RunningJobs(string) []agent.JobInfo { return nil }
+
 // buildAgentWorkspace returns a controller wired to a backend whose
 // single workspace exposes the given coordinator. The workspace
 // shutdown hook is overridden to avoid driving a real [app.App]

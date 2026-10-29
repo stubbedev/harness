@@ -69,7 +69,7 @@ func TestFocusTasks_ReturnsToLastFocusedTaskAfterReaps(t *testing.T) {
 	u.taskCursorDown()
 	u.taskCursorDown()
 	require.Equal(t, 2, u.taskCursor)
-	require.Equal(t, "a3", u.lastTaskFocusID)
+	require.Equal(t, "agent:a3", u.lastTaskFocusKey)
 
 	// Leave for the editor; while away, an earlier task is reaped and
 	// the indices shift.
@@ -103,8 +103,8 @@ func TestResetAgentTasks_ClearsTaskFocusMemory(t *testing.T) {
 
 	u.focusTasks()
 	u.taskCursorDown()
-	require.Equal(t, "a2", u.lastTaskFocusID)
+	require.Equal(t, "agent:a2", u.lastTaskFocusKey)
 
-	u.resetAgentTasks()
-	require.Empty(t, u.lastTaskFocusID)
+	u.resetTasks()
+	require.Empty(t, u.lastTaskFocusKey)
 }

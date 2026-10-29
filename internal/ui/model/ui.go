@@ -201,6 +201,15 @@ type (
 		forSession string
 		list       []workspace.RunningSubagentInfo
 	}
+
+	// runningJobsMsg carries the refreshed background-job list,
+	// resolved off the Update path.
+	runningJobsMsg struct {
+		// forSession is the session the fetch was scoped to; a result
+		// that raced a session switch is discarded rather than applied.
+		forSession string
+		list       []workspace.RunningJobInfo
+	}
 )
 
 // UI represents the main user interface model.
@@ -385,10 +394,12 @@ type UI struct {
 	customCommands []commands.CustomCommand
 	mcpPrompts     []commands.MCPPrompt
 
-	// Background tasks (subagents) render in a strip under the chat, not
-	// in the transcript. agentTasks is insertion-ordered; taskRows maps
-	// rendered strip rows back to tasks for click handling.
+	// Background tasks render in a strip under the chat, not in the
+	// transcript. agentTasks is insertion-ordered and jobTasks oldest
+	// first; taskRows maps rendered strip rows back to their rows for
+	// click handling.
 	agentTasks  []*agentTask
+	jobTasks    []jobTask
 	taskRows    []taskRow
 	taskSpinner spinner.Model
 	tasksView   string
@@ -413,10 +424,10 @@ type UI struct {
 	// the combined row list (the pinned Main row while an agent is
 	// viewed, then the tasks).
 	taskCursor int
-	// lastTaskFocusID is the task the cursor last rested on while the
+	// lastTaskFocusKey is the row the cursor last rested on while the
 	// strip was focused, so focus can return to it after reaps shift
 	// the indices.
-	lastTaskFocusID string
+	lastTaskFocusKey string
 	// agentView tracks which session the transcript renders (shown)
 	// and which it has been asked to render (requested). A difference
 	// is an in-flight switch: the old view stays visible until the new
@@ -961,6 +972,9 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// RuntimeEvent for the current session's parent, so fetch the new
 		// session's list rather than wait for one that may never come.
 		cmds = append(cmds, m.refreshRunningSubagents(m.session.ID))
+		// Jobs keep running across a switch and push nothing, so their
+		// rows are seeded the same way.
+		cmds = append(cmds, m.refreshRunningJobs(m.session.ID))
 		cmds = append(cmds, m.startLSPs(msg.lspFilePaths()))
 		// Restored diagnostics items render their live overlay from the
 		// memoized per-file state; fetch it for the new session instead of
@@ -1260,6 +1274,16 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// still running: settle background dispatches whose Finished
 			// event was missed (e.g. raced a session switch).
 			m.reconcileBackgroundTasks(msg.list)
+		}
+	case runningJobsMsg:
+		if msg.forSession == m.currentSessionID() {
+			m.applyRunningJobs(msg.list)
+			m.updateLayoutAndSize()
+			// A job row is the strip's only animation source, so the
+			// spinner must be ticking for the backstop to reap it.
+			if m.tasksSpinning() {
+				cmds = append(cmds, m.taskSpinner.Tick)
+			}
 		}
 	case pubsub.Event[subagents.Event]:
 		// Library discovery changed (e.g. a delete) — rebuild the @-mention
@@ -1886,6 +1910,11 @@ func (m *UI) appendSessionMessage(msg message.Message) tea.Cmd {
 			if m.resolveAgentTaskResult(tr) {
 				m.updateLayoutAndSize()
 				continue
+			}
+			// A started background job gets a strip row from here on;
+			// nothing else announces it.
+			if jobStarted(tr) && m.session != nil {
+				cmds = append(cmds, m.refreshRunningJobs(m.session.ID))
 			}
 			m.chat.UpdateToolItem(tr.ToolCallID, func(toolItem chat.ToolMessageItem) {
 				toolItem.SetResult(&tr)
@@ -4506,7 +4535,7 @@ func (m *UI) resetSessionScope() {
 	m.clearRetryNotice()
 	m.knownChildSessionIDs = nil
 	m.runningSubagents = nil
-	m.resetAgentTasks()
+	m.resetTasks()
 	m.parentTitle = ""
 	m.subagentColor = ""
 	m.pendingModelAction = nil

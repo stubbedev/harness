@@ -498,6 +498,26 @@ func (w *AppWorkspace) RunningSubagents(parentSessionID string) []RunningSubagen
 	return result
 }
 
+// RunningJobs returns the background shell jobs the session started, oldest
+// first. Returns nil when AgentCoordinator is nil.
+func (w *AppWorkspace) RunningJobs(parentSessionID string) []RunningJobInfo {
+	if w.app.AgentCoordinator == nil {
+		return nil
+	}
+	jobs := w.app.AgentCoordinator.RunningJobs(parentSessionID)
+	result := make([]RunningJobInfo, len(jobs))
+	for i, job := range jobs {
+		result[i] = RunningJobInfo{
+			ID:        job.ID,
+			Command:   job.Command,
+			State:     job.State,
+			StartedAt: job.StartedAt,
+			Elapsed:   job.Elapsed,
+		}
+	}
+	return result
+}
+
 // CancelSubagent cancels the subagent session with the given childSessionID.
 // It is a no-op when AgentCoordinator is nil.
 func (w *AppWorkspace) CancelSubagent(childSessionID string) {

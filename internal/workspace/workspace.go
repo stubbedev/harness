@@ -12,6 +12,7 @@ import (
 	"github.com/stubbedev/harness/internal/subagents"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/stubbedev/harness/internal/agent"
 	mcptools "github.com/stubbedev/harness/internal/agent/tools/mcp"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/checkpoints"
@@ -212,6 +213,10 @@ type Workspace interface {
 	RunExtensionCommand(ctx context.Context, commandID string, args map[string]string) (string, error)
 	ActiveSubagents() []SubagentInfo
 	RunningSubagents(parentSessionID string) []RunningSubagentInfo
+	// RunningJobs reports the background shell jobs a session started,
+	// oldest first, terminal ones included so a viewer can reap a row
+	// when its job ends.
+	RunningJobs(parentSessionID string) []RunningJobInfo
 	CancelSubagent(childSessionID string)
 	// SteerAgent delivers a user message to a running sub-agent's own
 	// session: persisted to the child session and injected into its next
@@ -259,6 +264,16 @@ type RunningSubagentInfo struct {
 	StartedAt        time.Time
 	PromptTokens     int64
 	CompletionTokens int64
+}
+
+// RunningJobInfo holds frontend-facing data for one background shell job
+// of a session: enough to render its row in the background tasks strip.
+type RunningJobInfo struct {
+	ID        string
+	Command   string
+	State     agent.JobState
+	StartedAt time.Time
+	Elapsed   time.Duration
 }
 
 // SubagentDefInfo holds frontend-facing data for a discovered subagent

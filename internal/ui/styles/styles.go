@@ -68,6 +68,11 @@ const (
 	// nerd fonts; see QueuedIcon for the width and tofu story.
 	MainAgentIcon string = "\U000f007c"
 
+	// JobIcon marks a background shell job's row in the background
+	// tasks strip: nf-md-console. Private-use area, one cell wide by
+	// nerd fonts; see QueuedIcon for the width and tofu story.
+	JobIcon string = "\U000f018d"
+
 	RadioOn  string = "◉"
 	RadioOff string = "○"
 

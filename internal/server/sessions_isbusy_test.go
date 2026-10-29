@@ -67,6 +67,8 @@ type stubSessions struct {
 	all             []session.Session
 }
 
+func (s *stubCoordinator) RunningJobs(string) []agent.JobInfo { return nil }
+
 func (s *stubSessions) List(context.Context) ([]session.Session, error) {
 	return s.all, nil
 }

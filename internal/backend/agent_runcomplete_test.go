@@ -75,6 +75,8 @@ func insertRunCompleteWorkspace(t *testing.T, b *Backend, base context.Context, 
 	return ws
 }
 
+func (c *errorCoordinator) RunningJobs(string) []agent.JobInfo { return nil }
+
 // TestRunAgent_PreRunErrorPublishesTerminalRunComplete proves that an
 // error returned from RunAccepted before the coordinator could publish
 // its own terminal event (e.g. a readyWg or UpdateModels failure,

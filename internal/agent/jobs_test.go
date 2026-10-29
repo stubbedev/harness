@@ -309,3 +309,31 @@ func TestJobStartRefusesEmptyCommand(t *testing.T) {
 	require.ErrorContains(t, err, "needs a command")
 	require.Zero(t, reg.runningCount("s"), "a refused start takes no slot")
 }
+
+// TestRunningJobsReportsEveryJobOldestFirst pins the strip's feed: a
+// session's jobs in mint order, terminal ones included so a viewer can
+// reap a row, and without the output a status viewer never reads.
+func TestRunningJobsReportsEveryJobOldestFirst(t *testing.T) {
+	t.Parallel()
+	requireJobShell(t)
+
+	reg, logDir := newTestJobRegistry(t)
+	dir := t.TempDir()
+	first, err := reg.start("s", "echo one", dir, logDir)
+	require.NoError(t, err)
+	waitFinished(t, first)
+	_, err = reg.start("s", "echo two", dir, logDir)
+	require.NoError(t, err)
+
+	c := &coordinator{jobs: reg}
+	infos := c.RunningJobs("s")
+	require.Len(t, infos, 2)
+	require.Equal(t, "job-1", infos[0].ID)
+	require.Equal(t, JobExited, infos[0].State)
+	require.Empty(t, infos[0].Output, "a feed entry carries no output")
+	require.Equal(t, "job-2", infos[1].ID)
+	require.Equal(t, JobRunning, infos[1].State)
+	require.Equal(t, "echo two", infos[1].Command)
+
+	require.Empty(t, c.RunningJobs("other"), "another session's jobs stay its own")
+}

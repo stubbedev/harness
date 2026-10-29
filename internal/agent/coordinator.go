@@ -104,6 +104,10 @@ type Coordinator interface {
 	// not running — a finished run never takes another step, so the
 	// message could not be delivered.
 	SteerSubagent(ctx context.Context, childSessionID, text string) error
+	// RunningJobs reports a session's background shell jobs oldest
+	// first, terminal ones included: a status viewer keeps a row only
+	// while the job runs and needs the terminal state to reap it.
+	RunningJobs(sessionID string) []JobInfo
 	// Warmup runs the readiness work the first run would otherwise wait
 	// on: the background agent build (system prompt, initial tool
 	// palette), for a non-interactive coordinator the bounded wait for
