@@ -191,14 +191,15 @@ func TestBackgroundTasksStrip(t *testing.T) {
 	assert.Equal(t, "dig into the git history", task.description, "the prompt excerpt is the fallback description")
 	assert.True(t, u.tasksSpinning(), "a fresh dispatch with no result is running")
 
-	// The strip renders one row per task: the Agent word plus the
-	// description, no type and no spinner glyph.
+	// The strip renders a header counting the agents, then one row per
+	// task: its type, description and elapsed time.
 	u.tasksAreaHeight()
 	require.NotEmpty(t, u.tasksView)
 	out := ansi.Strip(u.tasksView)
-	assert.Contains(t, out, "Agent")
+	assert.Contains(t, out, "Agents · 1 running", "the header counts the agents")
 	assert.Contains(t, out, "dig into the git history")
-	assert.NotContains(t, out, "researcher", "the subagent type is not shown")
+	assert.Contains(t, out, "researcher", "the row names the subagent type")
+	assert.Contains(t, out, "0s", "the row shows how long the agent has run")
 	assert.Contains(t, out, styles.AgentIcon, "a subagent row carries the robot glyph")
 	assert.NotContains(t, out, styles.MainAgentIcon, "a subagent row does not carry the main glyph")
 	require.Len(t, u.taskRows, 1)
@@ -212,7 +213,7 @@ func TestBackgroundTasksStrip(t *testing.T) {
 
 	// Clicking a row activates it: the transcript switches to the
 	// agent's session once the fetch lands.
-	clicked, clickCmd := u.handleTaskClick(2, 0)
+	clicked, clickCmd := u.handleTaskClick(2, u.taskRows[0].yStart)
 	assert.True(t, clicked)
 	assert.NotNil(t, clickCmd)
 	assert.Equal(t, task.childSessionID, u.agentView.requested)
@@ -278,31 +279,108 @@ func TestBackgroundTasksWindowScrolls(t *testing.T) {
 	u.state = uiChat
 	u.width = 100
 
-	// Four running tasks: only three rows render, and the window
-	// follows the cursor.
-	for _, id := range []string{"a1", "a2", "a3", "a4"} {
+	ids := []string{"a1", "a2", "a3", "a4", "a5", "a6", "a7"}
+	for _, id := range ids {
 		bg := agentToolCall(id)
 		bg.Input = fmt.Sprintf(`{"prompt":"dig %s"}`, id)
 		_ = u.upsertAgentTask(&message.Message{ID: "m", Role: message.Assistant}, bg)
 	}
-	require.Len(t, u.agentTasks, 4)
+	require.Len(t, u.agentTasks, len(ids))
 
-	u.tasksAreaHeight()
+	// The header counts every agent, the window shows tasksWindowSize
+	// rows, and the footer says how many are out of view.
+	height := u.tasksAreaHeight()
 	out := ansi.Strip(u.tasksView)
-	// The window renders at most three task rows.
-	assert.LessOrEqual(t, strings.Count(out, "Agent"), 3)
-	assert.LessOrEqual(t, strings.Count(out, "\n")+1, 3)
+	assert.Contains(t, out, fmt.Sprintf("Agents · %d running", len(ids)))
+	assert.Len(t, u.taskRows, tasksWindowSize)
+	assert.Contains(t, out, "↓ 2 below")
+	assert.NotContains(t, out, "above")
+	assert.Equal(t, 1+tasksWindowSize+1, height, "header, window and footer")
 
-	// Move the cursor past the window end: the window scrolls with it.
-	u.taskCursor = 3
-	u.tasksAreaHeight()
-	assert.Contains(t, ansi.Strip(u.tasksView), "dig a4", "the window follows the cursor onto the last task")
-	assert.NotContains(t, ansi.Strip(u.tasksView), "dig a1")
+	// Move the cursor onto the last task: the window follows it, the
+	// footer flips to what is above, and the height holds still.
+	u.taskCursor = len(ids) - 1
+	assert.Equal(t, height, u.tasksAreaHeight(), "scrolling never resizes the strip")
+	out = ansi.Strip(u.tasksView)
+	assert.Contains(t, out, "dig a7", "the window follows the cursor onto the last task")
+	assert.NotContains(t, out, "dig a1")
+	assert.Contains(t, out, "↑ 2 above")
+	assert.NotContains(t, out, "below")
 
 	// Reaping the task under the cursor clamps the cursor back in range.
-	u.reapAgentTask("a4")
+	u.reapAgentTask("a7")
 	u.clampTaskCursor()
-	assert.Equal(t, 2, u.taskCursor)
+	assert.Equal(t, len(ids)-2, u.taskCursor)
+}
+
+func TestTaskRowShowsLiveStepElapsedAndTokens(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.width = 120
+
+	startedAt := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	u.agentTasks = []*agentTask{{
+		toolCallID:     "a1",
+		childSessionID: "child-1",
+		agentType:      "fast",
+		description:    "Audit the dispatch path",
+		status:         subagents.StatusRunning,
+		startedAt:      startedAt,
+	}}
+	u.runningSubagents = []workspace.RunningSubagentInfo{{
+		ChildSessionID:   "child-1",
+		Name:             "explore",
+		StartedAt:        startedAt,
+		PromptTokens:     12_000,
+		CompletionTokens: 345,
+	}}
+
+	assert.True(t, u.applyTaskActivity(message.Message{
+		SessionID: "child-1",
+		Role:      message.Assistant,
+		Parts: []message.ContentPart{message.ToolCall{
+			ID: "c1", Name: "bash", Input: `{"command":"go test ./internal/agent"}`,
+		}},
+	}), "a tool call is the agent's current step")
+	assert.False(t, u.applyTaskActivity(message.Message{
+		SessionID: "child-1", Role: message.Tool,
+	}), "a tool result says nothing new")
+	assert.False(t, u.applyTaskActivity(message.Message{
+		SessionID: "main", Role: message.Assistant,
+	}), "another session's message touches no row")
+
+	out := ansi.Strip(u.renderTasks(u.width, startedAt.Add(102*time.Second)))
+	assert.Contains(t, out, "explore", "the runtime's name for the agent wins over the dispatch type")
+	assert.Contains(t, out, "Audit the dispatch path")
+	assert.Contains(t, out, "go test ./internal/agent", "the row shows the call in flight")
+	assert.Contains(t, out, "1m 42s")
+	assert.Contains(t, out, "12.3k tok")
+
+	assert.True(t, u.applyTaskActivity(message.Message{
+		SessionID: "child-1", Role: message.Assistant,
+	}))
+	assert.Contains(t, ansi.Strip(u.renderTasks(u.width, startedAt)), "thinking",
+		"a fresh step with no call or text yet is thinking")
+}
+
+func TestTaskColumnsAlignAcrossRows(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.width = 100
+
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	u.agentTasks = []*agentTask{
+		{toolCallID: "a1", agentType: "fast", description: "short", status: subagents.StatusRunning, startedAt: now.Add(-5 * time.Second)},
+		{toolCallID: "a2", agentType: "research", description: "a longer title", status: subagents.StatusRunning, startedAt: now.Add(-90 * time.Second)},
+	}
+	lines := strings.Split(ansi.Strip(u.renderTasks(u.width, now)), "\n")
+	require.Len(t, lines, 3)
+	assert.Equal(t, strings.Index(lines[1], "short"), strings.Index(lines[2], "a longer title"),
+		"titles start in one column whatever the type's length")
+	assert.Equal(t, len(strings.TrimRight(lines[1], " ")), len(strings.TrimRight(lines[2], " ")),
+		"elapsed times end in one column")
 }
 
 // activateAgentView is the test-side act of entering an agent's
@@ -1172,7 +1250,8 @@ func TestBackgroundJobRowTracksTheJob(t *testing.T) {
 	require.True(t, u.tasksSpinning(), "a running job keeps the strip alive")
 	u.tasksAreaHeight()
 	out := ansi.Strip(u.tasksView)
-	assert.Contains(t, out, "Job")
+	assert.Contains(t, out, "Jobs · 1 running", "a strip of jobs alone counts them as jobs")
+	assert.Contains(t, out, " job ", "the row names its kind in the type column")
 	assert.Contains(t, out, "go test ./...")
 	assert.Contains(t, out, "12s")
 	assert.Contains(t, out, styles.JobIcon, "a job row carries its own glyph")
@@ -1262,4 +1341,26 @@ func TestJobStartedRecognizesOnlyJobStarts(t *testing.T) {
 			assert.Equal(t, tt.want, jobStarted(tt.tr))
 		})
 	}
+}
+
+// TestSessionSwitchLeavesVanishedTaskStrip is the regression test for
+// focus stranded on the background tasks strip: switching from a session
+// whose strip held focus to one without tasks empties the strip, and the
+// editor must take focus back with a live caret instead of the next key
+// being spent leaving a strip that is no longer drawn.
+func TestSessionSwitchLeavesVanishedTaskStrip(t *testing.T) {
+	pinTTLs(t)
+
+	u := newBusyUI(&countingWorkspace{ready: true})
+	_ = u.upsertAgentTask(&message.Message{ID: "m1", SessionID: "s1", Role: message.Assistant}, agentToolCall("a1"))
+	u.focusTasks()
+	require.Equal(t, uiFocusTasks, u.focus)
+	u.textarea.Blur()
+
+	u.sessionLoadRequested = "s2"
+	u.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
+
+	require.Empty(t, u.agentTasks)
+	require.Equal(t, uiFocusEditor, u.focus, "focus leaves the vanished strip")
+	require.True(t, u.textarea.Focused(), "the editor takes the keyboard back")
 }

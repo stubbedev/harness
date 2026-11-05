@@ -129,9 +129,13 @@ func (m *UI) rewindSession(sessionID, messageID, prompt string, mode checkpoints
 
 type shellResultMsg struct {
 	PendingID string // ID of the pending ShellItem to update.
+	SessionID string // Session the command ran in.
 	Command   string
 	Output    string
 	ExitCode  int
+	// Err is why the command could not run; Output and ExitCode are
+	// meaningless when it is set.
+	Err error
 }
 
 // shellStreamMsg carries incremental output from a streaming shell command.
@@ -214,9 +218,14 @@ type (
 
 // UI represents the main user interface model.
 type UI struct {
-	com          *common.Common
-	session      *session.Session
-	sessionFiles []SessionFile
+	com     *common.Common
+	session *session.Session
+	// sessionLoadRequested is the session the latest loadSession asked
+	// for, empty once a new session is started instead. A loadSessionMsg
+	// for any other session lost a race against a newer switch and is
+	// discarded rather than painted over it.
+	sessionLoadRequested string
+	sessionFiles         []SessionFile
 	// sessionFilesLoading is the session whose file list is being
 	// loaded, empty when no load is in flight; sessionFilesStale records
 	// that a file event arrived during that load. A burst of writes then
@@ -297,11 +306,13 @@ type UI struct {
 	// stable, eliminating races between session load and shell output.
 	pendingBangCommand string
 
-	// bangCancel cancels a running bang-mode shell command. Nil when no
-	// bang command is in progress. Set by runShellCommand, cleared by
-	// shellResultMsg. Checked by isAgentBusy and stopAgent so that
-	// Escape works for bang commands the same way it does for agent runs.
-	bangCancel context.CancelFunc
+	// bangRuns holds the running bang-mode shell commands, keyed by their
+	// pending item's ID. Added by runShellCommand, removed by
+	// shellResultMsg. Only the current session's runs count for
+	// isAgentBusy and stopAgent, so Escape works for bang commands the
+	// same way it does for agent runs without reaching into another
+	// session.
+	bangRuns map[string]bangRun
 
 	header *header
 
@@ -657,12 +668,13 @@ func (m *UI) loadInitialSession() tea.Cmd {
 	case m.initialSessionID != "":
 		return m.loadSession(m.initialSessionID)
 	case m.continueLastSession:
+		ws := m.com.Workspace
 		return func() tea.Msg {
-			sessions, err := m.com.Workspace.ListSessions(context.Background())
+			sessions, err := ws.ListSessions(context.Background())
 			if err != nil || len(sessions) == 0 {
 				return nil
 			}
-			return m.loadSession(sessions[0].ID)()
+			return continueSessionMsg{sessionID: sessions[0].ID}
 		}
 	default:
 		return nil
@@ -863,6 +875,9 @@ type themeSavedMsg struct {
 // Update handles updates to the UI model.
 func (m *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	model, cmd := m.update(msg)
+	if focusCmd := m.leaveVanishedTasks(); focusCmd != nil {
+		cmd = tea.Batch(cmd, focusCmd)
+	}
 	// The command picker follows the editor's text, whatever changed it.
 	// Reading the text allocates the whole draft, so the stream deltas
 	// and animation ticks that make up most messages skip it unless the
@@ -953,7 +968,14 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.dispatchPromptQueueRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case continueSessionMsg:
+		if m.state == uiLanding && m.sessionLoadRequested == "" {
+			cmds = append(cmds, m.loadSession(msg.sessionID))
+		}
 	case loadSessionMsg:
+		if msg.session.ID != m.sessionLoadRequested {
+			break
+		}
 		m.resetSessionScope()
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
@@ -1139,6 +1161,10 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.session == nil {
 			break
 		}
+		// A child's message, viewed or not, says what its agent is doing.
+		if m.applyTaskActivity(msg.Payload) {
+			m.refreshTasksView()
+		}
 		isMain := msg.Payload.SessionID == m.session.ID
 		isViewed := m.agentView.shown != "" && msg.Payload.SessionID == m.agentView.shown
 		if !isMain && !isViewed {
@@ -1305,7 +1331,9 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 		}
 	case pubsub.Event[question.Request]:
-		m.openBatchFormDialog(msg.Payload)
+		if cmd := m.openBatchFormDialog(msg.Payload); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		m.chat.ScrollToBottom()
 		if cmd := m.sendNotification(notification.Notification{
 			Title:   "Agent is waiting...",
@@ -1576,6 +1604,9 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+			// The spinner is the strip's clock: each tick keeps the
+			// elapsed column current.
+			m.refreshTasksView()
 			// Backstop: settle tasks whose terminal RuntimeEvent was lost
 			// in flight, so no spinner outlives its subagent.
 			if cmd := m.maybeReconcileSpinningTasks(); cmd != nil {
@@ -1637,27 +1668,15 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 	case shellResultMsg:
-		// Clear the bang cancel func — command is done.
-		if m.bangCancel != nil {
-			m.bangCancel()
-			m.bangCancel = nil
-		}
-		// Complete the pending shell item if it exists, otherwise create a new one.
-		completed := false
-		if msg.PendingID != "" {
-			if item := m.chat.MessageItem(msg.PendingID); item != nil {
-				if shellItem, ok := item.(*chat.ShellItem); ok {
-					shellItem.Complete(msg.Output, msg.ExitCode)
-					m.chat.ScrollToBottom()
-					completed = true
-				}
+		m.finishBangRun(msg.PendingID)
+		if msg.Err != nil {
+			if shellItem, ok := m.chat.MessageItem(msg.PendingID).(*chat.ShellItem); ok {
+				shellItem.Fail(msg.Err.Error())
 			}
+			cmds = append(cmds, util.ReportError(fmt.Errorf("shell: %w", msg.Err)))
+			break
 		}
-		if !completed {
-			item := chat.NewShellItem(m.com.Styles, msg.Command, msg.Output, msg.ExitCode)
-			m.chat.AppendMessages(item)
-			m.chat.ScrollToBottom()
-		}
+		m.showShellResult(msg)
 		cmds = append(cmds, m.loadPromptHistory())
 	case util.InfoMsg:
 		if msg.Type == util.InfoTypeError {
@@ -2308,7 +2327,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		switch {
 		case key.Matches(msg, m.keyMap.Chat.BackgroundTasks):
 			if m.focus == uiFocusTasks {
-				m.focusEditorFromTasks()
+				cmds = append(cmds, m.focusEditorFromTasks())
 			} else if m.state == uiChat && m.taskRowCount() > 0 {
 				m.focusTasks()
 			}
@@ -2498,6 +2517,10 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				// in the editor rather than dropping what the user attached.
 				if m.agentView.shown != "" && m.hasInlineAttachments(draft) {
 					return util.ReportWarn("Attachments can't be sent to a subagent; switch back to the main agent first")
+				}
+
+				if attachErr := m.inlineAttachmentsErr(draft); attachErr != nil {
+					return util.ReportWarn(attachErr.Error())
 				}
 
 				// Otherwise, send the message
@@ -2799,11 +2822,8 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 		case uiFocusTasks:
 			// The background tasks strip: up/down move the cursor through
 			// the rows, enter/space switch the transcript to the row's
-			// session, esc or tab leave.
-			if m.state != uiChat || m.taskRowCount() == 0 {
-				m.focusEditorFromTasks()
-				break
-			}
+			// session, esc or tab leave. Update never leaves focus on
+			// a vanished strip, see leaveVanishedTasks.
 			if consumed, cmd := m.handleTaskKey(msg); consumed {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
@@ -3816,7 +3836,7 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 // would be an HTTP round-trip per keystroke in client/server mode); the
 // value is refreshed off-thread, see workspace_cache.go.
 func (m *UI) isAgentBusy() bool {
-	if m.bangCancel != nil {
+	if m.bangRunning() {
 		return true
 	}
 	return m.agentBusyCache.val
@@ -4160,16 +4180,13 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	m.bangCancel = cancel
+	m.startBangRun(pendingID, sessionID, cancel)
 
 	cmds = append(cmds, func() tea.Msg {
 		resp, err := m.com.Workspace.AgentRunShellCommand(ctx, sessionID, command, contentWidth, onProgress, isFirstMessage)
 		close(streamCh)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			return util.InfoMsg{
-				Type: util.InfoTypeError,
-				Msg:  fmt.Sprintf("shell: %v", err),
-			}
+			return shellResultMsg{PendingID: pendingID, SessionID: sessionID, Command: command, Err: err}
 		}
 		exitCode := resp.ExitCode
 		if errors.Is(err, context.Canceled) {
@@ -4177,6 +4194,7 @@ func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cm
 		}
 		return shellResultMsg{
 			PendingID: pendingID,
+			SessionID: sessionID,
 			Command:   command,
 			Output:    resp.Output,
 			ExitCode:  exitCode,
@@ -4361,7 +4379,8 @@ func (m *UI) openMentionPicker() tea.Cmd {
 
 // openBatchFormDialog activates a tabbed multi-question form in
 // the editor area. Single questions render without tabs or confirm.
-func (m *UI) openBatchFormDialog(batch question.Request) {
+// Returns the command focusing the editor produces.
+func (m *UI) openBatchFormDialog(batch question.Request) tea.Cmd {
 	// Close any existing question form first to prevent stacking.
 	if qf, ok := m.activeInline.(*dialog.QuestionForm); ok && qf != nil {
 		m.activeInline = nil
@@ -4375,8 +4394,9 @@ func (m *UI) openBatchFormDialog(batch question.Request) {
 		m.com.Workspace.QuestionCancel()
 	}
 	m.activeInline = form
-	m.focusEditor()
+	cmd := m.focusEditor()
 	m.updateLayoutAndSize()
+	return cmd
 }
 
 // handleQuestionNotification dismisses an open question form when
@@ -4552,6 +4572,7 @@ func (m *UI) newSession() tea.Cmd {
 
 	m.resetSessionScope()
 	m.session = nil
+	m.sessionLoadRequested = ""
 	m.sessionFiles = nil
 	// Reads recorded for the next prompt belong to the session being
 	// left. A load keeps them: it also reloads the same session (on
@@ -4676,8 +4697,8 @@ func (m *UI) handlePasteMsg(msg tea.PasteMsg) tea.Cmd {
 	if hasPasteExceededThreshold(msg) {
 		return func() tea.Msg {
 			content := []byte(msg.Content)
-			if int64(len(content)) > common.MaxAttachmentSize {
-				return util.ReportWarn("Paste is too big (>5mb)")
+			if warning, tooLarge := attachmentTooLarge("Paste", int64(len(content))); tooLarge {
+				return util.ReportWarn(warning)
 			}
 			name := fmt.Sprintf("paste_%d.txt", m.pasteIdx())
 			mimeBufferSize := min(512, len(content))
@@ -4755,8 +4776,8 @@ func (m *UI) handleFilePathPaste(path string) tea.Cmd {
 		if fileInfo.IsDir() {
 			return util.ReportWarn("Cannot attach a directory")
 		}
-		if fileInfo.Size() > common.MaxAttachmentSize {
-			return util.ReportWarn("File is too big (>5mb)")
+		if warning, tooLarge := attachmentTooLarge(filepath.Base(path), fileInfo.Size()); tooLarge {
+			return util.ReportWarn(warning)
 		}
 
 		content, err := os.ReadFile(path)
@@ -4799,11 +4820,8 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 		return util.NewWarnMsg("The current model does not support image attachments")
 	}
 	imageData, err := clipboard.Read(clipboard.FormatImage)
-	if int64(len(imageData)) > common.MaxAttachmentSize {
-		return util.InfoMsg{
-			Type: util.InfoTypeError,
-			Msg:  "File too large, max 5MB",
-		}
+	if warning, tooLarge := attachmentTooLarge("Pasted image", int64(len(imageData))); tooLarge {
+		return util.InfoMsg{Type: util.InfoTypeError, Msg: warning}
 	}
 	name := fmt.Sprintf("paste_%d.png", m.pasteIdx())
 	if err == nil {
@@ -4839,11 +4857,8 @@ func (m *UI) pasteImageFromClipboard() tea.Msg {
 			Msg:  fmt.Sprintf("Unable to read file: %v", statErr),
 		}
 	}
-	if fileInfo.Size() > common.MaxAttachmentSize {
-		return util.InfoMsg{
-			Type: util.InfoTypeError,
-			Msg:  "File too large, max 5MB",
-		}
+	if warning, tooLarge := attachmentTooLarge(filepath.Base(path), fileInfo.Size()); tooLarge {
+		return util.InfoMsg{Type: util.InfoTypeError, Msg: warning}
 	}
 
 	content, readErr := os.ReadFile(path)

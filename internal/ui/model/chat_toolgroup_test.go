@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/lsp"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/ui/chat"
 )
@@ -401,4 +402,36 @@ func TestAppendKeepsTheIndexEqualToARebuild(t *testing.T) {
 		u.chat.rebuildIndices()
 		require.Equal(t, u.chat.idInxMap, incremental, "after step %d", i)
 	}
+}
+
+// TestSettledGroupRerendersWhenLiveDiagnosticsChange pins the group's
+// render cache to its children: an expanded group holding a finished
+// diagnostics call must stop showing the call's errors as the last word
+// once the language servers report the file clean, even though the group
+// itself was rendered and cached before the push.
+func TestSettledGroupRerendersWhenLiveDiagnosticsChange(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+
+	diag := chat.NewToolMessageItem(
+		u.com.Styles,
+		"msg",
+		message.ToolCall{ID: "d1", Name: "lsp", Input: `{"action":"diagnostics","path":"/x/f.go"}`, Finished: true},
+		&message.ToolResult{ToolCallID: "d1", Name: "lsp", Content: "Error: /x/f.go:1:1 boom"},
+		false,
+	)
+	u.chat.SetMessages("", diag)
+	group, ok := u.chat.list.ItemAt(0).(*chat.ToolGroupMessageItem)
+	require.True(t, ok)
+	group.ToggleExpanded()
+	require.False(t, group.Spinning(), "a finished call settles the group")
+
+	before := ansi.Strip(group.Render(100))
+	require.Contains(t, before, "boom")
+	require.NotContains(t, before, "resolved")
+
+	u.chat.SetLiveDiagnostics(map[string]lsp.DiagnosticCounts{"/x/f.go": {}})
+
+	require.Contains(t, ansi.Strip(group.Render(100)), "resolved",
+		"a child's change must invalidate the group's cached render")
 }

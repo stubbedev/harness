@@ -38,7 +38,7 @@ func TestEscapeTwiceStopsEverythingAndRestoresQueue(t *testing.T) {
 	m.appendQueuedPrompt("second")
 	require.NotNil(t, m.queuedPromptItem)
 	var bangCanceled bool
-	m.bangCancel = func() { bangCanceled = true }
+	m.startBangRun("shell-1", "s1", func() { bangCanceled = true })
 
 	require.Equal(t, "press twice to stop", escHint(t, m))
 	runCmds(m, pressEsc(m))
@@ -51,7 +51,7 @@ func TestEscapeTwiceStopsEverythingAndRestoresQueue(t *testing.T) {
 	require.Equal(t, 1, ws.cancelCalls, "the second press stops the whole session")
 	require.False(t, m.isAgentBusy(), "the UI is idle as soon as the stop is pressed")
 	require.True(t, bangCanceled, "a running bang command is canceled")
-	require.Nil(t, m.bangCancel)
+	require.Empty(t, m.bangRuns)
 	require.Empty(t, m.promptQueueItems)
 	require.Empty(t, m.queuedPrompts)
 	require.Nil(t, m.queuedPromptItem, "the queued placeholder leaves the transcript")

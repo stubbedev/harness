@@ -506,14 +506,20 @@ func (g *ToolGroupMessageItem) Render(width int) string {
 	return out
 }
 
+// prefixKey keys the cached render on the prefix variant in the low bits
+// and the group's version in the upper bits. The group's own fields are
+// not the whole of its render: a child mutated in place (a result, a live
+// diagnostics push) only announces itself by the group's version bump, so
+// a render cached before that bump must miss.
 func (g *ToolGroupMessageItem) prefixKey() uint64 {
+	var variant uint64
 	switch {
 	case g.focused:
-		return 1
+		variant = 1
 	case g.hovered:
-		return 2
+		variant = 2
 	}
-	return 0
+	return g.Version()<<2 | variant
 }
 
 // runOutcome is how a run went, as the group header and verb color read

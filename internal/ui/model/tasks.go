@@ -19,6 +19,7 @@ import (
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/subagents"
 	"github.com/stubbedev/harness/internal/ui/chat"
+	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
 	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/workspace"
@@ -31,10 +32,17 @@ type agentTask struct {
 	toolCallID     string
 	childSessionID string
 	description    string
-	status         subagents.RunStatus
-	startedAt      time.Time
-	background     bool
-	dispatched     bool
+	// agentType is the subagent the dispatch runs (fast, task,
+	// research...), shown until the runtime names the agent itself.
+	agentType string
+	// activity is what the agent is doing right now, read from its
+	// session's latest assistant message: the call it is making, or
+	// thinking or writing. Empty until the agent's first step.
+	activity   string
+	status     subagents.RunStatus
+	startedAt  time.Time
+	background bool
+	dispatched bool
 	// titled marks a description that came from the child session's
 	// generated title rather than the dispatch-prompt excerpt, so a
 	// later message update cannot overwrite it with the excerpt again.
@@ -127,6 +135,7 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 		m.agentTasks = append(m.agentTasks, task)
 	}
 	task.background = !params.Blocking
+	task.agentType = dispatchAgentType(tc, params)
 	if !task.titled {
 		task.description = promptExcerpt(params.Prompt)
 	}
@@ -176,11 +185,8 @@ func (m *UI) resolveAgentTaskResult(tr message.ToolResult) bool {
 
 // reapAgentTask removes a finished task from the strip and marks the
 // dispatch as settled so late assistant-message updates for the same
-// tool call cannot re-register it. When the strip empties while it
-// held focus, focus falls back to the editor through the single
-// focusEditor path, otherwise the caret would vanish with the strip
-// (Draw only draws a cursor for the editor) and keys would route to a
-// dead surface until the user tabbed away and back.
+// tool call cannot re-register it. Focus on a strip the reap empties
+// is handed back by leaveVanishedTasks.
 func (m *UI) reapAgentTask(toolCallID string) {
 	if m.reapedAgentTasks == nil {
 		m.reapedAgentTasks = make(map[string]bool)
@@ -193,9 +199,20 @@ func (m *UI) reapAgentTask(toolCallID string) {
 		}
 	}
 	m.clampTaskCursor()
-	if m.focus == uiFocusTasks && m.taskRowCount() == 0 {
-		m.focusEditor()
+}
+
+// leaveVanishedTasks hands focus to the editor when the background tasks
+// strip holding it is gone, whatever removed it: the last task reaped, a
+// session switch resetting the strip, or a state without a transcript.
+// Otherwise the caret would vanish with the strip (Draw only draws a
+// cursor for the editor), the hints would describe a dead surface and the
+// next key would be spent leaving it. It returns the command that
+// restarts the caret's blink cycle.
+func (m *UI) leaveVanishedTasks() tea.Cmd {
+	if m.focus != uiFocusTasks || m.state == uiChat && m.taskRowCount() > 0 {
+		return nil
 	}
+	return m.focusEditor()
 }
 
 // childSessionIDFor derives the sub-session ID behind a dispatch. Empty
@@ -287,6 +304,7 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 				background:     !params.Blocking,
 				dispatched:     hasResult,
 				description:    promptExcerpt(params.Prompt),
+				agentType:      dispatchAgentType(tc, params),
 				childSessionID: m.childSessionIDFor(msg.ID, tc.ID),
 			}
 			m.agentTasks = append(m.agentTasks, task)
@@ -320,6 +338,64 @@ func (m *UI) applyTaskTitle(childSessionID, title string) bool {
 	task.description = title
 	task.titled = true
 	return true
+}
+
+// dispatchAgentType names the subagent a strip row's dispatch runs. The
+// research tool is an agent of its own; the dispatcher names one in its
+// input.
+func dispatchAgentType(tc message.ToolCall, params agent.AgentDispatchParams) string {
+	if tc.Name == agent.AgentToolName {
+		return params.AgentType()
+	}
+	return tc.Name
+}
+
+// applyTaskActivity records what a child session's message says its
+// agent is doing now. It reports whether a row's text changed.
+func (m *UI) applyTaskActivity(msg message.Message) bool {
+	task := m.agentTaskByChildSession(msg.SessionID)
+	if task == nil {
+		return false
+	}
+	activity, ok := subagentActivity(msg, m.itemEnv().WorkingDir)
+	if !ok || task.activity == activity {
+		return false
+	}
+	task.activity = activity
+	return true
+}
+
+// subagentActivity reads what an agent is doing from its session's
+// latest assistant message: the call it is making, labeled and
+// summarized the way a collapsed tool group labels it, or thinking or
+// writing. Any other message says nothing new, and ok is false.
+func subagentActivity(msg message.Message, workingDir string) (activity string, ok bool) {
+	if msg.Role != message.Assistant {
+		return "", false
+	}
+	if calls := msg.ToolCalls(); len(calls) > 0 {
+		tc := calls[len(calls)-1]
+		label := chat.ToolCallLabel(tc)
+		if summary := chat.ToolCallSummary(tc, workingDir); summary != "" {
+			return label + " " + summary, true
+		}
+		return label, true
+	}
+	if strings.TrimSpace(msg.Content().Text) != "" {
+		return "writing", true
+	}
+	return "thinking", true
+}
+
+// refreshTasksView re-renders the strip in place for changes that keep
+// its height - the elapsed column ticking, a new current step - without
+// relaying out the screen. Row count changes go through
+// updateLayoutAndSize, which sizes the strip.
+func (m *UI) refreshTasksView() {
+	if m.tasksView == "" {
+		return
+	}
+	m.tasksView = m.renderTasks(m.width, time.Now())
 }
 
 // agentTaskByChildSession returns the task running the given child
@@ -684,7 +760,7 @@ func (m *UI) tasksAreaHeight() int {
 		m.taskRows = nil
 		return 0
 	}
-	m.tasksView = m.renderTasks(m.width)
+	m.tasksView = m.renderTasks(m.width, time.Now())
 	return lipgloss.Height(m.tasksView)
 }
 
@@ -884,14 +960,35 @@ func (m *UI) focusAboveEditor(entry chatEntry) tea.Cmd {
 	return m.focusChat(entry)
 }
 
+// tasksWindowSize is how many rows the strip shows at once. The rest
+// scroll with the cursor, and the footer says how many are out of view.
+const tasksWindowSize = 5
+
+// taskCells is one task row's text before styling, so the columns can
+// be measured across the visible rows and aligned.
+type taskCells struct {
+	agentType string
+	title     string
+	activity  string
+	elapsed   string
+	tokens    string
+}
+
+// taskColumns is the width of each aligned column over the visible
+// rows; title and activity share what is left.
+type taskColumns struct {
+	agentType, elapsed, tokens int
+	title, activity            int
+}
+
 // renderTasks renders the background tasks strip and records the row
-// layout for mouse handling. Rows carry the same focused/blurred prefix
-// bar as transcript items, the word is styled like a tool group's verb
-// (pending while the agent runs, error/cancelled when it did not
-// survive), and the description is the child session's generated title
-// or, until that lands, the dispatch-prompt excerpt. The list is a
-// three-row scrolling window around the cursor.
-func (m *UI) renderTasks(width int) string {
+// layout for mouse handling. From the main session it is a header
+// counting the agents, one aligned row per agent in view - its type,
+// title, current step, elapsed time and tokens - and, when agents are
+// out of view, a footer saying how many sit above and below. While an
+// agent's session is viewed it is the pinned Main Agent row. Rows carry
+// the same focused/blurred prefix bar as transcript items.
+func (m *UI) renderTasks(width int, now time.Time) string {
 	t := m.com.Styles
 	m.taskRows = nil
 	m.clampTaskCursor()
@@ -899,90 +996,268 @@ func (m *UI) renderTasks(width int) string {
 	if n == 0 {
 		return ""
 	}
-	focused := m.focus == uiFocusTasks
-	focusedPrefix := t.Messages.ToolCallFocused.Render()
-	blurredPrefix := t.Messages.ToolCallBlurred.Render()
-	hoveredPrefix := t.Messages.ToolCallHovered.Render()
-	prefixWidth := lipgloss.Width(focusedPrefix)
-
-	const windowSize = 3
-	start := 0
-	if n > windowSize {
-		start = max(0, min(m.taskCursor-1, n-windowSize))
+	start, end := 0, n
+	if n > tasksWindowSize {
+		start = max(0, min(m.taskCursor-1, n-tasksWindowSize))
+		end = start + tasksWindowSize
 	}
-	end := min(n, start+windowSize)
+	prefixWidth := lipgloss.Width(t.Messages.ToolCallFocused.Render())
 
-	var rows []string
+	var lines []string
+	if m.agentView.shown == "" {
+		lines = append(lines, tasksHeader(t, m.agentTasks, len(m.jobTasks), prefixWidth))
+	}
+	cells := m.visibleTaskCells(start, end, now)
+	cols := layoutTaskColumns(cells, max(width-prefixWidth, 1))
 	for row := start; row < end; row++ {
+		y := len(lines)
 		ref := m.taskRowAt(row)
-		onCursor := focused && row == m.taskCursor
-		onHover := m.taskHoverY == row-start
-		prefix := blurredPrefix
-		if onHover {
-			prefix = hoveredPrefix
-		}
-		if onCursor {
-			prefix = focusedPrefix
-		}
-		// Every row shares the accent color: they must pop out of the
-		// grey tool-call surroundings they sit beside, not blend into
-		// them. The glyph tells the main session, a subagent and a
-		// background job apart.
-		var (
-			icon   string
-			word   lipgloss.Style
-			label  string
-			detail string
-		)
-		switch {
-		case ref.isMain:
-			icon = t.Tool.AgentIcon.Render(styles.MainAgentIcon)
-			word, label = t.Tool.NameNormal, "Main Agent"
-			if onCursor {
-				word = t.Tool.NameNormalSelected
-			}
-		case ref.task != nil:
-			task := ref.task
-			icon = t.Tool.AgentIcon.Render(styles.AgentIcon)
-			word = chat.GroupVerbStyle(t, task.spinning(),
-				task.status == subagents.StatusCancelled,
-				boolToInt(task.status == subagents.StatusFailed),
-				boolToInt(task.status == subagents.StatusCompleted),
-				onCursor)
-			label = "Agent"
-			detail = task.description
-		default:
-			// A job row only exists while the job runs; the feed reaps
-			// it when it ends, so there is no settled state to render.
-			job := ref.job
-			icon = t.Tool.AgentIcon.Render(styles.JobIcon)
-			word = chat.GroupVerbStyle(t, true, false, 0, 0, onCursor)
-			label = "Job"
-			detail = job.command
-			if badge := chat.ToolDurationBadge(job.elapsed); badge != "" {
-				detail = chat.FirstLine(detail) + " " + t.Tool.StateWaiting.Render(badge)
-			}
-		}
-		line := icon + " " + word.Render(label)
-		if detail != "" {
-			line += " " + t.Tool.Body.Render(detail)
-		}
-		rows = append(rows, prefix+ansi.Truncate(line, max(width-prefixWidth, 1), "…"))
+		lines = append(lines, m.renderTaskRow(ref, row, y, cells[row-start], cols, width))
+		m.taskRows = append(m.taskRows, taskRow{yStart: y, yEnd: y + 1, key: ref.key()})
 	}
-
-	// Record row bounds for click handling: one line per row.
-	for row := start; row < end; row++ {
-		m.taskRows = append(m.taskRows, taskRow{
-			yStart: row - start,
-			yEnd:   row - start + 1,
-			key:    m.taskRowAt(row).key(),
-		})
+	if footer := tasksFooter(t, start, n-end, prefixWidth); footer != "" {
+		lines = append(lines, footer)
 	}
 
 	// The strip borrows the tool group's row style (the one behind
 	// "Ran/Running (N calls)"), so subagent rows read like the
 	// transcript's tool-call rows they sit beside.
-	return t.Tool.Body.Render(strings.Join(rows, "\n"))
+	return t.Tool.Body.Render(strings.Join(lines, "\n"))
+}
+
+// tasksHeader counts what the strip holds, so how many agents and jobs
+// there are is readable at a glance however many rows fit. It is headed
+// by the agents when there are any and by the jobs when they are all
+// the strip holds.
+func tasksHeader(t *styles.Styles, tasks []*agentTask, jobs, indent int) string {
+	running, retrying := 0, 0
+	for _, task := range tasks {
+		switch task.status {
+		case subagents.StatusRunning:
+			running++
+		case subagents.StatusRetrying:
+			retrying++
+		default:
+		}
+	}
+	dim := t.Resource.AdditionalText
+	header := strings.Repeat(" ", indent)
+	if len(tasks) == 0 {
+		return header + t.Resource.Heading.Render("Jobs") + dim.Render(fmt.Sprintf(" · %d running", jobs))
+	}
+	header += t.Resource.Heading.Render("Agents")
+	if running > 0 {
+		header += dim.Render(fmt.Sprintf(" · %d running", running))
+	}
+	if retrying > 0 {
+		header += dim.Render(fmt.Sprintf(" · %d retrying", retrying))
+	}
+	switch {
+	case jobs == 1:
+		header += dim.Render(" · 1 job")
+	case jobs > 1:
+		header += dim.Render(fmt.Sprintf(" · %d jobs", jobs))
+	}
+	return header
+}
+
+// tasksFooter says how many rows the window hides on each side, empty
+// when everything is in view. It shows whenever the window scrolls, so
+// the strip's height does not change as the cursor moves through it.
+func tasksFooter(t *styles.Styles, above, below, indent int) string {
+	if above == 0 && below == 0 {
+		return ""
+	}
+	var parts []string
+	if above > 0 {
+		parts = append(parts, fmt.Sprintf("↑ %d above", above))
+	}
+	if below > 0 {
+		parts = append(parts, fmt.Sprintf("↓ %d below", below))
+	}
+	return strings.Repeat(" ", indent) + t.Resource.AdditionalText.Render(strings.Join(parts, " · "))
+}
+
+// visibleTaskCells collects the text of the rows in [start, end). The
+// runtime's entry for an agent, when it has one, is authoritative for
+// its name, start time and token use. A job row is its command and how
+// long it has run, as the job feed last reported it.
+func (m *UI) visibleTaskCells(start, end int, now time.Time) []taskCells {
+	runtime := make(map[string]workspace.RunningSubagentInfo, len(m.runningSubagents))
+	for _, info := range m.runningSubagents {
+		runtime[info.ChildSessionID] = info
+	}
+	cells := make([]taskCells, 0, end-start)
+	for row := start; row < end; row++ {
+		ref := m.taskRowAt(row)
+		if ref.job != nil {
+			cells = append(cells, taskCells{
+				agentType: "job",
+				title:     chat.FirstLine(ref.job.command),
+				elapsed:   common.FormatDuration(ref.job.elapsed),
+			})
+			continue
+		}
+		task := ref.task
+		if task == nil {
+			cells = append(cells, taskCells{})
+			continue
+		}
+		info, known := runtime[task.childSessionID]
+		c := taskCells{
+			agentType: task.agentType,
+			title:     task.description,
+			activity:  task.activity,
+		}
+		startedAt := task.startedAt
+		if known {
+			if info.Name != "" {
+				c.agentType = info.Name
+			}
+			if !info.StartedAt.IsZero() {
+				startedAt = info.StartedAt
+			}
+			c.tokens = common.FormatSubagentTokenCount(info.PromptTokens, info.CompletionTokens)
+		}
+		if task.status == subagents.StatusRetrying {
+			c.activity = "retrying"
+		}
+		if !startedAt.IsZero() {
+			c.elapsed = common.FormatDuration(max(now.Sub(startedAt), 0))
+		}
+		cells = append(cells, c)
+	}
+	return cells
+}
+
+// layoutTaskColumns sizes the columns to the widest visible cell. Type,
+// elapsed and tokens keep their width; title and step share what is
+// left. The title gets its full width when both fit, and otherwise at
+// least two fifths, the step taking the rest since it is what changes.
+// A narrow strip drops tokens first, then the step.
+func layoutTaskColumns(cells []taskCells, width int) taskColumns {
+	var cols taskColumns
+	var titleWidth, activityWidth int
+	for _, c := range cells {
+		cols.agentType = max(cols.agentType, ansi.StringWidth(c.agentType))
+		titleWidth = max(titleWidth, ansi.StringWidth(c.title))
+		activityWidth = max(activityWidth, ansi.StringWidth(c.activity))
+		cols.elapsed = max(cols.elapsed, ansi.StringWidth(c.elapsed))
+		cols.tokens = max(cols.tokens, ansi.StringWidth(c.tokens))
+	}
+	const (
+		iconWidth   = 2
+		gap         = 2
+		minFlexible = 16
+		// maxActivityClaim caps how much room a long step (a full shell
+		// command) can take from the title; the step still fills any
+		// room the title leaves.
+		maxActivityClaim = 40
+	)
+	fixed := func() int {
+		w := iconWidth + cols.agentType + gap
+		if cols.elapsed > 0 {
+			w += gap + cols.elapsed
+		}
+		if cols.tokens > 0 {
+			w += gap + cols.tokens
+		}
+		return w
+	}
+	if width-fixed() < minFlexible {
+		cols.tokens = 0
+	}
+	flexible := max(width-fixed(), 1)
+	if activityWidth == 0 || flexible < 2*minFlexible {
+		cols.title = flexible
+		return cols
+	}
+	share := flexible - gap
+	cols.title = min(max(share-min(activityWidth, maxActivityClaim), share*2/5), titleWidth)
+	cols.activity = share - cols.title
+	return cols
+}
+
+// renderTaskRow renders one strip row at strip line y.
+func (m *UI) renderTaskRow(ref taskRowRef, row, y int, c taskCells, cols taskColumns, width int) string {
+	t := m.com.Styles
+	onCursor := m.focus == uiFocusTasks && row == m.taskCursor
+	prefix := t.Messages.ToolCallBlurred.Render()
+	if m.taskHoverY == y {
+		prefix = t.Messages.ToolCallHovered.Render()
+	}
+	if onCursor {
+		prefix = t.Messages.ToolCallFocused.Render()
+	}
+	rowWidth := max(width-lipgloss.Width(prefix), 1)
+
+	// Every row shares the accent color: they must pop out of the grey
+	// tool-call surroundings they sit beside, not blend into them. The
+	// glyph tells the main session, a subagent and a background job apart.
+	if ref.isMain {
+		word := t.Tool.NameNormal
+		if onCursor {
+			word = t.Tool.NameNormalSelected
+		}
+		line := t.Tool.AgentIcon.Render(styles.MainAgentIcon) + " " + word.Render("Main Agent")
+		return prefix + ansi.Truncate(line, rowWidth, "…")
+	}
+
+	var icon string
+	var word lipgloss.Style
+	switch {
+	case ref.task != nil:
+		task := ref.task
+		icon = t.Tool.AgentIcon.Render(styles.AgentIcon)
+		word = chat.GroupVerbStyle(t, task.spinning(),
+			task.status == subagents.StatusCancelled,
+			boolToInt(task.status == subagents.StatusFailed),
+			boolToInt(task.status == subagents.StatusCompleted),
+			onCursor)
+	case ref.job != nil:
+		// A job row only exists while the job runs; the feed reaps it
+		// when it ends, so there is no settled state to render.
+		icon = t.Tool.AgentIcon.Render(styles.JobIcon)
+		word = chat.GroupVerbStyle(t, true, false, 0, 0, onCursor)
+	default:
+		return prefix
+	}
+	dim := t.Resource.AdditionalText
+
+	var sb strings.Builder
+	sb.WriteString(icon)
+	sb.WriteString(" ")
+	sb.WriteString(padCell(word, c.agentType, cols.agentType, false))
+	sb.WriteString("  ")
+	sb.WriteString(padCell(t.Tool.Body, c.title, cols.title, false))
+	if cols.activity > 0 {
+		sb.WriteString("  ")
+		sb.WriteString(padCell(dim, c.activity, cols.activity, false))
+	}
+	if cols.elapsed > 0 {
+		sb.WriteString("  ")
+		sb.WriteString(padCell(dim, c.elapsed, cols.elapsed, true))
+	}
+	if cols.tokens > 0 {
+		sb.WriteString("  ")
+		sb.WriteString(padCell(dim, c.tokens, cols.tokens, true))
+	}
+	return prefix + ansi.Truncate(sb.String(), rowWidth, "…")
+}
+
+// padCell fits text to exactly width cells: truncated with an ellipsis
+// when longer, padded with spaces (on the left when alignRight) when
+// shorter. The padding sits outside the style so it carries no color.
+func padCell(style lipgloss.Style, text string, width int, alignRight bool) string {
+	text = ansi.Truncate(text, width, "…")
+	pad := strings.Repeat(" ", max(width-ansi.StringWidth(text), 0))
+	if text == "" {
+		return pad
+	}
+	if alignRight {
+		return pad + style.Render(text)
+	}
+	return style.Render(text) + pad
 }
 
 func boolToInt(b bool) int {

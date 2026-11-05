@@ -14,7 +14,7 @@ func displayNameCall(name, input string) message.ToolCall {
 
 // TestToolDisplayNameTable pins the label table: every path that shows a
 // tool's name (full renderer headers, one-liners, copy headings) reads
-// the item's DisplayName, which reads callLabel, so the table is what
+// the item's DisplayName, which reads ToolCallLabel, so the table is what
 // users see.
 func TestToolDisplayNameTable(t *testing.T) {
 	t.Parallel()
@@ -36,7 +36,7 @@ func TestToolDisplayNameTable(t *testing.T) {
 		// MCP calls keep the server -> tool split.
 		{displayNameCall("mcp_github_create_issue", "{}"), "Github -> Create Issue"},
 	} {
-		require.Equal(t, tc.want, callLabel(tc.call), "name %q", tc.call.Name)
+		require.Equal(t, tc.want, ToolCallLabel(tc.call), "name %q", tc.call.Name)
 	}
 }
 
@@ -64,7 +64,7 @@ func TestToolDisplayNameLSPFollowsAction(t *testing.T) {
 		{"bogus", "Diagnostics"},
 	} {
 		call := displayNameCall("lsp", `{"action":"`+tc.action+`"}`)
-		require.Equal(t, tc.want, callLabel(call), "action %q", tc.action)
+		require.Equal(t, tc.want, ToolCallLabel(call), "action %q", tc.action)
 
 		// The dispatch and the label read the same field: a label always
 		// exists for the renderer lspToolRenderer picks.

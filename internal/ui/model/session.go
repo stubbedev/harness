@@ -60,25 +60,33 @@ type SessionFile struct {
 	Deletions     int
 }
 
-// loadSession loads the session along with its associated files and computes
-// the diff statistics (additions and deletions) for each file in the session.
-// It returns a tea.Cmd that, when executed, fetches the session data and
-// returns a sessionFilesLoadedMsg containing the processed session files.
+// continueSessionMsg names the most recent session, resolved off-thread
+// for --continue, so Update can request its load.
+type continueSessionMsg struct {
+	sessionID string
+}
+
+// loadSession requests a switch to sessionID: it records the request and
+// returns a tea.Cmd that fetches the session and its associated files,
+// computes the diff statistics (additions and deletions) for each file,
+// and returns a loadSessionMsg. Only the latest request's message is
+// applied.
 //
 // The returned batch also reports the new current-session selection to
 // the workspace so the server can update its per-client presence map.
 // That report is fire-and-forget: errors are logged at debug and the
 // UI never blocks on the call.
 func (m *UI) loadSession(sessionID string) tea.Cmd {
+	m.sessionLoadRequested = sessionID
 	load := func() tea.Msg {
 		session, err := m.com.Workspace.GetSession(context.Background(), sessionID)
 		if err != nil {
-			return util.ReportError(err)
+			return util.NewErrorMsg(fmt.Errorf("load session %s: %w", sessionID, err))
 		}
 
 		sessionFiles, err := m.loadSessionFiles(sessionID)
 		if err != nil {
-			return util.ReportError(err)
+			return util.NewErrorMsg(fmt.Errorf("load files of session %s: %w", sessionID, err))
 		}
 
 		readFiles, err := m.com.Workspace.FileTrackerListReadFiles(context.Background(), sessionID)

@@ -33,7 +33,7 @@ func TestMCPResourceIsNotAnMCPCall(t *testing.T) {
 
 	call := message.ToolCall{Name: tools.MCPResourceToolName}
 	require.IsType(t, &GenericToolRenderContext{}, toolRendererFor(call))
-	require.Equal(t, "Mcp Resource", callLabel(call))
+	require.Equal(t, "Mcp Resource", ToolCallLabel(call))
 }
 
 func TestMCPCallUsesTheRecordedServer(t *testing.T) {

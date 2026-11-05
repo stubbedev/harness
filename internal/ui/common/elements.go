@@ -25,15 +25,24 @@ func FormatReasoningEffort(effort string) string {
 	return cases.Title(language.English).String(effort)
 }
 
-// FormatSubagentTokenCount returns the "N tok" summary for a
-// prompt/completion token pair, empty when both are zero. Single source
-// for the task strip, the sidebar panel, and the running-subagent
-// dialog.
+// FormatSubagentTokenCount returns the compact "N tok" summary for a
+// prompt/completion token pair ("840 tok", "12.3k tok", "1.2M tok"),
+// empty when both are zero. Single source for the task strip and the
+// sidebar panel.
 func FormatSubagentTokenCount(prompt, completion int64) string {
-	if tokens := prompt + completion; tokens > 0 {
+	tokens := prompt + completion
+	switch {
+	case tokens <= 0:
+		return ""
+	case tokens < 1_000:
 		return fmt.Sprintf("%d tok", tokens)
+	case tokens < 1_000_000:
+		tenths := tokens / 100
+		return fmt.Sprintf("%d.%dk tok", tenths/10, tenths%10)
+	default:
+		tenths := tokens / 100_000
+		return fmt.Sprintf("%d.%dM tok", tenths/10, tenths%10)
 	}
-	return ""
 }
 
 // SubagentStatusSuffix renders a non-running subagent status in the

@@ -2,16 +2,19 @@ package model
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/ui/chat"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/dialog"
 )
@@ -112,4 +115,65 @@ func TestBangModeRunsShellCommand(t *testing.T) {
 	defer ws.mu.Unlock()
 	require.Equal(t, []string{"echo hi"}, ws.commands, "Enter must run the command through the workspace")
 	require.False(t, m.bangMode, "bang mode exits after the command is issued")
+}
+
+// TestBangResultStaysInItsSession is the cross-session regression: a
+// bang command started in one session and still running when the user
+// switches to another must neither keep the new session busy, nor be
+// stopped by its Escape, nor paint its output into its transcript.
+func TestBangResultStaysInItsSession(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newBangUI()
+	m.runShellCommand("make test")
+	require.Equal(t, 1, m.chat.Len(), "the pending item shows at once")
+	pending, ok := m.chat.list.ItemAt(0).(*chat.ShellItem)
+	require.True(t, ok)
+	require.True(t, m.isAgentBusy(), "the session running the command is busy")
+
+	m.session = &session.Session{ID: "s2"}
+	m.chat.SetMessages("s2")
+
+	require.False(t, m.isAgentBusy(), "another session's command does not make this one busy")
+	m.cancelBangRuns()
+	require.Len(t, m.bangRuns, 1, "stopping this session leaves the other's command running")
+
+	m.Update(shellResultMsg{PendingID: pending.ID(), SessionID: "s1", Command: "make test", Output: "PASS"})
+
+	require.Zero(t, m.chat.Len(), "the result does not paint into another session's transcript")
+	require.Empty(t, m.bangRuns, "the finished command is forgotten")
+}
+
+// TestBangResultAppendsInItsOwnSession keeps the fallback: a result whose
+// pending item was dropped by a reload of the same session still shows.
+func TestBangResultAppendsInItsOwnSession(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newBangUI()
+	m.Update(shellResultMsg{PendingID: "gone", SessionID: "s1", Command: "make test", Output: "PASS"})
+
+	require.Equal(t, 1, m.chat.Len())
+	_, ok := m.chat.list.ItemAt(0).(*chat.ShellItem)
+	require.True(t, ok)
+}
+
+// TestBangCommandThatCannotRunSettlesItsRow pins the error path: a
+// command that never ran still ends its pending row, showing why,
+// instead of leaving it spinning.
+func TestBangCommandThatCannotRunSettlesItsRow(t *testing.T) {
+	t.Parallel()
+
+	m, _ := newBangUI()
+	m.runShellCommand("make test")
+	pending, ok := m.chat.list.ItemAt(0).(*chat.ShellItem)
+	require.True(t, ok)
+
+	m.Update(shellResultMsg{PendingID: pending.ID(), SessionID: "s1", Command: "make test", Err: errors.New("no shell available")})
+
+	require.True(t, pending.Finished(), "the row stops spinning")
+	require.False(t, pending.Spinning())
+	rendered := ansi.Strip(pending.Render(80))
+	require.Contains(t, rendered, "failed to run")
+	require.Contains(t, rendered, "no shell available")
+	require.Empty(t, m.bangRuns)
 }

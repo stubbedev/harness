@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -422,4 +423,35 @@ func TestEnterWithAttachmentWhileViewingAgentKeepsDraft(t *testing.T) {
 	require.Empty(t, ws.runs, "nothing is sent without its attachment")
 	require.Equal(t, "[Image #1] ", m.textarea.Value(), "the draft survives")
 	require.Len(t, m.inlineAttachments, 1, "the payload survives")
+}
+
+// TestEnterOverTheAttachmentLimitKeepsDraft pins the shared limits: a
+// draft carrying more attachments than any prompt may is refused before
+// the editor is cleared, the same limit the server enforces.
+func TestEnterOverTheAttachmentLimitKeepsDraft(t *testing.T) {
+	t.Parallel()
+
+	m, ws := newRecordingUI(t)
+	for i := range message.MaxAttachments + 1 {
+		m.insertInlineAttachment(imagePaste(fmt.Sprintf("cat%d.png", i)))
+	}
+	draft := m.textarea.Value()
+
+	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	runCmds(m, cmd)
+
+	require.Empty(t, ws.runs, "nothing is sent over the limit")
+	require.Equal(t, draft, m.textarea.Value(), "the draft survives")
+	require.Len(t, m.inlineAttachments, message.MaxAttachments+1, "the payloads survive")
+}
+
+func TestAttachmentTooLargeNamesTheLimit(t *testing.T) {
+	t.Parallel()
+
+	_, tooLarge := attachmentTooLarge("cat.png", message.MaxAttachmentSize)
+	require.False(t, tooLarge, "the limit itself is allowed")
+	warning, tooLarge := attachmentTooLarge("cat.png", message.MaxAttachmentSize+1)
+	require.True(t, tooLarge)
+	require.Contains(t, warning, "cat.png")
+	require.Contains(t, warning, "5.0 MiB")
 }

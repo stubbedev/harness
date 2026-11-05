@@ -72,10 +72,7 @@ func (m *UI) stopAgent() tea.Cmd {
 	if !m.canStop() {
 		return nil
 	}
-	if m.bangCancel != nil {
-		m.bangCancel()
-		m.bangCancel = nil
-	}
+	m.cancelBangRuns()
 	dropped := slices.Clone(m.pendingQueuedPrompts())
 	m.reconcileQueuedPrompts(nil)
 	m.promptQueueItems = nil

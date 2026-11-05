@@ -367,6 +367,7 @@ func TestSessionSwitchRefreshesQueueAndBusy(t *testing.T) {
 	m.promptQueueItems = []string{"x", "y", "z", "w", "v"}
 	ws.resetCounters()
 
+	m.sessionLoadRequested = "s2"
 	_, cmd := m.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
 	require.Zero(t, len(m.promptQueueItems), "switching sessions must drop the old session's queue pill")
 	require.True(t, m.promptQueueInFlight, "session switch must schedule a queue refresh")
@@ -393,6 +394,7 @@ func TestSessionSwitchDropsAndRefreshesRunningSubagents(t *testing.T) {
 	m := newBusyUI(ws)
 	m.runningSubagents = []workspace.RunningSubagentInfo{{Name: "stale-from-s1"}}
 
+	m.sessionLoadRequested = "s2"
 	_, cmd := m.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
 	require.Empty(t, m.runningSubagents, "switching sessions must drop the old session's subagent list immediately")
 
@@ -420,6 +422,41 @@ func TestStaleRunningSubagentsFetchDiscarded(t *testing.T) {
 
 	require.Equal(t, []workspace.RunningSubagentInfo{{Name: "s2-current"}}, m.runningSubagents,
 		"a runningSubagentsMsg scoped to a departed session must not overwrite the current session's list")
+}
+
+// TestStaleSessionLoadDiscarded is the regression test for two switches
+// racing: the load of a session the user has since switched away from
+// resolves after the newer request was made, and must not replace the
+// session the user asked for last. The newer load still applies.
+func TestStaleSessionLoadDiscarded(t *testing.T) {
+	pinTTLs(t)
+
+	m := newBusyUI(&countingWorkspace{ready: true})
+	m.session = &session.Session{ID: "s1"}
+	_ = m.loadSession("s2")
+	_ = m.loadSession("s3")
+
+	m.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
+	require.Equal(t, "s1", m.currentSessionID(), "a load overtaken by a newer switch is discarded")
+
+	m.Update(loadSessionMsg{session: &session.Session{ID: "s3"}})
+	require.Equal(t, "s3", m.currentSessionID(), "the latest requested load applies")
+}
+
+// TestNewSessionDiscardsInFlightLoad covers starting a fresh session while
+// a switch is still loading: the load landing afterwards must not pull the
+// user back out of the new session.
+func TestNewSessionDiscardsInFlightLoad(t *testing.T) {
+	pinTTLs(t)
+
+	m := newBusyUI(&countingWorkspace{ready: true})
+	m.session = &session.Session{ID: "s1"}
+	_ = m.loadSession("s2")
+	m.newSession()
+
+	m.Update(loadSessionMsg{session: &session.Session{ID: "s2"}})
+	require.False(t, m.hasSession(), "the fresh session stays open")
+	require.Equal(t, uiLanding, m.state)
 }
 
 // TestNewSessionClearsSubagentState is the regression test for ctrl+n leaving

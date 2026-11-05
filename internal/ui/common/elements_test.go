@@ -33,3 +33,23 @@ func TestFormatTokensAndCostOmitsEstimatedPrefix(t *testing.T) {
 	require.Contains(t, actual, "12%")
 	require.NotContains(t, actual, "~12%")
 }
+
+func TestFormatSubagentTokenCountIsCompact(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		prompt, completion int64
+		want               string
+	}{
+		{0, 0, ""},
+		{800, 40, "840 tok"},
+		{999, 0, "999 tok"},
+		{1_000, 0, "1.0k tok"},
+		{12_000, 345, "12.3k tok"},
+		{999_999, 0, "999.9k tok"},
+		{1_000_000, 0, "1.0M tok"},
+		{1_234_567, 0, "1.2M tok"},
+	} {
+		require.Equal(t, tc.want, FormatSubagentTokenCount(tc.prompt, tc.completion), "%d+%d", tc.prompt, tc.completion)
+	}
+}

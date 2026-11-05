@@ -17,9 +17,6 @@ import (
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
-// MaxAttachmentSize defines the maximum allowed size for file attachments (5 MB).
-const MaxAttachmentSize = int64(5 * 1024 * 1024)
-
 // AllowedImageTypes defines the permitted image file types.
 var AllowedImageTypes = []string{".jpg", ".jpeg", ".png"}
 

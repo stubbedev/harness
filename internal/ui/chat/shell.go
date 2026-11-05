@@ -32,10 +32,13 @@ type ShellItem struct {
 	*cachedMessageItem
 	*focusableMessageItem
 
-	id              string
-	command         string
-	output          strings.Builder
-	exitCode        int
+	id       string
+	command  string
+	output   strings.Builder
+	exitCode int
+	// failed marks a command that could not be run at all, so it has no
+	// exit code to show.
+	failed          bool
 	expandedContent bool
 	xOffset         int
 	maxLineWidth    int // computed during render, used to clamp xOffset
@@ -100,6 +103,30 @@ func (s *ShellItem) Complete(output string, exitCode int) {
 	s.exitCode = exitCode
 	s.pending = false
 	s.Bump()
+}
+
+// Fail transitions a pending ShellItem to a finished state for a command
+// that could not be run, showing why in place of its output.
+func (s *ShellItem) Fail(reason string) {
+	s.replaceOutput(reason)
+	s.failed = true
+	s.pending = false
+	s.Bump()
+}
+
+// outcome is how a finished command ended, for its header: "failed to
+// run", "exit N", or empty for a pending command or a clean exit.
+func (s *ShellItem) outcome() string {
+	switch {
+	case s.pending:
+		return ""
+	case s.failed:
+		return "failed to run"
+	case s.exitCode != 0:
+		return fmt.Sprintf("exit %d", s.exitCode)
+	default:
+		return ""
+	}
 }
 
 // AppendOutput appends incremental output to a pending ShellItem.
@@ -220,8 +247,8 @@ func (s *ShellItem) RawRender(width int) string {
 	}
 
 	var exitSuffix string
-	if !s.pending && s.exitCode != 0 {
-		exitSuffix = " " + s.sty.Messages.ShellExitCode.Render(fmt.Sprintf("(exit %d)", s.exitCode))
+	if outcome := s.outcome(); outcome != "" {
+		exitSuffix = " " + s.sty.Messages.ShellExitCode.Render("("+outcome+")")
 	}
 
 	// Truncate the command so the header, prompt and exit suffix
@@ -367,8 +394,8 @@ func (s *ShellItem) copyText() string {
 	header := "$ " + s.command
 	// The exit code is on screen next to the command, so it belongs in
 	// the copy too: a failing run is the one worth pasting somewhere.
-	if !s.pending && s.exitCode != 0 {
-		header += fmt.Sprintf(" (exit %d)", s.exitCode)
+	if outcome := s.outcome(); outcome != "" {
+		header += " (" + outcome + ")"
 	}
 	return copyFence("console", header+"\n"+ansi.Strip(s.output.String()))
 }

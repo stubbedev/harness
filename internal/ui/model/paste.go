@@ -1,11 +1,13 @@
 package model
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/dustin/go-humanize"
 	"github.com/stubbedev/harness/internal/message"
 )
 
@@ -87,6 +89,28 @@ func (m *UI) presentReferences(text string) []string {
 		return strings.Index(text, present[i]) < strings.Index(text, present[j])
 	})
 	return present
+}
+
+// inlineAttachmentsErr checks the attachments the text still references
+// against the limits every prompt is held to, without consuming the
+// store, so a draft over them stays in the editor instead of being
+// cleared and then refused.
+func (m *UI) inlineAttachmentsErr(text string) error {
+	present := m.presentReferences(text)
+	attachments := make([]message.Attachment, 0, len(present))
+	for _, reference := range present {
+		attachments = append(attachments, m.inlineAttachments[reference].attachment)
+	}
+	return message.ValidateAttachments(attachments)
+}
+
+// attachmentTooLarge reports whether size bytes exceed the per-attachment
+// limit, and the warning that says so, naming the limit.
+func attachmentTooLarge(what string, size int64) (string, bool) {
+	if size <= message.MaxAttachmentSize {
+		return "", false
+	}
+	return fmt.Sprintf("%s is too big: %s, the limit is %s", what, humanize.IBytes(uint64(size)), humanize.IBytes(message.MaxAttachmentSize)), true
 }
 
 // hasInlineAttachments reports whether the text still references an

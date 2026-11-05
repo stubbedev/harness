@@ -173,6 +173,21 @@ func TestCaretAlwaysRendersWhileEditorFocused(t *testing.T) {
 		require.True(t, ok, "the focused editor draws its caret")
 	})
 
+	t.Run("background tasks key leaves the strip with a blinking caret", func(t *testing.T) {
+		ui := newUI(t)
+		_ = ui.upsertAgentTask(&message.Message{ID: "m1", Role: message.Assistant}, agentToolCall("a1"))
+		ui.focusTasks()
+		taStyles := ui.com.Styles.Editor.Textarea
+		taStyles.Cursor.BlinkSpeed = time.Millisecond
+		ui.textarea.SetStyles(taStyles)
+
+		cmd := ui.handleKeyPressMsg(tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl})
+		require.Equal(t, uiFocusEditor, ui.focus)
+		require.True(t, ui.textarea.Focused())
+		require.IsType(t, cursor.BlinkMsg{}, textareaTick(t, cmd),
+			"focusing the editor must hand back the command restarting the caret's blink")
+	})
+
 	t.Run("focused task strip emptying falls back to editor", func(t *testing.T) {
 		ui := newUI(t)
 		_ = ui.upsertAgentTask(&message.Message{ID: "m1", Role: message.Assistant}, agentToolCall("a1"))
@@ -181,7 +196,10 @@ func TestCaretAlwaysRendersWhileEditorFocused(t *testing.T) {
 		ui.focusTasks()
 		require.Equal(t, uiFocusTasks, ui.focus)
 
-		ui.reapAgentTask("a1")
+		ui.Update(pubsub.Event[message.Message]{Type: pubsub.CreatedEvent, Payload: message.Message{
+			ID: "tm1", SessionID: "session", Role: message.Tool,
+			Parts: []message.ContentPart{message.ToolResult{ToolCallID: "a1", Name: "agent", Content: "done"}},
+		}})
 		require.Empty(t, ui.agentTasks)
 		require.Equal(t, uiFocusEditor, ui.focus)
 		require.True(t, ui.textarea.Focused())

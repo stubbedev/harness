@@ -1420,7 +1420,7 @@ func toolOutputMarkdownContent(sty *styles.Styles, content string, width int, ex
 // clipboard heading cannot drift apart. Both wait forms are labelled by
 // what they are doing: the built-in wait tool by its tense, the
 // dispatcher's historical wait by its tense and live agent count. Every
-// other call is labeled from its wire name by [callLabel].
+// other call is labeled from its wire name by [ToolCallLabel].
 func (t *baseToolMessageItem) DisplayName() string {
 	if _, ok := t.toolRenderer.(*WaitToolRenderContext); ok {
 		return waitToolLabel(t.EffectiveStatus() == ToolStatusRunning)
@@ -1435,14 +1435,16 @@ func (t *baseToolMessageItem) DisplayName() string {
 	if control, ok := t.toolRenderer.(*AgentControlToolRenderContext); ok {
 		return control.label(t.EffectiveStatus() == ToolStatusRunning)
 	}
-	return callLabel(t.toolCall)
+	return ToolCallLabel(t.toolCall)
 }
 
-// callLabel maps a call's wire name to its label. Only
-// [baseToolMessageItem.DisplayName] reads it; everything else asks the
-// item. The lsp tool folds several actions into one wire name; the label
-// follows the action it carries.
-func callLabel(tc message.ToolCall) string {
+// ToolCallLabel maps a call's wire name to its label. A transcript item
+// is labeled through [baseToolMessageItem.DisplayName], which falls back
+// to this; a bare call with no item behind it, such as a subagent's
+// current step in the task strip, is labeled here directly. The lsp tool
+// folds several actions into one wire name; the label follows the action
+// it carries.
+func ToolCallLabel(tc message.ToolCall) string {
 	if name := lspDisplayName(tc); name != "" {
 		return name
 	}

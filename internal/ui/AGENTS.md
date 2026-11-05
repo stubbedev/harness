@@ -164,10 +164,21 @@ width allows, its failures, kinds of call and duration (`Ran (4 calls,
 never list items of their own — `Chat.ToolItem` resolves through groups.
 Subagent dispatches (`agent`, `research`) never render in the
 transcript; they live in the background tasks strip (`model/tasks.go`)
-between the chat and the editor. Each strip row is one line — accent
-robot icon, `Agent`/`Main Agent`, then the description (the child
-session's generated title, falling back to the dispatch-prompt
-excerpt) — with no fold-out. Enter or click on a row switches the
+between the chat and the editor. From the main session the strip is a
+header counting the agents and jobs (`Agents · 4 running · 1
+retrying · 2 jobs`, or `Jobs · 2 running` when only jobs run), a
+window of up to `tasksWindowSize` rows, and, whenever rows are out of
+view, a footer saying how many sit above and below (it stays while the
+window scrolls, so the strip never changes height under the cursor).
+Each row is one line of aligned columns — accent robot icon, the agent
+type, the description (the child session's generated title, falling
+back to the dispatch-prompt excerpt), its current step (the latest
+call in its session, labeled like a tool group's one-liner, or
+thinking/writing), elapsed time and tokens — with no fold-out; a
+narrow strip drops tokens, then the step. The step is read from every
+child message event, and the elapsed column ticks on the strip
+spinner through `refreshTasksView`, which re-renders without a
+relayout. Enter or click on a row switches the
 transcript into that agent's session: the switch is atomic (the old
 view keeps painting until the fetched transcript replaces it, then one
 retrace folds in events that raced the fetch). Every transcript
@@ -180,8 +191,8 @@ the toggles and the restore go through. In an agent's session
 the editor steers the agent via `Workspace.SteerAgent`; a pinned `Main
 Agent` row and escape switch back. Rows are removed when the run
 finishes. A background shell job (`run_in_background`) gets a row of
-its own after the dispatch rows — job icon, `Job`, the command and the
-elapsed time — fed by `Workspace.RunningJobs` and reaped when the feed
+its own after the dispatch rows, in the same columns — job icon, the
+type `job`, the command and the elapsed time — fed by `Workspace.RunningJobs` and reaped when the feed
 reports a terminal state; it is not a session, so activating it does
 nothing. Both feeds are reconciled on the same interval from the
 spinner tick (`maybeReconcileSpinningTasks`), since no event settles a

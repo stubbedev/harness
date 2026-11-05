@@ -3,6 +3,7 @@ package model
 import (
 	"image"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
@@ -69,19 +70,20 @@ func TestTasksStripHoverPrefersCursor(t *testing.T) {
 		description: "Audit the dispatch path",
 		status:      subagents.StatusRunning,
 	}}
-	u.taskHoverY = 0
+	// Line 0 is the strip header; the row sits under it.
+	u.taskHoverY = 1
 
-	hovered := u.renderTasks(80)
+	hovered := u.renderTasks(80, time.Now())
 	require.Contains(t, hovered, u.com.Styles.Messages.ToolCallHovered.Render())
 
 	u.focus = uiFocusTasks
 	u.taskCursor = 0
-	focused := u.renderTasks(80)
+	focused := u.renderTasks(80, time.Now())
 	require.Contains(t, focused, u.com.Styles.Messages.ToolCallFocused.Render())
 	require.NotContains(t, focused, u.com.Styles.Messages.ToolCallHovered.Render())
 
 	u.taskHoverY = -1
-	require.NotContains(t, u.renderTasks(80), u.com.Styles.Messages.ToolCallHovered.Render())
+	require.NotContains(t, u.renderTasks(80, time.Now()), u.com.Styles.Messages.ToolCallHovered.Render())
 }
 
 // TestUpdateHoverRoutesRegions pins the pointer mapping: the transcript

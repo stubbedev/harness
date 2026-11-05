@@ -154,7 +154,7 @@ func TestToolLabelsStableAcrossRenders(t *testing.T) {
 			group.AddTool(bashTool("t2", "go test", true))
 			require.True(t, group.ToggleExpanded())
 			require.True(t, group.Spinning())
-			wantGroup := "Running (2 calls · " + callLabel(call) + ", Shell)\n " + tt.want + "\n Shell go test"
+			wantGroup := "Running (2 calls · " + ToolCallLabel(call) + ", Shell)\n " + tt.want + "\n Shell go test"
 
 			for range 100 {
 				require.Equal(t, tt.want, ansi.Strip(ToolOneLiner(sty, item, 120, false)))
@@ -167,7 +167,7 @@ func TestToolLabelsStableAcrossRenders(t *testing.T) {
 
 			call.Input = `{"query":"updated parameters"}`
 			item.SetToolCall(call)
-			wantUpdated := callLabel(call) + " updated parameters"
+			wantUpdated := ToolCallLabel(call) + " updated parameters"
 			require.Equal(t, wantUpdated, ansi.Strip(ToolOneLiner(sty, item, 120, false)))
 			require.Contains(t, ansi.Strip(group.Render(120)), wantUpdated)
 		})
