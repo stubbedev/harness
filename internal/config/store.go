@@ -15,6 +15,7 @@ import (
 	"github.com/stubbedev/harness/internal/fsext"
 
 	"github.com/stubbedev/harness/internal/catalog"
+	"github.com/stubbedev/harness/internal/csync"
 	"github.com/stubbedev/harness/internal/env"
 	"github.com/stubbedev/harness/internal/lock"
 	"github.com/stubbedev/harness/internal/oauth"
@@ -983,6 +984,12 @@ func nextRecentModels(cfg *Config, modelType SelectedModelType, model SelectedMo
 
 // NewTestStore creates a ConfigStore for testing purposes.
 func NewTestStore(cfg *Config, loadedPaths ...string) *ConfigStore {
+	// Loading guarantees a provider map; a test store holds config built
+	// in memory, so it gets the same guarantee instead of handing nil
+	// to every provider lookup.
+	if cfg.Providers == nil {
+		cfg.Providers = csync.NewMap[catalog.InferenceProvider, ProviderConfig]()
+	}
 	return &ConfigStore{
 		config:      cfg,
 		loadedPaths: loadedPaths,
