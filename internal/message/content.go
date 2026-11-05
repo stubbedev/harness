@@ -185,8 +185,9 @@ func (SubagentNote) partType() partType { return subagentNoteType }
 
 // ContextNote is context the harness put in front of the model on its
 // own: a directory's instructions, an auto-activated skill, a
-// language-server report, the execution-state snapshot or the runtime
-// environment. Nobody typed it and nobody reads it in the transcript,
+// language-server report, the execution-state snapshot, the runtime
+// environment, or the prompt of a turn harness started on its own to
+// keep the agent working. Nobody typed it and nobody reads it in the transcript,
 // so renderers skip it like a SubagentNote. It is stored as a user
 // message all the same, because a note that only lives in one step's
 // request sits past every cached token and is paid for again on every
@@ -205,6 +206,10 @@ const (
 	ContextNoteSkill                 = "skill"
 	ContextNoteDiagnostics           = "diagnostics"
 	ContextNotePeers                 = "peers"
+	ContextNoteNextSteps             = "next_steps"
+	ContextNoteGoal                  = "goal"
+	ContextNoteResume                = "resume"
+	ContextNoteVerification          = "verification"
 )
 
 func (ContextNote) partType() partType { return contextNoteType }

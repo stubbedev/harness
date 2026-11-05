@@ -390,3 +390,23 @@ func TestTimerBroadcastsOncePerFireAndOncePerCancel(t *testing.T) {
 	default:
 	}
 }
+
+func TestTimerCancelEndsItsWaitAtOnce(t *testing.T) {
+	t.Parallel()
+
+	reg := newTimerRegistry()
+	timer, err := reg.reserve("s", minTimerDuration)
+	require.NoError(t, err)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		reg.run(timer, make(chan time.Time))
+	}()
+
+	require.NoError(t, reg.cancel("s", timer.id))
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancelled timer's goroutine still waits for its tick")
+	}
+}

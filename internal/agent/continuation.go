@@ -34,17 +34,37 @@ func answerTruncated(result *fantasy.AgentResult) bool {
 	return strings.TrimSpace(result.Response.Content.Text()) != ""
 }
 
-// continuationHistory is the request the resumed step sends: the history
-// the turn started from, the prompt that started it (which the first
-// call carried as its Prompt), and everything the model has produced
-// since - the steps' assistant and tool messages, the cut-off answer
-// last. The nudge goes in as the new prompt.
-func continuationHistory(history []fantasy.Message, prompt string, result *fantasy.AgentResult) []fantasy.Message {
+// continuationHistory is the request the first resumed step sends: the
+// history the turn started from, the prompt that started it with its
+// attachments (which the first call carried as its Prompt and Files),
+// and everything the model has produced since - the steps' assistant
+// and tool messages, the cut-off answer last. The nudge goes in as the
+// new prompt.
+func continuationHistory(history []fantasy.Message, prompt string, files []fantasy.FilePart, result *fantasy.AgentResult) []fantasy.Message {
 	out := make([]fantasy.Message, 0, len(history)+1+len(result.Steps)*2)
 	out = append(out, history...)
-	if prompt != "" {
-		out = append(out, fantasy.NewUserMessage(prompt))
+	if prompt != "" || len(files) > 0 {
+		out = append(out, fantasy.NewUserMessage(prompt, files...))
 	}
+	return appendStepMessages(out, result)
+}
+
+// nextContinuationHistory is the request a later resumed step sends: the
+// previous continuation's request exactly as it went out, its nudge, and
+// what that continuation produced. Extending the request rather than
+// rebuilding it keeps every earlier nudge in place, so the prefix the
+// provider cached stays the prefix, and the positions turnInjections
+// recorded during that continuation still point where they did.
+func nextContinuationHistory(previous []fantasy.Message, cont *fantasy.AgentResult) []fantasy.Message {
+	out := make([]fantasy.Message, 0, len(previous)+1+len(cont.Steps)*2)
+	out = append(out, previous...)
+	out = append(out, fantasy.NewUserMessage(continuePrompt))
+	return appendStepMessages(out, cont)
+}
+
+// appendStepMessages appends the assistant and tool messages of every
+// step of result to out.
+func appendStepMessages(out []fantasy.Message, result *fantasy.AgentResult) []fantasy.Message {
 	for _, step := range result.Steps {
 		out = append(out, step.Messages...)
 	}

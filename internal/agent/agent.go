@@ -129,18 +129,28 @@ type SessionAgentCall struct {
 	// does not loop on a session that still exceeds the window after
 	// summarizing.
 	OverflowRecovered bool
-	// GoalContinuations counts consecutive inherent-goal continuations
-	// behind this call: turns harness started because the previous one
-	// ended by declaring next steps. A real user prompt starts from
-	// zero; the chain is capped at maxGoalContinuations.
-	GoalContinuations int
-	// GoalContinuation marks a turn harness started because the judge
-	// found the session goal not yet met.
-	GoalContinuation bool
-	// GoalStalledTurns counts the consecutive goal continuations behind
+	// noteKind is set on a turn harness started on its own rather than
+	// on a user prompt: the ContextNote kind its prompt is stored as.
+	// The model reads that prompt like any other; the transcript, the
+	// prompt queue, prompt hooks and rewind points never see it. Only
+	// this package can set it, so every caller outside it submits a user
+	// prompt.
+	noteKind string
+	// resumed marks a prompt harness runs again because the turn it
+	// started overflowed the context window after doing work, which the
+	// recovery folded into a summary. The prompt is stored as it was,
+	// followed by a resumeNote telling the model to pick the work up
+	// rather than start over.
+	resumed bool
+	// nextStepsContinuations counts consecutive next-steps
+	// continuations behind this call: turns harness started because the
+	// previous one ended by declaring next steps. A user prompt starts
+	// from zero; the chain is capped at maxNextStepsContinuations.
+	nextStepsContinuations int
+	// goalStalledTurns counts the consecutive goal continuations behind
 	// this call that used no tools; the loop pauses at
 	// maxGoalStalledTurns.
-	GoalStalledTurns int
+	goalStalledTurns int
 	// OnComplete, when non-nil, replaces the default RunComplete
 	// publish path: the inner Run hands the terminal payload to this
 	// callback instead of emitting it on the RunComplete broker. The
@@ -548,10 +558,10 @@ func (a *sessionAgent) enqueueCallLocked(call SessionAgentCall) {
 // Calls covered by a pending cancel are dropped; the dropped ones that
 // carry a RunID are returned in canceledWithRunID so the caller can
 // publish their terminal cancelled RunComplete (a caller waiting on that
-// RunID, e.g. `harness run`, would otherwise hang). Uncanceled calls without
-// a RunID are returned in fold to be folded into the active turn,
+// RunID, e.g. `harness run`, would otherwise hang). Uncanceled user prompts
+// without a RunID are returned in fold to be folded into the active turn,
 // preserving the existing follow-up behavior. Uncanceled calls that carry
-// a RunID are left in the queue so each runs as its own turn via the
+// a RunID, and turns harness queued on its own, are left in the queue so each runs as its own turn via the
 // recursive run path and publishes its own RunComplete, giving every
 // RunID-bearing prompt an explicit lifecycle instead of being silently
 // absorbed into another turn. fold is processed by the caller without the
@@ -569,7 +579,7 @@ func (a *sessionAgent) drainQueueForStep(sessionID string) (fold, canceledWithRu
 			}
 			continue
 		}
-		if queued.RunID != "" {
+		if !queued.joinsBurst() {
 			keep = append(keep, queued)
 			continue
 		}
@@ -660,8 +670,8 @@ func (a *sessionAgent) dequeueNextLocked(sessionID string) (next SessionAgentCal
 		return SessionAgentCall{}, nil, drops, false
 	}
 	n := 1
-	if remaining[0].RunID == "" {
-		for n < len(remaining) && remaining[n].RunID == "" {
+	if remaining[0].joinsBurst() {
+		for n < len(remaining) && remaining[n].joinsBurst() {
 			n++
 		}
 	}
@@ -669,6 +679,61 @@ func (a *sessionAgent) dequeueNextLocked(sessionID string) (next SessionAgentCal
 	a.messageQueue.Set(sessionID, slices.Clone(remaining[n:]))
 	next.Accepted = a.BeginAccepted(sessionID)
 	return next, remaining, drops, true
+}
+
+// fromHarness reports whether harness, not the user, started this turn.
+func (call SessionAgentCall) fromHarness() bool {
+	return call.noteKind != ""
+}
+
+// harnessTurn derives the turn harness starts on its own behind call:
+// the same session and options, prompt stored as a ContextNote of kind,
+// and none of call's attachments, which the user sent once already.
+func (call SessionAgentCall) harnessTurn(kind, prompt string) SessionAgentCall {
+	next := call
+	next.noteKind = kind
+	next.Prompt = prompt
+	next.Attachments = nil
+	return next
+}
+
+// joinsBurst reports whether a queued call can be joined into one turn
+// with its neighbours: a fresh user prompt without a RunID. A harness
+// turn or a resumed prompt always runs on its own, so its note never
+// mixes with what the user typed since.
+func (call SessionAgentCall) joinsBurst() bool {
+	return call.RunID == "" && !call.fromHarness() && !call.resumed
+}
+
+// verificationRepairPrompt sends the model back to work when configured
+// completion verification fails.
+const verificationRepairPrompt = "<system_reminder>\nConfigured verification failed. Inspect the " +
+	"recorded verification results, repair the relevant changes, and verify again.\n</system_reminder>"
+
+// resumeNote is the note a resumed prompt carries; see
+// SessionAgentCall.resumed.
+const resumeNote = "<system_reminder>\nThis request was started once already. That turn ran " +
+	"past the context window, and the work it did is folded into the summary above. " +
+	"Continue from where the summary leaves off instead of starting over. " +
+	"Do not mention this reminder.\n</system_reminder>"
+
+// compactionContinuePrompt is the prompt of the turn that carries on
+// after the context window filled mid-turn and the session was folded
+// into a summary. A user's request is quoted so its exact wording
+// survives the summary; a harness turn's prompt is not a request.
+func compactionContinuePrompt(call SessionAgentCall) string {
+	var sb strings.Builder
+	sb.WriteString("<system_reminder>\nThe context window was nearly full, so the conversation so far " +
+		"was folded into the summary above. Continue the interrupted work from where the summary leaves off")
+	if call.fromHarness() {
+		sb.WriteString(".")
+	} else {
+		sb.WriteString(". The request was:\n\n<request>\n")
+		sb.WriteString(call.Prompt)
+		sb.WriteString("\n</request>")
+	}
+	sb.WriteString("\nDo not mention this reminder.\n</system_reminder>")
+	return sb.String()
 }
 
 // joinQueuedCalls merges queued calls without a RunID into a single
@@ -1064,7 +1129,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// can take tens of seconds. Blocking Run on it delays the
 	// response to the caller. Use a detached context so the title
 	// goroutine survives Run's cancel.
-	if !hasUserTextMessage(msgs) {
+	if !call.fromHarness() && !hasUserTextMessage(msgs) {
 		titleCtx := context.WithoutCancel(ctx)
 		crash.Go("agent.generateTitle", func() { a.GenerateTitle(titleCtx, call.SessionID, call.Prompt) })
 	}
@@ -1074,9 +1139,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// run before the user message is persisted so a denial leaves no
 	// orphaned turn behind. The outbound prompt is what the model sees;
 	// the stored message keeps the prompt exactly as the user typed it.
+	// A turn harness started on its own has no user prompt to submit.
 	outboundPrompt := call.Prompt
 	var promptHookContexts []string
-	if !a.isSubAgent {
+	if !a.isSubAgent && !call.fromHarness() {
 		if !hasUserTextMessage(msgs) && a.hooks.Has(hooks.EventSessionStart) {
 			res, hookErr := a.hooks.Run(ctx, hooks.EventContext{
 				Event:     hooks.EventSessionStart,
@@ -1121,6 +1187,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				promptHookContexts = append(promptHookContexts, res.Context)
 			}
 		}
+	}
+	// A resumed prompt reaches the model followed by its resume note, as
+	// the stored message reads back: the prompt part, then the note.
+	if call.resumed {
+		outboundPrompt += "\n\n" + resumeNote
 	}
 	if len(promptHookContexts) > 0 {
 		outboundPrompt += "\n\n<hook-context>\n" + strings.Join(promptHookContexts, "\n") + "\n</hook-context>"
@@ -1255,6 +1326,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// max_tokens: PrepareStep then keeps writing into the assistant
 	// message the cut happened in instead of opening a new one.
 	var continuing bool
+	// calledTools records that some step of this turn called a tool, so
+	// an overflow recovery knows the turn had done work before the
+	// request that failed - whose own assistant message is empty.
+	var calledTools bool
 	// injections is everything this turn added to its requests beyond
 	// what fantasy carries between steps; see turnInjections.
 	var injections turnInjections
@@ -1337,7 +1412,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// canceled step leaves the inbox alone: the messages drain on
 			// the next live step instead of failing to persist here.
 			if a.subagentInbox != nil && callContext.Err() == nil {
-				for _, msg := range a.subagentInbox.DrainSubagentInbox(call.SessionID) {
+				drained := a.subagentInbox.DrainSubagentInbox(call.SessionID)
+				for i, msg := range drained {
 					// A steering message was already persisted to this
 					// session by SteerSubagent; inject it as the plain
 					// user text it is. Report-backs are LLM-to-LLM mail:
@@ -1357,7 +1433,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 							}},
 						})
 						if createErr != nil {
-							return callContext, prepared, createErr
+							// The drain took these from the inbox; what was
+							// not delivered goes back, as the prompt fold
+							// above requeues its calls.
+							a.subagentInbox.RestoreSubagentInbox(call.SessionID, drained[i:])
+							return callContext, prepared, fmt.Errorf("store report-back from %s: %w", msg.AgentName, createErr)
 						}
 					}
 					note := userMessage.ToAIMessage()
@@ -1524,6 +1604,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 				projectedRequestTokens = projected
 				sessionLock.Unlock()
 				if projected+threshold >= cw {
+					// The step that fails is this one, which has no
+					// assistant message yet. The one still held is the
+					// previous step's, complete with tool results, and the
+					// failure must neither stamp nor delete it.
+					currentAssistant = nil
 					return callContext, prepared, fmt.Errorf(
 						"%w: next request projected at ~%d tokens against a %d-token usable window",
 						errContextWindowExceeded, projected, cw,
@@ -1534,7 +1619,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			if continuing && currentAssistant != nil {
 				// Resuming a cut-off answer: keep the assistant message it
 				// was cut in, minus the max_tokens finish it was closed
-				// with, so the continuation reads as one answer.
+				// with, so the continuation reads as one answer. Only its
+				// first step resumes: a step after a tool call answers
+				// that call and gets an assistant message of its own.
+				continuing = false
 				currentAssistant.Parts = slices.DeleteFunc(currentAssistant.Parts, func(p message.ContentPart) bool {
 					_, ok := p.(message.Finish)
 					return ok
@@ -1672,6 +1760,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return m.Model
 		},
 		OnToolCall: func(tc fantasy.ToolCallContent) error {
+			calledTools = true
 			input, wasSanitized := sanitizeToolInput(tc.ToolName, tc.ToolCallID, tc.Input)
 			if wasSanitized {
 				sanitizedToolCalls[tc.ToolCallID] = true
@@ -1808,13 +1897,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// An answer cut off at max_tokens is resumed in place: the same
 	// history, the partial answer, and an unpersisted nudge to carry on.
 	// The transcript sees one assistant message growing, never the nudge.
+	var resumed []fantasy.Message
 	for continued := 0; err == nil && continued < maxAnswerContinuations && answerTruncated(result); continued++ {
 		slog.Info("Answer hit max_tokens; continuing", "session_id", call.SessionID, "continuation", continued+1)
 		continuing = true
 		follow := streamCall
 		follow.Prompt = continuePrompt
 		follow.Files = nil
-		follow.Messages = continuationHistory(history, streamCall.Prompt, result)
+		if resumed == nil {
+			resumed = continuationHistory(history, streamCall.Prompt, streamCall.Files, result)
+		}
+		follow.Messages = resumed
 		var cont *fantasy.AgentResult
 		cont, err = agent.Stream(genCtx, follow)
 		continuing = false
@@ -1822,6 +1915,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			break
 		}
 		result = mergeContinuation(result, cont)
+		resumed = nextContinuationHistory(resumed, cont)
 	}
 
 	for repairs := 0; err == nil && !shouldSummarize && result != nil && result.Response.FinishReason == fantasy.FinishReasonStop; {
@@ -1847,8 +1941,22 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			break
 		}
 		repairs++
+		// The repair request is rebuilt from the stored session, which
+		// holds the verification the gate ran outside the model and every
+		// message this turn injected. The nudge is stored with them, so
+		// the next turn's history is the request the model was sent, and
+		// the injection bookkeeping starts over: its indices point into
+		// the request this one replaces, and replaying them here would
+		// send every injected message twice.
+		if _, err = a.messages.Create(genCtx, call.SessionID, message.CreateMessageParams{
+			Role:  message.User,
+			Parts: []message.ContentPart{message.ContextNote{Kind: message.ContextNoteVerification, Text: verificationRepairPrompt}},
+		}); err != nil {
+			err = fmt.Errorf("store verification repair note: %w", err)
+			break
+		}
 		follow := streamCall
-		follow.Prompt = "Configured verification failed. Inspect the recorded verification results, repair the relevant changes, and verify again."
+		follow.Prompt = ""
 		follow.Files = nil
 		stored, repairSummary, loadErr := a.sessionHistory(genCtx, currentSession)
 		if loadErr != nil {
@@ -1859,6 +1967,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		repairNarrative, _ := splitExecutionSummary(repairSummary)
 		follow.Messages, _ = a.preparePrompt(stored, largeModel.CatalogCfg.SupportsImages)
 		follow.Messages = withSummary(repairNarrative, follow.Messages)
+		injections = turnInjections{}
 		var repaired *fantasy.AgentResult
 		repaired, err = agent.Stream(genCtx, follow)
 		if err == nil {
@@ -1888,27 +1997,39 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// user-visible record. The user message was already created
 			// above, so persistCanceledTurn only writes the assistant
 			// record.
-			if isCancelErr {
+			switch {
+			case isCancelErr:
 				if persistErr := a.persistCanceledTurn(ctx, call, userMsgCreated); persistErr != nil {
 					return nil, persistErr
 				}
+			case !recoverOverflow:
+				// A step that failed before its assistant message existed
+				// - a request projected past the window once recovery has
+				// already run - still leaves its error in the transcript,
+				// on a message of its own.
+				failed, createErr := a.messages.Create(context.WithoutCancel(ctx), call.SessionID, message.CreateMessageParams{
+					Role:     message.Assistant,
+					Parts:    []message.ContentPart{},
+					Model:    largeModel.ModelCfg.Model,
+					Provider: largeModel.ModelCfg.Provider,
+				})
+				if createErr != nil {
+					return nil, fmt.Errorf("record failed turn: %w", createErr)
+				}
+				currentAssistant = &failed
+				if persistErr := a.persistFailedTurn(ctx, call.SessionID, currentSession.Title, currentAssistant, largeModel, err, retryAttempt); persistErr != nil {
+					return nil, persistErr
+				}
 			}
-			if !isCancelErr && !recoverOverflow {
-				return result, err
-			}
-			// Canceled with no assistant message: fall through to the
-			// queue handoff below so queued prompts still run. The
-			// failed-turn persistence block is skipped — there is no
-			// assistant state to persist.
 		} else if persistErr := a.persistFailedTurn(ctx, call.SessionID, currentSession.Title, currentAssistant, largeModel, err, retryAttempt); persistErr != nil {
 			return nil, persistErr
-		} else if !isCancelErr && !recoverOverflow {
-			return nil, err
 		}
-		// A canceled turn falls through to the queue handoff below
-		// instead of returning early: Cancel drops the queue it saw, and a
-		// prompt submitted while the canceled turn unwinds runs as the
-		// follow-up turn.
+		// A failed or canceled turn falls through to the queue handoff
+		// below instead of returning early: every step until then is
+		// guarded on err, and the prompts queued behind this one are
+		// turns of their own that still run - Cancel already dropped the
+		// queue it saw, so what is left was sent after it. The handoff
+		// reports this turn's error in its RunComplete.
 	}
 
 	// Recover from a context-window overflow: summarize the session and
@@ -1919,17 +2040,17 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		slog.Warn("Context window exceeded; summarizing and requeueing the prompt",
 			"session_id", call.SessionID, "error", err.Error())
 		err = nil
-		a.activeRequests.Del(call.SessionID)
+		// The session stays registered as busy through the clean-up and the
+		// compaction below: a prompt sent meanwhile queues behind the
+		// requeued one instead of starting a second run on a session that
+		// is being rewritten, and a cancel still reaches this run.
 		// Clear the wreckage of the turn that did not happen. The failed
 		// assistant carries the overflow as a finish error, which the
 		// transcript would render as a failure the user has to think
 		// about -- but it was recovered from, so there is nothing to
 		// report. The user message goes with it because the requeued turn
 		// writes the prompt again on the far side of the summary; keeping
-		// both would show it twice. Whether the turn had started calling
-		// tools decides the requeued prompt's framing, so read it before
-		// the assistant goes.
-		hadToolCalls := currentAssistant != nil && len(currentAssistant.ToolCalls()) > 0
+		// both would show it twice.
 		if currentAssistant != nil {
 			if delErr := a.messages.Delete(ctx, currentAssistant.ID); delErr != nil {
 				slog.Warn("Failed to remove the overflowed assistant message", "error", delErr)
@@ -1944,10 +2065,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 		requeued := call
 		requeued.OverflowRecovered = true
-		if hadToolCalls {
-			requeued.Prompt = fmt.Sprintf("The previous session was interrupted because it exceeded the context window and the history was summarized. The initial user request was: `%s`", requeued.Prompt)
-		}
-		a.appendQueued(call.SessionID, requeued)
+		requeued.resumed = calledTools
+		// The prompt goes back ahead of anything sent while it ran: it was
+		// asked first and the later prompts may build on its answer.
+		a.requeueCalls(call.SessionID, []SessionAgentCall{requeued})
 	}
 
 	if err == nil && shouldSummarize {
@@ -1957,9 +2078,8 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			return nil, compactErr
 		}
 		// If the agent wasn't done...
-		if len(currentAssistant.ToolCalls()) > 0 {
-			call.Prompt = fmt.Sprintf("The previous session was interrupted because it got too long, the initial user request was: `%s`", call.Prompt)
-			a.appendQueued(call.SessionID, call)
+		if genCtx.Err() == nil && len(currentAssistant.ToolCalls()) > 0 {
+			a.appendQueued(call.SessionID, call.harnessTurn(message.ContextNoteResume, compactionContinuePrompt(call)))
 		}
 	} else if err == nil && !a.disableAutoSummarize {
 		// The turn is over and the session is still ours: this is the
@@ -1973,25 +2093,42 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		}
 	}
 
-	// Session goal: judge the finished turn while the session still
-	// reads as busy, so a prompt the user sends meanwhile queues behind
-	// it instead of racing the continuation.
-	var goalNext *SessionAgentCall
+	// Decide whether harness carries on by itself while the session
+	// still reads as busy, so a prompt the user sends meanwhile queues
+	// behind the decision instead of racing it. A session goal takes
+	// precedence: its continuation restates the goal. Otherwise a turn
+	// that ended by declaring what it will do next is continued instead
+	// of waiting for the user to say "continue".
+	var continuation *SessionAgentCall
 	if err == nil {
-		goalNext = a.advanceGoal(genCtx, call, currentAssistant, result)
+		continuation = a.advanceGoal(genCtx, call, currentAssistant, result)
+		if continuation == nil {
+			continuation = a.nextStepsContinuation(call, currentAssistant, result)
+		}
+		// A cancel that landed after the model finished - during the
+		// end-of-turn compaction or the goal judge - stops harness from
+		// carrying on too. Checked after both decisions: a cancelled
+		// judge declines the goal's continuation, which would otherwise
+		// hand the turn to the next-steps one.
+		if genCtx.Err() != nil {
+			continuation = nil
+		}
 	}
 
 	// Release active request before publishing the notification.
 	// TUI handlers poll IsSessionBusy() and only re-evaluate when a
 	// tea.Msg arrives, so the cleanup must precede the notify or
-	// subscribers see stale busy state at the moment of receipt.
-	a.activeRequests.Del(call.SessionID)
+	// subscribers see stale busy state at the moment of receipt. Only this
+	// run's own entry goes: a newer run registered meanwhile keeps its
+	// cancel.
+	csync.CompareAndDelete(a.activeRequests, call.SessionID, ac)
 	cancel()
 
 	// Send notification that agent has finished its turn (skip for
-	// nested/non-interactive sessions, and for turns that ended in an
-	// error or a cancel — those have their own UX).
-	if err == nil && goalNext == nil && !call.NonInteractive && a.notify != nil {
+	// nested/non-interactive sessions, for turns that ended in an error
+	// or a cancel — those have their own UX — and for a turn harness is
+	// about to continue, which has not finished).
+	if err == nil && continuation == nil && !call.NonInteractive && a.notify != nil {
 		a.publishNotification(ctx, notify.Notification{
 			SessionID:    call.SessionID,
 			SessionTitle: currentSession.Title,
@@ -1999,22 +2136,11 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		})
 	}
 
-	// Inherent goals: a turn that ended by declaring what it will do
-	// next is continued with a synthesized prompt instead of waiting
-	// for the user to say "continue". Queueing keeps the handoff below
-	// atomic against a cancel, and a queued user prompt wins: the guard
-	// skips when one is already waiting.
-	//
-	// A session goal takes over from both: its continuation restates the
-	// goal. A prompt the user queued while the judge ran wins, and the
-	// turn it starts is judged in turn.
-	if goalNext != nil {
-		a.appendQueuedIfIdle(call.SessionID, *goalNext)
-	} else if a.goalContinuation(call, currentAssistant, result) {
-		continued := call
-		continued.Prompt = goalContinuationPrompt
-		continued.GoalContinuations++
-		a.appendQueued(call.SessionID, continued)
+	// Queueing the continuation keeps the handoff below atomic against a
+	// cancel. A prompt the user queued while it was decided wins, and
+	// the turn it starts is judged in turn.
+	if continuation != nil {
+		a.appendQueuedIfIdle(call.SessionID, *continuation)
 	}
 
 	// Hand off to the next queued prompt (if any) under dispatchMu so
@@ -2065,7 +2191,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		return q.RunID == call.RunID
 	})
 	if outerOwesRunComplete {
-		a.publishRunComplete(ctx, call, turnComplete(ctx, call, currentAssistant, nil))
+		a.publishRunComplete(ctx, call, turnComplete(ctx, call, currentAssistant, err))
 	}
 	return a.Run(ctx, next)
 }
@@ -2351,12 +2477,27 @@ func withPromptCacheKey(sessionID string, opts fantasy.ProviderOptions) fantasy.
 }
 
 func (a *sessionAgent) createUserMessage(ctx context.Context, call SessionAgentCall) (message.Message, error) {
-	parts := []message.ContentPart{message.TextContent{Text: call.Prompt}}
-	var attachmentParts []message.ContentPart
-	for _, attachment := range call.Attachments {
-		attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
+	var resume []message.ContentPart
+	if call.resumed {
+		resume = []message.ContentPart{message.ContextNote{Kind: message.ContextNoteResume, Text: resumeNote}}
 	}
-	parts = append(parts, attachmentParts...)
+	if call.fromHarness() {
+		parts := append([]message.ContentPart{message.ContextNote{Kind: call.noteKind, Text: call.Prompt}}, resume...)
+		msg, err := a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
+			Role:  message.User,
+			Parts: parts,
+		})
+		if err != nil {
+			return message.Message{}, fmt.Errorf("failed to create %s note: %w", call.noteKind, err)
+		}
+		return msg, nil
+	}
+	parts := make([]message.ContentPart, 0, 1+len(call.Attachments)+len(resume))
+	parts = append(parts, message.TextContent{Text: call.Prompt})
+	for _, attachment := range call.Attachments {
+		parts = append(parts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
+	}
+	parts = append(parts, resume...)
 	msg, err := a.messages.Create(ctx, call.SessionID, message.CreateMessageParams{
 		Role:  message.User,
 		Parts: parts,
@@ -2904,22 +3045,25 @@ func (a *sessionAgent) IsSessionBusy(sessionID string) bool {
 	return busy
 }
 
+// QueuedPrompts counts the user prompts waiting on the session. A turn
+// harness queued on its own is not a prompt anyone typed and is left
+// out.
 func (a *sessionAgent) QueuedPrompts(sessionID string) int {
-	l, ok := a.messageQueue.Get(sessionID)
-	if !ok {
-		return 0
-	}
-	return len(l)
+	return len(a.QueuedPromptsList(sessionID))
 }
 
+// QueuedPromptsList lists the user prompts waiting on the session, in
+// queue order; see QueuedPrompts.
 func (a *sessionAgent) QueuedPromptsList(sessionID string) []string {
 	l, ok := a.messageQueue.Get(sessionID)
 	if !ok {
 		return nil
 	}
-	prompts := make([]string, len(l))
-	for i, call := range l {
-		prompts[i] = call.Prompt
+	prompts := make([]string, 0, len(l))
+	for _, call := range l {
+		if !call.fromHarness() {
+			prompts = append(prompts, call.Prompt)
+		}
 	}
 	return prompts
 }

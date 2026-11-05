@@ -13,19 +13,23 @@ import (
 // continued by harness instead of ending and waiting for the user to
 // type "continue". The detection is mechanical — first-person
 // future-intent statements in the tail of the final assistant message —
-// and the continuation is an ordinary queued turn, so every guard the
-// queue path already has (cancel marks, user prompts taking precedence,
-// terminal events) applies unchanged.
+// and the continuation is a queued turn harness starts on its own, so
+// every guard the queue path already has (cancel marks, user prompts
+// taking precedence, terminal events) applies unchanged. Its prompt is
+// a ContextNote: the model reads it, the transcript does not show it.
 
-// goalContinuationPrompt is the synthesized prompt the continuation
-// turn runs with. The model has its own last message in context, so a
-// short nudge suffices.
-const goalContinuationPrompt = "Continue with the next steps you outlined."
+// nextStepsPrompt is the prompt the continuation turn runs with. The
+// model has its own last message in context, so a short nudge suffices;
+// it says where it comes from so the model acts on it instead of
+// answering it.
+const nextStepsPrompt = "<system_reminder>\nYour last message ended by stating what you would do next, " +
+	"and the turn stopped there. Do it now without restating the plan. " +
+	"This reminder is automatic, not from the user; do not mention it.\n</system_reminder>"
 
-// maxGoalContinuations bounds the chain: consecutive continuations
-// since the last real user prompt. It keeps a model that signs every
-// message off with "next I will..." from looping forever.
-const maxGoalContinuations = 3
+// maxNextStepsContinuations bounds the chain: consecutive continuations
+// since the last user prompt. It keeps a model that signs every message
+// off with "next I will..." from looping forever.
+const maxNextStepsContinuations = 3
 
 // goalScanWindow is how much of the final assistant message the
 // detector reads. Declarations of future work close a wrap-up, so
@@ -82,32 +86,34 @@ func declaresNextSteps(text string) bool {
 	return false
 }
 
-// goalContinuation reports whether a finished turn should be continued
-// with a synthesized prompt. Only interactive turns qualify: subagent
-// and non-interactive runs end when their work ends. A turn the user
-// already has follow-up input queued for continues through that input
-// instead, and the chain is capped so a model that ends every message
-// with a promise cannot run away.
-func (a *sessionAgent) goalContinuation(call SessionAgentCall, assistant *message.Message, result *fantasy.AgentResult) bool {
+// nextStepsContinuation returns the turn that continues a finished turn
+// which ended by declaring next steps, or nil when it should end. Only
+// interactive turns qualify: subagent and non-interactive runs end when
+// their work ends. A turn the user already has follow-up input queued
+// for continues through that input instead, and the chain is capped so
+// a model that ends every message with a promise cannot run away.
+func (a *sessionAgent) nextStepsContinuation(call SessionAgentCall, assistant *message.Message, result *fantasy.AgentResult) *SessionAgentCall {
 	if !a.inherentGoals || call.NonInteractive {
-		return false
+		return nil
 	}
-	if call.GoalContinuations >= maxGoalContinuations {
-		return false
+	if call.nextStepsContinuations >= maxNextStepsContinuations {
+		return nil
 	}
 	if a.QueuedPrompts(call.SessionID) > 0 {
-		return false
+		return nil
 	}
 	if assistant == nil || len(assistant.ToolCalls()) > 0 {
-		return false
+		return nil
 	}
 	if result == nil || result.Response.FinishReason != fantasy.FinishReasonStop {
-		return false
+		return nil
 	}
 	if !declaresNextSteps(assistant.Content().Text) {
-		return false
+		return nil
 	}
+	next := call.harnessTurn(message.ContextNoteNextSteps, nextStepsPrompt)
+	next.nextStepsContinuations++
 	slog.Info("Turn ended by declaring next steps; continuing",
-		"session_id", call.SessionID, "continuation", call.GoalContinuations+1)
-	return true
+		"session_id", call.SessionID, "continuation", next.nextStepsContinuations)
+	return &next
 }

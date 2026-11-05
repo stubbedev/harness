@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -349,6 +350,12 @@ func (f *fakeSubagentInbox) DrainSubagentInbox(_ string) []SubagentInboxMessage 
 	f.msgs = nil
 	f.drain++
 	return msgs
+}
+
+func (f *fakeSubagentInbox) RestoreSubagentInbox(_ string, msgs []SubagentInboxMessage) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.msgs = append(slices.Clone(msgs), f.msgs...)
 }
 
 // TestPrepareStepFoldsLiveInboxMessages covers the step-loop half: a message

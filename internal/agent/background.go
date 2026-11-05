@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -46,6 +47,10 @@ type SubagentInboxMessage struct {
 // dispatch result. The coordinator is the only implementation.
 type SubagentInboxSource interface {
 	DrainSubagentInbox(sessionID string) []SubagentInboxMessage
+	// RestoreSubagentInbox puts drained messages that could not be
+	// delivered back at the front of the session's inbox, so the next
+	// step reads them instead of losing them.
+	RestoreSubagentInbox(sessionID string, msgs []SubagentInboxMessage)
 }
 
 // SubagentDispatchDiscarder undoes a sub-agent dispatch that started
@@ -181,6 +186,18 @@ func (in *liveInbox) drain(parentSessionID string) []SubagentInboxMessage {
 	msgs := in.items[parentSessionID]
 	delete(in.items, parentSessionID)
 	return msgs
+}
+
+// restore puts drained messages back ahead of whatever arrived since.
+// They were accepted once, so the cap that refuses new senders does not
+// apply to them.
+func (in *liveInbox) restore(parentSessionID string, msgs []SubagentInboxMessage) {
+	if len(msgs) == 0 {
+		return
+	}
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	in.items[parentSessionID] = append(slices.Clone(msgs), in.items[parentSessionID]...)
 }
 
 // drainFrom takes the pending messages sent via the given handles, leaving

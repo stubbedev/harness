@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/fantasy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/message"
@@ -64,58 +65,76 @@ func TestDeclaresNextSteps(t *testing.T) {
 	assert.True(t, declaresNextSteps(tail), "a closing plan is inside the scan window")
 }
 
-func TestGoalContinuationEndsOfTurn(t *testing.T) {
+func TestNextStepsContinuation(t *testing.T) {
 	t.Parallel()
 
 	t.Run("a declaring turn is continued", func(t *testing.T) {
 		t.Parallel()
 
-		agent, env, _ := goalsAgent(t, nil,
+		agent, env, model := goalsAgent(t, nil,
 			scriptedTurn{text: "Fixed the parser. Next I will run the test suite."},
 			scriptedTurn{text: "Tests pass. Done."},
 		)
-		msgs := runScript(t, agent, env, "Fix the parser")
+		history := runScriptHistory(t, agent, env, "Fix the parser")
 
-		require.Len(t, msgs, 4)
+		msgs := conversation(history)
+		require.Len(t, msgs, 3, "the continuation shows no user turn")
 		require.Equal(t, message.User, msgs[0].Role)
+		require.Equal(t, "Fix the parser", msgs[0].Content().Text)
 		require.Equal(t, message.Assistant, msgs[1].Role)
 		require.Contains(t, msgs[1].Content().Text, "Next I will run")
-		// The continuation is a real turn: its prompt is persisted as
-		// the user message that starts it.
-		require.Equal(t, message.User, msgs[2].Role)
-		require.Equal(t, goalContinuationPrompt, msgs[2].Content().Text)
-		require.Equal(t, message.Assistant, msgs[3].Role)
-		require.Contains(t, msgs[3].Content().Text, "Tests pass")
+		require.Equal(t, message.Assistant, msgs[2].Role)
+		require.Contains(t, msgs[2].Content().Text, "Tests pass")
+
+		require.Equal(t, []string{nextStepsPrompt}, notesOfKind(history, message.ContextNoteNextSteps),
+			"the prompt is stored as a note the model reads")
+		calls := model.sentCalls()
+		require.Len(t, calls, 2)
+		var sent []string
+		for _, msg := range calls[1].Prompt {
+			if msg.Role == fantasy.MessageRoleUser {
+				sent = append(sent, messageText(msg))
+			}
+		}
+		assert.Contains(t, sent, nextStepsPrompt, "the continuation request carries the note as a message of its own")
 	})
 
 	t.Run("a plain answer is not continued", func(t *testing.T) {
 		t.Parallel()
 
 		agent, env, _ := goalsAgent(t, nil, scriptedTurn{text: "All done."})
-		msgs := runScript(t, agent, env, "Status?")
+		history := runScriptHistory(t, agent, env, "Status?")
 
-		require.Len(t, msgs, 2, "a turn that declares nothing ends the chain")
+		require.Len(t, conversation(history), 2, "a turn that declares nothing ends the chain")
+		assert.Empty(t, notesOfKind(history, message.ContextNoteNextSteps))
 	})
 
 	t.Run("the chain is capped", func(t *testing.T) {
 		t.Parallel()
 
-		turns := make([]scriptedTurn, 0, maxGoalContinuations+1)
-		for range maxGoalContinuations + 1 {
+		turns := make([]scriptedTurn, 0, maxNextStepsContinuations+1)
+		for range maxNextStepsContinuations + 1 {
 			turns = append(turns, scriptedTurn{text: "Progress. Next I will keep going."})
 		}
 		agent, env, _ := goalsAgent(t, nil, turns...)
-		msgs := runScript(t, agent, env, "Long task")
+		history := runScriptHistory(t, agent, env, "Long task")
 
-		// One user prompt, cap+1 declaring assistant turns, and a
-		// continuation prompt before every one of them but the last.
-		require.Len(t, msgs, 2*maxGoalContinuations+2)
-		continuations := 0
-		for _, msg := range msgs {
-			if msg.Role == message.User && msg.Content().Text == goalContinuationPrompt {
-				continuations++
-			}
-		}
-		assert.Equal(t, maxGoalContinuations, continuations, "the chain stops at the cap")
+		require.Len(t, conversation(history), maxNextStepsContinuations+2,
+			"one user prompt and cap+1 declaring assistant turns")
+		assert.Len(t, notesOfKind(history, message.ContextNoteNextSteps), maxNextStepsContinuations,
+			"the chain stops at the cap")
 	})
+}
+
+func TestQueuedPromptsLeaveOutHarnessTurns(t *testing.T) {
+	t.Parallel()
+
+	agent, _, _ := goalsAgent(t, nil)
+	a, ok := agent.(*sessionAgent)
+	require.True(t, ok)
+	user := SessionAgentCall{SessionID: "s", Prompt: "also check the docs"}
+	a.appendQueued("s", user.harnessTurn(message.ContextNoteNextSteps, nextStepsPrompt), user)
+
+	assert.Equal(t, []string{"also check the docs"}, a.QueuedPromptsList("s"))
+	assert.Equal(t, 1, a.QueuedPrompts("s"))
 }

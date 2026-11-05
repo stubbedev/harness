@@ -49,6 +49,13 @@ func scriptedAgent(t *testing.T, client *http.Client, turns ...scriptedTurn) (Se
 // it persisted.
 func runScript(t *testing.T, agent SessionAgent, env fakeEnv, prompt string) []message.Message {
 	t.Helper()
+	return conversation(runScriptHistory(t, agent, env, prompt))
+}
+
+// runScriptHistory runs prompt and returns every stored message of the
+// session, harness context notes included.
+func runScriptHistory(t *testing.T, agent SessionAgent, env fakeEnv, prompt string) []message.Message {
+	t.Helper()
 
 	sess, err := env.sessions.Create(t.Context(), "New Session")
 	require.NoError(t, err)
@@ -63,10 +70,29 @@ func runScript(t *testing.T, agent SessionAgent, env fakeEnv, prompt string) []m
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
-	// The runtime block and other harness context are stored as
-	// ContextNote rows so they stay in the cached prefix; they are not
-	// conversation and the scripts here assert on the conversation.
-	return slices.DeleteFunc(msgs, func(m message.Message) bool { return m.ContextNotesOnly() })
+	return msgs
+}
+
+// conversation is what the transcript shows of msgs. The runtime block
+// and other harness context are stored as ContextNote rows so they stay
+// in the cached prefix; they are not conversation and the scripts here
+// assert on the conversation.
+func conversation(msgs []message.Message) []message.Message {
+	return slices.DeleteFunc(slices.Clone(msgs), func(m message.Message) bool { return m.ContextNotesOnly() })
+}
+
+// notesOfKind returns the text of every ContextNote of kind in msgs, in
+// order.
+func notesOfKind(msgs []message.Message, kind string) []string {
+	var texts []string
+	for _, m := range msgs {
+		for _, note := range m.ContextNotes() {
+			if note.Kind == kind {
+				texts = append(texts, note.Text)
+			}
+		}
+	}
+	return texts
 }
 
 // toolResults pairs every tool result back to the call that produced it

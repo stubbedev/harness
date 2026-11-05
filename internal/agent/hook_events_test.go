@@ -536,3 +536,35 @@ func TestCompactHooks(t *testing.T) {
 		require.Equal(t, "auto", payloads[1]["trigger"])
 	})
 }
+
+func TestNextStepsContinuationIsNoUserPrompt(t *testing.T) {
+	t.Parallel()
+
+	promptLog := filepath.Join(t.TempDir(), "prompt.log")
+	notifyLog := filepath.Join(t.TempDir(), "notify.log")
+	sa, env, large := hookedCoderAgent(t,
+		map[string][]config.HookConfig{
+			hooks.EventUserPromptSubmit: {{Command: captureHookCmd(promptLog, "")}},
+			hooks.EventNotification:     {{Command: captureHookCmd(notifyLog, "")}},
+		},
+		scriptedTurn{text: "Fixed the parser. Next I will run the test suite."},
+		scriptedTurn{text: "Tests pass. Done."},
+	)
+	sa.inherentGoals = true
+	broker := pubsub.NewBroker[notify.Notification]()
+	t.Cleanup(broker.Shutdown)
+	sa.notify = broker
+	sessionID := newHookSession(t, env)
+
+	_, err := runHookTurn(t, sa, sessionID, "Fix the parser")
+	require.NoError(t, err)
+	require.Len(t, large.sentCalls(), 2, "the declaring turn was continued")
+
+	prompts := readHookPayloads(t, promptLog)
+	require.Len(t, prompts, 1, "only the prompt the user typed is submitted")
+	require.Equal(t, "Fix the parser", prompts[0]["prompt"])
+
+	finished := readHookPayloads(t, notifyLog)
+	require.Len(t, finished, 1, "the agent finishes once, after the continuation")
+	require.Equal(t, "agent_finished", finished[0]["notification_type"])
+}

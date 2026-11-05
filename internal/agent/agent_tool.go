@@ -58,6 +58,16 @@ type AgentDispatchParams struct {
 	Cancel bool `json:"cancel,omitempty"`
 }
 
+// AgentType names the subagent a dispatch runs. Dispatch leans light: an
+// omitted type runs the cheap fast agent on the small model, and task is
+// an explicit escalation the model must ask for by name.
+func (p AgentDispatchParams) AgentType() string {
+	if p.SubagentType == "" {
+		return config.AgentFast
+	}
+	return p.SubagentType
+}
+
 // AgentCallKind is the form a dispatcher tool call takes, decided by
 // which of its mutually exclusive fields is set.
 type AgentCallKind int
@@ -412,13 +422,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				return c.runSubAgent(ctx, runParams)
 			}
 
-			subagentType := params.SubagentType
-			if subagentType == "" {
-				// Dispatch leans light: an omitted type runs the cheap fast
-				// agent on the small model, and task is an explicit
-				// escalation the model must ask for by name.
-				subagentType = config.AgentFast
-			}
+			subagentType := params.AgentType()
 			if builtin, ok := builtins[subagentType]; ok {
 				var builtAgent SessionAgent
 				var err error

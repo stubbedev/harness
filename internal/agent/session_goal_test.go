@@ -74,7 +74,7 @@ func (m *judgeModel) judged() []string {
 }
 
 // runGoal sets condition as a fresh session's goal, runs prompt, and
-// returns the conversation and the goal it left.
+// returns every message it stored and the goal it left.
 func runGoal(t *testing.T, judge *judgeModel, condition string, turns ...scriptedTurn) ([]message.Message, *session.Goal) {
 	t.Helper()
 
@@ -99,15 +99,9 @@ func runGoal(t *testing.T, judge *judgeModel, condition string, turns ...scripte
 
 	msgs, err := env.messages.List(t.Context(), sess.ID)
 	require.NoError(t, err)
-	var convo []message.Message
-	for _, m := range msgs {
-		if !m.ContextNotesOnly() {
-			convo = append(convo, m)
-		}
-	}
 	after, err := env.sessions.Get(t.Context(), sess.ID)
 	require.NoError(t, err)
-	return convo, after.Goal
+	return msgs, after.Goal
 }
 
 func TestSessionGoalLoop(t *testing.T) {
@@ -120,18 +114,20 @@ func TestSessionGoalLoop(t *testing.T) {
 			`{"verdict": "not_met", "reason": "The README still lacks an install section."}`,
 			"```json\n{\"verdict\": \"met\", \"reason\": \"Both sections are written.\"}\n```",
 		)
-		msgs, goal := runGoal(t, judge, "README has usage and install sections",
+		history, goal := runGoal(t, judge, "README has usage and install sections",
 			scriptedTurn{text: "Wrote the usage section."},
 			scriptedTurn{text: "Wrote the install section."},
 		)
 
-		require.Len(t, msgs, 4)
-		cont := msgs[2]
-		require.Equal(t, message.User, cont.Role)
+		msgs := conversation(history)
+		require.Len(t, msgs, 3, "the continuation shows no user turn")
+		assert.Equal(t, message.Assistant, msgs[2].Role)
+		notes := notesOfKind(history, message.ContextNoteGoal)
+		require.Len(t, notes, 1)
 		// The continuation restates the goal, which after a compaction
 		// may be the only place the model still sees it.
-		assert.Contains(t, cont.Content().Text, "README has usage and install sections")
-		assert.Contains(t, cont.Content().Text, "lacks an install section")
+		assert.Contains(t, notes[0], "README has usage and install sections")
+		assert.Contains(t, notes[0], "lacks an install section")
 
 		require.NotNil(t, goal)
 		assert.Equal(t, session.GoalMet, goal.Status)
@@ -151,7 +147,7 @@ func TestSessionGoalLoop(t *testing.T) {
 		msgs, goal := runGoal(t, judge, "Deploy to the staging service",
 			scriptedTurn{text: "There is no staging service in this repo."},
 		)
-		require.Len(t, msgs, 2)
+		require.Len(t, conversation(msgs), 2)
 		assert.Equal(t, session.GoalImpossible, goal.Status)
 	})
 
@@ -162,7 +158,7 @@ func TestSessionGoalLoop(t *testing.T) {
 		msgs, goal := runGoal(t, judge, "Call the API",
 			scriptedTurn{text: "Which API key should I use?"},
 		)
-		require.Len(t, msgs, 2)
+		require.Len(t, conversation(msgs), 2)
 		assert.True(t, goal.Active())
 		assert.Equal(t, "Needs the API key.", goal.Reason)
 	})
@@ -180,7 +176,8 @@ func TestSessionGoalLoop(t *testing.T) {
 
 		// The prompt turn and maxGoalStalledTurns continuations; the last
 		// one is not judged.
-		require.Len(t, msgs, 2*(maxGoalStalledTurns+1))
+		require.Len(t, conversation(msgs), 2+maxGoalStalledTurns)
+		assert.Len(t, notesOfKind(msgs, message.ContextNoteGoal), maxGoalStalledTurns)
 		assert.Len(t, judge.judged(), maxGoalStalledTurns)
 		assert.True(t, goal.Active(), "a paused goal stays set")
 		assert.True(t, strings.HasPrefix(goal.Reason, "Paused:"), goal.Reason)
@@ -191,7 +188,7 @@ func TestSessionGoalLoop(t *testing.T) {
 
 		judge := newJudgeModel()
 		msgs, goal := runGoal(t, judge, "", scriptedTurn{text: "Hi."})
-		require.Len(t, msgs, 2)
+		require.Len(t, conversation(msgs), 2)
 		assert.Nil(t, goal)
 		assert.Empty(t, judge.judged())
 	})

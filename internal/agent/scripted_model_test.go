@@ -53,6 +53,9 @@ type scriptedTurn struct {
 	// stop for a text turn and tool-calls for a turn with calls. Tests of
 	// the max_tokens continuation set it to fantasy.FinishReasonLength.
 	finish fantasy.FinishReason
+	// err, when set, fails the request with it instead of answering, the
+	// way a provider rejects one (a context-length error, say).
+	err error
 }
 
 // scriptedCall is one tool call in a turn. Input is marshalled to JSON,
@@ -108,6 +111,9 @@ func (m *scriptedModel) sentCalls() []fantasy.Call {
 
 func (m *scriptedModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 	turn := m.take(call)
+	if turn.err != nil {
+		return nil, turn.err
+	}
 	// The call id must be unique across the whole conversation: results
 	// are paired back to calls by it, and a repeated id would make a
 	// second turn's result overwrite the first.

@@ -2485,7 +2485,13 @@ func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, sess
 		inner := authRefresh
 		authRefresh = func(ctx context.Context, pe *fantasy.ProviderError) error {
 			c.runtime.SetStatus(session.ID, subagents.StatusRetrying)
-			return inner(ctx, pe)
+			if err := inner(ctx, pe); err != nil {
+				return err
+			}
+			// Refreshed: fantasy retries the request, so the agent is
+			// running again rather than retrying for the rest of its run.
+			c.runtime.SetStatus(session.ID, subagents.StatusRunning)
+			return nil
 		}
 	}
 
@@ -2496,22 +2502,24 @@ func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, sess
 	call.OnAuthRefresh = authRefresh
 	result, err := params.Agent.Run(runCtx, call)
 	c.notifyIfUnauthorized(err, model.ModelCfg.Provider)
+
+	// What the child spent is the parent's however the run ended: a
+	// cancelled or failed child paid for every step it took. The write
+	// outlives a cancel of the run, and a failure to record it is not the
+	// child's failure.
+	if costErr := c.updateParentSessionCost(context.WithoutCancel(parentCtx), session.ID, params.SessionID); costErr != nil {
+		slog.Warn(
+			"Failed to update parent session cost",
+			"child_session", session.ID,
+			"parent_session", params.SessionID,
+			"error", costErr,
+		)
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return fantasy.NewTextErrorResponse("Subagent cancelled by user"), subagents.StatusCancelled
 		}
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("Failed to generate response: %s", err)), subagents.StatusFailed
-	}
-
-	// Update parent session cost on a best-effort basis. A failure here must
-	// not discard the sub-agent output that was already produced.
-	if err := c.updateParentSessionCost(parentCtx, session.ID, params.SessionID); err != nil {
-		slog.Warn(
-			"Failed to update parent session cost",
-			"child_session", session.ID,
-			"parent_session", params.SessionID,
-			"error", err,
-		)
 	}
 
 	output := subAgentOutput(result)
@@ -2700,6 +2708,12 @@ func (c *coordinator) drainLiveInboxFrom(parentSessionID string, handles map[str
 // session so PrepareStep can fold it into the next step.
 func (c *coordinator) DrainSubagentInbox(sessionID string) []SubagentInboxMessage {
 	return c.subagentRuns.inbox.drain(sessionID)
+}
+
+// RestoreSubagentInbox implements SubagentInboxSource.
+func (c *coordinator) RestoreSubagentInbox(sessionID string, msgs []SubagentInboxMessage) {
+	c.subagentRuns.inbox.restore(sessionID, msgs)
+	c.subagentRuns.inbox.notify(sessionID)
 }
 
 // fireSubagentStopHooks fires SubagentStop after a dispatched sub-agent

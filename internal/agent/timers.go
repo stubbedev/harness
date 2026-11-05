@@ -65,6 +65,9 @@ type sessionTimer struct {
 	id            string
 	parentSession string
 	duration      time.Duration
+	// cancelled closes when the timer is cancelled, so the goroutine
+	// waiting for its tick ends then instead of at the deadline.
+	cancelled chan struct{}
 
 	mu        sync.Mutex
 	state     TimerState
@@ -133,6 +136,7 @@ func (t *sessionTimer) cancel() bool {
 		return false
 	}
 	t.state = TimerCancelled
+	close(t.cancelled)
 	return true
 }
 
@@ -248,6 +252,7 @@ func (r *timerRegistry) reserve(parentSession string, d time.Duration) (*session
 		id:            fmt.Sprintf("%s%d", timerIDPrefix, session.seq),
 		parentSession: parentSession,
 		duration:      d,
+		cancelled:     make(chan struct{}),
 		state:         TimerArmed,
 		armedAt:       now,
 		firesAt:       now.Add(d),
@@ -259,9 +264,14 @@ func (r *timerRegistry) reserve(parentSession string, d time.Duration) (*session
 
 // run waits for a timer's tick and records its fire, then wakes everyone
 // waiting on the session. It is the only place a timer fires, so a fire
-// broadcasts exactly once and never happens twice.
+// broadcasts exactly once and never happens twice. A cancel ends the
+// wait at once.
 func (r *timerRegistry) run(timer *sessionTimer, fire <-chan time.Time) {
-	<-fire
+	select {
+	case <-fire:
+	case <-timer.cancelled:
+		return
+	}
 	if !timer.fire() {
 		// Cancelled while its tick was in flight.
 		return

@@ -74,17 +74,18 @@ func GoalPrompt(condition string) string {
 
 // goalContinuePrompt is the prompt a continuation turn runs with. It
 // restates the goal in full: after a compaction the goal may survive
-// only here.
+// only here. It reaches the model as a harness reminder, not as words
+// from the user, who sees the goal's state in the header instead.
 func goalContinuePrompt(goal *session.Goal) string {
 	var sb strings.Builder
-	sb.WriteString("The goal is not met yet.")
+	sb.WriteString("<system_reminder>\nThe goal is not met yet.")
 	if goal.Reason != "" {
 		sb.WriteString(" ")
 		sb.WriteString(goal.Reason)
 	}
 	sb.WriteString("\n\nKeep working toward the goal:\n\n<goal>\n")
 	sb.WriteString(goal.Condition)
-	sb.WriteString("\n</goal>")
+	sb.WriteString("\n</goal>\n</system_reminder>")
 	return sb.String()
 }
 
@@ -117,8 +118,8 @@ func (a *sessionAgent) advanceGoal(ctx context.Context, call SessionAgentCall, a
 
 	used := turnToolNames(result)
 	stalled := 0
-	if call.GoalContinuation && len(used) == 0 {
-		stalled = call.GoalStalledTurns + 1
+	if call.noteKind == message.ContextNoteGoal && len(used) == 0 {
+		stalled = call.goalStalledTurns + 1
 	}
 	if stalled >= maxGoalStalledTurns {
 		slog.Info("Goal loop paused; continuations stopped using tools",
@@ -152,12 +153,9 @@ func (a *sessionAgent) advanceGoal(ctx context.Context, call SessionAgentCall, a
 		return nil
 	}
 
-	next := call
-	next.Prompt = goalContinuePrompt(goal)
-	next.Attachments = nil
-	next.GoalContinuation = true
-	next.GoalStalledTurns = stalled
-	next.GoalContinuations = 0
+	next := call.harnessTurn(message.ContextNoteGoal, goalContinuePrompt(goal))
+	next.goalStalledTurns = stalled
+	next.nextStepsContinuations = 0
 	next.OverflowRecovered = false
 	return &next
 }
