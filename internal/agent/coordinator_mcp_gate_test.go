@@ -52,6 +52,11 @@ func newGateTestCoordinator(t *testing.T, interactive bool) *coordinator {
 
 	agent, err := coord.buildAgent(context.Background(), p, agentCfg, false, subagentModel{}, &coord.readyWg, nil)
 	require.NoError(t, err)
+	// buildAgent leaves its skills walk of the working directory running
+	// in readyWg. A subtest that never waits for it must not end with the
+	// walk still holding a directory open, or Windows cannot remove the
+	// test's temp dir. Registered after testEnv's TempDir, so it runs first.
+	t.Cleanup(func() { _ = coord.readyWg.Wait() })
 	coord.currentAgent = agent
 	coord.agents[config.AgentCoder] = agent
 
