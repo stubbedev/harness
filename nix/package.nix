@@ -42,7 +42,7 @@
           );
         };
 
-        vendorHash = "sha256-S1gZ+t3xHvnmN6iDOVxIezGFh8/c2xih7wxeycIoKhI=";
+        vendorHash = "sha256-YVVH39S9Vv73s2VDk8AC8y8kbX404N5mrQ+T0HXphIs=";
 
         # Only the root command. Without this every main package in the tree is
         # installed, which puts internal/ui/logo/example on PATH as `example`.
