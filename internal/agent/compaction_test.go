@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -514,9 +515,8 @@ func TestLoadForCompactionReadsFromTheBoundary(t *testing.T) {
 	assert.Equal(t, "new", tail[0].Content().Text)
 
 	sess.CompactionBoundaryID = "gone"
-	loaded, err = sa.loadForCompaction(t.Context(), sess)
-	require.NoError(t, err)
-	assert.Len(t, loaded, 3, "a lost anchor lists everything")
+	_, err = sa.loadForCompaction(t.Context(), sess)
+	require.ErrorIs(t, err, sql.ErrNoRows, "a lost anchor is a broken invariant, not a reason to send the whole history")
 }
 
 func TestCompactionExecutionStatePersistsIndependentOfNarrative(t *testing.T) {

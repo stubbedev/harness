@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,12 +24,12 @@ type slowUpdateQuerier struct {
 	startOnce sync.Once
 }
 
-func (s *slowUpdateQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMessageParams) error {
+func (s *slowUpdateQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMessageParams) (int64, error) {
 	s.startOnce.Do(func() { close(s.started) })
 	select {
 	case <-s.release:
 	case <-ctx.Done():
-		return ctx.Err()
+		return 0, ctx.Err()
 	}
 	return s.Querier.UpdateMessage(ctx, arg)
 }
@@ -948,4 +949,127 @@ func TestValidateAttachmentsEnforcesThePromptLimits(t *testing.T) {
 	require.NoError(t, ValidateAttachments([]Attachment{{Content: make([]byte, MaxAttachmentSize)}}))
 	require.ErrorIs(t, ValidateAttachments(make([]Attachment, MaxAttachments+1)), ErrAttachmentsRefused)
 	require.ErrorIs(t, ValidateAttachments([]Attachment{{FileName: "big.png", Content: make([]byte, MaxAttachmentSize+1)}}), ErrAttachmentsRefused)
+}
+
+func TestDelete_DuringTimerFlushDoesNotResurrect(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sess, err := session.NewService(q, conn).Create(t.Context(), "test")
+	require.NoError(t, err)
+	slow := &slowUpdateQuerier{Querier: q, release: make(chan struct{}), started: make(chan struct{})}
+	svc := NewService(slow, WithDebounce(time.Millisecond))
+
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	subCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := collect(subCtx, svc.Subscribe(subCtx))
+
+	msg.AppendContent("streaming")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	<-slow.started
+
+	require.NoError(t, svc.Delete(t.Context(), msg.ID))
+	close(slow.release)
+	require.NoError(t, svc.FlushAll(t.Context()))
+
+	require.Eventually(t, func() bool {
+		for _, ev := range events.snapshot() {
+			if ev.Type == pubsub.DeletedEvent {
+				return true
+			}
+		}
+		return false
+	}, time.Second, time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	got := events.snapshot()
+	require.Equal(t, pubsub.DeletedEvent, got[len(got)-1].Type, "a flush must not publish the message after its deletion: %v", got)
+
+	_, err = svc.Get(t.Context(), msg.ID)
+	require.Error(t, err)
+}
+
+func TestUpdate_AfterDeleteFailsWithoutPublishing(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t, WithDebounce(0))
+	msg, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+	require.NoError(t, svc.Delete(t.Context(), msg.ID))
+
+	subCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := collect(subCtx, svc.Subscribe(subCtx))
+
+	msg.AppendContent("late")
+	err = svc.Update(t.Context(), msg)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	time.Sleep(20 * time.Millisecond)
+	require.Empty(t, events.snapshot())
+}
+
+// writtenThenHeldQuerier lets UpdateMessage write its row, then holds
+// the flush that called it on a release channel before it can publish.
+type writtenThenHeldQuerier struct {
+	db.Querier
+	release   chan struct{}
+	written   chan struct{}
+	writeOnce sync.Once
+}
+
+func (w *writtenThenHeldQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMessageParams) (int64, error) {
+	rows, err := w.Querier.UpdateMessage(ctx, arg)
+	w.writeOnce.Do(func() { close(w.written) })
+	<-w.release
+	return rows, err
+}
+
+func TestDelete_AfterTimerFlushWroteDoesNotResurrect(t *testing.T) {
+	t.Parallel()
+
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sess, err := session.NewService(q, conn).Create(t.Context(), "test")
+	require.NoError(t, err)
+	held := &writtenThenHeldQuerier{Querier: q, release: make(chan struct{}), written: make(chan struct{})}
+	svc := NewService(held, WithDebounce(time.Millisecond))
+
+	msg, err := svc.Create(t.Context(), sess.ID, CreateMessageParams{Role: Assistant})
+	require.NoError(t, err)
+
+	subCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	events := collect(subCtx, svc.Subscribe(subCtx))
+
+	msg.AppendContent("streaming")
+	require.NoError(t, svc.Update(t.Context(), msg))
+	<-held.written
+
+	require.NoError(t, svc.Delete(t.Context(), msg.ID))
+	close(held.release)
+	require.NoError(t, svc.FlushAll(t.Context()))
+
+	time.Sleep(20 * time.Millisecond)
+	got := events.snapshot()
+	require.NotEmpty(t, got)
+	require.Equal(t, pubsub.DeletedEvent, got[len(got)-1].Type, "a flush must not publish the message after its deletion: %v", got)
+}
+
+func TestListFrom_MissingAnchorFails(t *testing.T) {
+	t.Parallel()
+
+	svc, sessionID := newTestService(t)
+	_, err := svc.Create(t.Context(), sessionID, CreateMessageParams{Role: User, Parts: []ContentPart{TextContent{Text: "hi"}}})
+	require.NoError(t, err)
+
+	msgs, err := svc.ListFrom(t.Context(), sessionID, "missing")
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	require.Nil(t, msgs)
 }

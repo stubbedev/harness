@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
-	"slices"
 
 	"github.com/google/uuid"
 	"github.com/stubbedev/harness/internal/db"
@@ -208,9 +207,16 @@ func (s *Service) Rewind(ctx context.Context, sessionID, messageID string, mode 
 }
 
 // truncateConversation deletes messageID and every message after it in
-// one statement, so a failure cannot leave a half-truncated transcript,
-// and clears a summary pointer that would otherwise dangle.
+// one statement, so a failure cannot leave a half-truncated transcript.
+// The same statement clears the session pointers into the deleted
+// messages (see the clear_session_pointers_on_message_delete trigger);
+// the cleared pointers are then written back through the session
+// service so its subscribers learn of them.
 func (s *Service) truncateConversation(ctx context.Context, sessionID, messageID string) error {
+	before, err := s.sessions.Get(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("reading session %s before rewind: %w", sessionID, err)
+	}
 	doomed, err := s.messages.DeleteFrom(ctx, sessionID, messageID)
 	if err != nil {
 		return fmt.Errorf("deleting messages from %s: %w", messageID, err)
@@ -219,45 +225,18 @@ func (s *Service) truncateConversation(ctx context.Context, sessionID, messageID
 		return fmt.Errorf("message %s not found in session %s", messageID, sessionID)
 	}
 
-	sess, err := s.sessions.Get(ctx, sessionID)
+	after, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return fmt.Errorf("reading session after rewind: %w", err)
+		return fmt.Errorf("reading session %s after rewind: %w", sessionID, err)
 	}
-	if clearDoomedPointers(&sess, doomed) {
-		if _, err := s.sessions.SetCompaction(ctx, sessionID, session.CompactionOf(sess), nil); err != nil {
-			slog.Warn("Failed to clear summary pointers after rewind", "error", err)
-		}
+	cleared := session.CompactionOf(after)
+	if cleared == session.CompactionOf(before) {
+		return nil
+	}
+	if _, err := s.sessions.SetCompaction(ctx, sessionID, cleared, nil); err != nil {
+		return fmt.Errorf("publishing the session pointers rewinding %s cleared: %w", sessionID, err)
 	}
 	return nil
-}
-
-// clearDoomedPointers drops every session pointer into the deleted
-// messages. A compaction whose boundary went stands for conversation the
-// user rewound away, so its summary goes with it; an aged mark that went
-// only resets which tool results are stubbed. It reports whether anything
-// changed.
-func clearDoomedPointers(sess *session.Session, doomed []message.Message) bool {
-	gone := func(id string) bool {
-		return id != "" && slices.ContainsFunc(doomed, func(m message.Message) bool {
-			return m.ID == id
-		})
-	}
-	changed := false
-	if gone(sess.SummaryMessageID) {
-		sess.SummaryMessageID = ""
-		changed = true
-	}
-	if gone(sess.CompactionBoundaryID) {
-		sess.CompactionSummary = ""
-		sess.CompactionBoundaryID = ""
-		sess.CompactionAgedID = ""
-		changed = true
-	}
-	if gone(sess.CompactionAgedID) {
-		sess.CompactionAgedID = ""
-		changed = true
-	}
-	return changed
 }
 
 // DeleteSession removes the snapshot objects a session accumulated.

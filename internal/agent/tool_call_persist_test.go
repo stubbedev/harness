@@ -31,15 +31,16 @@ type orderingQuerier struct {
 	orphaned []string
 }
 
-func (q *orderingQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMessageParams) error {
-	if err := q.Querier.UpdateMessage(ctx, arg); err != nil {
-		return err
+func (q *orderingQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMessageParams) (int64, error) {
+	rows, err := q.Querier.UpdateMessage(ctx, arg)
+	if err != nil {
+		return rows, err
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.writes[arg.ID]++
 	q.stored[arg.ID] = arg.Parts
-	return nil
+	return rows, nil
 }
 
 func (q *orderingQuerier) CreateMessage(ctx context.Context, arg db.CreateMessageParams) (db.Message, error) {

@@ -1,6 +1,8 @@
 package checkpoints
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -303,31 +305,41 @@ func TestRejectsUnsafeIdentifiers(t *testing.T) {
 	require.Error(t, svc.restore(t.Context(), "session-1", "--upload-pack=touch"))
 }
 
-// TestClearDoomedPointers: a rewind past the compaction boundary drops
-// the summary that stood for the rewound conversation, not only the
-// summary message pointer.
-func TestClearDoomedPointers(t *testing.T) {
+// failingCompactionSessions is a session service whose SetCompaction
+// always fails.
+type failingCompactionSessions struct {
+	session.Service
+}
+
+func (failingCompactionSessions) SetCompaction(context.Context, string, session.Compaction, *session.TokenCounts) (session.Session, error) {
+	return session.Session{}, errors.New("set compaction failed")
+}
+
+// TestRewindPastCompactionBoundaryIsAtomic: the rewind that deletes the
+// compaction boundary clears the pointers to it in the same statement,
+// so no failure afterwards can leave them pointing at a deleted row, and
+// a failure to publish the change reaches the caller.
+func TestRewindPastCompactionBoundaryIsAtomic(t *testing.T) {
 	t.Parallel()
+	svc, sess, _, _ := newTestService(t)
 
-	doomed := []message.Message{{ID: "b"}, {ID: "c"}}
+	createUserMessage(t, svc, sess.ID, "kept")
+	turn := createUserMessage(t, svc, sess.ID, "rewound")
+	boundary, err := svc.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{Role: message.Assistant})
+	require.NoError(t, err)
+	_, err = svc.sessions.SetCompaction(t.Context(), sess.ID, session.Compaction{
+		Summary:    "summary of the rewound turn",
+		BoundaryID: boundary.ID,
+		AgedID:     boundary.ID,
+	}, nil)
+	require.NoError(t, err)
 
-	sess := session.Session{
-		SummaryMessageID:     "a",
-		CompactionSummary:    "old summary",
-		CompactionBoundaryID: "b",
-		CompactionAgedID:     "a",
-	}
-	require.True(t, clearDoomedPointers(&sess, doomed))
-	require.Equal(t, "a", sess.SummaryMessageID)
-	require.Empty(t, sess.CompactionSummary)
-	require.Empty(t, sess.CompactionBoundaryID)
-	require.Empty(t, sess.CompactionAgedID)
+	sessions := svc.sessions
+	svc.sessions = failingCompactionSessions{Service: sessions}
+	err = svc.Rewind(t.Context(), sess.ID, turn.ID, ModeConversation)
+	require.ErrorContains(t, err, "set compaction failed")
 
-	sess = session.Session{CompactionSummary: "s", CompactionBoundaryID: "a", CompactionAgedID: "c"}
-	require.True(t, clearDoomedPointers(&sess, doomed))
-	require.Equal(t, "s", sess.CompactionSummary)
-	require.Empty(t, sess.CompactionAgedID)
-
-	sess = session.Session{CompactionBoundaryID: "a"}
-	require.False(t, clearDoomedPointers(&sess, doomed))
+	updated, err := sessions.Get(t.Context(), sess.ID)
+	require.NoError(t, err)
+	require.Equal(t, session.Compaction{}, session.CompactionOf(updated))
 }

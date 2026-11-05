@@ -20,7 +20,7 @@ type countingQuerier struct {
 	updates atomic.Int64
 }
 
-func (c *countingQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMessageParams) error {
+func (c *countingQuerier) UpdateMessage(ctx context.Context, arg db.UpdateMessageParams) (int64, error) {
 	c.updates.Add(1)
 	return c.Querier.UpdateMessage(ctx, arg)
 }

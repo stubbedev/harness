@@ -75,7 +75,7 @@ type Querier interface {
 	RecordSessionUsage(ctx context.Context, arg RecordSessionUsageParams) (Session, error)
 	RenameSession(ctx context.Context, arg RenameSessionParams) (int64, error)
 	SaveModelCatalog(ctx context.Context, data string) (ModelCatalog, error)
-	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
+	UpdateMessage(ctx context.Context, arg UpdateMessageParams) (int64, error)
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	// Writes the compaction pointers, and the token counters when given,
 	// leaving title, cost and todos to their own writers.

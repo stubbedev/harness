@@ -426,7 +426,7 @@ func (q *Queries) ListUserMessagesBySession(ctx context.Context, sessionID strin
 	return items, nil
 }
 
-const updateMessage = `-- name: UpdateMessage :exec
+const updateMessage = `-- name: UpdateMessage :execrows
 UPDATE messages
 SET
     parts = ?,
@@ -451,8 +451,8 @@ type UpdateMessageParams struct {
 	ID                      string          `json:"id"`
 }
 
-func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) error {
-	_, err := q.db.ExecContext(ctx, updateMessage,
+func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateMessage,
 		arg.Parts,
 		arg.PrismModelID,
 		arg.PrismModelName,
@@ -462,5 +462,8 @@ func (q *Queries) UpdateMessage(ctx context.Context, arg UpdateMessageParams) er
 		arg.Visible,
 		arg.ID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

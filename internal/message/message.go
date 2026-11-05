@@ -96,8 +96,9 @@ type Service interface {
 	List(ctx context.Context, sessionID string) ([]Message, error)
 	// ListFrom lists the session's messages from the one with fromID on,
 	// that message included, in order. A fromID the session does not
-	// hold lists everything, so a caller that lost its anchor degrades to
-	// List rather than to nothing.
+	// hold fails with an error wrapping [sql.ErrNoRows]: an anchor that
+	// points nowhere is a broken invariant, not a reason to send the
+	// whole history.
 	ListFrom(ctx context.Context, sessionID, fromID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
 	// PromptHistory returns the newest maxEntries prompt-history entries
@@ -182,9 +183,15 @@ type pendingState struct {
 	// back to the state it wrote.
 	publishedSeq uint64
 
+	// deleted is set once the message's row is deleted. A flush still
+	// holding this state publishes nothing after that, so subscribers
+	// never see the message again once they were told it is gone.
+	deleted bool
+
 	// publishMu serializes publishing for this ID, so the check against
-	// publishedSeq and the publish it allows happen as one step. It is
-	// never taken while service.mu is held.
+	// publishedSeq and deleted and the publish it allows happen as one
+	// step, and a deletion is published only after any update publish in
+	// progress. It is never taken while service.mu is held.
 	publishMu sync.Mutex
 }
 
@@ -258,21 +265,43 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	// Drop any pending coalesced state for this ID. We never want to
-	// flush back over a deleted row.
+	s.publishDeleted([]Message{message})
+	return nil
+}
+
+// publishDeleted drops the pending state of messages whose rows are
+// gone and tells subscribers they were deleted. Each pending state is
+// marked deleted before its deletion is published under its publishMu,
+// so an update publish of a flush already running either lands before
+// the deletion or not at all.
+func (s *service) publishDeleted(deleted []Message) {
+	states := make([]*pendingState, len(deleted))
 	s.mu.Lock()
-	if p, ok := s.pending[id]; ok {
+	for i, msg := range deleted {
+		p, ok := s.pending[msg.ID]
+		if !ok {
+			continue
+		}
 		if p.timer != nil {
 			p.timer.Stop()
+			p.timer = nil
 		}
-		delete(s.pending, id)
+		p.deleted = true
+		delete(s.pending, msg.ID)
+		states[i] = p
 	}
 	s.mu.Unlock()
-	s.decoded.forget(id)
-	// Clone the message before publishing to avoid race conditions with
-	// concurrent modifications to the Parts slice.
-	s.Publish(pubsub.DeletedEvent, message.Clone())
-	return nil
+	for i, msg := range deleted {
+		s.decoded.forget(msg.ID)
+		p := states[i]
+		if p == nil {
+			s.Publish(pubsub.DeletedEvent, msg.Clone())
+			continue
+		}
+		p.publishMu.Lock()
+		s.Publish(pubsub.DeletedEvent, msg.Clone())
+		p.publishMu.Unlock()
+	}
 }
 
 func (s *service) DeleteFrom(ctx context.Context, sessionID, fromID string) ([]Message, error) {
@@ -295,22 +324,7 @@ func (s *service) DeleteFrom(ctx context.Context, sessionID, fromID string) ([]M
 	slices.SortStableFunc(deleted, func(a, b Message) int {
 		return cmp.Compare(b.CreatedAt, a.CreatedAt)
 	})
-	s.mu.Lock()
-	for _, msg := range deleted {
-		if p, ok := s.pending[msg.ID]; ok {
-			if p.timer != nil {
-				p.timer.Stop()
-			}
-			delete(s.pending, msg.ID)
-		}
-	}
-	s.mu.Unlock()
-	for _, msg := range deleted {
-		s.decoded.forget(msg.ID)
-	}
-	for _, msg := range deleted {
-		s.Publish(pubsub.DeletedEvent, msg.Clone())
-	}
+	s.publishDeleted(deleted)
 	return deleted, nil
 }
 
@@ -468,12 +482,12 @@ func (s *service) publish(ctx context.Context, p *pendingState, msg Message, seq
 	p.publishMu.Lock()
 	defer p.publishMu.Unlock()
 	s.mu.Lock()
-	stale := seq <= p.publishedSeq
-	if !stale {
+	skip := p.deleted || seq <= p.publishedSeq
+	if !skip {
 		p.publishedSeq = seq
 	}
 	s.mu.Unlock()
-	if stale {
+	if skip {
 		return
 	}
 	if mustDeliver {
@@ -569,11 +583,19 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 
 		s.mu.Lock()
 		p.flushing = false
-		if err == nil {
+		switch {
+		case err == nil:
 			p.baseline = newFlushBaseline(&snap)
 			p.hasFlushed = true
 			p.writtenSeq = snapSeq
-		} else {
+		case errors.Is(err, sql.ErrNoRows):
+			// The row is gone, so no retry can land: the state goes
+			// with it and nothing is published for it.
+			p.deleted = true
+			s.dropPendingLocked(id, p)
+			s.mu.Unlock()
+			return err
+		default:
 			// Restore dirty so the next caller retries.
 			p.dirty = true
 		}
@@ -586,7 +608,7 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 			// takes no more deltas, so its whole entry goes; a later
 			// update simply starts a fresh one.
 			if snap.IsFinished() {
-				delete(s.pending, id)
+				s.dropPendingLocked(id, p)
 			} else {
 				p.latest = Message{}
 			}
@@ -617,8 +639,17 @@ func (s *service) flushOne(ctx context.Context, id string, syncCaller bool) erro
 	}
 }
 
+// dropPendingLocked removes p as the pending state of id, unless a
+// deletion already replaced it with a fresh one. Caller holds s.mu.
+func (s *service) dropPendingLocked(id string, p *pendingState) {
+	if s.pending[id] == p {
+		delete(s.pending, id)
+	}
+}
+
 // write performs the unguarded SQL write + UpdatedAt stamp. Caller
-// owns publishing.
+// owns publishing. Writing a message whose row does not exist fails
+// with an error wrapping [sql.ErrNoRows].
 func (s *service) write(ctx context.Context, msg Message) error {
 	parts, err := marshalParts(msg.Parts)
 	if err != nil {
@@ -629,7 +660,7 @@ func (s *service) write(ctx context.Context, msg Message) error {
 		finishedAt.Int64 = f.Time
 		finishedAt.Valid = true
 	}
-	if err := s.q.UpdateMessage(ctx, db.UpdateMessageParams{
+	rows, err := s.q.UpdateMessage(ctx, db.UpdateMessageParams{
 		ID:                      msg.ID,
 		Parts:                   string(parts),
 		PrismModelID:            sql.NullString{String: msg.PrismModelID, Valid: msg.PrismModelID != ""},
@@ -638,8 +669,12 @@ func (s *service) write(ctx context.Context, msg Message) error {
 		PrismDollarSavings:      nullableFloat(msg.PrismDollarSavings),
 		FinishedAt:              finishedAt,
 		Visible:                 boolInt(msg.CountsInTranscript()),
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return fmt.Errorf("updating message %s: %w", msg.ID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("updating message %s: %w", msg.ID, sql.ErrNoRows)
 	}
 	return nil
 }
@@ -747,9 +782,7 @@ func (s *service) ListFrom(ctx context.Context, sessionID, fromID string) ([]Mes
 		}
 	}
 	if start < 0 {
-		// Anchor gone (or its created_at unreadable): the query returned
-		// nothing useful, list everything instead.
-		return s.List(ctx, sessionID)
+		return nil, fmt.Errorf("listing messages of session %s from %s: anchor message: %w", sessionID, fromID, sql.ErrNoRows)
 	}
 	dbMessages = dbMessages[start:]
 	return s.convertAll(dbMessages)

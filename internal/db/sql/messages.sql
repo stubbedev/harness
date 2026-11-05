@@ -28,7 +28,7 @@ INSERT INTO messages (
 )
 RETURNING *;
 
--- name: UpdateMessage :exec
+-- name: UpdateMessage :execrows
 UPDATE messages
 SET
     parts = ?,
