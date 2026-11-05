@@ -264,6 +264,9 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 // pays for the build and later ones reuse it. The mutex serializes the
 // concurrent dispatches this tool allows (Parallel: true) onto one build, but
 // unlike sync.Once a failed build does not stick: the next dispatch retries.
+// A reused agent whose models predate the coordinator's latest model
+// rebuild resolves them again first, so it never runs on credentials or
+// config that have since been replaced.
 type lazyAgent struct {
 	coord  *coordinator
 	prompt *prompt.Prompt
@@ -273,13 +276,24 @@ type lazyAgent struct {
 	mu    sync.Mutex
 	agent SessionAgent
 	built bool
+	// epoch is the coordinator model epoch the agent's models match.
+	epoch uint64
 }
 
 // get returns the memoized agent, building it on first call.
 func (l *lazyAgent) get(ctx context.Context) (SessionAgent, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	epoch := l.coord.modelEpoch.Load()
 	if l.built {
+		if l.epoch != epoch {
+			primary, small, err := l.coord.agentModels(ctx, l.model, true)
+			if err != nil {
+				return nil, fmt.Errorf("refresh the %s agent's models: %w", l.cfg.ID, err)
+			}
+			l.agent.SetModels(primary, small)
+			l.epoch = epoch
+		}
 		return l.agent, nil
 	}
 	var wg errgroup.Group
@@ -295,6 +309,7 @@ func (l *lazyAgent) get(ctx context.Context) (SessionAgent, error) {
 	}
 	l.agent = agent
 	l.built = true
+	l.epoch = epoch
 	return l.agent, nil
 }
 
@@ -398,9 +413,10 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 					isolated.finish(&response)
 				}
 			}()
-			dispatchRun := func(agent SessionAgent, title, name, color, model string) (fantasy.ToolResponse, error) {
+			dispatchRun := func(agent SessionAgent, models subagentModel, title, name, color, model string) (fantasy.ToolResponse, error) {
 				runParams := subAgentParams{
 					Agent:          agent,
+					Models:         models,
 					SessionID:      sessionID,
 					AgentMessageID: agentMessageID,
 					ToolCallID:     call.ID,
@@ -449,7 +465,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				if err != nil {
 					return fantasy.NewTextErrorResponse(fmt.Sprintf("build %s agent: %v", subagentType, err)), nil
 				}
-				return dispatchRun(builtAgent, "New Agent Session", subagentType, subagents.AutoColor(subagentType), builtAgent.Model().ModelCfg.Model)
+				return dispatchRun(builtAgent, builtin.model, "New Agent Session", subagentType, subagents.AutoColor(subagentType), builtAgent.Model().ModelCfg.Model)
 			}
 
 			sa := findSubagentByName(c.activeSubagentsList(), subagentType)
@@ -493,7 +509,8 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 			// here as a tool error rather than in the coordinator-wide
 			// readyWg, whose sticky error would fail every subsequent turn.
 			var buildWg errgroup.Group
-			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider}, &buildWg, workspace)
+			models := subagentModel{Effort: sa.Effort, Model: sa.Model, Provider: sa.Provider}
+			agent, err := c.buildAgent(ctx, subPr, agentCfg, true, models, &buildWg, workspace)
 			if err != nil {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
 			}
@@ -501,7 +518,7 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				return fantasy.NewTextErrorResponse(fmt.Sprintf("build subagent %q: %v", sa.Name, err)), nil
 			}
 
-			return dispatchRun(agent, sa.Name+" Agent Session", sa.Name, sa.ResolvedColor(), agent.Model().ModelCfg.Model)
+			return dispatchRun(agent, models, sa.Name+" Agent Session", sa.Name, sa.ResolvedColor(), agent.Model().ModelCfg.Model)
 		},
 	}, nil
 }

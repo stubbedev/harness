@@ -2,8 +2,12 @@ package agent
 
 import (
 	"testing"
+	"time"
 
+	"charm.land/fantasy"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/subagents"
 )
 
 func TestSubagentRegistryBlockingRun(t *testing.T) {
@@ -140,4 +144,74 @@ func TestCoordinatorForTestAllocatesRegistries(t *testing.T) {
 	require.False(t, live)
 	require.Equal(t, []string{"m"}, c.drainSubagentMessages("child"))
 	require.False(t, c.builtinToolExpanded("view"))
+}
+
+// TestSubagentRegistryForgetsADeletedSession pins the registry's bound:
+// the records of a deleted session's background runs, and its inbox, go
+// with it, a run still live is cancelled, and another session's records
+// are untouched.
+func TestSubagentRegistryForgetsADeletedSession(t *testing.T) {
+	t.Parallel()
+
+	r := newSubagentRegistry()
+	gone, keep := "parent-gone", "parent-kept"
+	finished, unregisterFinished := r.registerBackground(gone, "child-1", "fast", func() {})
+	finished.finish(subagents.StatusCompleted, fantasy.NewTextResponse("report"))
+	unregisterFinished()
+	liveCancelled := false
+	r.registerBackground(gone, "child-2", "fast", func() { liveCancelled = true })
+	kept, _ := r.registerBackground(keep, "child-3", "fast", func() {})
+	require.NoError(t, r.inbox.record(gone, SubagentInboxMessage{Text: "unread"}))
+
+	r.forgetSession(gone)
+
+	assert.Empty(t, r.handles(gone))
+	_, found := r.lookupByHandle(gone, finished.handle)
+	assert.False(t, found, "the finished run's record is gone")
+	assert.True(t, liveCancelled, "a live run of the deleted session is cancelled")
+	assert.Empty(t, r.inbox.drain(gone))
+	assert.Equal(t, []string{kept.handle}, r.handles(keep))
+}
+
+// TestBackgroundRunReleasesItsResultOnceCollected pins that a collected
+// result is not kept: a later wait only reports that it was returned.
+func TestBackgroundRunReleasesItsResultOnceCollected(t *testing.T) {
+	t.Parallel()
+
+	r := newSubagentRegistry()
+	run, _ := r.registerBackground("p", "c", "fast", func() {})
+	run.finish(subagents.StatusCompleted, fantasy.NewTextResponse("a long report"))
+
+	_, _, result, _, delivered := run.take()
+	require.True(t, delivered)
+	assert.Equal(t, "a long report", result)
+
+	_, _, result, _, delivered = run.take()
+	assert.False(t, delivered)
+	assert.Empty(t, result)
+	_, _, kept, _ := run.snapshot()
+	assert.Empty(t, kept, "the text is released once handed back")
+}
+
+// TestDeletingASessionForgetsItsBackgroundState drives the coordinator
+// end to end: deleting a session through the session service drops what
+// the coordinator kept for it.
+func TestDeletingASessionForgetsItsBackgroundState(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	coord := newTestCoordinator(t, env, "test-provider", offlineTestProvider("model-a"))
+	coord.forgetDeletedSessions(t.Context())
+	sess, err := env.sessions.Create(t.Context(), "parent")
+	require.NoError(t, err)
+	run, _ := coord.subagentRuns.registerBackground(sess.ID, "child", "fast", func() {})
+	run.finish(subagents.StatusCompleted, fantasy.NewTextResponse("report"))
+	_, err = coord.timers.arm(sess.ID, minTimerDuration)
+	require.NoError(t, err)
+
+	require.NoError(t, env.sessions.Delete(t.Context(), sess.ID))
+
+	require.Eventually(t, func() bool {
+		return len(coord.subagentRuns.handles(sess.ID)) == 0 && len(coord.timers.records(sess.ID)) == 0
+	}, 5*time.Second, 10*time.Millisecond, "the deleted session's runs and timers are forgotten")
 }

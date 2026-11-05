@@ -200,6 +200,16 @@ func (in *liveInbox) restore(parentSessionID string, msgs []SubagentInboxMessage
 	in.items[parentSessionID] = append(slices.Clone(msgs), in.items[parentSessionID]...)
 }
 
+// forget drops everything kept for a session that no longer exists: its
+// pending messages, its steering state and its wakeup channel.
+func (in *liveInbox) forget(sessionID string) {
+	in.mu.Lock()
+	delete(in.items, sessionID)
+	delete(in.steerable, sessionID)
+	in.mu.Unlock()
+	in.signals.Forget(sessionID)
+}
+
 // drainFrom takes the pending messages sent via the given handles, leaving
 // the rest for later readers.
 func (in *liveInbox) drainFrom(parentSessionID string, handles map[string]bool) []SubagentInboxMessage {
@@ -226,8 +236,9 @@ func (in *liveInbox) drainFrom(parentSessionID string, handles map[string]bool) 
 // tool returned a handle immediately, and the child runs on its own goroutine
 // until it completes, fails, or is cancelled. Its final response (including
 // any SubagentStop hook context) is kept here until the dispatcher collects
-// it with the wait tool, which hands it back exactly once; records are
-// never evicted, so a result survives the turn that started it and remains
+// it with the wait tool, which hands it back exactly once and then lets the
+// text go. The record itself lives as long as the session that dispatched
+// it, so a result survives the turn that started it and remains
 // collectable in later turns.
 type backgroundRun struct {
 	handle        string
@@ -285,10 +296,14 @@ func (r *backgroundRun) take() (finished bool, status subagents.RunStatus, resul
 	defer r.mu.Unlock()
 	finished = r.status.IsTerminal()
 	delivered = finished && !r.collected
+	result = r.result
 	if delivered {
 		r.collected = true
+		// Handed back: a later wait only reports that it was, so the
+		// text, which can be a whole report, is not kept for it.
+		r.result = ""
 	}
-	return finished, r.status, r.result, r.resultErr, delivered
+	return finished, r.status, result, r.resultErr, delivered
 }
 
 // isFinished reports whether the run has terminated.

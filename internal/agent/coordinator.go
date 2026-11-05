@@ -229,6 +229,17 @@ type coordinator struct {
 	rebuildGen      modelToolGen
 	rebuildLarge    Model
 	rebuildGenMu    sync.Mutex
+	// modelEpoch counts the model rebuilds UpdateModels made. An agent
+	// built earlier and kept for reuse (the built-in subagents) compares
+	// it with the epoch it was built at and resolves its models again
+	// when they differ, so a refreshed credential or a reloaded config
+	// reaches it too.
+	modelEpoch atomic.Uint64
+
+	// background counts the background sub-agent runs in flight, so
+	// CancelAll can wait for them to unwind - an isolated run exports its
+	// worktree on the way out - before the caller tears the app down.
+	background runGroup
 
 	// dispatchSem bounds how many sub-agents run at once across the whole
 	// workspace. The agent tool is Parallel and the prompt now actively asks
@@ -384,6 +395,7 @@ func NewCoordinator(ctx context.Context, opts CoordinatorOptions) (Coordinator, 
 	}
 	c.currentAgent = agent
 	c.agents[config.AgentCoder] = agent
+	c.forgetDeletedSessions(ctx)
 	return c, nil
 }
 
@@ -1041,13 +1053,16 @@ func (c *coordinator) resolveModelByID(ctx context.Context, modelID string, prov
 // resolved via resolveModelByID. sm.Effort is applied to the resolved primary,
 // which is also the only large/specific model built — small always backs
 // titles/summaries, so it is built unconditionally.
-func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel, wg *errgroup.Group, workspace *agentWorkspace) (SessionAgent, error) {
-	small, err := c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
+// agentModels resolves the models an agent runs on from the current
+// config and credentials: its primary model as sm selects it, with sm's
+// effort applied, and the small model. buildAgent builds with it, and a
+// built agent is brought back up to date with it after the credentials
+// or config it was built from changed.
+func (c *coordinator) agentModels(ctx context.Context, sm subagentModel, isSubAgent bool) (primary, small Model, err error) {
+	small, err = c.buildNamedModel(ctx, config.SelectedModelTypeSmall, true)
 	if err != nil {
-		return nil, err
+		return Model{}, Model{}, err
 	}
-
-	var primary Model
 	switch sm.Model {
 	case subagents.ModelAliasSmall:
 		primary = small
@@ -1057,14 +1072,21 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		primary, err = c.resolveModelByID(ctx, sm.Model, sm.Provider, isSubAgent)
 	}
 	if err != nil {
-		return nil, err
+		return Model{}, Model{}, err
 	}
-
 	if subagents.EffortIgnored(sm.Effort, primary.CatalogCfg) {
 		slog.Warn("Subagent effort ignored: model does not support reasoning",
 			"model", primary.ModelCfg.Model, "effort", sm.Effort)
 	}
 	primary.ModelCfg = subagents.ApplyEffortToModel(sm.Effort, primary.ModelCfg, primary.CatalogCfg)
+	return primary, small, nil
+}
+
+func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, agent config.Agent, isSubAgent bool, sm subagentModel, wg *errgroup.Group, workspace *agentWorkspace) (SessionAgent, error) {
+	primary, small, err := c.agentModels(ctx, sm, isSubAgent)
+	if err != nil {
+		return nil, err
+	}
 
 	workspace = c.resolveWorkspace(workspace)
 	store, manager := workspace.store, workspace.manager
@@ -1731,7 +1753,19 @@ func (c *coordinator) CancelAll() {
 	c.jobs.cancelAll()
 	c.timers.cancelAll()
 	c.currentAgent.CancelAll()
+	// The cancelled background runs still finish on their own goroutines:
+	// they record their result and an isolated one exports its worktree.
+	// Wait for that, bounded by the export's own limit plus room for the
+	// rest of the unwind, so a caller about to close the database does
+	// not cut it off; a run stuck past that is not waited for forever.
+	if !c.background.wait(backgroundUnwindTimeout) {
+		slog.Warn("Background agents still unwinding after cancel; not waiting further", "waited", backgroundUnwindTimeout)
+	}
 }
+
+// backgroundUnwindTimeout is how long CancelAll waits for cancelled
+// background runs to finish unwinding.
+const backgroundUnwindTimeout = worktreeFinishTimeout + 15*time.Second
 
 func (c *coordinator) ClearQueue(sessionID string) {
 	c.currentAgent.ClearQueue(sessionID)
@@ -2022,6 +2056,7 @@ func (c *coordinator) UpdateModels(ctx context.Context) error {
 		}
 		c.currentAgent.SetModels(large, small)
 		c.rebuildLarge = large
+		c.modelEpoch.Add(1)
 	}
 
 	if toolsStale {
@@ -2354,7 +2389,10 @@ type subagentModelKey struct {
 
 // subAgentParams holds the parameters for running a sub-agent.
 type subAgentParams struct {
-	Agent           SessionAgent
+	Agent SessionAgent
+	// Models is how Agent's models were chosen, so they can be resolved
+	// again when a credential refresh replaces the ones it holds.
+	Models          subagentModel
 	SessionID       string
 	AgentMessageID  string
 	ToolCallID      string
@@ -2488,6 +2526,14 @@ func (c *coordinator) executeSubAgentRun(runCtx, parentCtx context.Context, sess
 			if err := inner(ctx, pe); err != nil {
 				return err
 			}
+			// The refresh rebuilt the coordinator's models, not the ones
+			// this child was built with; fantasy retries the request on
+			// the child's models, so they are resolved again first.
+			primary, small, err := c.agentModels(ctx, params.Models, true)
+			if err != nil {
+				return fmt.Errorf("refresh the %s agent's models after re-authenticating: %w", params.AgentName, err)
+			}
+			params.Agent.SetModels(primary, small)
 			// Refreshed: fantasy retries the request, so the agent is
 			// running again rather than retrying for the rest of its run.
 			c.runtime.SetStatus(session.ID, subagents.StatusRunning)
@@ -2545,7 +2591,9 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 	run, unregister := c.subagentRuns.registerBackground(params.SessionID, session.ID, params.AgentName, cancelRun)
 	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
 
+	c.background.add()
 	go func() {
+		defer c.background.done()
 		// finalStatus defaults to failed so the deferred runtime cleanup
 		// below still clears the entry when the run never reaches its own
 		// terminal state — a panic mid-run would otherwise leave a spinner
@@ -2885,4 +2933,30 @@ func SkillsDiscoveryConfig(cfg *config.ConfigStore) skills.DiscoveryConfig {
 		dc.DisabledSkills = opts.DisabledSkills
 	}
 	return dc
+}
+
+// forgetDeletedSessions drops what the coordinator keeps per session -
+// background runs and their results, the live inbox, timers and jobs -
+// once the session is deleted, however it was deleted. The subscription
+// is detached from ctx, which may be the request that initialised the
+// agent, and ends when the session broker shuts down with the app.
+func (c *coordinator) forgetDeletedSessions(ctx context.Context) {
+	if c.sessions == nil {
+		return
+	}
+	events := c.sessions.Subscribe(context.WithoutCancel(ctx))
+	crash.Go("agent.forgetDeletedSessions", func() {
+		for event := range events {
+			if event.Type == pubsub.DeletedEvent {
+				c.forgetSession(event.Payload.ID)
+			}
+		}
+	})
+}
+
+// forgetSession drops everything the coordinator keeps for a session.
+func (c *coordinator) forgetSession(sessionID string) {
+	c.subagentRuns.forgetSession(sessionID)
+	c.timers.forgetSession(sessionID)
+	c.jobs.forgetSession(sessionID)
 }

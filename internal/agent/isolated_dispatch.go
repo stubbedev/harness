@@ -57,10 +57,14 @@ func worktreeReport(result WorktreeResult) string {
 	return b.String()
 }
 
+// worktreeFinishTimeout bounds exporting an isolated run's worktree back to
+// the parent checkout.
+const worktreeFinishTimeout = 60 * time.Second
+
 func (d *isolatedDispatch) finish(response *fantasy.ToolResponse) {
 	d.once.Do(func() {
 		d.workspace.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), worktreeFinishTimeout)
 		defer cancel()
 		result, err := d.worktree.Finish(ctx)
 		if response == nil {

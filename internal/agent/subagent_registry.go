@@ -6,20 +6,28 @@ import (
 	"sync"
 )
 
+// subagentRegistry tracks the sub-agents the coordinator runs: the cancel
+// of every live run, and the record of every background dispatch, kept
+// per dispatching session for as long as that session exists.
 type subagentRegistry struct {
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
 	runs    map[string]*backgroundRun
 	byChild map[string]string
-	inbox   *liveInbox
+	// byParent indexes the background runs by the session that
+	// dispatched them, so a session's lookups and the walk down its tree
+	// touch that session's runs rather than every run ever made.
+	byParent map[string][]*backgroundRun
+	inbox    *liveInbox
 }
 
 func newSubagentRegistry() *subagentRegistry {
 	return &subagentRegistry{
-		cancels: make(map[string]context.CancelFunc),
-		runs:    make(map[string]*backgroundRun),
-		byChild: make(map[string]string),
-		inbox:   newLiveInbox(),
+		cancels:  make(map[string]context.CancelFunc),
+		runs:     make(map[string]*backgroundRun),
+		byChild:  make(map[string]string),
+		byParent: make(map[string][]*backgroundRun),
+		inbox:    newLiveInbox(),
 	}
 }
 
@@ -42,6 +50,7 @@ func (r *subagentRegistry) registerBackground(parentSession, childSession, agent
 	}
 	r.runs[run.handle] = run
 	r.byChild[childSession] = run.handle
+	r.byParent[parentSession] = append(r.byParent[parentSession], run)
 	r.cancels[childSession] = cancel
 	r.mu.Unlock()
 	r.inbox.openSteering(childSession)
@@ -92,18 +101,21 @@ func (r *subagentRegistry) cancelAll() {
 	}
 }
 
+// cancelDescendants cancels every live background run below session,
+// walking down the dispatch tree one session at a time.
 func (r *subagentRegistry) cancelDescendants(session string) {
 	r.mu.Lock()
-	tree := map[string]bool{session: true}
 	var cancels []context.CancelFunc
-	for grew := true; grew; {
-		grew = false
-		for _, run := range r.runs {
-			if !tree[run.parentSession] || tree[run.childSession] {
+	seen := map[string]bool{session: true}
+	for pending := []string{session}; len(pending) > 0; {
+		parent := pending[0]
+		pending = pending[1:]
+		for _, run := range r.byParent[parent] {
+			if seen[run.childSession] {
 				continue
 			}
-			tree[run.childSession] = true
-			grew = true
+			seen[run.childSession] = true
+			pending = append(pending, run.childSession)
 			if cancel, ok := r.cancels[run.childSession]; ok {
 				cancels = append(cancels, cancel)
 			}
@@ -125,10 +137,39 @@ func (r *subagentRegistry) isRunning(childSession string) bool {
 func (r *subagentRegistry) discard(childSession string) {
 	r.mu.Lock()
 	if handle, ok := r.byChild[childSession]; ok {
+		if run := r.runs[handle]; run != nil {
+			r.byParent[run.parentSession] = slices.DeleteFunc(r.byParent[run.parentSession], func(other *backgroundRun) bool {
+				return other == run
+			})
+			if len(r.byParent[run.parentSession]) == 0 {
+				delete(r.byParent, run.parentSession)
+			}
+		}
 		delete(r.runs, handle)
 	}
 	r.mu.Unlock()
 	r.cancel(childSession)
+}
+
+// forgetSession drops the records of the background runs a deleted
+// session dispatched, and its inbox. A run still live is cancelled: its
+// dispatcher is gone and nothing can collect what it produces.
+func (r *subagentRegistry) forgetSession(session string) {
+	r.mu.Lock()
+	runs := r.byParent[session]
+	delete(r.byParent, session)
+	cancels := make([]context.CancelFunc, 0, len(runs))
+	for _, run := range runs {
+		delete(r.runs, run.handle)
+		if cancel, ok := r.cancels[run.childSession]; ok {
+			cancels = append(cancels, cancel)
+		}
+	}
+	r.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	r.inbox.forget(session)
 }
 
 func (r *subagentRegistry) lookupByChild(childSession string) (*backgroundRun, bool) {
@@ -155,11 +196,10 @@ func (r *subagentRegistry) lookupByHandle(parentSession, handle string) (*backgr
 func (r *subagentRegistry) handles(parentSession string) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var handles []string
-	for handle, run := range r.runs {
-		if run.parentSession == parentSession {
-			handles = append(handles, handle)
-		}
+	runs := r.byParent[parentSession]
+	handles := make([]string, 0, len(runs))
+	for _, run := range runs {
+		handles = append(handles, run.handle)
 	}
 	slices.Sort(handles)
 	return handles

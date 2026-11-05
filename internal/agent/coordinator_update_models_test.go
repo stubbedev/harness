@@ -209,3 +209,35 @@ func toolNamesOf(tools []fantasy.AgentTool) []string {
 	}
 	return names
 }
+
+// TestCachedBuiltinAgentFollowsModelRebuilds pins that a built-in
+// subagent kept across dispatches does not keep the models it was built
+// with: once UpdateModels rebuilds the coordinator's models (a refreshed
+// credential, a switched model, a reloaded config), the next dispatch of
+// the cached agent resolves them again.
+func TestCachedBuiltinAgentFollowsModelRebuilds(t *testing.T) {
+	env := testEnv(t)
+	coord, _ := newUpdateModelsCoordinator(t, env, offlineTestProvider("model-a", "model-b"))
+	selectTestModels(t, coord, "model-a")
+	require.NoError(t, coord.UpdateModels(t.Context()))
+
+	cached := &recordingAgent{}
+	lazy := &lazyAgent{coord: coord, agent: cached, built: true, epoch: coord.modelEpoch.Load()}
+
+	got, err := lazy.get(t.Context())
+	require.NoError(t, err)
+	require.Same(t, cached, got)
+	require.Zero(t, cached.modelSets, "an agent built at the current epoch is reused as it is")
+
+	selectTestModels(t, coord, "model-b")
+	require.NoError(t, coord.UpdateModels(t.Context()))
+
+	_, err = lazy.get(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, cached.modelSets, "the cached agent's models are resolved again")
+	require.Equal(t, "model-b", cached.model.ModelCfg.Model)
+
+	_, err = lazy.get(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, cached.modelSets, "once per rebuild, not per dispatch")
+}

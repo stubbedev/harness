@@ -26,6 +26,17 @@ func (s *signalMap) Broadcast(key string) {
 	s.broadcastLocked(key)
 }
 
+// Forget wakes everyone waiting on the key one last time and drops its
+// channel, for a key that is gone for good.
+func (s *signalMap) Forget(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ch := s.chans[key]; ch != nil {
+		close(ch)
+		delete(s.chans, key)
+	}
+}
+
 func (s *signalMap) chanLocked(key string) chan struct{} {
 	if s.chans == nil {
 		s.chans = map[string]chan struct{}{}

@@ -330,6 +330,17 @@ func (r *timerRegistry) cancelSession(parentSession string) {
 	}
 }
 
+// forgetSession cancels a deleted session's timers and drops their
+// records: unlike cancelSession, there is no session left to collect
+// the results.
+func (r *timerRegistry) forgetSession(parentSession string) {
+	r.cancelSession(parentSession)
+	r.mu.Lock()
+	delete(r.sessions, parentSession)
+	r.mu.Unlock()
+	r.signals.Forget(parentSession)
+}
+
 // cancelAll cancels every timer of every session: the coordinator is
 // going away and no timer may fire into it.
 func (r *timerRegistry) cancelAll() {

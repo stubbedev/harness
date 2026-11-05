@@ -165,6 +165,7 @@ func (c *coordinator) researchTool(client *http.Client) fantasy.AgentTool {
 
 			return c.runSubAgent(ctx, subAgentParams{
 				Agent:          agent,
+				Models:         subagentModel{Model: subagents.ModelAliasSmall},
 				SessionID:      validationResult.SessionID,
 				AgentMessageID: validationResult.AgentMessageID,
 				ToolCallID:     call.ID,

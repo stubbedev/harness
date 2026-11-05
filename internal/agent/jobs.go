@@ -492,6 +492,13 @@ func (r *jobRegistry) cancelSession(parentSession string) {
 	}
 }
 
+// forgetSession stops a deleted session's jobs and drops everything kept
+// for it, its wakeup channel included.
+func (r *jobRegistry) forgetSession(parentSession string) {
+	r.cancelSession(parentSession)
+	r.signals.Forget(parentSession)
+}
+
 // cancelAll stops every job of every session: the coordinator is going
 // away and no job may outlive it.
 func (r *jobRegistry) cancelAll() {
