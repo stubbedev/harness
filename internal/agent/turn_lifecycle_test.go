@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -286,4 +288,35 @@ func TestLiveInboxRestorePutsMessagesBackFirst(t *testing.T) {
 		texts = append(texts, m.Text)
 	}
 	assert.Equal(t, []string{"b", "c"}, texts, "an undelivered message is read before newer ones")
+}
+
+// TestQueuedTurnsRunAtConstantStackDepth pins the queue handoff as a
+// loop: each queued turn runs from the same frame, so a long chain holds
+// one turn's state at a time instead of nesting a call per turn.
+func TestQueuedTurnsRunAtConstantStackDepth(t *testing.T) {
+	t.Parallel()
+
+	const queued = 30
+	env := testEnv(t)
+	sess, err := env.sessions.Create(t.Context(), "s")
+	require.NoError(t, err)
+	var sa *sessionAgent
+	var depths []int
+	large := &callHookModel{LanguageModel: newScriptedModel()}
+	large.onCall = func(n int) {
+		depths = append(depths, runtime.Callers(0, make([]uintptr, 4096)))
+		if n == 1 {
+			for i := range queued {
+				_, queueErr := sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "queued", RunID: fmt.Sprintf("r%d", i)})
+				require.NoError(t, queueErr)
+			}
+		}
+	}
+	sa = testSessionAgent(env, large, textModel("t"), "system").(*sessionAgent)
+
+	_, err = sa.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "first", MaxOutputTokens: 10000})
+	require.NoError(t, err)
+
+	require.Len(t, depths, queued+1, "every queued prompt ran")
+	assert.Equal(t, depths[1], depths[len(depths)-1], "the last queued turn runs no deeper than the second")
 }

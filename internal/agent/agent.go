@@ -161,7 +161,7 @@ type SessionAgentCall struct {
 	// successful retry. It is intentionally stripped when queueing
 	// a busy-session call (see Run): the originating
 	// coordinator.Run has long returned by the time the queued
-	// recursion drains, so falling back to the default broker
+	// handoff runs it, so falling back to the default broker
 	// publish keeps the event visible to subscribers.
 	OnComplete func(notify.RunComplete)
 	// Accepted, when non-nil, is the accept reservation taken by
@@ -524,7 +524,7 @@ func (a *sessionAgent) sessionMu(sessionID string) *sync.Mutex {
 // OnComplete hook is stripped: the caller that supplied it (typically
 // coordinator.Run) has its own retry/coalesce scope that ends when it
 // returns, so by the time the queue drains nobody is left to consume the
-// buffered terminal event. The recursive Run falls back to the default
+// buffered terminal event. The next turn falls back to the default
 // broker publish, which is what existing subscribers expect for queued
 // turns.
 func (a *sessionAgent) enqueueCallLocked(call SessionAgentCall) {
@@ -562,7 +562,7 @@ func (a *sessionAgent) enqueueCallLocked(call SessionAgentCall) {
 // without a RunID are returned in fold to be folded into the active turn,
 // preserving the existing follow-up behavior. Uncanceled calls that carry
 // a RunID, and turns harness queued on its own, are left in the queue so each runs as its own turn via the
-// recursive run path and publishes its own RunComplete, giving every
+// turn handoff and publishes its own RunComplete, giving every
 // RunID-bearing prompt an explicit lifecycle instead of being silently
 // absorbed into another turn. fold is processed by the caller without the
 // lock held.
@@ -966,11 +966,27 @@ func ValidateCall(call SessionAgentCall) error {
 	return nil
 }
 
-func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, retErr error) {
+// Run runs call and then every turn queued behind it, one after another,
+// and returns the last turn's result. The handoff from one turn to the
+// next is this loop rather than a call per turn, so a long chain of
+// queued prompts and continuations holds one turn's history and stack at
+// a time instead of every turn's until the chain ends.
+func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (*fantasy.AgentResult, error) {
 	if err := ValidateCall(call); err != nil {
 		return nil, err
 	}
+	for {
+		result, next, err := a.runTurn(ctx, call)
+		if next == nil {
+			return result, err
+		}
+		call = *next
+	}
+}
 
+// runTurn runs one turn of call and returns, alongside its result, the
+// queued call that runs next, or nil when the queue is done.
+func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (result *fantasy.AgentResult, handoff *SessionAgentCall, retErr error) {
 	// genCtx/cancel are the run context and its cancel func, created under
 	// the per-session dispatch mutex below so a concurrent Cancel can observe
 	// the activeRequests entry before the assistant message exists.
@@ -1014,10 +1030,10 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if err := a.persistCanceledTurn(ctx, call, false); err != nil {
 			complete.Error = err.Error()
 			a.publishRunComplete(ctx, call, complete)
-			return nil, err
+			return nil, nil, err
 		}
 		a.publishRunComplete(ctx, call, complete)
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	if a.IsSessionBusy(call.SessionID) {
@@ -1037,7 +1053,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			call.Accepted.Close()
 		}
 		sessMu.Unlock()
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Idle: become the active run. Register the cancel func before dropping
@@ -1115,12 +1131,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	sessionLock := sync.Mutex{}
 	currentSession, err := a.sessions.Get(ctx, call.SessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session: %w", err)
+		return nil, nil, fmt.Errorf("failed to get session: %w", err)
 	}
 
 	msgs, hiddenSummary, err := a.sessionHistory(ctx, currentSession)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session messages: %w", err)
+		return nil, nil, fmt.Errorf("failed to get session messages: %w", err)
 	}
 	hiddenSummary, execution := splitExecutionSummary(hiddenSummary)
 	execution.Ingest(msgs)
@@ -1178,7 +1194,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					Error:     blockErr.Error(),
 				}
 				a.publishRunComplete(ctx, call, complete)
-				return nil, blockErr
+				return nil, nil, blockErr
 			}
 			if res.UpdatedPrompt != "" {
 				outboundPrompt = res.UpdatedPrompt
@@ -1203,7 +1219,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// show the user their own message twice.
 	userMsg, err := a.createUserMessage(ctx, call)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	userMsgCreated = true
 
@@ -1226,9 +1242,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// cancel func were already created and registered under the dispatch
 	// mutex above for both the accepted and in-process paths.
 	ctx = context.WithValue(ctx, tools.SessionIDContextKey, call.SessionID)
-	// skipRunComplete is set just before the queued-recursion path so
+	// skipRunComplete is set just before the queue handoff so
 	// the outer Run doesn't publish a RunComplete that would race
-	// with — and be superseded by — the recursive call's own
+	// with — and be superseded by — the next turn's own
 	// RunComplete (each queued user prompt is its own turn and
 	// publishes exactly one terminal event).
 	var skipRunComplete bool
@@ -1291,7 +1307,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			slog.Error("Failed to flush pending message updates after run", "error", flushErr)
 		}
 		if skipRunComplete {
-			// A queued prompt is about to recurse into its own Run on
+			// A queued prompt runs next as its own turn on
 			// this session; that run's step sweep and final sweep cover
 			// anything in flight, so reporting here would only split one
 			// turn's diagnostics across two rows.
@@ -1375,7 +1391,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			// prompt (they were queued as one steering burst, and the
 			// transcript shows them as one entry); uncanceled prompts with
 			// a RunID are left queued so each runs as its own turn (with
-			// its own RunComplete) via the recursive run path below.
+			// its own RunComplete) via the turn handoff below.
 			//
 			// A step whose context is already canceled — a cancel that
 			// landed between this run registering itself and its first
@@ -2000,7 +2016,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			switch {
 			case isCancelErr:
 				if persistErr := a.persistCanceledTurn(ctx, call, userMsgCreated); persistErr != nil {
-					return nil, persistErr
+					return nil, nil, persistErr
 				}
 			case !recoverOverflow:
 				// A step that failed before its assistant message existed
@@ -2014,15 +2030,15 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 					Provider: largeModel.ModelCfg.Provider,
 				})
 				if createErr != nil {
-					return nil, fmt.Errorf("record failed turn: %w", createErr)
+					return nil, nil, fmt.Errorf("record failed turn: %w", createErr)
 				}
 				currentAssistant = &failed
 				if persistErr := a.persistFailedTurn(ctx, call.SessionID, currentSession.Title, currentAssistant, largeModel, err, retryAttempt); persistErr != nil {
-					return nil, persistErr
+					return nil, nil, persistErr
 				}
 			}
 		} else if persistErr := a.persistFailedTurn(ctx, call.SessionID, currentSession.Title, currentAssistant, largeModel, err, retryAttempt); persistErr != nil {
-			return nil, persistErr
+			return nil, nil, persistErr
 		}
 		// A failed or canceled turn falls through to the queue handoff
 		// below instead of returning early: every step until then is
@@ -2061,7 +2077,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 			slog.Warn("Failed to remove the overflowed user message", "error", delErr)
 		}
 		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", true, requestTokens); compactErr != nil {
-			return nil, compactErr
+			return nil, nil, compactErr
 		}
 		requeued := call
 		requeued.OverflowRecovered = true
@@ -2075,7 +2091,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		// The stop condition ended the turn with the window nearly full:
 		// fold everything, then let the turn carry on if it was not done.
 		if _, compactErr := a.maintainContext(genCtx, call.SessionID, call.ProviderOptions, call.OnAuthRefresh, compactAuto, "", true, requestTokens); compactErr != nil {
-			return nil, compactErr
+			return nil, nil, compactErr
 		}
 		// If the agent wasn't done...
 		if genCtx.Err() == nil && len(currentAssistant.ToolCalls()) > 0 {
@@ -2150,9 +2166,9 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	// which the session looks idle and a cancel becomes a no-op that
 	// fails to stop the queued prompt. Holding the lock lets us observe
 	// a pending cancel recorded against the session and drop the queue
-	// instead of running it, and (for the recursion) hand a fresh
+	// instead of running it, and (for the next turn) hand a fresh
 	// accept reservation to the dequeued call so acceptedRuns stays > 0
-	// across the recursive Run's own dispatch handoff — keeping the
+	// across the next turn's own dispatch — keeping the
 	// session observable to Cancel for the entire transition and
 	// closing the dequeue -> re-register window.
 	mu := a.sessionMu(call.SessionID)
@@ -2171,17 +2187,16 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		if err == nil {
 			a.fireStopHooks(ctx, call.SessionID)
 		}
-		return result, err
+		return result, nil, err
 	}
-	// There are queued messages, restart the loop. Suppress the outer
-	// defer's emit: it would otherwise observe the recursive Run's retErr
-	// (named-return clobbering through the return below) against this
-	// turn's MessageID/Text and publish a mixed, racing event.
+	// There are queued messages: hand the next one to Run. Suppress the
+	// deferred emit, which would otherwise publish a terminal event for
+	// this turn on top of the one decided below.
 	skipRunComplete = true
 	// Decide whether this turn still owes its own terminal RunComplete.
 	// Each submitted prompt with a RunID has its own lifecycle, so a turn
 	// that is finished and handing off to a *different* queued prompt must
-	// publish its own RunComplete here — leaving it to the recursive turn
+	// publish its own RunComplete here — leaving it to the next turn
 	// (which carries a different RunID) would hang a caller waiting on
 	// this turn's RunID. The exception is the summarize-continuation path,
 	// which re-queues this same call (same RunID) to resume after a
@@ -2193,7 +2208,7 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 	if outerOwesRunComplete {
 		a.publishRunComplete(ctx, call, turnComplete(ctx, call, currentAssistant, err))
 	}
-	return a.Run(ctx, next)
+	return nil, &next, nil
 }
 
 // stripOrphanThinking drops reasoning content from an assistant
