@@ -43,8 +43,8 @@ func newFilteredSessionsDialog(t *testing.T) (*Session, *sessionEditWorkspace) {
 		renamed: map[string]string{},
 	}
 	sty := styles.CharmtonePantera()
-	s, err := NewSessions(&common.Common{Workspace: ws, Styles: &sty}, "s3")
-	require.NoError(t, err)
+	s, load := NewSessions(&common.Common{Workspace: ws, Styles: &sty}, "s3")
+	loadDialog(t, s, load)
 
 	typeKeys(s, "oldest")
 	require.Len(t, s.list.FilteredItems(), 1, "the filter narrows the list")
@@ -76,7 +76,7 @@ func TestSessionDeleteWhileFilteredDeletesMatch(t *testing.T) {
 
 	s, ws := newFilteredSessionsDialog(t)
 
-	s.HandleMsg(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	pressDelete(t, s)
 	require.Equal(t, sessionsModeDeleting, s.sessionsMode)
 	require.Len(t, s.list.FilteredItems(), 1, "delete mode keeps the filter")
 	require.Equal(t, "s1", s.selectedSessionItem().ID())

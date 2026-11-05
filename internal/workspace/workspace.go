@@ -135,19 +135,19 @@ type Workspace interface {
 	// run, queued prompts, accepted runs, and the background subagents
 	// it dispatched.
 	AgentCancel(sessionID string) error
-	AgentIsBusy() (bool, error)
-	AgentIsSessionBusy(sessionID string) (bool, error)
-	AgentModel() (AgentModel, error)
-	AgentIsReady() bool
+	AgentIsBusy(ctx context.Context) (bool, error)
+	AgentIsSessionBusy(ctx context.Context, sessionID string) (bool, error)
+	AgentModel(ctx context.Context) (AgentModel, error)
+	AgentIsReady(ctx context.Context) bool
 	// AgentReadyErr reports nil when the coder agent is ready to accept
 	// work, or a descriptive error otherwise: ErrAgentNotInitialized
 	// when the agent simply isn't set up, or ErrServerUnreachable
 	// (wrapped) when the client could not reach the server to find out.
 	// It lets the UI show an actionable message instead of collapsing
 	// both cases into "agent offline".
-	AgentReadyErr() error
+	AgentReadyErr(ctx context.Context) error
 	AgentQueuedPrompts(sessionID string) (int, error)
-	AgentQueuedPromptsList(sessionID string) ([]string, error)
+	AgentQueuedPromptsList(ctx context.Context, sessionID string) ([]string, error)
 	AgentClearQueue(sessionID string) error
 	AgentSummarize(ctx context.Context, sessionID, instructions string) error
 	// AgentSetGoal sets the session goal the agent works toward until a
@@ -162,10 +162,10 @@ type Workspace interface {
 	// Questions
 	//
 	// QuestionAnswer resolves the pending question with responses.
-	QuestionAnswer(responses []question.Answer) bool
+	QuestionAnswer(ctx context.Context, responses []question.Answer) bool
 
 	// QuestionCancel cancels the pending question.
-	QuestionCancel() bool
+	QuestionCancel(ctx context.Context) bool
 
 	// FileTracker
 	FileTrackerRecordRead(ctx context.Context, sessionID, path string) error
@@ -236,8 +236,8 @@ type Workspace interface {
 	ListMCPPrompts(ctx context.Context) ([]commands.MCPPrompt, error)
 	GetMCPPrompt(clientID, promptID string, args map[string]string) (string, error)
 	MCPAuthenticate(ctx context.Context, name string) error
-	MCPPendingAuth() []mcptools.PendingAuthServer
-	MCPAuthURL(name string) (string, error)
+	MCPPendingAuth(ctx context.Context) []mcptools.PendingAuthServer
+	MCPAuthURL(ctx context.Context, name string) (string, error)
 	MCPReconnect(ctx context.Context, name string) error
 	MCPDisableForSession(ctx context.Context, name string) error
 

@@ -73,7 +73,9 @@ func TestSessionRenameCtrlVPastesFromClipboard(t *testing.T) {
 	m := newBusyUI(ws.countingWorkspace)
 	m.com = common.DefaultCommon(ws)
 
-	runCmds(m, m.openSessionsDialog())
+	for _, msg := range leafMsgs(m.openSessionsDialog()) {
+		m.Update(msg)
+	}
 	require.True(t, m.dialog.ContainsDialog(dialog.SessionsID), "sessions dialog should be open")
 	_, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	runCmds(m, cmd)

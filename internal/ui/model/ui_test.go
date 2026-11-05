@@ -144,11 +144,11 @@ func (w *testWorkspace) WorkingDir() string {
 	return "/tmp/harness-test"
 }
 
-func (w *testWorkspace) AgentIsReady() bool {
+func (w *testWorkspace) AgentIsReady(context.Context) bool {
 	return false
 }
 
-func (w *testWorkspace) AgentReadyErr() error {
+func (w *testWorkspace) AgentReadyErr(context.Context) error {
 	return workspace.ErrAgentNotInitialized
 }
 

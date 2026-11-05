@@ -44,8 +44,8 @@ func newRewindForTest(t *testing.T) *Rewind {
 		},
 		checkpoints: []checkpoints.Checkpoint{{MessageID: "m3"}},
 	}}
-	r, err := NewRewind(com, "s1")
-	require.NoError(t, err)
+	r, load := NewRewind(com, "s1")
+	loadDialog(t, r, load)
 	return r
 }
 

@@ -54,14 +54,26 @@ type QuestionForm struct {
 	// Hover position for highlighting interactive elements.
 	hoverX, hoverY int
 
-	// OnAnswer is called when the form is submitted. The UI sets
-	// this to wire up workspace submission.
-	OnAnswer func(responses []question.Answer)
+	// outcome is how the user resolved the batch, nil while the form
+	// is still open.
+	outcome *QuestionOutcome
+}
 
-	// OnCancel is called when the user presses escape to cancel
-	// the entire question batch. The UI sets this to wire up
-	// workspace cancellation.
-	OnCancel func()
+// QuestionOutcome is how the user resolved a question batch: answered
+// with Responses, or Cancelled.
+type QuestionOutcome struct {
+	Responses []question.Answer
+	Cancelled bool
+}
+
+// Outcome returns how the user resolved the batch, and false while the
+// form is still open. The UI reads it once the form reports done and
+// delivers it to the workspace off the Update goroutine.
+func (f *QuestionForm) Outcome() (QuestionOutcome, bool) {
+	if f.outcome == nil {
+		return QuestionOutcome{}, false
+	}
+	return *f.outcome, true
 }
 
 // NewQuestionForm creates a tabbed multi-question form from a
@@ -296,7 +308,7 @@ func (f *QuestionForm) syncConfirmAnswers() {
 	}
 }
 
-// submit collects stored responses and calls OnAnswer.
+// submit records the stored responses as the outcome.
 func (f *QuestionForm) submit() {
 	responses := make([]question.Answer, f.numQuestions)
 	for i, ans := range f.answers {
@@ -308,17 +320,13 @@ func (f *QuestionForm) submit() {
 			}
 		}
 	}
-	if f.OnAnswer != nil {
-		f.OnAnswer(responses)
-	}
+	f.outcome = &QuestionOutcome{Responses: responses}
 }
 
-// cancel calls OnCancel to signal that the user dismissed the
-// question batch without answering.
+// cancel records that the user dismissed the question batch without
+// answering.
 func (f *QuestionForm) cancel() {
-	if f.OnCancel != nil {
-		f.OnCancel()
-	}
+	f.outcome = &QuestionOutcome{Cancelled: true}
 }
 
 // ShortHelp returns key bindings for the status bar.

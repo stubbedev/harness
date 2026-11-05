@@ -380,8 +380,8 @@ func (c *controllerV1) handleGetWorkspaceMCPStates(w http.ResponseWriter, r *htt
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/mcp/pending-auth [get]
 func (c *controllerV1) handleGetWorkspaceMCPPendingAuth(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		pending := ws.Ops().MCPPendingAuth()
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		pending := ws.Ops().MCPPendingAuth(ctx)
 		return mapSlice(pending, proto.MCPPendingAuthServerFromDomain), nil
 	})
 }
@@ -404,8 +404,8 @@ func (c *controllerV1) handleGetWorkspaceMCPAuthURL(w http.ResponseWriter, r *ht
 		jsonError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		u, err := ws.Ops().MCPAuthURL(name)
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		u, err := ws.Ops().MCPAuthURL(ctx, name)
 		if err != nil {
 			return nil, err
 		}

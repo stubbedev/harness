@@ -1,7 +1,6 @@
 package model
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -115,7 +114,7 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 	// assistant message publishes after its tool results, so this call
 	// runs again for an already-reaped task and would resurrect it as a
 	// forever-running ghost.
-	if m.reapedAgentTasks[tc.ID] {
+	if m.reapedAgentTasks.has(m.currentSessionID(), tc.ID) {
 		return nil
 	}
 
@@ -188,10 +187,7 @@ func (m *UI) resolveAgentTaskResult(tr message.ToolResult) bool {
 // tool call cannot re-register it. Focus on a strip the reap empties
 // is handed back by leaveVanishedTasks.
 func (m *UI) reapAgentTask(toolCallID string) {
-	if m.reapedAgentTasks == nil {
-		m.reapedAgentTasks = make(map[string]bool)
-	}
-	m.reapedAgentTasks[toolCallID] = true
+	m.reapedAgentTasks.add(m.currentSessionID(), toolCallID)
 	for i, t := range m.agentTasks {
 		if t.toolCallID == toolCallID {
 			m.agentTasks = append(m.agentTasks[:i], m.agentTasks[i+1:]...)
@@ -199,6 +195,39 @@ func (m *UI) reapAgentTask(toolCallID string) {
 		}
 	}
 	m.clampTaskCursor()
+}
+
+// reapedDispatches is the set of reaped dispatch tool call IDs of one
+// session. The resurrection it guards against happens within a session:
+// late updates of its own assistant messages, and the strip rebuilding
+// from its history on every switch between its transcript and an
+// agent's. Another session's dispatches never reach its strip, so
+// recording a reap for a different session than the set holds starts
+// the set over, which bounds it by one session's dispatches instead of
+// every dispatch the process has seen. A session loaded afresh needs no
+// carried-over entries: its old dispatches are past tasksReconcileGrace,
+// so the running list it fetches settles them at once.
+type reapedDispatches struct {
+	sessionID   string
+	toolCallIDs map[string]struct{}
+}
+
+// add records a reaped dispatch of sessionID.
+func (r *reapedDispatches) add(sessionID, toolCallID string) {
+	if r.toolCallIDs == nil || r.sessionID != sessionID {
+		r.sessionID = sessionID
+		r.toolCallIDs = make(map[string]struct{})
+	}
+	r.toolCallIDs[toolCallID] = struct{}{}
+}
+
+// has reports whether the dispatch of sessionID was reaped.
+func (r *reapedDispatches) has(sessionID, toolCallID string) bool {
+	if r.sessionID != sessionID {
+		return false
+	}
+	_, ok := r.toolCallIDs[toolCallID]
+	return ok
 }
 
 // leaveVanishedTasks hands focus to the editor when the background tasks
@@ -278,7 +307,7 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			// blocking-dispatch skip below - its result is just the start
 			// handle - so without this it re-entered as a running ghost
 			// for the second or so until reconciliation reaped it again.
-			if m.reapedAgentTasks[tc.ID] {
+			if m.reapedAgentTasks.has(m.currentSessionID(), tc.ID) {
 				continue
 			}
 			params, kind, decided := agent.DecodeAgentCall(tc)
@@ -473,7 +502,9 @@ func (m *UI) fetchAgentTranscript(sessionID, childSessionID string, retraced boo
 		if listID == "" {
 			listID = sessionID
 		}
-		msgs, err := m.com.Workspace.ListMessages(context.Background(), listID)
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		msgs, err := m.com.Workspace.ListMessages(ctx, listID)
 		if err != nil {
 			return util.InfoMsg{Type: util.InfoTypeError, Msg: fmt.Sprintf("Failed to load transcript: %v", err)}
 		}

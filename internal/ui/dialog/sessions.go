@@ -1,7 +1,7 @@
 package dialog
 
 import (
-	"context"
+	"fmt"
 	"image"
 	"strings"
 	"time"
@@ -37,6 +37,11 @@ type Session struct {
 	list     *list.FilterableList
 	input    textinput.Model
 	sessions []session.Session
+	// loading is set until the session list lands; loadErr says why it
+	// did not. selectedSessionID is the session to select once it does.
+	loading           bool
+	loadErr           error
+	selectedSessionID string
 
 	sessionsMode        sessionsMode
 	bodyArea            image.Rectangle
@@ -62,28 +67,39 @@ type Session struct {
 
 var _ Dialog = (*Session)(nil)
 
-// NewSessions creates a new Session dialog.
-func NewSessions(com *common.Common, selectedSessionID string) (*Session, error) {
+// sessionsLoadedMsg carries the session list a Session dialog fetched.
+// owner is the dialog that asked: a list for one since closed, or
+// closed and reopened, is dropped.
+type sessionsLoadedMsg struct {
+	owner    *Session
+	sessions []session.Session
+	err      error
+}
+
+func (sessionsLoadedMsg) targetDialog() ID { return SessionsID }
+
+// sessionDeleteCheckedMsg carries whether the session a delete was asked
+// for is running, which refuses the delete.
+type sessionDeleteCheckedMsg struct {
+	owner     *Session
+	sessionID string
+	busy      bool
+	err       error
+}
+
+func (sessionDeleteCheckedMsg) targetDialog() ID { return SessionsID }
+
+// NewSessions creates a new Session dialog and the command that fetches
+// its sessions; the list shows a loading state until they land.
+func NewSessions(com *common.Common, selectedSessionID string) (*Session, tea.Cmd) {
 	s := new(Session)
 	s.sessionsMode = sessionsModeNormal
 	s.com = com
-	sessions, err := com.Workspace.ListSessions(context.TODO())
-	if err != nil {
-		return nil, err
-	}
+	s.loading = true
+	s.selectedSessionID = selectedSessionID
 
-	s.sessions = sessions
-	var selectedInx int
-	for i, sess := range sessions {
-		if sess.ID == selectedSessionID {
-			selectedInx = i
-			break
-		}
-	}
-
-	s.list = list.NewFilterableList(sessionItems(com.Styles, sessionsModeNormal, sessions...)...)
+	s.list = list.NewFilterableList()
 	s.list.Focus()
-	s.list.SetSelected(selectedInx)
 
 	s.input = textinput.New()
 	s.input.SetVirtualCursor(false)
@@ -106,7 +122,74 @@ func NewSessions(com *common.Common, selectedSessionID string) (*Session, error)
 	s.keyMap.CancelDelete = km.Sessions.CancelDelete
 	s.keyMap.Close = km.Close
 
-	return s, nil
+	return s, s.loadSessionsCmd()
+}
+
+func (s *Session) loadSessionsCmd() tea.Cmd {
+	ws := s.com.Workspace
+	return func() tea.Msg {
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		sessions, err := ws.ListSessions(ctx)
+		return sessionsLoadedMsg{owner: s, sessions: sessions, err: err}
+	}
+}
+
+// applySessionsLoaded fills the list, selecting the session the dialog
+// was opened on and applying whatever filter was typed meanwhile.
+func (s *Session) applySessionsLoaded(msg sessionsLoadedMsg) Action {
+	s.loading = false
+	if msg.err != nil {
+		s.loadErr = msg.err
+		return ActionCmd{util.ReportError(fmt.Errorf("list sessions: %w", msg.err))}
+	}
+	s.sessions = msg.sessions
+	s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+	if query := s.input.Value(); query != "" {
+		applyListFilter(s.list)(query)
+		return nil
+	}
+	for i, sess := range s.sessions {
+		if sess.ID == s.selectedSessionID {
+			s.list.SetSelected(i)
+			break
+		}
+	}
+	s.scrolledToSelection = false
+	return nil
+}
+
+// checkDeleteCmd asks whether the session is running before the delete
+// is offered: a running session cannot be deleted.
+func (s *Session) checkDeleteCmd(sessionID string) tea.Cmd {
+	ws := s.com.Workspace
+	return func() tea.Msg {
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		msg := sessionDeleteCheckedMsg{owner: s, sessionID: sessionID}
+		if ws.AgentIsReady(ctx) {
+			msg.busy, msg.err = ws.AgentIsSessionBusy(ctx, sessionID)
+		}
+		return msg
+	}
+}
+
+// applyDeleteChecked enters the delete confirmation, unless the session
+// is running or the user moved on while the check was in flight.
+func (s *Session) applyDeleteChecked(msg sessionDeleteCheckedMsg) Action {
+	item := s.selectedSessionItem()
+	if s.sessionsMode != sessionsModeNormal || item == nil || item.ID() != msg.sessionID {
+		return nil
+	}
+	if msg.err != nil {
+		return ActionCmd{util.ReportError(msg.err)}
+	}
+	if msg.busy {
+		return ActionCmd{util.ReportAgentBusy("deleting a session")}
+	}
+	s.sessionsMode = sessionsModeDeleting
+	s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)
+	return nil
 }
 
 // ID implements Dialog.
@@ -117,6 +200,16 @@ func (s *Session) ID() ID {
 // HandleMsg implements Dialog.
 func (s *Session) HandleMsg(msg tea.Msg) Action {
 	switch msg := msg.(type) {
+	case sessionsLoadedMsg:
+		if msg.owner != s {
+			return nil
+		}
+		return s.applySessionsLoaded(msg)
+	case sessionDeleteCheckedMsg:
+		if msg.owner != s {
+			return nil
+		}
+		return s.applyDeleteChecked(msg)
 	case tea.KeyPressMsg:
 		switch s.sessionsMode {
 		case sessionsModeDeleting:
@@ -149,18 +242,15 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 			case key.Matches(msg, s.keyMap.Close):
 				return ActionClose{}
 			case key.Matches(msg, s.keyMap.Rename):
+				if s.selectedSessionItem() == nil {
+					return nil
+				}
 				s.sessionsMode = sessionsModeUpdating
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeUpdating, s.sessions...)...)
 			case key.Matches(msg, s.keyMap.Delete):
-				busy, err := s.isCurrentSessionBusy()
-				if err != nil {
-					return ActionCmd{util.ReportError(err)}
+				if item := s.selectedSessionItem(); item != nil {
+					return ActionCmd{s.checkDeleteCmd(item.ID())}
 				}
-				if busy {
-					return ActionCmd{util.ReportAgentBusy("deleting a session")}
-				}
-				s.sessionsMode = sessionsModeDeleting
-				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeDeleting, s.sessions...)...)
 			case key.Matches(msg, s.keyMap.Previous):
 				s.list.Focus()
 				selectPrevWrap(s.list)
@@ -307,6 +397,9 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 			t.Dialog.InputPrompt, t.Dialog.Sessions.RenamingView, rows)
 	default:
 		rc.AddInput(s.input.View())
+		if status := s.loadStatus(); status != "" {
+			rc.AddPart(t.Dialog.NormalItem.Render(status))
+		}
 	}
 	bodyView := t.Dialog.List.Height(s.list.Height()).Render(s.list.Render())
 	bodyView = joinScrollbar(t, bodyView, listHeight, listTotalHeight, listHeight, s.list.Offset())
@@ -320,6 +413,18 @@ func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	DrawCenterCursor(scr, area, view, cur)
 	return cur
+}
+
+// loadStatus is what stands in for the list while it is not there: the
+// fetch in flight, or the reason it failed.
+func (s *Session) loadStatus() string {
+	switch {
+	case s.loading:
+		return "Loading sessions…"
+	case s.loadErr != nil:
+		return "Could not load sessions."
+	}
+	return ""
 }
 
 func (s *Session) updateSessionListArea(
@@ -394,7 +499,9 @@ func (s *Session) removeSession(id string) {
 
 func (s *Session) deleteSessionCmd(id string) tea.Cmd {
 	return func() tea.Msg {
-		err := s.com.Workspace.DeleteSession(context.TODO(), id)
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		err := s.com.Workspace.DeleteSession(ctx, id)
 		if err != nil {
 			return util.NewErrorMsg(err)
 		}
@@ -430,24 +537,13 @@ func (s *Session) updateSession(session session.Session) {
 
 func (s *Session) renameSessionCmd(id, title string) tea.Cmd {
 	return func() tea.Msg {
-		if err := s.com.Workspace.RenameSession(context.TODO(), id, title); err != nil {
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		if err := s.com.Workspace.RenameSession(ctx, id, title); err != nil {
 			return util.NewErrorMsg(err)
 		}
 		return nil
 	}
-}
-
-func (s *Session) isCurrentSessionBusy() (bool, error) {
-	sessionItem := s.selectedSessionItem()
-	if sessionItem == nil {
-		return false, nil
-	}
-
-	if !s.com.Workspace.AgentIsReady() {
-		return false, nil
-	}
-
-	return s.com.Workspace.AgentIsSessionBusy(sessionItem.ID())
 }
 
 // renameBindings returns the bindings routed in rename mode. The keep-title

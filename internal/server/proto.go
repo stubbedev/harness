@@ -653,16 +653,16 @@ func (c *controllerV1) handleLSPSessionDisabled(w http.ResponseWriter, r *http.R
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent [get]
 func (c *controllerV1) handleGetWorkspaceAgent(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
 		ops := ws.Ops()
-		if !ops.AgentIsReady() {
+		if !ops.AgentIsReady(ctx) {
 			return proto.AgentInfo{}, nil
 		}
-		m, err := ops.AgentModel()
+		m, err := ops.AgentModel(ctx)
 		if err != nil {
 			return nil, err
 		}
-		busy, err := ops.AgentIsBusy()
+		busy, err := ops.AgentIsBusy(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -882,8 +882,8 @@ func (c *controllerV1) handlePostWorkspaceAgentSessionShell(w http.ResponseWrite
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent/sessions/{sid}/prompts/list [get]
 func (c *controllerV1) handleGetWorkspaceAgentSessionPromptList(w http.ResponseWriter, r *http.Request) {
-	c.serveSession(w, r, func(_ context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
-		return ws.Ops().AgentQueuedPromptsList(string(sid))
+	c.serveSession(w, r, func(ctx context.Context, ws *backend.Workspace, sid proto.SessionID) (any, error) {
+		return ws.Ops().AgentQueuedPromptsList(ctx, string(sid))
 	})
 }
 
@@ -917,8 +917,8 @@ func (c *controllerV1) handleGetWorkspaceAgentDefaultSmallModel(w http.ResponseW
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/questions/answer [post]
 func (c *controllerV1) handlePostWorkspaceQuestionsAnswer(w http.ResponseWriter, r *http.Request) {
-	serveBody(c, w, r, func(_ context.Context, ws *backend.Workspace, req proto.QuestionAnswer) (any, error) {
-		resolved := ws.Ops().QuestionAnswer(proto.QuestionResponsesToDomain(req.Responses))
+	serveBody(c, w, r, func(ctx context.Context, ws *backend.Workspace, req proto.QuestionAnswer) (any, error) {
+		resolved := ws.Ops().QuestionAnswer(ctx, proto.QuestionResponsesToDomain(req.Responses))
 		return proto.QuestionAnswerResponse{Resolved: resolved}, nil
 	})
 }
@@ -935,8 +935,8 @@ func (c *controllerV1) handlePostWorkspaceQuestionsAnswer(w http.ResponseWriter,
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/questions/cancel [post]
 func (c *controllerV1) handlePostWorkspaceQuestionsCancel(w http.ResponseWriter, r *http.Request) {
-	c.serve(w, r, func(_ context.Context, ws *backend.Workspace) (any, error) {
-		return proto.QuestionAnswerResponse{Resolved: ws.Ops().QuestionCancel()}, nil
+	c.serve(w, r, func(ctx context.Context, ws *backend.Workspace) (any, error) {
+		return proto.QuestionAnswerResponse{Resolved: ws.Ops().QuestionCancel(ctx)}, nil
 	})
 }
 

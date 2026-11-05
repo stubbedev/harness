@@ -1364,3 +1364,21 @@ func TestSessionSwitchLeavesVanishedTaskStrip(t *testing.T) {
 	require.Equal(t, uiFocusEditor, u.focus, "focus leaves the vanished strip")
 	require.True(t, u.textarea.Focused(), "the editor takes the keyboard back")
 }
+
+// TestReapedDispatchesAreScopedToTheirSession pins that the reaped set
+// holds the current session's dispatches only: a reap recorded after a
+// switch starts it over instead of keeping every dispatch the process
+// ever saw, and the previous session's entries no longer answer.
+func TestReapedDispatchesAreScopedToTheirSession(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.session = &session.Session{ID: "s1"}
+	u.reapAgentTask("a1")
+	require.True(t, u.reapedAgentTasks.has("s1", "a1"))
+
+	u.session = &session.Session{ID: "s2"}
+	u.reapAgentTask("b1")
+	require.True(t, u.reapedAgentTasks.has("s2", "b1"))
+	require.False(t, u.reapedAgentTasks.has("s1", "a1"))
+	require.Len(t, u.reapedAgentTasks.toolCallIDs, 1, "the set holds one session's dispatches")
+}

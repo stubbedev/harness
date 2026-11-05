@@ -1,8 +1,73 @@
 package model
 
 import (
+	"slices"
+
 	"github.com/stubbedev/harness/internal/ui/chat"
 )
+
+// maxChatViewStates bounds how many transcripts' view states the chat
+// remembers. Each holds an expansion level per expandable item, so one
+// kept for every session and agent ever opened grows without limit over
+// a long-lived process. Sixteen covers a main session and the agents of
+// a wide fan-out the user flips between, plus a few sessions visited
+// around it; a transcript evicted past that reopens the way a fresh one
+// does, on its newest item at the bottom.
+const maxChatViewStates = 16
+
+// viewStateEntry is one remembered transcript's view state.
+type viewStateEntry struct {
+	transcriptID string
+	state        ChatViewState
+}
+
+// viewStateCache remembers the view states of the transcripts the chat
+// has left, least recently viewed first. The transcript on screen is
+// not in it: its state is taken when it is shown and put back when it
+// is left, so the order is the order the user left them in.
+type viewStateCache struct {
+	entries []viewStateEntry
+}
+
+// put remembers a left transcript's state as the most recently viewed,
+// evicting the least recently viewed beyond maxChatViewStates.
+func (c *viewStateCache) put(transcriptID string, vs ChatViewState) {
+	c.forget(transcriptID)
+	c.entries = append(c.entries, viewStateEntry{transcriptID: transcriptID, state: vs})
+	if over := len(c.entries) - maxChatViewStates; over > 0 {
+		c.entries = slices.Delete(c.entries, 0, over)
+	}
+}
+
+// take removes and returns a transcript's remembered state, the zero
+// state when there is none.
+func (c *viewStateCache) take(transcriptID string) ChatViewState {
+	i := c.index(transcriptID)
+	if i < 0 {
+		return ChatViewState{}
+	}
+	vs := c.entries[i].state
+	c.entries = slices.Delete(c.entries, i, i+1)
+	return vs
+}
+
+// forget drops a transcript's remembered state.
+func (c *viewStateCache) forget(transcriptID string) {
+	if i := c.index(transcriptID); i >= 0 {
+		c.entries = slices.Delete(c.entries, i, i+1)
+	}
+}
+
+func (c *viewStateCache) index(transcriptID string) int {
+	return slices.IndexFunc(c.entries, func(e viewStateEntry) bool { return e.transcriptID == transcriptID })
+}
+
+// ForgetTranscript drops the view state of a transcript that can never
+// be shown again, a deleted session's. Its agents' transcripts age out
+// of the bounded cache instead: their IDs do not name the session.
+func (m *Chat) ForgetTranscript(transcriptID string) {
+	m.viewStates.forget(transcriptID)
+}
 
 // ChatViewState is how the user left a transcript: what they expanded,
 // where the selection sat and how far they had scrolled. Items are
@@ -58,7 +123,7 @@ func (m *Chat) eachExpandable(fn func(id string, e chat.Expandable)) {
 // come back to.
 func (m *Chat) saveViewState() {
 	if m.transcriptID != "" {
-		m.viewStates[m.transcriptID] = m.captureViewState()
+		m.viewStates.put(m.transcriptID, m.captureViewState())
 	}
 }
 

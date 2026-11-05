@@ -31,7 +31,8 @@ func TestEnterKeepsDraftWhenAgentNotReady(t *testing.T) {
 	typeIntoEditor(t, m, "hello")
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.NotNil(t, cmd, "the rejection is reported")
+	require.NotNil(t, cmd, "enter dispatches the readiness check")
+	runCmds(m, cmd)
 	require.Equal(t, "hello", m.textarea.Value(), "a rejected send keeps the draft")
 }
 
@@ -41,13 +42,16 @@ func TestEnterKeepsDraftWhenAgentNotReady(t *testing.T) {
 func TestEnterClearsAndSendsWhenReady(t *testing.T) {
 	t.Parallel()
 
-	ws := &countingWorkspace{ready: true}
-	m := newBusyUI(ws)
+	m, ws := newRecordingUI(t)
 	typeIntoEditor(t, m, "hello")
 
 	_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.NotNil(t, cmd, "enter dispatches the send")
+	require.NotNil(t, cmd, "enter dispatches the readiness check")
+	require.Equal(t, "hello", m.textarea.Value(), "the draft stays until the check passes")
+	runCmds(m, cmd)
 	require.Empty(t, m.textarea.Value(), "an accepted send clears the editor")
+	require.Len(t, ws.runs, 1)
+	require.Equal(t, "hello", ws.runs[0].prompt)
 }
 
 // TestEnterWithEmptyEditorDoesNotProbe pins that an empty enter clears

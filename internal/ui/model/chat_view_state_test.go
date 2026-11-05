@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/pubsub"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/ui/chat"
 )
@@ -148,4 +149,48 @@ func TestViewStateKeepsNewItemsDefault(t *testing.T) {
 	require.True(t, u.chat.Follow(), "a view left following returns to the bottom")
 	require.True(t, u.chat.AtBottom())
 	require.Zero(t, u.chat.ToolItem("late-t").ExpansionLevel(), "a new call keeps its default")
+}
+
+// viewStateIDs lists the transcripts the chat remembers, least recently
+// viewed first.
+func viewStateIDs(c *Chat) []string {
+	ids := make([]string, 0, len(c.viewStates.entries))
+	for _, e := range c.viewStates.entries {
+		ids = append(ids, e.transcriptID)
+	}
+	return ids
+}
+
+// TestViewStatesStayBounded pins the cap on remembered view states:
+// leaving more transcripts than maxChatViewStates keeps only the most
+// recently viewed, so a long-lived process does not keep one per session
+// and agent it ever opened.
+func TestViewStatesStayBounded(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+
+	var left []string
+	for i := range maxChatViewStates + 5 {
+		id := fmt.Sprintf("s%d", i)
+		u.chat.SetMessages(id)
+		left = append(left, id)
+	}
+	u.chat.SetMessages("current")
+
+	require.Equal(t, left[len(left)-maxChatViewStates:], viewStateIDs(u.chat))
+}
+
+// TestDeletedSessionForgetsItsViewState pins that a deleted session's
+// view state goes with it: it can never be shown again.
+func TestDeletedSessionForgetsItsViewState(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.session = &session.Session{ID: "kept"}
+
+	u.chat.SetMessages("gone")
+	u.chat.SetMessages("kept")
+	require.Equal(t, []string{"gone"}, viewStateIDs(u.chat))
+
+	u.Update(pubsub.Event[session.Session]{Type: pubsub.DeletedEvent, Payload: session.Session{ID: "gone"}})
+	require.Empty(t, viewStateIDs(u.chat))
 }

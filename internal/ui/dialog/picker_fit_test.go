@@ -135,8 +135,8 @@ func newLongRewindForTest(t *testing.T) Dialog {
 		}
 	}
 	st := styles.CharmtonePantera()
-	r, err := NewRewind(&common.Common{Styles: &st, Workspace: &rewindWorkspace{messages: messages}}, "s1")
-	require.NoError(t, err)
+	r, load := NewRewind(&common.Common{Styles: &st, Workspace: &rewindWorkspace{messages: messages}}, "s1")
+	loadDialog(t, r, load)
 	return r
 }
 

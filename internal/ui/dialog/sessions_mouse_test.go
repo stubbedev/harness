@@ -25,7 +25,7 @@ func (w *sessionMouseWorkspace) ListSessions(context.Context) ([]session.Session
 	return w.sessions, nil
 }
 
-func (w *sessionMouseWorkspace) AgentIsReady() bool {
+func (w *sessionMouseWorkspace) AgentIsReady(context.Context) bool {
 	return false
 }
 
@@ -33,11 +33,11 @@ func newSessionMouseDialog(t *testing.T, sessions []session.Session, selectedSes
 	t.Helper()
 
 	sty := styles.CharmtonePantera()
-	dialog, err := NewSessions(&common.Common{
+	dialog, load := NewSessions(&common.Common{
 		Workspace: &sessionMouseWorkspace{sessions: sessions},
 		Styles:    &sty,
 	}, selectedSessionID)
-	require.NoError(t, err)
+	loadDialog(t, dialog, load)
 	return dialog
 }
 
@@ -245,7 +245,7 @@ func testSessions(n int) []session.Session {
 
 func deleteSelectedSession(t *testing.T, dialog *Session) {
 	t.Helper()
-	dialog.HandleMsg(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	pressDelete(t, dialog)
 	require.Equal(t, sessionsModeDeleting, dialog.sessionsMode)
 	dialog.HandleMsg(tea.KeyPressMsg{Code: 'y'})
 	require.Equal(t, sessionsModeNormal, dialog.sessionsMode)
@@ -296,4 +296,21 @@ func TestSessionDeleteAfterWheelScrollsSelectionBackIntoView(t *testing.T) {
 
 	require.True(t, dialog.list.SelectedItemInView(), "deleting off-screen must show what it landed on")
 	require.Equal(t, "s01", dialog.selectedSessionItem().ID())
+}
+
+// loadDialog delivers the result of a dialog's initial fetch, the way the
+// runtime does once the command returns.
+func loadDialog(t *testing.T, d Dialog, load tea.Cmd) {
+	t.Helper()
+	require.NotNil(t, load, "the dialog fetches its list off the update loop")
+	require.Nil(t, d.HandleMsg(load()), "the fetch lands without error")
+}
+
+// pressDelete presses the delete key and delivers the busy check it
+// starts, the way the runtime does once the command returns.
+func pressDelete(t *testing.T, s *Session) {
+	t.Helper()
+	action, ok := s.HandleMsg(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}).(ActionCmd)
+	require.True(t, ok, "delete checks the session off the update loop")
+	require.Nil(t, s.HandleMsg(action.Cmd()))
 }

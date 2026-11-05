@@ -14,6 +14,7 @@ import (
 	"github.com/stubbedev/harness/internal/diff"
 	"github.com/stubbedev/harness/internal/fsext"
 	"github.com/stubbedev/harness/internal/history"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -26,6 +27,10 @@ type loadSessionMsg struct {
 	session   *session.Session
 	files     []SessionFile
 	readFiles []string
+	// msgs is the session's transcript and busy whether it was running,
+	// fetched with the session so the switch applies them together.
+	msgs []message.Message
+	busy bool
 }
 
 // lspFilePaths returns deduplicated file paths from both modified and read
@@ -67,10 +72,10 @@ type continueSessionMsg struct {
 }
 
 // loadSession requests a switch to sessionID: it records the request and
-// returns a tea.Cmd that fetches the session and its associated files,
-// computes the diff statistics (additions and deletions) for each file,
-// and returns a loadSessionMsg. Only the latest request's message is
-// applied.
+// returns a tea.Cmd that fetches the session, its associated files with
+// their diff statistics (additions and deletions), its transcript and
+// whether it is busy, and returns a loadSessionMsg. Only the latest
+// request's message is applied.
 //
 // The returned batch also reports the new current-session selection to
 // the workspace so the server can update its per-client presence map.
@@ -79,28 +84,49 @@ type continueSessionMsg struct {
 func (m *UI) loadSession(sessionID string) tea.Cmd {
 	m.sessionLoadRequested = sessionID
 	load := func() tea.Msg {
-		session, err := m.com.Workspace.GetSession(context.Background(), sessionID)
-		if err != nil {
-			return util.NewErrorMsg(fmt.Errorf("load session %s: %w", sessionID, err))
-		}
-
-		sessionFiles, err := m.loadSessionFiles(sessionID)
-		if err != nil {
-			return util.NewErrorMsg(fmt.Errorf("load files of session %s: %w", sessionID, err))
-		}
-
-		readFiles, err := m.com.Workspace.FileTrackerListReadFiles(context.Background(), sessionID)
-		if err != nil {
-			slog.Error("Failed to load read files for session", "error", err)
-		}
-
-		return loadSessionMsg{
-			session:   &session,
-			files:     sessionFiles,
-			readFiles: readFiles,
-		}
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		return m.fetchSession(ctx, sessionID)
 	}
 	return tea.Batch(load, m.reportCurrentSession(sessionID))
+}
+
+// fetchSession gathers everything a switch to sessionID applies. It runs
+// off the Update goroutine.
+func (m *UI) fetchSession(ctx context.Context, sessionID string) tea.Msg {
+	ws := m.com.Workspace
+	session, err := ws.GetSession(ctx, sessionID)
+	if err != nil {
+		return util.NewErrorMsg(fmt.Errorf("load session %s: %w", sessionID, err))
+	}
+
+	sessionFiles, err := m.loadSessionFiles(ctx, sessionID)
+	if err != nil {
+		return util.NewErrorMsg(fmt.Errorf("load files of session %s: %w", sessionID, err))
+	}
+
+	readFiles, err := ws.FileTrackerListReadFiles(ctx, sessionID)
+	if err != nil {
+		slog.Error("Failed to load read files for session", "error", err)
+	}
+
+	msgs, err := ws.ListMessages(ctx, sessionID)
+	if err != nil {
+		return util.NewErrorMsg(fmt.Errorf("load messages of session %s: %w", sessionID, err))
+	}
+
+	busy, err := sessionBusy(ctx, ws, sessionID)
+	if err != nil {
+		return util.NewErrorMsg(fmt.Errorf("load busy state of session %s: %w", sessionID, err))
+	}
+
+	return loadSessionMsg{
+		session:   &session,
+		files:     sessionFiles,
+		readFiles: readFiles,
+		msgs:      msgs,
+		busy:      busy,
+	}
 }
 
 // fetchParentMeta fetches the parent session title (for the breadcrumb) and
@@ -161,8 +187,8 @@ func (m *UI) reportCurrentSession(sessionID string) tea.Cmd {
 	}
 }
 
-func (m *UI) loadSessionFiles(sessionID string) ([]SessionFile, error) {
-	files, err := m.com.Workspace.ListSessionHistory(context.Background(), sessionID)
+func (m *UI) loadSessionFiles(ctx context.Context, sessionID string) ([]SessionFile, error) {
+	files, err := m.com.Workspace.ListSessionHistory(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +267,9 @@ func (m *UI) loadSessionFilesCmd() tea.Cmd {
 	m.sessionFilesLoading = sessionID
 	m.sessionFilesStale = false
 	return func() tea.Msg {
-		sessionFiles, err := m.loadSessionFiles(sessionID)
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		sessionFiles, err := m.loadSessionFiles(ctx, sessionID)
 		return sessionFilesUpdatesMsg{
 			forSession:   sessionID,
 			sessionFiles: sessionFiles,

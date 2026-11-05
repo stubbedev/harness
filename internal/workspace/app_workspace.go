@@ -95,7 +95,7 @@ func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) erro
 		return err
 	}
 	for _, id := range ids {
-		busy, err := w.AgentIsSessionBusy(id)
+		busy, err := w.AgentIsSessionBusy(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -212,21 +212,21 @@ func (w *AppWorkspace) AgentCancel(sessionID string) error {
 	return nil
 }
 
-func (w *AppWorkspace) AgentIsBusy() (bool, error) {
+func (w *AppWorkspace) AgentIsBusy(context.Context) (bool, error) {
 	if w.app.AgentCoordinator == nil {
 		return false, nil
 	}
 	return w.app.AgentCoordinator.IsBusy(), nil
 }
 
-func (w *AppWorkspace) AgentIsSessionBusy(sessionID string) (bool, error) {
+func (w *AppWorkspace) AgentIsSessionBusy(_ context.Context, sessionID string) (bool, error) {
 	if w.app.AgentCoordinator == nil {
 		return false, nil
 	}
 	return w.app.AgentCoordinator.IsSessionBusy(sessionID), nil
 }
 
-func (w *AppWorkspace) AgentModel() (AgentModel, error) {
+func (w *AppWorkspace) AgentModel(context.Context) (AgentModel, error) {
 	if w.app.AgentCoordinator == nil {
 		return AgentModel{}, nil
 	}
@@ -237,11 +237,11 @@ func (w *AppWorkspace) AgentModel() (AgentModel, error) {
 	}, nil
 }
 
-func (w *AppWorkspace) AgentIsReady() bool {
+func (w *AppWorkspace) AgentIsReady(context.Context) bool {
 	return w.app.AgentCoordinator != nil
 }
 
-func (w *AppWorkspace) AgentReadyErr() error {
+func (w *AppWorkspace) AgentReadyErr(context.Context) error {
 	if w.app.AgentCoordinator == nil {
 		return ErrAgentNotInitialized
 	}
@@ -255,7 +255,7 @@ func (w *AppWorkspace) AgentQueuedPrompts(sessionID string) (int, error) {
 	return w.app.AgentCoordinator.QueuedPrompts(sessionID), nil
 }
 
-func (w *AppWorkspace) AgentQueuedPromptsList(sessionID string) ([]string, error) {
+func (w *AppWorkspace) AgentQueuedPromptsList(_ context.Context, sessionID string) ([]string, error) {
 	if w.app.AgentCoordinator == nil {
 		return nil, nil
 	}
@@ -294,11 +294,11 @@ func (w *AppWorkspace) GetDefaultSmallModel(providerID catalog.InferenceProvider
 
 // -- Questions --
 
-func (w *AppWorkspace) QuestionAnswer(responses []question.Answer) bool {
+func (w *AppWorkspace) QuestionAnswer(_ context.Context, responses []question.Answer) bool {
 	return w.app.Questions.Answer(responses)
 }
 
-func (w *AppWorkspace) QuestionCancel() bool {
+func (w *AppWorkspace) QuestionCancel(context.Context) bool {
 	return w.app.Questions.Cancel()
 }
 
@@ -760,11 +760,11 @@ func (w *AppWorkspace) MCPAuthenticate(ctx context.Context, name string) error {
 	return mcptools.AuthenticateMCP(ctx, w.store, name)
 }
 
-func (w *AppWorkspace) MCPPendingAuth() []mcptools.PendingAuthServer {
+func (w *AppWorkspace) MCPPendingAuth(context.Context) []mcptools.PendingAuthServer {
 	return mcptools.PendingAuthMCPs(w.store)
 }
 
-func (w *AppWorkspace) MCPAuthURL(name string) (string, error) {
+func (w *AppWorkspace) MCPAuthURL(_ context.Context, name string) (string, error) {
 	return mcptools.MCPAuthURL(name), nil
 }
 
@@ -807,7 +807,7 @@ func (w *AppWorkspace) ListCheckpoints(ctx context.Context, sessionID string) ([
 
 func (w *AppWorkspace) Rewind(ctx context.Context, sessionID, messageID string, mode checkpoints.Mode) error {
 	// Rewinding mid-run would race the tools still writing to the tree.
-	busy, err := w.AgentIsSessionBusy(sessionID)
+	busy, err := w.AgentIsSessionBusy(ctx, sessionID)
 	if err != nil {
 		return err
 	}

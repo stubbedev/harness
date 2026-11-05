@@ -22,8 +22,8 @@ func newRenamingSessionsDialog(t *testing.T) (*Session, *sessionEditWorkspace) {
 		renamed:  map[string]string{},
 	}
 	sty := styles.CharmtonePantera()
-	s, err := NewSessions(&common.Common{Workspace: ws, Styles: &sty}, "s1")
-	require.NoError(t, err)
+	s, load := NewSessions(&common.Common{Workspace: ws, Styles: &sty}, "s1")
+	loadDialog(t, s, load)
 
 	s.HandleMsg(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	require.Equal(t, sessionsModeUpdating, s.sessionsMode)

@@ -156,7 +156,8 @@ type (
 	}
 	// mcpStateChangedMsg is sent when there is a change in MCP client states.
 	mcpStateChangedMsg struct {
-		states map[string]mcp.ClientInfo
+		states      map[string]mcp.ClientInfo
+		pendingAuth []mcp.PendingAuthServer
 	}
 	// sendMessageMsg is sent to send a message. A set Name marks the
 	// content as a named prompt invocation (custom command, MCP prompt
@@ -306,6 +307,14 @@ type UI struct {
 	// stable, eliminating races between session load and shell output.
 	pendingBangCommand string
 
+	// submitPending is set while an editor submit waits for its readiness
+	// check, so a repeated enter cannot send the same draft twice.
+	submitPending bool
+	// newSessionStarts holds the prompts and shell commands waiting for
+	// the session being created for them; non-empty exactly while that
+	// creation is in flight.
+	newSessionStarts []sessionStart
+
 	// bangRuns holds the running bang-mode shell commands, keyed by their
 	// pending item's ID. Added by runShellCommand, removed by
 	// shellResultMsg. Only the current session's runs count for
@@ -419,13 +428,13 @@ type UI struct {
 	// rows the current frame renders, so reaping agents cannot leave the
 	// hover on a different row.
 	taskHoverY int
-	// reapedAgentTasks records dispatches whose task was already reaped
-	// (result landed or terminal runtime status). Assistant-message
-	// updates keep arriving after that — the step-finish update publishes
-	// after its tool results — and would otherwise resurrect the finished
-	// dispatch as a running task. Tool call IDs are unique per dispatch,
-	// so entries survive session switches without colliding.
-	reapedAgentTasks map[string]bool
+	// reapedAgentTasks records the current session's dispatches whose task
+	// was already reaped (result landed or terminal runtime status).
+	// Assistant-message updates keep arriving after that — the step-finish
+	// update publishes after its tool results — and would otherwise
+	// resurrect the finished dispatch as a running task. See
+	// reapedDispatches for why it holds one session only.
+	reapedAgentTasks reapedDispatches
 	// lastTasksReconcile paces the periodic running-list refresh while
 	// tasks spin (see the spinner tick handler): a terminal RuntimeEvent
 	// lost in flight would otherwise leave a spinner that nothing ever
@@ -471,10 +480,17 @@ type UI struct {
 	// queuedPromptsSession is the session queuedPrompts were queued on;
 	// the placeholder belongs to that session's main transcript only.
 	queuedPromptsSession string
-	// agentBusyCache memoizes the workspace busy
-	// probes (synchronous HTTP round-trips in client/server mode). Reads
-	// never probe; refreshes happen off-thread (see workspace_cache.go).
-	agentBusyCache    ttlCache
+	// agentBusyCache memoizes whether the current session is busy, the
+	// workspace busy probe (a synchronous HTTP round-trip in
+	// client/server mode). Reads never probe; refreshes happen off-thread
+	// (see workspace_cache.go). While an agent's transcript is shown it
+	// still describes the main session: the agent runs under it, stop
+	// cancels it and idle-only actions act on it.
+	agentBusyCache ttlCache
+	// anyAgentBusy is whether any session has a request in flight, from
+	// the same probe. Only what acts on the whole process reads it (see
+	// isAnyAgentBusy).
+	anyAgentBusy      bool
 	busyFetchInFlight bool
 	// agentReady / agentModel memoize the coordinator readiness and
 	// selected model (AgentIsReady/AgentModel are synchronous HTTP GETs in
@@ -600,8 +616,10 @@ func New(com *common.Common, initialSessionID string, continueLast bool) *UI {
 	// Seed the memoized agent ready/model state the same way so the first
 	// frame renders the model info; the busy probe keeps it fresh
 	// afterwards.
-	if com.Workspace.AgentIsReady() {
-		if model, err := com.Workspace.AgentModel(); err != nil {
+	seedCtx, cancelSeed := common.WorkspaceCallContext()
+	defer cancelSeed()
+	if com.Workspace.AgentIsReady(seedCtx) {
+		if model, err := com.Workspace.AgentModel(seedCtx); err != nil {
 			slog.Warn("Failed to fetch agent model", "error", err)
 		} else {
 			ui.agentReady = true
@@ -956,6 +974,12 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.applyReasoningEffortSaved(msg))
 	case sessionModelRestoredMsg:
 		cmds = append(cmds, m.applySessionModelRestored(msg))
+	case submitCheckedMsg:
+		cmds = append(cmds, m.applySubmitChecked(msg))
+	case promptReadyMsg:
+		cmds = append(cmds, m.applyPromptReady(msg))
+	case newSessionCreatedMsg:
+		cmds = append(cmds, m.applyNewSessionCreated(msg))
 	case agentRunSubmittedMsg:
 		// A prompt was just accepted (run started or enqueued): fetch the
 		// authoritative busy/queue state to confirm the optimistic values
@@ -980,6 +1004,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setState(uiChat, m.focus)
 		m.session = msg.session
 		m.sessionFiles = msg.files
+		m.agentBusyCache.set(msg.busy)
 		// The memoized busy state and queued prompts were dropped with
 		// the previous session; re-fetch them off-thread so the queue
 		// indicator and esc behavior track the new one.
@@ -1004,15 +1029,14 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd := m.requestLSPRefresh(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		msgs, err := m.com.Workspace.ListMessages(context.Background(), m.session.ID)
-		if err != nil {
-			cmds = append(cmds, util.ReportError(err))
-			break
-		}
-		if cmd := m.setSessionMessages(msgs); cmd != nil {
+		if cmd := m.setSessionMessages(msg.msgs); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		if cmd := m.restoreModelFromSession(msgs); cmd != nil {
+		// The transcript was listed off-thread before this session became
+		// current, so its own events that landed in between were not
+		// applied; one retrace folds them in.
+		cmds = append(cmds, m.fetchAgentTranscript(m.session.ID, "", true))
+		if cmd := m.restoreModelFromSession(msg.msgs); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		// If a bang command was issued before the session finished
@@ -1096,7 +1120,11 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			servers.SetStates(msg.states)
 		}
 		// Auto-open the MCP auth dialog if any servers need authentication.
-		if cmd := m.openMCPAuthDialog(); cmd != nil {
+		if cmd := m.openMCPAuthDialog(msg.pendingAuth); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case mcpPendingAuthMsg:
+		if cmd := m.openMCPAuthDialog(msg.pending); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case mcpPromptsLoadedMsg:
@@ -1138,6 +1166,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, cmd)
 				}
 			}
+			m.chat.ForgetTranscript(msg.Payload.ID)
 			break
 		}
 		if m.session != nil && msg.Payload.ID == m.session.ID {
@@ -1396,9 +1425,7 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if clickable, ok := m.activeInline.(dialog.MouseClickableEditor); ok {
 				if done, handled := clickable.HandleMouseClick(msg.X, msg.Y); handled {
 					if done {
-						m.activeInline = nil
-						cmds = append(cmds, m.focusEditor())
-						m.updateLayoutAndSize()
+						cmds = append(cmds, m.closeInlineEditor())
 					}
 					return m, tea.Batch(cmds...)
 				}
@@ -2112,7 +2139,7 @@ func (m *UI) handleAction(action dialog.Action) tea.Cmd {
 	case dialog.ActionMCPDisableForSession:
 		cmds = append(cmds, m.disableMCPForSession(msg.Name))
 	case dialog.ActionOpenMCPAuth:
-		cmds = append(cmds, m.openMCPAuthDialog())
+		cmds = append(cmds, fetchMCPPendingAuth(m.com.Workspace))
 	case dialog.ActionLSPRestart:
 		cmds = append(cmds, m.restartLSP(msg.Name))
 	case dialog.ActionLSPSetSessionDisabled:
@@ -2372,7 +2399,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 				return true
 			}
 		case key.Matches(msg, m.keyMap.Suspend):
-			if m.isAgentBusy() {
+			if m.isAnyAgentBusy() {
 				cmds = append(cmds, util.ReportAgentBusy("suspending"))
 				return true
 			}
@@ -2425,9 +2452,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 	// Route keys to active inline editor if one is showing.
 	if m.activeInline != nil && m.focus == uiFocusEditor {
 		if done, cmd := m.activeInline.HandleKey(msg); done {
-			m.activeInline = nil
-			cmds = append(cmds, m.focusEditor())
-			m.updateLayoutAndSize()
+			cmds = append(cmds, m.closeInlineEditor())
 		} else {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -2499,65 +2524,7 @@ func (m *UI) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
 					return nil
 				}
 
-				// The draft survives a rejected send: the readiness gate
-				// runs before the editor is cleared, so a prompt typed while
-				// the agent is still starting (or the server is unreachable)
-				// is reported but not thrown away. A command invocation
-				// ("/goal ...") runs without the agent and stays ungated;
-				// its decision is computed once here and reused below.
-				inv, isInvocation := m.editorInvocation(draft)
-				if !isInvocation {
-					if err := m.com.Workspace.AgentReadyErr(); err != nil {
-						return util.ReportError(err)
-					}
-				}
-
-				// An agent's steering channel carries text only, so a prompt
-				// with an attachment would lose it. Say so and leave the draft
-				// in the editor rather than dropping what the user attached.
-				if m.agentView.shown != "" && m.hasInlineAttachments(draft) {
-					return util.ReportWarn("Attachments can't be sent to a subagent; switch back to the main agent first")
-				}
-
-				if attachErr := m.inlineAttachmentsErr(draft); attachErr != nil {
-					return util.ReportWarn(attachErr.Error())
-				}
-
-				// Otherwise, send the message
-				m.textarea.Reset()
-				if cmd := m.handleTextareaHeightChange(prevHeight); cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-
-				// Inline attachments ride references in the text; swap them
-				// for the payloads. Paste tokens are stripped, mention text
-				// stays. An attachment with nothing left to say is a prompt
-				// of its own: the model reads an image just as well as text.
-				value, attachments := m.resolveInlineAttachments(draft)
-				if len(value) == 0 && len(attachments) == 0 {
-					return nil
-				}
-
-				m.randomizePlaceholders()
-				m.historyReset()
-
-				// A command invocation ("/compact keep the API notes") runs
-				// the command. A line carrying attachments is a message:
-				// commands take text, not files.
-				if len(attachments) == 0 && isInvocation {
-					return m.invoke(inv)
-				}
-
-				if m.agentView.shown != "" {
-					// Viewing an agent: the prompt steers its session
-					// instead of starting a main-session turn. Its message
-					// arrives through the normal Created event, so the
-					// transcript picks it up without extra plumbing.
-					return tea.Batch(m.steerAgent(value), m.loadPromptHistory())
-				}
-
-				// The readiness gate above already ran for this prompt.
-				return tea.Batch(m.sendReadyMessage(value, attachments...), m.loadPromptHistory())
+				return m.submitDraft(draft)
 			case key.Matches(msg, m.keyMap.Chat.NewSession):
 				if !m.hasSession() {
 					break
@@ -3830,16 +3797,27 @@ func (m *UI) insertMCPResourceCompletion(item completions.ResourceCompletionValu
 	return tea.Batch(heightCmd, resourceCmd)
 }
 
-// isAgentBusy returns true if the agent coordinator exists and is currently
-// busy processing a request. It only reads the memoized state (it runs in
-// per-message paths like the textarea placeholder, where a workspace probe
-// would be an HTTP round-trip per keystroke in client/server mode); the
-// value is refreshed off-thread, see workspace_cache.go.
+// isAgentBusy reports whether the current session is busy: a request of
+// its own in flight or a bang command running in it. Another session's
+// run does not count, so an idle session opened beside a running one
+// takes prompts, stops and idle-only actions as idle. It only reads the
+// memoized state (it runs in per-message paths like the textarea
+// placeholder, where a workspace probe would be an HTTP round-trip per
+// keystroke in client/server mode); the value is refreshed off-thread,
+// see workspace_cache.go.
 func (m *UI) isAgentBusy() bool {
 	if m.bangRunning() {
 		return true
 	}
 	return m.agentBusyCache.val
+}
+
+// isAnyAgentBusy reports whether any session is busy. It is for what acts
+// on the whole process rather than on the current session: suspending
+// it freezes every run, and the coordinator's model is shared by all of
+// them.
+func (m *UI) isAnyAgentBusy() bool {
+	return m.anyAgentBusy || len(m.bangRuns) > 0 || m.agentBusyCache.val
 }
 
 // hasSession returns true if there is an active session with a valid ID.
@@ -4013,38 +3991,20 @@ func (m *UI) runSkill(skillID, name, args string) tea.Cmd {
 	}
 }
 
-// sendMessage sends a message with the given content and attachments,
-// once the agent reports ready.
-func (m *UI) sendMessage(content string, attachments ...message.Attachment) tea.Cmd {
-	if err := m.com.Workspace.AgentReadyErr(); err != nil {
-		return util.ReportError(err)
-	}
-	return m.sendReadyMessage(content, attachments...)
-}
-
-// sendReadyMessage is sendMessage for a caller that already checked the
-// agent is ready. In client/server mode the check is a round trip to the
-// server, made on the key press, so the editor's submit path makes it
-// once, not twice.
+// sendReadyMessage sends a prompt to the current session for a caller
+// that already checked the agent is ready. With no session open the
+// prompt waits for the one startInNewSession creates.
 func (m *UI) sendReadyMessage(content string, attachments ...message.Attachment) tea.Cmd {
+	if !m.hasSession() {
+		return m.startInNewSession(promptStart{content: content, attachments: attachments})
+	}
+
 	content = rewriteSubagentPrompt(content, m.activeSubagentNames)
 
 	// Start the turn timer.
 	common.StartTurn()
 
 	var cmds []tea.Cmd
-	if !m.hasSession() {
-		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
-		if err != nil {
-			return util.ReportError(err)
-		}
-		if newSession.ID != "" {
-			m.session = &newSession
-			cmds = append(cmds, m.loadSession(newSession.ID))
-		}
-		m.setState(uiChat, m.focus)
-	}
-
 	ctx := context.Background()
 	readsSessionID := m.session.ID
 	reads := slices.Clone(m.sessionFileReads)
@@ -4129,22 +4089,11 @@ func (m *UI) runShellCommand(command string) tea.Cmd {
 // execution. isFirstMessage indicates the command is the first user message
 // in a newly created session, which triggers title generation.
 func (m *UI) runShellCommandInternal(command string, isFirstMessage bool) tea.Cmd {
-	var cmds []tea.Cmd
 	if !m.hasSession() {
-		newSession, err := m.com.Workspace.CreateSession(context.Background(), "New Session")
-		if err != nil {
-			return util.ReportError(err)
-		}
-		if newSession.ID != "" {
-			m.session = &newSession
-			cmds = append(cmds, m.loadSession(newSession.ID))
-		}
-		m.setState(uiChat, m.focus)
-		// Defer shell execution until loadSessionMsg fires so the chat
-		// list is stable before we add items or start streaming.
-		m.pendingBangCommand = command
-		return tea.Batch(cmds...)
+		return m.startInNewSession(bangStart{command: command})
 	}
+
+	var cmds []tea.Cmd
 
 	sessionID := m.session.ID
 	contentWidth := min(m.layout.main.Dx()-2, 120)
@@ -4264,12 +4213,9 @@ func (m *UI) openRewindDialog() tea.Cmd {
 	if m.isAgentBusy() {
 		return util.ReportAgentBusy("rewinding")
 	}
-	rewind, err := dialog.NewRewind(m.com, m.session.ID)
-	if err != nil {
-		return util.ReportError(err)
-	}
+	rewind, load := dialog.NewRewind(m.com, m.session.ID)
 	m.dialog.OpenDialog(rewind)
-	return nil
+	return load
 }
 
 // openModelsDialog opens the models dialog.
@@ -4353,13 +4299,9 @@ func (m *UI) openSessionsDialog() tea.Cmd {
 		selectedSessionID = m.session.ID
 	}
 
-	dialog, err := dialog.NewSessions(m.com, selectedSessionID)
-	if err != nil {
-		return util.ReportError(err)
-	}
-
-	m.dialog.OpenDialog(dialog)
-	return nil
+	sessions, load := dialog.NewSessions(m.com, selectedSessionID)
+	m.dialog.OpenDialog(sessions)
+	return load
 }
 
 // openMentionPicker opens the @-mention picker: the shared dialog
@@ -4386,17 +4328,40 @@ func (m *UI) openBatchFormDialog(batch question.Request) tea.Cmd {
 		m.activeInline = nil
 	}
 
-	form := dialog.NewQuestionForm(m.com.Styles, batch)
-	form.OnAnswer = func(responses []question.Answer) {
-		m.com.Workspace.QuestionAnswer(responses)
-	}
-	form.OnCancel = func() {
-		m.com.Workspace.QuestionCancel()
-	}
-	m.activeInline = form
+	m.activeInline = dialog.NewQuestionForm(m.com.Styles, batch)
 	cmd := m.focusEditor()
 	m.updateLayoutAndSize()
 	return cmd
+}
+
+// closeInlineEditor closes the inline editor the user finished with and
+// hands the editor back. A question form's outcome is delivered to the
+// workspace off the Update goroutine: answering or cancelling is a round
+// trip to the server in client/server mode.
+func (m *UI) closeInlineEditor() tea.Cmd {
+	var resolve tea.Cmd
+	if qf, ok := m.activeInline.(*dialog.QuestionForm); ok {
+		if outcome, ok := qf.Outcome(); ok {
+			resolve = resolveQuestion(m.com.Workspace, outcome)
+		}
+	}
+	m.activeInline = nil
+	cmd := m.focusEditor()
+	m.updateLayoutAndSize()
+	return tea.Batch(cmd, resolve)
+}
+
+func resolveQuestion(ws workspace.Workspace, outcome dialog.QuestionOutcome) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		if outcome.Cancelled {
+			ws.QuestionCancel(ctx)
+			return nil
+		}
+		ws.QuestionAnswer(ctx, outcome.Responses)
+		return nil
+	}
 }
 
 // handleQuestionNotification dismisses an open question form when
@@ -4561,6 +4526,7 @@ func (m *UI) resetSessionScope() {
 	m.pendingModelAction = nil
 	m.promptQueueItems = nil
 	m.stopping = false
+	m.agentBusyCache = ttlCache{}
 	m.invalidateBusyCaches()
 	m.invalidatePromptQueue()
 }

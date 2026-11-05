@@ -28,7 +28,7 @@ func TestQueuedPromptRendersImmediately(t *testing.T) {
 	m, _ := newQueuedTestUI()
 
 	require.Nil(t, m.chat.MessageItem("queued-prompt-1"))
-	_ = m.sendMessage("steer this way")
+	_ = m.sendReadyMessage("steer this way")
 
 	require.Len(t, m.queuedPrompts, 1, "the prompt must appear in the transcript")
 	item := m.chat.MessageItem("queued-prompt-1")
@@ -46,8 +46,8 @@ func TestQueuedPromptsJoinIntoSingleEntry(t *testing.T) {
 	pinTTLs(t)
 	m, _ := newQueuedTestUI()
 
-	_ = m.sendMessage("first")
-	_ = m.sendMessage("second")
+	_ = m.sendReadyMessage("first")
+	_ = m.sendReadyMessage("second")
 
 	require.Len(t, m.queuedPrompts, 2)
 	item := m.chat.MessageItem("queued-prompt-1")
@@ -66,7 +66,7 @@ func TestQueuedPromptMaterializesIntoRealMessage(t *testing.T) {
 	pinTTLs(t)
 	m, _ := newQueuedTestUI()
 
-	_ = m.sendMessage("steer this way")
+	_ = m.sendReadyMessage("steer this way")
 	require.Len(t, m.queuedPrompts, 1)
 
 	m.appendSessionMessage(message.Message{
@@ -88,8 +88,8 @@ func TestJoinedQueuedPromptsMaterializeTogether(t *testing.T) {
 	pinTTLs(t)
 	m, _ := newQueuedTestUI()
 
-	_ = m.sendMessage("one")
-	_ = m.sendMessage("two")
+	_ = m.sendReadyMessage("one")
+	_ = m.sendReadyMessage("two")
 	require.Len(t, m.queuedPrompts, 2)
 
 	m.appendSessionMessage(message.Message{
@@ -113,7 +113,7 @@ func TestQueuedPromptReconcileWithAuthoritativeQueue(t *testing.T) {
 	pinTTLs(t)
 	m, _ := newQueuedTestUI()
 
-	_ = m.sendMessage("mine")
+	_ = m.sendReadyMessage("mine")
 
 	// The authoritative fetch confirms the local entry and adds one
 	// queued from another client.
@@ -139,8 +139,8 @@ func TestQueuedPromptReconcileKeepsDuplicates(t *testing.T) {
 	pinTTLs(t)
 	m, _ := newQueuedTestUI()
 
-	_ = m.sendMessage("again")
-	_ = m.sendMessage("again")
+	_ = m.sendReadyMessage("again")
+	_ = m.sendReadyMessage("again")
 	require.Len(t, m.queuedPrompts, 2)
 
 	m.reconcileQueuedPrompts([]string{"again", "again"})
@@ -185,7 +185,7 @@ func TestQueuedPromptNeverPaintsIntoAgentView(t *testing.T) {
 	pinTTLs(t)
 	m, _ := newQueuedTestUI()
 
-	_ = m.sendMessage("queued for main")
+	_ = m.sendReadyMessage("queued for main")
 	showAgentView(m, queuedTestChild)
 	showMainView(m)
 	showAgentView(m, queuedTestChild)
@@ -204,7 +204,7 @@ func TestQueuedPromptReturnsWithMainTranscript(t *testing.T) {
 	pinTTLs(t)
 	m, _ := newQueuedTestUI()
 
-	_ = m.sendMessage("queued for main")
+	_ = m.sendReadyMessage("queued for main")
 	showAgentView(m, queuedTestChild)
 	showMainView(m)
 
@@ -220,7 +220,7 @@ func TestQueuedPromptDrainedWhileAgentViewedIsNotRestored(t *testing.T) {
 	pinTTLs(t)
 	m, _ := newQueuedTestUI()
 
-	_ = m.sendMessage("queued for main")
+	_ = m.sendReadyMessage("queued for main")
 	showAgentView(m, queuedTestChild)
 
 	drained := message.Message{
@@ -243,7 +243,7 @@ func TestQueuedPromptsDroppedOnSessionSwitch(t *testing.T) {
 	pinTTLs(t)
 	m, _ := newQueuedTestUI()
 
-	_ = m.sendMessage("queued for s1")
+	_ = m.sendReadyMessage("queued for s1")
 	m.session = &session.Session{ID: "s2"}
 	_ = m.setSessionMessages(nil)
 

@@ -138,14 +138,14 @@ type Chat struct {
 	manualSelection bool
 
 	// transcriptID is the session whose transcript the list holds, and
-	// viewStates how the user left each transcript it has held. Every
+	// viewStates how the user left the transcripts it held recently. Every
 	// replacement of the list goes through SetMessages or ClearMessages,
 	// which save the outgoing transcript's state under its ID and
 	// restore the incoming one's, so switching between the main session
 	// and an agent's keeps expansion, selection and scroll by
 	// construction rather than by each caller remembering to.
 	transcriptID string
-	viewStates   map[string]ChatViewState
+	viewStates   viewStateCache
 
 	// drawCache memoizes the decoded form of the last list.Render output so
 	// repeat frames with byte-identical content skip the per-cell ANSI
@@ -196,7 +196,6 @@ func NewChat(com *common.Common, scrollbarMode string) *Chat {
 	c := &Chat{
 		com:           com,
 		idInxMap:      make(map[string]int),
-		viewStates:    make(map[string]ChatViewState),
 		scrollbarMode: scrollbarMode,
 		animAllowed:   true,
 		itemKeys:      chat.DefaultItemKeymap(),
@@ -525,7 +524,7 @@ func (m *Chat) SetMessages(transcriptID string, msgs ...chat.MessageItem) tea.Cm
 	m.list.SetItems(items...)
 	m.rebuildIndices()
 	m.transcriptID = transcriptID
-	m.restoreViewState(m.viewStates[transcriptID])
+	m.restoreViewState(m.viewStates.take(transcriptID))
 	return nil
 }
 

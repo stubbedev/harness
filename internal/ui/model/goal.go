@@ -8,6 +8,7 @@ import (
 
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/session"
+	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/workspace"
 )
@@ -36,10 +37,11 @@ func (m *UI) setGoal(condition string) tea.Cmd {
 }
 
 func storeGoal(ws workspace.Workspace, sessionID, condition string) tea.Msg {
-	if err := ws.AgentReadyErr(); err != nil {
+	ctx, cancel := common.WorkspaceCallContext()
+	defer cancel()
+	if err := ws.AgentReadyErr(ctx); err != nil {
 		return util.NewErrorMsg(err)
 	}
-	ctx := context.Background()
 	msg := goalSetMsg{sessionID: sessionID, condition: condition}
 	if sessionID == "" {
 		created, err := ws.CreateSession(ctx, "New Session")

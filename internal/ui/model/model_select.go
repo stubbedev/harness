@@ -53,7 +53,7 @@ func saveModel(ws workspace.Workspace, modelType config.SelectedModelType, model
 }
 
 func syncAgentModel(ws workspace.Workspace) error {
-	ready, err := agentReady(ws)
+	ready, err := probeAgentReady(ws)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func (m *UI) applySessionModelRestored(msg sessionModelRestoredMsg) tea.Cmd {
 // While the agent is mid-turn the choice is queued and applied when
 // the turn finishes, so the in-flight request is untouched.
 func (m *UI) handleSelectReasoningEffort(msg dialog.ActionSelectReasoningEffort) tea.Cmd {
-	if m.isAgentBusy() {
+	if m.isAnyAgentBusy() {
 		m.pendingModelAction = msg
 		m.dialog.CloseDialog(dialog.ReasoningID)
 		return util.ReportInfo("Reasoning effort applies after the current turn")
@@ -199,7 +199,7 @@ func (m *UI) applyReasoningEffortSaved(msg reasoningEffortSavedMsg) tea.Cmd {
 // handleSelectModel performs the model selection after any provider
 // pre-checks have completed.
 func (m *UI) handleSelectModel(msg dialog.ActionSelectModel) tea.Cmd {
-	if m.isAgentBusy() {
+	if m.isAnyAgentBusy() {
 		// The in-flight turn keeps the model it started with; the
 		// choice is queued and applied when the turn finishes.
 		m.pendingModelAction = msg

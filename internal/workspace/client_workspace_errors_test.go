@@ -63,15 +63,15 @@ func TestClientWorkspace_ServerDownReadersReturnErrors(t *testing.T) {
 	ctx := t.Context()
 
 	calls := map[string]func() error{
-		"AgentIsBusy": func() error { _, err := ws.AgentIsBusy(); return err },
+		"AgentIsBusy": func() error { _, err := ws.AgentIsBusy(t.Context()); return err },
 		"AgentIsSessionBusy": func() error {
-			_, err := ws.AgentIsSessionBusy("s1")
+			_, err := ws.AgentIsSessionBusy(t.Context(), "s1")
 			return err
 		},
-		"AgentModel":         func() error { _, err := ws.AgentModel(); return err },
+		"AgentModel":         func() error { _, err := ws.AgentModel(t.Context()); return err },
 		"AgentQueuedPrompts": func() error { _, err := ws.AgentQueuedPrompts("s1"); return err },
 		"AgentQueuedPromptsList": func() error {
-			_, err := ws.AgentQueuedPromptsList("s1")
+			_, err := ws.AgentQueuedPromptsList(t.Context(), "s1")
 			return err
 		},
 		"FileTrackerLastReadTime": func() error {
@@ -88,7 +88,7 @@ func TestClientWorkspace_ServerDownReadersReturnErrors(t *testing.T) {
 			return err
 		},
 		"MCPGetStates": func() error { _, err := ws.MCPGetStates(); return err },
-		"MCPAuthURL":   func() error { _, err := ws.MCPAuthURL("m"); return err },
+		"MCPAuthURL":   func() error { _, err := ws.MCPAuthURL(t.Context(), "m"); return err },
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
@@ -184,11 +184,11 @@ func TestClientWorkspace_StateReadersReturnServerValues(t *testing.T) {
 		}
 	})
 
-	busy, err := ws.AgentIsBusy()
+	busy, err := ws.AgentIsBusy(t.Context())
 	require.NoError(t, err)
 	require.True(t, busy)
 
-	prompts, err := ws.AgentQueuedPromptsList("s1")
+	prompts, err := ws.AgentQueuedPromptsList(t.Context(), "s1")
 	require.NoError(t, err)
 	require.Equal(t, []string{"a", "b"}, prompts)
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -39,7 +40,10 @@ type MCPAuth struct {
 	current   int
 	state     MCPAuthState
 	err       error
-	authURLFn func(name string) (string, error)
+	authURLFn func(ctx context.Context, name string) (string, error)
+	// authURL is the current server's authorization URL once the flow
+	// produced one, polled off the Update goroutine while authenticating.
+	authURL string
 
 	cancelAuth context.CancelFunc
 
@@ -55,7 +59,7 @@ type MCPAuth struct {
 var _ Dialog = (*MCPAuth)(nil)
 
 // NewMCPAuth creates a new MCP authentication dialog.
-func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authURLFn func(string) (string, error)) (*MCPAuth, tea.Cmd) {
+func NewMCPAuth(com *common.Common, pending []mcptools.PendingAuthServer, authURLFn func(context.Context, string) (string, error)) (*MCPAuth, tea.Cmd) {
 	t := com.Styles
 	m := &MCPAuth{
 		com:       com,
@@ -117,7 +121,9 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 			case MCPAuthStatePrompt:
 				return m.startAuth()
 			case MCPAuthStateAuthenticating:
-				m.openAuthURL()
+				if m.authURL != "" {
+					return ActionCmd{openBrowserCmd(m.authURL)}
+				}
 			case MCPAuthStateSuccess:
 				return m.advance()
 			default:
@@ -127,7 +133,7 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 			// During authentication the authorization URL exists; during
 			// prompt we fall back to the server URL. Starting the flow
 			// (and opening the browser) is enter's job, not c's.
-			if u := m.authURL(); u != "" {
+			if u := m.authURL; u != "" {
 				return ActionCmd{common.CopyToClipboard(u, "URL copied to clipboard")}
 			}
 			if u := m.currentServer().URL; u != "" {
@@ -141,6 +147,22 @@ func (m *MCPAuth) HandleMsg(msg tea.Msg) Action {
 			m.CancelAuth()
 			return ActionClose{}
 		}
+
+	case mcpAuthURLMsg:
+		if !m.polling(msg.owner, msg.server) {
+			return nil
+		}
+		if msg.url != "" {
+			m.authURL = msg.url
+			return nil
+		}
+		return ActionCmd{m.pollAuthURLLater(msg.server)}
+
+	case mcpAuthURLPollMsg:
+		if !m.polling(msg.owner, msg.server) {
+			return nil
+		}
+		return ActionCmd{m.fetchAuthURLCmd(msg.server)}
 
 	case ActionMCPAuthComplete:
 		m.state = MCPAuthStateSuccess
@@ -162,6 +184,7 @@ func (m *MCPAuth) startAuth() Action {
 	}
 	m.state = MCPAuthStateAuthenticating
 	m.err = nil
+	m.authURL = ""
 	name := m.pending[m.current].Name
 
 	// Create a cancellable context owned by the dialog. The UI will
@@ -175,6 +198,7 @@ func (m *MCPAuth) startAuth() Action {
 		func() tea.Msg {
 			return ActionMCPAuthStarted{Name: name, Ctx: ctx}
 		},
+		m.fetchAuthURLCmd(name),
 	)}
 }
 
@@ -186,27 +210,69 @@ func (m *MCPAuth) advance() Action {
 	}
 	m.state = MCPAuthStatePrompt
 	m.err = nil
+	m.authURL = ""
 	return nil
 }
 
-func (m *MCPAuth) openAuthURL() {
-	if u := m.authURL(); u != "" {
-		browser.OpenURL(u)
+// authURLPollInterval paces the authorization URL poll while a flow runs
+// without having produced one yet.
+const authURLPollInterval = 500 * time.Millisecond
+
+// mcpAuthURLMsg carries a fetched authorization URL, empty while the
+// flow has not produced one. owner and server are the dialog and the
+// server it was fetched for: a URL for a dialog since closed or
+// reopened, or for a server it moved past, is dropped.
+type mcpAuthURLMsg struct {
+	owner  *MCPAuth
+	server string
+	url    string
+}
+
+func (mcpAuthURLMsg) targetDialog() ID { return MCPAuthID }
+
+// mcpAuthURLPollMsg asks for the next authorization URL fetch.
+type mcpAuthURLPollMsg struct {
+	owner  *MCPAuth
+	server string
+}
+
+func (mcpAuthURLPollMsg) targetDialog() ID { return MCPAuthID }
+
+// polling reports whether a poll result still concerns this dialog's
+// flow in progress.
+func (m *MCPAuth) polling(owner *MCPAuth, server string) bool {
+	return owner == m && m.state == MCPAuthStateAuthenticating && m.currentServer().Name == server
+}
+
+// fetchAuthURLCmd fetches the server's authorization URL off the Update
+// goroutine: in client/server mode it is a round trip.
+func (m *MCPAuth) fetchAuthURLCmd(server string) tea.Cmd {
+	if m.authURLFn == nil {
+		return nil
+	}
+	fetch := m.authURLFn
+	return func() tea.Msg {
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		u, err := fetch(ctx, server)
+		if err != nil {
+			slog.Warn("Failed to fetch MCP auth URL", "server", server, "error", err)
+		}
+		return mcpAuthURLMsg{owner: m, server: server, url: u}
 	}
 }
 
-// authURL returns the browser authorization URL for the current server,
-// or empty if the flow has not produced one yet.
-func (m *MCPAuth) authURL() string {
-	if m.authURLFn == nil {
-		return ""
+func (m *MCPAuth) pollAuthURLLater(server string) tea.Cmd {
+	return tea.Tick(authURLPollInterval, func(time.Time) tea.Msg {
+		return mcpAuthURLPollMsg{owner: m, server: server}
+	})
+}
+
+func openBrowserCmd(u string) tea.Cmd {
+	return func() tea.Msg {
+		browser.OpenURL(u)
+		return nil
 	}
-	u, err := m.authURLFn(m.currentServer().Name)
-	if err != nil {
-		slog.Warn("Failed to fetch MCP auth URL", "server", m.currentServer().Name, "error", err)
-		return ""
-	}
-	return u
 }
 
 func (m *MCPAuth) currentServer() mcptools.PendingAuthServer {
@@ -305,7 +371,7 @@ func (m *MCPAuth) innerContent() string {
 			"",
 			block(waiting),
 			"",
-			urlText(m.authURL()),
+			urlText(m.authURL),
 			"",
 		)
 

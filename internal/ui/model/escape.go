@@ -85,7 +85,7 @@ func (m *UI) stopAgent() tea.Cmd {
 
 	done := make(chan struct{})
 	m.stopDone = done
-	return tea.Batch(m.restoreStoppedPrompts(dropped), cancelSession(m.com.Workspace, m.session.ID, done))
+	return tea.Batch(m.restorePrompts(dropped), cancelSession(m.com.Workspace, m.session.ID, done))
 }
 
 func cancelSession(ws workspace.Workspace, sessionID string, done chan struct{}) tea.Cmd {
@@ -114,7 +114,7 @@ func (m *UI) settleStop(busy bool) bool {
 	return false
 }
 
-func (m *UI) restoreStoppedPrompts(prompts []string) tea.Cmd {
+func (m *UI) restorePrompts(prompts []string) tea.Cmd {
 	if len(prompts) == 0 {
 		return nil
 	}

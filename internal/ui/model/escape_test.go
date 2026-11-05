@@ -292,7 +292,7 @@ func TestSendAfterStopClearsStopGuard(t *testing.T) {
 	runCmds(m, pressEsc(m))
 	require.True(t, m.stopping)
 
-	require.NotNil(t, m.sendMessage("next"))
+	require.NotNil(t, m.sendReadyMessage("next"))
 	require.False(t, m.stopping)
 	require.True(t, m.isAgentBusy())
 }

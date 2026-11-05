@@ -348,17 +348,17 @@ func TestClientWorkspace_AgentReadyErr(t *testing.T) {
 	t.Run("ready", func(t *testing.T) {
 		t.Parallel()
 		ws := agentInfoWorkspace(t, proto.AgentInfo{IsReady: true})
-		require.NoError(t, ws.AgentReadyErr())
-		require.True(t, ws.AgentIsReady())
+		require.NoError(t, ws.AgentReadyErr(t.Context()))
+		require.True(t, ws.AgentIsReady(t.Context()))
 	})
 
 	t.Run("not initialized", func(t *testing.T) {
 		t.Parallel()
 		ws := agentInfoWorkspace(t, proto.AgentInfo{IsReady: false})
-		err := ws.AgentReadyErr()
+		err := ws.AgentReadyErr(t.Context())
 		require.ErrorIs(t, err, ErrAgentNotInitialized)
 		require.NotErrorIs(t, err, ErrServerUnreachable)
-		require.False(t, ws.AgentIsReady())
+		require.False(t, ws.AgentIsReady(t.Context()))
 	})
 
 	t.Run("server unreachable", func(t *testing.T) {
@@ -366,10 +366,10 @@ func TestClientWorkspace_AgentReadyErr(t *testing.T) {
 		c, err := client.NewClient(t.TempDir(), "tcp", "127.0.0.1:1")
 		require.NoError(t, err)
 		ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
-		readyErr := ws.AgentReadyErr()
+		readyErr := ws.AgentReadyErr(t.Context())
 		require.ErrorIs(t, readyErr, ErrServerUnreachable)
 		require.NotErrorIs(t, readyErr, ErrAgentNotInitialized)
-		require.False(t, ws.AgentIsReady())
+		require.False(t, ws.AgentIsReady(t.Context()))
 	})
 }
 
@@ -764,7 +764,7 @@ func TestClientWorkspace_AgentReadyErr_WorkspaceGone(t *testing.T) {
 	require.NoError(t, err)
 
 	ws := NewClientWorkspace(c, proto.Workspace{ID: "ws-1"})
-	readyErr := ws.AgentReadyErr()
+	readyErr := ws.AgentReadyErr(t.Context())
 	require.ErrorIs(t, readyErr, ErrWorkspaceGone)
 	require.NotErrorIs(t, readyErr, ErrServerUnreachable)
 	require.NotErrorIs(t, readyErr, ErrAgentNotInitialized)

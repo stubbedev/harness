@@ -2,6 +2,7 @@ package dialog
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/list"
 	"github.com/stubbedev/harness/internal/ui/styles"
+	"github.com/stubbedev/harness/internal/ui/util"
+	"github.com/stubbedev/harness/internal/workspace"
 )
 
 // RewindID is the identifier for the rewind (checkpoint) picker dialog.
@@ -66,26 +69,54 @@ type Rewind struct {
 	sessionID string
 	turns     []RewindTurn
 	selected  RewindTurn
+	// loading is set until the turns land; loadErr says why they did
+	// not.
+	loading bool
+	loadErr error
 }
 
 var _ Dialog = (*Rewind)(nil)
 
-// NewRewind creates a rewind dialog for a session, listing its user
-// turns newest first.
-func NewRewind(com *common.Common, sessionID string) (*Rewind, error) {
+// rewindLoadedMsg carries the turns a Rewind dialog fetched. owner is
+// the dialog that asked: turns for one since closed, or closed and
+// reopened, are dropped.
+type rewindLoadedMsg struct {
+	owner *Rewind
+	turns []RewindTurn
+	err   error
+}
+
+func (rewindLoadedMsg) targetDialog() ID { return RewindID }
+
+// NewRewind creates a rewind dialog for a session and the command that
+// fetches its user turns; the list shows a loading state until they
+// land.
+func NewRewind(com *common.Common, sessionID string) (*Rewind, tea.Cmd) {
 	km := dialogKeys()
 	r := &Rewind{
 		twoPhasePicker: newTwoPhasePicker(com, "Filter turns", km.Rewind.Select, km.Rewind.Back, km.Close),
 		sessionID:      sessionID,
+		loading:        true,
 	}
+	ws := com.Workspace
+	return r, func() tea.Msg {
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		turns, err := fetchRewindTurns(ctx, ws, sessionID)
+		return rewindLoadedMsg{owner: r, turns: turns, err: err}
+	}
+}
 
-	messages, err := com.Workspace.ListUserMessages(context.TODO(), sessionID)
+// fetchRewindTurns lists a session's user turns newest first, each
+// marked with whether a working-tree snapshot backs it.
+func fetchRewindTurns(ctx context.Context, ws workspace.Workspace, sessionID string) ([]RewindTurn, error) {
+	messages, err := ws.ListUserMessages(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list the turns of session %s: %w", sessionID, err)
 	}
-	checkpointList, err := com.Workspace.ListCheckpoints(context.TODO(), sessionID)
+	checkpointList, err := ws.ListCheckpoints(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list the checkpoints of session %s: %w", sessionID, err)
 	}
 	snapshotted := make(map[string]bool, len(checkpointList))
 	for _, cp := range checkpointList {
@@ -95,21 +126,37 @@ func NewRewind(com *common.Common, sessionID string) (*Rewind, error) {
 	// ListUserMessages is newest first already; keep only prompts with
 	// text, so auxiliary user-role records (e.g. shell commands) do not
 	// clutter the picker.
+	var turns []RewindTurn
 	for _, msg := range messages {
 		prompt := userPromptText(msg)
 		if prompt == "" {
 			continue
 		}
-		r.turns = append(r.turns, RewindTurn{
+		turns = append(turns, RewindTurn{
 			MessageID: msg.ID,
 			Prompt:    prompt,
 			CreatedAt: time.Unix(msg.CreatedAt, 0),
 			HasFiles:  snapshotted[msg.ID],
 		})
 	}
+	return turns, nil
+}
 
-	r.list.SetItems(rewindTurnItems(com.Styles, r.turns)...)
-	return r, nil
+// applyLoaded fills the turn list once the fetch lands.
+func (r *Rewind) applyLoaded(msg rewindLoadedMsg) Action {
+	r.loading = false
+	if msg.err != nil {
+		r.loadErr = msg.err
+		return ActionCmd{util.ReportError(msg.err)}
+	}
+	r.turns = msg.turns
+	if r.phase == pickerPhaseList {
+		r.list.SetItems(rewindTurnItems(r.com.Styles, r.turns)...)
+		if query := r.input.Value(); query != "" {
+			applyListFilter(r.list)(query)
+		}
+	}
+	return nil
 }
 
 // userPromptText returns the first non-empty text part of a user
@@ -129,6 +176,12 @@ func (r *Rewind) ID() ID {
 
 // HandleMsg implements Dialog.
 func (r *Rewind) HandleMsg(msg tea.Msg) Action {
+	if loaded, ok := msg.(rewindLoadedMsg); ok {
+		if loaded.owner != r {
+			return nil
+		}
+		return r.applyLoaded(loaded)
+	}
 	return r.handleMsg(msg, r)
 }
 
@@ -183,7 +236,12 @@ func (r *Rewind) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	st := r.com.Styles
 	if r.phase == pickerPhaseList {
 		header := ""
-		if len(r.turns) == 0 {
+		switch {
+		case r.loading:
+			header = st.Dialog.NormalItem.Render("Loading turns…")
+		case r.loadErr != nil:
+			header = st.Dialog.NormalItem.Render("Could not load turns.")
+		case len(r.turns) == 0:
 			header = st.Dialog.NormalItem.Render("No user turns to rewind to yet.")
 		}
 		return r.draw(scr, area, "Rewind", header)

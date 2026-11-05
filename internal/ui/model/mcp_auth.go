@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stubbedev/harness/internal/agent/tools/mcp"
+	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/ui/dialog"
 	"github.com/stubbedev/harness/internal/ui/util"
 	"github.com/stubbedev/harness/internal/workspace"
@@ -43,11 +44,26 @@ func (m *UI) authenticateMCP(ctx context.Context, name string) tea.Cmd {
 	}
 }
 
+// mcpPendingAuthMsg carries the servers waiting for authentication,
+// fetched off-thread.
+type mcpPendingAuthMsg struct {
+	pending []mcp.PendingAuthServer
+}
+
+// fetchMCPPendingAuth lists the servers pending authentication off the
+// Update goroutine: in client/server mode it is a round trip.
+func fetchMCPPendingAuth(ws workspace.Workspace) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		return mcpPendingAuthMsg{pending: ws.MCPPendingAuth(ctx)}
+	}
+}
+
 // openMCPAuthDialog opens the MCP authentication dialog if any servers
 // are pending auth. If the dialog is already open, it brings it to the
 // front instead.
-func (m *UI) openMCPAuthDialog() tea.Cmd {
-	pending := m.com.Workspace.MCPPendingAuth()
+func (m *UI) openMCPAuthDialog(pending []mcp.PendingAuthServer) tea.Cmd {
 	if len(pending) == 0 {
 		return nil
 	}
@@ -74,9 +90,11 @@ func (m *UI) checkPendingMCPAuth() tea.Cmd {
 }
 
 func mcpStatesMsg(ws workspace.Workspace) tea.Msg {
+	ctx, cancel := common.WorkspaceCallContext()
+	defer cancel()
 	states, err := ws.MCPGetStates()
 	if err != nil {
 		return util.NewErrorMsg(err)
 	}
-	return mcpStateChangedMsg{states: states}
+	return mcpStateChangedMsg{states: states, pendingAuth: ws.MCPPendingAuth(ctx)}
 }

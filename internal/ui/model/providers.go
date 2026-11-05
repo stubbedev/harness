@@ -130,7 +130,7 @@ func (m *UI) saveProvider(msg dialog.ActionSaveProvider) tea.Cmd {
 }
 
 func refreshAgentProviders(ws workspace.Workspace) error {
-	ready, err := agentReady(ws)
+	ready, err := probeAgentReady(ws)
 	if err != nil || !ready {
 		return err
 	}

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -17,11 +18,13 @@ type unreachableWorkspace struct {
 	*countingWorkspace
 }
 
-func (w *unreachableWorkspace) AgentReadyErr() error {
+func (w *unreachableWorkspace) AgentReadyErr(context.Context) error {
 	return errors.Join(workspace.ErrServerUnreachable, errUnreachable)
 }
 
-func (w *unreachableWorkspace) AgentIsBusy() (bool, error) { return false, errUnreachable }
+func (w *unreachableWorkspace) AgentIsBusy(context.Context) (bool, error) {
+	return false, errUnreachable
+}
 
 func (w *unreachableWorkspace) AgentCancel(string) error { return errUnreachable }
 
@@ -128,3 +131,5 @@ type mcpStatesWorkspace struct {
 func (w *mcpStatesWorkspace) MCPGetStates() (map[string]mcp.ClientInfo, error) {
 	return nil, w.err
 }
+
+func (w *mcpStatesWorkspace) MCPPendingAuth(context.Context) []mcp.PendingAuthServer { return nil }

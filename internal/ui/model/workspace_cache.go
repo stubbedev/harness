@@ -25,12 +25,14 @@ package model
 // Update, no model mutation inside commands).
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/stubbedev/harness/internal/ui/common"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
@@ -76,9 +78,12 @@ type busyStateMsg struct {
 	// before a newer state transition (optimistic send, invalidation,
 	// session switch, ...) and is discarded, then re-fetched, so the
 	// authoritative refresh is never lost to an older in-flight request.
-	gen       uint64
-	ready     bool
-	agentBusy bool
+	gen   uint64
+	ready bool
+	// sessionBusy is whether the session the probe was dispatched for is
+	// busy; anyBusy whether any session is.
+	sessionBusy bool
+	anyBusy     bool
 	// model is the coordinator's selected model, fetched by the same probe
 	// so the sidebar/landing model info renders from memoized state. Zero
 	// (and ignored) when ready is false.
@@ -150,27 +155,58 @@ func (m *UI) dispatchBusyRefresh() tea.Cmd {
 	m.busyFetchInFlight = true
 	ws := m.com.Workspace
 	gen := m.busyFetchGen
+	sessionID := m.currentSessionID()
 	stopDone := m.stopDone
 	return func() tea.Msg {
 		awaitStop(stopDone)
-		return probeBusyState(ws, gen)
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
+		return probeBusyState(ctx, ws, gen, sessionID)
 	}
 }
 
-func probeBusyState(ws workspace.Workspace, gen uint64) busyStateMsg {
+// probeBusyState probes readiness, the busy state of sessionID and of
+// the whole workspace, and the selected model. With no session open
+// there is no session to be busy. A session switch bumps the busy
+// generation, so the result of a probe for the session left is
+// discarded by its gen.
+func probeBusyState(ctx context.Context, ws workspace.Workspace, gen uint64, sessionID string) busyStateMsg {
 	st := busyStateMsg{gen: gen}
-	if st.ready, st.err = agentReady(ws); st.err != nil || !st.ready {
+	if st.ready, st.err = agentReady(ctx, ws); st.err != nil || !st.ready {
 		return st
 	}
-	if st.agentBusy, st.err = ws.AgentIsBusy(); st.err != nil {
+	if sessionID != "" {
+		if st.sessionBusy, st.err = ws.AgentIsSessionBusy(ctx, sessionID); st.err != nil {
+			return st
+		}
+	}
+	if st.anyBusy, st.err = ws.AgentIsBusy(ctx); st.err != nil {
 		return st
 	}
-	st.model, st.err = ws.AgentModel()
+	st.model, st.err = ws.AgentModel(ctx)
 	return st
 }
 
-func agentReady(ws workspace.Workspace) (bool, error) {
-	err := ws.AgentReadyErr()
+// sessionBusy reports whether sessionID has a request in flight. An agent
+// that is not ready runs nothing.
+func sessionBusy(ctx context.Context, ws workspace.Workspace, sessionID string) (bool, error) {
+	ready, err := agentReady(ctx, ws)
+	if err != nil || !ready {
+		return false, err
+	}
+	return ws.AgentIsSessionBusy(ctx, sessionID)
+}
+
+// probeAgentReady is agentReady bounded on its own, for a caller whose
+// other calls are not.
+func probeAgentReady(ws workspace.Workspace) (bool, error) {
+	ctx, cancel := common.WorkspaceCallContext()
+	defer cancel()
+	return agentReady(ctx, ws)
+}
+
+func agentReady(ctx context.Context, ws workspace.Workspace) (bool, error) {
+	err := ws.AgentReadyErr(ctx)
 	if errors.Is(err, workspace.ErrAgentNotInitialized) {
 		return false, nil
 	}
@@ -201,19 +237,20 @@ func (m *UI) applyBusyState(msg busyStateMsg) []tea.Cmd {
 		}
 		return nil
 	}
-	prevBusy := m.isAgentBusy()
+	prevBusy := m.isAnyAgentBusy()
 	if msg.err != nil {
 		slog.Warn("Failed to refresh agent state", "error", msg.err)
 		m.agentBusyCache.retain()
 		return nil
 	}
-	m.agentBusyCache.set(m.settleStop(msg.agentBusy))
+	m.agentBusyCache.set(m.settleStop(msg.sessionBusy))
+	m.anyAgentBusy = msg.anyBusy
 	m.agentReady = msg.ready
 	m.agentModel = msg.model
-	// A model or effort selection queued while the turn was running
-	// applies now that the agent is idle, so the next turn starts with
-	// the user's choice.
-	if prevBusy && !m.isAgentBusy() && m.pendingModelAction != nil {
+	// A model or effort selection queued while a turn was running applies
+	// once no session runs one, so the next turn starts with the user's
+	// choice and no in-flight turn has its model swapped.
+	if prevBusy && !m.isAnyAgentBusy() && m.pendingModelAction != nil {
 		if cmd := m.applyPendingModelAction(); cmd != nil {
 			return []tea.Cmd{cmd}
 		}
@@ -249,14 +286,16 @@ func (m *UI) dispatchPromptQueueRefresh() tea.Cmd {
 	stopDone := m.stopDone
 	return func() tea.Msg {
 		awaitStop(stopDone)
+		ctx, cancel := common.WorkspaceCallContext()
+		defer cancel()
 		msg := promptQueueMsg{forSession: sessionID, gen: gen}
-		ready, err := agentReady(ws)
+		ready, err := agentReady(ctx, ws)
 		if err != nil {
 			msg.err = err
 			return msg
 		}
 		if ready {
-			msg.prompts, msg.err = ws.AgentQueuedPromptsList(sessionID)
+			msg.prompts, msg.err = ws.AgentQueuedPromptsList(ctx, sessionID)
 		}
 		return msg
 	}

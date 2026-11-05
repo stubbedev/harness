@@ -221,24 +221,24 @@ func (w *ClientWorkspace) AgentCancel(sessionID string) error {
 	return w.client.CancelAgentSession(context.Background(), w.workspaceID(), sessionID)
 }
 
-func (w *ClientWorkspace) AgentIsBusy() (bool, error) {
-	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+func (w *ClientWorkspace) AgentIsBusy(ctx context.Context) (bool, error) {
+	info, err := w.client.GetAgentInfo(ctx, w.workspaceID())
 	if err != nil {
 		return false, err
 	}
 	return info.IsBusy, nil
 }
 
-func (w *ClientWorkspace) AgentIsSessionBusy(sessionID string) (bool, error) {
-	info, err := w.client.GetAgentSessionInfo(context.Background(), w.workspaceID(), sessionID)
+func (w *ClientWorkspace) AgentIsSessionBusy(ctx context.Context, sessionID string) (bool, error) {
+	info, err := w.client.GetAgentSessionInfo(ctx, w.workspaceID(), sessionID)
 	if err != nil {
 		return false, err
 	}
 	return info.IsBusy, nil
 }
 
-func (w *ClientWorkspace) AgentModel() (AgentModel, error) {
-	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+func (w *ClientWorkspace) AgentModel(ctx context.Context) (AgentModel, error) {
+	info, err := w.client.GetAgentInfo(ctx, w.workspaceID())
 	if err != nil {
 		return AgentModel{}, err
 	}
@@ -248,12 +248,12 @@ func (w *ClientWorkspace) AgentModel() (AgentModel, error) {
 	}, nil
 }
 
-func (w *ClientWorkspace) AgentIsReady() bool {
-	return w.AgentReadyErr() == nil
+func (w *ClientWorkspace) AgentIsReady(ctx context.Context) bool {
+	return w.AgentReadyErr(ctx) == nil
 }
 
-func (w *ClientWorkspace) AgentReadyErr() error {
-	info, err := w.client.GetAgentInfo(context.Background(), w.workspaceID())
+func (w *ClientWorkspace) AgentReadyErr(ctx context.Context) error {
+	info, err := w.client.GetAgentInfo(ctx, w.workspaceID())
 	if err != nil {
 		if errors.Is(err, client.ErrNotFound) {
 			// The server answered, it just does not know this workspace
@@ -276,8 +276,8 @@ func (w *ClientWorkspace) AgentQueuedPrompts(sessionID string) (int, error) {
 	return w.client.GetAgentSessionQueuedPrompts(context.Background(), w.workspaceID(), sessionID)
 }
 
-func (w *ClientWorkspace) AgentQueuedPromptsList(sessionID string) ([]string, error) {
-	return w.client.GetAgentSessionQueuedPromptsList(context.Background(), w.workspaceID(), sessionID)
+func (w *ClientWorkspace) AgentQueuedPromptsList(ctx context.Context, sessionID string) ([]string, error) {
+	return w.client.GetAgentSessionQueuedPromptsList(ctx, w.workspaceID(), sessionID)
 }
 
 func (w *ClientWorkspace) AgentClearQueue(sessionID string) error {
@@ -311,9 +311,9 @@ func (w *ClientWorkspace) GetDefaultSmallModel(providerID catalog.InferenceProvi
 // -- Questions --
 
 // QuestionAnswer submits answers for a question via the client SDK.
-func (w *ClientWorkspace) QuestionAnswer(responses []question.Answer) bool {
+func (w *ClientWorkspace) QuestionAnswer(ctx context.Context, responses []question.Answer) bool {
 	req := proto.QuestionAnswer{Responses: proto.QuestionResponsesFromDomain(responses)}
-	resolved, err := w.client.AnswerQuestionBatch(context.Background(), w.workspaceID(), req)
+	resolved, err := w.client.AnswerQuestionBatch(ctx, w.workspaceID(), req)
 	if err != nil {
 		logErr("answer question", err)
 		return false
@@ -322,8 +322,8 @@ func (w *ClientWorkspace) QuestionAnswer(responses []question.Answer) bool {
 }
 
 // QuestionCancel cancels the pending question via the client SDK.
-func (w *ClientWorkspace) QuestionCancel() bool {
-	cancelled, err := w.client.CancelQuestionBatch(context.Background(), w.workspaceID())
+func (w *ClientWorkspace) QuestionCancel(ctx context.Context) bool {
+	cancelled, err := w.client.CancelQuestionBatch(ctx, w.workspaceID())
 	if err != nil {
 		logErr("cancel question", err)
 		return false
@@ -670,7 +670,7 @@ func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) erro
 			if opened {
 				continue
 			}
-			u, err := w.MCPAuthURL(name)
+			u, err := w.MCPAuthURL(ctx, name)
 			if err != nil {
 				logErr("poll MCP auth URL", err)
 				continue
@@ -685,8 +685,8 @@ func (w *ClientWorkspace) MCPAuthenticate(ctx context.Context, name string) erro
 	}
 }
 
-func (w *ClientWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
-	pending, err := w.client.MCPPendingAuth(context.Background(), w.workspaceID())
+func (w *ClientWorkspace) MCPPendingAuth(ctx context.Context) []mcp.PendingAuthServer {
+	pending, err := w.client.MCPPendingAuth(ctx, w.workspaceID())
 	if err != nil {
 		logErr("fetch MCP pending auth", err)
 		return nil
@@ -694,12 +694,12 @@ func (w *ClientWorkspace) MCPPendingAuth() []mcp.PendingAuthServer {
 	return proto.MCPPendingAuthServersToDomain(pending)
 }
 
-func (w *ClientWorkspace) MCPAuthURL(name string) (string, error) {
+func (w *ClientWorkspace) MCPAuthURL(ctx context.Context, name string) (string, error) {
 	// The server's in-progress authorization URL is exposed through the
 	// pending-auth list while the flow runs; a server in StateNeedsAuth
 	// paired with an active flow reports its URL here. Poll the server
 	// for the in-flight URL.
-	return w.client.MCPAuthURL(context.Background(), w.workspaceID(), name)
+	return w.client.MCPAuthURL(ctx, w.workspaceID(), name)
 }
 
 func (w *ClientWorkspace) MCPReconnect(ctx context.Context, name string) error {

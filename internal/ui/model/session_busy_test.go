@@ -29,13 +29,16 @@ import (
 type countingWorkspace struct {
 	workspace.Workspace
 
-	ready           bool
-	agentBusy       bool
-	queued          []string
-	model           workspace.AgentModel
-	lspStates       map[string]lsp.ClientInfo
-	lspDiags        map[string]lsp.DiagnosticCounts
-	runningSubagent []workspace.RunningSubagentInfo
+	ready     bool
+	agentBusy bool
+	// otherSessionBusy marks a session other than the stub's as running:
+	// the workspace is busy, the stub's sessions are not.
+	otherSessionBusy bool
+	queued           []string
+	model            workspace.AgentModel
+	lspStates        map[string]lsp.ClientInfo
+	lspDiags         map[string]lsp.DiagnosticCounts
+	runningSubagent  []workspace.RunningSubagentInfo
 
 	// summarizeCalls records every AgentSummarize request (the /compact and
 	// summarize entry points) so tests can pin the focus instructions they
@@ -43,21 +46,33 @@ type countingWorkspace struct {
 	// per-message probe.
 	summarizeCalls []summarizeCall
 
-	readyCalls      int
-	agentBusyCalls  int
-	queuedCalls     int
-	queueListCalls  int
-	permCalls       int
-	permSetCalls    int
-	clearQueueCalls int
-	cancelCalls     int
-	modelCalls      int
-	lspStateCalls   int
-	lspDiagCalls    int
+	readyCalls       int
+	agentBusyCalls   int
+	sessionBusyCalls int
+	queuedCalls      int
+	queueListCalls   int
+	permCalls        int
+	permSetCalls     int
+	clearQueueCalls  int
+	cancelCalls      int
+	modelCalls       int
+	lspStateCalls    int
+	lspDiagCalls     int
 }
 
-func (w *countingWorkspace) AgentIsReady() bool         { w.readyCalls++; return w.ready }
-func (w *countingWorkspace) AgentIsBusy() (bool, error) { w.agentBusyCalls++; return w.agentBusy, nil }
+func (w *countingWorkspace) AgentIsReady(context.Context) bool { w.readyCalls++; return w.ready }
+func (w *countingWorkspace) AgentIsBusy(context.Context) (bool, error) {
+	w.agentBusyCalls++
+	return w.agentBusy || w.otherSessionBusy, nil
+}
+
+// AgentIsSessionBusy reports agentBusy for every session: the stub's
+// sessions run together, and otherSessionBusy stands for one that is not
+// any of them.
+func (w *countingWorkspace) AgentIsSessionBusy(context.Context, string) (bool, error) {
+	w.sessionBusyCalls++
+	return w.agentBusy, nil
+}
 
 // summarizeCall is one recorded AgentSummarize request.
 type summarizeCall struct {
@@ -70,7 +85,7 @@ func (w *countingWorkspace) AgentSummarize(_ context.Context, sessionID, instruc
 	return nil
 }
 
-func (w *countingWorkspace) AgentReadyErr() error {
+func (w *countingWorkspace) AgentReadyErr(context.Context) error {
 	w.readyCalls++
 	if w.ready {
 		return nil
@@ -83,7 +98,7 @@ func (w *countingWorkspace) AgentQueuedPrompts(string) (int, error) {
 	return len(w.queued), nil
 }
 
-func (w *countingWorkspace) AgentQueuedPromptsList(string) ([]string, error) {
+func (w *countingWorkspace) AgentQueuedPromptsList(context.Context, string) ([]string, error) {
 	w.queueListCalls++
 	return w.queued, nil
 }
@@ -103,7 +118,7 @@ func (w *countingWorkspace) ListCheckpoints(context.Context, string) ([]checkpoi
 	return nil, nil
 }
 
-func (w *countingWorkspace) AgentModel() (workspace.AgentModel, error) {
+func (w *countingWorkspace) AgentModel(context.Context) (workspace.AgentModel, error) {
 	w.modelCalls++
 	return w.model, nil
 }
@@ -160,13 +175,13 @@ func (w *countingWorkspace) Config() *config.Config { return nil }
 // zero — the invariant is that no workspace call ever happens on the Update
 // goroutine (which is also the render loop).
 func (w *countingWorkspace) syncProbes() int {
-	return w.readyCalls + w.agentBusyCalls +
+	return w.readyCalls + w.agentBusyCalls + w.sessionBusyCalls +
 		w.queuedCalls + w.queueListCalls + w.permCalls +
 		w.modelCalls + w.lspStateCalls + w.lspDiagCalls
 }
 
 func (w *countingWorkspace) resetCounters() {
-	w.readyCalls, w.agentBusyCalls = 0, 0
+	w.readyCalls, w.agentBusyCalls, w.sessionBusyCalls = 0, 0, 0
 	w.queuedCalls, w.queueListCalls, w.permCalls = 0, 0, 0
 	w.permSetCalls, w.clearQueueCalls, w.cancelCalls = 0, 0, 0
 	w.modelCalls, w.lspStateCalls, w.lspDiagCalls = 0, 0, 0
@@ -226,7 +241,8 @@ func runCmds(m *UI, cmd tea.Cmd) {
 		for _, c := range msg {
 			runCmds(m, c)
 		}
-	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg, runningSubagentsMsg:
+	case busyStateMsg, promptQueueMsg, agentRunSubmittedMsg, lspStatesMsg, agentModelChangedMsg, runningSubagentsMsg,
+		submitCheckedMsg, promptReadyMsg, newSessionCreatedMsg:
 		_, next := m.Update(msg)
 		runCmds(m, next)
 	}
@@ -650,7 +666,7 @@ func TestStaleBusyRefreshDiscardedAndReDispatched(t *testing.T) {
 	m.busyFetchGen++           // newer state transition
 
 	// The stale probe (agent reported idle) lands with the old generation.
-	cmds := m.applyBusyState(busyStateMsg{gen: staleGen, agentBusy: false})
+	cmds := m.applyBusyState(busyStateMsg{gen: staleGen, sessionBusy: false})
 	require.True(t, m.isAgentBusy(),
 		"a stale busy result must not overwrite the newer optimistic busy state")
 	require.NotEmpty(t, cmds,
@@ -659,7 +675,7 @@ func TestStaleBusyRefreshDiscardedAndReDispatched(t *testing.T) {
 
 	// The fresh probe (matching generation) is applied normally.
 	freshGen := m.busyFetchGen
-	m.applyBusyState(busyStateMsg{gen: freshGen, agentBusy: false})
+	m.applyBusyState(busyStateMsg{gen: freshGen, sessionBusy: false})
 	require.False(t, m.isAgentBusy(), "a current-generation result must land in the cache")
 }
 
@@ -947,4 +963,40 @@ func TestAgentErrorNotificationToastsTerminalFailure(t *testing.T) {
 	require.NotNil(t, cmd, "a terminal failure must produce a toast command")
 	require.True(t, m.isAgentBusy(),
 		"the toast path must not disturb the busy cache either")
+}
+
+// TestAnotherSessionsRunLeavesThisOneIdle pins that the busy state is
+// the current session's: with only another session running, this one
+// takes prompts without queueing them and has nothing to stop, while
+// what acts on the whole process (suspend, the shared model) still sees
+// the run.
+func TestAnotherSessionsRunLeavesThisOneIdle(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true, otherSessionBusy: true}
+	m := newBusyUI(ws)
+	warmCaches(m, false)
+	m.invalidateBusyCaches()
+	runCmds(m, m.dispatchBusyRefresh())
+
+	require.False(t, m.isAgentBusy(), "another session's run does not make this one busy")
+	require.False(t, m.canStop(), "there is nothing in this session to stop")
+	require.True(t, m.isAnyAgentBusy(), "the process-wide check still sees the run")
+
+	_ = m.sendReadyMessage("go")
+	require.Empty(t, m.queuedPrompts, "a prompt to an idle session is not queued")
+}
+
+// TestSessionSwitchTakesTheNewSessionsBusyState pins that a switch does
+// not carry the departed session's busy state over: the loaded session's
+// own state applies with its transcript.
+func TestSessionSwitchTakesTheNewSessionsBusyState(t *testing.T) {
+	pinTTLs(t)
+
+	ws := &countingWorkspace{ready: true}
+	m := newBusyUI(ws)
+	warmCaches(m, true)
+	m.sessionLoadRequested = "s2"
+	m.Update(loadSessionMsg{session: &session.Session{ID: "s2"}, busy: false})
+	require.False(t, m.isAgentBusy())
 }

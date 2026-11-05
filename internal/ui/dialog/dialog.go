@@ -319,6 +319,12 @@ func (d *Overlay) Update(msg tea.Msg) Action {
 	if len(d.dialogs) == 0 {
 		return nil
 	}
+	if t, ok := msg.(targetedMsg); ok {
+		if target := d.Dialog(t.targetDialog()); target != nil {
+			return target.HandleMsg(msg)
+		}
+		return nil
+	}
 
 	// Absorb keystrokes during the grace period for async dialogs.
 	if _, ok := msg.(tea.KeyPressMsg); ok && d.inGracePeriod() {
@@ -333,6 +339,14 @@ func (d *Overlay) Update(msg tea.Msg) Action {
 	}
 
 	return dialog.HandleMsg(msg)
+}
+
+// targetedMsg is a result addressed to an open dialog by its ID rather
+// than to whichever dialog is in front: a fetch a dialog started lands
+// in it even when another dialog was opened over it meanwhile. With the
+// dialog closed it is dropped.
+type targetedMsg interface {
+	targetDialog() ID
 }
 
 // DrawCenterCursor draws the given string view anchored in the screen area
