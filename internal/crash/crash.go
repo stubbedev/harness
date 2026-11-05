@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/stubbedev/harness/internal/envvars"
@@ -46,10 +47,17 @@ var written atomic.Uint64
 
 // Dir returns the directory crash reports are written to. The
 // HARNESS_CRASH_DIR environment variable overrides the default location
-// under the global data root.
+// under the global data root. A test binary that sets no override writes
+// to a directory of its own under the system temp dir: a test that
+// panics on purpose, or code under test that panics in the background,
+// must not fill the user's real crash directory, whose cap would then
+// prune the reports of actual crashes.
 func Dir() string {
 	if dir := os.Getenv(envvars.CrashDir); dir != "" {
 		return dir
+	}
+	if testing.Testing() {
+		return filepath.Join(os.TempDir(), fmt.Sprintf("harness-test-crashes-%d", os.Getpid()))
 	}
 	return filepath.Join(home.DataDir(), "crashes")
 }

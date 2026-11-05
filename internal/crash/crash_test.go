@@ -183,3 +183,11 @@ func TestListReturnsNewestFirstWithHeaders(t *testing.T) {
 	require.Equal(t, "newer", reports[0].Component)
 	require.Equal(t, "second panic", reports[0].Panic)
 }
+
+func TestTestBinaryNeverWritesTheRealCrashDir(t *testing.T) {
+	t.Setenv("HARNESS_CRASH_DIR", "")
+
+	dir := Dir()
+	require.True(t, strings.HasPrefix(dir, os.TempDir()), "a test binary reports under the temp dir, not %s", dir)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+}
