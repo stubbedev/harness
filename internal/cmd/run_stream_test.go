@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -414,4 +415,45 @@ func TestRunStream_NoRunIDFallsBackToSessionID(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, done)
 	require.Equal(t, "DONE", buf.String())
+}
+
+// TestFollowRun_ClosedStreamIsAnError pins that an event stream closing
+// before the run's RunComplete fails the run: the server drops a client
+// that falls behind, and exiting 0 then would pass partial output off as
+// the whole answer.
+func TestFollowRun_ClosedStreamIsAnError(t *testing.T) {
+	t.Parallel()
+
+	s := &runStream{sessionID: "S", runID: "R", out: &bytes.Buffer{}, read: map[string]int{}}
+	events := make(chan any)
+	close(events)
+
+	err := followRun(t.Context(), events, s, func(any) {}, func() {})
+	require.ErrorContains(t, err, "event stream closed before run R completed")
+}
+
+// TestFollowRun_CancelWinsOverAClosedStream keeps a cancelled run
+// reporting the cancel even when its stream closes with it.
+func TestFollowRun_CancelWinsOverAClosedStream(t *testing.T) {
+	t.Parallel()
+
+	s := &runStream{sessionID: "S", runID: "R", out: &bytes.Buffer{}, read: map[string]int{}}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	events := make(chan any)
+	close(events)
+
+	require.ErrorIs(t, followRun(ctx, events, s, func(any) {}, func() {}), context.Canceled)
+}
+
+// TestFollowRun_RunCompleteEndsTheRun keeps the happy path: the run's own
+// RunComplete ends it without error.
+func TestFollowRun_RunCompleteEndsTheRun(t *testing.T) {
+	t.Parallel()
+
+	s := &runStream{sessionID: "S", runID: "R", out: &bytes.Buffer{}, read: map[string]int{}}
+	events := make(chan any, 1)
+	events <- pubsub.Event[proto.RunComplete]{Payload: proto.RunComplete{SessionID: "S", RunID: "R"}}
+
+	require.NoError(t, followRun(t.Context(), events, s, func(any) {}, func() {}))
 }

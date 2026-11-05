@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/stubbedev/harness/internal/backend"
 	"github.com/stubbedev/harness/internal/catalog"
@@ -206,6 +207,9 @@ func (c *controllerV1) handleGetWorkspaceConfig(w http.ResponseWriter, r *http.R
 }
 
 // handleGetWorkspaceEvents streams workspace events as Server-Sent Events.
+// A client that does not take a write within the server's event write
+// timeout, or falls so far behind that the workspace disconnects it, has
+// its stream ended; it reconnects and resyncs.
 //
 //	@Summary		Stream workspace events (SSE)
 //	@Tags			workspaces
@@ -216,7 +220,8 @@ func (c *controllerV1) handleGetWorkspaceConfig(w http.ResponseWriter, r *http.R
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/events [get]
 func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.Request) {
-	flusher := http.NewResponseController(w)
+	rc := http.NewResponseController(w)
+	timeout := c.server.eventWriteTimeout
 	id := r.PathValue("id")
 	clientID, ok := c.clientID(w, r)
 	if !ok {
@@ -245,8 +250,15 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 	// before any events arrive. Without this, a quiet workspace
 	// keeps the client's SubscribeEvents call blocked on the
 	// initial RoundTrip.
+	if err := rc.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		c.server.logError(r, "Failed to bound event stream writes", "error", err)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
+	if err := rc.Flush(); err != nil {
+		c.server.logDebug(r, "Stopping event stream", "error", err)
+		return
+	}
 
 	for {
 		select {
@@ -255,10 +267,13 @@ func (c *controllerV1) handleGetWorkspaceEvents(w http.ResponseWriter, r *http.R
 			return
 		case ev, ok := <-events:
 			if !ok {
+				c.server.logDebug(r, "Event stream closed by the workspace")
 				return
 			}
-			writeSSEFrame(w, ev.Payload)
-			flusher.Flush()
+			if err := writeEvent(rc, w, ev.Payload, timeout); err != nil {
+				c.server.logDebug(r, "Stopping event stream", "error", err)
+				return
+			}
 		}
 	}
 }

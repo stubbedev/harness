@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -80,4 +81,46 @@ func TestEventFramesCloseWithTheWorkspace(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("frame channel stayed open after the workspace closed")
 	}
+}
+
+// TestEventFramesStalledStreamDoesNotSlowOthers: a stream that stops
+// reading is disconnected once a must-deliver frame finds its buffer
+// full, instead of costing every other stream a wait per frame.
+func TestEventFramesStalledStreamDoesNotSlowOthers(t *testing.T) {
+	t.Parallel()
+	ws := newFramesWorkspace(t)
+	stalled := ws.EventFrames(t.Context())
+	healthy := ws.EventFrames(t.Context())
+
+	const total = 4096 + 40
+	received := make(chan int, 1)
+	go func() {
+		n := 0
+		for range healthy {
+			n++
+			if n == total {
+				break
+			}
+		}
+		received <- n
+	}()
+
+	ws.SendEvent(pubsub.Event[mcp.Event]{Payload: mcp.Event{Type: mcp.EventChannelMessage}})
+	require.Eventually(t, func() bool { return ws.RunCompletions().GetSubscriberCount() > 0 }, 2*time.Second, time.Millisecond)
+	for i := range total {
+		ws.RunCompletions().PublishMustDeliver(t.Context(), pubsub.UpdatedEvent, notify.RunComplete{SessionID: "s1", RunID: fmt.Sprint(i)})
+	}
+
+	select {
+	case n := <-received:
+		require.Equal(t, total, n)
+	case <-time.After(time.Second):
+		t.Fatal("the healthy stream was held up by the stalled one")
+	}
+
+	drained := 0
+	for range stalled {
+		drained++
+	}
+	require.Less(t, drained, total, "the stalled stream must be disconnected, not fed")
 }

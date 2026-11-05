@@ -263,6 +263,6 @@ func roundTripEvent[P any](t *testing.T, src any) pubsub.Event[P] {
 func TestWriteSSEFrame(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	writeSSEFrame(&buf, []byte(`{"type":"message","payload":{}}`))
+	require.NoError(t, writeSSEFrame(&buf, []byte(`{"type":"message","payload":{}}`)))
 	require.Equal(t, "data: {\"type\":\"message\",\"payload\":{}}\n\n", buf.String())
 }

@@ -19,6 +19,13 @@
 //     (finish, tool result, error, cancel) that must not be silently
 //     coalesced away.
 //
+//   - An evicting broker ([NewEvictingStreamingBroker]) never waits on a
+//     subscriber: a must-deliver event that finds a subscriber's buffer
+//     full disconnects that subscriber by closing its channel. This is
+//     the right choice for subscribers that resync from scratch when
+//     their channel closes, such as remote event streams, so one that
+//     stalls cannot slow delivery to the rest.
+//
 // Drop counters ([Broker.DropCount], [Broker.MustDeliverDropCount]) are
 // exposed so callers can surface saturation in telemetry.
 package pubsub
@@ -58,7 +65,10 @@ type Broker[T any] struct {
 	done               chan struct{}
 	channelBufferSize  int
 	mustDeliverTimeout time.Duration
-	dropCount          atomic.Uint64
+	// evictFull disconnects a subscriber whose buffer is full when a
+	// must-deliver event reaches it, instead of waiting for room.
+	evictFull bool
+	dropCount atomic.Uint64
 	// dropLoggedAt and dropLoggedCount are when the last drop warning
 	// was written and dropCount as of then: a saturated subscriber drops
 	// thousands of events a second, and one line per drop buries the log.
@@ -77,6 +87,16 @@ func NewBroker[T any]() *Broker[T] {
 // subscriber channel cheap.
 func NewStreamingBroker[T any]() *Broker[T] {
 	return NewBrokerWithOptions[T](streamingBufferSize)
+}
+
+// NewEvictingStreamingBroker creates a streaming broker that disconnects
+// a subscriber whose buffer is full when a must-deliver event reaches it,
+// rather than blocking on it. Only subscribers that recover from a
+// closed channel by resyncing may use it.
+func NewEvictingStreamingBroker[T any]() *Broker[T] {
+	b := NewBrokerWithOptions[T](streamingBufferSize)
+	b.evictFull = true
+	return b
 }
 
 func NewBrokerWithOptions[T any](channelBufferSize int) *Broker[T] {
@@ -148,11 +168,41 @@ func (b *Broker[T]) Subscribe(ctx context.Context) <-chan Event[T] {
 		default:
 		}
 
-		delete(b.subs, sub)
-		close(sub)
+		b.removeLocked(sub)
 	}()
 
 	return sub
+}
+
+// removeLocked unsubscribes sub and closes its channel, unless it was
+// removed already. Caller holds b.mu for writing.
+func (b *Broker[T]) removeLocked(sub chan Event[T]) {
+	if _, ok := b.subs[sub]; !ok {
+		return
+	}
+	delete(b.subs, sub)
+	close(sub)
+}
+
+// evict disconnects the subscribers in full, whose buffers had no room
+// for a must-deliver event.
+func (b *Broker[T]) evict(t EventType, full []chan Event[T]) {
+	if len(full) == 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	select {
+	case <-b.done:
+		return
+	default:
+	}
+	for _, sub := range full {
+		b.removeLocked(sub)
+	}
+	b.mustDeliverDropCount.Add(uint64(len(full)))
+	slog.Warn("Disconnecting pubsub subscribers too slow for a must-deliver event",
+		"type", t, "subscribers", len(full))
 }
 
 func (b *Broker[T]) GetSubscriberCount() int {
@@ -234,26 +284,39 @@ func (b *Broker[T]) logDrop(t EventType, total uint64) {
 // after timeout — recovery is the subscriber's responsibility (e.g. a
 // re-fetch on the next session-visible event). A canceled ctx stops the
 // blocking wait, not the delivery: the remaining subscribers still get
-// the non-blocking attempt.
+// the non-blocking attempt. An evicting broker does not wait at all: it
+// disconnects every subscriber the non-blocking attempt found full.
 func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload T) {
+	b.evict(t, b.publishMustDeliver(ctx, t, payload))
+}
+
+// publishMustDeliver delivers a must-deliver event and returns the
+// subscribers an evicting broker found full, for the caller to evict
+// once the read lock is released.
+func (b *Broker[T]) publishMustDeliver(ctx context.Context, t EventType, payload T) []chan Event[T] {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	select {
 	case <-b.done:
-		return
+		return nil
 	default:
 	}
 
 	event := Event[T]{Type: t, Payload: payload, MustDeliver: true}
 	timeout := b.mustDeliverTimeout
 
+	var full []chan Event[T]
 	for sub := range b.subs {
 		// Fast path: non-blocking send.
 		select {
 		case sub <- event:
 			continue
 		default:
+		}
+		if b.evictFull {
+			full = append(full, sub)
+			continue
 		}
 		if ctx.Err() != nil {
 			b.mustDeliverDropCount.Add(1)
@@ -276,4 +339,5 @@ func (b *Broker[T]) PublishMustDeliver(ctx context.Context, t EventType, payload
 			slog.Error("PublishMustDeliver canceled before delivering event", "type", t)
 		}
 	}
+	return full
 }

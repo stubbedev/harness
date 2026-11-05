@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/stubbedev/harness/internal/backend"
 	"github.com/stubbedev/harness/internal/config"
@@ -97,6 +98,10 @@ type Server struct {
 
 	backend *backend.Backend
 	logger  *slog.Logger
+
+	// eventWriteTimeout bounds each write to an event stream; see
+	// [eventWriteTimeout].
+	eventWriteTimeout time.Duration
 }
 
 // SetLogger sets the logger for the server.
@@ -140,6 +145,7 @@ func NewServer(cfg *config.ConfigStore, network, address string) *Server {
 // [NewServer] so test harnesses can wire a Server around a
 // pre-constructed backend.
 func (s *Server) installHandler() {
+	s.eventWriteTimeout = eventWriteTimeout
 	var p http.Protocols
 	p.SetHTTP1(true)
 	p.SetUnencryptedHTTP2(true)

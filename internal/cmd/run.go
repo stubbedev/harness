@@ -325,25 +325,36 @@ func runNonInteractive(
 		_, _ = fmt.Fprintln(os.Stdout)
 	}()
 
-	for {
+	forward := func(ev any) {
 		if progress && stderrTTY {
 			_, _ = fmt.Fprintf(os.Stderr, ansi.SetIndeterminateProgressBar)
 		}
+		// Forward events to the multiplexer integrations when running
+		// inside a herdr or tmux pane.
+		if hev := agentstate.Translate(ev); hev != nil {
+			hc.HandleEvent(hev)
+			tc.HandleEvent(hev)
+		}
+	}
+	return followRun(ctx, events, stream, forward, stopSpinner)
+}
 
+// followRun streams the run's events until its terminal event. A stream
+// that closes first is an error, not a finished run: the server drops a
+// subscriber that falls behind, and exiting 0 there would pass partial
+// output off as the whole answer.
+func followRun[E any](ctx context.Context, events <-chan E, stream *runStream, forward func(any), stopSpinner func()) error {
+	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
 				stopSpinner()
-				return nil
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return fmt.Errorf("event stream closed before run %s completed", stream.runID)
 			}
-
-			// Forward events to the multiplexer integrations when running
-			// inside a herdr or tmux pane.
-			if hev := agentstate.Translate(ev); hev != nil {
-				hc.HandleEvent(hev)
-				tc.HandleEvent(hev)
-			}
-
+			forward(ev)
 			done, err := stream.handle(ev, stopSpinner)
 			if err != nil {
 				return err

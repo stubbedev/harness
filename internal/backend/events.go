@@ -27,7 +27,7 @@ func (ws *Workspace) EventFrames(ctx context.Context) <-chan pubsub.Event[[]byte
 }
 
 func (ws *Workspace) startFrameEncoder() {
-	ws.frames = pubsub.NewStreamingBroker[[]byte]()
+	ws.frames = pubsub.NewEvictingStreamingBroker[[]byte]()
 	events := ws.Events(ws.ctx)
 	crash.Go("backend.eventFrames", func() {
 		defer ws.frames.Shutdown()

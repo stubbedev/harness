@@ -1,15 +1,44 @@
 package server
 
 import (
+	"fmt"
 	"io"
+	"net/http"
+	"time"
 
 	"github.com/stubbedev/harness/internal/backend"
 )
 
-func writeSSEFrame(w io.Writer, frame []byte) {
-	_, _ = io.WriteString(w, "data: ")
-	_, _ = w.Write(frame)
-	_, _ = io.WriteString(w, "\n\n")
+// eventWriteTimeout bounds every write to an event stream. A client that
+// keeps its stream open without reading it would otherwise hold its
+// handler in a write forever; past the deadline the stream is dropped,
+// and the client reconnects and resyncs.
+const eventWriteTimeout = 10 * time.Second
+
+func writeSSEFrame(w io.Writer, frame []byte) error {
+	if _, err := io.WriteString(w, "data: "); err != nil {
+		return err
+	}
+	if _, err := w.Write(frame); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, "\n\n")
+	return err
+}
+
+// writeEvent writes one SSE frame to an event stream and flushes it,
+// failing when the client does not take it within timeout.
+func writeEvent(rc *http.ResponseController, w io.Writer, frame []byte, timeout time.Duration) error {
+	if err := rc.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return fmt.Errorf("setting the event write deadline: %w", err)
+	}
+	if err := writeSSEFrame(w, frame); err != nil {
+		return fmt.Errorf("writing an event frame: %w", err)
+	}
+	if err := rc.Flush(); err != nil {
+		return fmt.Errorf("flushing an event frame: %w", err)
+	}
+	return nil
 }
 
 // isSessionBusy reports whether the given workspace has an in-flight
