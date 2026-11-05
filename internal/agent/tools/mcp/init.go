@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -498,12 +499,13 @@ func PendingAuthMCPs(cfg *config.ConfigStore) []PendingAuthServer {
 // BeginAuth starts the OAuth flow for a server in StateNeedsAuth but
 // suppresses opening a local browser; the caller is responsible for
 // surfacing the authorization URL (via [MCPAuthURL]) to the user. It returns
-// a finish function that must be called exactly once with the request
-// context: finish blocks until the flow completes and returns the result.
+// a finish function to call once with the request context: finish blocks
+// until the flow completes and returns the result.
 //
 // Only one browser-suppressed flow per server may be in progress. The
-// returned cancel function aborts the flow without waiting; use it when the
-// caller's context is cancelled.
+// returned cancel function aborts the flow without waiting and is safe to
+// call at any point, any number of times: before finish it releases the
+// server for the next flow, so a caller may cancel instead of finishing.
 func BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Context) error, cancel context.CancelFunc, err error) {
 	m, err := mcpConfigFor(cfg, name)
 	if err != nil {
@@ -522,7 +524,21 @@ func BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Co
 	flowCtx = mcpoauth.WithInteractive(flowCtx)
 	flowCtx = context.WithValue(flowCtx, suppressBrowserKey{}, true)
 
+	// Whichever of finish and cancel claims the flow first owns the
+	// lock's release: finish releases it when the flow ends, and a cancel
+	// that finds finish never ran releases it itself, so a caller that
+	// only cancels does not lock the server out of authenticating again.
+	var claimed atomic.Bool
+	cancel = func() {
+		flowCancel()
+		if claimed.CompareAndSwap(false, true) {
+			lock.Unlock()
+		}
+	}
 	finish = func(ctx context.Context) error {
+		if !claimed.CompareAndSwap(false, true) {
+			return fmt.Errorf("mcp '%s' authentication already finished or cancelled", name)
+		}
 		defer lock.Unlock()
 		defer flowCancel()
 
@@ -540,7 +556,7 @@ func BeginAuth(cfg *config.ConfigStore, name string) (finish func(ctx context.Co
 			return ctx.Err()
 		}
 	}
-	return finish, flowCancel, nil
+	return finish, cancel, nil
 }
 
 // runAuthFlow executes the OAuth connect for BeginAuth with browser
@@ -554,11 +570,7 @@ func runAuthFlow(ctx context.Context, cfg *config.ConfigStore, name string, m co
 // suppressLock returns the per-server mutex used to serialize
 // browser-suppressed OAuth flows, creating it on first use.
 func suppressLock(name string) *sync.Mutex {
-	mu, ok := suppressMus.Get(name)
-	if !ok {
-		mu = &sync.Mutex{}
-		suppressMus.Set(name, mu)
-	}
+	mu, _ := suppressMus.LoadOrStore(name, &sync.Mutex{})
 	return mu
 }
 

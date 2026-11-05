@@ -99,6 +99,20 @@ func (m *Map[K, V]) GetOrSet(key K, fn func() V) V {
 	return value
 }
 
+// LoadOrStore returns the value stored under key, storing value there
+// first when the key is missing; loaded reports whether it was already
+// present. Unlike GetOrSet it is atomic, so concurrent callers missing
+// the same key all get the one value that was stored.
+func (m *Map[K, V]) LoadOrStore(key K, value V) (actual V, loaded bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if got, ok := m.inner[key]; ok {
+		return got, true
+	}
+	m.inner[key] = value
+	return value, false
+}
+
 // Take gets an item and then deletes it.
 func (m *Map[K, V]) Take(key K) (V, bool) {
 	m.mu.Lock()

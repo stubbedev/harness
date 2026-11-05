@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -32,7 +33,7 @@ func shellResolverWithPath(t *testing.T, overrides map[string]string) config.Var
 }
 
 func TestMCPSession_CancelOnClose(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 
@@ -834,6 +835,52 @@ func TestBeginAuth_Concurrent(t *testing.T) {
 	cancel2()
 }
 
+// TestBeginAuth_CancelAloneReleasesTheServer pins that a caller may
+// cancel a flow it never finishes: the server is free for the next one,
+// and the abandoned flow can no longer be finished.
+func TestBeginAuth_CancelAloneReleasesTheServer(t *testing.T) {
+	const name = "oauth-http-cancel"
+	cfg := config.NewTestStore(&config.Config{
+		MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.com/mcp", OAuth: true}},
+	})
+
+	finish, cancel, err := BeginAuth(cfg, name)
+	require.NoError(t, err)
+	cancel()
+	cancel()
+	require.ErrorContains(t, finish(t.Context()), "already finished or cancelled")
+
+	_, cancel2, err := BeginAuth(cfg, name)
+	require.NoError(t, err, "cancelling released the server")
+	cancel2()
+}
+
+// TestBeginAuth_FirstConcurrentCallersShareOneLock pins that concurrent
+// first flows for a server contend on one lock: exactly one starts.
+func TestBeginAuth_FirstConcurrentCallersShareOneLock(t *testing.T) {
+	const name = "oauth-http-race"
+	cfg := config.NewTestStore(&config.Config{
+		MCP: config.MCPs{name: {Type: config.MCPHttp, URL: "https://example.com/mcp", OAuth: true}},
+	})
+
+	const callers = 16
+	var started atomic.Int32
+	var wg sync.WaitGroup
+	release := make(chan struct{})
+	for range callers {
+		wg.Go(func() {
+			<-release
+			if _, cancel, err := BeginAuth(cfg, name); err == nil {
+				started.Add(1)
+				t.Cleanup(cancel)
+			}
+		})
+	}
+	close(release)
+	wg.Wait()
+	require.Equal(t, int32(1), started.Load())
+}
+
 // TestCreateSession_Sessionless pins the Sessionless opt-out
 // for sessionless streamable-HTTP servers such as GitHub MCP. Those servers
 // complete the SEP-2575 server/discover probe without ever issuing a
@@ -852,7 +899,7 @@ func TestBeginAuth_Concurrent(t *testing.T) {
 // The stub server mimics GitHub: it answers server/discover (no session
 // id), 404s any subscriptions/listen, and serves tools/list.
 func TestCreateSession_Sessionless(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 
 	newStub := func(t *testing.T) (*httptest.Server, *atomic.Int64) {
 		t.Helper()
