@@ -4633,6 +4633,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "integer"
                 },
+                "estimated_usage": {
+                    "type": "boolean"
+                },
                 "goal": {
                     "$ref": "#/definitions/proto.Goal"
                 },
@@ -5345,6 +5348,9 @@ const docTemplate = `{
                 },
                 "created_at": {
                     "type": "integer"
+                },
+                "estimated_usage": {
+                    "type": "boolean"
                 },
                 "goal": {
                     "$ref": "#/definitions/proto.Goal"

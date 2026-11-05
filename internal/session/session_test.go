@@ -1,6 +1,7 @@
 package session
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -156,11 +157,50 @@ func TestDelete_RemovesDescendantsAndGetLastSkipsChildren(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, parent.ID, last.ID)
 
+	other, err := sessions.Create(t.Context(), "other")
+	require.NoError(t, err)
+	otherChild, err := sessions.CreateTaskSession(t.Context(), "tool-call-3", other.ID, "other child")
+	require.NoError(t, err)
+
+	tree, err := sessions.(*service).Tree(t.Context(), parent.ID)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{parent.ID, child.ID, grandchild.ID}, tree)
+
 	require.NoError(t, sessions.Delete(t.Context(), parent.ID))
 	for _, id := range []string{parent.ID, child.ID, grandchild.ID} {
 		_, err := sessions.Get(t.Context(), id)
 		require.Error(t, err, id)
 	}
+	for _, id := range []string{other.ID, otherChild.ID} {
+		_, err := sessions.Get(t.Context(), id)
+		require.NoError(t, err, "a session outside the deleted tree survives")
+	}
+	_, err = sessions.(*service).Tree(t.Context(), parent.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+}
+
+// TestRenameMissingSessionIsNotFound pins that renaming a session that does
+// not exist fails the way the server's 404 reports it, not silently.
+func TestRenameMissingSessionIsNotFound(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Cleanup(func() {
+		require.NoError(t, db.Release(dataDir))
+		db.ResetPool()
+	})
+
+	conn, err := db.Connect(t.Context(), dataDir)
+	require.NoError(t, err)
+
+	sessions := NewService(db.New(conn), conn)
+	require.ErrorIs(t, sessions.Rename(t.Context(), "missing", "title"), sql.ErrNoRows)
+	require.ErrorIs(t, sessions.SetGoal(t.Context(), "missing", nil), sql.ErrNoRows, "a goal on a missing session is not silently dropped")
+
+	created, err := sessions.Create(t.Context(), "before")
+	require.NoError(t, err)
+	require.NoError(t, sessions.Rename(t.Context(), created.ID, "after"))
+	got, err := sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "after", got.Title)
 }
 
 // TestNarrowUpdatesKeepConcurrentWrites pins the reason usage and

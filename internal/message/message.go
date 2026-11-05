@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -27,6 +28,31 @@ import (
 // (finish/error/cancel/tool-call structural changes) bypass the
 // debounce and flush synchronously.
 const defaultUpdateDebounce = 33 * time.Millisecond
+
+const (
+	// MaxAttachmentSize is the largest attachment, in bytes, a prompt may
+	// carry.
+	MaxAttachmentSize = 5 << 20
+	// MaxAttachments is the most attachments one prompt may carry.
+	MaxAttachments = 10
+)
+
+// ErrAttachmentsRefused means a prompt's attachments exceed
+// MaxAttachments or MaxAttachmentSize.
+var ErrAttachmentsRefused = errors.New("attachments refused")
+
+// ValidateAttachments reports whether a prompt may carry attachments.
+func ValidateAttachments(attachments []Attachment) error {
+	if len(attachments) > MaxAttachments {
+		return fmt.Errorf("%w: %d attachments; the limit is %d", ErrAttachmentsRefused, len(attachments), MaxAttachments)
+	}
+	for _, a := range attachments {
+		if len(a.Content) > MaxAttachmentSize {
+			return fmt.Errorf("%w: %s is %d bytes; the limit is %d", ErrAttachmentsRefused, a.FileName, len(a.Content), MaxAttachmentSize)
+		}
+	}
+	return nil
+}
 
 type CreateMessageParams struct {
 	Role             MessageRole
@@ -74,11 +100,11 @@ type Service interface {
 	// List rather than to nothing.
 	ListFrom(ctx context.Context, sessionID, fromID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
-	// PromptHistory returns the prompt-history entries of the session's
-	// user messages, newest first: the text of each prompt and each
-	// shell command, marked as such. An empty sessionID reads every
-	// session. It decodes nothing but those strings.
-	PromptHistory(ctx context.Context, sessionID string) ([]PromptHistoryEntry, error)
+	// PromptHistory returns the newest maxEntries prompt-history entries
+	// of the session's user messages, newest first: the text of each
+	// prompt and each shell command, marked as such. An empty sessionID
+	// reads every session. It decodes nothing but those strings.
+	PromptHistory(ctx context.Context, sessionID string, maxEntries int64) ([]PromptHistoryEntry, error)
 	// GetLastAssistantMessage returns the provider and model that
 	// produced the latest non-summary assistant message; every other
 	// field of the returned Message is left empty because no caller
@@ -742,24 +768,36 @@ type PromptHistoryEntry struct {
 	Shell bool   `json:"shell"`
 }
 
-func (s *service) PromptHistory(ctx context.Context, sessionID string) ([]PromptHistoryEntry, error) {
-	rows, err := s.q.ListPromptHistory(ctx, sessionID)
-	if err != nil {
-		return nil, err
+func (s *service) PromptHistory(ctx context.Context, sessionID string, maxEntries int64) ([]PromptHistoryEntry, error) {
+	if maxEntries <= 0 {
+		return nil, fmt.Errorf("reading prompt history: max entries must be positive, got %d", maxEntries)
 	}
-	entries := make([]PromptHistoryEntry, 0, len(rows))
-	for _, row := range rows {
-		switch partType(row.PartType) {
-		case textType:
-			if row.Entry != "" {
-				entries = append(entries, PromptHistoryEntry{Text: row.Entry})
-			}
-		case shellCommandType:
-			entries = append(entries, PromptHistoryEntry{Text: row.Entry, Shell: true})
-		default:
+	if sessionID == "" {
+		rows, err := s.q.ListPromptHistory(ctx, maxEntries)
+		if err != nil {
+			return nil, fmt.Errorf("reading prompt history: %w", err)
 		}
+		return promptHistoryEntries(rows), nil
 	}
-	return entries, nil
+	rows, err := s.q.ListSessionPromptHistory(ctx, db.ListSessionPromptHistoryParams{
+		SessionID:  sessionID,
+		MaxEntries: maxEntries,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reading prompt history of session %s: %w", sessionID, err)
+	}
+	return promptHistoryEntries(rows), nil
+}
+
+// promptHistoryEntries converts the rows of either history query, which
+// hold only text and shell command parts.
+func promptHistoryEntries[R db.ListPromptHistoryRow | db.ListSessionPromptHistoryRow](rows []R) []PromptHistoryEntry {
+	entries := make([]PromptHistoryEntry, len(rows))
+	for i, r := range rows {
+		row := db.ListPromptHistoryRow(r)
+		entries[i] = PromptHistoryEntry{Text: row.Entry, Shell: partType(row.PartType) == shellCommandType}
+	}
+	return entries
 }
 
 // GetLastAssistantMessage returns the provider and model of the last

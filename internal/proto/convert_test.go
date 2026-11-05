@@ -82,7 +82,6 @@ func TestSessionRoundTrip(t *testing.T) {
 	t.Parallel()
 	d := filled[session.Session](&filler{})
 	// Server-only state.
-	d.EstimatedUsage = false
 	d.CompactionSummary, d.CompactionBoundaryID, d.CompactionAgedID = "", "", ""
 	require.Equal(t, d, SessionFromDomain(d).ToDomain())
 }

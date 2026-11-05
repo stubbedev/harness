@@ -54,6 +54,10 @@ func (m *mockSessionService) ListChildSessions(context.Context, string) ([]sessi
 	return nil, nil
 }
 
+func (m *mockSessionService) Tree(_ context.Context, id string) ([]string, error) {
+	return []string{id}, nil
+}
+
 func (m *mockSessionService) Save(_ context.Context, s session.Session) (session.Session, error) {
 	return s, nil
 }

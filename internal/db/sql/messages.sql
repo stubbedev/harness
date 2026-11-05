@@ -79,16 +79,31 @@ WHERE messages.session_id = sqlc.arg(session_id)
   )
 RETURNING *;
 
+-- name: ListSessionPromptHistory :many
+-- The newest prompt-history entries of one session's user messages: each
+-- non-empty text part and each shell command as written, with its part
+-- type, read straight from the stored parts so no binary attachment or
+-- context note is decoded.
+SELECT
+    CAST(json_extract(p.value, '$.type') AS TEXT) AS part_type,
+    CAST(COALESCE(json_extract(p.value, '$.data.text'), json_extract(p.value, '$.data.command'), '') AS TEXT) AS entry
+FROM messages m, json_each(m.parts) p
+WHERE m.session_id = sqlc.arg(session_id)
+  AND m.role = 'user'
+  AND (json_extract(p.value, '$.type') = 'shell_command'
+    OR (json_extract(p.value, '$.type') = 'text' AND COALESCE(json_extract(p.value, '$.data.text'), '') != ''))
+ORDER BY m.created_at DESC, m.rowid DESC, p.key ASC
+LIMIT sqlc.arg(max_entries);
+
 -- name: ListPromptHistory :many
--- The prompt-history entries of user messages, newest message first: each
--- text part and each shell command as written with its part type, read
--- straight from the stored parts so no binary attachment or context note
--- is decoded. An empty session_id reads every session.
+-- The newest prompt-history entries across every session, read as
+-- ListSessionPromptHistory reads one session.
 SELECT
     CAST(json_extract(p.value, '$.type') AS TEXT) AS part_type,
     CAST(COALESCE(json_extract(p.value, '$.data.text'), json_extract(p.value, '$.data.command'), '') AS TEXT) AS entry
 FROM messages m, json_each(m.parts) p
 WHERE m.role = 'user'
-  AND (sqlc.arg(session_id) = '' OR m.session_id = sqlc.arg(session_id))
-  AND json_extract(p.value, '$.type') IN ('text', 'shell_command')
-ORDER BY m.created_at DESC, m.rowid DESC, p.key ASC;
+  AND (json_extract(p.value, '$.type') = 'shell_command'
+    OR (json_extract(p.value, '$.type') = 'text' AND COALESCE(json_extract(p.value, '$.data.text'), '') != ''))
+ORDER BY m.created_at DESC, m.rowid DESC, p.key ASC
+LIMIT sqlc.arg(max_entries);

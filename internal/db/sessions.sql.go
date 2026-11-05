@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const addSessionCost = `-- name: AddSessionCost :execrows
@@ -98,13 +99,23 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 	return i, err
 }
 
-const deleteSession = `-- name: DeleteSession :exec
+const deleteSessions = `-- name: DeleteSessions :exec
 DELETE FROM sessions
-WHERE id = ?
+WHERE id IN (/*SLICE:ids*/?)
 `
 
-func (q *Queries) DeleteSession(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteSession, id)
+func (q *Queries) DeleteSessions(ctx context.Context, ids []string) error {
+	query := deleteSessions
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
 	return err
 }
 
@@ -112,7 +123,7 @@ const getLastSession = `-- name: GetLastSession :one
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, compaction_summary, compaction_boundary_id, compaction_aged_id, goal
 FROM sessions
 WHERE parent_session_id IS NULL
-ORDER BY updated_at DESC
+ORDER BY updated_at DESC, id DESC
 LIMIT 1
 `
 
@@ -172,7 +183,7 @@ const listChildSessions = `-- name: ListChildSessions :many
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, compaction_summary, compaction_boundary_id, compaction_aged_id, goal
 FROM sessions
 WHERE parent_session_id = ?
-ORDER BY updated_at DESC
+ORDER BY updated_at DESC, id DESC
 `
 
 func (q *Queries) ListChildSessions(ctx context.Context, parentSessionID sql.NullString) ([]Session, error) {
@@ -214,13 +225,49 @@ func (q *Queries) ListChildSessions(ctx context.Context, parentSessionID sql.Nul
 	return items, nil
 }
 
+const listSessionTree = `-- name: ListSessionTree :many
+WITH RECURSIVE tree(id) AS (
+    SELECT sessions.id FROM sessions WHERE sessions.id = ?1
+    UNION
+    SELECT child.id FROM sessions child JOIN tree ON child.parent_session_id = tree.id
+)
+SELECT tree.id FROM tree
+`
+
+// The session and every session below it. UNION rather than UNION ALL
+// ends the walk should a parent link ever form a cycle.
+func (q *Queries) ListSessionTree(ctx context.Context, id string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionTree, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessions = `-- name: ListSessions :many
 SELECT id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost, updated_at, created_at, summary_message_id, todos, compaction_summary, compaction_boundary_id, compaction_aged_id, goal
 FROM sessions
-WHERE parent_session_id is NULL
-ORDER BY updated_at DESC
+WHERE parent_session_id IS NULL
+ORDER BY updated_at DESC, id DESC
 `
 
+// Every top-level session: the session picker lists and filters all of
+// them, and ID-prefix resolution matches against all of them.
 func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 	rows, err := q.db.QueryContext(ctx, listSessions)
 	if err != nil {
@@ -309,7 +356,7 @@ func (q *Queries) RecordSessionUsage(ctx context.Context, arg RecordSessionUsage
 	return i, err
 }
 
-const renameSession = `-- name: RenameSession :exec
+const renameSession = `-- name: RenameSession :execrows
 UPDATE sessions
 SET
     title = ?
@@ -321,9 +368,12 @@ type RenameSessionParams struct {
 	ID    string `json:"id"`
 }
 
-func (q *Queries) RenameSession(ctx context.Context, arg RenameSessionParams) error {
-	_, err := q.db.ExecContext(ctx, renameSession, arg.Title, arg.ID)
-	return err
+func (q *Queries) RenameSession(ctx context.Context, arg RenameSessionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renameSession, arg.Title, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateSession = `-- name: UpdateSession :one
@@ -447,7 +497,7 @@ func (q *Queries) UpdateSessionCompaction(ctx context.Context, arg UpdateSession
 	return i, err
 }
 
-const updateSessionGoal = `-- name: UpdateSessionGoal :exec
+const updateSessionGoal = `-- name: UpdateSessionGoal :execrows
 UPDATE sessions
 SET goal = ?
 WHERE id = ?
@@ -458,9 +508,12 @@ type UpdateSessionGoalParams struct {
 	ID   string         `json:"id"`
 }
 
-func (q *Queries) UpdateSessionGoal(ctx context.Context, arg UpdateSessionGoalParams) error {
-	_, err := q.db.ExecContext(ctx, updateSessionGoal, arg.Goal, arg.ID)
-	return err
+func (q *Queries) UpdateSessionGoal(ctx context.Context, arg UpdateSessionGoalParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateSessionGoal, arg.Goal, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateSessionTitleAndCost = `-- name: UpdateSessionTitleAndCost :exec

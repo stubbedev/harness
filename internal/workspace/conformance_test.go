@@ -2,11 +2,14 @@ package workspace_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stubbedev/harness/internal/client"
 	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/workspace"
 )
 
@@ -98,4 +101,25 @@ func TestWorkspaceConformance(t *testing.T) {
 	require.NoError(t, p.remote.DeleteSession(ctx, created.ID))
 	_, err = p.local.GetSession(ctx, created.ID)
 	require.Error(t, err, "a session deleted remotely is gone locally")
+
+	// A missing session fails a rename both ways, never silently.
+	require.ErrorIs(t, p.local.RenameSession(ctx, created.ID, "gone"), sql.ErrNoRows)
+	require.ErrorIs(t, p.remote.RenameSession(ctx, created.ID, "gone"), client.ErrResourceNotFound)
+}
+
+// TestWorkspaceConformanceSessionWireFields pins that the estimated-usage
+// marker a session carries in process reaches a client too.
+func TestWorkspaceConformanceSessionWireFields(t *testing.T) {
+	p := newConformancePair(t)
+	ctx := context.Background()
+
+	created, err := p.remote.CreateSession(ctx, "estimated")
+	require.NoError(t, err)
+	estimated := true
+	_, err = p.local.App().Sessions.RecordUsage(ctx, created.ID, session.Usage{PromptTokens: 10, Estimated: &estimated})
+	require.NoError(t, err)
+
+	remote, err := p.remote.GetSession(ctx, created.ID)
+	require.NoError(t, err)
+	require.True(t, remote.EstimatedUsage)
 }

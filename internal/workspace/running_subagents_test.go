@@ -63,6 +63,20 @@ func (s *stubSessionService) ListChildSessions(_ context.Context, parentID strin
 	return out, nil
 }
 
+func (s *stubSessionService) Tree(ctx context.Context, id string) ([]string, error) {
+	ids := []string{id}
+	for i := 0; i < len(ids); i++ {
+		children, err := s.ListChildSessions(ctx, ids[i])
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			ids = append(ids, child.ID)
+		}
+	}
+	return ids, nil
+}
+
 func (s *stubSessionService) Save(_ context.Context, sess session.Session) (session.Session, error) {
 	return sess, nil
 }

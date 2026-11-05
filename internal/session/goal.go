@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,9 @@ const (
 
 // MaxGoalConditionLength bounds a goal's condition, in runes.
 const MaxGoalConditionLength = 4000
+
+// ErrInvalidGoal means a goal condition was refused by NewGoal.
+var ErrInvalidGoal = errors.New("invalid goal condition")
 
 // Goal is a completion condition the agent works toward across turns.
 // It lives on the session row rather than in the conversation, so
@@ -56,11 +60,15 @@ func (s *service) SetGoal(ctx context.Context, sessionID string, goal *Goal) err
 	if err != nil {
 		return err
 	}
-	if err := s.q.UpdateSessionGoal(ctx, db.UpdateSessionGoalParams{
+	rows, err := s.q.UpdateSessionGoal(ctx, db.UpdateSessionGoalParams{
 		ID:   sessionID,
 		Goal: nullStr(data),
-	}); err != nil {
-		return fmt.Errorf("updating session goal: %w", err)
+	})
+	if err != nil {
+		return fmt.Errorf("updating the goal of session %s: %w", sessionID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("updating the goal of session %s: %w", sessionID, sql.ErrNoRows)
 	}
 	s.publishSessionUpdate(ctx, sessionID)
 	return nil
@@ -93,10 +101,10 @@ func unmarshalGoal(data string) (*Goal, error) {
 func NewGoal(condition string, now time.Time) (*Goal, error) {
 	condition = strings.TrimSpace(condition)
 	if condition == "" {
-		return nil, errors.New("goal condition is empty")
+		return nil, fmt.Errorf("%w: it is empty", ErrInvalidGoal)
 	}
 	if n := utf8.RuneCountInString(condition); n > MaxGoalConditionLength {
-		return nil, fmt.Errorf("goal condition is %d characters; the limit is %d", n, MaxGoalConditionLength)
+		return nil, fmt.Errorf("%w: it is %d characters; the limit is %d", ErrInvalidGoal, n, MaxGoalConditionLength)
 	}
 	return &Goal{
 		Condition: condition,

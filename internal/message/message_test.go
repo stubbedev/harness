@@ -892,13 +892,60 @@ func TestPromptHistoryReadsOnlyPromptText(t *testing.T) {
 	create(one.ID, Assistant, TextContent{Text: "reply"})
 	create(one.ID, User, ShellCommand{Command: "ls"})
 	create(one.ID, User, ContextNote{Kind: ContextNoteRuntime, Text: "env"})
+	create(one.ID, User, TextContent{Text: ""})
 	create(two.ID, User, TextContent{Text: "elsewhere"})
 
-	got, err := svc.PromptHistory(t.Context(), one.ID)
+	got, err := svc.PromptHistory(t.Context(), one.ID, 10)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []PromptHistoryEntry{{Text: "ls", Shell: true}, {Text: "first"}}, got)
 
-	all, err := svc.PromptHistory(t.Context(), "")
+	all, err := svc.PromptHistory(t.Context(), "", 10)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []PromptHistoryEntry{{Text: "ls", Shell: true}, {Text: "first"}, {Text: "elsewhere"}}, all)
+}
+
+// TestPromptHistoryReturnsTheNewestEntriesUpToTheLimit pins the bound:
+// the history reads only the newest maxEntries entries, per session and
+// across sessions, so it never walks every prompt ever sent.
+func TestPromptHistoryReturnsTheNewestEntriesUpToTheLimit(t *testing.T) {
+	t.Parallel()
+	conn, err := db.Connect(t.Context(), t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	one, err := sessions.Create(t.Context(), "one")
+	require.NoError(t, err)
+	two, err := sessions.Create(t.Context(), "two")
+	require.NoError(t, err)
+	svc := NewService(q)
+
+	for _, p := range []struct{ sessionID, text string }{
+		{one.ID, "oldest"},
+		{two.ID, "other"},
+		{one.ID, "middle"},
+		{one.ID, "newest"},
+	} {
+		_, err := svc.Create(t.Context(), p.sessionID, CreateMessageParams{Role: User, Parts: []ContentPart{TextContent{Text: p.text}}})
+		require.NoError(t, err)
+	}
+
+	got, err := svc.PromptHistory(t.Context(), one.ID, 2)
+	require.NoError(t, err)
+	require.Equal(t, []PromptHistoryEntry{{Text: "newest"}, {Text: "middle"}}, got)
+
+	all, err := svc.PromptHistory(t.Context(), "", 3)
+	require.NoError(t, err)
+	require.Equal(t, []PromptHistoryEntry{{Text: "newest"}, {Text: "middle"}, {Text: "other"}}, all)
+
+	_, err = svc.PromptHistory(t.Context(), one.ID, 0)
+	require.Error(t, err)
+}
+
+func TestValidateAttachmentsEnforcesThePromptLimits(t *testing.T) {
+	t.Parallel()
+	require.NoError(t, ValidateAttachments(make([]Attachment, MaxAttachments)))
+	require.NoError(t, ValidateAttachments([]Attachment{{Content: make([]byte, MaxAttachmentSize)}}))
+	require.ErrorIs(t, ValidateAttachments(make([]Attachment, MaxAttachments+1)), ErrAttachmentsRefused)
+	require.ErrorIs(t, ValidateAttachments([]Attachment{{FileName: "big.png", Content: make([]byte, MaxAttachmentSize+1)}}), ErrAttachmentsRefused)
 }

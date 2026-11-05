@@ -52,10 +52,10 @@ func TestNewGoalValidates(t *testing.T) {
 	t.Parallel()
 
 	_, err := NewGoal("   ", time.Now())
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrInvalidGoal)
 
 	_, err = NewGoal(strings.Repeat("é", MaxGoalConditionLength+1), time.Now())
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrInvalidGoal)
 
 	goal, err := NewGoal(strings.Repeat("é", MaxGoalConditionLength), time.Now())
 	require.NoError(t, err)

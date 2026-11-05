@@ -50,8 +50,7 @@ func stringError(s string) error {
 }
 
 // SessionFromDomain converts a session for the wire. Compaction state
-// and the estimated-usage flag stay on the server: clients never send
-// them to the model.
+// stays on the server: clients never send it to the model.
 func SessionFromDomain(s session.Session) Session {
 	return Session{
 		ID:               s.ID,
@@ -61,6 +60,7 @@ func SessionFromDomain(s session.Session) Session {
 		MessageCount:     s.MessageCount,
 		PromptTokens:     s.PromptTokens,
 		CompletionTokens: s.CompletionTokens,
+		EstimatedUsage:   s.EstimatedUsage,
 		Cost:             s.Cost,
 		Todos:            mapSlice(s.Todos, todoFromDomain),
 		Goal:             goalFromDomain(s.Goal),
@@ -80,6 +80,7 @@ func (s Session) ToDomain() session.Session {
 		MessageCount:     s.MessageCount,
 		PromptTokens:     s.PromptTokens,
 		CompletionTokens: s.CompletionTokens,
+		EstimatedUsage:   s.EstimatedUsage,
 		Cost:             s.Cost,
 		Todos:            mapSlice(s.Todos, Todo.toDomain),
 		Goal:             s.Goal.toDomain(),

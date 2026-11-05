@@ -32,20 +32,32 @@ WHERE id = ? LIMIT 1;
 SELECT *
 FROM sessions
 WHERE parent_session_id IS NULL
-ORDER BY updated_at DESC
+ORDER BY updated_at DESC, id DESC
 LIMIT 1;
 
 -- name: ListSessions :many
+-- Every top-level session: the session picker lists and filters all of
+-- them, and ID-prefix resolution matches against all of them.
 SELECT *
 FROM sessions
-WHERE parent_session_id is NULL
-ORDER BY updated_at DESC;
+WHERE parent_session_id IS NULL
+ORDER BY updated_at DESC, id DESC;
 
 -- name: ListChildSessions :many
 SELECT *
 FROM sessions
 WHERE parent_session_id = ?
-ORDER BY updated_at DESC;
+ORDER BY updated_at DESC, id DESC;
+
+-- name: ListSessionTree :many
+-- The session and every session below it. UNION rather than UNION ALL
+-- ends the walk should a parent link ever form a cycle.
+WITH RECURSIVE tree(id) AS (
+    SELECT sessions.id FROM sessions WHERE sessions.id = sqlc.arg(id)
+    UNION
+    SELECT child.id FROM sessions child JOIN tree ON child.parent_session_id = tree.id
+)
+SELECT tree.id FROM tree;
 
 -- name: UpdateSession :one
 UPDATE sessions
@@ -109,16 +121,16 @@ SET
 WHERE id = ?;
 
 
--- name: RenameSession :exec
+-- name: RenameSession :execrows
 UPDATE sessions
 SET
     title = ?
 WHERE id = ?;
 
--- name: DeleteSession :exec
+-- name: DeleteSessions :exec
 DELETE FROM sessions
-WHERE id = ?;
--- name: UpdateSessionGoal :exec
+WHERE id IN (sqlc.slice(ids));
+-- name: UpdateSessionGoal :execrows
 UPDATE sessions
 SET goal = ?
 WHERE id = ?;

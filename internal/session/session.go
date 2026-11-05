@@ -135,6 +135,9 @@ type Service interface {
 	// sessions created via CreateTaskSession) of parentSessionID. It does
 	// not recurse into grandchildren.
 	ListChildSessions(ctx context.Context, parentSessionID string) ([]Session, error)
+	// Tree returns the IDs of id and of every session below it, in no
+	// particular order. A missing session yields sql.ErrNoRows.
+	Tree(ctx context.Context, id string) ([]string, error)
 	// Save overwrites every mutable column from session. It races any
 	// concurrent writer of those columns, so production code uses the
 	// narrow updates below; Save is for seeding state wholesale.
@@ -216,34 +219,36 @@ func (s *service) Delete(ctx context.Context, id string) error {
 	// go explicitly or they are orphaned: hidden from every listing, yet
 	// holding their messages forever. Messages, files and checkpoints
 	// cascade from each session row.
-	if err = deleteSessionTree(ctx, qtx, dbSession.ID); err != nil {
-		return err
+	ids, err := qtx.ListSessionTree(ctx, dbSession.ID)
+	if err != nil {
+		return fmt.Errorf("listing the session tree of %s: %w", id, err)
+	}
+	if err = qtx.DeleteSessions(ctx, ids); err != nil {
+		return fmt.Errorf("deleting the session tree of %s: %w", id, err)
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
 	}
 
 	session := s.fromDBItem(dbSession)
-	s.clearEstimatedUsageState(dbSession.ID)
+	for _, deleted := range ids {
+		s.clearEstimatedUsageState(deleted)
+	}
 	s.Publish(pubsub.DeletedEvent, session)
 	return nil
 }
 
-// deleteSessionTree deletes id and, depth first, every session below it.
-func deleteSessionTree(ctx context.Context, q *db.Queries, id string) error {
-	children, err := q.ListChildSessions(ctx, sql.NullString{String: id, Valid: true})
+// Tree returns the IDs of id and of every session below it, in no
+// particular order. A missing session yields sql.ErrNoRows.
+func (s *service) Tree(ctx context.Context, id string) ([]string, error) {
+	ids, err := s.q.ListSessionTree(ctx, id)
 	if err != nil {
-		return fmt.Errorf("listing child sessions: %w", err)
+		return nil, fmt.Errorf("listing the session tree of %s: %w", id, err)
 	}
-	for _, child := range children {
-		if err := deleteSessionTree(ctx, q, child.ID); err != nil {
-			return err
-		}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("listing the session tree of %s: %w", id, sql.ErrNoRows)
 	}
-	if err := q.DeleteSession(ctx, id); err != nil {
-		return fmt.Errorf("deleting session: %w", err)
-	}
-	return nil
+	return ids, nil
 }
 
 func (s *service) Get(ctx context.Context, id string) (Session, error) {
@@ -374,13 +379,17 @@ func (s *service) AddCost(ctx context.Context, sessionID string, delta float64) 
 }
 
 // Rename updates only the title of a session without touching updated_at or
-// usage fields.
+// usage fields. A missing session yields sql.ErrNoRows.
 func (s *service) Rename(ctx context.Context, id string, title string) error {
-	if err := s.q.RenameSession(ctx, db.RenameSessionParams{
+	rows, err := s.q.RenameSession(ctx, db.RenameSessionParams{
 		ID:    id,
 		Title: title,
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return fmt.Errorf("renaming session %s: %w", id, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("renaming session %s: %w", id, sql.ErrNoRows)
 	}
 	s.publishSessionUpdate(ctx, id)
 	return nil

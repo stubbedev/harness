@@ -24,7 +24,7 @@ type Querier interface {
 	// Deletes the anchor message and every message after it in the session,
 	// in the order ListMessagesBySession reads them, as one statement.
 	DeleteMessagesFrom(ctx context.Context, arg DeleteMessagesFromParams) ([]Message, error)
-	DeleteSession(ctx context.Context, id string) error
+	DeleteSessions(ctx context.Context, ids []string) error
 	GetAverageResponseTime(ctx context.Context) (int64, error)
 	GetCheckpointByMessage(ctx context.Context, messageID string) (Checkpoint, error)
 	GetFile(ctx context.Context, id string) (File, error)
@@ -52,12 +52,20 @@ type Querier interface {
 	// often share a second; rowid is insertion order and breaks the tie.
 	ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	ListMessagesBySessionFrom(ctx context.Context, arg ListMessagesBySessionFromParams) ([]Message, error)
-	// The prompt-history entries of user messages, newest message first: each
-	// text part and each shell command as written with its part type, read
-	// straight from the stored parts so no binary attachment or context note
-	// is decoded. An empty session_id reads every session.
-	ListPromptHistory(ctx context.Context, sessionID interface{}) ([]ListPromptHistoryRow, error)
+	// The newest prompt-history entries across every session, read as
+	// ListSessionPromptHistory reads one session.
+	ListPromptHistory(ctx context.Context, maxEntries int64) ([]ListPromptHistoryRow, error)
+	// The newest prompt-history entries of one session's user messages: each
+	// non-empty text part and each shell command as written, with its part
+	// type, read straight from the stored parts so no binary attachment or
+	// context note is decoded.
+	ListSessionPromptHistory(ctx context.Context, arg ListSessionPromptHistoryParams) ([]ListSessionPromptHistoryRow, error)
 	ListSessionReadFiles(ctx context.Context, sessionID string) ([]ReadFile, error)
+	// The session and every session below it. UNION rather than UNION ALL
+	// ends the walk should a parent link ever form a cycle.
+	ListSessionTree(ctx context.Context, id string) ([]string, error)
+	// Every top-level session: the session picker lists and filters all of
+	// them, and ID-prefix resolution matches against all of them.
 	ListSessions(ctx context.Context) ([]Session, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
@@ -65,14 +73,14 @@ type Querier interface {
 	// measured (NULL leaves a counter alone), in one statement so a concurrent
 	// rename or sub-agent cost roll-up is never overwritten.
 	RecordSessionUsage(ctx context.Context, arg RecordSessionUsageParams) (Session, error)
-	RenameSession(ctx context.Context, arg RenameSessionParams) error
+	RenameSession(ctx context.Context, arg RenameSessionParams) (int64, error)
 	SaveModelCatalog(ctx context.Context, data string) (ModelCatalog, error)
 	UpdateMessage(ctx context.Context, arg UpdateMessageParams) error
 	UpdateSession(ctx context.Context, arg UpdateSessionParams) (Session, error)
 	// Writes the compaction pointers, and the token counters when given,
 	// leaving title, cost and todos to their own writers.
 	UpdateSessionCompaction(ctx context.Context, arg UpdateSessionCompactionParams) (Session, error)
-	UpdateSessionGoal(ctx context.Context, arg UpdateSessionGoalParams) error
+	UpdateSessionGoal(ctx context.Context, arg UpdateSessionGoalParams) (int64, error)
 	// Sets the title and adds the titling request's cost, leaving the token
 	// counters to the coding requests whose context size they measure.
 	UpdateSessionTitleAndCost(ctx context.Context, arg UpdateSessionTitleAndCostParams) error

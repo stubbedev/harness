@@ -93,7 +93,7 @@ func (c *controllerV1) handlePostWorkspaceConfigCompact(w http.ResponseWriter, r
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/config/provider-key [post]
 func (c *controllerV1) handlePostWorkspaceConfigProviderKey(w http.ResponseWriter, r *http.Request) {
-	req, ok := decodeBody[proto.ConfigProviderKeyRequest](c, w, r, false)
+	req, ok := decodeBody[proto.ConfigProviderKeyRequest](c, w, r, false, maxRequestBody)
 	if !ok {
 		return
 	}

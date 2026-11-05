@@ -294,9 +294,10 @@ SELECT
     CAST(COALESCE(json_extract(p.value, '$.data.text'), json_extract(p.value, '$.data.command'), '') AS TEXT) AS entry
 FROM messages m, json_each(m.parts) p
 WHERE m.role = 'user'
-  AND (?1 = '' OR m.session_id = ?1)
-  AND json_extract(p.value, '$.type') IN ('text', 'shell_command')
+  AND (json_extract(p.value, '$.type') = 'shell_command'
+    OR (json_extract(p.value, '$.type') = 'text' AND COALESCE(json_extract(p.value, '$.data.text'), '') != ''))
 ORDER BY m.created_at DESC, m.rowid DESC, p.key ASC
+LIMIT ?1
 `
 
 type ListPromptHistoryRow struct {
@@ -304,12 +305,10 @@ type ListPromptHistoryRow struct {
 	Entry    string `json:"entry"`
 }
 
-// The prompt-history entries of user messages, newest message first: each
-// text part and each shell command as written with its part type, read
-// straight from the stored parts so no binary attachment or context note
-// is decoded. An empty session_id reads every session.
-func (q *Queries) ListPromptHistory(ctx context.Context, sessionID interface{}) ([]ListPromptHistoryRow, error) {
-	rows, err := q.db.QueryContext(ctx, listPromptHistory, sessionID)
+// The newest prompt-history entries across every session, read as
+// ListSessionPromptHistory reads one session.
+func (q *Queries) ListPromptHistory(ctx context.Context, maxEntries int64) ([]ListPromptHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPromptHistory, maxEntries)
 	if err != nil {
 		return nil, err
 	}
@@ -317,6 +316,56 @@ func (q *Queries) ListPromptHistory(ctx context.Context, sessionID interface{}) 
 	items := []ListPromptHistoryRow{}
 	for rows.Next() {
 		var i ListPromptHistoryRow
+		if err := rows.Scan(&i.PartType, &i.Entry); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSessionPromptHistory = `-- name: ListSessionPromptHistory :many
+SELECT
+    CAST(json_extract(p.value, '$.type') AS TEXT) AS part_type,
+    CAST(COALESCE(json_extract(p.value, '$.data.text'), json_extract(p.value, '$.data.command'), '') AS TEXT) AS entry
+FROM messages m, json_each(m.parts) p
+WHERE m.session_id = ?1
+  AND m.role = 'user'
+  AND (json_extract(p.value, '$.type') = 'shell_command'
+    OR (json_extract(p.value, '$.type') = 'text' AND COALESCE(json_extract(p.value, '$.data.text'), '') != ''))
+ORDER BY m.created_at DESC, m.rowid DESC, p.key ASC
+LIMIT ?2
+`
+
+type ListSessionPromptHistoryParams struct {
+	SessionID  string `json:"session_id"`
+	MaxEntries int64  `json:"max_entries"`
+}
+
+type ListSessionPromptHistoryRow struct {
+	PartType string `json:"part_type"`
+	Entry    string `json:"entry"`
+}
+
+// The newest prompt-history entries of one session's user messages: each
+// non-empty text part and each shell command as written, with its part
+// type, read straight from the stored parts so no binary attachment or
+// context note is decoded.
+func (q *Queries) ListSessionPromptHistory(ctx context.Context, arg ListSessionPromptHistoryParams) ([]ListSessionPromptHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionPromptHistory, arg.SessionID, arg.MaxEntries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSessionPromptHistoryRow{}
+	for rows.Next() {
+		var i ListSessionPromptHistoryRow
 		if err := rows.Scan(&i.PartType, &i.Entry); err != nil {
 			return nil, err
 		}

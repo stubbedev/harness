@@ -69,7 +69,6 @@ func TestEveryPayloadTypeHasExactlyOneCodec(t *testing.T) {
 var wireOnlyFixups = map[reflect.Type]func(reflect.Value){
 	reflect.TypeFor[pubsub.Event[session.Session]](): func(v reflect.Value) {
 		s := v.Addr().Interface().(*pubsub.Event[session.Session])
-		s.Payload.EstimatedUsage = false
 		s.Payload.CompactionSummary, s.Payload.CompactionBoundaryID, s.Payload.CompactionAgedID = "", "", ""
 	},
 	reflect.TypeFor[pubsub.Event[message.Message]](): func(v reflect.Value) {

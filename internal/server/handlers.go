@@ -2,18 +2,26 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/stubbedev/harness/internal/backend"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/session"
 )
 
 // maxRequestBody bounds how much of a request body a handler decodes.
 const maxRequestBody = 1 << 20
+
+// maxAgentMessageBody bounds a prompt's request body: the base64 that
+// encoding/json writes for the most and largest attachments a prompt may
+// carry, plus maxRequestBody for the prompt text and everything else.
+var maxAgentMessageBody = int64(maxRequestBody + message.MaxAttachments*base64.StdEncoding.EncodedLen(message.MaxAttachmentSize))
 
 // wsFunc is the body of a workspace-scoped handler: it receives the
 // resolved {id} workspace and returns the value to encode. A nil result
@@ -107,7 +115,7 @@ func serveOptionalBody[Req any](c *controllerV1, w http.ResponseWriter, r *http.
 }
 
 func serveDecoded[Req any](c *controllerV1, w http.ResponseWriter, r *http.Request, allowEmpty bool, fn func(ctx context.Context, ws *backend.Workspace, req Req) (any, error)) {
-	req, ok := decodeBody[Req](c, w, r, allowEmpty)
+	req, ok := decodeBody[Req](c, w, r, allowEmpty, maxRequestBody)
 	if !ok {
 		return
 	}
@@ -116,16 +124,22 @@ func serveDecoded[Req any](c *controllerV1, w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// decodeBody decodes the JSON request body, writing a 400 and reporting
-// false when it is malformed.
-func decodeBody[Req any](c *controllerV1, w http.ResponseWriter, r *http.Request, allowEmpty bool) (Req, bool) {
+// decodeBody decodes the JSON request body of at most limit bytes,
+// writing a 413 and reporting false when it is larger and a 400 when it
+// is malformed.
+func decodeBody[Req any](c *controllerV1, w http.ResponseWriter, r *http.Request, allowEmpty bool, limit int64) (Req, bool) {
 	var req Req
 	if r.Body == nil {
 		return req, allowEmpty
 	}
-	err := json.NewDecoder(io.LimitReader(r.Body, maxRequestBody)).Decode(&req)
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(&req)
 	if err == nil || (allowEmpty && errors.Is(err, io.EOF)) {
 		return req, true
+	}
+	if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
+		c.server.logDebug(r, "Refused oversized request", "limit", tooLarge.Limit)
+		jsonError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request body exceeds %d bytes", tooLarge.Limit))
+		return req, false
 	}
 	c.server.logDebug(r, "Failed to decode request", "error", err)
 	jsonError(w, http.StatusBadRequest, "failed to decode request")

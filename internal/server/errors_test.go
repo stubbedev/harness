@@ -10,7 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/backend"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
+	"github.com/stubbedev/harness/internal/session"
 )
 
 // TestClassifyError pins the status and code for the errors clients act
@@ -30,6 +32,9 @@ func TestClassifyError(t *testing.T) {
 		{fmt.Errorf("cannot rewind: %w", backend.ErrSessionBusy), http.StatusConflict, proto.ErrorCodeSessionBusy},
 		{fmt.Errorf("compact: %w", agent.ErrSessionBusy), http.StatusConflict, proto.ErrorCodeSessionBusy},
 		{fmt.Errorf("%w: mode", backend.ErrInvalidArgument), http.StatusBadRequest, proto.ErrorCodeInvalidArgument},
+		{fmt.Errorf("set goal: %w", session.ErrInvalidGoal), http.StatusBadRequest, proto.ErrorCodeInvalidArgument},
+		{fmt.Errorf("send: %w", message.ErrAttachmentsRefused), http.StatusBadRequest, proto.ErrorCodeInvalidArgument},
+		{fmt.Errorf("cannot delete: %w", backend.ErrSessionBusy), http.StatusConflict, proto.ErrorCodeSessionBusy},
 		{backend.ErrServerShuttingDown, http.StatusServiceUnavailable, proto.ErrorCodeUnavailable},
 		{errors.New("boom"), http.StatusInternalServerError, proto.ErrorCodeInternal},
 	}

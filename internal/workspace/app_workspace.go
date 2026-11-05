@@ -85,7 +85,24 @@ func (w *AppWorkspace) RenameSession(ctx context.Context, sessionID, title strin
 	return w.app.Sessions.Rename(ctx, sessionID, title)
 }
 
+// DeleteSession deletes a session and every session below it. It refuses
+// with ErrSessionBusy while an agent runs in any of them, since the run
+// would keep calling the provider and then fail writing to rows that no
+// longer exist.
 func (w *AppWorkspace) DeleteSession(ctx context.Context, sessionID string) error {
+	ids, err := w.app.Sessions.Tree(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		busy, err := w.AgentIsSessionBusy(id)
+		if err != nil {
+			return err
+		}
+		if busy {
+			return fmt.Errorf("cannot delete session %s while session %s runs: %w", sessionID, id, ErrSessionBusy)
+		}
+	}
 	if err := w.app.Sessions.Delete(ctx, sessionID); err != nil {
 		return err
 	}
@@ -118,8 +135,12 @@ func (w *AppWorkspace) ListUserMessages(ctx context.Context, sessionID string) (
 	return w.app.Messages.ListUserMessages(ctx, sessionID)
 }
 
+// promptHistoryLimit is how many prompt-history entries the editor's
+// history navigation is given.
+const promptHistoryLimit = 1000
+
 func (w *AppWorkspace) PromptHistory(ctx context.Context, sessionID string) ([]message.PromptHistoryEntry, error) {
-	return w.app.Messages.PromptHistory(ctx, sessionID)
+	return w.app.Messages.PromptHistory(ctx, sessionID, promptHistoryLimit)
 }
 
 // -- Agent --
@@ -127,6 +148,9 @@ func (w *AppWorkspace) PromptHistory(ctx context.Context, sessionID string) ([]m
 func (w *AppWorkspace) AgentRun(ctx context.Context, sessionID, prompt string, attachments ...message.Attachment) error {
 	if w.app.AgentCoordinator == nil {
 		return ErrAgentNotInitialized
+	}
+	if err := message.ValidateAttachments(attachments); err != nil {
+		return err
 	}
 	_, err := w.app.AgentCoordinator.Run(ctx, sessionID, prompt, attachments...)
 	return err

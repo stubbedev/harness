@@ -10,6 +10,7 @@ import (
 
 	"github.com/stubbedev/harness/internal/backend"
 	"github.com/stubbedev/harness/internal/catalog"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/session"
 )
@@ -51,7 +52,7 @@ func (c *controllerV1) handleGetVersion(w http.ResponseWriter, _ *http.Request) 
 //	@Failure		409	{object}	proto.Error
 //	@Router			/control [post]
 func (c *controllerV1) handlePostControl(w http.ResponseWriter, r *http.Request) {
-	req, ok := decodeBody[proto.ServerControl](c, w, r, false)
+	req, ok := decodeBody[proto.ServerControl](c, w, r, false, maxRequestBody)
 	if !ok {
 		return
 	}
@@ -115,7 +116,7 @@ func (c *controllerV1) handleGetWorkspace(w http.ResponseWriter, r *http.Request
 //	@Failure		500		{object}	proto.Error
 //	@Router			/workspaces [post]
 func (c *controllerV1) handlePostWorkspaces(w http.ResponseWriter, r *http.Request) {
-	args, ok := decodeBody[proto.Workspace](c, w, r, false)
+	args, ok := decodeBody[proto.Workspace](c, w, r, false, maxRequestBody)
 	if !ok {
 		return
 	}
@@ -147,7 +148,7 @@ func (c *controllerV1) handlePostWorkspaceCurrentSession(w http.ResponseWriter, 
 	if !ok {
 		return
 	}
-	req, ok := decodeBody[proto.CurrentSession](c, w, r, false)
+	req, ok := decodeBody[proto.CurrentSession](c, w, r, false, maxRequestBody)
 	if !ok {
 		return
 	}
@@ -673,7 +674,7 @@ func (c *controllerV1) handleGetWorkspaceAgent(w http.ResponseWriter, r *http.Re
 //	@Failure		500	{object}	proto.Error
 //	@Router			/workspaces/{id}/agent [post]
 func (c *controllerV1) handlePostWorkspaceAgent(w http.ResponseWriter, r *http.Request) {
-	msg, ok := decodeBody[proto.AgentMessage](c, w, r, false)
+	msg, ok := decodeBody[proto.AgentMessage](c, w, r, false, maxAgentMessageBody)
 	if !ok {
 		return
 	}
@@ -1003,6 +1004,8 @@ var errorClasses = []struct {
 	{proto.ErrInvalidRunID, classInvalid},
 	{backend.ErrInvalidDataDir, classInvalid},
 	{backend.ErrInvalidArgument, classInvalid},
+	{session.ErrInvalidGoal, classInvalid},
+	{message.ErrAttachmentsRefused, classInvalid},
 	// 409, not 404: the workspace exists, the caller just has no live
 	// stream yet.
 	{backend.ErrClientNotAttached, classConflict},
@@ -1046,7 +1049,7 @@ func jsonEncode(w http.ResponseWriter, v any) {
 func jsonError(w http.ResponseWriter, status int, message string) {
 	code := proto.ErrorCodeInternal
 	switch status {
-	case http.StatusBadRequest:
+	case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
 		code = proto.ErrorCodeInvalidArgument
 	case http.StatusNotFound:
 		code = proto.ErrorCodeNotFound

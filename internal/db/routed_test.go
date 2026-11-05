@@ -56,7 +56,7 @@ func TestRoutedReadsDoNotWaitForTheWriter(t *testing.T) {
 	tx, err := conn.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	err = q.WithTx(tx).RenameSession(t.Context(), RenameSessionParams{ID: "s1", Title: "renamed"})
+	_, err = q.WithTx(tx).RenameSession(t.Context(), RenameSessionParams{ID: "s1", Title: "renamed"})
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -126,7 +126,8 @@ func TestRoutedPreparesEachQueryOnce(t *testing.T) {
 	round := func() {
 		_, err := q.GetSessionByID(t.Context(), created.ID)
 		require.NoError(t, err)
-		require.NoError(t, q.RenameSession(t.Context(), RenameSessionParams{ID: created.ID, Title: "renamed"}))
+		_, err = q.RenameSession(t.Context(), RenameSessionParams{ID: created.ID, Title: "renamed"})
+		require.NoError(t, err)
 	}
 	round()
 	first := cachedStatements(routed)

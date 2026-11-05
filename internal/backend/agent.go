@@ -7,6 +7,7 @@ import (
 	"github.com/stubbedev/harness/internal/agent"
 	"github.com/stubbedev/harness/internal/agent/notify"
 	"github.com/stubbedev/harness/internal/crash"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/proto"
 	"github.com/stubbedev/harness/internal/pubsub"
 )
@@ -21,9 +22,10 @@ import (
 //
 // SendMessage returns synchronously when the request cannot be accepted:
 // ErrWorkspaceNotFound if the workspace is missing, ErrAgentNotInitialized
-// if its coordinator is nil, the structural validation errors from
-// agent.ValidateCall (ErrEmptyPrompt, ErrSessionMissing) when the prompt
-// or session is missing, proto.ErrInvalidSessionID or proto.ErrInvalidRunID when an
+// if its coordinator is nil, message.ErrAttachmentsRefused when the
+// attachments exceed the prompt limits, the structural validation errors
+// from agent.ValidateCall (ErrEmptyPrompt, ErrSessionMissing) when the
+// prompt or session is missing, proto.ErrInvalidSessionID or proto.ErrInvalidRunID when an
 // identifier is not the canonical UUID shape harness mints them in, and
 // ErrWorkspaceClosing if the workspace is being torn down.
 func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error {
@@ -36,10 +38,14 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 		return ErrAgentNotInitialized
 	}
 
+	attachments := proto.AttachmentsToMessage(msg.Attachments)
+	if err := message.ValidateAttachments(attachments); err != nil {
+		return err
+	}
 	if err := agent.ValidateCall(agent.SessionAgentCall{
 		SessionID:   msg.SessionID,
 		Prompt:      msg.Prompt,
-		Attachments: proto.AttachmentsToMessage(msg.Attachments),
+		Attachments: attachments,
 	}); err != nil {
 		return err
 	}
@@ -88,7 +94,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 				})
 			}
 		})
-		b.runAgent(ws, msg, sessionID, runID, accept)
+		b.runAgent(ws, msg.Prompt, attachments, sessionID, runID, accept)
 	}()
 	return nil
 }
@@ -102,7 +108,7 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // notify.TypeAgentError notification (lossy, best-effort). That alone is
 // not a reliable terminal signal: the agent-event fan-in uses lossy
 // subscribers, so a `harness run` caller blocking on its RunID could hang
-// if the event is dropped. To guarantee termination, when msg.RunID is
+// if the event is dropped. To guarantee termination, when runID is
 // non-empty and the coordinator did not already publish the run's
 // authoritative terminal RunComplete (e.g. the error was returned before
 // sessionAgent.Run executed, such as a readyWg or UpdateModels failure),
@@ -112,12 +118,12 @@ func (b *Backend) SendMessage(workspaceID string, msg proto.AgentMessage) error 
 // publishes the cancelled terminal marker) and produces no error
 // terminal event.
 //
-// When msg.RunID is non-empty it is attached to the context via
+// When runID is non-empty it is attached to the context via
 // agent.WithRunID so the coordinator can stamp the terminal
 // notify.RunComplete event with that correlator. A run-complete marker
 // is also attached so the coordinator can report whether it published
 // the terminal event, letting runAgent avoid a duplicate fallback.
-func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, sessionID, runID string, accept *agent.AcceptedRun) {
+func (b *Backend) runAgent(ws *Workspace, prompt string, attachments []message.Attachment, sessionID, runID string, accept *agent.AcceptedRun) {
 	defer ws.runWG.Done()
 	defer accept.Close()
 
@@ -127,7 +133,7 @@ func (b *Backend) runAgent(ws *Workspace, msg proto.AgentMessage, sessionID, run
 	}
 	ctx = agent.WithRunCompleteMarker(ctx)
 
-	_, err := ws.AgentCoordinator.RunAccepted(ctx, accept, sessionID, msg.Prompt, proto.AttachmentsToMessage(msg.Attachments)...)
+	_, err := ws.AgentCoordinator.RunAccepted(ctx, accept, sessionID, prompt, attachments...)
 	if err == nil || errors.Is(err, context.Canceled) {
 		return
 	}
