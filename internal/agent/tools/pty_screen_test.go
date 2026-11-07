@@ -16,6 +16,20 @@ func requireProgram(t *testing.T, name string) {
 	}
 }
 
+// requireLeftAltScreen asserts that the full-screen program res came from
+// quits. A call returns once the screen settles, and a loaded machine can
+// leave the program quiet on screen past that window before it exits, so
+// the session is polled until it does rather than judged on res alone.
+func requireLeftAltScreen(t *testing.T, r *ptyRunner, res PTYResult) {
+	t.Helper()
+	for deadline := time.Now().Add(15 * time.Second); res.AltScreen && time.Now().Before(deadline); {
+		var err error
+		res, err = r.PollFor(t.Context(), 1)
+		require.NoError(t, err)
+	}
+	require.False(t, res.AltScreen, "the full-screen program should have quit")
+}
+
 // A full-screen program must be reported as running with its screen
 // rendered - never as a finished command. The bug this guards against:
 // nvim enables bracketed paste on startup, which the old prompt
@@ -44,7 +58,7 @@ func TestPtyRunner_EditorIsDrivenNotMistakenForAPrompt(t *testing.T) {
 
 	res, err = r.Type(t.Context(), "\x1b:q!\r", 10)
 	require.NoError(t, err)
-	require.False(t, res.AltScreen, "editor should have quit")
+	requireLeftAltScreen(t, r, res)
 
 	done, err := r.Type(t.Context(), "echo back", 10)
 	require.NoError(t, err)
@@ -63,7 +77,7 @@ func TestPtyRunner_PagerRendersAndQuits(t *testing.T) {
 
 	res, err = r.Type(t.Context(), "q", 10)
 	require.NoError(t, err)
-	require.False(t, res.AltScreen)
+	requireLeftAltScreen(t, r, res)
 
 	done, err := r.Type(t.Context(), "echo back", 10)
 	require.NoError(t, err)
@@ -233,7 +247,7 @@ func TestPtyRunner_TypingGoesToWhateverIsRunning(t *testing.T) {
 	// Quitting hands the terminal back, and the same text now runs.
 	res, err = r.Type(t.Context(), "\x1b:q!\r", 10)
 	require.NoError(t, err)
-	require.False(t, res.AltScreen)
+	requireLeftAltScreen(t, r, res)
 	done, err := r.Type(t.Context(), "echo beside", 10)
 	require.NoError(t, err)
 	require.NotNil(t, done.ExitCode)
