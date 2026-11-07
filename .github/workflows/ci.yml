@@ -39,7 +39,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.2
+          version: v2.15.0
           args: --path-mode=abs --config=.golangci.yml --timeout=8m
 
       - name: Log messages start with a capital
