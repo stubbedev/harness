@@ -54,6 +54,28 @@ func newHookRunner(t *testing.T) *ptyRunner {
 	return nil
 }
 
+// holdUntilReleased returns a command that keeps the shell busy until
+// release is called. release then waits for the shell's next prompt, so
+// the completion has landed before the caller swallows it. A fixed sleep
+// in its place raced the calls around it on a loaded machine: the command
+// could finish before the line meant to queue behind it was typed.
+func holdUntilReleased(t *testing.T, r *ptyRunner) (string, func()) {
+	t.Helper()
+	gate := filepath.Join(t.TempDir(), "gate")
+	cmd := fmt.Sprintf("while [ ! -e '%s' ]; do sleep 0.05; done", gate)
+	release := func() {
+		t.Helper()
+		before, ok := r.readPromptState()
+		require.True(t, ok)
+		require.NoError(t, os.WriteFile(gate, nil, 0o644))
+		require.Eventually(t, func() bool {
+			after, ok := r.readPromptState()
+			return ok && after.seq > before.seq
+		}, 10*time.Second, 20*time.Millisecond, "the held command must finish at a new prompt")
+	}
+	return cmd, release
+}
+
 // The prompt-state hook is the shell's own account: a line per prompt,
 // ordinal first, advancing past every command, and naming the directory
 // the command left the session in. The exit code it carries is
@@ -89,12 +111,13 @@ func TestPtyRunner_PromptStateAdvances(t *testing.T) {
 // the two-hour "still running, idle" wedge of the wild report.
 func TestPtyRunner_DrainedCompletionStillCollects(t *testing.T) {
 	r := newHookRunner(t)
+	hold, release := holdUntilReleased(t, r)
 
-	started, err := r.Type(t.Context(), "sleep 2; echo done", 1)
+	started, err := r.Type(t.Context(), hold+"; echo done", 1)
 	require.NoError(t, err)
 	require.True(t, started.Running)
 
-	time.Sleep(3 * time.Second)
+	release()
 	r.session.Drain()
 
 	poll, err := r.PollFor(t.Context(), 10)
@@ -116,8 +139,9 @@ func TestPtyRunner_DrainedCompletionStillCollects(t *testing.T) {
 // unseen - the queue starvation of the wild report.
 func TestPtyRunner_QueuedLinesRunAfterDrainedCompletion(t *testing.T) {
 	r := newHookRunner(t)
+	hold, release := holdUntilReleased(t, r)
 
-	started, err := r.Type(t.Context(), "sleep 2", 1)
+	started, err := r.Type(t.Context(), hold, 1)
 	require.NoError(t, err)
 	require.True(t, started.Running)
 
@@ -125,7 +149,7 @@ func TestPtyRunner_QueuedLinesRunAfterDrainedCompletion(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, queued.Queued)
 
-	time.Sleep(3 * time.Second)
+	release()
 	r.session.Drain()
 
 	poll, err := r.PollFor(t.Context(), 15)
