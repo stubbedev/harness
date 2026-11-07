@@ -2,6 +2,8 @@ module github.com/stubbedev/harness
 
 go 1.27.0
 
+toolchain go1.27.3
+
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.1
