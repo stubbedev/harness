@@ -302,6 +302,9 @@ func (s *executionState) Ingest(msgs []message.Message) {
 					call.Name = part.Name
 				}
 				s.ingestResult(call, part)
+			case message.TextContent, message.ReasoningContent, message.BinaryContent,
+				message.ImageURLContent, message.ContextNote, message.ShellCommand,
+				message.SubagentNote, message.Finish:
 			}
 		}
 	}

@@ -177,12 +177,12 @@ func startTime(pid int) (uint64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	end := bytes.LastIndexByte(data, ')')
-	if end < 0 {
+	_, rest, found := bytes.CutLast(data, []byte(")"))
+	if !found {
 		return 0, false
 	}
 	// Fields after the comm start at field 3 (state); starttime is 22.
-	fields := strings.Fields(string(data[end+1:]))
+	fields := strings.Fields(string(rest))
 	const startTimeField = 22 - 3
 	if len(fields) <= startTimeField {
 		return 0, false

@@ -203,6 +203,8 @@ func ageMessages(msgs []message.Message, agedIdx int) []message.Message {
 					part = p
 					rewritten = true
 				}
+			case message.ToolCall, message.ReasoningContent, message.ImageURLContent,
+				message.ShellCommand, message.SubagentNote, message.Finish:
 			}
 			parts = append(parts, part)
 		}
