@@ -29,7 +29,6 @@ func TestE2E_StalledStreamIsDisconnected(t *testing.T) {
 	h.srv.eventWriteTimeout = time.Second
 
 	stalledID := proto.ClientID(uuid.New().String())
-	t.Logf("stalled=%s", stalledID)
 	q := url.Values{"client_id": []string{string(stalledID)}}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		h.httpSrv.URL+"/v1/workspaces/"+h.workspace.ID+"/events?"+q.Encode(), nil)
@@ -40,7 +39,6 @@ func TestE2E_StalledStreamIsDisconnected(t *testing.T) {
 	require.Equal(t, http.StatusOK, stalled.StatusCode)
 
 	readingID := proto.ClientID(uuid.New().String())
-	t.Logf("reading=%s", readingID)
 	ctxB, cancelB := context.WithCancel(t.Context())
 	t.Cleanup(cancelB)
 	evcB, killB := h.subscribeSSE(t, ctxB, h.workspace.ID, string(readingID))
