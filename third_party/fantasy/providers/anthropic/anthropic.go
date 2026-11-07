@@ -164,6 +164,8 @@ type options struct {
 	bedrockProfile string
 
 	objectMode fantasy.ObjectMode
+
+	eagerToolInputStreaming bool
 }
 
 type provider struct {
@@ -265,6 +267,17 @@ func WithHTTPClient(client option.HTTPClient) Option {
 func WithUserAgent(ua string) Option {
 	return func(o *options) {
 		o.userAgent = ua
+	}
+}
+
+// WithEagerToolInputStreaming asks the API to stream every function tool's
+// input as it is generated instead of validating it whole first. Without it
+// a long argument, a file being written say, can arrive after a minute of
+// silence. The input is then not validated before it arrives, so a stream
+// cut short can end on arguments that are not valid JSON.
+func WithEagerToolInputStreaming() Option {
+	return func(o *options) {
+		o.eagerToolInputStreaming = true
 	}
 }
 
@@ -751,6 +764,9 @@ func (a languageModel) toTools(tools []fantasy.Tool, toolChoice *fantasy.ToolCho
 			}
 			if cacheControl != nil {
 				anthropicTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+			}
+			if a.options.eagerToolInputStreaming {
+				anthropicTool.EagerInputStreaming = anthropic.Bool(true)
 			}
 			raw, err := json.Marshal(anthropic.ToolUnionParam{OfTool: &anthropicTool})
 			if err != nil {

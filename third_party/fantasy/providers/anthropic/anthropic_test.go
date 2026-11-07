@@ -3349,3 +3349,38 @@ func TestDisplayDefaultDoesNotChangeThinkingMode(t *testing.T) {
 	require.True(t, requiresAdaptiveThinking("claude-opus-4-7"))
 	require.True(t, requiresAdaptiveThinking("claude-mythos-preview"))
 }
+
+func TestToTools_EagerInputStreaming(t *testing.T) {
+	t.Parallel()
+
+	tools := []fantasy.Tool{
+		fantasy.FunctionTool{
+			Name:        "write",
+			Description: "Write a file",
+			InputSchema: map[string]any{
+				"properties": map[string]any{
+					"content": map[string]any{"type": "string"},
+				},
+			},
+		},
+		WebSearchTool(nil),
+	}
+
+	functionTool := func(o *options) map[string]any {
+		rawTools, _, warnings, _ := languageModel{options: *o}.toTools(tools, nil, false)
+		require.Empty(t, warnings)
+		require.Len(t, rawTools, 2)
+		var webTool map[string]any
+		require.NoError(t, json.Unmarshal(rawTools[1], &webTool))
+		require.NotContains(t, webTool, "eager_input_streaming", "only function tools take the flag")
+		var funcTool map[string]any
+		require.NoError(t, json.Unmarshal(rawTools[0], &funcTool))
+		return funcTool
+	}
+
+	require.NotContains(t, functionTool(&options{}), "eager_input_streaming", "off unless asked for")
+
+	enabled := options{}
+	WithEagerToolInputStreaming()(&enabled)
+	require.Equal(t, true, functionTool(&enabled)["eager_input_streaming"])
+}

@@ -1403,6 +1403,12 @@ func (c *coordinator) buildAnthropicProvider(baseURL, apiKey string, headers map
 		opts = append(opts, anthropic.WithBaseURL(baseURL))
 	}
 
+	// Anthropic-compatible gateways speak the wire format, not every field
+	// of it, so the per-tool flag goes only to Anthropic itself.
+	if providerID == catalog.InferenceProviderAnthropic {
+		opts = append(opts, anthropic.WithEagerToolInputStreaming())
+	}
+
 	opts = append(opts, anthropic.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)))
 	return anthropic.New(opts...)
 }

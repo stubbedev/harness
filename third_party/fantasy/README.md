@@ -68,6 +68,11 @@ finish in.
   profile instead of `$AWS_PROFILE`, so a provider configured in Harness can
   name its profile without touching the process environment.
 
+- **Eager tool input streaming.** `anthropic.WithEagerToolInputStreaming`
+  sets `eager_input_streaming` on every function tool, so the API streams a
+  long argument as it is generated instead of buffering and validating it
+  first, which could leave the stream silent for over a minute.
+
 Not vendored: `providertests/` (provider integration tests and their 4.7MB
 of recorded cassettes), `.github/`, `.helix/`, `scripts/`, `Taskfile.yaml`,
 `.goreleaser.yml`, `.editorconfig`, `.gitattributes`, `.gitignore`,
