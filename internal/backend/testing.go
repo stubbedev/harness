@@ -67,3 +67,15 @@ func WorkspaceLiveStreamCountForTest(ws *Workspace) int {
 	}
 	return n
 }
+
+// ClientLiveStreamsForTest returns the number of live SSE streams clientID
+// has open on ws, zero when the client holds no claim on it.
+func ClientLiveStreamsForTest(ws *Workspace, clientID proto.ClientID) int {
+	ws.clientsMu.Lock()
+	defer ws.clientsMu.Unlock()
+	cs, ok := ws.clients[clientID]
+	if !ok {
+		return 0
+	}
+	return cs.streams
+}
