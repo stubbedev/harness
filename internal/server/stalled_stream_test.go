@@ -43,20 +43,27 @@ func TestE2E_StalledStreamIsDisconnected(t *testing.T) {
 	}()
 	h.waitForAttached(t, 2)
 
+	// How much a stalled loopback socket absorbs before a write blocks is
+	// the OS's choice; Windows autotunes it to tens of megabytes. So events
+	// keep coming until the stream is dropped, capped below the frame
+	// broker's per-subscriber buffer so that only the write timeout, never
+	// eviction of a full subscriber, can be what disconnects it.
+	const maxEvents = 2048
 	text := strings.Repeat("x", 64<<10)
-	for i := range 400 {
-		h.app.SendEvent(pubsub.Event[message.Message]{
-			Type: pubsub.CreatedEvent,
-			Payload: message.Message{
-				ID:        fmt.Sprintf("m-%d", i),
-				SessionID: "s",
-				Role:      message.Assistant,
-				Parts:     []message.ContentPart{message.TextContent{Text: text}},
-			},
-		})
-	}
-
+	sent := 0
 	require.Eventually(t, func() bool {
+		for n := 0; n < 16 && sent < maxEvents; n++ {
+			h.app.SendEvent(pubsub.Event[message.Message]{
+				Type: pubsub.CreatedEvent,
+				Payload: message.Message{
+					ID:        fmt.Sprintf("m-%d", sent),
+					SessionID: "s",
+					Role:      message.Assistant,
+					Parts:     []message.ContentPart{message.TextContent{Text: text}},
+				},
+			})
+			sent++
+		}
 		return backend.WorkspaceLiveStreamCountForTest(h.workspace) == 1
-	}, 5*time.Second, 10*time.Millisecond, "the stalled stream must be disconnected")
+	}, 10*time.Second, 10*time.Millisecond, "the stalled stream must be disconnected")
 }
