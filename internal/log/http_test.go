@@ -143,7 +143,7 @@ func TestProviderTransportIsSharedAndIsolated(t *testing.T) {
 	if got := http.DefaultTransport.(*http.Transport).ResponseHeaderTimeout; got != 0 {
 		t.Fatalf("http.DefaultTransport was mutated: ResponseHeaderTimeout = %v", got)
 	}
-	if got := ProviderTransport().(*http.Transport).ResponseHeaderTimeout; got != ResponseHeaderTimeout {
+	if got := baseTransport(t, ProviderTransport()).ResponseHeaderTimeout; got != ResponseHeaderTimeout {
 		t.Fatalf("ResponseHeaderTimeout = %v, want %v", got, ResponseHeaderTimeout)
 	}
 
@@ -175,7 +175,7 @@ func TestProviderTransportIsSharedAndIsolated(t *testing.T) {
 func TestHTTP1OnlyProviderTransport(t *testing.T) {
 	t.Parallel()
 
-	h1 := ProviderTransportFor(true).(*http.Transport)
+	h1 := baseTransport(t, ProviderTransportFor(true))
 	if h1.TLSNextProto == nil {
 		t.Fatal("TLSNextProto must be non-nil empty to disable HTTP/2, got nil")
 	}
@@ -204,7 +204,7 @@ func TestHTTP1OnlyProviderTransport(t *testing.T) {
 	// Its TLSNextProto is deliberately not asserted on: net/http fills in the
 	// "h2" hook lazily on first use, so its contents depend on whether some
 	// other test has already dialled through it.
-	h2 := ProviderTransportFor(false).(*http.Transport)
+	h2 := baseTransport(t, ProviderTransportFor(false))
 	if !h2.ForceAttemptHTTP2 {
 		t.Fatal("default provider transport must still attempt HTTP/2")
 	}
@@ -231,4 +231,13 @@ func TestHTTP1OnlyProviderTransport(t *testing.T) {
 	if got := NewProviderHTTPClient(false, true).Transport; got != ProviderTransportFor(true) {
 		t.Fatal("quiet client with disableHTTP2 must use the HTTP/1.1-only transport")
 	}
+}
+
+func baseTransport(t *testing.T, rt http.RoundTripper) *http.Transport {
+	t.Helper()
+	activity, ok := rt.(*activityTransport)
+	if !ok {
+		t.Fatalf("provider transport = %T, want *activityTransport", rt)
+	}
+	return activity.base
 }

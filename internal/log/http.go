@@ -43,7 +43,11 @@ var http1OnlyProviderTransport = sync.OnceValue(func() http.RoundTripper {
 	return newProviderTransport(true)
 })
 
-func newProviderTransport(disableHTTP2 bool) *http.Transport {
+func newProviderTransport(disableHTTP2 bool) *activityTransport {
+	return &activityTransport{base: newBaseProviderTransport(disableHTTP2)}
+}
+
+func newBaseProviderTransport(disableHTTP2 bool) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.ResponseHeaderTimeout = ResponseHeaderTimeout
 	if disableHTTP2 {

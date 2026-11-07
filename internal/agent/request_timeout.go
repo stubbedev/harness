@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"charm.land/fantasy"
+	"github.com/stubbedev/harness/internal/log"
 )
 
 // requestTimeoutError reports that an LLM request exhausted its configured
@@ -68,25 +70,31 @@ func newRequestTimeoutModel(m fantasy.LanguageModel, timeout time.Duration) fant
 // wrapTimedOut replaces err with the requestTimeoutError when this model's
 // own deadline fired. Other errors — user cancellation, outer deadlines,
 // provider failures — pass through unchanged. Cancellation errors caused by
-// our own timer report as [context.DeadlineExceeded] so callers never
-// mistake a timeout for a user cancellation.
+// our own timer keep the [context.DeadlineExceeded] cause timeoutErr is
+// created with, so callers never mistake a timeout for a user cancellation.
+// An error that already carries timeoutErr, as net/http reports a read
+// canceled with that cause, is returned as is: making it timeoutErr's own
+// cause would loop the chain.
 func wrapTimedOut(ctx context.Context, timeoutErr *requestTimeoutError, err error) error {
 	if err == nil || !errors.Is(context.Cause(ctx), timeoutErr) {
 		return err
 	}
-	if errors.Is(err, context.Canceled) {
-		timeoutErr.cause = context.DeadlineExceeded
-	} else {
+	switch {
+	case errors.Is(err, timeoutErr):
+		return err
+	case errors.Is(err, context.Canceled):
+		return timeoutErr
+	default:
 		timeoutErr.cause = err
+		return timeoutErr
 	}
-	return timeoutErr
 }
 
 // Generate implements [fantasy.LanguageModel]. The request gets a hard
 // deadline: there is no incremental progress signal, so the whole call must
 // finish within the budget.
 func (m requestTimeoutModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
-	timeoutErr := &requestTimeoutError{timeout: m.timeout}
+	timeoutErr := &requestTimeoutError{timeout: m.timeout, cause: context.DeadlineExceeded}
 	ctx, cancel := context.WithTimeoutCause(ctx, m.timeout, timeoutErr)
 	defer cancel()
 	resp, err := m.LanguageModel.Generate(ctx, call)
@@ -96,28 +104,66 @@ func (m requestTimeoutModel) Generate(ctx context.Context, call fantasy.Call) (*
 // Stream implements [fantasy.LanguageModel].
 //
 // The stream is consumed after Stream returns, so the timer must outlive
-// this call: it fires only after timeout seconds without any part arriving,
-// and is released when iteration ends, whether the stream finishes, breaks,
-// or the idle timeout aborts it. Both the initial connection and gaps
-// between parts share the same budget.
+// this call: it fires only after timeout seconds without any activity, and
+// is released when iteration ends, whether the stream finishes, breaks, or
+// the idle timeout aborts it. Both the initial connection and gaps between
+// parts share the same budget.
+//
+// Activity is a stream part or any bytes read off the response. The second
+// is what keeps a long tool call alive: providers can go a minute without a
+// content event while they buffer its arguments, and the keep-alives they
+// send meanwhile never reach fantasy as parts.
 func (m requestTimeoutModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-	timeoutErr := &requestTimeoutError{timeout: m.timeout, idle: true}
+	timeoutErr := &requestTimeoutError{timeout: m.timeout, idle: true, cause: context.DeadlineExceeded}
 	ctx, cancel := context.WithCancelCause(ctx)
-	timer := time.AfterFunc(m.timeout, func() { cancel(timeoutErr) })
+	idle := startIdleTimer(m.timeout, func() { cancel(timeoutErr) })
+	ctx = log.WithReadActivity(ctx, idle.reset)
 
 	inner, err := m.LanguageModel.Stream(ctx, call)
 	if err != nil {
-		timer.Stop()
+		idle.stop()
 		cancel(nil)
 		return nil, wrapTimedOut(ctx, timeoutErr, err)
 	}
 	return func(yield func(fantasy.StreamPart) bool) {
-		defer timer.Stop()
+		defer idle.stop()
 		defer cancel(nil)
 		inner(func(part fantasy.StreamPart) bool {
-			timer.Reset(m.timeout)
+			idle.reset()
 			part.Error = wrapTimedOut(ctx, timeoutErr, part.Error)
 			return yield(part)
 		})
 	}, nil
+}
+
+// idleTimer fires once its timeout passes without a reset. Resets come from
+// the stream's consumer and from the transport's reader goroutine at once,
+// and one that lands after stop must not re-arm a finished stream's timer.
+type idleTimer struct {
+	timeout time.Duration
+	mu      sync.Mutex
+	timer   *time.Timer
+	stopped bool
+}
+
+func startIdleTimer(timeout time.Duration, fire func()) *idleTimer {
+	t := &idleTimer{timeout: timeout}
+	t.timer = time.AfterFunc(timeout, fire)
+	return t
+}
+
+func (t *idleTimer) reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopped {
+		return
+	}
+	t.timer.Reset(t.timeout)
+}
+
+func (t *idleTimer) stop() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.stopped = true
+	t.timer.Stop()
 }

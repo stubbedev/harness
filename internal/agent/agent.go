@@ -2227,6 +2227,21 @@ func stripOrphanThinking(msg *message.Message) {
 	})
 }
 
+// failedToolCallResult is the result the model reads for a call a failed
+// turn left without one. A call whose arguments never finished streaming
+// was never run, and saying so with the stream's error is what lets the
+// model tell a cut-off response from a tool that failed.
+func failedToolCallResult(streamErr error, unfinished bool) string {
+	switch {
+	case errors.Is(streamErr, context.Canceled):
+		return "Error: user cancelled assistant tool calling"
+	case unfinished:
+		return fmt.Sprintf("Error: the tool was not run: the response ended before its arguments finished streaming (%v)", streamErr)
+	default:
+		return "There was an error while executing the tool"
+	}
+}
+
 // persistFailedTurn writes the terminal state of a streaming turn that
 // ended with streamErr: unfinished tool calls are closed with error
 // results, the failure (or cancellation) is recorded on the assistant
@@ -2267,7 +2282,8 @@ func (a *sessionAgent) persistFailedTurn(
 		return listErr
 	}
 	for _, tc := range toolCalls {
-		if !tc.Finished {
+		unfinished := !tc.Finished
+		if unfinished {
 			tc.Finished = true
 			tc.Input = "{}"
 			currentAssistant.AddToolCall(tc)
@@ -2295,14 +2311,10 @@ func (a *sessionAgent) persistFailedTurn(
 		if found {
 			continue
 		}
-		content := "There was an error while executing the tool"
-		if isCancelErr {
-			content = "Error: user cancelled assistant tool calling"
-		}
 		toolResult := message.ToolResult{
 			ToolCallID: tc.ID,
 			Name:       tc.Name,
-			Content:    content,
+			Content:    failedToolCallResult(streamErr, unfinished),
 			IsError:    true,
 			Canceled:   isCancelErr,
 		}
