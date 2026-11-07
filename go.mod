@@ -16,7 +16,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.4
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/aws/aws-sdk-go-v2/config v1.33.12
+	github.com/aws/aws-sdk-go-v2/config v1.33.13
 	github.com/aymanbagabas/go-pty v0.2.3
 	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/bmatcuk/doublestar/v4 v4.10.4
@@ -65,14 +65,14 @@ require (
 	github.com/zeebo/xxh3 v1.1.0
 	go.uber.org/goleak v1.3.0
 	golang.design/x/clipboard v0.11.0
-	golang.org/x/net v0.61.0
+	golang.org/x/net v0.62.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.43.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.60.1
+	modernc.org/sqlite v1.61.1
 	mvdan.cc/sh/v3 v3.14.1
 	mvdan.cc/sh/x v0.0.0-20260907232430-b5028a3332a4
 )
@@ -89,16 +89,16 @@ require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.47.5 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20 // indirect
-	github.com/aws/aws-sdk-go-v2/credentials v1.20.12 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.20.13 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.5 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.8 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.23 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.8 // indirect
-	github.com/aws/aws-sdk-go-v2/service/signin v1.12.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.39.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.44.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.12.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.39.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.44.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.51.6 // indirect
 	github.com/aws/smithy-go v1.28.7 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
@@ -207,7 +207,7 @@ require (
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	modernc.org/libc v1.78.0 // indirect
+	modernc.org/libc v1.79.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
