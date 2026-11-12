@@ -43,7 +43,7 @@
 
       env = {
         CGO_ENABLED = "0";
-        # nixpkgs' go defaults to GOTOOLCHAIN=auto, which would fetch whatever
+        # go defaults to GOTOOLCHAIN=auto, which would fetch whatever
         # toolchain a go.mod line asks for; the shell holds to the pinned one.
         GOTOOLCHAIN = "local";
       };
