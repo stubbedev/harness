@@ -3,6 +3,7 @@
 package term
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,12 +30,14 @@ func TestSession_OOMKillStaysInScope(t *testing.T) {
 	// share of the machine's memory.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "memory.max"), []byte("64M"), 0o644))
 
-	// tail holds the current line in memory, and /dev/zero has no line
-	// breaks: it grows until it is killed. It reads /dev/zero itself
-	// rather than through a pipe, so it is the only process allocating:
-	// a writer feeding it can hit the limit again before the kernel has
-	// reclaimed tail's memory and be killed as well.
-	require.NoError(t, s.Send([]byte("tail -n 1 /dev/zero; printf '__status:%s__\\n' \"$?\"\n")))
+	// The hog is this test binary rerun as TestMemoryHog, which allocates
+	// until it is killed. It is the only process allocating, so nothing
+	// else hits the limit before the kernel has reclaimed its memory. A
+	// coreutils trick such as `tail -n 1 /dev/zero` is not a hog
+	// everywhere: uutils tail streams the zeros instead of holding the
+	// line.
+	hog := fmt.Sprintf("%s=1 '%s' -test.run='^TestMemoryHog$'; printf '__status:%%s__\\n' \"$?\"\n", memoryHogEnv, os.Args[0])
+	require.NoError(t, s.Send([]byte(hog)))
 	require.True(t, waitOutput(t, s, regexp.MustCompile(`__status:137__`), testTimeout(30*time.Second)),
 		"the hog was not killed: %q", s.Pending())
 
@@ -45,6 +48,28 @@ func TestSession_OOMKillStaysInScope(t *testing.T) {
 	limit, ok := s.MemoryLimit()
 	require.True(t, ok)
 	require.Equal(t, int64(64<<20), limit)
+}
+
+const memoryHogEnv = "HARNESS_TEST_MEMORY_HOG"
+
+// memoryHogHeld keeps every chunk TestMemoryHog allocates reachable, so
+// none of it can be collected.
+var memoryHogHeld [][]byte
+
+// TestMemoryHog is the helper process TestSession_OOMKillStaysInScope
+// runs inside the session's scope. It touches every page it allocates,
+// so its resident memory grows until the kernel kills it.
+func TestMemoryHog(t *testing.T) {
+	if os.Getenv(memoryHogEnv) == "" {
+		t.Skip("helper process for TestSession_OOMKillStaysInScope")
+	}
+	for {
+		chunk := make([]byte, 1<<20)
+		for i := 0; i < len(chunk); i += os.Getpagesize() {
+			chunk[i] = 1
+		}
+		memoryHogHeld = append(memoryHogHeld, chunk)
+	}
 }
 
 // TestSession_CloseKillsScope checks that closing a session ends a
