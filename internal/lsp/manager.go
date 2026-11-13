@@ -17,6 +17,7 @@ import (
 
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
 	powernap "github.com/charmbracelet/x/powernap/pkg/lsp"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/sourcegraph/jsonrpc2"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/crash"
@@ -309,7 +310,7 @@ func (s *Manager) startServer(name, filepath string, server *powernapconfig.Serv
 	}
 
 	if isUserConfigured {
-		if !handles(server, filepath, s.cfg.WorkingDir()) {
+		if !s.handles(name, server, filepath, s.cfg.WorkingDir()) {
 			return
 		}
 	} else if !s.canAutoStart(name, filepath, s.cfg.WorkingDir(), server) {
@@ -391,7 +392,7 @@ func (s *Manager) canAutoStart(
 	// Filtering by file type is cheap and usually rejects a server before the
 	// root marker check. Do both before searching PATH, which can require a stat
 	// for every directory in PATH for every bundled server.
-	if !handles(server, filePath, workDir) {
+	if !s.handles(name, server, filePath, workDir) {
 		return false
 	}
 
@@ -430,7 +431,7 @@ func (s *Manager) supersededFor(name, filePath, workDir string) (string, bool) {
 		return "", false
 	}
 	server, ok := s.manager.GetServer(successor)
-	if !ok || !handles(server, filePath, workDir) {
+	if !ok || !s.handles(successor, server, filePath, workDir) {
 		return "", false
 	}
 	if _, disabled := s.sessionDisabled.Get(successor); disabled {
@@ -476,6 +477,7 @@ func (s *Manager) buildConfig(name string, server *powernapconfig.ServerConfig) 
 	}
 	if userCfg, ok := s.userConfig(name); ok {
 		cfg.Timeout = userCfg.Timeout
+		cfg.LanguageIDs = userCfg.LanguageIDs
 	}
 	return cfg
 }
@@ -517,16 +519,33 @@ func uniqueServerByCommand(manager *powernapconfig.Manager, command string) (str
 	return match, match != ""
 }
 
-func handlesFiletype(sname string, fileTypes []string, filePath string) bool {
+func matchesFileType(name, normalized string) bool {
+	return name == normalized || strings.HasSuffix(name, "."+normalized)
+}
+
+func languageID(ids config.LanguageIDs, filePath string) protocol.LanguageKind {
+	name := strings.ToLower(filepath.Base(filePath))
+	best := ""
+	for pattern := range ids {
+		if len(pattern) > len(best) && matchesFileType(name, pattern) {
+			best = pattern
+		}
+	}
+	if best != "" {
+		return ids[best]
+	}
+	return powernap.DetectLanguage(filePath)
+}
+
+func handlesFiletype(sname string, fileTypes []string, ids config.LanguageIDs, filePath string) bool {
 	if len(fileTypes) == 0 {
 		return true
 	}
 
-	kind := powernap.DetectLanguage(filePath)
+	kind := languageID(ids, filePath)
 	name := strings.ToLower(filepath.Base(filePath))
 	for _, filetype := range fileTypes {
-		bare := strings.TrimPrefix(strings.ToLower(filetype), ".")
-		if name == bare || strings.HasSuffix(name, "."+bare) || filetype == string(kind) {
+		if matchesFileType(name, config.NormalizeFileType(filetype)) || filetype == string(kind) {
 			slog.Debug("Handles file", "name", sname, "file", name, "filetype", filetype, "kind", kind)
 			return true
 		}
@@ -552,8 +571,9 @@ func hasRootMarkers(dir string, markers []string) bool {
 	return false
 }
 
-func handles(server *powernapconfig.ServerConfig, filePath, workDir string) bool {
-	return handlesFiletype(server.Command, server.FileTypes, filePath) &&
+func (s *Manager) handles(name string, server *powernapconfig.ServerConfig, filePath, workDir string) bool {
+	userCfg, _ := s.userConfig(name)
+	return handlesFiletype(server.Command, server.FileTypes, userCfg.LanguageIDs, filePath) &&
 		hasRootMarkers(workDir, server.RootMarkers)
 }
 

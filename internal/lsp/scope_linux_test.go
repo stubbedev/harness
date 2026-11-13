@@ -91,9 +91,10 @@ func fakeServer(in io.Reader, out io.Writer) {
 var hogHeld [][]byte
 
 type documentSync struct {
-	Method  string `json:"method"`
-	Version int32  `json:"version"`
-	Text    string `json:"text"`
+	Method     string `json:"method"`
+	LanguageID string `json:"languageId,omitempty"`
+	Version    int32  `json:"version"`
+	Text       string `json:"text"`
 }
 
 func logDocumentSync(method string, raw json.RawMessage) {
@@ -103,15 +104,16 @@ func logDocumentSync(method string, raw json.RawMessage) {
 	}
 	var params struct {
 		TextDocument struct {
-			Version int32  `json:"version"`
-			Text    string `json:"text"`
+			LanguageID string `json:"languageId"`
+			Version    int32  `json:"version"`
+			Text       string `json:"text"`
 		} `json:"textDocument"`
 		ContentChanges []struct {
 			Text string `json:"text"`
 		} `json:"contentChanges"`
 	}
 	_ = json.Unmarshal(raw, &params)
-	entry := documentSync{Method: method, Version: params.TextDocument.Version, Text: params.TextDocument.Text}
+	entry := documentSync{Method: method, LanguageID: params.TextDocument.LanguageID, Version: params.TextDocument.Version, Text: params.TextDocument.Text}
 	for _, change := range params.ContentChanges {
 		entry.Text = change.Text
 	}
@@ -142,23 +144,22 @@ func hog() {
 // test where servers cannot be put in scopes of their own.
 func startFakeClient(t *testing.T) *Client {
 	t.Helper()
-	c := newFakeClient(t, nil)
+	c := newFakeClient(t, config.LSPConfig{})
 	if c.scope.Load() == nil {
 		t.Skip("no systemd user manager to put the server in a scope")
 	}
 	return c
 }
 
-func newFakeClient(t *testing.T, env map[string]string) *Client {
+func newFakeClient(t *testing.T, cfg config.LSPConfig) *Client {
 	t.Helper()
 	exe, err := os.Executable()
 	require.NoError(t, err)
-	cfg := config.LSPConfig{
-		Command: exe,
-		Args:    []string{"-test.run=^$"},
-		Env:     map[string]string{fakeServerEnv: "1"},
-	}
-	maps.Copy(cfg.Env, env)
+	cfg.Command = exe
+	cfg.Args = []string{"-test.run=^$"}
+	env := map[string]string{fakeServerEnv: "1"}
+	maps.Copy(env, cfg.Env)
+	cfg.Env = env
 	c, err := New("fake server", cfg, config.IdentityResolver(), t.TempDir(), false)
 	require.NoError(t, err)
 	t.Cleanup(c.Shutdown)

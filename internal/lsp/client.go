@@ -535,7 +535,7 @@ func (c *Client) HandlesFile(path string) bool {
 		slog.Debug("File outside workspace", "name", c.name, "file", path, "workDir", c.cwd)
 		return false
 	}
-	return handlesFiletype(c.name, c.fileTypes, path)
+	return handlesFiletype(c.name, c.fileTypes, c.config.LanguageIDs, path)
 }
 
 // OpenFile opens a file in the LSP server.
@@ -570,7 +570,7 @@ func (c *Client) SyncContent(ctx context.Context, filepath, text string) error {
 
 func (c *Client) didOpen(ctx context.Context, filepath, uri, text string) error {
 	if err := c.notify(func(pn *powernap.Client) error {
-		return pn.NotifyDidOpenTextDocument(ctx, uri, string(powernap.DetectLanguage(filepath)), 1, text)
+		return pn.NotifyDidOpenTextDocument(ctx, uri, string(languageID(c.config.LanguageIDs, filepath)), 1, text)
 	}); err != nil {
 		return err
 	}

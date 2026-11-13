@@ -8,6 +8,7 @@ import (
 	"time"
 
 	powernapconfig "github.com/charmbracelet/x/powernap/pkg/config"
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/csync"
@@ -80,6 +81,7 @@ func TestCanAutoStartFiltersBeforeLookingUpCommand(t *testing.T) {
 
 			lookups := 0
 			manager := &Manager{
+				cfg:         config.NewTestStoreWithWorkingDir(&config.Config{}, t.TempDir()),
 				unavailable: csync.NewMap[string, time.Time](),
 				now:         time.Now,
 				lookPath: func(string) (string, error) {
@@ -101,6 +103,7 @@ func TestCanAutoStartCachesMissingCommand(t *testing.T) {
 
 	lookups := 0
 	manager := &Manager{
+		cfg:         config.NewTestStoreWithWorkingDir(&config.Config{}, t.TempDir()),
 		unavailable: csync.NewMap[string, time.Time](),
 		now:         time.Now,
 		lookPath: func(string) (string, error) {
@@ -157,11 +160,63 @@ func TestHandlesFiletypeMatchesFilesWithoutExtension(t *testing.T) {
 
 	fileTypes := []string{"justfile", "makefile", "containerfile", "sh"}
 	for _, path := range []string{"/repo/justfile", "/repo/Justfile", "/repo/.justfile", "/repo/Makefile", "/repo/Containerfile", "/repo/run.sh"} {
-		require.True(t, handlesFiletype("test", fileTypes, path), path)
+		require.True(t, handlesFiletype("test", fileTypes, nil, path), path)
 	}
 	for _, path := range []string{"/repo/notjustfile", "/repo/README", "/repo/run.bash"} {
-		require.False(t, handlesFiletype("test", fileTypes, path), path)
+		require.False(t, handlesFiletype("test", fileTypes, nil, path), path)
 	}
+}
+
+func TestLanguageIDPrefersTheLongestConfiguredPattern(t *testing.T) {
+	t.Parallel()
+
+	ids := config.LanguageIDs{
+		"hcl":             "hcl",
+		"tftest.hcl":      "terraform-test",
+		"docker-bake.hcl": "dockerbake",
+		"tf":              "terraform",
+	}
+	for path, want := range map[string]protocol.LanguageKind{
+		"/repo/main.tf":           "terraform",
+		"/repo/MAIN.TF":           "terraform",
+		"/repo/a.tftest.hcl":      "terraform-test",
+		"/repo/tftest.hcl":        "terraform-test",
+		"/repo/docker-bake.hcl":   "dockerbake",
+		"/repo/x.docker-bake.hcl": "dockerbake",
+		"/repo/other.hcl":         "hcl",
+		"/repo/a.go":              protocol.LangGo,
+		"/repo/notes.unknownext":  "",
+		"/repo/atf":               "",
+	} {
+		require.Equal(t, want, languageID(ids, path), path)
+	}
+}
+
+func TestHandlesFiletypeMatchesConfiguredLanguageIDs(t *testing.T) {
+	t.Parallel()
+
+	ids := config.LanguageIDs{"tf": "terraform", "compose.yaml": "dockercompose"}
+	require.True(t, handlesFiletype("test", []string{"terraform"}, ids, "/repo/main.tf"))
+	require.True(t, handlesFiletype("test", []string{"dockercompose"}, ids, "/repo/compose.yaml"))
+	require.False(t, handlesFiletype("test", []string{"terraform"}, nil, "/repo/main.tf"))
+	require.False(t, handlesFiletype("test", []string{"dockercompose"}, ids, "/repo/other.yaml"))
+}
+
+func TestManagerTakesLanguageIDsFromUserConfig(t *testing.T) {
+	t.Parallel()
+
+	ids := config.LanguageIDs{"tf": "terraform"}
+	workDir := t.TempDir()
+	cfg := &config.Config{LSP: map[string]config.LSPConfig{
+		"terraform-custom": {Command: "my-terraform-ls", FileTypes: []string{"terraform"}, LanguageIDs: ids},
+	}}
+	manager := NewManager(config.NewTestStoreWithWorkingDir(cfg, workDir))
+	server, ok := manager.manager.GetServer("terraform-custom")
+	require.True(t, ok)
+
+	require.Equal(t, ids, manager.buildConfig("terraform-custom", server).LanguageIDs)
+	require.True(t, manager.handles("terraform-custom", server, filepath.Join(workDir, "main.tf"), workDir))
+	require.False(t, manager.handles("terraform-custom", server, filepath.Join(workDir, "main.hcl"), workDir))
 }
 
 func newCatalogManager(t *testing.T, installed func(command string) bool) *Manager {

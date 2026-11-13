@@ -155,8 +155,10 @@ lsp:
     args: [--stdio]
 ```
 
-Fields: `command`, `args`, `env`, `filetypes`, `root_markers`, `init_options`,
-`options`, `timeout`, `disabled`.
+Fields: `command`, `args`, `env`, `filetypes`, `language_ids`, `root_markers`,
+`init_options`, `options`, `timeout`, `disabled`. `language_ids` maps a file
+pattern (matched like `filetypes`, longest key wins) to the `languageId` the
+server is sent, e.g. `tf: terraform` for terraform-ls.
 
 ## Tools
 

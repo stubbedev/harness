@@ -3830,6 +3830,12 @@ const docTemplate = `{
                     "type": "object",
                     "additionalProperties": {}
                 },
+                "language_ids": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "options": {
                     "type": "object",
                     "additionalProperties": {}

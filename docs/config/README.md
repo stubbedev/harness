@@ -313,13 +313,38 @@ lsp:
     args: [--stdio]
 ```
 
-Fields: `command`, `args`, `env`, `filetypes`, `root_markers`, `init_options`
-(sent in the LSP `initialize` request), `options` (server settings), `timeout`,
-and `disabled`. Harness fills in defaults for servers it recognizes, so a bare
+Fields: `command`, `args`, `env`, `filetypes`, `language_ids`, `root_markers`,
+`init_options` (sent in the LSP `initialize` request), `options` (server
+settings), `timeout`, and `disabled`. Harness fills in defaults for servers it recognizes, so a bare
 `command` is usually enough.
 
 A `filetypes` entry matches a file whose name ends in `.<entry>` or is the
 entry itself, so `justfile` and `makefile` cover files without an extension.
+
+`language_ids` sets the `languageId` a server is told a file has. Keys match
+the same way `filetypes` entries do, and the longest matching key wins, so
+`tftest.hcl` beats `hcl`. A file no key matches gets Harness's built-in
+detection, which knows common extensions only and sends an empty ID for the
+rest. A `filetypes` entry may also name a language ID, configured or built in:
+
+```yaml
+lsp:
+  terraformls:
+    command: terraform-ls
+    args: [serve]
+    filetypes: [tf, tfvars, tftest.hcl]
+    language_ids:
+      tf: terraform
+      tfvars: terraform-vars
+      tftest.hcl: terraform-test
+  docker:
+    command: docker-language-server
+    args: [start, --stdio]
+    filetypes: [docker-bake.hcl, compose.yaml]
+    language_ids:
+      docker-bake.hcl: dockerbake
+      compose.yaml: dockercompose
+```
 
 When [shell-lsp](https://github.com/stubbedev/shell-lsp) is on `PATH` (or
 configured as `shell_lsp`), it handles shell scripts, Makefiles, justfiles and

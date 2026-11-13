@@ -167,6 +167,10 @@
           "type": "array",
           "description": "File types this LSP server handles"
         },
+        "language_ids": {
+          "$ref": "#/$defs/LanguageIDs",
+          "description": "languageId sent to this server per file pattern. Keys match like filetypes (an exact file name or a .\u003ckey\u003e suffix) and the longest matching key wins. Files no key matches use the built-in detection"
+        },
         "root_markers": {
           "items": {
             "type": "string",
@@ -203,6 +207,12 @@
     "LSPs": {
       "additionalProperties": {
         "$ref": "#/$defs/LSPConfig"
+      },
+      "type": "object"
+    },
+    "LanguageIDs": {
+      "additionalProperties": {
+        "type": "string"
       },
       "type": "object"
     },

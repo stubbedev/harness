@@ -222,6 +222,10 @@ definitions:
       init_options:
         additionalProperties: {}
         type: object
+      language_ids:
+        additionalProperties:
+          type: string
+        type: object
       options:
         additionalProperties: {}
         type: object
