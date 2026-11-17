@@ -49,7 +49,7 @@ substitute it instead of compiling:
 
 ```nix
 nix.settings = {
-  substituters = [ "https://nix.stubbe.dev/c/default/default" ];
+  substituters = [ "https://xilos.dev/c/stubbedev/main" ];
 };
 ```
 
