@@ -14,23 +14,12 @@ permissions:
 jobs:
   vendor-hash:
     runs-on: ubuntu-latest
-    env:
-      XILO_TOKEN: ${{ secrets.XILO_TOKEN }}
     steps:
       - uses: actions/checkout@v7
 
       - uses: DeterminateSystems/nix-installer-action@main
-        with:
-          extra-conf: |
-            extra-substituters = https://xilos.dev/c/stubbedev/main
-            extra-trusted-public-keys = xilos.dev/stubbedev/main-1:397R6S49v/FSvP+mZ3HlKrVN1KXhgzHIEIHxA/UuG6Y=
 
-      # Set up the self-hosted xilo cache at xilos.dev so consumers can
-      # substitute this build instead of rebuilding:
-      #   nix.settings.substituters = [ "https://xilos.dev/c/stubbedev/main" ];
-      # Skipped on PRs from forks, where the secret is unavailable.
-      - uses: stubbedev/xilo@v1
-        if: ${{ env.XILO_TOKEN != '' }}
+      - uses: stubbedev/xilo@v2
         with:
           url: https://xilos.dev
           cache: stubbedev/main
@@ -50,13 +39,7 @@ jobs:
           echo "vendorHash = ${GOT}"
 
       - name: Build check
-        run: nix build .#default --no-link --print-out-paths | tee /tmp/outpaths
-
-      - name: Push to xilo cache
-        if: ${{ env.XILO_TOKEN != '' }}
-        # Best-effort: a cache-push failure must not redden the workflow.
-        continue-on-error: true
-        run: xilo push stubbedev/main $(cat /tmp/outpaths)
+        run: nix build .#default --no-link
 
       - name: Commit updated vendorHash
         if: github.event_name != 'pull_request'
