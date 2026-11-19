@@ -101,6 +101,10 @@ type Service interface {
 	// whole history.
 	ListFrom(ctx context.Context, sessionID, fromID string) ([]Message, error)
 	ListUserMessages(ctx context.Context, sessionID string) ([]Message, error)
+	// ListUnfinishedAssistants returns every assistant message that has
+	// no finish, grouped by session and oldest first within one. Read
+	// before any turn runs, these are turns a process that died left.
+	ListUnfinishedAssistants(ctx context.Context) ([]Message, error)
 	// PromptHistory returns the newest maxEntries prompt-history entries
 	// of the session's user messages, newest first: the text of each
 	// prompt and each shell command, marked as such. An empty sessionID
@@ -792,6 +796,14 @@ func (s *service) ListUserMessages(ctx context.Context, sessionID string) ([]Mes
 	dbMessages, err := s.q.ListUserMessagesBySession(ctx, sessionID)
 	if err != nil {
 		return nil, err
+	}
+	return s.convertAll(dbMessages)
+}
+
+func (s *service) ListUnfinishedAssistants(ctx context.Context) ([]Message, error) {
+	dbMessages, err := s.q.ListUnfinishedAssistantMessages(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing unfinished assistant messages: %w", err)
 	}
 	return s.convertAll(dbMessages)
 }

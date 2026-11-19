@@ -71,6 +71,7 @@ const (
 	FinishReasonCanceled      FinishReason = "canceled"
 	FinishReasonError         FinishReason = "error"
 	FinishReasonContentFilter FinishReason = "content_filter"
+	FinishReasonInterrupted   FinishReason = "interrupted"
 	FinishReasonUnknown       FinishReason = "unknown"
 )
 

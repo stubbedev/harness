@@ -67,6 +67,11 @@ type Querier interface {
 	// Every top-level session: the session picker lists and filters all of
 	// them, and ID-prefix resolution matches against all of them.
 	ListSessions(ctx context.Context) ([]Session, error)
+	// Every assistant message that never finished, grouped by session and
+	// oldest first within one. At startup these are the turns a process that
+	// died left behind: the data directory lock keeps any other process from
+	// running a turn on the same database.
+	ListUnfinishedAssistantMessages(ctx context.Context) ([]Message, error)
 	ListUserMessagesBySession(ctx context.Context, sessionID string) ([]Message, error)
 	RecordFileRead(ctx context.Context, arg RecordFileReadParams) error
 	// Adds a step's cost and replaces whichever token counter the step

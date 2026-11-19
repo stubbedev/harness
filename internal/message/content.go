@@ -49,6 +49,10 @@ const (
 	// The TUI renders this as a REFUSED banner rather than a silent
 	// empty turn.
 	FinishReasonContentFilter FinishReason = "content_filter"
+	// FinishReasonInterrupted closes a turn whose process stopped before
+	// the turn finished: it was found unfinished when harness next opened
+	// the database.
+	FinishReasonInterrupted FinishReason = "interrupted"
 
 	// Should never happen
 	FinishReasonUnknown FinishReason = "unknown"
@@ -426,11 +430,11 @@ func (m *Message) FinishReason() FinishReason {
 }
 
 // IsErrorLike reports whether the message finished with an error-style
-// banner (a real error or a provider safety refusal). The TUI renders
-// both through the same banner path.
+// banner (a real error, a provider safety refusal or an interrupted
+// turn). The TUI renders all three through the same banner path.
 func (m *Message) IsErrorLike() bool {
 	switch m.FinishReason() {
-	case FinishReasonError, FinishReasonContentFilter:
+	case FinishReasonError, FinishReasonContentFilter, FinishReasonInterrupted:
 		return true
 	default:
 	}

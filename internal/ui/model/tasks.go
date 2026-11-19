@@ -312,7 +312,8 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			}
 			params, kind, decided := agent.DecodeAgentCall(tc)
 			_, hasResult := toolResults[tc.ID]
-			canceled := msg.FinishReason() == message.FinishReasonCanceled
+			stopped := msg.FinishReason() == message.FinishReasonCanceled ||
+				msg.FinishReason() == message.FinishReasonInterrupted
 			// A set Finished flag only means the model finished emitting
 			// the call; the subagent runs until a result lands. Skip only
 			// blocking dispatches that settled, or that cannot be running
@@ -320,7 +321,7 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			// default) is excepted on both counts: its tool result is just
 			// the start handle and it runs independently of the parent's
 			// busy state; the running list reconciles it instead.
-			if canceled || (params.Blocking && (hasResult || !busy)) {
+			if stopped || (params.Blocking && (hasResult || !busy)) {
 				continue
 			}
 			if tc.Name == agent.AgentToolName && (!decided || kind != agent.AgentCallDispatch) {

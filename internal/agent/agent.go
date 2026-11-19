@@ -2281,58 +2281,24 @@ func (a *sessionAgent) persistFailedTurn(
 	// Ensure we finish thinking on error to close the reasoning state.
 	currentAssistant.FinishThinking()
 	stripOrphanThinking(currentAssistant)
-	toolCalls := currentAssistant.ToolCalls()
-	// INFO: we use the cleanup context here because the genCtx has been cancelled.
-	msgs, listErr := a.messages.List(cleanupCtx, currentAssistant.SessionID)
+	// The cleanup context, because the run context has been canceled.
+	// Results always follow the message whose calls they answer.
+	later, listErr := a.messages.ListFrom(cleanupCtx, currentAssistant.SessionID, currentAssistant.ID)
 	if listErr != nil {
 		return listErr
 	}
-	for _, tc := range toolCalls {
-		unfinished := !tc.Finished
-		if unfinished {
-			tc.Finished = true
-			tc.Input = "{}"
-			currentAssistant.AddToolCall(tc)
-			// Buffered: the result row created below writes it first.
-			updateErr := a.messages.UpdateBuffered(cleanupCtx, *currentAssistant)
-			if updateErr != nil {
-				return updateErr
+	closeErr := closeToolCalls(cleanupCtx, a.messages, currentAssistant, answeredToolCalls(later),
+		func(call message.ToolCall, unfinished bool) message.ToolResult {
+			return message.ToolResult{
+				ToolCallID: call.ID,
+				Name:       call.Name,
+				Content:    failedToolCallResult(streamErr, unfinished),
+				IsError:    true,
+				Canceled:   isCancelErr,
 			}
-		}
-
-		found := false
-		for _, msg := range msgs {
-			if msg.Role == message.Tool {
-				for _, tr := range msg.ToolResults() {
-					if tr.ToolCallID == tc.ID {
-						found = true
-						break
-					}
-				}
-			}
-			if found {
-				break
-			}
-		}
-		if found {
-			continue
-		}
-		toolResult := message.ToolResult{
-			ToolCallID: tc.ID,
-			Name:       tc.Name,
-			Content:    failedToolCallResult(streamErr, unfinished),
-			IsError:    true,
-			Canceled:   isCancelErr,
-		}
-		_, createErr := a.messages.Create(cleanupCtx, currentAssistant.SessionID, message.CreateMessageParams{
-			Role: message.Tool,
-			Parts: []message.ContentPart{
-				toolResult,
-			},
 		})
-		if createErr != nil {
-			return createErr
-		}
+	if closeErr != nil {
+		return closeErr
 	}
 	const defaultTitle = "Provider Error"
 	linkStyle := lipgloss.NewStyle().Foreground(charmtone.Guac).Underline(true)
@@ -2720,7 +2686,7 @@ func toolResultsForCalls(m message.Message, toolResultsByCall map[string][]fanta
 		content = append(content, fantasy.ToolResultPart{
 			ToolCallID: tc.ID,
 			Output: fantasy.ToolResultOutputContentError{
-				Error: errors.New("tool call was interrupted and did not produce a result, you may retry this call if the result is still needed"),
+				Error: errors.New(interruptedToolResult(tc)),
 			},
 		})
 	}

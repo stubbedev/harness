@@ -121,6 +121,9 @@ func New(ctx context.Context, conn *sql.DB, store *config.ConfigStore, skillsMgr
 	q := db.New(db.Routed(conn))
 	sessions := session.NewService(q, conn)
 	messages := message.NewService(q)
+	if err := agent.RecoverInterruptedTurns(ctx, messages); err != nil {
+		return nil, err
+	}
 	files := history.NewService(q)
 	memories, closeMemory := openMemory(ctx, store)
 	cfg := store.Config()

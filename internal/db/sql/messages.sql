@@ -107,3 +107,13 @@ WHERE m.role = 'user'
     OR (json_extract(p.value, '$.type') = 'text' AND COALESCE(json_extract(p.value, '$.data.text'), '') != ''))
 ORDER BY m.created_at DESC, m.rowid DESC, p.key ASC
 LIMIT sqlc.arg(max_entries);
+
+-- name: ListUnfinishedAssistantMessages :many
+-- Every assistant message that never finished, grouped by session and
+-- oldest first within one. At startup these are the turns a process that
+-- died left behind: the data directory lock keeps any other process from
+-- running a turn on the same database.
+SELECT *
+FROM messages
+WHERE role = 'assistant' AND finished_at IS NULL
+ORDER BY session_id ASC, created_at ASC, rowid ASC;

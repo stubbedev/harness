@@ -380,6 +380,56 @@ func (q *Queries) ListSessionPromptHistory(ctx context.Context, arg ListSessionP
 	return items, nil
 }
 
+const listUnfinishedAssistantMessages = `-- name: ListUnfinishedAssistantMessages :many
+SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, visible
+FROM messages
+WHERE role = 'assistant' AND finished_at IS NULL
+ORDER BY session_id ASC, created_at ASC, rowid ASC
+`
+
+// Every assistant message that never finished, grouped by session and
+// oldest first within one. At startup these are the turns a process that
+// died left behind: the data directory lock keeps any other process from
+// running a turn on the same database.
+func (q *Queries) ListUnfinishedAssistantMessages(ctx context.Context) ([]Message, error) {
+	rows, err := q.db.QueryContext(ctx, listUnfinishedAssistantMessages)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Parts,
+			&i.Model,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FinishedAt,
+			&i.Provider,
+			&i.IsSummaryMessage,
+			&i.PrismModelID,
+			&i.PrismModelName,
+			&i.PrismHypercreditSavings,
+			&i.PrismDollarSavings,
+			&i.Visible,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserMessagesBySession = `-- name: ListUserMessagesBySession :many
 SELECT id, session_id, role, parts, model, created_at, updated_at, finished_at, provider, is_summary_message, prism_model_id, prism_model_name, prism_hypercredit_savings, prism_dollar_savings, visible
 FROM messages

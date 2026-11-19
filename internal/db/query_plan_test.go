@@ -65,6 +65,7 @@ func TestHotQueriesUseTheirIndexes(t *testing.T) {
 		{"UpdateMessage", updateMessage, []any{"[]", nil, nil, nil, nil, nil, 1, "m"}, "sqlite_autoindex_messages_1", false},
 		{"DeleteMessage", deleteMessage, []any{"m"}, "sqlite_autoindex_messages_1", false},
 		{"DeleteMessagesFrom", deleteMessagesFrom, []any{"p", "m"}, "idx_messages_session_created_at", false},
+		{"ListUnfinishedAssistantMessages", listUnfinishedAssistantMessages, nil, "idx_messages_unfinished_assistant", false},
 		// A session holds one checkpoint per prompt, so sorting them is
 		// bounded by the length of one conversation.
 		{"ListCheckpointsBySession", listCheckpointsBySession, []any{"p"}, "sqlite_autoindex_checkpoints_2", true},
