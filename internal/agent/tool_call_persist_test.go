@@ -6,10 +6,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/db"
@@ -161,4 +163,59 @@ func TestToolCallBatchIsWrittenOnceAheadOfItsResults(t *testing.T) {
 	for i := 1; i <= calls; i++ {
 		require.True(t, seen[i], "subscribers never saw the message with %d finished calls", i)
 	}
+}
+
+// The assistant message holding a round's calls is stored before any of
+// them runs, so a process that dies while a tool changes something leaves
+// the call that changed it behind. The debounce is long enough that only
+// the dispatch can have written it.
+func TestToolCallIsStoredBeforeTheToolRuns(t *testing.T) {
+	t.Parallel()
+	conn, err := db.Connect(t.Context(), tempDBDir(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	q := db.New(conn)
+	sessions := session.NewService(q, conn)
+	messages := message.NewService(q, message.WithDebounce(time.Hour))
+
+	type args struct {
+		Path string `json:"path"`
+	}
+	var storedBeforeRun []message.ToolCall
+	mutate := fantasy.NewAgentTool("mutate", "changes a file",
+		func(ctx context.Context, in args, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			// A service of its own holds nothing buffered: what it reads
+			// is what the database holds.
+			id, _ := ctx.Value(tools.MessageIDContextKey).(string)
+			stored, err := message.NewService(q).Get(ctx, id)
+			if err != nil {
+				return fantasy.ToolResponse{}, err
+			}
+			storedBeforeRun = stored.ToolCalls()
+			return fantasy.NewTextResponse("changed " + in.Path), nil
+		})
+
+	model := newScriptedModel(scriptedTurn{calls: []scriptedCall{{name: "mutate", input: map[string]any{"path": "a.go"}}}})
+	agent := NewSessionAgent(SessionAgentOptions{
+		LargeModel: Model{
+			Model:      model,
+			CatalogCfg: catalog.Model{ID: "large", ContextWindow: 1_000_000, DefaultMaxTokens: 1000},
+			ModelCfg:   config.SelectedModel{Model: "large", Provider: "scripted"},
+		},
+		SmallModel:   Model{Model: textModel("title")},
+		SystemPrompt: "system",
+		Sessions:     sessions,
+		Messages:     messages,
+		Tools:        []fantasy.AgentTool{mutate},
+	})
+	sess, err := sessions.Create(t.Context(), "dispatch")
+	require.NoError(t, err)
+
+	_, err = agent.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "change a.go"})
+	require.NoError(t, err)
+
+	require.Len(t, storedBeforeRun, 1)
+	require.Equal(t, "mutate", storedBeforeRun[0].Name)
+	require.True(t, storedBeforeRun[0].Finished)
+	require.JSONEq(t, `{"path":"a.go"}`, storedBeforeRun[0].Input)
 }

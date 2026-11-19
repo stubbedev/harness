@@ -1737,6 +1737,12 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (resu
 			}
 			a.subagentDiscard.DiscardSubagentDispatch(session.AgentToolSessionID(currentAssistant.ID, tc.ToolCallID))
 		},
+		// The calls OnToolCall buffered reach the database before any of
+		// them runs, so a process that dies while a tool changes something
+		// leaves a record of the call that changed it.
+		OnToolDispatch: func() error {
+			return a.messages.Flush(ctx, currentAssistant.ID)
+		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
 			retryAttempt++
@@ -1798,8 +1804,8 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (resu
 			// message once per call: quadratic in the batch, and all of it
 			// ahead of the first tool. Buffered, the transcript still sees
 			// each call as it is reported, and the message is written once,
-			// on the debounce tick or ahead of the first tool result's row,
-			// whichever comes first (see message.Service.UpdateBuffered).
+			// on the debounce tick or by OnToolDispatch before the first
+			// tool runs, whichever comes first.
 			// Use parent ctx instead of genCtx to ensure the update succeeds
 			// even if the request is canceled mid-stream.
 			return a.messages.UpdateBuffered(ctx, *currentAssistant)

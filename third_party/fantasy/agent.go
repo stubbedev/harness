@@ -328,6 +328,13 @@ type AgentStreamCall struct {
 	// the call, such as work it handed to a goroutine of its own.
 	OnEarlyToolCallDiscarded func(toolCall ToolCallContent)
 
+	// OnToolDispatch is called once per step that dispatches tools, after
+	// every OnToolCall of the step has returned and before the first call
+	// that was not dispatched early starts. It is the step's last chance to
+	// record the calls it is about to run; an error fails the step and runs
+	// none of them.
+	OnToolDispatch func() error
+
 	// Agent-level callbacks
 	OnAgentStart  OnAgentStartFunc  // Called when agent starts
 	OnAgentFinish OnAgentFinishFunc // Called when agent finishes
@@ -1932,6 +1939,12 @@ func (a *agent) processStepStream(ctx context.Context, stream StreamResponse, op
 		// that all OnToolCall callbacks complete before any tool result is
 		// written.
 		pendingDispatches = append(pendingDispatches, toolExecutionRequest{toolCall: validatedToolCall, parallel: isParallel})
+	}
+
+	if len(pendingDispatches) > 0 && opts.OnToolDispatch != nil {
+		if err := opts.OnToolDispatch(); err != nil {
+			return stepExecutionResult{}, err
+		}
 	}
 
 	// Every OnToolCall callback has run: report early results as their calls

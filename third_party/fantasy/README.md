@@ -37,6 +37,12 @@ The agent-loop changes are in `agent.go`. Tests are in
   dispatched (CHARM-2020). `Parallel` alone is not the gate because a
   consumer may mark mutating tools parallel (Harness does: edit, write and
   shell are), and such a tool must not run for a turn that is then cut off.
+- **Tool dispatch callback.** `AgentStreamCall.OnToolDispatch` fires once
+  per step that dispatches tools, after every `OnToolCall` and before the
+  first call not dispatched early starts; an error fails the step and runs
+  none of them. Harness stores the assistant message holding the calls
+  there, so a call is on disk before the tool it names can change anything.
+  Tests are in `agent_tool_dispatch_test.go`.
 - **Parallelism.** The per-step parallel limit is 16 instead of 5, and
   sequential tools no longer run on the dispatcher goroutine. Each one waits
   for the sequential tool emitted before it, so they still run one at a
