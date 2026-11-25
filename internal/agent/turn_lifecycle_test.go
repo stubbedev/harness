@@ -173,11 +173,7 @@ func TestOverflowAtLaterStepKeepsCompletedSteps(t *testing.T) {
 	env := testEnv(t)
 	sess, err := env.sessions.Create(t.Context(), "s")
 	require.NoError(t, err)
-	createMessage(t, env, sess.ID, message.User, message.TextContent{Text: history})
-	earlier, err := env.messages.Create(t.Context(), sess.ID, message.CreateMessageParams{Role: message.Assistant, Parts: []message.ContentPart{message.TextContent{Text: "ok"}}})
-	require.NoError(t, err)
-	earlier.AddFinish(message.FinishReasonEndTurn, "", "")
-	require.NoError(t, env.messages.Update(t.Context(), earlier))
+	createFinishedTurn(t, env, sess.ID, history, "ok")
 
 	large := newScriptedModel(
 		scriptedTurn{calls: []scriptedCall{{name: "probe", input: map[string]any{}}}},
@@ -197,14 +193,45 @@ func TestOverflowAtLaterStepKeepsCompletedSteps(t *testing.T) {
 	}
 }
 
+func createFinishedTurn(t *testing.T, env fakeEnv, sessionID, prompt, answer string) {
+	t.Helper()
+	createMessage(t, env, sessionID, message.User, message.TextContent{Text: prompt})
+	reply := createMessage(t, env, sessionID, message.Assistant, message.TextContent{Text: answer})
+	reply.AddFinish(message.FinishReasonEndTurn, "", "")
+	require.NoError(t, env.messages.Update(t.Context(), reply))
+}
+
+func TestOverflowRecoveryKeepsTheSessionTitle(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	sess, err := env.sessions.Create(t.Context(), "Fix the parser")
+	require.NoError(t, err)
+	createFinishedTurn(t, env, sess.ID, "Fix the parser", "Fixed.")
+	large := newScriptedModel(
+		scriptedTurn{err: errors.New("context_length_exceeded")},
+		scriptedTurn{text: "Done."},
+	)
+	sa := testSessionAgent(env, large, textModel("summary"), "system")
+
+	_, err = sa.Run(t.Context(), SessionAgentCall{Prompt: "Now the lexer", SessionID: sess.ID, MaxOutputTokens: 10000})
+	require.NoError(t, err)
+	sa.CancelAll()
+
+	got, err := env.sessions.Get(t.Context(), sess.ID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, got.CompactionBoundaryID, "the recovery compacted the session")
+	assert.Equal(t, "Fix the parser", got.Title)
+}
+
 func TestOverflowRecoveryKeepsTheSessionBusy(t *testing.T) {
 	t.Parallel()
 
 	env := testEnv(t)
 	sess, err := env.sessions.Create(t.Context(), "s")
 	require.NoError(t, err)
+	createFinishedTurn(t, env, sess.ID, "earlier", "earlier answer")
 	large := newScriptedModel(
-		scriptedTurn{text: "earlier answer"},
 		scriptedTurn{err: errors.New("context_length_exceeded")},
 		scriptedTurn{text: "Done."},
 	)
@@ -215,9 +242,6 @@ func TestOverflowRecoveryKeepsTheSessionBusy(t *testing.T) {
 		busyDuringSummary = append(busyDuringSummary, sa.IsSessionBusy(sess.ID))
 	}
 	sa = testSessionAgent(env, large, small, "system").(*sessionAgent)
-	_, err = sa.Run(t.Context(), SessionAgentCall{Prompt: "earlier", SessionID: sess.ID, MaxOutputTokens: 10000})
-	require.NoError(t, err)
-	busyDuringSummary = nil
 
 	_, err = sa.Run(t.Context(), SessionAgentCall{Prompt: "hi", SessionID: sess.ID, MaxOutputTokens: 10000})
 	require.NoError(t, err)
@@ -226,6 +250,37 @@ func TestOverflowRecoveryKeepsTheSessionBusy(t *testing.T) {
 		assert.True(t, busy, "the session reads busy while recovery compacts it")
 	}
 	assert.False(t, sa.IsSessionBusy(sess.ID))
+}
+
+type stallingModel struct {
+	fantasy.LanguageModel
+	started chan struct{}
+	once    sync.Once
+}
+
+func (m *stallingModel) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	m.once.Do(func() { close(m.started) })
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestCancelAllReturnsOnceTheTitleIsSaved(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv(t)
+	sess, err := env.sessions.Create(t.Context(), "s")
+	require.NoError(t, err)
+	small := &stallingModel{LanguageModel: textModel("unused"), started: make(chan struct{})}
+	sa := testSessionAgent(env, textModel("Done."), small, "system")
+	_, err = sa.Run(t.Context(), SessionAgentCall{Prompt: "hi", SessionID: sess.ID, MaxOutputTokens: 10000})
+	require.NoError(t, err)
+	<-small.started
+
+	sa.CancelAll()
+
+	got, err := env.sessions.Get(t.Context(), sess.ID)
+	require.NoError(t, err)
+	assert.Equal(t, DefaultSessionName, got.Title)
 }
 
 // cancelOnVerdict cancels a session from inside the goal judge's verdict

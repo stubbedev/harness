@@ -284,6 +284,9 @@ type sessionAgent struct {
 	messageQueue   *csync.Map[string, []SessionAgentCall]
 	activeRequests *csync.Map[string, *activeCancel]
 
+	titleRuns    runGroup
+	titleCancels *csync.Map[*activeCancel, struct{}]
+
 	// dispatchMu holds a per-session mutex that serializes the
 	// accepted -> (cancel-on-entry | queued | active) transition in
 	// Run against a concurrent Cancel. The lock is held only during
@@ -411,6 +414,7 @@ func NewSessionAgent(
 		presence:              opts.Presence,
 		messageQueue:          csync.NewMap[string, []SessionAgentCall](),
 		activeRequests:        csync.NewMap[string, *activeCancel](),
+		titleCancels:          csync.NewMap[*activeCancel, struct{}](),
 		dispatchMu:            csync.NewMap[string, *sync.Mutex](),
 		acceptedRuns:          csync.NewMap[string, int](),
 		cancelMark:            csync.NewMap[string, uint64](),
@@ -1145,9 +1149,9 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (resu
 	// can take tens of seconds. Blocking Run on it delays the
 	// response to the caller. Use a detached context so the title
 	// goroutine survives Run's cancel.
-	if !call.fromHarness() && !hasUserTextMessage(msgs) {
-		titleCtx := context.WithoutCancel(ctx)
-		crash.Go("agent.generateTitle", func() { a.GenerateTitle(titleCtx, call.SessionID, call.Prompt) })
+	firstPrompt := !sessionHasUserPrompt(currentSession, msgs)
+	if !call.fromHarness() && firstPrompt {
+		a.generateTitleDetached(ctx, call.SessionID, call.Prompt)
 	}
 
 	// Fire the pre-prompt hooks: SessionStart on the first turn of a
@@ -1159,7 +1163,7 @@ func (a *sessionAgent) runTurn(ctx context.Context, call SessionAgentCall) (resu
 	outboundPrompt := call.Prompt
 	var promptHookContexts []string
 	if !a.isSubAgent && !call.fromHarness() {
-		if !hasUserTextMessage(msgs) && a.hooks.Has(hooks.EventSessionStart) {
+		if firstPrompt && a.hooks.Has(hooks.EventSessionStart) {
 			res, hookErr := a.hooks.Run(ctx, hooks.EventContext{
 				Event:     hooks.EventSessionStart,
 				SessionID: call.SessionID,
@@ -2740,9 +2744,10 @@ func mergeConsecutiveUserMessages(msgs []fantasy.Message) []fantasy.Message {
 	return out
 }
 
-// hasUserTextMessage reports whether any user message in msgs contains
-// text content (as opposed to only shell commands or other non-text parts).
-func hasUserTextMessage(msgs []message.Message) bool {
+func sessionHasUserPrompt(s session.Session, msgs []message.Message) bool {
+	if s.CompactionBoundaryID != "" {
+		return true
+	}
 	for _, msg := range msgs {
 		if msg.Role != message.User {
 			continue
@@ -3010,22 +3015,35 @@ func (a *sessionAgent) ClearQueue(sessionID string) {
 }
 
 func (a *sessionAgent) CancelAll() {
-	if !a.IsBusy() {
-		return
-	}
 	for key := range a.activeRequests.Seq2() {
 		a.Cancel(key) // key is sessionID
 	}
-
-	timeout := time.After(5 * time.Second)
-	for a.IsBusy() {
-		select {
-		case <-timeout:
-			return
-		default:
-			time.Sleep(200 * time.Millisecond)
-		}
+	for title := range a.titleCancels.Seq2() {
+		title.cancel()
 	}
+
+	deadline := time.Now().Add(cancelAllTimeout)
+	for a.IsBusy() && time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !a.titleRuns.wait(time.Until(deadline)) {
+		slog.Warn("Title generation still running after cancel; not waiting further", "waited", cancelAllTimeout)
+	}
+}
+
+const cancelAllTimeout = 5 * time.Second
+
+func (a *sessionAgent) generateTitleDetached(ctx context.Context, sessionID, prompt string) {
+	titleCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	handle := &activeCancel{cancel: cancel}
+	a.titleCancels.Set(handle, struct{}{})
+	a.titleRuns.add()
+	crash.Go("agent.generateTitle", func() {
+		defer a.titleRuns.done()
+		defer a.titleCancels.Del(handle)
+		defer cancel()
+		a.GenerateTitle(titleCtx, sessionID, prompt)
+	})
 }
 
 func (a *sessionAgent) IsBusy() bool {
