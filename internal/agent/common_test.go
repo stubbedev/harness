@@ -27,6 +27,7 @@ import (
 
 // fakeEnv is an environment for testing.
 type fakeEnv struct {
+	t           testing.TB
 	workingDir  string
 	sessions    session.Service
 	messages    message.Service
@@ -57,6 +58,7 @@ func testEnv(t *testing.T) fakeEnv {
 	})
 
 	return fakeEnv{
+		t,
 		workingDir,
 		sessions,
 		messages,
@@ -89,6 +91,7 @@ func testSessionAgent(env fakeEnv, large, small fantasy.LanguageModel, systemPro
 		Messages:     env.messages,
 		Tools:        tools,
 	})
+	env.t.Cleanup(agent.CancelAll)
 	return agent
 }
 
